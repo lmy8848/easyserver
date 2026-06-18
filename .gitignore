@@ -1,0 +1,52 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+easyserver
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Config with secrets
+config.yaml
+.env
+.env.local
+*.pem
+*.key
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Build artifacts
+dist/
+build/
+*.exe
+*.dll
+web/node_modules/
+web/dist/
+data/
+internal/api/web/

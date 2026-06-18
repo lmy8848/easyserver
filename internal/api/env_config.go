@@ -1,0 +1,345 @@
+package api
+
+import (
+	"fmt"
+
+	"easyserver/internal/model"
+	"easyserver/internal/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+type EnvConfigHandler struct {
+	envConfigService *service.EnvConfigService
+}
+
+func NewEnvConfigHandler(envConfigService *service.EnvConfigService) *EnvConfigHandler {
+	return &EnvConfigHandler{envConfigService: envConfigService}
+}
+
+// ListEnvConfigs returns all environment configurations
+func (h *EnvConfigHandler) ListEnvConfigs(c *gin.Context) {
+	runtimeIDStr := c.Query("runtime_id")
+	var runtimeID int64
+	if runtimeIDStr != "" {
+		fmt.Sscanf(runtimeIDStr, "%d", &runtimeID)
+	}
+
+	configs, err := h.envConfigService.ListEnvConfigs(runtimeID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{
+		"configs": configs,
+	})
+}
+
+// GetEnvConfig returns a specific environment configuration
+func (h *EnvConfigHandler) GetEnvConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	config, err := h.envConfigService.GetEnvConfig(id)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	if config == nil {
+		NotFound(c, "config not found")
+		return
+	}
+
+	Success(c, config)
+}
+
+// CreateEnvConfig creates a new environment configuration
+func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
+	var req struct {
+		Name      string `json:"name" binding:"required"`
+		Value     string `json:"value" binding:"required"`
+		RuntimeID int64  `json:"runtime_id"`
+		IsGlobal  bool   `json:"is_global"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	config := &model.EnvConfig{
+		Name:      req.Name,
+		Value:     req.Value,
+		RuntimeID: req.RuntimeID,
+		IsGlobal:  req.IsGlobal,
+	}
+
+	if err := h.envConfigService.CreateEnvConfig(config); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, config)
+}
+
+// UpdateEnvConfig updates an environment configuration
+func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	var req struct {
+		Name  string `json:"name" binding:"required"`
+		Value string `json:"value" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	config, err := h.envConfigService.GetEnvConfig(id)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	if config == nil {
+		NotFound(c, "config not found")
+		return
+	}
+
+	config.Name = req.Name
+	config.Value = req.Value
+
+	if err := h.envConfigService.UpdateEnvConfig(config); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, config)
+}
+
+// DeleteEnvConfig deletes an environment configuration
+func (h *EnvConfigHandler) DeleteEnvConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	if err := h.envConfigService.DeleteEnvConfig(id); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "deleted successfully"})
+}
+
+// ListPathEntries returns all PATH entries
+func (h *EnvConfigHandler) ListPathEntries(c *gin.Context) {
+	runtimeIDStr := c.Query("runtime_id")
+	var runtimeID int64
+	if runtimeIDStr != "" {
+		fmt.Sscanf(runtimeIDStr, "%d", &runtimeID)
+	}
+
+	entries, err := h.envConfigService.ListPathEntries(runtimeID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{
+		"entries": entries,
+	})
+}
+
+// CreatePathEntry creates a new PATH entry
+func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
+	var req struct {
+		Path      string `json:"path" binding:"required"`
+		RuntimeID int64  `json:"runtime_id"`
+		IsGlobal  bool   `json:"is_global"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	entry := &model.PathEntry{
+		Path:      req.Path,
+		RuntimeID: req.RuntimeID,
+		IsGlobal:  req.IsGlobal,
+	}
+
+	if err := h.envConfigService.CreatePathEntry(entry); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, entry)
+}
+
+// DeletePathEntry deletes a PATH entry
+func (h *EnvConfigHandler) DeletePathEntry(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	if err := h.envConfigService.DeletePathEntry(id); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "deleted successfully"})
+}
+
+// GenerateEnvScript generates a shell script to set environment variables
+func (h *EnvConfigHandler) GenerateEnvScript(c *gin.Context) {
+	runtimeIDStr := c.Query("runtime_id")
+	var runtimeID int64
+	if runtimeIDStr != "" {
+		fmt.Sscanf(runtimeIDStr, "%d", &runtimeID)
+	}
+
+	script, err := h.envConfigService.GenerateEnvScript(runtimeID)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{
+		"script": script,
+	})
+}
+
+// ListGlobalConfigs returns all global configurations
+func (h *EnvConfigHandler) ListGlobalConfigs(c *gin.Context) {
+	category := c.Query("category")
+
+	configs, err := h.envConfigService.ListGlobalConfigs(category)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{
+		"configs": configs,
+	})
+}
+
+// GetGlobalConfig returns a specific global configuration
+func (h *EnvConfigHandler) GetGlobalConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	config, err := h.envConfigService.GetGlobalConfig(id)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	if config == nil {
+		NotFound(c, "config not found")
+		return
+	}
+
+	Success(c, config)
+}
+
+// CreateGlobalConfig creates a new global configuration
+func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
+	var req struct {
+		Category    string `json:"category" binding:"required"`
+		Key         string `json:"key" binding:"required"`
+		Value       string `json:"value" binding:"required"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	config := &model.GlobalConfig{
+		Category:    req.Category,
+		Key:         req.Key,
+		Value:       req.Value,
+		Description: req.Description,
+	}
+
+	if err := h.envConfigService.CreateGlobalConfig(config); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, config)
+}
+
+// UpdateGlobalConfig updates a global configuration
+func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	var req struct {
+		Value       string `json:"value" binding:"required"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	config, err := h.envConfigService.GetGlobalConfig(id)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+	if config == nil {
+		NotFound(c, "config not found")
+		return
+	}
+
+	config.Value = req.Value
+	config.Description = req.Description
+
+	if err := h.envConfigService.UpdateGlobalConfig(config); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, config)
+}
+
+// DeleteGlobalConfig deletes a global configuration
+func (h *EnvConfigHandler) DeleteGlobalConfig(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		BadRequest(c, "invalid id")
+		return
+	}
+
+	if err := h.envConfigService.DeleteGlobalConfig(id); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "deleted successfully"})
+}

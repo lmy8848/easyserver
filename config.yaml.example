@@ -1,0 +1,48 @@
+# EasyServer Configuration
+# Copy this file to config.yaml and modify as needed
+
+server:
+  port: 8080
+  host: 0.0.0.0
+  serve_frontend: false  # 是否提供前端页面，开发时关闭只暴露 API
+  dev_mode: false  # 开发模式，允许 localhost Origin（生产环境设为 false）
+  allowed_origins:  # 允许的 WebSocket Origin（dev_mode 时自动允许 localhost）
+    - "http://localhost:5173"
+    # - "https://yourdomain.com"
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+auth:
+  # IMPORTANT: Change this in production!
+  # Or use EASYSERVER_JWT_SECRET environment variable
+  jwt_secret: "change-me-to-a-random-secret"
+  session_timeout: 24h
+  idle_timeout: 30m
+  max_login_attempts: 5
+  lockout_duration: 15m
+  rate_limit: 100        # Max requests per interval
+  rate_interval: 1m      # Rate limit interval
+  ip_whitelist: []       # Empty = allow all; e.g., ["192.168.1.0/24", "10.0.0.1"]
+
+monitor:
+  history_retention: 24h
+  collect_interval: 1s
+
+database:
+  path: "./data/easyserver.db"
+
+audit:
+  enabled: true
+  log_path: "./data/audit.log"
+
+filemanager:
+  base_path: "/"  # Restrict file access to this path
+
+tencentcloud:
+  enabled: false
+  secret_id: ""
+  secret_key: ""
+  region: "ap-guangzhou"
+  instance_id: ""
