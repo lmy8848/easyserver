@@ -7,8 +7,8 @@ import (
 )
 
 // registerDatabaseRoutes registers database management routes
-func registerDatabaseRoutes(protected *gin.RouterGroup, dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) {
-	handler := NewDBServerHandler(dbServerService, dbMgmtService, dbBackupService)
+func registerDatabaseRoutes(protected *gin.RouterGroup, dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService, sqlService *service.SQLQueryService) {
+	handler := NewDBServerHandler(dbServerService, dbMgmtService, dbBackupService, sqlService)
 
 	protected.GET("/db-servers", handler.List)
 	protected.GET("/db-servers/:id", handler.Get)

@@ -165,6 +165,7 @@ func main() {
 	dbServerService.SeedPredefinedServers(context.Background())
 	databaseMgmtService := service.NewDatabaseMgmtService(db, cmdExec)
 	dbBackupService := service.NewDBBackupService(db, cmdExec)
+	sqlQueryService := service.NewSQLQueryService(databaseMgmtService)
 
 	// Initialize deploy service (single shared instance)
 	deployService, err := service.NewDeployService(db, cfg.Deploy.EncryptionKey)
@@ -223,6 +224,7 @@ func main() {
 		DBServerService:     dbServerService,
 		DatabaseMgmtService: databaseMgmtService,
 		DBBackupService:     dbBackupService,
+		SQLQueryService:     sqlQueryService,
 
 		// Deploy service
 		DeployService: deployService,

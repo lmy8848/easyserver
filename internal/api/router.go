@@ -46,6 +46,7 @@ type Router struct {
 	dbServerService     *service.DBServerService
 	databaseMgmtService *service.DatabaseMgmtService
 	dbBackupService     *service.DBBackupService
+	sqlQueryService     *service.SQLQueryService
 
 	// Deploy service
 	deployService *service.DeployService
@@ -100,6 +101,7 @@ type RouterDeps struct {
 	DBServerService   *service.DBServerService
 	DatabaseMgmtService *service.DatabaseMgmtService
 	DBBackupService   *service.DBBackupService
+	SQLQueryService   *service.SQLQueryService
 
 	// Deploy service
 	DeployService *service.DeployService
@@ -174,6 +176,7 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		dbServerService:     deps.DBServerService,
 		databaseMgmtService: deps.DatabaseMgmtService,
 		dbBackupService:     deps.DBBackupService,
+		sqlQueryService:     deps.SQLQueryService,
 
 		// Deploy service
 		deployService: deps.DeployService,
@@ -262,7 +265,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerRuntimeRoutes(protected, r.runtimeService, r.runtimeVersionService, r.packageManagerService)
 	registerEnvRoutes(protected, r.envConfigService)
 	registerWebServerRoutes(protected, r.webServerService, r.websiteService)
-	registerDatabaseRoutes(protected, r.dbServerService, r.databaseMgmtService, r.dbBackupService)
+	registerDatabaseRoutes(protected, r.dbServerService, r.databaseMgmtService, r.dbBackupService, r.sqlQueryService)
 	registerCronRoutes(protected, r.cronService)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	registerSSHRoutes(protected, r.sshConfigService)

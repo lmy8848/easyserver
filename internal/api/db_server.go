@@ -2,11 +2,8 @@ package api
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +18,15 @@ type DBServerHandler struct {
 	dbServerService *service.DBServerService
 	dbMgmtService   *service.DatabaseMgmtService
 	dbBackupService *service.DBBackupService
+	sqlService      *service.SQLQueryService
 }
 
-func NewDBServerHandler(dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) *DBServerHandler {
+func NewDBServerHandler(dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService, sqlService *service.SQLQueryService) *DBServerHandler {
 	return &DBServerHandler{
 		dbServerService: dbServerService,
 		dbMgmtService:   dbMgmtService,
 		dbBackupService: dbBackupService,
+		sqlService:      sqlService,
 	}
 }
 
@@ -349,51 +348,10 @@ func (h *DBServerHandler) ListTables(c *gin.Context) {
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
+	tables, err := h.sqlService.ListTables(c.Request.Context(), did)
+	if err != nil {
+		InternalError(c, err.Error())
 		return
-	}
-
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	var tables []map[string]interface{}
-	switch server.Name {
-	case "mysql":
-		out, err := exec.Command("mysql", db.Name, "-e", "SHOW TABLES;").CombinedOutput()
-		if err != nil {
-			InternalError(c, fmt.Sprintf("获取表列表失败: %s", string(out)))
-			return
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for i, line := range lines {
-			if i == 0 {
-				continue
-			} // skip header
-			line = strings.TrimSpace(line)
-			if line != "" {
-				tables = append(tables, map[string]interface{}{"name": line})
-			}
-		}
-	case "postgresql":
-		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c",
-			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;").CombinedOutput()
-		if err != nil {
-			InternalError(c, fmt.Sprintf("获取表列表失败: %s", string(out)))
-			return
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for i, line := range lines {
-			line = strings.TrimSpace(line)
-			if i < 2 || line == "" || line == "(0 rows)" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "(") {
-				continue
-			}
-			tables = append(tables, map[string]interface{}{"name": line})
-		}
 	}
 
 	Success(c, tables)
@@ -411,73 +369,18 @@ func (h *DBServerHandler) DescribeTable(c *gin.Context) {
 		BadRequest(c, "表名不能为空")
 		return
 	}
-	if !validateTableName(tableName) {
+	if !service.ValidateTableName(tableName) {
 		BadRequest(c, "无效的表名")
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
-		return
-	}
-
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	var dbType service.DBType
-	switch server.Name {
-	case "mysql":
-		dbType = service.DBTypeMySQL
-	case "postgresql":
-		dbType = service.DBTypePostgreSQL
-	default:
-		BadRequest(c, "不支持的数据库类型")
-		return
-	}
-
-	// Build and execute DESCRIBE query
-	builder := service.NewSQLBuilder(dbType)
-	describeSQL := builder.BuildDescribeTable(tableName)
-
-	var out []byte
-	switch server.Name {
-	case "mysql":
-		out, err = exec.Command("mysql", db.Name, "-e", describeSQL).CombinedOutput()
-	case "postgresql":
-		out, err = exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c", describeSQL).CombinedOutput()
-	}
+	result, err := h.sqlService.DescribeTable(c.Request.Context(), did, tableName)
 	if err != nil {
-		InternalError(c, fmt.Sprintf("获取表结构失败: %s", string(out)))
+		InternalError(c, err.Error())
 		return
 	}
 
-	// Parse into structured TableInfo
-	tableInfo := service.ParseTableInfo(dbType, tableName, string(out))
-
-	// Convert to response format
-	var columns []map[string]interface{}
-	for _, col := range tableInfo.Columns {
-		c := map[string]interface{}{
-			"name":           col.Name,
-			"type":           col.Type,
-			"is_primary_key": col.IsPrimaryKey,
-			"is_auto_incr":   col.IsAutoIncr,
-			"has_default":    col.HasDefault,
-			"default":        col.DefaultValue,
-			"is_nullable":    col.IsNullable,
-		}
-		columns = append(columns, c)
-	}
-
-	Success(c, gin.H{
-		"table_name":  tableName,
-		"primary_key": tableInfo.PrimaryKey,
-		"columns":     columns,
-	})
+	Success(c, result)
 }
 
 // QueryTable returns table data with pagination
@@ -492,132 +395,26 @@ func (h *DBServerHandler) QueryTable(c *gin.Context) {
 		BadRequest(c, "表名不能为空")
 		return
 	}
-	if !validateTableName(tableName) {
+	if !service.ValidateTableName(tableName) {
 		BadRequest(c, "无效的表名")
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 50
-	}
-	if pageSize > 200 {
-		pageSize = 200
-	}
-	offset := (page - 1) * pageSize
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
+	result, err := h.sqlService.QueryTable(c.Request.Context(), did, tableName, page, pageSize)
+	if err != nil {
+		InternalError(c, err.Error())
 		return
-	}
-
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	// Get total count
-	var total int
-	switch server.Name {
-	case "mysql":
-		out, err := exec.Command("mysql", db.Name, "-N", "-e", fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName)).CombinedOutput()
-		if err == nil {
-			fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &total)
-		}
-	case "postgresql":
-		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-t", "-c",
-			fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName)).CombinedOutput()
-		if err == nil {
-			fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &total)
-		}
-	}
-
-	// Get data
-	var headers []string
-	var rows [][]interface{}
-	switch server.Name {
-	case "mysql":
-		out, err := exec.Command("mysql", db.Name, "-e",
-			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset)).CombinedOutput()
-		if err != nil {
-			InternalError(c, fmt.Sprintf("查询失败: %s", string(out)))
-			return
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for i, line := range lines {
-			fields := strings.Split(line, "\t")
-			if i == 0 {
-				headers = fields
-			} else {
-				var row []interface{}
-				for _, f := range fields {
-					row = append(row, f)
-				}
-				rows = append(rows, row)
-			}
-		}
-	case "postgresql":
-		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c",
-			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset)).CombinedOutput()
-		if err != nil {
-			InternalError(c, fmt.Sprintf("查询失败: %s", string(out)))
-			return
-		}
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for i, line := range lines {
-			fields := strings.Split(line, "|")
-			for j := range fields {
-				fields[j] = strings.TrimSpace(fields[j])
-			}
-			if i == 0 {
-				headers = fields
-			} else if i >= 2 && !strings.HasPrefix(line, "(") && line != "" {
-				var row []interface{}
-				for _, f := range fields {
-					row = append(row, f)
-				}
-				rows = append(rows, row)
-			}
-		}
 	}
 
 	Success(c, gin.H{
-		"headers":   headers,
-		"rows":      rows,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
+		"headers":   result.Headers,
+		"rows":      result.Rows,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
 	})
-}
-
-// pathPattern matches filesystem paths that should be stripped from error output
-var pathPattern = regexp.MustCompile(`(?:/[\w.-]+){2,}`)
-
-// sanitizeSQLError strips sensitive information (file paths, internal details) from
-// SQL command output while preserving the useful error message for the user.
-func sanitizeSQLError(raw string) string {
-	lines := strings.Split(raw, "\n")
-	var sanitized []string
-	for _, line := range lines {
-		// Skip lines that contain filesystem paths
-		if pathPattern.MatchString(line) {
-			continue
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		sanitized = append(sanitized, line)
-	}
-	if len(sanitized) == 0 {
-		return "query execution failed"
-	}
-	return strings.Join(sanitized, "\n")
 }
 
 // ExecuteSQL executes a SQL query
@@ -636,47 +433,18 @@ func (h *DBServerHandler) ExecuteSQL(c *gin.Context) {
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
+	result, err := h.sqlService.ExecuteSQL(c.Request.Context(), did, req.SQL)
+	if err != nil {
+		NotFound(c, err.Error())
 		return
 	}
 
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
+	if !result.Success {
+		Success(c, gin.H{"success": false, "error": result.Error})
 		return
 	}
 
-	// Validate SQL using the comprehensive validator
-	dbType := getDBType(server.Name)
-	validator := service.NewSQLValidator(dbType)
-	if r := validator.ValidateSQL(req.SQL); !r.Valid {
-		BadRequest(c, r.Message)
-		return
-	}
-
-	var output string
-	switch server.Name {
-	case "mysql":
-		out, err := exec.Command("mysql", db.Name, "-e", req.SQL).CombinedOutput()
-		if err != nil {
-			log.Printf("ExecuteSQL mysql error [db=%s]: %s", db.Name, string(out))
-			Success(c, gin.H{"success": false, "error": sanitizeSQLError(string(out))})
-			return
-		}
-		output = string(out)
-	case "postgresql":
-		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c", req.SQL).CombinedOutput()
-		if err != nil {
-			log.Printf("ExecuteSQL postgresql error [db=%s]: %s", db.Name, string(out))
-			Success(c, gin.H{"success": false, "error": sanitizeSQLError(string(out))})
-			return
-		}
-		output = string(out)
-	}
-
-	Success(c, gin.H{"success": true, "output": output})
+	Success(c, gin.H{"success": true, "output": result.Output})
 }
 
 // InsertRecord inserts a record into a table
@@ -695,49 +463,14 @@ func (h *DBServerHandler) InsertRecord(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	if !validateTableName(req.Table) {
-		BadRequest(c, "无效的表名")
-		return
-	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
-		return
-	}
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	dbType := getDBType(server.Name)
-	builder := service.NewSQLBuilder(dbType)
-	validator := service.NewSQLValidator(dbType)
-
-	// Validate
-	if r := validator.ValidateInsert(req.Table, req.Data, nil); !r.Valid {
-		BadRequest(c, r.Message)
-		return
-	}
-
-	// Build SQL
-	sql := builder.BuildInsert(req.Table, req.Data, nil)
-
-	// Dry-run check
-	if c.Query("dry_run") == "true" {
-		Success(c, gin.H{"success": true, "dry_run": true, "sql": sql})
-		return
-	}
-
-	// Execute
-	output, err := executeSQL(dbType, db.Name, sql)
+	result, err := h.sqlService.InsertRecord(c.Request.Context(), did, req.Table, req.Data, c.Query("dry_run") == "true")
 	if err != nil {
-		Success(c, gin.H{"success": false, "error": output})
+		BadRequest(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"success": true, "output": output})
+	Success(c, result)
 }
 
 // UpdateRecord updates a record in a table
@@ -758,45 +491,14 @@ func (h *DBServerHandler) UpdateRecord(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	if !validateTableName(req.Table) {
-		BadRequest(c, "无效的表名")
-		return
-	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
-		return
-	}
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	dbType := getDBType(server.Name)
-	builder := service.NewSQLBuilder(dbType)
-	validator := service.NewSQLValidator(dbType)
-
-	if r := validator.ValidateUpdate(req.Table, req.Data, req.PrimaryKey, req.PrimaryVal); !r.Valid {
-		BadRequest(c, r.Message)
-		return
-	}
-
-	sql := builder.BuildUpdate(req.Table, req.Data, req.PrimaryKey, req.PrimaryVal)
-
-	if c.Query("dry_run") == "true" {
-		Success(c, gin.H{"success": true, "dry_run": true, "sql": sql})
-		return
-	}
-
-	output, err := executeSQL(dbType, db.Name, sql)
+	result, err := h.sqlService.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
-		Success(c, gin.H{"success": false, "error": output})
+		BadRequest(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"success": true, "output": output})
+	Success(c, result)
 }
 
 // DeleteRecord deletes a record from a table
@@ -816,45 +518,14 @@ func (h *DBServerHandler) DeleteRecord(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	if !validateTableName(req.Table) {
-		BadRequest(c, "无效的表名")
-		return
-	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
-		return
-	}
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	dbType := getDBType(server.Name)
-	builder := service.NewSQLBuilder(dbType)
-	validator := service.NewSQLValidator(dbType)
-
-	if r := validator.ValidateDelete(req.Table, req.PrimaryKey, req.PrimaryVal); !r.Valid {
-		BadRequest(c, r.Message)
-		return
-	}
-
-	sql := builder.BuildDelete(req.Table, req.PrimaryKey, req.PrimaryVal)
-
-	if c.Query("dry_run") == "true" {
-		Success(c, gin.H{"success": true, "dry_run": true, "sql": sql})
-		return
-	}
-
-	output, err := executeSQL(dbType, db.Name, sql)
+	result, err := h.sqlService.DeleteRecord(c.Request.Context(), did, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
-		Success(c, gin.H{"success": false, "error": output})
+		BadRequest(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"success": true})
+	Success(c, result)
 }
 
 // MySQL Config endpoints
@@ -1133,37 +804,6 @@ func (h *DBServerHandler) GetRedisCommonParams(c *gin.Context) {
 	Success(c, params)
 }
 
-// Helper functions
-
-var tableNameRegexp = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-
-func validateTableName(name string) bool {
-	return name != "" && len(name) <= 64 && tableNameRegexp.MatchString(name)
-}
-
-func getDBType(name string) service.DBType {
-	switch name {
-	case "mysql":
-		return service.DBTypeMySQL
-	case "postgresql":
-		return service.DBTypePostgreSQL
-	case "redis":
-		return service.DBTypeRedis
-	}
-	return service.DBTypeMySQL
-}
-
-func executeSQL(dbType service.DBType, dbName string, sql string) (string, error) {
-	switch dbType {
-	case service.DBTypeMySQL:
-		out, err := exec.Command("mysql", dbName, "-e", sql).CombinedOutput()
-		return string(out), err
-	case service.DBTypePostgreSQL:
-		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", dbName, "-c", sql).CombinedOutput()
-		return string(out), err
-	}
-	return "", fmt.Errorf("不支持的数据库类型")
-}
 
 // Backup endpoints
 
@@ -1324,96 +964,23 @@ func (h *DBServerHandler) CreateTable(c *gin.Context) {
 		return
 	}
 
-	if !validateTableName(req.Name) {
-		BadRequest(c, "无效的表名")
-		return
-	}
-
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
-		return
-	}
-
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	// Validate column types against whitelist
-	allowedTypes := map[string]bool{
-		"INT": true, "INTEGER": true, "TINYINT": true, "SMALLINT": true, "MEDIUMINT": true, "BIGINT": true,
-		"FLOAT": true, "DOUBLE": true, "DECIMAL": true, "NUMERIC": true, "REAL": true,
-		"VARCHAR": true, "CHAR": true, "TEXT": true, "TINYTEXT": true, "MEDIUMTEXT": true, "LONGTEXT": true,
-		"BLOB": true, "TINYBLOB": true, "MEDIUMBLOB": true, "LONGBLOB": true, "BINARY": true, "VARBINARY": true,
-		"DATE": true, "TIME": true, "DATETIME": true, "TIMESTAMP": true, "YEAR": true,
-		"BOOLEAN": true, "BOOL": true, "BIT": true,
-		"JSON": true, "ENUM": true, "SET": true,
-		"SERIAL": true, "BIGSERIAL": true, "SMALLSERIAL": true, // PostgreSQL
-		"UUID": true, "JSONB": true, // PostgreSQL
-	}
+	var columns []service.TableColumn
 	for _, col := range req.Columns {
-		// Extract base type (strip length/precision like VARCHAR(255))
-		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
-		baseType = strings.TrimSpace(baseType)
-		if !allowedTypes[baseType] {
-			BadRequest(c, fmt.Sprintf("不支持的列类型: %s", col.Type))
-			return
-		}
-		if !validateTableName(col.Name) {
-			BadRequest(c, fmt.Sprintf("无效的列名: %s", col.Name))
-			return
-		}
+		columns = append(columns, service.TableColumn{
+			Name:      col.Name,
+			Type:      col.Type,
+			Nullable:  col.Nullable,
+			IsPrimary: col.IsPrimary,
+			AutoIncr:  col.AutoIncr,
+		})
 	}
 
-	// Build CREATE TABLE SQL
-	var columns []string
-	for _, col := range req.Columns {
-		parts := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
-		if col.IsPrimary {
-			parts = append(parts, "PRIMARY KEY")
+	if err := h.sqlService.CreateTable(c.Request.Context(), did, req.Name, columns); err != nil {
+		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
+			BadRequest(c, err.Error())
+		} else {
+			InternalError(c, err.Error())
 		}
-		if col.AutoIncr {
-			parts = append(parts, "AUTO_INCREMENT")
-		}
-		if !col.Nullable {
-			parts = append(parts, "NOT NULL")
-		}
-		columns = append(columns, strings.Join(parts, " "))
-	}
-
-	var sql string
-	switch server.Name {
-	case "mysql":
-		sql = fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-			req.Name, strings.Join(columns, ", "))
-	case "postgresql":
-		// PostgreSQL syntax adjustments
-		var pgColumns []string
-		for _, col := range req.Columns {
-			parts := []string{fmt.Sprintf("\"%s\"", col.Name), col.Type}
-			if col.IsPrimary {
-				parts = append(parts, "PRIMARY KEY")
-			}
-			if col.AutoIncr {
-				// PostgreSQL uses SERIAL for auto increment
-				parts = []string{fmt.Sprintf("\"%s\"", col.Name), "SERIAL", "PRIMARY KEY"}
-			}
-			if !col.Nullable && !col.IsPrimary {
-				parts = append(parts, "NOT NULL")
-			}
-			pgColumns = append(pgColumns, strings.Join(parts, " "))
-		}
-		sql = fmt.Sprintf("CREATE TABLE \"%s\" (%s);", req.Name, strings.Join(pgColumns, ", "))
-	default:
-		BadRequest(c, "不支持的数据库类型")
-		return
-	}
-
-	out, err := executeSQL(getDBType(server.Name), db.Name, sql)
-	if err != nil {
-		InternalError(c, fmt.Sprintf("创建表失败: %s", out))
 		return
 	}
 
@@ -1433,37 +1000,13 @@ func (h *DBServerHandler) DropTable(c *gin.Context) {
 		BadRequest(c, "表名不能为空")
 		return
 	}
-	if !validateTableName(tableName) {
-		BadRequest(c, "无效的表名")
-		return
-	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil || db == nil {
-		NotFound(c, "数据库不存在")
-		return
-	}
-
-	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
-	if server == nil {
-		NotFound(c, "服务器不存在")
-		return
-	}
-
-	var sql string
-	switch server.Name {
-	case "mysql":
-		sql = fmt.Sprintf("DROP TABLE `%s`;", tableName)
-	case "postgresql":
-		sql = fmt.Sprintf("DROP TABLE \"%s\";", tableName)
-	default:
-		BadRequest(c, "不支持的数据库类型")
-		return
-	}
-
-	out, err := executeSQL(getDBType(server.Name), db.Name, sql)
-	if err != nil {
-		InternalError(c, fmt.Sprintf("删除表失败: %s", out))
+	if err := h.sqlService.DropTable(c.Request.Context(), did, tableName); err != nil {
+		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
+			BadRequest(c, err.Error())
+		} else {
+			InternalError(c, err.Error())
+		}
 		return
 	}
 
