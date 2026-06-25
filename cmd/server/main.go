@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/api"
 	"easyserver/internal/config"
 	"easyserver/internal/database"
+	"easyserver/internal/executor"
 	"easyserver/internal/middleware"
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/service"
@@ -146,12 +147,58 @@ func main() {
 	// Initialize notification service (single shared instance)
 	notificationService := service.NewNotificationService(db)
 
+	// Initialize shared command executor
+	cmdExec := executor.NewOSExecutor()
+
+	// Initialize container services (single shared instance)
+	containerService := service.NewContainerService(cmdExec)
+	dockerService := service.NewDockerService(cmdExec)
+	composeService := service.NewComposeService(cmdExec)
+	volumeService := service.NewVolumeService(cmdExec)
+	networkService := service.NewNetworkService(cmdExec)
+
+	// Initialize cron service (single shared instance)
+	cronService := service.NewCronService(db, cmdExec)
+
+	// Initialize database services (single shared instance)
+	dbServerService := service.NewDBServerService(db, cmdExec)
+	dbServerService.SeedPredefinedServers(context.Background())
+	databaseMgmtService := service.NewDatabaseMgmtService(db, cmdExec)
+	dbBackupService := service.NewDBBackupService(db, cmdExec)
+
+	// Initialize deploy service (single shared instance)
+	deployService, err := service.NewDeployService(db, cfg.Deploy.EncryptionKey)
+	if err != nil {
+		log.Fatalf("Failed to init deploy service: %v", err)
+	}
+
+	// Initialize environment config service (single shared instance)
+	envConfigService := service.NewEnvConfigService(db)
+	envConfigService.InitDefaultGlobalConfigs(context.Background())
+
+	// Initialize firewall service (single shared instance)
+	firewallService := service.NewFirewallService(db, cmdExec)
+
+	// Initialize runtime services (single shared instance)
+	runtimeService := service.NewRuntimeService(db, cmdExec)
+	runtimeVersionService := service.NewRuntimeVersionService(db)
+	packageManagerService := service.NewPackageManagerService(db, cmdExec)
+
+	// Initialize SSH service (single shared instance)
+	sshConfigService := service.NewSSHConfigService(cmdExec)
+
+	// Initialize web server services (single shared instance)
+	webServerService := service.NewWebServerService(db, cmdExec)
+	webServerService.SeedPredefinedWebServers(context.Background())
+	websiteService := service.NewWebsiteService(db, cmdExec)
+
 	// Log server start
 	auditService.LogSystemEvent(context.Background(), "SERVER_START", "EasyServer started")
 
 	// Setup router with shared service instances (no duplicate creation)
 	router := api.NewRouter(cfg, *configPath, api.RouterDeps{
 		DB:                   db,
+		Executor:             cmdExec,
 		AuthService:          authService,
 		MonitorService:       monitorService,
 		AuditService:         auditService,
@@ -161,6 +208,42 @@ func main() {
 		ProcessManager:       processManager,
 		SystemProcessService: systemProcessService,
 		NotificationService:  notificationService,
+
+		// Container services
+		ContainerService: containerService,
+		DockerService:    dockerService,
+		ComposeService:   composeService,
+		VolumeService:    volumeService,
+		NetworkService:   networkService,
+
+		// Cron service
+		CronService: cronService,
+
+		// Database services
+		DBServerService:     dbServerService,
+		DatabaseMgmtService: databaseMgmtService,
+		DBBackupService:     dbBackupService,
+
+		// Deploy service
+		DeployService: deployService,
+
+		// Environment config service
+		EnvConfigService: envConfigService,
+
+		// Firewall service
+		FirewallService: firewallService,
+
+		// Runtime services
+		RuntimeService:        runtimeService,
+		RuntimeVersionService: runtimeVersionService,
+		PackageManagerService: packageManagerService,
+
+		// SSH service
+		SSHConfigService: sshConfigService,
+
+		// Web server services
+		WebServerService: webServerService,
+		WebsiteService:   websiteService,
 	})
 	r := router.Setup()
 

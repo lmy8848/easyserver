@@ -1,19 +1,14 @@
 package api
 
 import (
-	"database/sql"
-
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerRuntimeRoutes registers runtime and package management routes
-func registerRuntimeRoutes(protected *gin.RouterGroup, db *sql.DB) {
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *service.RuntimeService, runtimeVersionService *service.RuntimeVersionService, packageService *service.PackageManagerService) {
 	// Runtime environment management
-	cmdExec := executor.NewOSExecutor()
-	runtimeService := service.NewRuntimeService(db, cmdExec)
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)
 	protected.GET("/runtime/:name", runtimeHandler.ListByName)
@@ -28,7 +23,6 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, db *sql.DB) {
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
 
 	// Runtime version management
-	runtimeVersionService := service.NewRuntimeVersionService(db)
 	runtimeVersionHandler := NewRuntimeVersionHandler(runtimeVersionService)
 	protected.GET("/runtime-versions/:name", runtimeVersionHandler.List)
 	protected.POST("/runtime-versions/:name/fetch", runtimeVersionHandler.Fetch)
@@ -36,7 +30,6 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, db *sql.DB) {
 	protected.GET("/runtime-versions/:name/suggestions", runtimeVersionHandler.GetAliasSuggestions)
 
 	// Package management
-	packageService := service.NewPackageManagerService(db, cmdExec)
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)
 	protected.GET("/packages", packageHandler.ListPackages)
 	protected.GET("/packages/scan/:id", packageHandler.ScanPackages)

@@ -1,23 +1,13 @@
 package api
 
 import (
-	"context"
-	"database/sql"
-
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerDatabaseRoutes registers database management routes
-func registerDatabaseRoutes(protected *gin.RouterGroup, db *sql.DB) {
-	ctx := context.Background()
-	cmdExec := executor.NewOSExecutor()
-	dbServerService := service.NewDBServerService(db, cmdExec)
-	dbServerService.SeedPredefinedServers(ctx)
-	dbMgmtService := service.NewDatabaseMgmtService(db, cmdExec)
-	dbBackupService := service.NewDBBackupService(db, cmdExec)
+func registerDatabaseRoutes(protected *gin.RouterGroup, dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) {
 	handler := NewDBServerHandler(dbServerService, dbMgmtService, dbBackupService)
 
 	protected.GET("/db-servers", handler.List)

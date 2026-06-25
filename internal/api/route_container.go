@@ -1,22 +1,13 @@
 package api
 
 import (
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerContainerRoutes registers all container-related routes
-func registerContainerRoutes(protected *gin.RouterGroup, auditService *service.AuditService) {
-	exec := executor.NewOSExecutor()
-
-	containerService := service.NewContainerService(exec)
-	dockerService := service.NewDockerService(exec)
-	composeService := service.NewComposeService(exec)
-	volumeService := service.NewVolumeService(exec)
-	networkService := service.NewNetworkService(exec)
-
+func registerContainerRoutes(protected *gin.RouterGroup, containerService *service.ContainerService, dockerService *service.DockerService, composeService *service.ComposeService, volumeService *service.VolumeService, networkService *service.NetworkService, auditService *service.AuditService) {
 	handler := NewContainerHandler(containerService, dockerService, composeService, volumeService, networkService, auditService)
 
 	// Docker management

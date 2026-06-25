@@ -1,20 +1,13 @@
 package api
 
 import (
-	"database/sql"
-	"log"
-
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerDeployRoutes registers deploy management routes
-func registerDeployRoutes(protected *gin.RouterGroup, db *sql.DB, encryptionKey string) {
-	deployService, err := service.NewDeployService(db, encryptionKey)
-	if err != nil {
-		log.Fatalf("FATAL: failed to init deploy service: %v", err)
-	}
+func registerDeployRoutes(protected *gin.RouterGroup, deployService *service.DeployService) {
 	handler := NewDeployHandler(deployService)
 	protected.GET("/deploy/servers", handler.ListServers)
 	protected.POST("/deploy/servers", handler.CreateServer)

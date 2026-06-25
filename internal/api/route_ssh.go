@@ -1,15 +1,13 @@
 package api
 
 import (
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerSSHRoutes registers SSH management routes
-func registerSSHRoutes(protected *gin.RouterGroup) {
-	sshService := service.NewSSHConfigService(executor.NewOSExecutor())
+func registerSSHRoutes(protected *gin.RouterGroup, sshService *service.SSHConfigService) {
 	handler := NewSSHHandler(sshService)
 
 	// SSH Config

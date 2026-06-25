@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 
 	"easyserver/internal/service"
 
@@ -10,8 +9,7 @@ import (
 )
 
 // registerEnvRoutes registers environment configuration routes
-func registerEnvRoutes(protected *gin.RouterGroup, db *sql.DB) {
-	envConfigService := service.NewEnvConfigService(db)
+func registerEnvRoutes(protected *gin.RouterGroup, envConfigService *service.EnvConfigService) {
 	// Initialize default global configs (tables managed by migration system)
 	envConfigService.InitDefaultGlobalConfigs(context.Background())
 	handler := NewEnvConfigHandler(envConfigService)

@@ -1,22 +1,13 @@
 package api
 
 import (
-	"context"
-	"database/sql"
-
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerWebServerRoutes registers web server and website management routes
-func registerWebServerRoutes(protected *gin.RouterGroup, db *sql.DB) {
-	ctx := context.Background()
-	cmdExec := executor.NewOSExecutor()
-	webServerService := service.NewWebServerService(db, cmdExec)
-	webServerService.SeedPredefinedWebServers(ctx)
-	websiteService := service.NewWebsiteService(db, cmdExec)
+func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *service.WebServerService, websiteService *service.WebsiteService) {
 	handler := NewWebServerHandler(webServerService, websiteService)
 
 	// Utilities (must be before /:id to avoid conflict)

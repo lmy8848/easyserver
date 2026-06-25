@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"easyserver/internal/config"
+	"easyserver/internal/executor"
 	"easyserver/internal/middleware"
 	"easyserver/internal/model"
 	"easyserver/internal/repository"
@@ -19,6 +20,7 @@ type Router struct {
 	cfg                  *config.Config
 	configPath           string
 	db                   *sql.DB
+	executor             executor.CommandExecutor
 	auditRepo            repository.AuditRepository
 	authService          *service.AuthService
 	monitorService       *service.MonitorService
@@ -29,6 +31,42 @@ type Router struct {
 	processManager       *service.ProcessManager
 	systemProcessService *service.SystemProcessService
 	notificationService  *service.NotificationService
+
+	// Container services
+	containerService *service.ContainerService
+	dockerService    *service.DockerService
+	composeService   *service.ComposeService
+	volumeService    *service.VolumeService
+	networkService   *service.NetworkService
+
+	// Cron service
+	cronService *service.CronService
+
+	// Database services
+	dbServerService     *service.DBServerService
+	databaseMgmtService *service.DatabaseMgmtService
+	dbBackupService     *service.DBBackupService
+
+	// Deploy service
+	deployService *service.DeployService
+
+	// Environment config service
+	envConfigService *service.EnvConfigService
+
+	// Firewall service
+	firewallService *service.FirewallService
+
+	// Runtime services
+	runtimeService        *service.RuntimeService
+	runtimeVersionService *service.RuntimeVersionService
+	packageManagerService *service.PackageManagerService
+
+	// SSH service
+	sshConfigService *service.SSHConfigService
+
+	// Web server services
+	webServerService *service.WebServerService
+	websiteService   *service.WebsiteService
 }
 
 // RouterDeps holds the shared service instances created once in main.go.
@@ -37,6 +75,7 @@ type Router struct {
 // and lifecycle hooks (Close, flush) all operate on the same state.
 type RouterDeps struct {
 	DB                   *sql.DB
+	Executor             executor.CommandExecutor
 	AuthService          *service.AuthService
 	MonitorService       *service.MonitorService
 	AuditService         *service.AuditService
@@ -46,6 +85,42 @@ type RouterDeps struct {
 	ProcessManager       *service.ProcessManager
 	SystemProcessService *service.SystemProcessService
 	NotificationService  *service.NotificationService
+
+	// Container services
+	ContainerService *service.ContainerService
+	DockerService    *service.DockerService
+	ComposeService   *service.ComposeService
+	VolumeService    *service.VolumeService
+	NetworkService   *service.NetworkService
+
+	// Cron service
+	CronService *service.CronService
+
+	// Database services
+	DBServerService   *service.DBServerService
+	DatabaseMgmtService *service.DatabaseMgmtService
+	DBBackupService   *service.DBBackupService
+
+	// Deploy service
+	DeployService *service.DeployService
+
+	// Environment config service
+	EnvConfigService *service.EnvConfigService
+
+	// Firewall service
+	FirewallService *service.FirewallService
+
+	// Runtime services
+	RuntimeService        *service.RuntimeService
+	RuntimeVersionService *service.RuntimeVersionService
+	PackageManagerService *service.PackageManagerService
+
+	// SSH service
+	SSHConfigService *service.SSHConfigService
+
+	// Web server services
+	WebServerService *service.WebServerService
+	WebsiteService   *service.WebsiteService
 }
 
 func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
@@ -73,6 +148,7 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		cfg:                  cfg,
 		configPath:           configPath,
 		db:                   deps.DB,
+		executor:             deps.Executor,
 		auditRepo:            deps.AuditRepo,
 		authService:          deps.AuthService,
 		monitorService:       deps.MonitorService,
@@ -83,6 +159,42 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		processManager:       deps.ProcessManager,
 		systemProcessService: deps.SystemProcessService,
 		notificationService:  deps.NotificationService,
+
+		// Container services
+		containerService: deps.ContainerService,
+		dockerService:    deps.DockerService,
+		composeService:   deps.ComposeService,
+		volumeService:    deps.VolumeService,
+		networkService:   deps.NetworkService,
+
+		// Cron service
+		cronService: deps.CronService,
+
+		// Database services
+		dbServerService:     deps.DBServerService,
+		databaseMgmtService: deps.DatabaseMgmtService,
+		dbBackupService:     deps.DBBackupService,
+
+		// Deploy service
+		deployService: deps.DeployService,
+
+		// Environment config service
+		envConfigService: deps.EnvConfigService,
+
+		// Firewall service
+		firewallService: deps.FirewallService,
+
+		// Runtime services
+		runtimeService:        deps.RuntimeService,
+		runtimeVersionService: deps.RuntimeVersionService,
+		packageManagerService: deps.PackageManagerService,
+
+		// SSH service
+		sshConfigService: deps.SSHConfigService,
+
+		// Web server services
+		webServerService: deps.WebServerService,
+		websiteService:   deps.WebsiteService,
 	}
 }
 
@@ -146,15 +258,15 @@ func (r *Router) Setup() *gin.Engine {
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService)
 	registerSystemRoutes(protected)
 	registerCloudRoutes(protected, &r.cfg.TencentCloud, r.cfg.Server.Port)
-	registerDeployRoutes(protected, r.db, r.cfg.Deploy.EncryptionKey)
-	registerRuntimeRoutes(protected, r.db)
-	registerEnvRoutes(protected, r.db)
-	registerWebServerRoutes(protected, r.db)
-	registerDatabaseRoutes(protected, r.db)
-	registerCronRoutes(protected, r.db)
-	registerFirewallRoutes(protected, r.db, r.cfg.Server.Port)
-	registerSSHRoutes(protected)
-	registerContainerRoutes(protected, r.auditService)
+	registerDeployRoutes(protected, r.deployService)
+	registerRuntimeRoutes(protected, r.runtimeService, r.runtimeVersionService, r.packageManagerService)
+	registerEnvRoutes(protected, r.envConfigService)
+	registerWebServerRoutes(protected, r.webServerService, r.websiteService)
+	registerDatabaseRoutes(protected, r.dbServerService, r.databaseMgmtService, r.dbBackupService)
+	registerCronRoutes(protected, r.cronService)
+	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
+	registerSSHRoutes(protected, r.sshConfigService)
+	registerContainerRoutes(protected, r.containerService, r.dockerService, r.composeService, r.volumeService, r.networkService, r.auditService)
 	registerTemplateRoutes(protected)
 	registerProcessRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)

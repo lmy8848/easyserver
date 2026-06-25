@@ -2,18 +2,15 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"log"
 
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerCronRoutes registers cron task management routes
-func registerCronRoutes(protected *gin.RouterGroup, db *sql.DB) {
-	cronService := service.NewCronService(db, executor.NewOSExecutor())
+func registerCronRoutes(protected *gin.RouterGroup, cronService *service.CronService) {
 	// Seed default documentation (tables managed by migration system)
 	if err := cronService.SeedDefaultDocs(context.Background()); err != nil {
 		log.Printf("WARNING: seed default cron docs failed: %v", err)

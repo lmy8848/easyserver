@@ -1,18 +1,15 @@
 package api
 
 import (
-	"database/sql"
 	"strconv"
 
-	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerFirewallRoutes registers firewall management routes
-func registerFirewallRoutes(protected *gin.RouterGroup, db *sql.DB, panelPort int) {
-	firewallService := service.NewFirewallService(db, executor.NewOSExecutor())
+func registerFirewallRoutes(protected *gin.RouterGroup, firewallService *service.FirewallService, panelPort int) {
 	// Set protected ports: SSH (22) + panel port from config
 	firewallService.SetProtectedPorts([]string{"22", strconv.Itoa(panelPort)})
 	handler := NewFirewallHandler(firewallService, panelPort)
