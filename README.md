@@ -2,6 +2,8 @@
 
 基于 Go + React 的 Linux 服务器管理面板。
 
+![EasyServer 面板截图](docs/screenshot.jpg)
+
 ## 特性
 
 - 🖥️ 系统监控（CPU、内存、磁盘、网络）
