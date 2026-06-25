@@ -133,7 +133,7 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 	deps.AuthService.SetNotifyService(notifyService)
 
 	// Initialize alert service
-	alertService := service.NewAlertService(notifyService)
+	alertService := service.NewAlertService(notifyService, deps.NotificationService)
 	var alertRules []model.AlertRule
 	for i, rule := range cfg.Alerts.Rules {
 		alertRules = append(alertRules, model.AlertRule{

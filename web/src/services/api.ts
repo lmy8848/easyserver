@@ -646,7 +646,7 @@ export const firewallApi = {
     api.post<ApiResponse>('/firewall/enable'),
 
   disable: () =>
-    api.post<ApiResponse>('/firewall/disable'),
+    api.post<ApiResponse>('/firewall/disable', { confirm: true }),
 
   listRules: () =>
     api.get<ApiResponse<FirewallRule[]>>('/firewall/rules'),
@@ -863,6 +863,15 @@ export const notificationApi = {
 
   delete: (id: number) =>
     api.delete<ApiResponse>(`/notifications/${id}`),
+};
+
+// Template API
+export const templateApi = {
+  getDockerImages: () =>
+    api.get<ApiResponse>('/templates/docker-images'),
+
+  getScriptTemplates: () =>
+    api.get<ApiResponse>('/templates/scripts'),
 };
 
 export default api;
