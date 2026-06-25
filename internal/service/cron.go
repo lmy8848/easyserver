@@ -294,7 +294,6 @@ func (s *CronService) executeTask(task *model.CronTask) {
 		if task.EnvVars != "" {
 			opts.Env = parseEnvVars(task.EnvVars)
 		}
-		}
 
 		outputStr, _, runErr := s.executor.RunWithOptions(runCtx, opts, "sh", "-c", command)
 		output = []byte(outputStr)
