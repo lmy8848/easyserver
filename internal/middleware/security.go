@@ -31,12 +31,13 @@ func SecurityMiddleware() gin.HandlerFunc {
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		// Content Security Policy
-		// - nonce overrides unsafe-inline per CSP spec, so unsafe-inline is omitted
-		// - unsafe-eval removed; production builds should not require eval
+		// - script-src uses nonce for security
+		// - style-src uses unsafe-inline because Ant Design CSS-in-JS requires inline styles
+		//   (nonce + unsafe-inline: per CSP spec, nonce takes precedence and unsafe-inline is fallback)
 		c.Header("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src 'self' 'nonce-"+nonce+"'; "+
-				"style-src 'self' 'nonce-"+nonce+"'; "+
+				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob:; "+
 				"font-src 'self' data:; "+
 				"connect-src 'self' ws: wss:; "+

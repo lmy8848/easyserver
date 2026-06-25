@@ -140,7 +140,7 @@ func (s *SQLQueryService) ListTables(ctx context.Context, dbID int64) ([]map[str
 	case "mysql":
 		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name, "SHOW TABLES;")
 		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", out)
+			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -156,7 +156,7 @@ func (s *SQLQueryService) ListTables(ctx context.Context, dbID int64) ([]map[str
 		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name,
 			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
 		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", out)
+			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -185,7 +185,7 @@ func (s *SQLQueryService) DescribeTable(ctx context.Context, dbID int64, tableNa
 
 	out, err := s.execRaw(ctx, dbType, db.Name, describeSQL)
 	if err != nil {
-		return nil, fmt.Errorf("获取表结构失败: %s", out)
+		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(out))
 	}
 
 	tableInfo := ParseTableInfo(dbType, tableName, out)
@@ -254,7 +254,7 @@ func (s *SQLQueryService) QueryTable(ctx context.Context, dbID int64, tableName 
 		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name,
 			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", out)
+			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -273,7 +273,7 @@ func (s *SQLQueryService) QueryTable(ctx context.Context, dbID int64, tableName 
 		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name,
 			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", out)
+			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -317,10 +317,9 @@ func (s *SQLQueryService) ExecuteSQL(ctx context.Context, dbID int64, sql string
 
 	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
-		log.Printf("ExecuteSQL %s error [db=%s]: %s", server.Name, db.Name, out)
+		log.Printf("ExecuteSQL %s error [db=%s]: %s", server.Name, db.Name, SanitizeSQLError(out))
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
-
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
@@ -348,7 +347,7 @@ func (s *SQLQueryService) InsertRecord(ctx context.Context, dbID int64, table st
 
 	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
-		return &DMLResult{Success: false, Error: out}, nil
+		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
@@ -377,7 +376,7 @@ func (s *SQLQueryService) UpdateRecord(ctx context.Context, dbID int64, table st
 
 	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
-		return &DMLResult{Success: false, Error: out}, nil
+		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
@@ -406,7 +405,7 @@ func (s *SQLQueryService) DeleteRecord(ctx context.Context, dbID int64, table st
 
 	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
-		return &DMLResult{Success: false, Error: out}, nil
+		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true}, nil
 }
@@ -485,7 +484,7 @@ func (s *SQLQueryService) CreateTable(ctx context.Context, dbID int64, tableName
 
 	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
-		return fmt.Errorf("创建表失败: %s", out)
+		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(out))
 	}
 	return nil
 }

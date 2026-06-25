@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -583,8 +585,63 @@ func (s *FirewallService) removeRuleForVersion(ctx context.Context, rule *model.
 	}
 }
 
+// isValidIPorCIDR checks if a string is a valid IP address or CIDR notation
+func isValidIPorCIDR(s string) bool {
+	// Single IP: 192.168.1.1
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	// CIDR: 192.168.1.0/24
+	if _, _, err := net.ParseCIDR(s); err == nil {
+		return true
+	}
+	return false
+}
+
+// validateFirewallRuleFields validates all fields of a firewall rule before applying
+func validateFirewallRuleFields(rule *model.FirewallRule) error {
+	// Validate Chain
+	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
+	if !validChains[rule.Chain] {
+		return fmt.Errorf("invalid chain: %s", rule.Chain)
+	}
+
+	// Validate Action
+	validActions := map[string]bool{"ACCEPT": true, "DROP": true, "REJECT": true}
+	if !validActions[rule.Action] {
+		return fmt.Errorf("invalid action: %s", rule.Action)
+	}
+
+	// Validate Protocol
+	validProtocols := map[string]bool{"tcp": true, "udp": true, "all": true, "icmp": true}
+	if rule.Protocol != "" && !validProtocols[rule.Protocol] {
+		return fmt.Errorf("invalid protocol: %s", rule.Protocol)
+	}
+
+	// Validate Port (must be numeric or range)
+	if rule.Port != "" {
+		portRegex := regexp.MustCompile(`^(\d+(-\d+)?)(,\d+(-\d+)?)*$`)
+		if !portRegex.MatchString(rule.Port) {
+			return fmt.Errorf("invalid port: %s", rule.Port)
+		}
+	}
+
+	// Validate Source (must be valid IP/CIDR or empty)
+	if rule.Source != "" && rule.Source != "0.0.0.0/0" && rule.Source != "::/0" {
+		if !isValidIPorCIDR(rule.Source) {
+			return fmt.Errorf("invalid source: %s", rule.Source)
+		}
+	}
+
+	return nil
+}
+
 // applyUfwRule applies a rule using ufw
 func (s *FirewallService) applyUfwRule(ctx context.Context, rule *model.FirewallRule) error {
+	if err := validateFirewallRuleFields(rule); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
 	args := []string{}
 
 	if rule.Source != "" {
@@ -643,6 +700,10 @@ func iptablesTool(ipVersion string) string {
 
 // applyIptablesRule applies a rule using iptables
 func (s *FirewallService) applyIptablesRule(ctx context.Context, rule *model.FirewallRule) error {
+	if err := validateFirewallRuleFields(rule); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
 	tool := iptablesTool(rule.IPVersion)
 	args := []string{"-A", rule.Chain}
 
@@ -695,6 +756,10 @@ func (s *FirewallService) removeIptablesRule(ctx context.Context, rule *model.Fi
 
 // applyNftRule applies a rule using nftables
 func (s *FirewallService) applyNftRule(ctx context.Context, rule *model.FirewallRule) error {
+	if err := validateFirewallRuleFields(rule); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
 	// First, ensure the table and chain exist
 	if err := s.ensureNftTable(ctx); err != nil {
 		return err

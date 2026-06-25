@@ -41,16 +41,28 @@ type AuthService struct {
 	lockoutDuration time.Duration
 	cache           tokenCache
 	notifyService   *NotifyService
+	done            chan struct{}
 }
 
 func NewAuthService(maxAttempts int, lockoutDuration time.Duration) *AuthService {
 	s := &AuthService{
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
+		done:            make(chan struct{}),
 	}
 	go s.cacheCleanupLoop()
 	go s.tokenBlacklistCleanupLoop()
 	return s
+}
+
+// Close signals background goroutines to stop. Safe to call multiple times.
+func (s *AuthService) Close() {
+	select {
+	case <-s.done:
+		// already closed
+	default:
+		close(s.done)
+	}
 }
 
 // SetRepositories sets the repository implementations for the auth service
@@ -70,9 +82,14 @@ func (s *AuthService) SetNotifyService(notifyService *NotifyService) {
 func (s *AuthService) tokenBlacklistCleanupLoop() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
-	for range ticker.C {
-		if err := s.CleanupExpiredTokens(context.Background()); err != nil {
-			log.Printf("auth: failed to cleanup expired tokens: %v", err)
+	for {
+		select {
+		case <-ticker.C:
+			if err := s.CleanupExpiredTokens(context.Background()); err != nil {
+				log.Printf("auth: failed to cleanup expired tokens: %v", err)
+			}
+		case <-s.done:
+			return
 		}
 	}
 }
@@ -81,20 +98,25 @@ func (s *AuthService) tokenBlacklistCleanupLoop() {
 func (s *AuthService) cacheCleanupLoop() {
 	ticker := time.NewTicker(CacheCleanupInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		now := time.Now()
-		s.cache.blacklisted.Range(func(key, value any) bool {
-			if t, ok := value.(time.Time); ok && t.Before(now) {
-				s.cache.blacklisted.Delete(key)
-			}
-			return true
-		})
-		s.cache.invalidations.Range(func(key, value any) bool {
-			if t, ok := value.(time.Time); ok && t.Add(365*TokenExpiry).Before(now) {
-				s.cache.invalidations.Delete(key)
-			}
-			return true
-		})
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			s.cache.blacklisted.Range(func(key, value any) bool {
+				if t, ok := value.(time.Time); ok && t.Before(now) {
+					s.cache.blacklisted.Delete(key)
+				}
+				return true
+			})
+			s.cache.invalidations.Range(func(key, value any) bool {
+				if t, ok := value.(time.Time); ok && t.Add(365*TokenExpiry).Before(now) {
+					s.cache.invalidations.Delete(key)
+				}
+				return true
+			})
+		case <-s.done:
+			return
+		}
 	}
 }
 

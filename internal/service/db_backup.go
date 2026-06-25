@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -214,9 +215,18 @@ func (s *DBBackupService) RestoreBackup(ctx context.Context, id int64, dbType st
 
 // restoreMySQL restores a MySQL database from backup
 func (s *DBBackupService) restoreMySQL(ctx context.Context, backup *model.DBBackup) error {
-	out, _, err := s.executor.RunCombined(ctx, "bash", "-c", fmt.Sprintf("mysql %s < %s", backup.DatabaseName, backup.FilePath))
+	// Use exec.Command with stdin file to avoid shell injection via bash -c
+	file, err := os.Open(backup.FilePath)
 	if err != nil {
-		return fmt.Errorf("mysql restore failed: %s", out)
+		return fmt.Errorf("open backup file: %w", err)
+	}
+	defer file.Close()
+
+	cmd := exec.CommandContext(ctx, "mysql", backup.DatabaseName)
+	cmd.Stdin = file
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mysql restore failed: %s", string(out))
 	}
 	return nil
 }

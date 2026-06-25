@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"easyserver/internal/executor"
@@ -44,6 +45,10 @@ func (s *WebsiteService) Get(ctx context.Context, webServerID, id int64) (*model
 func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *model.CreateWebsiteRequest) (*model.Website, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// Validate domain safety
+	if err := validateDomain(req.Domain); err != nil {
+		return nil, err
 	}
 	// Validate root_path safety
 	if err := validateRootPath(req.RootPath); err != nil {
@@ -390,6 +395,22 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 // Internal helpers
 
 // validateRootPath checks that a root path is safe: absolute, no traversal, no shell metacharacters.
+// validateDomain validates that a domain name is safe to use in file paths
+func validateDomain(domain string) error {
+	if domain == "" {
+		return fmt.Errorf("domain is required")
+	}
+	// Only allow alphanumeric, hyphens, dots
+	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)
+	if !domainRegex.MatchString(domain) {
+		return fmt.Errorf("invalid domain name: %s", domain)
+	}
+	if len(domain) > 253 {
+		return fmt.Errorf("domain name too long: %d chars", len(domain))
+	}
+	return nil
+}
+
 func validateRootPath(p string) error {
 	if p == "" {
 		return fmt.Errorf("root_path is required")

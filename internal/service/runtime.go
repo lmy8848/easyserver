@@ -191,7 +191,7 @@ func (s *RuntimeService) installRuntime(ctx context.Context, id int64, name, ver
 	if err != nil {
 		errMsg := fmt.Sprintf("安装失败: %v", err)
 		log.Printf("runtime: failed to install %s %s: %v", name, version, err)
-		s.db.Exec("UPDATE runtime_environments SET status = 'failed', error_message = ?, progress = 0, progress_step = 'failed' WHERE id = ?", errMsg, id)
+		s.db.Exec("UPDATE runtime_environments SET status = 'failed', error_message = ?, progress = 0, progress_step = 'failed' WHERE id = ? AND status = 'installing'", errMsg, id)
 		return
 	}
 
@@ -199,7 +199,7 @@ func (s *RuntimeService) installRuntime(ctx context.Context, id int64, name, ver
 	s.updateProgress(id, 90, "configuring", "正在配置环境...")
 
 	// Update status
-	s.db.Exec("UPDATE runtime_environments SET status = 'installed', path = ?, progress = 100, progress_step = 'done' WHERE id = ?", path, id)
+	s.db.Exec("UPDATE runtime_environments SET status = 'installed', path = ?, progress = 100, progress_step = 'done' WHERE id = ? AND status = 'installing'", path, id)
 
 	// If this is the first version of this runtime, set as default
 	var count int
@@ -321,6 +321,8 @@ func (s *RuntimeService) installNode(ctx context.Context, id int64, version stri
 
 	if _, err := exec.LookPath("nvm"); err != nil {
 		// Install nvm first
+		// SECURITY WARNING: Piping curl to bash is inherently risky (MITM, compromised CDN).
+		// For production, consider downloading the script first, verifying its checksum, then executing.
 		s.updateProgress(id, 30, "compiling", "正在安装 nvm...")
 		_, _, nvmErr := s.executor.RunCombined(ctx, "bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
 		if nvmErr != nil {

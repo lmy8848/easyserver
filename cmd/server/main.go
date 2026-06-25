@@ -39,24 +39,46 @@ func main() {
 			log.Println("Please set a strong secret in config.yaml or use EASYSERVER_JWT_SECRET environment variable.")
 			os.Exit(1)
 		}
-		log.Println("WARNING: JWT secret is too short. Using in development mode only!")
+		log.Println("WARNING: JWT secret is too short (< 32 bytes). Using in development mode only!")
 	}
 
-	// Check for default JWT secret
+	// Check for default or well-known JWT secrets
 	defaultSecrets := []string{
 		"easyserver-secret-key-change-me",
 		"change-me-to-a-random-secret",
 		"change-me-to-a-random-secret-at-least-32-bytes-long",
+		"secret",
+		"password",
+		"12345678901234567890123456789012",
 	}
 	for _, defaultSecret := range defaultSecrets {
 		if cfg.Auth.JWTSecret == defaultSecret {
 			if !*devMode {
-				log.Println("ERROR: JWT secret is set to a default value.")
+				log.Println("ERROR: JWT secret is set to a well-known default value.")
 				log.Println("Please set a strong secret in config.yaml or use EASYSERVER_JWT_SECRET environment variable.")
 				os.Exit(1)
 			}
 			log.Println("WARNING: Using default JWT secret in development mode. Change it for production!")
 			break
+		}
+	}
+
+	// Check for trivially weak secrets (all same character)
+	if len(cfg.Auth.JWTSecret) >= 32 {
+		allSame := true
+		for i := 1; i < len(cfg.Auth.JWTSecret); i++ {
+			if cfg.Auth.JWTSecret[i] != cfg.Auth.JWTSecret[0] {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			if !*devMode {
+				log.Println("ERROR: JWT secret must have sufficient entropy (all same character is not allowed).")
+				log.Println("Please set a strong, random secret in config.yaml or use EASYSERVER_JWT_SECRET environment variable.")
+				os.Exit(1)
+			}
+			log.Println("WARNING: JWT secret has no entropy (all same character). Using in development mode only!")
 		}
 	}
 
