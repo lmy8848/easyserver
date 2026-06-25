@@ -227,9 +227,9 @@ func (e *OSExecutor) Start(ctx context.Context, opts StartOptions, name string, 
 		cmd.Env = append(os.Environ(), opts.Env...)
 	}
 
-	if opts.Setpgid {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	// applyPlatformStartOptions is platform-specific:
+	// on unix it honors opts.Setpgid; on windows it is a no-op.
+	applyPlatformStartOptions(cmd, opts)
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
