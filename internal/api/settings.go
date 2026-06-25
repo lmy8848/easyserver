@@ -1,12 +1,12 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"easyserver/internal/config"
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 	"easyserver/internal/service"
 
@@ -32,13 +33,15 @@ type SettingsHandler struct {
 	cfgMu        sync.RWMutex
 	configPath   string
 	alertService *service.AlertService
+	executor     executor.CommandExecutor
 }
 
-func NewSettingsHandler(cfg *config.Config, configPath string, alertService *service.AlertService) *SettingsHandler {
+func NewSettingsHandler(cfg *config.Config, configPath string, alertService *service.AlertService, exec executor.CommandExecutor) *SettingsHandler {
 	return &SettingsHandler{
 		cfg:          cfg,
 		configPath:   configPath,
 		alertService: alertService,
+		executor:     exec,
 	}
 }
 
@@ -660,8 +663,10 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 		safeExecPath := "'" + strings.ReplaceAll(execPath, "'", "'\\''") + "'"
 		cmdStr := fmt.Sprintf("sleep 2 && nohup %s -config %s > /dev/null 2>&1 &",
 			safeExecPath, safeConfigPath)
-		cmd := exec.Command("sh", "-c", cmdStr)
-		cmd.Start()
+		if _, _, err := h.executor.RunCombined(context.Background(), "sh", "-c", cmdStr); err != nil {
+			log.Printf("settings: failed to start restart command: %v", err)
+			return
+		}
 
 		time.Sleep(500 * time.Millisecond)
 		os.Exit(0)
@@ -669,8 +674,8 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	Success(c, gin.H{"message": "面板正在重启..."})
 }
 
-func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *service.AlertService) {
-	handler := NewSettingsHandler(cfg, configPath, alertService)
+func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *service.AlertService, exec executor.CommandExecutor) {
+	handler := NewSettingsHandler(cfg, configPath, alertService, exec)
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)
 	protected.PUT("/settings/server", handler.UpdateServerConfig)

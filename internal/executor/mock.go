@@ -128,6 +128,12 @@ func (p *MockProcess) Cmd() *exec.Cmd {
 	return nil
 }
 
+// Command creates a mock command. It intentionally returns nil because tests should
+// use Start/Run methods instead of shelling out through exec.Cmd directly.
+func (m *MockExecutor) Command(ctx context.Context, opts StartOptions, name string, args ...string) *exec.Cmd {
+	return nil
+}
+
 // Start starts a mock process
 func (m *MockExecutor) Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error) {
 	return NewMockProcess(12345), nil

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"easyserver/internal/executor"
 )
 
 type TerminalSession struct {
@@ -19,11 +21,13 @@ type TerminalSession struct {
 type TerminalManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*TerminalSession
+	executor executor.CommandExecutor
 }
 
-func NewTerminalManager() *TerminalManager {
+func NewTerminalManager(exec executor.CommandExecutor) *TerminalManager {
 	return &TerminalManager{
 		sessions: make(map[string]*TerminalSession),
+		executor: exec,
 	}
 }
 

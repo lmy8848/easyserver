@@ -31,6 +31,7 @@ type Router struct {
 	processManager       *service.ProcessManager
 	systemProcessService *service.SystemProcessService
 	notificationService  *service.NotificationService
+	serviceManager       *service.ServiceManager
 
 	// Container services
 	containerService *service.ContainerService
@@ -86,6 +87,7 @@ type RouterDeps struct {
 	ProcessManager       *service.ProcessManager
 	SystemProcessService *service.SystemProcessService
 	NotificationService  *service.NotificationService
+	ServiceManager       *service.ServiceManager
 
 	// Container services
 	ContainerService *service.ContainerService
@@ -161,6 +163,7 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		processManager:       deps.ProcessManager,
 		systemProcessService: deps.SystemProcessService,
 		notificationService:  deps.NotificationService,
+		serviceManager:       deps.ServiceManager,
 
 		// Container services
 		containerService: deps.ContainerService,
@@ -254,12 +257,12 @@ func (r *Router) Setup() *gin.Engine {
 
 	// Register domain routes
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerServiceRoutes(protected, wsGroup, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerTerminalRoutes(protected, wsGroup, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
+	registerServiceRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
+	registerTerminalRoutes(protected, wsGroup, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerFileRoutes(protected, r.cfg.FileManager.BasePath, r.auditService)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
-	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService)
-	registerSystemRoutes(protected)
+	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor)
+	registerSystemRoutes(protected, r.executor)
 	registerCloudRoutes(protected, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	registerDeployRoutes(protected, r.deployService)
 	registerRuntimeRoutes(protected, r.runtimeService, r.runtimeVersionService, r.packageManagerService)

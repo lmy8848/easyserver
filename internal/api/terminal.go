@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -51,9 +52,9 @@ type TerminalHandler struct {
 	upgrader        gorillaWs.Upgrader
 }
 
-func NewTerminalHandler(jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) *TerminalHandler {
+func NewTerminalHandler(exec executor.CommandExecutor, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) *TerminalHandler {
 	return &TerminalHandler{
-		terminalManager: service.NewTerminalManager(),
+		terminalManager: service.NewTerminalManager(exec),
 		auditService:    auditService,
 		jwtSecret:       jwtSecret,
 		upgrader:        createUpgrader(allowedOrigins, devMode),

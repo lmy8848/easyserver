@@ -164,6 +164,9 @@ func main() {
 	volumeService := service.NewVolumeService(cmdExec)
 	networkService := service.NewNetworkService(cmdExec)
 
+	// Initialize service manager (single shared instance)
+	serviceManager := service.NewServiceManager(cmdExec)
+
 	// Initialize cron service (single shared instance)
 	cronRepo := sqlite.NewCronRepository(db)
 	cronService := service.NewCronService(cronRepo, cmdExec)
@@ -176,7 +179,7 @@ func main() {
 	databaseMgmtService := service.NewDatabaseMgmtService(databaseMgmtRepo, cmdExec)
 	dbBackupRepo := sqlite.NewDBBackupRepository(db)
 	dbBackupService := service.NewDBBackupService(dbBackupRepo, cmdExec)
-	sqlQueryService := service.NewSQLQueryService(databaseMgmtService)
+	sqlQueryService := service.NewSQLQueryService(databaseMgmtService, cmdExec)
 
 	// Initialize deploy service (single shared instance)
 	deployRepo := sqlite.NewDeployRepository(db)
@@ -225,6 +228,7 @@ func main() {
 		ProcessManager:       processManager,
 		SystemProcessService: systemProcessService,
 		NotificationService:  notificationService,
+		ServiceManager:       serviceManager,
 
 		// Container services
 		ContainerService: containerService,

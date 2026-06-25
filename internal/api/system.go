@@ -2,21 +2,25 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"easyserver/internal/executor"
+
 	"github.com/gin-gonic/gin"
 )
 
-type SystemHandler struct{}
+type SystemHandler struct {
+	executor executor.CommandExecutor
+}
 
-func NewSystemHandler() *SystemHandler {
-	return &SystemHandler{}
+func NewSystemHandler(exec executor.CommandExecutor) *SystemHandler {
+	return &SystemHandler{executor: exec}
 }
 
 // SSHLogin represents an SSH login record
@@ -36,7 +40,7 @@ func (h *SystemHandler) GetSSHLogins(c *gin.Context) {
 	}
 
 	// Try to use `last` command first (more reliable)
-	logins, err := getLastLogins(limit)
+	logins, err := h.getLastLogins(limit)
 	if err != nil || len(logins) == 0 {
 		// Fallback to parsing /var/log/auth.log
 		logins, err = getAuthLogins(limit)
@@ -50,15 +54,14 @@ func (h *SystemHandler) GetSSHLogins(c *gin.Context) {
 }
 
 // getLastLogins uses the `last` command to get login history
-func getLastLogins(limit int) ([]SSHLogin, error) {
-	cmd := exec.Command("last", "-n", fmt.Sprintf("%d", limit), "-F", "-i")
-	output, err := cmd.Output()
+func (h *SystemHandler) getLastLogins(limit int) ([]SSHLogin, error) {
+	output, _, _, err := h.executor.Run(nil, "last", "-n", fmt.Sprintf("%d", limit), "-F", "-i")
 	if err != nil {
 		return nil, err
 	}
 
 	var logins []SSHLogin
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" || strings.HasPrefix(line, "wtmp") || strings.HasPrefix(line, "reboot") {
@@ -223,10 +226,9 @@ func (h *SystemHandler) GetSystemSSHConfig(c *gin.Context) {
 	}
 
 	// Check if SSH service is running
-	cmd := exec.Command("systemctl", "is-active", "ssh")
-	output, err := cmd.Output()
+	output, _, _, err := h.executor.Run(c.Request.Context(), "systemctl", "is-active", "ssh")
 	if err == nil {
-		status = strings.TrimSpace(string(output))
+		status = strings.TrimSpace(output)
 	}
 
 	Success(c, gin.H{
@@ -256,7 +258,7 @@ func (h *SystemHandler) CheckPort(c *gin.Context) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		// Port is in use - try to find what's using it
-		processInfo := getPortProcess(port)
+		processInfo := h.getPortProcess(c.Request.Context(), port)
 		Success(c, gin.H{
 			"available": false,
 			"port":      port,
@@ -275,11 +277,11 @@ func (h *SystemHandler) CheckPort(c *gin.Context) {
 }
 
 // getPortProcess finds the process using a given port
-func getPortProcess(port int) string {
+func (h *SystemHandler) getPortProcess(ctx context.Context, port int) string {
 	// Try ss first
-	out, err := exec.Command("ss", "-tlnp", fmt.Sprintf("sport = :%d", port)).CombinedOutput()
+	out, _, err := h.executor.RunCombined(ctx, "ss", "-tlnp", fmt.Sprintf("sport = :%d", port))
 	if err == nil {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for _, line := range lines[1:] { // skip header
 			if strings.Contains(line, fmt.Sprintf(":%d", port)) {
 				// Extract process info
@@ -295,9 +297,9 @@ func getPortProcess(port int) string {
 	}
 
 	// Fallback to netstat
-	out, err = exec.Command("netstat", "-tlnp").CombinedOutput()
+	out, _, err = h.executor.RunCombined(ctx, "netstat", "-tlnp")
 	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
+		for _, line := range strings.Split(out, "\n") {
 			if strings.Contains(line, fmt.Sprintf(":%d ", port)) || strings.Contains(line, fmt.Sprintf(":%d\t", port)) {
 				return strings.TrimSpace(line)
 			}

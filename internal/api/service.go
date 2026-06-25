@@ -2,11 +2,11 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"sync"
@@ -29,14 +29,16 @@ func validateServiceName(name string) bool {
 
 type ServiceHandler struct {
 	serviceManager    *service.ServiceManager
+	executor          executor.CommandExecutor
 	jwtSecret         string
 	upgrader          gorillaWs.Upgrader
 	protectedServices []string // Services that cannot be stopped/disabled
 }
 
-func NewServiceHandler(jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
+func NewServiceHandler(serviceManager *service.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
 	return &ServiceHandler{
-		serviceManager:    service.NewServiceManager(executor.NewOSExecutor()),
+		serviceManager:    serviceManager,
+		executor:          exec,
 		jwtSecret:         jwtSecret,
 		upgrader:          createUpgrader(allowedOrigins, devMode),
 		protectedServices: []string{"easyserver"}, // Panel's own service
@@ -228,22 +230,22 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	writeMu := &sync.Mutex{}
 
 	// Start journalctl -f to follow logs
-	cmd := exec.Command("journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
-	stdout, err := cmd.StdoutPipe()
+	proc, err := h.executor.Start(context.Background(), executor.StartOptions{}, "journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
 	if err != nil {
-		writeMu.Lock()
-		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"获取日志流失败"}`))
-		writeMu.Unlock()
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
 		writeMu.Lock()
 		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"启动日志流失败"}`))
 		writeMu.Unlock()
 		return
 	}
-	defer cmd.Process.Kill()
+	stdout, err := proc.StdoutPipe()
+	if err != nil {
+		proc.Kill()
+		writeMu.Lock()
+		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"获取日志流失败"}`))
+		writeMu.Unlock()
+		return
+	}
+	defer proc.Kill()
 
 	scanner := bufio.NewScanner(stdout)
 	msgCh := make(chan []byte, 64)

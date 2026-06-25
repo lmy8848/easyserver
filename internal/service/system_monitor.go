@@ -9,9 +9,7 @@ import (
 )
 
 // SystemEventMonitor monitors system-level events (disk, memory, service failures)
-// and logs them as audit events.
-// Platform-specific implementations are in:
-//   - system_monitor_linux.go
+// and logs them as audit events. Linux implementation lives in system_monitor_linux.go.
 type SystemEventMonitor struct {
 	auditService *AuditService
 	executor     executor.CommandExecutor
@@ -76,7 +74,7 @@ func (m *SystemEventMonitor) monitorServiceFailures() {
 	}
 }
 
-// Platform-specific methods (defined in system_monitor_linux.go):
+// Linux-specific methods (defined in system_monitor_linux.go):
 //   - checkDiskSpace()
 //   - checkMemoryUsage()
 //   - checkServiceFailures()

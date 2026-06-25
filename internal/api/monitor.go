@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -242,8 +243,8 @@ func registerMonitorRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerServiceRoutes registers service management routes
-func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, jwtSecret string, allowedOrigins []string, devMode bool) {
-	handler := NewServiceHandler(jwtSecret, allowedOrigins, devMode)
+func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *service.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
+	handler := NewServiceHandler(serviceManager, exec, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
 	protected.GET("/services/:name", handler.Get)
 	protected.GET("/services/:name/logs", handler.GetLogs)
@@ -256,17 +257,17 @@ func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerTerminalRoutes registers terminal routes
-func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) {
+func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, exec executor.CommandExecutor, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) {
 	protected.GET("/terminal/:id", func(c *gin.Context) {
 		Success(c, nil)
 	})
-	handler := NewTerminalHandler(jwtSecret, auditService, allowedOrigins, devMode)
+	handler := NewTerminalHandler(exec, jwtSecret, auditService, allowedOrigins, devMode)
 	wsGroup.GET("/terminal/:id", handler.HandleWebSocket)
 }
 
 // registerSystemRoutes registers system routes
-func registerSystemRoutes(protected *gin.RouterGroup) {
-	handler := NewSystemHandler()
+func registerSystemRoutes(protected *gin.RouterGroup, exec executor.CommandExecutor) {
+	handler := NewSystemHandler(exec)
 	protected.GET("/system/ssh-logins", handler.GetSSHLogins)
 	protected.GET("/system/ssh-config", handler.GetSystemSSHConfig)
 	protected.GET("/system/check-port", handler.CheckPort)

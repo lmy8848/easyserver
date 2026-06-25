@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/executor"
+
 	"github.com/creack/pty"
 )
 
@@ -37,11 +39,13 @@ type TerminalSession struct {
 type TerminalManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*TerminalSession
+	executor executor.CommandExecutor
 }
 
-func NewTerminalManager() *TerminalManager {
+func NewTerminalManager(exec executor.CommandExecutor) *TerminalManager {
 	return &TerminalManager{
 		sessions: make(map[string]*TerminalSession),
+		executor: exec,
 	}
 }
 
@@ -61,9 +65,11 @@ func (m *TerminalManager) CreateSession(id string) (*TerminalSession, error) {
 		shell = "/bin/bash"
 	}
 
-	// Create command
-	cmd := exec.Command(shell)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	// Create command through executor so process creation still goes through the shared seam.
+	cmd := m.executor.Command(nil, executor.StartOptions{Env: []string{"TERM=xterm-256color"}}, shell)
+	if cmd == nil {
+		return nil, fmt.Errorf("executor returned nil command")
+	}
 
 	// Start PTY
 	ptmx, err := pty.Start(cmd)

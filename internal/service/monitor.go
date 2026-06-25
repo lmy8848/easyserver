@@ -276,8 +276,7 @@ func (s *MonitorService) readAll() *model.MonitorPoint {
 	return p
 }
 
-// Platform-specific functions defined in:
-// - monitor_linux.go: readCPU, readLoad, readMemory, readDisk, readNetwork
+// Platform-specific functions are defined in monitor_linux.go.
 
 // savePoint saves a single point using the repository
 func (s *MonitorService) savePoint(p *model.MonitorPoint) error {

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os/exec"
 	"regexp"
 	"strings"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
@@ -16,11 +16,12 @@ import (
 // driver swap with no Handler-side change.
 // TODO: swap *DatabaseMgmtService to DatabaseRepository when candidate 1 lands.
 type SQLQueryService struct {
-	mgmtSvc *DatabaseMgmtService
+	mgmtSvc  *DatabaseMgmtService
+	executor executor.CommandExecutor
 }
 
-func NewSQLQueryService(mgmtSvc *DatabaseMgmtService) *SQLQueryService {
-	return &SQLQueryService{mgmtSvc: mgmtSvc}
+func NewSQLQueryService(mgmtSvc *DatabaseMgmtService, exec executor.CommandExecutor) *SQLQueryService {
+	return &SQLQueryService{mgmtSvc: mgmtSvc, executor: exec}
 }
 
 // --- Result types (keep Handler JSON wire shape stable) ---
@@ -88,21 +89,16 @@ func getDBTypeFromName(name string) DBType {
 }
 
 // execRaw shells out to mysql/psql and returns combined output.
-// Package-level var so tests can stub.
-var execRawFunc = func(dbType DBType, dbName string, sql string) (string, error) {
+func (s *SQLQueryService) execRaw(ctx context.Context, dbType DBType, dbName string, sql string) (string, error) {
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := exec.Command("mysql", dbName, "-e", sql).CombinedOutput()
-		return string(out), err
+		out, _, err := s.executor.RunCombined(ctx, "mysql", dbName, "-e", sql)
+		return out, err
 	case DBTypePostgreSQL:
-		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", dbName, "-c", sql).CombinedOutput()
-		return string(out), err
+		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "psql", "-d", dbName, "-c", sql)
+		return out, err
 	}
 	return "", fmt.Errorf("不支持的数据库类型")
-}
-
-func execRaw(dbType DBType, dbName string, sql string) (string, error) {
-	return execRawFunc(dbType, dbName, sql)
 }
 
 // pathPattern matches filesystem paths that should be stripped from error output.
@@ -142,7 +138,7 @@ func (s *SQLQueryService) ListTables(ctx context.Context, dbID int64) ([]map[str
 	var tables []map[string]interface{}
 	switch server.Name {
 	case "mysql":
-		out, err := execRaw(DBTypeMySQL, db.Name, "SHOW TABLES;")
+		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name, "SHOW TABLES;")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", out)
 		}
@@ -157,7 +153,7 @@ func (s *SQLQueryService) ListTables(ctx context.Context, dbID int64) ([]map[str
 			}
 		}
 	case "postgresql":
-		out, err := execRaw(DBTypePostgreSQL, db.Name,
+		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name,
 			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", out)
@@ -187,7 +183,7 @@ func (s *SQLQueryService) DescribeTable(ctx context.Context, dbID int64, tableNa
 	builder := NewSQLBuilder(dbType)
 	describeSQL := builder.BuildDescribeTable(tableName)
 
-	out, err := execRaw(dbType, db.Name, describeSQL)
+	out, err := s.execRaw(ctx, dbType, db.Name, describeSQL)
 	if err != nil {
 		return nil, fmt.Errorf("获取表结构失败: %s", out)
 	}
@@ -239,12 +235,12 @@ func (s *SQLQueryService) QueryTable(ctx context.Context, dbID int64, tableName 
 	var total int
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := execRaw(DBTypeMySQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
+		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
 		if err == nil {
 			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
 		}
 	case DBTypePostgreSQL:
-		out, err := execRaw(DBTypePostgreSQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
+		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
 		if err == nil {
 			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
 		}
@@ -255,7 +251,7 @@ func (s *SQLQueryService) QueryTable(ctx context.Context, dbID int64, tableName 
 	var rows [][]interface{}
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := execRaw(DBTypeMySQL, db.Name,
+		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name,
 			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", out)
@@ -274,7 +270,7 @@ func (s *SQLQueryService) QueryTable(ctx context.Context, dbID int64, tableName 
 			}
 		}
 	case DBTypePostgreSQL:
-		out, err := execRaw(DBTypePostgreSQL, db.Name,
+		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name,
 			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", out)
@@ -319,7 +315,7 @@ func (s *SQLQueryService) ExecuteSQL(ctx context.Context, dbID int64, sql string
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	out, execErr := execRaw(dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
 		log.Printf("ExecuteSQL %s error [db=%s]: %s", server.Name, db.Name, out)
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
@@ -350,7 +346,7 @@ func (s *SQLQueryService) InsertRecord(ctx context.Context, dbID int64, table st
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := execRaw(dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: out}, nil
 	}
@@ -379,7 +375,7 @@ func (s *SQLQueryService) UpdateRecord(ctx context.Context, dbID int64, table st
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := execRaw(dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: out}, nil
 	}
@@ -408,7 +404,7 @@ func (s *SQLQueryService) DeleteRecord(ctx context.Context, dbID int64, table st
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := execRaw(dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: out}, nil
 	}
@@ -487,7 +483,7 @@ func (s *SQLQueryService) CreateTable(ctx context.Context, dbID int64, tableName
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := execRaw(dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
 		return fmt.Errorf("创建表失败: %s", out)
 	}
@@ -514,7 +510,7 @@ func (s *SQLQueryService) DropTable(ctx context.Context, dbID int64, tableName s
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := execRaw(dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
 	if execErr != nil {
 		return fmt.Errorf("删除表失败: %s", out)
 	}
