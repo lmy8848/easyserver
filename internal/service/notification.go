@@ -151,7 +151,7 @@ func (s *NotificationService) CheckSystemAlerts(overview *model.SystemOverview) 
 		s.CreateIfNotExists(model.CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "CPU 使用率过高",
-			Message: fmt.Sprintf("当前 CPU 使用率 %.1f%%，超过 %.0f%% 阈值", overview.CPUUsage, cpuAlertThreshold),
+			Message: fmt.Sprintf("当前 CPU 使用率 %.1f%%, 超过 %.0f%% 阈值", overview.CPUUsage, cpuAlertThreshold),
 			Level:   "error",
 		})
 	}
@@ -161,7 +161,7 @@ func (s *NotificationService) CheckSystemAlerts(overview *model.SystemOverview) 
 		s.CreateIfNotExists(model.CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "内存使用率过高",
-			Message: fmt.Sprintf("当前内存使用 %.1f%%（%d/%d MB），超过 %.0f%% 阈值", overview.MemoryUsage, overview.MemoryUsed, overview.MemoryTotal, memoryAlertThreshold),
+			Message: fmt.Sprintf("当前内存使用 %.1f%% (%d/%d MB), 超过 %.0f%% 阈值", overview.MemoryUsage, overview.MemoryUsed, overview.MemoryTotal, memoryAlertThreshold),
 			Level:   "warning",
 		})
 	}
