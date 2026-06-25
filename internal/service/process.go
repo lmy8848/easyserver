@@ -3,7 +3,6 @@ package service
 import (
 	"bufio"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 // --- Constants ---
@@ -36,7 +36,7 @@ type managedProcess struct {
 
 // ProcessManager is the core service for managing background processes
 type ProcessManager struct {
-	db       *sql.DB
+	repo     repository.ProcessRepository
 	executor executor.CommandExecutor
 
 	processes map[int64]*managedProcess
@@ -46,9 +46,9 @@ type ProcessManager struct {
 
 // NewProcessManager creates a new ProcessManager.
 // It auto-starts processes that have auto_start=1.
-func NewProcessManager(db *sql.DB, exec executor.CommandExecutor) *ProcessManager {
+func NewProcessManager(repo repository.ProcessRepository, exec executor.CommandExecutor) *ProcessManager {
 	pm := &ProcessManager{
-		db:       db,
+		repo:     repo,
 		executor: exec,
 
 		processes: make(map[int64]*managedProcess),
@@ -73,65 +73,33 @@ func (pm *ProcessManager) Shutdown() {
 
 // List returns all process configurations with their runtime status
 func (pm *ProcessManager) List(ctx context.Context) ([]model.ProcessWithStatus, error) {
-	rows, err := pm.db.QueryContext(ctx,
-		`SELECT id, name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id, created_at, updated_at
-		 FROM processes ORDER BY id`)
+	processes, err := pm.repo.ListProcesses(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list processes: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
 
 	var result []model.ProcessWithStatus
-	for rows.Next() {
-		var p model.Process
-		var autoRestart, autoStart int
-		if err := rows.Scan(
-			&p.ID, &p.Name, &p.Command, &p.Args, &p.Dir, &p.Env,
-			&autoRestart, &p.MaxRestarts, &p.RestartDelay,
-			&p.StopTimeout, &p.StartupTimeout, &autoStart,
-			&p.LogFile, &p.GroupID, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan process: %w", err)
-		}
-		p.AutoRestart = autoRestart != 0
-		p.AutoStart = autoStart != 0
-
+	for _, p := range processes {
 		pws := model.ProcessWithStatus{Process: p}
-		// Attach runtime status
 		pws.Status = pm.getStatus(ctx, p.ID)
-		// Attach group info
 		pws.Group = pm.getGroup(ctx, p.GroupID)
 		result = append(result, pws)
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // Get returns a single process by ID
 func (pm *ProcessManager) Get(ctx context.Context, id int64) (*model.ProcessWithStatus, error) {
-	var p model.Process
-	var autoRestart, autoStart int
-	err := pm.db.QueryRowContext(ctx,
-		`SELECT id, name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id, created_at, updated_at
-		 FROM processes WHERE id = ?`, id,
-	).Scan(
-		&p.ID, &p.Name, &p.Command, &p.Args, &p.Dir, &p.Env,
-		&autoRestart, &p.MaxRestarts, &p.RestartDelay,
-		&p.StopTimeout, &p.StartupTimeout, &autoStart,
-		&p.LogFile, &p.GroupID, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	p, err := pm.repo.GetProcessByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get process: %w", err)
 	}
-	p.AutoRestart = autoRestart != 0
-	p.AutoStart = autoStart != 0
+	if p == nil {
+		return nil, nil
+	}
 
 	return &model.ProcessWithStatus{
-		Process: p,
+		Process: *p,
 		Status:  pm.getStatus(ctx, p.ID),
 		Group:   pm.getGroup(ctx, p.GroupID),
 	}, nil
@@ -164,27 +132,7 @@ func (pm *ProcessManager) Create(ctx context.Context, req *model.CreateProcessRe
 		startupTimeout = defaultStartupTimeout
 	}
 
-	result, err := pm.db.ExecContext(ctx,
-		`INSERT INTO processes (name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.Name, req.Command, req.Args, req.Dir, req.Env,
-		boolToInt(autoRestart), maxRestarts, restartDelay,
-		stopTimeout, startupTimeout,
-		boolToInt(autoStart), req.LogFile, req.GroupID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create process: %w", err)
-	}
-
-	id, _ := result.LastInsertId()
-
-	// Insert initial status
-	pm.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO process_status (process_id, status) VALUES (?, 'stopped')`, id)
-
-	return &model.Process{
-		ID:             id,
+	p := &model.Process{
 		Name:           req.Name,
 		Command:        req.Command,
 		Args:           req.Args,
@@ -198,7 +146,14 @@ func (pm *ProcessManager) Create(ctx context.Context, req *model.CreateProcessRe
 		AutoStart:      autoStart,
 		LogFile:        req.LogFile,
 		GroupID:        req.GroupID,
-	}, nil
+	}
+
+	id, err := pm.repo.CreateProcess(ctx, p)
+	if err != nil {
+		return nil, fmt.Errorf("create process: %w", err)
+	}
+	p.ID = id
+	return p, nil
 }
 
 // Update modifies an existing process configuration
@@ -208,75 +163,11 @@ func (pm *ProcessManager) Update(ctx context.Context, id int64, req *model.Updat
 	_, running := pm.processes[id]
 	pm.mu.RUnlock()
 
-	if req.Name != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET name = ?, updated_at = datetime('now') WHERE id = ?", *req.Name, id); err != nil {
-			return err
-		}
+	if running && req.Command != nil {
+		return fmt.Errorf("cannot change command while process is running, stop it first")
 	}
-	if req.Command != nil {
-		if running {
-			return fmt.Errorf("cannot change command while process is running, stop it first")
-		}
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET command = ?, updated_at = datetime('now') WHERE id = ?", *req.Command, id); err != nil {
-			return err
-		}
-	}
-	if req.Args != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET args = ?, updated_at = datetime('now') WHERE id = ?", *req.Args, id); err != nil {
-			return err
-		}
-	}
-	if req.Dir != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET dir = ?, updated_at = datetime('now') WHERE id = ?", *req.Dir, id); err != nil {
-			return err
-		}
-	}
-	if req.Env != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET env = ?, updated_at = datetime('now') WHERE id = ?", *req.Env, id); err != nil {
-			return err
-		}
-	}
-	if req.AutoRestart != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET auto_restart = ?, updated_at = datetime('now') WHERE id = ?", boolToInt(*req.AutoRestart), id); err != nil {
-			return err
-		}
-	}
-	if req.MaxRestarts != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET max_restarts = ?, updated_at = datetime('now') WHERE id = ?", *req.MaxRestarts, id); err != nil {
-			return err
-		}
-	}
-	if req.RestartDelay != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET restart_delay = ?, updated_at = datetime('now') WHERE id = ?", *req.RestartDelay, id); err != nil {
-			return err
-		}
-	}
-	if req.StopTimeout != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET stop_timeout = ?, updated_at = datetime('now') WHERE id = ?", *req.StopTimeout, id); err != nil {
-			return err
-		}
-	}
-	if req.StartupTimeout != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET startup_timeout = ?, updated_at = datetime('now') WHERE id = ?", *req.StartupTimeout, id); err != nil {
-			return err
-		}
-	}
-	if req.AutoStart != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET auto_start = ?, updated_at = datetime('now') WHERE id = ?", boolToInt(*req.AutoStart), id); err != nil {
-			return err
-		}
-	}
-	if req.LogFile != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET log_file = ?, updated_at = datetime('now') WHERE id = ?", *req.LogFile, id); err != nil {
-			return err
-		}
-	}
-	if req.GroupID != nil {
-		if _, err := pm.db.ExecContext(ctx, "UPDATE processes SET group_id = ?, updated_at = datetime('now') WHERE id = ?", *req.GroupID, id); err != nil {
-			return err
-		}
-	}
-	return nil
+
+	return pm.repo.UpdateProcess(ctx, id, req)
 }
 
 // Delete removes a process and its status/logs
@@ -292,8 +183,7 @@ func (pm *ProcessManager) Delete(ctx context.Context, id int64) error {
 		pm.mu.Unlock()
 	}
 
-	// Delete from DB (cascade handles status and logs)
-	if _, err := pm.db.ExecContext(ctx, "DELETE FROM processes WHERE id = ?", id); err != nil {
+	if err := pm.repo.DeleteProcess(ctx, id); err != nil {
 		return fmt.Errorf("delete process: %w", err)
 	}
 	return nil
@@ -363,8 +253,8 @@ func (pm *ProcessManager) Start(ctx context.Context, id int64) error {
 	pm.addLog(ctx, id, "system", fmt.Sprintf("Process started (PID: %d)", proc.Pid()))
 
 	// Start log capture goroutines
-	go pm.captureOutput(ctx, id, stdout, "stdout")
-	go pm.captureOutput(ctx, id, stderr, "stderr")
+	go pm.captureOutput(mpCtx, id, stdout, "stdout")
+	go pm.captureOutput(mpCtx, id, stderr, "stderr")
 
 	// Wait for process to exit in background
 	startupTimeout := p.StartupTimeout
@@ -458,29 +348,7 @@ func (pm *ProcessManager) GetLogs(ctx context.Context, processID int64, limit, o
 	if limit <= 0 {
 		limit = 50
 	}
-
-	// Count total
-	var total int
-	pm.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM process_logs WHERE process_id = ?", processID).Scan(&total)
-
-	rows, err := pm.db.QueryContext(ctx,
-		`SELECT id, process_id, type, content, created_at
-		 FROM process_logs WHERE process_id = ?
-		 ORDER BY id DESC LIMIT ? OFFSET ?`, processID, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	var logs []model.ProcessLog
-	for rows.Next() {
-		var l model.ProcessLog
-		if err := rows.Scan(&l.ID, &l.ProcessID, &l.Type, &l.Content, &l.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		logs = append(logs, l)
-	}
-	return logs, total, rows.Err()
+	return pm.repo.ListLogs(ctx, processID, limit, offset)
 }
 
 // --- Batch operations ---
@@ -529,85 +397,33 @@ func (pm *ProcessManager) BatchRestart(ctx context.Context, ids []int64) ([]int6
 
 // ListGroups returns all process groups
 func (pm *ProcessManager) ListGroups(ctx context.Context) ([]model.ProcessGroup, error) {
-	rows, err := pm.db.QueryContext(ctx,
-		"SELECT id, name, description, created_at FROM process_groups ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var groups []model.ProcessGroup
-	for rows.Next() {
-		var g model.ProcessGroup
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.CreatedAt); err != nil {
-			return nil, err
-		}
-		groups = append(groups, g)
-	}
-	return groups, rows.Err()
+	return pm.repo.ListGroups(ctx)
 }
 
 // CreateGroup creates a new process group
 func (pm *ProcessManager) CreateGroup(ctx context.Context, req *model.CreateProcessGroupRequest) (*model.ProcessGroup, error) {
-	result, err := pm.db.ExecContext(ctx,
-		"INSERT INTO process_groups (name, description) VALUES (?, ?)",
-		req.Name, req.Description)
+	id, err := pm.repo.CreateGroup(ctx, req.Name, req.Description)
 	if err != nil {
 		return nil, err
 	}
-	id, _ := result.LastInsertId()
 	return &model.ProcessGroup{ID: id, Name: req.Name, Description: req.Description}, nil
 }
 
 // UpdateGroup updates a process group
 func (pm *ProcessManager) UpdateGroup(ctx context.Context, id int64, req *model.UpdateProcessGroupRequest) error {
-	if req.Name != nil {
-		pm.db.ExecContext(ctx, "UPDATE process_groups SET name = ? WHERE id = ?", *req.Name, id)
-	}
-	if req.Description != nil {
-		pm.db.ExecContext(ctx, "UPDATE process_groups SET description = ? WHERE id = ?", *req.Description, id)
-	}
-	return nil
+	return pm.repo.UpdateGroup(ctx, id, req)
 }
 
 // DeleteGroup deletes a process group
 func (pm *ProcessManager) DeleteGroup(ctx context.Context, id int64) error {
-	// Unlink processes from this group
-	pm.db.ExecContext(ctx, "UPDATE processes SET group_id = 0 WHERE group_id = ?", id)
-	pm.db.ExecContext(ctx, "DELETE FROM process_groups WHERE id = ?", id)
-	return nil
+	return pm.repo.DeleteGroup(ctx, id)
 }
 
 // --- Export/Import ---
 
 // Export returns JSON representation of all process configs
 func (pm *ProcessManager) Export(ctx context.Context) ([]model.Process, error) {
-	rows, err := pm.db.QueryContext(ctx,
-		`SELECT id, name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id, created_at, updated_at
-		 FROM processes ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var processes []model.Process
-	for rows.Next() {
-		var p model.Process
-		var autoRestart, autoStart int
-		if err := rows.Scan(
-			&p.ID, &p.Name, &p.Command, &p.Args, &p.Dir, &p.Env,
-			&autoRestart, &p.MaxRestarts, &p.RestartDelay,
-			&p.StopTimeout, &p.StartupTimeout, &autoStart,
-			&p.LogFile, &p.GroupID, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		p.AutoRestart = autoRestart != 0
-		p.AutoStart = autoStart != 0
-		processes = append(processes, p)
-	}
-	return processes, rows.Err()
+	return pm.repo.ListProcesses(ctx)
 }
 
 // Import imports process configurations from JSON
@@ -725,12 +541,10 @@ func (pm *ProcessManager) waitForExit(ctx context.Context, mp *managedProcess, a
 			time.Sleep(time.Duration(backoff) * time.Second)
 
 			// Increment restart counter
-			pm.db.ExecContext(context.Background(),
-				"UPDATE process_status SET restarts = restarts + 1 WHERE process_id = ?", mp.ID)
+			pm.repo.IncrementRestarts(context.Background(), mp.ID)
 
 			// Clear exit code and error before restart
-			pm.db.ExecContext(context.Background(),
-				"UPDATE process_status SET exit_code = 0, last_error = '' WHERE process_id = ?", mp.ID)
+			pm.repo.ClearExitInfo(context.Background(), mp.ID)
 
 			if err := pm.Start(context.Background(), mp.ID); err != nil {
 				pm.addLog(context.Background(), mp.ID, "system",
@@ -758,51 +572,24 @@ func (pm *ProcessManager) captureOutput(ctx context.Context, processID int64, r 
 }
 
 func (pm *ProcessManager) updateStatus(ctx context.Context, processID int64, status string, pid int, exitCode int, lastError string) {
-	pm.db.ExecContext(ctx, `
-		INSERT INTO process_status (process_id, status, pid, exit_code, last_error, last_start, updated_at)
-		VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		ON CONFLICT(process_id) DO UPDATE SET
-			status = excluded.status,
-			pid = excluded.pid,
-			exit_code = excluded.exit_code,
-			last_error = excluded.last_error,
-			last_start = CASE WHEN excluded.status = 'running' THEN datetime('now') ELSE last_start END,
-			updated_at = datetime('now')`,
-		processID, status, pid, exitCode, lastError)
+	pm.repo.UpsertStatus(ctx, processID, status, pid, exitCode, lastError)
 }
 
 func (pm *ProcessManager) addLog(ctx context.Context, processID int64, logType, content string) {
-	pm.db.ExecContext(ctx,
-		"INSERT INTO process_logs (process_id, type, content) VALUES (?, ?, ?)",
-		processID, logType, content)
+	pm.repo.AppendLog(ctx, processID, logType, content)
 }
 
 func (pm *ProcessManager) getStatus(ctx context.Context, processID int64) *model.ProcessStatus {
-	var s model.ProcessStatus
-	err := pm.db.QueryRowContext(ctx,
-		`SELECT id, process_id, status, pid, uptime, restarts, cpu_percent, memory_mb,
-		 exit_code, COALESCE(last_start,''), COALESCE(last_error,''), updated_at
-		 FROM process_status WHERE process_id = ?`, processID,
-	).Scan(&s.ID, &s.ProcessID, &s.Status, &s.PID, &s.Uptime, &s.Restarts,
-		&s.CPUPercent, &s.MemoryMB, &s.ExitCode, &s.LastStart, &s.LastError, &s.UpdatedAt)
-	if err != nil {
-		return nil
-	}
-	return &s
+	s, _ := pm.repo.GetStatus(ctx, processID)
+	return s
 }
 
 func (pm *ProcessManager) getGroup(ctx context.Context, groupID int64) *model.ProcessGroup {
 	if groupID == 0 {
 		return nil
 	}
-	var g model.ProcessGroup
-	err := pm.db.QueryRowContext(ctx,
-		"SELECT id, name, description, created_at FROM process_groups WHERE id = ?", groupID,
-	).Scan(&g.ID, &g.Name, &g.Description, &g.CreatedAt)
-	if err != nil {
-		return nil
-	}
-	return &g
+	g, _ := pm.repo.GetGroup(ctx, groupID)
+	return g
 }
 
 func (pm *ProcessManager) autoStartAll() {
@@ -810,19 +597,10 @@ func (pm *ProcessManager) autoStartAll() {
 	time.Sleep(2 * time.Second)
 
 	ctx := context.Background()
-	rows, err := pm.db.QueryContext(ctx,
-		"SELECT id FROM processes WHERE auto_start = 1")
+	ids, err := pm.repo.GetAutoStartIDs(ctx)
 	if err != nil {
 		log.Printf("process: auto-start query failed: %v", err)
 		return
-	}
-	defer rows.Close()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		rows.Scan(&id)
-		ids = append(ids, id)
 	}
 
 	for _, id := range ids {

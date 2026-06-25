@@ -2,24 +2,23 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 type RuntimeVersionService struct {
-	db *sql.DB
+	repo repository.RuntimeRepository
 }
 
-func NewRuntimeVersionService(db *sql.DB) *RuntimeVersionService {
-	return &RuntimeVersionService{db: db}
+func NewRuntimeVersionService(repo repository.RuntimeRepository) *RuntimeVersionService {
+	return &RuntimeVersionService{repo: repo}
 }
 
 // Deprecated: InitTables is kept for backward compatibility only.
@@ -28,26 +27,7 @@ func (s *RuntimeVersionService) InitTables(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS runtime_versions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			version TEXT NOT NULL,
-			lts INTEGER DEFAULT 0,
-			stable INTEGER DEFAULT 1,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(name, version)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_runtime_versions_name ON runtime_versions(name)`,
-	}
-
-	for _, q := range queries {
-		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return s.repo.InitRuntimeVersionsTable(ctx)
 }
 
 // List returns all cached versions for a runtime
@@ -55,32 +35,7 @@ func (s *RuntimeVersionService) List(ctx context.Context, name string) ([]model.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, name, version, lts, stable, updated_at FROM runtime_versions WHERE name = ? ORDER BY version DESC",
-		name,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var versions []model.RuntimeVersion
-	for rows.Next() {
-		var v model.RuntimeVersion
-		var lts, stable int
-		err := rows.Scan(&v.ID, &v.Name, &v.Version, &lts, &stable, &v.UpdatedAt)
-		if err != nil {
-			continue
-		}
-		v.LTS = lts != 0
-		v.Stable = stable != 0
-		versions = append(versions, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-
-	return versions, nil
+	return s.repo.ListRuntimeVersions(ctx, name)
 }
 
 // ResolveAlias resolves a version alias to an actual version
@@ -172,36 +127,13 @@ func (s *RuntimeVersionService) ListWithInstalledStatus(ctx context.Context, nam
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// First get all versions
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, version, lts, stable, updated_at
-		FROM runtime_versions
-		WHERE name = ?
-		ORDER BY version DESC
-	`, name)
+	versions, err := s.repo.ListRuntimeVersions(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var versions []model.RuntimeVersion
-	for rows.Next() {
-		var v model.RuntimeVersion
-		var lts, stable int
-		err := rows.Scan(&v.ID, &v.Name, &v.Version, &lts, &stable, &v.UpdatedAt)
-		if err != nil {
-			continue
-		}
-		v.LTS = lts != 0
-		v.Stable = stable != 0
-		versions = append(versions, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
 
 	// Get installed environments for this runtime
-	installedEnvs, err := s.getInstalledEnvironments(name)
+	envs, err := s.repo.ListByName(ctx, name)
 	if err != nil {
 		// If error, just return versions without installed status
 		return versions, nil
@@ -209,9 +141,7 @@ func (s *RuntimeVersionService) ListWithInstalledStatus(ctx context.Context, nam
 
 	// Match installed environments with versions
 	for i, v := range versions {
-		for _, env := range installedEnvs {
-			// Check if installed version starts with this major version
-			// e.g., "17.0.19" starts with "17"
+		for _, env := range envs {
 			if strings.HasPrefix(env.Version, v.Version) || env.Version == v.Version {
 				versions[i].Installed = true
 				versions[i].IsDefault = env.IsDefault
@@ -221,42 +151,6 @@ func (s *RuntimeVersionService) ListWithInstalledStatus(ctx context.Context, nam
 	}
 
 	return versions, nil
-}
-
-// getInstalledEnvironments returns installed environments for a runtime
-func (s *RuntimeVersionService) getInstalledEnvironments(name string) ([]struct {
-	Version   string
-	IsDefault bool
-}, error) {
-	rows, err := s.db.Query(
-		"SELECT version, is_default FROM runtime_environments WHERE name = ?",
-		name,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var envs []struct {
-		Version   string
-		IsDefault bool
-	}
-	for rows.Next() {
-		var version string
-		var isDefault int
-		if err := rows.Scan(&version, &isDefault); err != nil {
-			continue
-		}
-		envs = append(envs, struct {
-			Version   string
-			IsDefault bool
-		}{version, isDefault != 0})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-
-	return envs, nil
 }
 
 // FetchAndCache fetches versions from external sources and caches them
@@ -289,11 +183,7 @@ func (s *RuntimeVersionService) FetchAndCache(ctx context.Context, name string) 
 	// Cache versions
 	cached := 0
 	for _, v := range versions {
-		_, err := s.db.ExecContext(ctx,
-			`INSERT OR REPLACE INTO runtime_versions (name, version, lts, stable, updated_at) VALUES (?, ?, ?, ?, ?)`,
-			name, v.Version, v.LTS, v.Stable, time.Now(),
-		)
-		if err != nil {
+		if err := s.repo.UpsertRuntimeVersion(ctx, name, v.Version, v.LTS, v.Stable); err != nil {
 			log.Printf("runtime_version: failed to cache %s %s: %v", name, v.Version, err)
 			continue
 		}

@@ -122,8 +122,7 @@ func main() {
 	cmdExec := executor.NewOSExecutor()
 
 	// Initialize audit service and system event monitor (single shared instance)
-	auditService := service.NewAuditService(db, cfg.Audit.RetentionDays)
-	auditService.SetAuditRepository(auditRepo)
+	auditService := service.NewAuditService(db, auditRepo, cfg.Audit.RetentionDays)
 	systemMonitor := service.NewSystemEventMonitor(auditService, cmdExec)
 	systemMonitor.Start()
 
@@ -146,10 +145,12 @@ func main() {
 	}()
 
 	// Initialize process guardian (single shared instance)
-	processManager := service.NewProcessManager(db, cmdExec)
+	processRepo := sqlite.NewProcessRepository(db)
+	processManager := service.NewProcessManager(processRepo, cmdExec)
 
 	// Initialize system process service (single shared instance)
-	systemProcessService := service.NewSystemProcessService(db, cmdExec)
+	serviceWhitelistRepo := sqlite.NewServiceWhitelistRepository(db)
+	systemProcessService := service.NewSystemProcessService(cmdExec, serviceWhitelistRepo, auditService)
 
 	// Initialize notification service (single shared instance)
 	notificationRepo := sqlite.NewNotificationRepository(db)
@@ -199,9 +200,11 @@ func main() {
 	firewallService := service.NewFirewallService(firewallRepo, cmdExec)
 
 	// Initialize runtime services (single shared instance)
+	runtimeRepo := sqlite.NewRuntimeRepository(db)
 	runtimeService := service.NewRuntimeService(db, cmdExec)
-	runtimeVersionService := service.NewRuntimeVersionService(db)
-	packageManagerService := service.NewPackageManagerService(db, cmdExec)
+	runtimeVersionService := service.NewRuntimeVersionService(runtimeRepo)
+	packageRepo := sqlite.NewPackageRepository(db)
+	packageManagerService := service.NewPackageManagerService(packageRepo, cmdExec)
 
 	// Initialize SSH service (single shared instance)
 	sshConfigService := service.NewSSHConfigService(cmdExec)

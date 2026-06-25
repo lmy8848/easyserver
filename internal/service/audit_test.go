@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"easyserver/internal/repository/sqlite"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -40,12 +42,14 @@ func setupAuditTestDB(t *testing.T) *sql.DB {
 
 func newTestAuditService(db *sql.DB) *AuditService {
 	key := []byte("test-signing-key-32-chars-long!!")
+	repo := sqlite.NewAuditRepository(db)
 	return &AuditService{
 		db:            db,
+		auditRepo:     repo,
 		signingKey:    key,
 		retentionDays: 90,
 		writer: &AuditWriter{
-			db:         db,
+			repo:       repo,
 			ch:         make(chan auditEntry, 100),
 			done:       make(chan struct{}),
 			finished:   make(chan struct{}),
