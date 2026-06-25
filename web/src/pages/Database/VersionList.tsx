@@ -1,5 +1,5 @@
 import {
-  Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input,
+  Card, Button, Space, Tag, Modal, Form, Select, InputNumber,
   message, Popconfirm, Row, Col, Empty, Spin,
 } from 'antd';
 import {
@@ -14,7 +14,7 @@ import type { VersionListProps, DBVersion } from './types';
 export default function VersionList({
   server, versions, versionsLoading, operating,
   onBack, onEnterVersion, onRefreshVersions,
-  onStartVersion, onStopVersion, onRestartVersion, onUninstallVersion,
+  onStartVersion, onStopVersion, _onRestartVersion, onUninstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, onInstallVersion,
   portCheck, onCheckPort,

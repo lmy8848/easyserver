@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -347,6 +346,7 @@ func (pm *ProcessManager) Start(ctx context.Context, id int64) error {
 	stdout, _ := proc.StdoutPipe()
 	stderr, _ := proc.StderrPipe()
 
+	mpCtx, cancel := context.WithCancel(context.Background())
 	mp := &managedProcess{
 		ID:        id,
 		proc:      proc,

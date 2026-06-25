@@ -1,9 +1,9 @@
 import {
-  Card, Button, Space, Tag, Select, Spin, Empty, Descriptions, Modal, Tooltip,
+  Card, Button, Space, Tag, Select, Spin, Empty, Descriptions, Tooltip,
 } from 'antd';
 import {
   SafetyOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  LockOutlined, UnlockOutlined, ExclamationCircleOutlined,
+  LockOutlined, UnlockOutlined,
 } from '@ant-design/icons';
 import type { FirewallStatus } from '../../types';
 

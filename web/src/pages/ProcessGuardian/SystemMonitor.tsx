@@ -213,8 +213,6 @@ export default function SystemMonitor() {
 
   // --- Pagination helpers ---
   const renderPaginationFooter = (total: number, page: number, size: number, options: readonly number[], onSizeChange: (s: number) => void) => {
-    const start = (page - 1) * size + 1;
-    const end = Math.min(page * size, size === 0 ? 0 : Math.ceil(total / size) * size);
     const totalPages = Math.ceil(total / size);
     return (
       <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -325,7 +323,7 @@ export default function SystemMonitor() {
         { title: 'PPID', dataIndex: 'ppid', width: 70 },
         { title: '名称', dataIndex: 'name', ellipsis: true },
         { title: '用户', dataIndex: 'user', width: 80 },
-        { title: '状态', dataIndex: 'state', width: 70, render: (s: string) => { const c = STATE_MAP[s] || STATE_MAP.T; return <Tag color={c.color}>{c.label}</Tag>; } },
+        { title: '状态', dataIndex: 'state', width: 70, render: (s: string) => { const c = STATE_MAP[s] || STATE_MAP['T']; return <Tag color={c?.color}>{c?.label}</Tag>; } },
         { title: 'CPU%', dataIndex: 'cpu_percent', width: 80, render: (v: number) => <Text type={v > 50 ? 'danger' : undefined}>{v.toFixed(1)}%</Text> },
         { title: '内存', dataIndex: 'memory_mb', width: 80, render: (v: number) => formatMemory(v) },
         { title: '线程', dataIndex: 'threads', width: 60 },
@@ -364,7 +362,7 @@ export default function SystemMonitor() {
           <Table dataSource={pagedServices} rowKey="name" size="small" pagination={false} columns={[
             { title: '服务名', dataIndex: 'name', ellipsis: true },
             { title: '描述', dataIndex: 'description', ellipsis: true },
-            { title: '状态', dataIndex: 'active_state', width: 100, render: (s: string) => { const c = SERVICE_STATE_MAP[s] || SERVICE_STATE_MAP.inactive; return <Badge status={c.color as any} text={c.label} />; } },
+            { title: '状态', dataIndex: 'active_state', width: 100, render: (s: string) => { const c = SERVICE_STATE_MAP[s] || SERVICE_STATE_MAP['inactive']; return <Badge status={c?.color as any} text={c?.label} />; } },
             { title: '子状态', dataIndex: 'sub_state', width: 80, render: (v: string) => <Tag>{v}</Tag> },
             { title: 'PID', dataIndex: 'pid', width: 70, render: (pid: number) => pid > 0 ? pid : '-' },
             { title: '开机启动', dataIndex: 'enabled', width: 80, render: (e: boolean) => e ? <Tag color="green">已启用</Tag> : <Tag>未启用</Tag> },

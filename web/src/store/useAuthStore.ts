@@ -7,10 +7,10 @@ function isValidUser(obj: unknown): obj is User {
   if (!obj || typeof obj !== 'object') return false;
   const u = obj as Record<string, unknown>;
   return (
-    typeof u.id === 'number' &&
-    typeof u.username === 'string' &&
-    typeof u.role === 'string' &&
-    ['admin', 'operator', 'viewer'].includes(u.role)
+    typeof u['id'] === 'number' &&
+    typeof u['username'] === 'string' &&
+    typeof u['role'] === 'string' &&
+    ['admin', 'operator', 'viewer'].includes(u['role'] as string)
   );
 }
 
@@ -94,7 +94,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (error: unknown) {
       // Only clear token on 401 (unauthorized), not on 500 (server error)
       const errObj = error as Record<string, unknown> | undefined;
-      if (errObj?.code === 40100 || errObj?.code === 40101) {
+      if (errObj?.['code'] === 40100 || errObj?.['code'] === 40101) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         set({

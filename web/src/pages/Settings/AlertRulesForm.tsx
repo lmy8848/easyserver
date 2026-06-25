@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Card, Spin, Form, Input, Select, Switch, Button, Space, message,
+  Card, Spin, Input, Select, Switch, Button, Space, message,
   InputNumber,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -46,7 +46,7 @@ export default function AlertRulesForm() {
 
   const updateRule = (index: number, field: keyof AlertRule, value: string | number | boolean) => {
     const newRules = [...rules];
-    newRules[index] = { ...newRules[index], [field]: value };
+    newRules[index] = { ...newRules[index], [field]: value } as AlertRule;
     setRules(newRules);
   };
 

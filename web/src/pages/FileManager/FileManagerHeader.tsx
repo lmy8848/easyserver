@@ -28,12 +28,9 @@ interface FileManagerHeaderProps {
 
 export default function FileManagerHeader({
   basePath,
-  currentPath,
   pathParts,
   canManageFiles,
   selectedKeys,
-  sortField,
-  sortOrder,
   onNavigate,
   onSearch,
   onMkdir,

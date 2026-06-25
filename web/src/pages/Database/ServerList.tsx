@@ -3,7 +3,7 @@ import {
   Row, Col, Empty,
 } from 'antd';
 import {
-  DatabaseOutlined, PlusOutlined, ReloadOutlined,
+  DatabaseOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import type { ServerListProps } from './types';
 import { getServiceStatusColor, ServiceStatusTag } from '../../utils/status';

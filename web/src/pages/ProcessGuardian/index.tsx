@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber,
   Select, Switch, message, Popconfirm, Table, Empty, Tooltip, Tabs,
-  Typography, Divider, Badge, Row, Col, Statistic,
+  Typography, Badge, Row, Col, Statistic,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
@@ -239,7 +239,7 @@ export default function ProcessGuardian() {
       width: 100,
       render: (_: unknown, record: ProcessWithStatus) => {
         const st = record.status?.status || 'stopped';
-        const cfg = STATUS_CONFIG[st] || STATUS_CONFIG.stopped;
+        const cfg = STATUS_CONFIG[st] || STATUS_CONFIG['stopped'];
         return <Badge status={cfg.color as any} text={cfg.label} />;
       },
     },

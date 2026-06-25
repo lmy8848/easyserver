@@ -89,6 +89,7 @@ export default function Dashboard() {
         }
         return true; // prevent auto-reconnect on auth failure
       }
+      return;
     },
   });
 

@@ -1,6 +1,6 @@
 import {
   Card, Button, Space, Tag, Modal, Form, Input, Select, InputNumber,
-  message, Popconfirm, Row, Col, Table, Tabs, Empty, Spin,
+  Popconfirm, Row, Col, Table, Tabs, Empty, Spin,
 } from 'antd';
 import {
   DatabaseOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined,

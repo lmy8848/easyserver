@@ -1,4 +1,3 @@
-import { forwardRef } from 'react';
 import { Modal, Button, Space } from 'antd';
 import { SyncOutlined } from '@ant-design/icons';
 import type { Service } from '../../types';

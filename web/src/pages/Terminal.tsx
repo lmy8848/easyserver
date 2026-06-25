@@ -237,7 +237,7 @@ export default function TerminalPage() {
       }
       const newTabs = prev.filter(t => t.key !== key);
       if (activeKey === key && newTabs.length > 0) {
-        setActiveKey(newTabs[newTabs.length - 1].key);
+        setActiveKey(newTabs[newTabs.length - 1]!.key);
       }
       return newTabs;
     });

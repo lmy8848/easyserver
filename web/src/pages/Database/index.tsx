@@ -48,9 +48,9 @@ export default function DatabasePage() {
   const [grantForm] = Form.useForm();
 
   // ===== Config editor =====
-  const [configVisible, setConfigVisible] = useState(false);
-  const [configContent, setConfigContent] = useState('');
-  const [configLoading, setConfigLoading] = useState(false);
+  const [_configVisible, setConfigVisible] = useState(false);
+  const [_configContent, setConfigContent] = useState('');
+  const [_configLoading, setConfigLoading] = useState(false);
 
   // ===== Service logs =====
   const [logVisible, setLogVisible] = useState(false);
@@ -450,7 +450,7 @@ export default function DatabasePage() {
         setConfigContent(content);
       } else {
         const dbType = serverName || 'mysql';
-        const template = DEFAULT_CONFIG_TEMPLATES[dbType] || DEFAULT_CONFIG_TEMPLATES.mysql;
+        const template = DEFAULT_CONFIG_TEMPLATES[dbType] || DEFAULT_CONFIG_TEMPLATES['mysql'];
         setConfigContent(`# ${selectedServer?.display_name} 默认配置模板\n# 保存后将创建配置文件\n\n${template}`);
       }
     } catch (error: any) { setConfigContent('# Error: ' + error.message); }

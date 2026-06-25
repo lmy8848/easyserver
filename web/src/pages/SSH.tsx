@@ -9,19 +9,6 @@ import {
 } from '@ant-design/icons';
 import api from '../services/api';
 
-interface SSHConfig {
-  port: number;
-  permit_root_login: string;
-  password_auth: string;
-  pubkey_auth: string;
-  max_auth_tries: number;
-  login_grace_time: number;
-  client_alive_interval: number;
-  client_alive_count_max: number;
-  allow_users: string;
-  deny_users: string;
-}
-
 interface SSHSession {
   pid: number;
   user: string;

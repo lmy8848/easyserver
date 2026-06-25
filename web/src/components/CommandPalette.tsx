@@ -20,8 +20,6 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
-
   const commands: CommandItem[] = [
     // Navigation
     { id: 'nav-overview', label: '系统概览', hint: '/', group: '导航', action: () => onSelect('/') },
