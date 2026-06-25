@@ -3,18 +3,18 @@ package api
 import (
 	"strconv"
 
+	"easyserver/internal/dbserver"
 	"easyserver/internal/model"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // VersionHandler handles DB version management endpoints.
 type VersionHandler struct {
-	dbServerService *service.DBServerService
+	dbServerService *dbserver.Service
 }
 
-func NewVersionHandler(dbServerService *service.DBServerService) *VersionHandler {
+func NewVersionHandler(dbServerService *dbserver.Service) *VersionHandler {
 	return &VersionHandler{dbServerService: dbServerService}
 }
 

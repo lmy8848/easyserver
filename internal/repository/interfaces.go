@@ -131,19 +131,6 @@ type TOTPRepository interface {
 	StorePendingSecret(ctx context.Context, userID int64, secret string) error
 }
 
-// FirewallRepository defines the interface for firewall rule data access
-type FirewallRepository interface {
-	CountEnabledRules(ctx context.Context) (int, error)
-	ListRules(ctx context.Context) ([]model.FirewallRule, error)
-	GetRule(ctx context.Context, id int64) (*model.FirewallRule, error)
-	CreateRule(ctx context.Context, rule *model.FirewallRule) error
-	UpdateRule(ctx context.Context, rule *model.FirewallRule) error
-	DeleteRule(ctx context.Context, id int64) error
-	EnableRule(ctx context.Context, id int64) error
-	DisableRule(ctx context.Context, id int64) error
-	SwapPriorities(ctx context.Context, id1 int64, priority1 int64, id2 int64, priority2 int64) error
-}
-
 // CronRepository defines the interface for cron task data access
 type CronRepository interface {
 	// Task CRUD

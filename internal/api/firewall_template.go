@@ -3,19 +3,18 @@ package api
 import (
 	"fmt"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
 )
 
 // FirewallTemplateHandler handles firewall rule template operations
 type FirewallTemplateHandler struct {
-	firewallService *service.FirewallService
+	firewallService *firewall.Service
 }
 
 // NewFirewallTemplateHandler creates a new FirewallTemplateHandler
-func NewFirewallTemplateHandler(firewallService *service.FirewallService) *FirewallTemplateHandler {
+func NewFirewallTemplateHandler(firewallService *firewall.Service) *FirewallTemplateHandler {
 	return &FirewallTemplateHandler{
 		firewallService: firewallService,
 	}
@@ -83,7 +82,7 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 		return
 	}
 
-	rule := &model.FirewallRule{
+	rule := &firewall.FirewallRule{
 		Chain:     "INPUT",
 		Protocol:  tpl.Protocol,
 		Port:      tpl.Port,

@@ -166,9 +166,8 @@ func TestFileManagerCopy(t *testing.T) {
 // --- TestIsProtectedPort ---
 
 func TestIsProtectedPort(t *testing.T) {
-	fw := &FirewallService{
-		protectedPorts: []string{"22", "80", "443", "8080"},
-	}
+	fw := NewFirewallService(nil, nil)
+	fw.SetProtectedPorts([]string{"22", "80", "443", "8080"})
 
 	tests := []struct {
 		name     string
@@ -195,9 +194,8 @@ func TestIsProtectedPort(t *testing.T) {
 }
 
 func TestIsProtectedPort_Range(t *testing.T) {
-	fw := &FirewallService{
-		protectedPorts: []string{"22", "8080"},
-	}
+	fw := NewFirewallService(nil, nil)
+	fw.SetProtectedPorts([]string{"22", "8080"})
 
 	tests := []struct {
 		name     string
@@ -222,9 +220,8 @@ func TestIsProtectedPort_Range(t *testing.T) {
 }
 
 func TestIsProtectedPort_SetProtectedPorts(t *testing.T) {
-	fw := &FirewallService{
-		protectedPorts: []string{"22"},
-	}
+	fw := NewFirewallService(nil, nil)
+	fw.SetProtectedPorts([]string{"22"})
 
 	if !fw.IsProtectedPort(t.Context(), "22") {
 		t.Error("port 22 should be protected by default")

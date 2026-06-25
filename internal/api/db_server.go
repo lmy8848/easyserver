@@ -3,7 +3,7 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/service"
+	"easyserver/internal/dbserver"
 
 	"github.com/gin-gonic/gin"
 )
@@ -11,10 +11,10 @@ import (
 // DBServerHandler handles top-level DB server endpoints (list, get).
 // Sub-domain endpoints are delegated to focused sub-handlers.
 type DBServerHandler struct {
-	dbServerService *service.DBServerService
+	dbServerService *dbserver.Service
 }
 
-func NewDBServerHandler(dbServerService *service.DBServerService) *DBServerHandler {
+func NewDBServerHandler(dbServerService *dbserver.Service) *DBServerHandler {
 	return &DBServerHandler{dbServerService: dbServerService}
 }
 

@@ -4,16 +4,18 @@ import (
 	"fmt"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/packagemanager"
+	"easyserver/internal/runtimeenv"
+	"easyserver/internal/runtimeversion"
 
 	"github.com/gin-gonic/gin"
 )
 
 type RuntimeHandler struct {
-	runtimeService *service.RuntimeService
+	runtimeService *runtimeenv.Service
 }
 
-func NewRuntimeHandler(runtimeService *service.RuntimeService) *RuntimeHandler {
+func NewRuntimeHandler(runtimeService *runtimeenv.Service) *RuntimeHandler {
 	return &RuntimeHandler{runtimeService: runtimeService}
 }
 
@@ -288,7 +290,7 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	})
 }
 
-func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *service.RuntimeService, runtimeVersionService *service.RuntimeVersionService, packageService *service.PackageManagerService) {
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeversion.Service, packageService *packagemanager.Service) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)

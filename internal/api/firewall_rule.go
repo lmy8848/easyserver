@@ -6,19 +6,18 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
 )
 
 // FirewallRuleHandler handles firewall rule CRUD operations
 type FirewallRuleHandler struct {
-	firewallService *service.FirewallService
+	firewallService *firewall.Service
 }
 
 // NewFirewallRuleHandler creates a new FirewallRuleHandler
-func NewFirewallRuleHandler(firewallService *service.FirewallService) *FirewallRuleHandler {
+func NewFirewallRuleHandler(firewallService *firewall.Service) *FirewallRuleHandler {
 	return &FirewallRuleHandler{
 		firewallService: firewallService,
 	}
@@ -67,7 +66,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
-	var req model.CreateFirewallRuleRequest
+	var req firewall.CreateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -132,7 +131,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
-	rule := &model.FirewallRule{
+	rule := &firewall.FirewallRule{
 		Chain:     strings.ToUpper(req.Chain),
 		Protocol:  strings.ToLower(protocol),
 		Port:      req.Port,
@@ -164,7 +163,7 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 		return
 	}
 
-	var req model.UpdateFirewallRuleRequest
+	var req firewall.UpdateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -359,7 +358,7 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
 		return
 	}
 
-	var req model.BulkIDsRequest
+	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -396,7 +395,7 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
 
 // BulkDisableRules disables multiple firewall rules
 func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
-	var req model.BulkIDsRequest
+	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -427,7 +426,7 @@ func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
 
 // BulkDeleteRules deletes multiple firewall rules
 func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) {
-	var req model.BulkIDsRequest
+	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -468,7 +467,7 @@ func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) {
 
 // DeleteSystemRule deletes a rule directly from the system (not from database)
 func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
-	var rule model.FirewallRule
+	var rule firewall.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
 		BadRequest(c, "invalid request: "+err.Error())
 		return
@@ -633,7 +632,7 @@ func (h *FirewallRuleHandler) ImportRules(c *gin.Context) {
 			continue
 		}
 
-		rule := &model.FirewallRule{
+		rule := &firewall.FirewallRule{
 			Chain:     strings.ToUpper(r.Chain),
 			Protocol:  protocol,
 			Port:      r.Port,
