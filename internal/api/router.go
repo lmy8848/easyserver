@@ -252,7 +252,7 @@ func (r *Router) Setup() *gin.Engine {
 	// Register domain routes
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerServiceRoutes(protected, wsGroup, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerTerminalRoutes(protected, wsGroup, r.cfg.Auth.JWTSecret, r.auditService, r.executor, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
+	registerTerminalRoutes(protected, wsGroup, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerFileRoutes(protected, r.cfg.FileManager.BasePath, r.auditService)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService)

@@ -239,7 +239,7 @@ export default function ProcessGuardian() {
       width: 100,
       render: (_: unknown, record: ProcessWithStatus) => {
         const st = record.status?.status || 'stopped';
-        const cfg = STATUS_CONFIG[st] || STATUS_CONFIG['stopped'];
+        const cfg = STATUS_CONFIG[st] || STATUS_CONFIG['stopped']!;
         return <Badge status={cfg.color as any} text={cfg.label} />;
       },
     },

@@ -14,7 +14,7 @@ import type { VersionListProps, DBVersion } from './types';
 export default function VersionList({
   server, versions, versionsLoading, operating,
   onBack, onEnterVersion, onRefreshVersions,
-  onStartVersion, onStopVersion, _onRestartVersion, onUninstallVersion,
+  onStartVersion, onStopVersion, onUninstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, onInstallVersion,
   portCheck, onCheckPort,
