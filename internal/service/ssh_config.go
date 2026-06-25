@@ -32,14 +32,14 @@ func NewSSHConfigService(exec executor.CommandExecutor) *SSHConfigService {
 // GetConfig parses and returns the current SSH configuration
 func (s *SSHConfigService) GetConfig() (*model.SSHConfig, error) {
 	config := &model.SSHConfig{
-		Port:                22,
-		PermitRootLogin:     "yes",
+		Port:                   22,
+		PermitRootLogin:        "yes",
 		PasswordAuthentication: "yes",
 		PubkeyAuthentication:   "yes",
-		MaxAuthTries:        6,
-		LoginGraceTime:      120,
-		ClientAliveInterval: 0,
-		ClientAliveCountMax: 3,
+		MaxAuthTries:           6,
+		LoginGraceTime:         120,
+		ClientAliveInterval:    0,
+		ClientAliveCountMax:    3,
 	}
 
 	file, err := os.Open(s.configPath)

@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	procDir              = "/proc"
-	memInfoFile          = "/proc/meminfo"
-	loadAvgFile          = "/proc/loadavg"
-	uptimeFile           = "/proc/uptime"
-	statFile             = "/proc/stat"
-	defaultProcLimit     = 100
+	procDir                = "/proc"
+	memInfoFile            = "/proc/meminfo"
+	loadAvgFile            = "/proc/loadavg"
+	uptimeFile             = "/proc/uptime"
+	statFile               = "/proc/stat"
+	defaultProcLimit       = 100
 	defaultServiceLogLines = 100
 	maxServiceLogLines     = 500
 )
@@ -52,10 +52,10 @@ type SystemProcessService struct {
 	db       *sql.DB
 	executor executor.CommandExecutor
 
-	cache    *model.SystemOverview
-	cacheMu  sync.RWMutex
+	cache     *model.SystemOverview
+	cacheMu   sync.RWMutex
 	cacheTime time.Time
-	cacheTTL time.Duration
+	cacheTTL  time.Duration
 
 	cpuSamples map[int]*cpuSample // pid -> last sample
 	cpuMu      sync.RWMutex
@@ -397,11 +397,11 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 
 // protectedServices are services that cannot be stopped/restarted without force flag
 var protectedServices = map[string]string{
-	"easyserver":  "EasyServer 面板进程",
-	"ssh":         "SSH 远程访问服务",
-	"sshd":        "SSH 远程访问服务",
-	"networking":  "网络服务",
-	"network":     "网络服务",
+	"easyserver":     "EasyServer 面板进程",
+	"ssh":            "SSH 远程访问服务",
+	"sshd":           "SSH 远程访问服务",
+	"networking":     "网络服务",
+	"network":        "网络服务",
 	"systemd-logind": "登录管理服务",
 }
 

@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"easyserver/internal/repository/sqlite"
+
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // --- TestValidatePassword ---
@@ -204,7 +206,8 @@ func createTestUser(t *testing.T, db *sql.DB, username, password string, locked 
 
 func newTestAuthService(db *sql.DB) *AuthService {
 	return &AuthService{
-		db:              db,
+		userRepo:        sqlite.NewUserRepository(db),
+		tokenRepo:       sqlite.NewTokenBlacklistRepository(db),
 		maxAttempts:     5,
 		lockoutDuration: 5 * time.Minute,
 	}

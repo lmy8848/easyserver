@@ -3,11 +3,12 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
+
+	"easyserver/internal/repository"
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
@@ -30,18 +31,18 @@ const (
 
 // TOTPService handles TOTP operations
 type TOTPService struct {
-	db *sql.DB
+	repo repository.TOTPRepository
 }
 
 // NewTOTPService creates a new TOTPService
-func NewTOTPService(db *sql.DB) *TOTPService {
-	return &TOTPService{db: db}
+func NewTOTPService(repo repository.TOTPRepository) *TOTPService {
+	return &TOTPService{repo: repo}
 }
 
 // TOTPSetupResult contains the TOTP setup information
 type TOTPSetupResult struct {
-	Secret      string `json:"secret"`
-	OtpauthURL  string `json:"otpauth_url"`
+	Secret       string `json:"secret"`
+	OtpauthURL   string `json:"otpauth_url"`
 	QRCodeBase64 string `json:"qr_code_base64"`
 }
 
@@ -114,12 +115,8 @@ func (s *TOTPService) EnableTOTP(ctx context.Context, userID int64, secret, code
 	}
 
 	// Update user in database
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE users SET totp_secret = ?, totp_enabled = 1, totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, secret, string(hashedCodesJSON), userID)
-	if err != nil {
-		return nil, fmt.Errorf("update user TOTP: %w", err)
+	if err := s.repo.EnableTOTP(ctx, userID, secret, string(hashedCodesJSON)); err != nil {
+		return nil, err
 	}
 
 	return backupCodes, nil
@@ -131,10 +128,9 @@ func (s *TOTPService) DisableTOTP(ctx context.Context, userID int64, password st
 		ctx = context.Background()
 	}
 	// Get user's current password hash
-	var passwordHash string
-	err := s.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id = ?", userID).Scan(&passwordHash)
+	passwordHash, err := s.repo.GetPasswordHash(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("get user password: %w", err)
+		return err
 	}
 
 	// Verify password
@@ -143,15 +139,7 @@ func (s *TOTPService) DisableTOTP(ctx context.Context, userID int64, password st
 	}
 
 	// Disable TOTP
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE users SET totp_secret = '', totp_enabled = 0, totp_backup_codes = '[]', updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, userID)
-	if err != nil {
-		return fmt.Errorf("disable TOTP: %w", err)
-	}
-
-	return nil
+	return s.repo.DisableTOTP(ctx, userID)
 }
 
 // GenerateBackupCodes generates random backup codes
@@ -173,13 +161,9 @@ func (s *TOTPService) VerifyBackupCode(ctx context.Context, userID int64, code s
 		ctx = context.Background()
 	}
 	// Get user's backup codes
-	var backupCodesJSON string
-	err := s.db.QueryRowContext(ctx, "SELECT totp_backup_codes FROM users WHERE id = ? AND totp_enabled = 1", userID).Scan(&backupCodesJSON)
+	backupCodesJSON, err := s.repo.GetBackupCodes(ctx, userID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, fmt.Errorf("user not found or 2FA not enabled")
-		}
-		return false, fmt.Errorf("get backup codes: %w", err)
+		return false, err
 	}
 
 	// Parse backup codes
@@ -199,12 +183,8 @@ func (s *TOTPService) VerifyBackupCode(ctx context.Context, userID int64, code s
 			}
 
 			// Update database
-			_, err = s.db.ExecContext(ctx, `
-				UPDATE users SET totp_backup_codes = ?, updated_at = CURRENT_TIMESTAMP
-				WHERE id = ?
-			`, string(newJSON), userID)
-			if err != nil {
-				return false, fmt.Errorf("update backup codes: %w", err)
+			if err := s.repo.UpdateBackupCodes(ctx, userID, string(newJSON)); err != nil {
+				return false, err
 			}
 
 			return true, nil
@@ -219,15 +199,7 @@ func (s *TOTPService) IsTOTPEnabled(ctx context.Context, userID int64) (bool, er
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var enabled bool
-	err := s.db.QueryRowContext(ctx, "SELECT totp_enabled FROM users WHERE id = ?", userID).Scan(&enabled)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, fmt.Errorf("check TOTP status: %w", err)
-	}
-	return enabled, nil
+	return s.repo.IsTOTPEnabled(ctx, userID)
 }
 
 // GetTOTPSecret gets the TOTP secret for a user
@@ -235,15 +207,7 @@ func (s *TOTPService) GetTOTPSecret(ctx context.Context, userID int64) (string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var secret string
-	err := s.db.QueryRowContext(ctx, "SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 1", userID).Scan(&secret)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("user not found or 2FA not enabled")
-		}
-		return "", fmt.Errorf("get TOTP secret: %w", err)
-	}
-	return secret, nil
+	return s.repo.GetTOTPSecret(ctx, userID)
 }
 
 // GetPendingSecret gets the pending TOTP secret for a user (during setup)
@@ -251,15 +215,7 @@ func (s *TOTPService) GetPendingSecret(ctx context.Context, userID int64) (strin
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var secret string
-	err := s.db.QueryRowContext(ctx, "SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 0 AND totp_secret != ''", userID).Scan(&secret)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("no pending TOTP secret found")
-		}
-		return "", fmt.Errorf("get pending secret: %w", err)
-	}
-	return secret, nil
+	return s.repo.GetPendingSecret(ctx, userID)
 }
 
 // StorePendingSecret stores a TOTP secret temporarily during setup
@@ -267,14 +223,7 @@ func (s *TOTPService) StorePendingSecret(ctx context.Context, userID int64, secr
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE users SET totp_secret = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, secret, userID)
-	if err != nil {
-		return fmt.Errorf("store pending secret: %w", err)
-	}
-	return nil
+	return s.repo.StorePendingSecret(ctx, userID, secret)
 }
 
 // Helper functions

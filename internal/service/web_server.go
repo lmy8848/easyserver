@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +11,7 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 // sanitizePackageName allows only alphanumeric characters, hyphens, dots, and plus signs
@@ -27,78 +27,12 @@ func sanitizePackageName(name string) string {
 }
 
 type WebServerService struct {
-	db       *sql.DB
+	repo     repository.WebServerRepository
 	executor executor.CommandExecutor
 }
 
-func NewWebServerService(db *sql.DB, exec executor.CommandExecutor) *WebServerService {
-	return &WebServerService{db: db, executor: exec}
-}
-
-// Deprecated: InitTables is kept for backward compatibility only.
-// Table creation is now handled by the migration system (migrations/ directory).
-func (s *WebServerService) InitTables(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS web_servers (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			display_name TEXT NOT NULL,
-			description TEXT DEFAULT '',
-			install_cmd TEXT DEFAULT '',
-			uninstall_cmd TEXT DEFAULT '',
-			config_path TEXT DEFAULT '',
-			config_file TEXT DEFAULT '',
-			sites_available TEXT DEFAULT '',
-			sites_enabled TEXT DEFAULT '',
-			service_name TEXT DEFAULT '',
-			binary_path TEXT DEFAULT '',
-			default_port INTEGER DEFAULT 80,
-			log_dir TEXT DEFAULT '',
-			status TEXT DEFAULT 'not_installed',
-			version TEXT DEFAULT '',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_web_servers_name ON web_servers(name)`,
-	}
-	for _, q := range queries {
-		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-
-	// Migration: add new columns if missing
-	cols := []struct{ name, typ string }{
-		{"uninstall_cmd", "TEXT DEFAULT ''"},
-		{"config_file", "TEXT DEFAULT ''"},
-		{"binary_path", "TEXT DEFAULT ''"},
-		{"default_port", "INTEGER DEFAULT 80"},
-		{"log_dir", "TEXT DEFAULT ''"},
-	}
-	for _, c := range cols {
-		s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE web_servers ADD COLUMN %s %s", c.name, c.typ))
-	}
-
-	// Insert predefined web servers if not exists
-	for _, ws := range model.PredefinedWebServers() {
-		var count int
-		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM web_servers WHERE name = ?", ws.Name).Scan(&count)
-		if count == 0 {
-			s.db.ExecContext(ctx, `INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				ws.Name, ws.DisplayName, ws.Description, ws.InstallCmd, ws.UninstallCmd,
-				ws.ConfigPath, ws.ConfigFile, ws.SitesAvailable, ws.SitesEnabled,
-				ws.ServiceName, ws.BinaryPath, ws.DefaultPort, ws.LogDir)
-		} else {
-			// Update existing with new fields
-			s.db.ExecContext(ctx, `UPDATE web_servers SET uninstall_cmd=?, config_file=?, binary_path=?, default_port=?, log_dir=?, description=? WHERE name=? AND (uninstall_cmd='' OR config_file='')`,
-				ws.UninstallCmd, ws.ConfigFile, ws.BinaryPath, ws.DefaultPort, ws.LogDir, ws.Description, ws.Name)
-		}
-	}
-
-	return nil
+func NewWebServerService(repo repository.WebServerRepository, exec executor.CommandExecutor) *WebServerService {
+	return &WebServerService{repo: repo, executor: exec}
 }
 
 // SeedPredefinedWebServers inserts predefined web server entries if not exists.
@@ -107,19 +41,15 @@ func (s *WebServerService) SeedPredefinedWebServers(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	existing, _ := s.repo.List(ctx)
+	existingByName := make(map[string]bool, len(existing))
+	for _, ws := range existing {
+		existingByName[ws.Name] = true
+	}
+
 	for _, ws := range model.PredefinedWebServers() {
-		var count int
-		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM web_servers WHERE name = ?", ws.Name).Scan(&count)
-		if count == 0 {
-			s.db.ExecContext(ctx, `INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				ws.Name, ws.DisplayName, ws.Description, ws.InstallCmd, ws.UninstallCmd,
-				ws.ConfigPath, ws.ConfigFile, ws.SitesAvailable, ws.SitesEnabled,
-				ws.ServiceName, ws.BinaryPath, ws.DefaultPort, ws.LogDir)
-		} else {
-			// Update existing with new fields
-			s.db.ExecContext(ctx, `UPDATE web_servers SET uninstall_cmd=?, config_file=?, binary_path=?, default_port=?, log_dir=?, description=? WHERE name=? AND (uninstall_cmd='' OR config_file='')`,
-				ws.UninstallCmd, ws.ConfigFile, ws.BinaryPath, ws.DefaultPort, ws.LogDir, ws.Description, ws.Name)
+		if !existingByName[ws.Name] {
+			s.repo.Create(ctx, &ws)
 		}
 	}
 }
@@ -128,73 +58,28 @@ func (s *WebServerService) List(ctx context.Context) ([]model.WebServer, error) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, display_name, description, install_cmd, uninstall_cmd,
-		config_path, config_file, sites_available, sites_enabled, service_name, binary_path,
-		default_port, log_dir, status, version, created_at
-		FROM web_servers ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var servers []model.WebServer
-	for rows.Next() {
-		var ws model.WebServer
-		err := rows.Scan(&ws.ID, &ws.Name, &ws.DisplayName, &ws.Description,
-			&ws.InstallCmd, &ws.UninstallCmd, &ws.ConfigPath, &ws.ConfigFile,
-			&ws.SitesAvailable, &ws.SitesEnabled, &ws.ServiceName, &ws.BinaryPath,
-			&ws.DefaultPort, &ws.LogDir, &ws.Status, &ws.Version, &ws.CreatedAt)
-		if err != nil {
-			continue
-		}
-		servers = append(servers, ws)
-	}
-	return servers, nil
+	return s.repo.List(ctx)
 }
 
 func (s *WebServerService) Get(ctx context.Context, id int64) (*model.WebServer, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws := &model.WebServer{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, display_name, description, install_cmd, uninstall_cmd,
-		config_path, config_file, sites_available, sites_enabled, service_name, binary_path,
-		default_port, log_dir, status, version, created_at
-		FROM web_servers WHERE id = ?`, id).Scan(
-		&ws.ID, &ws.Name, &ws.DisplayName, &ws.Description,
-		&ws.InstallCmd, &ws.UninstallCmd, &ws.ConfigPath, &ws.ConfigFile,
-		&ws.SitesAvailable, &ws.SitesEnabled, &ws.ServiceName, &ws.BinaryPath,
-		&ws.DefaultPort, &ws.LogDir, &ws.Status, &ws.Version, &ws.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return ws, nil
+	return s.repo.Get(ctx, id)
 }
 
 func (s *WebServerService) Create(ctx context.Context, ws *model.WebServer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ws.Name, ws.DisplayName, ws.Description, ws.InstallCmd, ws.UninstallCmd,
-		ws.ConfigPath, ws.ConfigFile, ws.SitesAvailable, ws.SitesEnabled,
-		ws.ServiceName, ws.BinaryPath, ws.DefaultPort, ws.LogDir)
-	if err != nil {
-		return err
-	}
-	ws.ID, _ = result.LastInsertId()
-	return nil
+	return s.repo.Create(ctx, ws)
 }
 
 func (s *WebServerService) Delete(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -202,14 +87,12 @@ func (s *WebServerService) Delete(ctx context.Context, id int64) error {
 		return fmt.Errorf("web server not found")
 	}
 
-	var count int
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM websites WHERE web_server_id = ?", id).Scan(&count)
+	count, _ := s.repo.CountWebsitesByServerID(ctx, id)
 	if count > 0 {
 		return fmt.Errorf("cannot delete: %d websites are using this server", count)
 	}
 
-	_, err = s.db.ExecContext(ctx, "DELETE FROM web_servers WHERE id = ?", id)
-	return err
+	return s.repo.Delete(ctx, id)
 }
 
 // Install installs the web server software.
@@ -219,7 +102,7 @@ func (s *WebServerService) Install(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -259,7 +142,7 @@ func (s *WebServerService) Uninstall(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -267,8 +150,7 @@ func (s *WebServerService) Uninstall(ctx context.Context, id int64) error {
 		return fmt.Errorf("web server not found")
 	}
 
-	var count int
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM websites WHERE web_server_id = ?", id).Scan(&count)
+	count, _ := s.repo.CountWebsitesByServerID(ctx, id)
 	if count > 0 {
 		return fmt.Errorf("cannot uninstall: %d websites are using this server", count)
 	}
@@ -297,7 +179,7 @@ func (s *WebServerService) Uninstall(ctx context.Context, id int64) error {
 		return fmt.Errorf("uninstall failed: %s", out)
 	}
 
-	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'not_installed', version = '' WHERE id = ?", id)
+	s.repo.UpdateStatus(ctx, id, "not_installed")
 	return nil
 }
 
@@ -306,7 +188,7 @@ func (s *WebServerService) Start(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -322,8 +204,7 @@ func (s *WebServerService) Start(ctx context.Context, id int64) error {
 		return fmt.Errorf("start failed: %s", out)
 	}
 
-	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'running' WHERE id = ?", id)
-	return nil
+	return s.repo.UpdateStatus(ctx, id, "running")
 }
 
 // Stop stops the web server service
@@ -331,7 +212,7 @@ func (s *WebServerService) Stop(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -347,8 +228,7 @@ func (s *WebServerService) Stop(ctx context.Context, id int64) error {
 		return fmt.Errorf("stop failed: %s", out)
 	}
 
-	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'stopped' WHERE id = ?", id)
-	return nil
+	return s.repo.UpdateStatus(ctx, id, "stopped")
 }
 
 // Restart restarts the web server service
@@ -356,7 +236,7 @@ func (s *WebServerService) Restart(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -372,8 +252,7 @@ func (s *WebServerService) Restart(ctx context.Context, id int64) error {
 		return fmt.Errorf("restart failed: %s", out)
 	}
 
-	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'running' WHERE id = ?", id)
-	return nil
+	return s.repo.UpdateStatus(ctx, id, "running")
 }
 
 // Reload reloads the web server config without restarting
@@ -381,7 +260,7 @@ func (s *WebServerService) Reload(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -408,7 +287,7 @@ func (s *WebServerService) TestConfig(ctx context.Context, id int64) (bool, stri
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil || ws == nil {
 		return false, "web server not found"
 	}
@@ -445,7 +324,7 @@ func (s *WebServerService) GetConfig(ctx context.Context, id int64) (string, err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -468,7 +347,7 @@ func (s *WebServerService) SaveConfig(ctx context.Context, id int64, content str
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -493,7 +372,7 @@ func (s *WebServerService) GetServiceLogs(ctx context.Context, id int64, lines i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -519,7 +398,7 @@ func (s *WebServerService) SetAutoStart(ctx context.Context, id int64, enabled b
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -547,7 +426,7 @@ func (s *WebServerService) RefreshStatus(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -605,8 +484,7 @@ func (s *WebServerService) RefreshStatus(ctx context.Context, id int64) error {
 		}
 	}
 
-	s.db.ExecContext(ctx, "UPDATE web_servers SET status = ?, version = ? WHERE id = ?", status, version, id)
-	return nil
+	return s.repo.UpdateStatusAndVersion(ctx, id, status, version)
 }
 
 // RefreshAllStatus refreshes status for all web servers
@@ -614,7 +492,7 @@ func (s *WebServerService) RefreshAllStatus(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	servers, _ := s.List(ctx)
+	servers, _ := s.repo.List(ctx)
 	for _, ws := range servers {
 		s.RefreshStatus(ctx, ws.ID)
 	}
@@ -625,7 +503,7 @@ func (s *WebServerService) GetConnections(ctx context.Context, id int64) (int, e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, err := s.Get(ctx, id)
+	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return 0, err
 	}
@@ -649,7 +527,7 @@ func (s *WebServerService) GetProcessInfo(ctx context.Context, id int64) (pid in
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ws, e := s.Get(ctx, id)
+	ws, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return 0, 0, "", e
 	}

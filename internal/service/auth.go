@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -22,9 +21,9 @@ import (
 
 // 认证相关常量
 const (
-	TokenExpiry          = 24 * time.Hour        // JWT token 过期时间
-	CacheCleanupInterval = 5 * time.Minute       // 缓存清理间隔
-	InvalidationExpiry   = 365 * TokenExpiry     // 失效标记过期时间
+	TokenExpiry          = 24 * time.Hour    // JWT token 过期时间
+	CacheCleanupInterval = 5 * time.Minute   // 缓存清理间隔
+	InvalidationExpiry   = 365 * TokenExpiry // 失效标记过期时间
 )
 
 // tokenCache provides in-memory caching for token blacklist lookups.
@@ -34,18 +33,18 @@ type tokenCache struct {
 }
 
 type AuthService struct {
-	db              *sql.DB
 	userRepo        repository.UserRepository
 	tokenRepo       repository.TokenBlacklistRepository
+	activityRepo    repository.ActivityRepository
+	totpRepo        repository.TOTPRepository
 	maxAttempts     int
 	lockoutDuration time.Duration
 	cache           tokenCache
 	notifyService   *NotifyService
 }
 
-func NewAuthService(db *sql.DB, maxAttempts int, lockoutDuration time.Duration) *AuthService {
+func NewAuthService(maxAttempts int, lockoutDuration time.Duration) *AuthService {
 	s := &AuthService{
-		db:              db,
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
 	}
@@ -55,9 +54,11 @@ func NewAuthService(db *sql.DB, maxAttempts int, lockoutDuration time.Duration) 
 }
 
 // SetRepositories sets the repository implementations for the auth service
-func (s *AuthService) SetRepositories(userRepo repository.UserRepository, tokenRepo repository.TokenBlacklistRepository) {
+func (s *AuthService) SetRepositories(userRepo repository.UserRepository, tokenRepo repository.TokenBlacklistRepository, activityRepo repository.ActivityRepository, totpRepo repository.TOTPRepository) {
 	s.userRepo = userRepo
 	s.tokenRepo = tokenRepo
+	s.activityRepo = activityRepo
+	s.totpRepo = totpRepo
 }
 
 // SetNotifyService sets the notification service for login alerts
@@ -89,7 +90,7 @@ func (s *AuthService) cacheCleanupLoop() {
 			return true
 		})
 		s.cache.invalidations.Range(func(key, value any) bool {
-			if t, ok := value.(time.Time); ok && t.Add(365 * TokenExpiry).Before(now) {
+			if t, ok := value.(time.Time); ok && t.Add(365*TokenExpiry).Before(now) {
 				s.cache.invalidations.Delete(key)
 			}
 			return true
@@ -102,59 +103,24 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	if s.userRepo != nil {
-		_, total, err := s.userRepo.List(ctx, 0, 1)
-		if err != nil {
-			return err
-		}
-		if total == 0 {
-			password := generateRandomPassword(16)
-			hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-			if err != nil {
-				return err
-			}
-			if err := s.userRepo.Create(ctx, &model.User{
-				Username:       "admin",
-				PasswordHash:   string(hash),
-				Role:           model.RoleAdmin,
-				MustChangePass: true,
-			}); err != nil {
-				return err
-			}
-			fmt.Println("=================================================")
-			fmt.Println("EasyServer 初次启动 - 管理员账号信息")
-			fmt.Println("=================================================")
-			fmt.Printf("用户名: admin\n")
-			fmt.Printf("密码:   %s\n", password)
-			fmt.Println("=================================================")
-			fmt.Println("请登录后立即修改密码！")
-			fmt.Println("=================================================")
-		}
-		return nil
-	}
-
-	var count int
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count)
+	_, total, err := s.userRepo.List(ctx, 0, 1)
 	if err != nil {
 		return err
 	}
-
-	if count == 0 {
-		// Generate random 16-character password
+	if total == 0 {
 		password := generateRandomPassword(16)
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			return err
 		}
-		_, err = s.db.ExecContext(ctx,
-			"INSERT INTO users (username, password_hash, role, must_change_pass) VALUES (?, ?, ?, ?)",
-			"admin", string(hash), model.RoleAdmin, true,
-		)
-		if err != nil {
+		if err := s.userRepo.Create(ctx, &model.User{
+			Username:       "admin",
+			PasswordHash:   string(hash),
+			Role:           model.RoleAdmin,
+			MustChangePass: true,
+		}); err != nil {
 			return err
 		}
-
-		// Print the random password to stdout (only on first start)
 		fmt.Println("=================================================")
 		fmt.Println("EasyServer 初次启动 - 管理员账号信息")
 		fmt.Println("=================================================")
@@ -200,32 +166,13 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 		ctx = context.Background()
 	}
 
-	var user *model.User
-	if s.userRepo != nil {
-		var err error
-		user, err = s.userRepo.GetByUsername(ctx, username)
-		if err != nil {
-			return nil, errors.New("invalid credentials")
-		}
-	} else {
-		user = &model.User{}
-		var mustChangePass int
-		err := s.db.QueryRowContext(ctx,
-			"SELECT id, username, password_hash, role, must_change_pass, last_login, login_attempts, locked_until FROM users WHERE username = ?",
-			username,
-		).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &mustChangePass, &user.LastLogin, &user.LoginAttempts, &user.LockedUntil)
-		user.MustChangePass = mustChangePass != 0
-
-		if err == sql.ErrNoRows {
-			return nil, errors.New("invalid credentials")
-		}
-		if err != nil {
-			return nil, err
-		}
+	user, err := s.userRepo.GetByUsername(ctx, username)
+	if err != nil {
+		return nil, errors.New("invalid credentials")
 	}
 
 	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
-		if _, err := s.db.ExecContext(ctx, "UPDATE users SET login_attempts = login_attempts + 1 WHERE id = ?", user.ID); err != nil {
+		if err := s.userRepo.IncrementLoginAttempts(ctx, user.ID); err != nil {
 			log.Printf("auth: failed to increment login attempts: %v", err)
 		}
 		return nil, errors.New("invalid credentials")
@@ -233,20 +180,14 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*mo
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		// Atomic update: increment attempts and lock if threshold reached
-		if _, err := s.db.ExecContext(ctx, `UPDATE users SET
-			login_attempts = login_attempts + 1,
-			locked_until = CASE
-				WHEN login_attempts + 1 >= ? THEN datetime('now', ?)
-				ELSE locked_until
-			END
-			WHERE id = ?`, s.maxAttempts, fmt.Sprintf("+%d seconds", int(s.lockoutDuration.Seconds())), user.ID); err != nil {
+		if err := s.userRepo.IncrementLoginAttemptsWithLock(ctx, user.ID, s.maxAttempts, int(s.lockoutDuration.Seconds())); err != nil {
 			log.Printf("auth: failed to update login attempts: %v", err)
 		}
 		return nil, errors.New("invalid credentials")
 	}
 
 	// Reset login attempts on success and update last login IP
-	s.db.ExecContext(ctx, "UPDATE users SET login_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP, last_login_ip = ? WHERE id = ?", "", user.ID)
+	s.userRepo.ResetLoginState(ctx, user.ID, "")
 
 	return user, nil
 }
@@ -306,7 +247,7 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 	}
 
 	// Update last login IP
-	s.db.ExecContext(ctx, "UPDATE users SET last_login_ip = ? WHERE id = ?", ip, user.ID)
+	s.userRepo.UpdateLastLoginIP(ctx, user.ID, ip)
 
 	// Log successful login
 	s.LogUserActivity(ctx, user.ID, username, "LOGIN_SUCCESS", ip, userAgent)
@@ -326,29 +267,17 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 }
 
 func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
-	var hash string
-	var lockedUntil sql.NullTime
-
-	if s.userRepo != nil {
-		user, err := s.userRepo.GetByID(ctx, userID)
-		if err != nil {
-			return err
-		}
-		hash = user.PasswordHash
-		lockedUntil = user.LockedUntil
-	} else {
-		err := s.db.QueryRowContext(ctx, "SELECT password_hash, locked_until FROM users WHERE id = ?", userID).Scan(&hash, &lockedUntil)
-		if err != nil {
-			return err
-		}
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return err
 	}
 
 	// Check if account is locked
-	if lockedUntil.Valid && lockedUntil.Time.After(time.Now()) {
+	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
 		return errors.New("account is locked")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(oldPassword)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
 		return errors.New("invalid old password")
 	}
 
@@ -362,50 +291,11 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 		return err
 	}
 
-	if s.userRepo != nil {
-		return s.userRepo.UpdatePassword(ctx, userID, string(newHash))
-	}
-
-	_, err = s.db.ExecContext(ctx, "UPDATE users SET password_hash = ?, must_change_pass = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", string(newHash), userID)
-	return err
+	return s.userRepo.UpdatePassword(ctx, userID, string(newHash))
 }
 
 func (s *AuthService) GetUserByID(ctx context.Context, id int64) (*model.User, error) {
-	if s.userRepo != nil {
-		return s.userRepo.GetByID(ctx, id)
-	}
-	user := &model.User{}
-	var lastLoginStr, createdAtStr sql.NullString
-	var mustChangePass int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT id, username, role, must_change_pass, last_login, created_at FROM users WHERE id = ?", id,
-	).Scan(&user.ID, &user.Username, &user.Role, &mustChangePass, &lastLoginStr, &createdAtStr)
-	if err != nil {
-		return nil, err
-	}
-	user.MustChangePass = mustChangePass != 0
-
-	// Parse last_login
-	if lastLoginStr.Valid && lastLoginStr.String != "" {
-		t, err := time.Parse("2006-01-02 15:04:05", lastLoginStr.String)
-		if err == nil {
-			user.LastLogin = sql.NullTime{Time: t, Valid: true}
-		}
-	}
-
-	// Parse created_at
-	if createdAtStr.Valid && createdAtStr.String != "" {
-		t, err := time.Parse("2006-01-02 15:04:05", createdAtStr.String)
-		if err == nil {
-			user.CreatedAt = t
-		} else {
-			user.CreatedAt = time.Now()
-		}
-	} else {
-		user.CreatedAt = time.Now()
-	}
-
-	return user, nil
+	return s.userRepo.GetByID(ctx, id)
 }
 
 // hashToken returns the SHA-256 hex digest of a token.
@@ -421,15 +311,7 @@ func (s *AuthService) AddTokenToBlacklist(ctx context.Context, userID int64, tok
 		ctx = context.Background()
 	}
 	tokenHash := hashToken(token)
-	var err error
-	if s.tokenRepo != nil {
-		err = s.tokenRepo.Add(ctx, userID, tokenHash, expiresAt)
-	} else {
-		_, err = s.db.ExecContext(ctx,
-			"INSERT INTO token_blacklist (user_id, token, expires_at) VALUES (?, ?, ?)",
-			userID, tokenHash, expiresAt,
-		)
-	}
+	err := s.tokenRepo.Add(ctx, userID, tokenHash, expiresAt)
 	if err == nil {
 		s.cache.blacklisted.Store(tokenHash, expiresAt)
 	}
@@ -445,18 +327,7 @@ func (s *AuthService) IsTokenBlacklisted(ctx context.Context, token string) (boo
 		}
 		s.cache.blacklisted.Delete(tokenHash)
 	}
-	if s.tokenRepo != nil {
-		return s.tokenRepo.IsBlacklisted(ctx, tokenHash)
-	}
-	var count int
-	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM token_blacklist WHERE token = ? AND expires_at > ?",
-		tokenHash, time.Now(),
-	).Scan(&count)
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
+	return s.tokenRepo.IsBlacklisted(ctx, tokenHash)
 }
 
 // InvalidateAllUserTokens invalidates all tokens for a user
@@ -466,32 +337,7 @@ func (s *AuthService) InvalidateAllUserTokens(ctx context.Context, userID int64)
 		ctx = context.Background()
 	}
 	now := time.Now()
-	if s.tokenRepo != nil {
-		if err := s.tokenRepo.AddUserInvalidation(ctx, userID); err != nil {
-			return err
-		}
-		s.cache.invalidations.Store(userID, now)
-		return nil
-	}
-	// Fallback path: use a transaction to avoid the DELETE-INSERT race window
-	tx, txErr := s.db.BeginTx(ctx, nil)
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-	// Delete any existing markers for this user first
-	tx.ExecContext(ctx, "DELETE FROM token_blacklist WHERE user_id = ? AND token LIKE 'user_%_all'", userID)
-
-	// Add a marker with the current time as the invalidation point
-	// expires_at is set far in the future to keep the marker active
-	_, err := tx.Exec(
-		"INSERT INTO token_blacklist (user_id, token, expires_at) VALUES (?, ?, ?)",
-		userID, fmt.Sprintf("user_%d_all", userID), now.Add(365*24*time.Hour),
-	)
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := s.tokenRepo.AddUserInvalidation(ctx, userID); err != nil {
 		return err
 	}
 	s.cache.invalidations.Store(userID, now)
@@ -507,36 +353,12 @@ func (s *AuthService) IsUserTokenInvalidated(ctx context.Context, userID int64, 
 			return issuedAt.Before(t), nil
 		}
 	}
-	if s.tokenRepo != nil {
-		invalidated, err := s.tokenRepo.IsUserInvalidated(ctx, userID, issuedAt)
-		if err != nil {
-			log.Printf("auth: error checking token invalidation: %v", err)
-			return false, nil
-		}
-		return invalidated, nil
-	}
-	var createdAt time.Time
-	// Get the most recent invalidation marker for this user
-	err := s.db.QueryRow(
-		"SELECT created_at FROM token_blacklist WHERE user_id = ? AND token LIKE 'user_%_all' AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
-		userID,
-	).Scan(&createdAt)
-	if err == sql.ErrNoRows {
-		// No invalidation marker found
-		return false, nil
-	}
+	invalidated, err := s.tokenRepo.IsUserInvalidated(ctx, userID, issuedAt)
 	if err != nil {
-		// On database error, log and return false (not invalidated)
-		// This avoids blocking requests due to transient database issues
 		log.Printf("auth: error checking token invalidation: %v", err)
 		return false, nil
 	}
-
-	// Warm the cache for subsequent requests
-	s.cache.invalidations.Store(userID, createdAt)
-
-	// Token is invalidated if it was issued before the invalidation marker
-	return issuedAt.Before(createdAt), nil
+	return invalidated, nil
 }
 
 // CleanupExpiredTokens removes expired tokens from blacklist
@@ -544,11 +366,7 @@ func (s *AuthService) CleanupExpiredTokens(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.tokenRepo != nil {
-		return s.tokenRepo.Clean(ctx)
-	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM token_blacklist WHERE expires_at < ?", time.Now())
-	return err
+	return s.tokenRepo.Clean(ctx)
 }
 
 // ResetPassword resets a user's password (admin only)
@@ -563,18 +381,10 @@ func (s *AuthService) ResetPassword(ctx context.Context, userID int64, newPasswo
 		return err
 	}
 
-	if s.userRepo != nil {
-		if err := s.userRepo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
-			return err
-		}
-		return s.userRepo.SetMustChangePass(ctx, userID, true)
+	if err := s.userRepo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
+		return err
 	}
-
-	_, err = s.db.Exec(
-		"UPDATE users SET password_hash = ?, must_change_pass = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		string(newHash), userID,
-	)
-	return err
+	return s.userRepo.SetMustChangePass(ctx, userID, true)
 }
 
 // ValidatePassword validates password strength.
@@ -609,11 +419,13 @@ func (s *AuthService) LogUserActivity(ctx context.Context, userID int64, usernam
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO user_activities (user_id, username, action, ip, user_agent) VALUES (?, ?, ?, ?, ?)",
-		userID, username, action, ip, userAgent,
-	)
-	return err
+	return s.activityRepo.Log(ctx, &model.UserActivity{
+		UserID:    userID,
+		Username:  username,
+		Action:    action,
+		IP:        ip,
+		UserAgent: userAgent,
+	})
 }
 
 // GetUserActivities returns user activity log
@@ -621,31 +433,7 @@ func (s *AuthService) GetUserActivities(ctx context.Context, userID int64, limit
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, user_id, username, action, ip, user_agent, created_at FROM user_activities WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-		userID, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var activities []model.UserActivity
-	for rows.Next() {
-		var a model.UserActivity
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Username, &a.Action, &a.IP, &a.UserAgent, &a.CreatedAt); err != nil {
-			continue
-		}
-		activities = append(activities, a)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return activities, nil
+	return s.activityRepo.GetByUserID(ctx, userID, limit)
 }
 
 // GetAllActivities returns all user activities
@@ -653,31 +441,7 @@ func (s *AuthService) GetAllActivities(ctx context.Context, limit int) ([]model.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, user_id, username, action, ip, user_agent, created_at FROM user_activities ORDER BY id DESC LIMIT ?",
-		limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var activities []model.UserActivity
-	for rows.Next() {
-		var a model.UserActivity
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Username, &a.Action, &a.IP, &a.UserAgent, &a.CreatedAt); err != nil {
-			continue
-		}
-		activities = append(activities, a)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return activities, nil
+	return s.activityRepo.GetAll(ctx, limit)
 }
 
 // SetAccountExpiry sets account expiration date
@@ -685,12 +449,7 @@ func (s *AuthService) SetAccountExpiry(ctx context.Context, userID int64, expire
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if expiresAt == nil {
-		_, err := s.db.ExecContext(ctx, "UPDATE users SET expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", userID)
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, "UPDATE users SET expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", expiresAt, userID)
-	return err
+	return s.userRepo.SetAccountExpiry(ctx, userID, expiresAt)
 }
 
 // SetIPWhitelist sets IP whitelist for a user
@@ -698,8 +457,7 @@ func (s *AuthService) SetIPWhitelist(ctx context.Context, userID int64, whitelis
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.db.ExecContext(ctx, "UPDATE users SET ip_whitelist = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", whitelist, userID)
-	return err
+	return s.userRepo.SetIPWhitelist(ctx, userID, whitelist)
 }
 
 // IsTOTPEnabled checks if 2FA is enabled for a user
@@ -707,15 +465,7 @@ func (s *AuthService) IsTOTPEnabled(ctx context.Context, userID int64) (bool, er
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var enabled bool
-	err := s.db.QueryRowContext(ctx, "SELECT totp_enabled FROM users WHERE id = ?", userID).Scan(&enabled)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
-		return false, fmt.Errorf("check TOTP status: %w", err)
-	}
-	return enabled, nil
+	return s.totpRepo.IsTOTPEnabled(ctx, userID)
 }
 
 // GetTOTPSecret gets the TOTP secret for a user
@@ -723,15 +473,7 @@ func (s *AuthService) GetTOTPSecret(ctx context.Context, userID int64) (string, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var secret string
-	err := s.db.QueryRowContext(ctx, "SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 1", userID).Scan(&secret)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("user not found or 2FA not enabled")
-		}
-		return "", fmt.Errorf("get TOTP secret: %w", err)
-	}
-	return secret, nil
+	return s.totpRepo.GetTOTPSecret(ctx, userID)
 }
 
 // GetIPWhitelist returns the raw IP whitelist string for a user (comma-separated,
@@ -741,9 +483,7 @@ func (s *AuthService) GetIPWhitelist(ctx context.Context, userID int64) (string,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var whitelist string
-	err := s.db.QueryRowContext(ctx, "SELECT COALESCE(ip_whitelist, '') FROM users WHERE id = ?", userID).Scan(&whitelist)
-	return whitelist, err
+	return s.userRepo.GetIPWhitelist(ctx, userID)
 }
 
 // CheckIPWhitelist checks if an IP is in the user's whitelist
@@ -798,8 +538,7 @@ func (s *AuthService) IsAccountExpired(ctx context.Context, userID int64) (bool,
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var expiresAt sql.NullTime
-	err := s.db.QueryRowContext(ctx, "SELECT expires_at FROM users WHERE id = ?", userID).Scan(&expiresAt)
+	expiresAt, err := s.userRepo.GetAccountExpiry(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -810,4 +549,3 @@ func (s *AuthService) IsAccountExpired(ctx context.Context, userID int64) (bool,
 
 	return expiresAt.Time.Before(time.Now()), nil
 }
-

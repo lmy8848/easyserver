@@ -22,8 +22,8 @@ type DBServer struct {
 	DisplayName string `json:"display_name"` // MySQL, PostgreSQL, Redis
 	Description string `json:"description"`
 	DefaultPort int    `json:"default_port"`
-	Status      string `json:"status"`   // not_installed, running, stopped, partial
-	Version     string `json:"version"`  // summary of installed versions
+	Status      string `json:"status"`  // not_installed, running, stopped, partial
+	Version     string `json:"version"` // summary of installed versions
 	CreatedAt   string `json:"created_at"`
 }
 

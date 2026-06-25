@@ -12,60 +12,22 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
+	"easyserver/internal/repository/sqlite"
 )
 
 type RuntimeService struct {
 	db       *sql.DB
+	repo     repository.RuntimeRepository
 	executor executor.CommandExecutor
 }
 
 func NewRuntimeService(db *sql.DB, exec executor.CommandExecutor) *RuntimeService {
-	return &RuntimeService{db: db, executor: exec}
-}
-
-// Deprecated: InitTables is kept for backward compatibility only.
-// Table creation is now handled by the migration system (migrations/ directory).
-func (s *RuntimeService) InitTables(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
+	return &RuntimeService{
+		db:       db,
+		repo:     sqlite.NewRuntimeRepository(db),
+		executor: exec,
 	}
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS runtime_environments (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			version TEXT NOT NULL,
-			path TEXT NOT NULL,
-			is_default INTEGER DEFAULT 0,
-			status TEXT DEFAULT 'installed',
-			progress INTEGER DEFAULT 0,
-			progress_step TEXT DEFAULT '',
-			logs TEXT DEFAULT '',
-			error_message TEXT DEFAULT '',
-			installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(name, version)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_runtime_name ON runtime_environments(name)`,
-	}
-
-	for _, q := range queries {
-		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-
-	// Add missing columns if table already exists (migration)
-	migrations := []string{
-		`ALTER TABLE runtime_environments ADD COLUMN progress INTEGER DEFAULT 0`,
-		`ALTER TABLE runtime_environments ADD COLUMN progress_step TEXT DEFAULT ''`,
-		`ALTER TABLE runtime_environments ADD COLUMN logs TEXT DEFAULT ''`,
-		`ALTER TABLE runtime_environments ADD COLUMN error_message TEXT DEFAULT ''`,
-	}
-
-	for _, m := range migrations {
-		s.db.ExecContext(ctx, m) // Ignore errors (column already exists)
-	}
-
-	return nil
 }
 
 // ListAll returns all installed runtime environments
@@ -73,30 +35,7 @@ func (s *RuntimeService) ListAll(ctx context.Context) ([]model.RuntimeEnvironmen
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments ORDER BY name, version",
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var environments []model.RuntimeEnvironment
-	for rows.Next() {
-		var env model.RuntimeEnvironment
-		var isDefault int
-		err := rows.Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
-		if err != nil {
-			continue
-		}
-		env.IsDefault = isDefault != 0
-		environments = append(environments, env)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-
-	return environments, nil
+	return s.repo.ListAll(ctx)
 }
 
 // ListByName returns all versions of a specific runtime environment
@@ -104,31 +43,7 @@ func (s *RuntimeService) ListByName(ctx context.Context, name string) ([]model.R
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments WHERE name = ? ORDER BY version",
-		name,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var environments []model.RuntimeEnvironment
-	for rows.Next() {
-		var env model.RuntimeEnvironment
-		var isDefault int
-		err := rows.Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
-		if err != nil {
-			continue
-		}
-		env.IsDefault = isDefault != 0
-		environments = append(environments, env)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-
-	return environments, nil
+	return s.repo.ListByName(ctx, name)
 }
 
 // GetDefault returns the default version of a runtime environment
@@ -136,20 +51,7 @@ func (s *RuntimeService) GetDefault(ctx context.Context, name string) (*model.Ru
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	env := &model.RuntimeEnvironment{}
-	var isDefault int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT id, name, version, path, is_default, status, installed_at FROM runtime_environments WHERE name = ? AND is_default = 1",
-		name,
-	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.InstalledAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	env.IsDefault = isDefault != 0
-	return env, nil
+	return s.repo.GetDefault(ctx, name)
 }
 
 // GetByID returns a runtime environment by ID
@@ -157,20 +59,7 @@ func (s *RuntimeService) GetByID(ctx context.Context, id int64) (*model.RuntimeE
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	env := &model.RuntimeEnvironment{}
-	var isDefault int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments WHERE id = ?",
-		id,
-	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	env.IsDefault = isDefault != 0
-	return env, nil
+	return s.repo.GetByID(ctx, id)
 }
 
 // DependencyGroup represents a group of dependencies where at least one is required
@@ -256,27 +145,19 @@ func (s *RuntimeService) Install(ctx context.Context, name, version string) erro
 	}
 
 	// Check if already installed
-	var count int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND version = ?",
-		name, version,
-	).Scan(&count)
+	exists, err := s.repo.ExistsByNameAndVersion(ctx, name, version)
 	if err != nil {
 		return err
 	}
-	if count > 0 {
+	if exists {
 		return fmt.Errorf("%s %s is already installed", name, version)
 	}
 
 	// Insert with installing status
-	result, err := s.db.ExecContext(ctx,
-		"INSERT INTO runtime_environments (name, version, path, status) VALUES (?, ?, ?, ?)",
-		name, version, "", "installing",
-	)
+	id, err := s.repo.Create(ctx, name, version, "", "installing")
 	if err != nil {
 		return err
 	}
-	id, _ := result.LastInsertId()
 
 	// Install in background
 	go s.installRuntime(context.Background(), id, name, version)

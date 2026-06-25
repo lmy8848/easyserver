@@ -11,13 +11,13 @@ import (
 )
 
 type FileEntry struct {
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	IsDir       bool   `json:"is_dir"`
-	SizeBytes   int64  `json:"size_bytes"`
-	Mode        string `json:"mode"`
-	ModifiedAt  string `json:"modified_at"`
-	IsSymlink   bool   `json:"is_symlink"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	IsDir      bool   `json:"is_dir"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Mode       string `json:"mode"`
+	ModifiedAt string `json:"modified_at"`
+	IsSymlink  bool   `json:"is_symlink"`
 }
 
 type FileContent struct {

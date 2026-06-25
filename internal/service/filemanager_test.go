@@ -67,9 +67,9 @@ func TestValidatePath_TraversalAttempts(t *testing.T) {
 		{"subdir", "sub/dir/file.txt", false},
 		{"dot-dot traversal", "../../../etc/passwd", true},
 		{"dot-dot in middle", "sub/../../../etc/passwd", true},
-		{"dot-dot clean to base", "sub/..", false},  // cleans to base itself
-		{"single dot", ".", false},                    // current dir = base
-		{"dot-dot from base", "..", true},            // escapes base
+		{"dot-dot clean to base", "sub/..", false}, // cleans to base itself
+		{"single dot", ".", false},                 // current dir = base
+		{"dot-dot from base", "..", true},          // escapes base
 		{"nested dot-dot", "a/b/c/../../../../d", true},
 	}
 

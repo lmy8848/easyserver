@@ -33,10 +33,10 @@ func (s *NetworkService) ListNetworks(ctx context.Context) ([]model.Network, err
 			continue
 		}
 		var raw struct {
-			ID      string `json:"ID"`
-			Name    string `json:"Name"`
-			Driver  string `json:"Driver"`
-			Scope   string `json:"Scope"`
+			ID     string `json:"ID"`
+			Name   string `json:"Name"`
+			Driver string `json:"Driver"`
+			Scope  string `json:"Scope"`
 		}
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			continue

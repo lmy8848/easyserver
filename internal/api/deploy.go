@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/model"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -45,7 +46,7 @@ func (h *DeployHandler) GetServer(c *gin.Context) {
 }
 
 func (h *DeployHandler) CreateServer(c *gin.Context) {
-	var srv service.DeployServer
+	var srv model.DeployServer
 	if err := c.ShouldBindJSON(&srv); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -94,7 +95,7 @@ func (h *DeployHandler) UpdateServer(c *gin.Context) {
 		return
 	}
 
-	var srv service.DeployServer
+	var srv model.DeployServer
 	if err := c.ShouldBindJSON(&srv); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -174,7 +175,7 @@ func (h *DeployHandler) GetTask(c *gin.Context) {
 }
 
 func (h *DeployHandler) CreateTask(c *gin.Context) {
-	var task service.DeployTask
+	var task model.DeployTask
 	if err := c.ShouldBindJSON(&task); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -271,4 +272,21 @@ func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"status": "rolling_back"})
+}
+
+func registerDeployRoutes(protected *gin.RouterGroup, deployService *service.DeployService) {
+	handler := NewDeployHandler(deployService)
+	protected.GET("/deploy/servers", handler.ListServers)
+	protected.POST("/deploy/servers", handler.CreateServer)
+	protected.GET("/deploy/servers/:id", handler.GetServer)
+	protected.PUT("/deploy/servers/:id", handler.UpdateServer)
+	protected.DELETE("/deploy/servers/:id", handler.DeleteServer)
+	protected.POST("/deploy/servers/:id/test", handler.TestConnection)
+	protected.GET("/deploy/tasks", handler.ListTasks)
+	protected.POST("/deploy/tasks", handler.CreateTask)
+	protected.GET("/deploy/tasks/:id", handler.GetTask)
+	protected.DELETE("/deploy/tasks/:id", handler.DeleteTask)
+	protected.POST("/deploy/tasks/:id/exec", handler.ExecuteTask)
+	protected.GET("/deploy/versions", handler.ListVersions)
+	protected.POST("/deploy/versions/:id/rollback", handler.RollbackVersion)
 }

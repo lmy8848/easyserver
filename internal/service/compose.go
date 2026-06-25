@@ -46,8 +46,8 @@ func (s *ComposeService) ListProjects(ctx context.Context) ([]model.ComposeProje
 			continue
 		}
 		var raw struct {
-			Name       string `json:"Name"`
-			Status     string `json:"Status"`
+			Name        string `json:"Name"`
+			Status      string `json:"Status"`
 			ConfigFiles string `json:"ConfigFiles"`
 		}
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {

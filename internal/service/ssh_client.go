@@ -15,6 +15,8 @@ import (
 
 	"crypto/x509"
 
+	"easyserver/internal/model"
+
 	"golang.org/x/crypto/ssh"
 )
 
@@ -35,7 +37,7 @@ type SSHClient struct {
 
 // NewSSHClient creates an SSHClient connected to the given DeployServer.
 // authData is the decrypted password or private key content.
-func NewSSHClient(srv *DeployServer, authData string) (*SSHClient, error) {
+func NewSSHClient(srv *model.DeployServer, authData string) (*SSHClient, error) {
 	if srv == nil {
 		return nil, fmt.Errorf("ssh: deploy server is nil")
 	}
@@ -49,8 +51,8 @@ func NewSSHClient(srv *DeployServer, authData string) (*SSHClient, error) {
 	// Current implementation is vulnerable to MITM attacks.
 	log.Printf("ssh: WARNING - host key verification disabled for %s:%d (MITM risk)", srv.Host, srv.Port)
 	config := &ssh.ClientConfig{
-		User: srv.Username,
-		Auth: []ssh.AuthMethod{authMethod},
+		User:            srv.Username,
+		Auth:            []ssh.AuthMethod{authMethod},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         SSHConnectTimeout,
 	}

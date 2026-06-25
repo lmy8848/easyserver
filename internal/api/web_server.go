@@ -547,7 +547,7 @@ type DirEntry struct {
 	Path     string `json:"path"`
 	IsDir    bool   `json:"is_dir"`
 	HasItems bool   `json:"has_items"` // has package.json, index.php, etc.
-	Project  string `json:"project"`  // detected project type
+	Project  string `json:"project"`   // detected project type
 }
 
 func (h *WebServerHandler) BrowseDirs(c *gin.Context) {
@@ -701,8 +701,8 @@ func hasProjectFiles(dir string) bool {
 		"index.php", "composer.json", // PHP
 		"app.py", "manage.py", "requirements.txt", // Python
 		"pom.xml", "build.gradle", // Java
-		"go.mod", // Go
-		"Gemfile", // Ruby
+		"go.mod",                  // Go
+		"Gemfile",                 // Ruby
 		"index.html", "index.htm", // Static
 	}
 	for _, f := range indicators {

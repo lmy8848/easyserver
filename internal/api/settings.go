@@ -81,18 +81,18 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 
 	Success(c, gin.H{
 		"server": gin.H{
-			"port":          h.cfg.Server.Port,
-			"host":          h.cfg.Server.Host,
+			"port":           h.cfg.Server.Port,
+			"host":           h.cfg.Server.Host,
 			"serve_frontend": h.cfg.Server.ServeFrontend,
-			"tls_enabled":   h.cfg.Server.TLS.Enabled,
+			"tls_enabled":    h.cfg.Server.TLS.Enabled,
 		},
 		"auth": gin.H{
-			"session_timeout":   h.cfg.Auth.SessionTimeout.String(),
-			"idle_timeout":      h.cfg.Auth.IdleTimeout.String(),
+			"session_timeout":    h.cfg.Auth.SessionTimeout.String(),
+			"idle_timeout":       h.cfg.Auth.IdleTimeout.String(),
 			"max_login_attempts": h.cfg.Auth.MaxLoginAttempts,
-			"lockout_duration":  h.cfg.Auth.LockoutDuration.String(),
-			"rate_limit":        h.cfg.Auth.RateLimit,
-			"rate_interval":     h.cfg.Auth.RateInterval.String(),
+			"lockout_duration":   h.cfg.Auth.LockoutDuration.String(),
+			"rate_limit":         h.cfg.Auth.RateLimit,
+			"rate_interval":      h.cfg.Auth.RateInterval.String(),
 		},
 		"monitor": gin.H{
 			"history_retention": h.cfg.Monitor.HistoryRetention.String(),
@@ -136,17 +136,17 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 
 	// Validate region
 	validRegions := map[string]bool{
-		"ap-guangzhou":  true,
-		"ap-shanghai":   true,
-		"ap-beijing":    true,
-		"ap-nanjing":    true,
-		"ap-chengdu":    true,
-		"ap-chongqing":  true,
-		"ap-hongkong":   true,
-		"ap-singapore":  true,
-		"ap-tokyo":      true,
+		"ap-guangzhou":     true,
+		"ap-shanghai":      true,
+		"ap-beijing":       true,
+		"ap-nanjing":       true,
+		"ap-chengdu":       true,
+		"ap-chongqing":     true,
+		"ap-hongkong":      true,
+		"ap-singapore":     true,
+		"ap-tokyo":         true,
 		"na-siliconvalley": true,
-		"eu-frankfurt":  true,
+		"eu-frankfurt":     true,
 	}
 
 	if req.Enabled != nil {
@@ -183,9 +183,9 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 	h.cfgMu.Lock()
 	defer h.cfgMu.Unlock()
 	var req struct {
-		Port          *int  `json:"port"`
+		Port          *int    `json:"port"`
 		Host          *string `json:"host"`
-		ServeFrontend *bool `json:"serve_frontend"`
+		ServeFrontend *bool   `json:"serve_frontend"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
@@ -667,4 +667,21 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 		os.Exit(0)
 	}()
 	Success(c, gin.H{"message": "面板正在重启..."})
+}
+
+func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *service.AlertService) {
+	handler := NewSettingsHandler(cfg, configPath, alertService)
+	protected.GET("/settings", handler.GetSettings)
+	protected.GET("/settings/system", handler.GetSystemInfo)
+	protected.PUT("/settings/server", handler.UpdateServerConfig)
+	protected.PUT("/settings/auth", handler.UpdateAuthConfig)
+	protected.PUT("/settings/monitor", handler.UpdateMonitorConfig)
+	protected.PUT("/settings/audit", handler.UpdateAuditConfig)
+	protected.PUT("/settings/notify", handler.UpdateNotifyConfig)
+	protected.POST("/settings/notify/test", handler.TestWebhook)
+	protected.GET("/alerts/rules", handler.GetAlertRules)
+	protected.PUT("/alerts/rules", handler.UpdateAlertRules)
+	protected.PUT("/settings/cloud", handler.UpdateCloudConfig)
+	protected.POST("/settings/cloud/test", handler.TestCloudConnection)
+	protected.POST("/settings/restart", handler.RestartPanel)
 }

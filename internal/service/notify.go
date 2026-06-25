@@ -212,4 +212,3 @@ func (s *NotifyService) sendAlertWebhook(event AlertEvent) error {
 
 	return nil
 }
-

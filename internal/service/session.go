@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"time"
@@ -13,70 +12,34 @@ import (
 
 type SessionService struct {
 	sessionRepo     repository.SessionRepository
-	db              *sql.DB // for operations not covered by repository
 	activeThreshold time.Duration
 }
 
-func NewSessionService(db *sql.DB) *SessionService {
-	return &SessionService{
-		sessionRepo:     nil, // will be set via SetSessionRepository
-		db:              db,
-		activeThreshold: 5 * time.Minute,
-	}
-}
-
-// NewSessionServiceWithRepo creates a SessionService using a repository
-func NewSessionServiceWithRepo(sessionRepo repository.SessionRepository, db *sql.DB) *SessionService {
+// NewSessionService creates a SessionService using a repository
+func NewSessionService(sessionRepo repository.SessionRepository) *SessionService {
 	return &SessionService{
 		sessionRepo:     sessionRepo,
-		db:              db,
 		activeThreshold: 5 * time.Minute,
 	}
 }
 
 // CreateSession creates a new session when user logs in
 func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, username, role, ip, userAgent string, expiresAt time.Time) error {
-	if s.sessionRepo != nil {
-		return s.sessionRepo.Create(ctx, &model.Session{
-			UserID:    userID,
-			Username:  username,
-			Role:      role,
-			IP:        ip,
-			UserAgent: userAgent,
-			ExpiresAt: expiresAt,
-			Token:     token,
-		})
-	}
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token, user_id, username, role, ip, user_agent, last_active, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		token, userID, username, role, ip, userAgent, time.Now(), expiresAt,
-	)
-	if err != nil {
-		log.Printf("session: failed to create session: %v", err)
-		return err
-	}
-	return nil
+	return s.sessionRepo.Create(ctx, &model.Session{
+		UserID:    userID,
+		Username:  username,
+		Role:      role,
+		IP:        ip,
+		UserAgent: userAgent,
+		ExpiresAt: expiresAt,
+		Token:     token,
+	})
 }
 
 // UpdateActivity updates the last_active timestamp for a session
 // Returns error if session doesn't exist
 func (s *SessionService) UpdateActivity(ctx context.Context, token string) error {
-	if s.sessionRepo != nil {
-		return s.sessionRepo.UpdateActivity(ctx, token)
-	}
-	result, err := s.db.ExecContext(ctx,
-		"UPDATE sessions SET last_active = ? WHERE token = ?",
-		time.Now(), token,
-	)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("session not found")
-	}
-	return nil
+	return s.sessionRepo.UpdateActivity(ctx, token)
 }
 
 // RemoveSession removes a session (logout)
@@ -84,11 +47,7 @@ func (s *SessionService) RemoveSession(ctx context.Context, token string) error 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.sessionRepo != nil {
-		return s.sessionRepo.DeleteByToken(ctx, token)
-	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE token = ?", token)
-	return err
+	return s.sessionRepo.DeleteByToken(ctx, token)
 }
 
 // RemoveUserSessions removes all sessions for a user (force logout)
@@ -96,11 +55,7 @@ func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.sessionRepo != nil {
-		return s.sessionRepo.DeleteByUserID(ctx, userID)
-	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
-	return err
+	return s.sessionRepo.DeleteByUserID(ctx, userID)
 }
 
 // GetActiveSessions returns all active sessions
@@ -108,31 +63,7 @@ func (s *SessionService) GetActiveSessions(ctx context.Context) ([]model.Session
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.sessionRepo != nil {
-		return s.sessionRepo.GetActive(ctx)
-	}
-	threshold := time.Now().Add(-s.activeThreshold)
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT user_id, username, role, ip, user_agent, last_active, expires_at
-		FROM sessions
-		WHERE last_active > ? AND expires_at > ?
-		ORDER BY last_active DESC
-	`, threshold, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sessions []model.Session
-	for rows.Next() {
-		var sess model.Session
-		if err := rows.Scan(&sess.UserID, &sess.Username, &sess.Role, &sess.IP, &sess.UserAgent, &sess.LoginAt, &sess.ExpiresAt); err != nil {
-			continue
-		}
-		sessions = append(sessions, sess)
-	}
-	return sessions, nil
+	return s.sessionRepo.GetActive(ctx)
 }
 
 // GetUserSessions returns active sessions for a specific user
@@ -140,28 +71,7 @@ func (s *SessionService) GetUserSessions(ctx context.Context, userID int64) ([]m
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	threshold := time.Now().Add(-s.activeThreshold)
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT user_id, username, role, ip, user_agent, last_active, expires_at
-		FROM sessions
-		WHERE user_id = ? AND last_active > ? AND expires_at > ?
-		ORDER BY last_active DESC
-	`, userID, threshold, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sessions []model.Session
-	for rows.Next() {
-		var sess model.Session
-		if err := rows.Scan(&sess.UserID, &sess.Username, &sess.Role, &sess.IP, &sess.UserAgent, &sess.LoginAt, &sess.ExpiresAt); err != nil {
-			continue
-		}
-		sessions = append(sessions, sess)
-	}
-	return sessions, nil
+	return s.sessionRepo.GetActiveByUserID(ctx, userID)
 }
 
 // CleanupExpiredSessions removes expired and inactive sessions
@@ -170,14 +80,12 @@ func (s *SessionService) CleanupExpiredSessions(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	// Remove expired sessions
-	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE expires_at < ?", time.Now())
-	if err != nil {
+	if err := s.sessionRepo.DeleteExpired(ctx); err != nil {
 		return err
 	}
 
 	// Remove sessions inactive for more than 1 hour
-	_, err = s.db.ExecContext(ctx, "DELETE FROM sessions WHERE last_active < ?", time.Now().Add(-1*time.Hour))
-	return err
+	return s.sessionRepo.DeleteInactive(ctx, time.Now().Add(-1*time.Hour))
 }
 
 // GetSessionCount returns the count of active sessions
@@ -185,32 +93,19 @@ func (s *SessionService) GetSessionCount(ctx context.Context) (int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.sessionRepo != nil {
-		return s.sessionRepo.Count(ctx)
-	}
-	threshold := time.Now().Add(-s.activeThreshold)
-	var count int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM sessions WHERE last_active > ? AND expires_at > ?",
-		threshold, time.Now(),
-	).Scan(&count)
-	return count, err
+	return s.sessionRepo.Count(ctx)
 }
 
 // IsSessionValid checks if a session exists and is not expired
 // On database errors, returns false (invalid) to fail-closed for security
 func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > ?",
-		token, time.Now(),
-	).Scan(&count)
+	valid, err := s.sessionRepo.IsValid(ctx, token)
 	if err != nil {
 		// Fail-closed: on DB error, treat session as invalid
 		log.Printf("session: error checking session validity: %v", err)
 		return false, err
 	}
-	return count > 0, nil
+	return valid, nil
 }
 
 // GetActiveSessionsWithToken returns all active sessions with token (for current session identification)
@@ -218,31 +113,7 @@ func (s *SessionService) GetActiveSessionsWithToken(ctx context.Context) ([]mode
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.sessionRepo != nil {
-		return s.sessionRepo.GetActive(ctx)
-	}
-	threshold := time.Now().Add(-s.activeThreshold)
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT user_id, username, role, ip, user_agent, last_active, expires_at, token
-		FROM sessions
-		WHERE last_active > ? AND expires_at > ?
-		ORDER BY last_active DESC
-	`, threshold, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sessions []model.Session
-	for rows.Next() {
-		var sess model.Session
-		if err := rows.Scan(&sess.UserID, &sess.Username, &sess.Role, &sess.IP, &sess.UserAgent, &sess.LoginAt, &sess.ExpiresAt, &sess.Token); err != nil {
-			continue
-		}
-		sessions = append(sessions, sess)
-	}
-	return sessions, nil
+	return s.sessionRepo.GetActive(ctx)
 }
 
 // RemoveSessionByToken removes a specific session by token
@@ -250,18 +121,7 @@ func (s *SessionService) RemoveSessionByToken(ctx context.Context, token string)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.sessionRepo != nil {
-		return s.sessionRepo.DeleteByToken(ctx, token)
-	}
-	result, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE token = ?", token)
-	if err != nil {
-		return err
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("session not found")
-	}
-	return nil
+	return s.sessionRepo.DeleteByToken(ctx, token)
 }
 
 // RemoveOtherSessions removes all sessions for a user except the current one
@@ -269,6 +129,17 @@ func (s *SessionService) RemoveOtherSessions(ctx context.Context, userID int64, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, currentToken)
-	return err
+	return s.sessionRepo.DeleteByUserIDExcept(ctx, userID, currentToken)
+}
+
+// IsSessionValidByToken checks if a session exists by token (returns error if not found)
+func (s *SessionService) IsSessionValidByToken(ctx context.Context, token string) (*model.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	session, err := s.sessionRepo.GetByToken(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+	return session, nil
 }

@@ -4,24 +4,24 @@ import "time"
 
 // MonitorPoint represents a single monitoring data point
 type MonitorPoint struct {
-	ID            int64     `json:"id" db:"id"`
-	CPUPercent    float64   `json:"cpu_percent" db:"cpu"`
-	CPULoad1m     float64   `json:"cpu_load_1m" db:"cpu_load_1m"`
-	CPULoad5m     float64   `json:"cpu_load_5m" db:"cpu_load_5m"`
-	CPULoad15m    float64   `json:"cpu_load_15m" db:"cpu_load_15m"`
-	MemTotal      uint64    `json:"mem_total" db:"mem_total"`
-	MemUsed       uint64    `json:"mem_used" db:"mem_used"`
-	MemAvailable  uint64    `json:"mem_available" db:"mem_available"`
-	MemPercent    float64   `json:"mem_percent" db:"mem_usage"`
-	DiskTotal     uint64    `json:"disk_total" db:"disk_total"`
-	DiskUsed      uint64    `json:"disk_used" db:"disk_used"`
-	DiskFree      uint64    `json:"disk_free" db:"disk_free"`
-	DiskPercent   float64   `json:"disk_percent" db:"disk_usage"`
-	NetBytesSent  uint64    `json:"net_bytes_sent" db:"net_bytes_sent"`
-	NetBytesRecv  uint64    `json:"net_bytes_recv" db:"net_bytes_recv"`
-	NetPktsSent   uint64    `json:"net_packets_sent" db:"net_packets_sent"`
-	NetPktsRecv   uint64    `json:"net_packets_recv" db:"net_packets_recv"`
-	Timestamp     string    `json:"timestamp" db:"timestamp"`
+	ID           int64   `json:"id" db:"id"`
+	CPUPercent   float64 `json:"cpu_percent" db:"cpu"`
+	CPULoad1m    float64 `json:"cpu_load_1m" db:"cpu_load_1m"`
+	CPULoad5m    float64 `json:"cpu_load_5m" db:"cpu_load_5m"`
+	CPULoad15m   float64 `json:"cpu_load_15m" db:"cpu_load_15m"`
+	MemTotal     uint64  `json:"mem_total" db:"mem_total"`
+	MemUsed      uint64  `json:"mem_used" db:"mem_used"`
+	MemAvailable uint64  `json:"mem_available" db:"mem_available"`
+	MemPercent   float64 `json:"mem_percent" db:"mem_usage"`
+	DiskTotal    uint64  `json:"disk_total" db:"disk_total"`
+	DiskUsed     uint64  `json:"disk_used" db:"disk_used"`
+	DiskFree     uint64  `json:"disk_free" db:"disk_free"`
+	DiskPercent  float64 `json:"disk_percent" db:"disk_usage"`
+	NetBytesSent uint64  `json:"net_bytes_sent" db:"net_bytes_sent"`
+	NetBytesRecv uint64  `json:"net_bytes_recv" db:"net_bytes_recv"`
+	NetPktsSent  uint64  `json:"net_packets_sent" db:"net_packets_sent"`
+	NetPktsRecv  uint64  `json:"net_packets_recv" db:"net_packets_recv"`
+	Timestamp    string  `json:"timestamp" db:"timestamp"`
 }
 
 // DiskPartition represents a single disk partition
@@ -89,9 +89,9 @@ type MonitorSnapshot struct {
 		BytesSent uint64 `json:"bytes_sent"`
 		BytesRecv uint64 `json:"bytes_recv"`
 	} `json:"network"`
-	System     *SystemInfo     `json:"system,omitempty"`
-	TopProcess []ProcessInfo   `json:"top_process,omitempty"`
-	Timestamp  string          `json:"timestamp"`
+	System     *SystemInfo   `json:"system,omitempty"`
+	TopProcess []ProcessInfo `json:"top_process,omitempty"`
+	Timestamp  string        `json:"timestamp"`
 }
 
 // ToSnapshot converts MonitorPoint to API response format

@@ -444,10 +444,10 @@ func fetchPythonVersions() ([]model.RuntimeVersion, error) {
 	}
 
 	var releases []struct {
-		Cycle      string `json:"cycle"`
-		Support    string `json:"support"`
-		EOL        string `json:"eol"`
-		Latest     string `json:"latest"`
+		Cycle   string `json:"cycle"`
+		Support string `json:"support"`
+		EOL     string `json:"eol"`
+		Latest  string `json:"latest"`
 	}
 	if err := json.Unmarshal(body, &releases); err != nil {
 		return nil, err
@@ -482,10 +482,10 @@ func fetchPHPVersions() ([]model.RuntimeVersion, error) {
 	}
 
 	var releases []struct {
-		Cycle      string `json:"cycle"`
-		Support    string `json:"support"`
-		EOL        string `json:"eol"`
-		Latest     string `json:"latest"`
+		Cycle   string `json:"cycle"`
+		Support string `json:"support"`
+		EOL     string `json:"eol"`
+		Latest  string `json:"latest"`
 	}
 	if err := json.Unmarshal(body, &releases); err != nil {
 		return nil, err

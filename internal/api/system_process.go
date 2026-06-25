@@ -183,3 +183,30 @@ func (h *SystemProcessHandler) RemoveFromWhitelist(c *gin.Context) {
 	}
 	Success(c, gin.H{"message": fmt.Sprintf("已从白名单移除 %s", name)})
 }
+
+func registerSystemProcessRoutes(protected *gin.RouterGroup, sps *service.SystemProcessService) {
+	handler := NewSystemProcessHandler(sps)
+
+	sysGroup := protected.Group("/system")
+	{
+		// System overview
+		sysGroup.GET("/overview", handler.GetSystemOverview)
+
+		// System processes (read-only monitoring)
+		sysGroup.GET("/processes", handler.ListSystemProcesses)
+		sysGroup.GET("/processes/:pid", handler.GetSystemProcess)
+
+		// System services (systemd management)
+		sysGroup.GET("/services", handler.ListSystemServices)
+		sysGroup.POST("/services/:name/action", handler.ServiceAction)
+		sysGroup.GET("/services/:name/logs", handler.GetServiceLogs)
+
+		// Protected services info
+		sysGroup.GET("/services/protected", handler.ListProtectedServices)
+
+		// Service whitelist
+		sysGroup.GET("/services/whitelist", handler.ListWhitelist)
+		sysGroup.POST("/services/whitelist", handler.AddToWhitelist)
+		sysGroup.DELETE("/services/whitelist/:name", handler.RemoveFromWhitelist)
+	}
+}

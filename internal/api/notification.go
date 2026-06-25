@@ -95,3 +95,17 @@ func (h *NotificationHandler) Delete(c *gin.Context) {
 	}
 	Success(c, gin.H{"message": "已删除"})
 }
+
+func registerNotificationRoutes(protected *gin.RouterGroup, ns *service.NotificationService) {
+	handler := NewNotificationHandler(ns)
+
+	notifGroup := protected.Group("/notifications")
+	{
+		notifGroup.GET("", handler.List)
+		notifGroup.GET("/unread-count", handler.CountUnread)
+		notifGroup.POST("", handler.Create)
+		notifGroup.PUT("/:id/read", handler.MarkAsRead)
+		notifGroup.PUT("/read-all", handler.MarkAllAsRead)
+		notifGroup.DELETE("/:id", handler.Delete)
+	}
+}

@@ -19,6 +19,12 @@ func NewMonitorRepository(db *sql.DB) repository.MonitorRepository {
 	return &MonitorRepository{db: db}
 }
 
+// EnsureIndexes creates necessary indexes for monitor data
+func (r *MonitorRepository) EnsureIndexes(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_monitor_data_timestamp ON monitor_data(timestamp)")
+	return err
+}
+
 // Save saves a single monitor point
 func (r *MonitorRepository) Save(ctx context.Context, point *model.MonitorPoint) error {
 	_, err := r.db.ExecContext(ctx,

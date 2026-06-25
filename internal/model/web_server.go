@@ -8,8 +8,8 @@ import (
 // WebServer represents a web server software (Nginx, Tomcat, Apache, Caddy)
 type WebServer struct {
 	ID             int64  `json:"id"`
-	Name           string `json:"name"`            // nginx, tomcat, apache, caddy
-	DisplayName    string `json:"display_name"`    // Nginx, Tomcat, Apache, Caddy
+	Name           string `json:"name"`         // nginx, tomcat, apache, caddy
+	DisplayName    string `json:"display_name"` // Nginx, Tomcat, Apache, Caddy
 	Description    string `json:"description"`
 	InstallCmd     string `json:"install_cmd"`     // apt install -y nginx
 	UninstallCmd   string `json:"uninstall_cmd"`   // apt remove -y nginx
@@ -22,13 +22,13 @@ type WebServer struct {
 	DefaultPort    int    `json:"default_port"`    // 80, 8080
 	LogDir         string `json:"log_dir"`         // /var/log/nginx
 	// Runtime state (populated by RefreshStatus)
-	Status      string `json:"status"`       // not_installed, running, stopped
+	Status      string `json:"status"` // not_installed, running, stopped
 	Version     string `json:"version"`
 	PID         int    `json:"pid"`
 	MemoryBytes int64  `json:"memory_bytes"`
-	Uptime      string `json:"uptime"`       // human-readable uptime
-	AutoStart   bool   `json:"auto_start"`   // systemctl is-enabled
-	ConfigOK    bool   `json:"config_ok"`    // config test result
+	Uptime      string `json:"uptime"`     // human-readable uptime
+	AutoStart   bool   `json:"auto_start"` // systemctl is-enabled
+	ConfigOK    bool   `json:"config_ok"`  // config test result
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -41,7 +41,7 @@ type Website struct {
 	RootPath     string `json:"root_path"`
 	Port         int    `json:"port"`
 	ProjectType  string `json:"project_type"` // static, nodejs, php, python, java, proxy
-	AppPort      int    `json:"app_port"`      // app listen port (e.g. 3000 for Node.js)
+	AppPort      int    `json:"app_port"`     // app listen port (e.g. 3000 for Node.js)
 	SSLEnabled   bool   `json:"ssl_enabled"`
 	SSLCertPath  string `json:"ssl_cert_path"`
 	SSLKeyPath   string `json:"ssl_key_path"`
@@ -56,12 +56,12 @@ type Website struct {
 }
 
 type CreateWebsiteRequest struct {
-	Name        string `json:"name" binding:"required"`
-	Domain      string `json:"domain" binding:"required"`
-	RootPath    string `json:"root_path" binding:"required"`
-	Port        int    `json:"port"`
-	ProjectType string `json:"project_type"` // static, nodejs, php, python, java, proxy
-	AppPort     int    `json:"app_port"`
+	Name         string `json:"name" binding:"required"`
+	Domain       string `json:"domain" binding:"required"`
+	RootPath     string `json:"root_path" binding:"required"`
+	Port         int    `json:"port"`
+	ProjectType  string `json:"project_type"` // static, nodejs, php, python, java, proxy
+	AppPort      int    `json:"app_port"`
 	CustomConfig string `json:"custom_config"`
 }
 
@@ -113,9 +113,9 @@ func GetProjectTypes() []ProjectTypeConfig {
 // It only accepts display-level fields; install/uninstall commands are derived
 // from the predefined template matching the Name field.
 type CreateWebServerRequest struct {
-	Name        string `json:"name" binding:"required"`        // e.g. "nginx", "apache"
-	DisplayName string `json:"display_name"`                   // optional override
-	Description string `json:"description"`                    // optional override
+	Name        string `json:"name" binding:"required"` // e.g. "nginx", "apache"
+	DisplayName string `json:"display_name"`            // optional override
+	Description string `json:"description"`             // optional override
 }
 
 // FindPredefinedWebServer looks up a predefined server config by name.

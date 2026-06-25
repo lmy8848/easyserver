@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +10,7 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 const (
@@ -21,15 +21,15 @@ const (
 
 // DBBackupService handles database backup and restore operations
 type DBBackupService struct {
-	db        *sql.DB
+	repo      repository.DBBackupRepository
 	backupDir string
 	executor  executor.CommandExecutor
 }
 
 // NewDBBackupService creates a new DBBackupService
-func NewDBBackupService(db *sql.DB, exec executor.CommandExecutor) *DBBackupService {
+func NewDBBackupService(repo repository.DBBackupRepository, exec executor.CommandExecutor) *DBBackupService {
 	return &DBBackupService{
-		db:        db,
+		repo:      repo,
 		backupDir: DefaultBackupDir,
 		executor:  exec,
 	}
@@ -38,29 +38,6 @@ func NewDBBackupService(db *sql.DB, exec executor.CommandExecutor) *DBBackupServ
 // SetBackupDir sets the backup directory
 func (s *DBBackupService) SetBackupDir(dir string) {
 	s.backupDir = dir
-}
-
-// Deprecated: InitTables is kept for backward compatibility only.
-// Table creation is now handled by the migration system (migrations/ directory).
-func (s *DBBackupService) InitTables(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	query := `CREATE TABLE IF NOT EXISTS db_backups (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		db_server_id INTEGER NOT NULL,
-		db_version_id INTEGER NOT NULL,
-		database_id INTEGER DEFAULT 0,
-		database_name TEXT NOT NULL,
-		backup_type TEXT NOT NULL DEFAULT 'manual',
-		file_path TEXT NOT NULL,
-		file_size INTEGER DEFAULT 0,
-		status TEXT DEFAULT 'completed',
-		error_message TEXT DEFAULT '',
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`
-	_, err := s.db.ExecContext(ctx, query)
-	return err
 }
 
 // CreateBackup creates a backup of a database
@@ -96,14 +73,11 @@ func (s *DBBackupService) CreateBackup(ctx context.Context, dbServerID, dbVersio
 		Status:       "pending",
 	}
 
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO db_backups (db_server_id, db_version_id, database_id, database_name, backup_type, file_path, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		backup.DBServerID, backup.DBVersionID, backup.DatabaseID, backup.DatabaseName, backup.BackupType, backup.FilePath, backup.Status)
+	id, err := s.repo.CreateBackup(ctx, backup)
 	if err != nil {
-		return nil, fmt.Errorf("insert backup record: %w", err)
+		return nil, err
 	}
-	backup.ID, _ = result.LastInsertId()
+	backup.ID = id
 
 	// Execute backup in background with a detached context (request context
 	// would be cancelled when the HTTP handler returns, killing the backup).
@@ -142,9 +116,7 @@ func (s *DBBackupService) executeBackup(ctx context.Context, backup *model.DBBac
 	}
 
 	// Update backup record
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE db_backups SET status = ?, file_size = ?, error_message = ? WHERE id = ?`,
-		backup.Status, backup.FileSize, backup.ErrorMessage, backup.ID); err != nil {
+	if err := s.repo.UpdateBackupStatus(ctx, backup.ID, backup.Status, backup.FileSize, backup.ErrorMessage); err != nil {
 		log.Printf("failed to update backup record %d: %v", backup.ID, err)
 	}
 }
@@ -188,47 +160,17 @@ func (s *DBBackupService) backupRedis(ctx context.Context, backup *model.DBBacku
 
 // ListBackups returns all backups for a database
 func (s *DBBackupService) ListBackups(ctx context.Context, databaseID int64) ([]model.DBBackup, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, db_server_id, db_version_id, database_id, database_name, backup_type, file_path, file_size, status, error_message, created_at
-		FROM db_backups WHERE database_id = ? ORDER BY created_at DESC`, databaseID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var backups []model.DBBackup
-	for rows.Next() {
-		var b model.DBBackup
-		if err := rows.Scan(&b.ID, &b.DBServerID, &b.DBVersionID, &b.DatabaseID, &b.DatabaseName, &b.BackupType, &b.FilePath, &b.FileSize, &b.Status, &b.ErrorMessage, &b.CreatedAt); err != nil {
-			log.Printf("scan backup row: %v", err)
-			continue
-		}
-		backups = append(backups, b)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate backups: %w", err)
-	}
-	return backups, nil
+	return s.repo.ListBackups(ctx, databaseID)
 }
 
 // GetBackup returns a backup by ID
 func (s *DBBackupService) GetBackup(ctx context.Context, id int64) (*model.DBBackup, error) {
-	var b model.DBBackup
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, db_server_id, db_version_id, database_id, database_name, backup_type, file_path, file_size, status, error_message, created_at
-		FROM db_backups WHERE id = ?`, id).Scan(&b.ID, &b.DBServerID, &b.DBVersionID, &b.DatabaseID, &b.DatabaseName, &b.BackupType, &b.FilePath, &b.FileSize, &b.Status, &b.ErrorMessage, &b.CreatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &b, nil
+	return s.repo.GetBackup(ctx, id)
 }
 
 // DeleteBackup deletes a backup file and record
 func (s *DBBackupService) DeleteBackup(ctx context.Context, id int64) error {
-	backup, err := s.GetBackup(ctx, id)
+	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
 		return fmt.Errorf("backup not found: %w", err)
 	}
@@ -239,13 +181,12 @@ func (s *DBBackupService) DeleteBackup(ctx context.Context, id int64) error {
 	}
 
 	// Delete record
-	_, err = s.db.ExecContext(ctx, "DELETE FROM db_backups WHERE id = ?", id)
-	return err
+	return s.repo.DeleteBackup(ctx, id)
 }
 
 // RestoreBackup restores a database from backup
 func (s *DBBackupService) RestoreBackup(ctx context.Context, id int64, dbType string) error {
-	backup, err := s.GetBackup(ctx, id)
+	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
 		return fmt.Errorf("backup not found: %w", err)
 	}
@@ -319,37 +260,16 @@ func (s *DBBackupService) CleanOldBackups(ctx context.Context, databaseID int64,
 	}
 
 	// Get backups ordered by date
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, file_path FROM db_backups WHERE database_id = ? ORDER BY created_at DESC`, databaseID)
+	backups, err := s.repo.ListBackups(ctx, databaseID)
 	if err != nil {
 		return err
-	}
-	defer rows.Close()
-
-	var backups []struct {
-		ID       int64
-		FilePath string
-	}
-	for rows.Next() {
-		var b struct {
-			ID       int64
-			FilePath string
-		}
-		if err := rows.Scan(&b.ID, &b.FilePath); err != nil {
-			log.Printf("scan backup row for cleanup: %v", err)
-			continue
-		}
-		backups = append(backups, b)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate backups for cleanup: %w", err)
 	}
 
 	// Delete old backups
 	if len(backups) > maxBackups {
 		for _, b := range backups[maxBackups:] {
 			os.Remove(b.FilePath)
-			s.db.ExecContext(ctx, "DELETE FROM db_backups WHERE id = ?", b.ID)
+			s.repo.DeleteBackup(ctx, b.ID)
 		}
 	}
 

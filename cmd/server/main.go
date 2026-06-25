@@ -97,17 +97,20 @@ func main() {
 	sessionRepo := sqlite.NewSessionRepository(db)
 	tokenRepo := sqlite.NewTokenBlacklistRepository(db)
 	auditRepo := sqlite.NewAuditRepository(db)
+	activityRepo := sqlite.NewActivityRepository(db)
+	totpRepo := sqlite.NewTOTPRepository(db)
+	monitorRepo := sqlite.NewMonitorRepository(db)
 
 	// Initialize auth service and default admin (single shared instance)
-	authService := service.NewAuthService(db, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration)
-	authService.SetRepositories(userRepo, tokenRepo)
+	authService := service.NewAuthService(cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration)
+	authService.SetRepositories(userRepo, tokenRepo, activityRepo, totpRepo)
 	if err := authService.InitDefaultAdmin(context.Background()); err != nil {
 		log.Fatalf("Failed to initialize default admin: %v", err)
 	}
 
 	// Initialize monitor service with WaitGroup for proper shutdown
 	var monitorWg sync.WaitGroup
-	monitorService := service.NewMonitorService(db, cfg.Monitor.CollectInterval, cfg.Monitor.HistoryRetention)
+	monitorService := service.NewMonitorService(monitorRepo, cfg.Monitor.CollectInterval, cfg.Monitor.HistoryRetention)
 	monitorWg.Add(1)
 	go func() {
 		defer monitorWg.Done()
@@ -124,7 +127,7 @@ func main() {
 	systemMonitor.Start()
 
 	// Initialize session service and start cleanup (single shared instance)
-	sessionService := service.NewSessionServiceWithRepo(sessionRepo, db)
+	sessionService := service.NewSessionService(sessionRepo)
 	sessionDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(cfg.Auth.SessionCleanupInterval)
@@ -148,7 +151,11 @@ func main() {
 	systemProcessService := service.NewSystemProcessService(db, cmdExec)
 
 	// Initialize notification service (single shared instance)
-	notificationService := service.NewNotificationService(db)
+	notificationRepo := sqlite.NewNotificationRepository(db)
+	notificationService := service.NewNotificationService(notificationRepo)
+
+	// Initialize TOTP service (single shared instance)
+	totpService := service.NewTOTPService(totpRepo)
 
 	// Initialize container services (single shared instance)
 	containerService := service.NewContainerService(cmdExec)
@@ -158,27 +165,34 @@ func main() {
 	networkService := service.NewNetworkService(cmdExec)
 
 	// Initialize cron service (single shared instance)
-	cronService := service.NewCronService(db, cmdExec)
+	cronRepo := sqlite.NewCronRepository(db)
+	cronService := service.NewCronService(cronRepo, cmdExec)
 
 	// Initialize database services (single shared instance)
-	dbServerService := service.NewDBServerService(db, cmdExec)
+	dbServerRepo := sqlite.NewDBServerRepository(db)
+	dbServerService := service.NewDBServerService(db, cmdExec, dbServerRepo)
 	dbServerService.SeedPredefinedServers(context.Background())
-	databaseMgmtService := service.NewDatabaseMgmtService(db, cmdExec)
-	dbBackupService := service.NewDBBackupService(db, cmdExec)
+	databaseMgmtRepo := sqlite.NewDatabaseMgmtRepository(db)
+	databaseMgmtService := service.NewDatabaseMgmtService(databaseMgmtRepo, cmdExec)
+	dbBackupRepo := sqlite.NewDBBackupRepository(db)
+	dbBackupService := service.NewDBBackupService(dbBackupRepo, cmdExec)
 	sqlQueryService := service.NewSQLQueryService(databaseMgmtService)
 
 	// Initialize deploy service (single shared instance)
-	deployService, err := service.NewDeployService(db, cfg.Deploy.EncryptionKey)
+	deployRepo := sqlite.NewDeployRepository(db)
+	deployService, err := service.NewDeployService(deployRepo, cfg.Deploy.EncryptionKey)
 	if err != nil {
 		log.Fatalf("Failed to init deploy service: %v", err)
 	}
 
 	// Initialize environment config service (single shared instance)
-	envConfigService := service.NewEnvConfigService(db)
+	envConfigRepo := sqlite.NewEnvConfigRepository(db)
+	envConfigService := service.NewEnvConfigService(envConfigRepo)
 	envConfigService.InitDefaultGlobalConfigs(context.Background())
 
 	// Initialize firewall service (single shared instance)
-	firewallService := service.NewFirewallService(db, cmdExec)
+	firewallRepo := sqlite.NewFirewallRepository(db)
+	firewallService := service.NewFirewallService(firewallRepo, cmdExec)
 
 	// Initialize runtime services (single shared instance)
 	runtimeService := service.NewRuntimeService(db, cmdExec)
@@ -189,9 +203,11 @@ func main() {
 	sshConfigService := service.NewSSHConfigService(cmdExec)
 
 	// Initialize web server services (single shared instance)
-	webServerService := service.NewWebServerService(db, cmdExec)
+	webServerRepo := sqlite.NewWebServerRepository(db)
+	websiteRepo := sqlite.NewWebsiteRepository(db)
+	webServerService := service.NewWebServerService(webServerRepo, cmdExec)
 	webServerService.SeedPredefinedWebServers(context.Background())
-	websiteService := service.NewWebsiteService(db, cmdExec)
+	websiteService := service.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
 
 	// Log server start
 	auditService.LogSystemEvent(context.Background(), "SERVER_START", "EasyServer started")
@@ -204,7 +220,7 @@ func main() {
 		MonitorService:       monitorService,
 		AuditService:         auditService,
 		SessionService:       sessionService,
-		TotpService:          service.NewTOTPService(db),
+		TotpService:          totpService,
 		AuditRepo:            auditRepo,
 		ProcessManager:       processManager,
 		SystemProcessService: systemProcessService,

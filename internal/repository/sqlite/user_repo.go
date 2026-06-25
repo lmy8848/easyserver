@@ -200,3 +200,65 @@ func (r *UserRepository) SetMustChangePass(ctx context.Context, id int64, mustCh
 	)
 	return err
 }
+
+// IncrementLoginAttempts atomically increments login_attempts by 1
+func (r *UserRepository) IncrementLoginAttempts(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE users SET login_attempts = login_attempts + 1 WHERE id = ?", id)
+	return err
+}
+
+// IncrementLoginAttemptsWithLock atomically increments login attempts and locks the account if threshold is reached
+func (r *UserRepository) IncrementLoginAttemptsWithLock(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET
+		login_attempts = login_attempts + 1,
+		locked_until = CASE
+			WHEN login_attempts + 1 >= ? THEN datetime('now', ?)
+			ELSE locked_until
+		END
+		WHERE id = ?`, maxAttempts, fmt.Sprintf("+%d seconds", lockoutSeconds), id)
+	return err
+}
+
+// ResetLoginState resets login attempts and updates last login info on successful login
+func (r *UserRepository) ResetLoginState(ctx context.Context, id int64, ip string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE users SET login_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP, last_login_ip = ? WHERE id = ?",
+		ip, id)
+	return err
+}
+
+// UpdateLastLoginIP updates only the last login IP
+func (r *UserRepository) UpdateLastLoginIP(ctx context.Context, id int64, ip string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE users SET last_login_ip = ? WHERE id = ?", ip, id)
+	return err
+}
+
+// SetAccountExpiry sets the account expiration date (nil means no expiry)
+func (r *UserRepository) SetAccountExpiry(ctx context.Context, id int64, expiresAt *time.Time) error {
+	if expiresAt == nil {
+		_, err := r.db.ExecContext(ctx, "UPDATE users SET expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, "UPDATE users SET expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", expiresAt, id)
+	return err
+}
+
+// GetAccountExpiry returns the account expiration time
+func (r *UserRepository) GetAccountExpiry(ctx context.Context, id int64) (sql.NullTime, error) {
+	var expiresAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, "SELECT expires_at FROM users WHERE id = ?", id).Scan(&expiresAt)
+	return expiresAt, err
+}
+
+// SetIPWhitelist sets the IP whitelist for a user
+func (r *UserRepository) SetIPWhitelist(ctx context.Context, id int64, whitelist string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE users SET ip_whitelist = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", whitelist, id)
+	return err
+}
+
+// GetIPWhitelist returns the IP whitelist string for a user
+func (r *UserRepository) GetIPWhitelist(ctx context.Context, id int64) (string, error) {
+	var whitelist string
+	err := r.db.QueryRowContext(ctx, "SELECT COALESCE(ip_whitelist, '') FROM users WHERE id = ?", id).Scan(&whitelist)
+	return whitelist, err
+}

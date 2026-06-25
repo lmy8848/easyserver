@@ -88,7 +88,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 			items = append(items, AuditLogItem{
 				ID:        log.ID,
 				UserID:    log.UserID,
-				Username:   log.Username,
+				Username:  log.Username,
 				Action:    log.Action,
 				Resource:  log.Resource,
 				Detail:    log.Detail,
@@ -524,4 +524,15 @@ func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
 		"valid":   valid,
 		"invalid": invalid,
 	})
+}
+
+func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *service.AuditService, auditRepo repository.AuditRepository) {
+	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
+	protected.GET("/audit-logs", handler.List)
+	protected.GET("/audit-logs/actions", handler.GetActions)
+	protected.GET("/audit-logs/stats", handler.Stats)
+	protected.GET("/audit-logs/clean-policy", handler.GetCleanPolicy)
+	protected.GET("/audit-logs/export", handler.Export)
+	protected.DELETE("/audit-logs/clean", handler.Clean)
+	protected.GET("/audit-logs/verify", handler.VerifyIntegrity)
 }

@@ -2,61 +2,25 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
-type DeployServer struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	Username  string `json:"username"`
-	AuthType  string `json:"auth_type"`  // password or key
-	AuthData  string `json:"auth_data"`  // password or key path (encrypted in DB)
-	Status    string `json:"status"`     // online, offline, unknown
-	LastPing  string `json:"last_ping"`
-	CreatedAt string `json:"created_at"`
-}
-
-type DeployTask struct {
-	ID         int64  `json:"id"`
-	ServerID   int64  `json:"server_id"`
-	ServerName string `json:"server_name"`
-	Name       string `json:"name"`
-	Type       string `json:"type"` // sync, command, rollback
-	SourcePath string `json:"source_path"`
-	DestPath   string `json:"dest_path"`
-	Command    string `json:"command"`
-	Status     string `json:"status"` // pending, running, success, failed
-	Result     string `json:"result"`
-	CreatedAt  string `json:"created_at"`
-}
-
-type DeployVersion struct {
-	ID         int64  `json:"id"`
-	ServerID   int64  `json:"server_id"`
-	ServerName string `json:"server_name"`
-	TaskID     int64  `json:"task_id"`
-	Version    string `json:"version"`
-	Files      string `json:"files"`       // JSON array of changed files
-	BackupPath string `json:"backup_path"`
-	CreatedAt  string `json:"created_at"`
-}
-
 type DeployService struct {
-	db             *sql.DB
-	encryptionKey  []byte
+	repo          repository.DeployRepository
+	encryptionKey []byte
 }
 
-func NewDeployService(db *sql.DB, encryptionKey string) (*DeployService, error) {
+func NewDeployService(repo repository.DeployRepository, encryptionKey string) (*DeployService, error) {
 	if encryptionKey == "" {
 		// Allow empty key but don't encrypt
-		return &DeployService{db: db}, nil
+		return &DeployService{repo: repo}, nil
 	}
 
 	if len(encryptionKey) < 32 {
@@ -64,61 +28,25 @@ func NewDeployService(db *sql.DB, encryptionKey string) (*DeployService, error) 
 	}
 
 	return &DeployService{
-		db:            db,
+		repo:          repo,
 		encryptionKey: []byte(encryptionKey[:32]),
 	}, nil
 }
 
 // Server CRUD
 
-func (s *DeployService) ListServers(ctx context.Context) ([]DeployServer, error) {
+func (s *DeployService) ListServers(ctx context.Context) ([]model.DeployServer, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, host, port, username, auth_type, status, last_ping, created_at FROM deploy_servers ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var servers []DeployServer
-	for rows.Next() {
-		var srv DeployServer
-		var lastPing sql.NullString
-		err := rows.Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Port, &srv.Username, &srv.AuthType, &srv.Status, &lastPing, &srv.CreatedAt)
-		if err != nil {
-			log.Printf("deploy: scan server row error: %v", err)
-			continue
-		}
-		if lastPing.Valid {
-			srv.LastPing = lastPing.String
-		}
-		servers = append(servers, srv)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate servers: %w", err)
-	}
-
-	return servers, nil
+	return s.repo.ListServers(ctx)
 }
 
-func (s *DeployService) GetServer(ctx context.Context, id int64) (*DeployServer, error) {
+func (s *DeployService) GetServer(ctx context.Context, id int64) (*model.DeployServer, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	srv := &DeployServer{}
-	var lastPing sql.NullString
-	err := s.db.QueryRowContext(ctx,
-		"SELECT id, name, host, port, username, auth_type, status, last_ping, created_at FROM deploy_servers WHERE id = ?", id,
-	).Scan(&srv.ID, &srv.Name, &srv.Host, &srv.Port, &srv.Username, &srv.AuthType, &srv.Status, &lastPing, &srv.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	if lastPing.Valid {
-		srv.LastPing = lastPing.String
-	}
-	return srv, nil
+	return s.repo.GetServer(ctx, id)
 }
 
 // GetServerAuthData returns the decrypted auth data for internal use only
@@ -126,10 +54,7 @@ func (s *DeployService) GetServerAuthData(ctx context.Context, id int64) (string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var authData string
-	err := s.db.QueryRowContext(ctx,
-		"SELECT auth_data FROM deploy_servers WHERE id = ?", id,
-	).Scan(&authData)
+	authData, err := s.repo.GetServerAuthData(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +73,7 @@ func (s *DeployService) GetServerAuthData(ctx context.Context, id int64) (string
 	return authData, nil
 }
 
-func (s *DeployService) CreateServer(ctx context.Context, srv *DeployServer) error {
+func (s *DeployService) CreateServer(ctx context.Context, srv *model.DeployServer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -162,18 +87,11 @@ func (s *DeployService) CreateServer(ctx context.Context, srv *DeployServer) err
 		authData = encrypted
 	}
 
-	result, err := s.db.ExecContext(ctx,
-		"INSERT INTO deploy_servers (name, host, port, username, auth_type, auth_data) VALUES (?, ?, ?, ?, ?, ?)",
-		srv.Name, srv.Host, srv.Port, srv.Username, srv.AuthType, authData,
-	)
-	if err != nil {
-		return err
-	}
-	srv.ID, _ = result.LastInsertId()
-	return nil
+	srv.AuthData = authData
+	return s.repo.CreateServer(ctx, srv)
 }
 
-func (s *DeployService) UpdateServer(ctx context.Context, srv *DeployServer) error {
+func (s *DeployService) UpdateServer(ctx context.Context, srv *model.DeployServer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -187,11 +105,8 @@ func (s *DeployService) UpdateServer(ctx context.Context, srv *DeployServer) err
 		authData = encrypted
 	}
 
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE deploy_servers SET name=?, host=?, port=?, username=?, auth_type=?, auth_data=? WHERE id=?",
-		srv.Name, srv.Host, srv.Port, srv.Username, srv.AuthType, authData, srv.ID,
-	)
-	return err
+	srv.AuthData = authData
+	return s.repo.UpdateServer(ctx, srv)
 }
 
 func (s *DeployService) DeleteServer(ctx context.Context, id int64) error {
@@ -199,12 +114,12 @@ func (s *DeployService) DeleteServer(ctx context.Context, id int64) error {
 		ctx = context.Background()
 	}
 	// Check for sub-resources before deleting
-	var taskCount int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM deploy_tasks WHERE server_id = ?", id).Scan(&taskCount); err != nil {
+	taskCount, err := s.repo.CountServerTasks(ctx, id)
+	if err != nil {
 		return fmt.Errorf("failed to check tasks: %w", err)
 	}
-	var versionCount int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM deploy_versions WHERE server_id = ?", id).Scan(&versionCount); err != nil {
+	versionCount, err := s.repo.CountServerVersions(ctx, id)
+	if err != nil {
 		return fmt.Errorf("failed to check versions: %w", err)
 	}
 
@@ -212,8 +127,7 @@ func (s *DeployService) DeleteServer(ctx context.Context, id int64) error {
 		return fmt.Errorf("server has %d tasks and %d versions; delete them first", taskCount, versionCount)
 	}
 
-	_, err := s.db.ExecContext(ctx, "DELETE FROM deploy_servers WHERE id=?", id)
-	return err
+	return s.repo.DeleteServer(ctx, id)
 }
 
 // TestConnection tests SSH connection to a server
@@ -229,7 +143,7 @@ func (s *DeployService) TestConnection(ctx context.Context, id int64) error {
 	// Get auth data
 	authData, err := s.GetServerAuthData(ctx, id)
 	if err != nil {
-		s.db.ExecContext(ctx, "UPDATE deploy_servers SET status='offline', last_ping=? WHERE id=?", time.Now().Format(time.RFC3339), id)
+		s.repo.UpdateServerStatus(ctx, id, "offline", time.Now().Format(time.RFC3339))
 		return fmt.Errorf("failed to get auth data: %w", err)
 	}
 
@@ -238,131 +152,54 @@ func (s *DeployService) TestConnection(ctx context.Context, id int64) error {
 	// Try SSH connection
 	client, err := NewSSHClient(srv, authData)
 	if err != nil {
-		s.db.ExecContext(ctx, "UPDATE deploy_servers SET status='offline', last_ping=? WHERE id=?", time.Now().Format(time.RFC3339), id)
+		s.repo.UpdateServerStatus(ctx, id, "offline", time.Now().Format(time.RFC3339))
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 	defer client.Close()
 
 	// Connection successful
-	s.db.ExecContext(ctx, "UPDATE deploy_servers SET status='online', last_ping=? WHERE id=?", time.Now().Format(time.RFC3339), id)
+	s.repo.UpdateServerStatus(ctx, id, "online", time.Now().Format(time.RFC3339))
 	log.Printf("deploy: tested connection to %s (%s:%d) - OK", srv.Name, srv.Host, srv.Port)
 	return nil
 }
 
 // Task CRUD
 
-func (s *DeployService) ListTasks(ctx context.Context) ([]DeployTask, error) {
+func (s *DeployService) ListTasks(ctx context.Context) ([]model.DeployTask, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.server_id, s.name, t.name, t.type, t.source_path, t.dest_path, t.command, t.status, t.result, t.created_at
-		FROM deploy_tasks t
-		LEFT JOIN deploy_servers s ON t.server_id = s.id
-		ORDER BY t.id DESC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tasks []DeployTask
-	for rows.Next() {
-		var task DeployTask
-		var serverName, sourcePath, destPath, command, result sql.NullString
-		err := rows.Scan(&task.ID, &task.ServerID, &serverName, &task.Name, &task.Type, &sourcePath, &destPath, &command, &task.Status, &result, &task.CreatedAt)
-		if err != nil {
-			log.Printf("deploy: scan task row error: %v", err)
-			continue
-		}
-		if serverName.Valid {
-			task.ServerName = serverName.String
-		}
-		if sourcePath.Valid {
-			task.SourcePath = sourcePath.String
-		}
-		if destPath.Valid {
-			task.DestPath = destPath.String
-		}
-		if command.Valid {
-			task.Command = command.String
-		}
-		if result.Valid {
-			task.Result = result.String
-		}
-		tasks = append(tasks, task)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tasks: %w", err)
-	}
-
-	return tasks, nil
+	return s.repo.ListTasks(ctx)
 }
 
-func (s *DeployService) GetTask(ctx context.Context, id int64) (*DeployTask, error) {
+func (s *DeployService) GetTask(ctx context.Context, id int64) (*model.DeployTask, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	task := &DeployTask{}
-	var serverName, sourcePath, destPath, command, result sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT t.id, t.server_id, s.name, t.name, t.type, t.source_path, t.dest_path, t.command, t.status, t.result, t.created_at
-		FROM deploy_tasks t
-		LEFT JOIN deploy_servers s ON t.server_id = s.id
-		WHERE t.id = ?
-	`, id).Scan(&task.ID, &task.ServerID, &serverName, &task.Name, &task.Type, &sourcePath, &destPath, &command, &task.Status, &result, &task.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	if serverName.Valid {
-		task.ServerName = serverName.String
-	}
-	if sourcePath.Valid {
-		task.SourcePath = sourcePath.String
-	}
-	if destPath.Valid {
-		task.DestPath = destPath.String
-	}
-	if command.Valid {
-		task.Command = command.String
-	}
-	if result.Valid {
-		task.Result = result.String
-	}
-	return task, nil
+	return s.repo.GetTask(ctx, id)
 }
 
-func (s *DeployService) CreateTask(ctx context.Context, task *DeployTask) error {
+func (s *DeployService) CreateTask(ctx context.Context, task *model.DeployTask) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	// Verify server exists
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM deploy_servers WHERE id = ?)", task.ServerID).Scan(&exists); err != nil {
+	exists, err := s.repo.ServerExists(ctx, task.ServerID)
+	if err != nil {
 		return fmt.Errorf("failed to check server: %w", err)
 	}
 	if !exists {
 		return fmt.Errorf("server %d does not exist", task.ServerID)
 	}
 
-	result, err := s.db.ExecContext(ctx,
-		"INSERT INTO deploy_tasks (server_id, name, type, source_path, dest_path, command) VALUES (?, ?, ?, ?, ?, ?)",
-		task.ServerID, task.Name, task.Type, task.SourcePath, task.DestPath, task.Command,
-	)
-	if err != nil {
-		return err
-	}
-	task.ID, _ = result.LastInsertId()
-	return nil
+	return s.repo.CreateTask(ctx, task)
 }
 
 func (s *DeployService) DeleteTask(ctx context.Context, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM deploy_tasks WHERE id=?", id)
-	return err
+	return s.repo.DeleteTask(ctx, id)
 }
 
 // ExecuteTask executes a deploy task
@@ -386,7 +223,7 @@ func (s *DeployService) ExecuteTask(ctx context.Context, taskID int64) error {
 	}
 
 	// Update task status
-	if _, err := s.db.ExecContext(ctx, "UPDATE deploy_tasks SET status='running' WHERE id=?", taskID); err != nil {
+	if err := s.repo.UpdateTaskStatus(ctx, taskID, "running", ""); err != nil {
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
 
@@ -404,23 +241,23 @@ func (s *DeployService) ExecuteTask(ctx context.Context, taskID int64) error {
 	}
 
 	if err != nil {
-		if _, updateErr := s.db.ExecContext(ctx, "UPDATE deploy_tasks SET status='failed', result=? WHERE id=?", err.Error(), taskID); updateErr != nil {
+		if updateErr := s.repo.UpdateTaskStatus(ctx, taskID, "failed", err.Error()); updateErr != nil {
 			log.Printf("deploy: failed to update task status to failed: %v", updateErr)
 		}
 		return err
 	}
 
-	if _, err := s.db.ExecContext(ctx, "UPDATE deploy_tasks SET status='success', result=? WHERE id=?", result, taskID); err != nil {
+	if err := s.repo.UpdateTaskStatus(ctx, taskID, "success", result); err != nil {
 		log.Printf("deploy: failed to update task status to success: %v", err)
 	}
 
 	// Create version record
-	s.createVersion(task, result)
+	s.createVersion(ctx, task, result)
 
 	return nil
 }
 
-func (s *DeployService) executeSync(srv *DeployServer, task *DeployTask) (string, error) {
+func (s *DeployService) executeSync(srv *model.DeployServer, task *model.DeployTask) (string, error) {
 	// Validate inputs
 	if task.SourcePath == "" {
 		return "", fmt.Errorf("source path is required")
@@ -461,7 +298,7 @@ func (s *DeployService) executeSync(srv *DeployServer, task *DeployTask) (string
 	return result, nil
 }
 
-func (s *DeployService) executeCommand(srv *DeployServer, task *DeployTask) (string, error) {
+func (s *DeployService) executeCommand(srv *model.DeployServer, task *model.DeployTask) (string, error) {
 	// Validate inputs
 	if task.Command == "" {
 		return "", fmt.Errorf("command is required")
@@ -504,7 +341,7 @@ func (s *DeployService) executeCommand(srv *DeployServer, task *DeployTask) (str
 	return result, nil
 }
 
-func (s *DeployService) executeRollback(srv *DeployServer, task *DeployTask) (string, error) {
+func (s *DeployService) executeRollback(srv *model.DeployServer, task *model.DeployTask) (string, error) {
 	// Get auth data
 	authData, err := s.GetServerAuthData(context.Background(), srv.ID)
 	if err != nil {
@@ -536,58 +373,23 @@ func (s *DeployService) executeRollback(srv *DeployServer, task *DeployTask) (st
 	return fmt.Sprintf("Rollback completed on %s", srv.Host), nil
 }
 
-func (s *DeployService) createVersion(task *DeployTask, result string) {
+func (s *DeployService) createVersion(ctx context.Context, task *model.DeployTask, result string) {
 	version := fmt.Sprintf("v%s", time.Now().Format("20060102-150405"))
-	s.db.Exec(
-		"INSERT INTO deploy_versions (server_id, task_id, version, files) VALUES (?, ?, ?, ?)",
-		task.ServerID, task.ID, version, result,
-	)
+	s.repo.CreateVersion(ctx, &model.DeployVersion{
+		ServerID: task.ServerID,
+		TaskID:   task.ID,
+		Version:  version,
+		Files:    result,
+	})
 }
 
 // Version management
 
-func (s *DeployService) ListVersions(ctx context.Context, serverID int64) ([]DeployVersion, error) {
+func (s *DeployService) ListVersions(ctx context.Context, serverID int64) ([]model.DeployVersion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.id, v.server_id, s.name, v.task_id, v.version, v.files, v.backup_path, v.created_at
-		FROM deploy_versions v
-		LEFT JOIN deploy_servers s ON v.server_id = s.id
-		WHERE v.server_id = ?
-		ORDER BY v.id DESC
-	`, serverID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var versions []DeployVersion
-	for rows.Next() {
-		var ver DeployVersion
-		var serverName, files, backupPath sql.NullString
-		err := rows.Scan(&ver.ID, &ver.ServerID, &serverName, &ver.TaskID, &ver.Version, &files, &backupPath, &ver.CreatedAt)
-		if err != nil {
-			log.Printf("deploy: scan version row error: %v", err)
-			continue
-		}
-		if serverName.Valid {
-			ver.ServerName = serverName.String
-		}
-		if files.Valid {
-			ver.Files = files.String
-		}
-		if backupPath.Valid {
-			ver.BackupPath = backupPath.String
-		}
-		versions = append(versions, ver)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate versions: %w", err)
-	}
-
-	return versions, nil
+	return s.repo.ListVersions(ctx, serverID)
 }
 
 func (s *DeployService) RollbackVersion(ctx context.Context, versionID int64) error {
@@ -595,25 +397,9 @@ func (s *DeployService) RollbackVersion(ctx context.Context, versionID int64) er
 		ctx = context.Background()
 	}
 	// Get version info
-	var ver DeployVersion
-	var serverName, files, backupPath sql.NullString
-	err := s.db.QueryRowContext(ctx, `
-		SELECT v.id, v.server_id, s.name, v.task_id, v.version, v.files, v.backup_path
-		FROM deploy_versions v
-		LEFT JOIN deploy_servers s ON v.server_id = s.id
-		WHERE v.id = ?
-	`, versionID).Scan(&ver.ID, &ver.ServerID, &serverName, &ver.TaskID, &ver.Version, &files, &backupPath)
+	ver, err := s.repo.GetVersion(ctx, versionID)
 	if err != nil {
 		return fmt.Errorf("version not found: %w", err)
-	}
-	if serverName.Valid {
-		ver.ServerName = serverName.String
-	}
-	if files.Valid {
-		ver.Files = files.String
-	}
-	if backupPath.Valid {
-		ver.BackupPath = backupPath.String
 	}
 
 	// Get server info
@@ -664,10 +450,13 @@ func (s *DeployService) RollbackVersion(ctx context.Context, versionID int64) er
 
 	// Create a new version record for the rollback
 	rollbackVersion := fmt.Sprintf("rollback-%s-%s", ver.Version, time.Now().Format("20060102-150405"))
-	s.db.ExecContext(ctx,
-		"INSERT INTO deploy_versions (server_id, task_id, version, files, backup_path) VALUES (?, ?, ?, ?, ?)",
-		ver.ServerID, ver.TaskID, rollbackVersion, ver.Files, ver.BackupPath,
-	)
+	s.repo.CreateVersion(ctx, &model.DeployVersion{
+		ServerID:   ver.ServerID,
+		TaskID:     ver.TaskID,
+		Version:    rollbackVersion,
+		Files:      ver.Files,
+		BackupPath: ver.BackupPath,
+	})
 
 	log.Printf("deploy: rolled back to version %s on server %s", ver.Version, srv.Name)
 	return nil

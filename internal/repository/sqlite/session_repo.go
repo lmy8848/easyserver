@@ -69,6 +69,31 @@ func (r *SessionRepository) DeleteExpired(ctx context.Context) error {
 	return err
 }
 
+// DeleteInactive deletes sessions inactive since the given time
+func (r *SessionRepository) DeleteInactive(ctx context.Context, inactiveSince time.Time) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE last_active < ?", inactiveSince)
+	return err
+}
+
+// DeleteByUserIDExcept deletes all sessions for a user except the specified token
+func (r *SessionRepository) DeleteByUserIDExcept(ctx context.Context, userID int64, exceptToken string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, exceptToken)
+	return err
+}
+
+// IsValid checks if a session exists and is not expired
+func (r *SessionRepository) IsValid(ctx context.Context, token string) (bool, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > ?",
+		token, time.Now(),
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // GetActiveByUserID returns active sessions for a user
 func (r *SessionRepository) GetActiveByUserID(ctx context.Context, userID int64) ([]model.Session, error) {
 	rows, err := r.db.QueryContext(ctx,

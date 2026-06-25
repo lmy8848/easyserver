@@ -63,11 +63,11 @@ type AlertConfig struct {
 }
 
 type AlertRuleConfig struct {
-	Name      string  `yaml:"name"`
-	Metric    string  `yaml:"metric"`
-	Threshold float64 `yaml:"threshold"`
-	Duration  int     `yaml:"duration"`
-	Enabled   bool    `yaml:"enabled"`
+	Name      string  `yaml:"name" json:"name"`
+	Metric    string  `yaml:"metric" json:"metric"`
+	Threshold float64 `yaml:"threshold" json:"threshold"`
+	Duration  int     `yaml:"duration" json:"duration"`
+	Enabled   bool    `yaml:"enabled" json:"enabled"`
 }
 
 type DatabaseConfig struct {

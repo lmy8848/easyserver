@@ -3,12 +3,16 @@
 
 package executor
 
-import "os/exec"
+import (
+	"os/exec"
+	"syscall"
+)
 
-// applyPlatformStartOptions is a no-op on Windows.
-// opts.Setpgid has no equivalent on Windows (process groups work differently;
-// see CREATE_NEW_PROCESS_GROUP if needed in the future).
+// applyPlatformStartOptions applies Windows-specific process attributes.
+// On Windows, Setpgid is not applicable; we use CREATE_NEW_PROCESS_GROUP
+// via the Windows-specific SysProcAttr when needed.
 func applyPlatformStartOptions(cmd *exec.Cmd, opts StartOptions) {
-	_ = cmd
-	_ = opts
+	if opts.Setpgid {
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
+	}
 }

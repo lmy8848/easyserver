@@ -12,11 +12,11 @@ type CronTask struct {
 	LastRun     string `json:"last_run"`
 	LastResult  string `json:"last_result"`
 	NextRun     string `json:"next_run"`
-	ScriptID    int    `json:"script_id"`   // 0 = no script
-	Timeout     int    `json:"timeout"`     // seconds, 0 = no timeout
-	MaxRetry    int    `json:"max_retry"`   // 0 = no retry
-	EnvVars     string `json:"env_vars"`    // KEY=VALUE format, one per line
-	WorkDir     string `json:"work_dir"`    // working directory
+	ScriptID    int    `json:"script_id"` // 0 = no script
+	Timeout     int    `json:"timeout"`   // seconds, 0 = no timeout
+	MaxRetry    int    `json:"max_retry"` // 0 = no retry
+	EnvVars     string `json:"env_vars"`  // KEY=VALUE format, one per line
+	WorkDir     string `json:"work_dir"`  // working directory
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -80,4 +80,14 @@ type UpdateScriptRequest struct {
 	Description *string `json:"description"`
 	Content     *string `json:"content"`
 	Language    *string `json:"language"`
+}
+
+// CronDoc represents a cron documentation section
+type CronDoc struct {
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	SortOrder int    `json:"sort_order"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }

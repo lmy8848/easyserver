@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
@@ -11,11 +10,12 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 // FirewallService manages local firewall rules
 type FirewallService struct {
-	db             *sql.DB
+	repo           repository.FirewallRepository
 	mu             sync.Mutex
 	protectedPorts []string // Ports that cannot be blocked (panel port, SSH, etc.)
 	executor       executor.CommandExecutor
@@ -23,9 +23,9 @@ type FirewallService struct {
 }
 
 // NewFirewallService creates a new FirewallService
-func NewFirewallService(db *sql.DB, exec executor.CommandExecutor) *FirewallService {
+func NewFirewallService(repo repository.FirewallRepository, exec executor.CommandExecutor) *FirewallService {
 	return &FirewallService{
-		db:             db,
+		repo:           repo,
 		protectedPorts: []string{"22"}, // SSH port is always protected
 		executor:       exec,
 	}
@@ -252,8 +252,7 @@ func (s *FirewallService) GetStatus(ctx context.Context) (*model.FirewallStatus,
 	}
 
 	// Count enabled rules from database (custom rules)
-	var dbCount int
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM firewall_rules WHERE enabled = 1").Scan(&dbCount)
+	dbCount, _ := s.repo.CountEnabledRules(ctx)
 	status.CustomRuleCount = dbCount
 	status.RuleCount += dbCount
 
@@ -262,79 +261,12 @@ func (s *FirewallService) GetStatus(ctx context.Context) (*model.FirewallStatus,
 
 // ListRules returns all firewall rules from the database
 func (s *FirewallService) ListRules(ctx context.Context) ([]model.FirewallRule, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, chain, protocol, port, action, source, target, enabled, priority, ip_version, remark, created_at FROM firewall_rules ORDER BY priority ASC, id ASC")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var rules []model.FirewallRule
-	for rows.Next() {
-		var r model.FirewallRule
-		var enabled int
-		var port, source, target, ipVersion, remark sql.NullString
-		if err := rows.Scan(&r.ID, &r.Chain, &r.Protocol, &port, &r.Action, &source, &target, &enabled, &r.Priority, &ipVersion, &remark, &r.CreatedAt); err != nil {
-			log.Printf("firewall: scan rule row error: %v", err)
-			continue
-		}
-		r.Enabled = enabled != 0
-		if port.Valid {
-			r.Port = port.String
-		}
-		if source.Valid {
-			r.Source = source.String
-		}
-		if target.Valid {
-			r.Target = target.String
-		}
-		if ipVersion.Valid && ipVersion.String != "" {
-			r.IPVersion = ipVersion.String
-		} else {
-			r.IPVersion = "ipv4"
-		}
-		if remark.Valid {
-			r.Remark = remark.String
-		}
-		rules = append(rules, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating firewall rules: %w", err)
-	}
-	return rules, nil
+	return s.repo.ListRules(ctx)
 }
 
 // GetRule returns a firewall rule by ID
 func (s *FirewallService) GetRule(ctx context.Context, id int64) (*model.FirewallRule, error) {
-	var r model.FirewallRule
-	var enabled int
-	var port, source, target, ipVersion, remark sql.NullString
-
-	err := s.db.QueryRowContext(ctx,
-		"SELECT id, chain, protocol, port, action, source, target, enabled, priority, ip_version, remark, created_at FROM firewall_rules WHERE id = ?", id,
-	).Scan(&r.ID, &r.Chain, &r.Protocol, &port, &r.Action, &source, &target, &enabled, &r.Priority, &ipVersion, &remark, &r.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-	r.Enabled = enabled != 0
-	if port.Valid {
-		r.Port = port.String
-	}
-	if source.Valid {
-		r.Source = source.String
-	}
-	if target.Valid {
-		r.Target = target.String
-	}
-	if ipVersion.Valid && ipVersion.String != "" {
-		r.IPVersion = ipVersion.String
-	} else {
-		r.IPVersion = "ipv4"
-	}
-	if remark.Valid {
-		r.Remark = remark.String
-	}
-	return &r, nil
+	return s.repo.GetRule(ctx, id)
 }
 
 // CreateRule creates a new firewall rule and applies it
@@ -345,15 +277,7 @@ func (s *FirewallService) CreateRule(ctx context.Context, rule *model.FirewallRu
 	}
 
 	// Save to database
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO firewall_rules (chain, protocol, port, action, source, target, enabled, ip_version, remark)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		rule.Chain, rule.Protocol, rule.Port, rule.Action, rule.Source, rule.Target, boolToInt(rule.Enabled), rule.IPVersion, rule.Remark)
-	if err != nil {
-		return err
-	}
-	rule.ID, _ = result.LastInsertId()
-	return nil
+	return s.repo.CreateRule(ctx, rule)
 }
 
 // UpdateRule updates an existing firewall rule
@@ -372,9 +296,7 @@ func (s *FirewallService) UpdateRule(ctx context.Context, rule *model.FirewallRu
 	}
 
 	// Update database
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE firewall_rules SET chain=?, protocol=?, port=?, action=?, source=?, target=?, ip_version=?, remark=? WHERE id=?`,
-		rule.Chain, rule.Protocol, rule.Port, rule.Action, rule.Source, rule.Target, rule.IPVersion, rule.Remark, rule.ID); err != nil {
+	if err := s.repo.UpdateRule(ctx, rule); err != nil {
 		return fmt.Errorf("failed to update rule in database: %w", err)
 	}
 
@@ -405,7 +327,7 @@ func (s *FirewallService) DeleteRule(ctx context.Context, id int64) error {
 	}
 
 	// Remove from database
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM firewall_rules WHERE id = ?", id); err != nil {
+	if err := s.repo.DeleteRule(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete rule from database: %w", err)
 	}
 
@@ -424,8 +346,7 @@ func (s *FirewallService) EnableRule(ctx context.Context, id int64) error {
 		return fmt.Errorf("failed to apply rule: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, "UPDATE firewall_rules SET enabled=1 WHERE id=?", id)
-	return err
+	return s.repo.EnableRule(ctx, id)
 }
 
 // DisableRule disables a firewall rule
@@ -439,8 +360,7 @@ func (s *FirewallService) DisableRule(ctx context.Context, id int64) error {
 		return fmt.Errorf("failed to remove rule: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, "UPDATE firewall_rules SET enabled=0 WHERE id=?", id)
-	return err
+	return s.repo.DisableRule(ctx, id)
 }
 
 // MoveRuleUp moves a rule up in priority (lower priority number)
@@ -470,20 +390,7 @@ func (s *FirewallService) MoveRuleUp(ctx context.Context, id int64) error {
 	ruleAbove := rules[idx-1]
 	currentRule := rules[idx]
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "UPDATE firewall_rules SET priority=? WHERE id=?", ruleAbove.Priority, currentRule.ID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE firewall_rules SET priority=? WHERE id=?", currentRule.Priority, ruleAbove.ID); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return s.repo.SwapPriorities(ctx, currentRule.ID, ruleAbove.Priority, ruleAbove.ID, currentRule.Priority)
 }
 
 // MoveRuleDown moves a rule down in priority (higher priority number)
@@ -513,20 +420,7 @@ func (s *FirewallService) MoveRuleDown(ctx context.Context, id int64) error {
 	ruleBelow := rules[idx+1]
 	currentRule := rules[idx]
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "UPDATE firewall_rules SET priority=? WHERE id=?", ruleBelow.Priority, currentRule.ID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE firewall_rules SET priority=? WHERE id=?", currentRule.Priority, ruleBelow.ID); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return s.repo.SwapPriorities(ctx, currentRule.ID, ruleBelow.Priority, ruleBelow.ID, currentRule.Priority)
 }
 
 // EnableFirewall enables the firewall

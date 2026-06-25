@@ -21,11 +21,11 @@ func NewSystemHandler() *SystemHandler {
 
 // SSHLogin represents an SSH login record
 type SSHLogin struct {
-	Username  string `json:"username"`
-	IP        string `json:"ip"`
-	Time      string `json:"time"`
-	Type      string `json:"type"` // login, logout, failed
-	Terminal  string `json:"terminal"`
+	Username string `json:"username"`
+	IP       string `json:"ip"`
+	Time     string `json:"time"`
+	Type     string `json:"type"` // login, logout, failed
+	Terminal string `json:"terminal"`
 }
 
 // GetSSHLogins returns recent SSH login history
@@ -230,10 +230,10 @@ func (h *SystemHandler) GetSystemSSHConfig(c *gin.Context) {
 	}
 
 	Success(c, gin.H{
-		"port":                  port,
-		"permit_root_login":     permitRootLogin,
+		"port":                    port,
+		"permit_root_login":       permitRootLogin,
 		"password_authentication": passwordAuth,
-		"status":                status,
+		"status":                  status,
 	})
 }
 

@@ -60,9 +60,9 @@ type TrafficInfo struct {
 }
 
 type MonitorData struct {
-	Metric    string         `json:"metric"`
-	Unit      string         `json:"unit"`
-	Points    []MonitorPoint `json:"points"`
+	Metric string         `json:"metric"`
+	Unit   string         `json:"unit"`
+	Points []MonitorPoint `json:"points"`
 }
 
 type MonitorPoint struct {
@@ -261,10 +261,10 @@ func (s *CloudService) AddFirewallRule(ctx context.Context, instanceID string, r
 	request.InstanceId = common.StringPtr(instanceID)
 
 	firewallRule := &lighthouse.FirewallRule{
-		Protocol: common.StringPtr(rule.Protocol),
-		Port:     common.StringPtr(rule.Port),
+		Protocol:  common.StringPtr(rule.Protocol),
+		Port:      common.StringPtr(rule.Port),
 		CidrBlock: common.StringPtr(rule.Source),
-		Action:   common.StringPtr(rule.Action),
+		Action:    common.StringPtr(rule.Action),
 	}
 
 	if rule.Remark != "" {

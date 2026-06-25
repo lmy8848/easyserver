@@ -161,10 +161,10 @@ func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	}
 
 	Success(c, gin.H{
-		"progress":       progress,
-		"step":           step,
-		"logs":           logs,
-		"error_message":  errorMessage,
+		"progress":      progress,
+		"step":          step,
+		"logs":          logs,
+		"error_message": errorMessage,
 	})
 }
 
@@ -278,12 +278,45 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	}
 
 	Success(c, gin.H{
-		"runtime": env,
-		"env_configs": envConfigs,
+		"runtime":      env,
+		"env_configs":  envConfigs,
 		"path_entries": pathEntries,
 		"will_cleanup": gin.H{
-			"env_configs_count": len(envConfigs),
+			"env_configs_count":  len(envConfigs),
 			"path_entries_count": len(pathEntries),
 		},
 	})
+}
+
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *service.RuntimeService, runtimeVersionService *service.RuntimeVersionService, packageService *service.PackageManagerService) {
+	// Runtime environment management
+	runtimeHandler := NewRuntimeHandler(runtimeService)
+	protected.GET("/runtime", runtimeHandler.List)
+	protected.GET("/runtime/:name", runtimeHandler.ListByName)
+	protected.POST("/runtime/install", runtimeHandler.Install)
+	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
+	protected.POST("/runtime/set-default", runtimeHandler.SetDefault)
+	protected.GET("/runtime/detect", runtimeHandler.Detect)
+	protected.POST("/runtime/import-detected", runtimeHandler.ImportDetected)
+	protected.GET("/runtime/progress/:id", runtimeHandler.GetProgress)
+	protected.GET("/runtime/check-deps/:name", runtimeHandler.CheckDependencies)
+	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
+	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
+
+	// Runtime version management
+	runtimeVersionHandler := NewRuntimeVersionHandler(runtimeVersionService)
+	protected.GET("/runtime-versions/:name", runtimeVersionHandler.List)
+	protected.POST("/runtime-versions/:name/fetch", runtimeVersionHandler.Fetch)
+	protected.GET("/runtime-versions/:name/resolve/:alias", runtimeVersionHandler.ResolveAlias)
+	protected.GET("/runtime-versions/:name/suggestions", runtimeVersionHandler.GetAliasSuggestions)
+
+	// Package management
+	packageHandler := NewPackageManagerHandler(packageService, runtimeService)
+	protected.GET("/packages", packageHandler.ListPackages)
+	protected.GET("/packages/scan/:id", packageHandler.ScanPackages)
+	protected.GET("/packages/search", packageHandler.SearchPackages)
+	protected.GET("/packages/versions/:name", packageHandler.GetPackageVersions)
+	protected.POST("/packages/install", packageHandler.InstallPackage)
+	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
+	protected.POST("/packages/update", packageHandler.UpdatePackage)
 }

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 const (
@@ -62,7 +62,7 @@ func (h *MonitorHub) Broadcast(data []byte) {
 
 type MonitorService struct {
 	mu           sync.RWMutex
-	db           *sql.DB
+	monitorRepo  repository.MonitorRepository
 	interval     time.Duration
 	retention    time.Duration
 	hub          *MonitorHub
@@ -72,8 +72,8 @@ type MonitorService struct {
 	prevRecv     uint64
 	prevPktsSent uint64
 	prevPktsRecv uint64
-	stopCh     chan struct{}
-	lastCleanup time.Time
+	stopCh       chan struct{}
+	lastCleanup  time.Time
 
 	// 性能优化：进程采集降频
 	processInterval    time.Duration
@@ -94,17 +94,17 @@ type MonitorService struct {
 	alertService *AlertService
 
 	// 性能优化：环形缓冲 + 批量写入
-	ringBuffer   []*model.MonitorPoint
-	ringSize     int
-	ringHead     int
-	ringCount    int
-	ringMu       sync.Mutex
-	flushTicker  *time.Ticker
+	ringBuffer  []*model.MonitorPoint
+	ringSize    int
+	ringHead    int
+	ringCount   int
+	ringMu      sync.Mutex
+	flushTicker *time.Ticker
 }
 
-func NewMonitorService(db *sql.DB, interval, retention time.Duration) *MonitorService {
+func NewMonitorService(monitorRepo repository.MonitorRepository, interval, retention time.Duration) *MonitorService {
 	return &MonitorService{
-		db:              db,
+		monitorRepo:     monitorRepo,
 		interval:        interval,
 		retention:       retention,
 		hub:             NewMonitorHub(),
@@ -126,9 +126,13 @@ func (s *MonitorService) SetAlertService(alertService *AlertService) {
 }
 
 func (s *MonitorService) Start() {
+	ctx := context.Background()
+
 	// 性能优化：创建时间戳索引（异步执行，不阻塞启动）
 	go func() {
-		s.db.Exec("CREATE INDEX IF NOT EXISTS idx_monitor_data_timestamp ON monitor_data(timestamp)")
+		if err := s.monitorRepo.EnsureIndexes(ctx); err != nil {
+			log.Printf("monitor: failed to create index: %v", err)
+		}
 	}()
 
 	ticker := time.NewTicker(s.interval)
@@ -274,22 +278,10 @@ func (s *MonitorService) readAll() *model.MonitorPoint {
 
 // Platform-specific functions defined in:
 // - monitor_linux.go: readCPU, readLoad, readMemory, readDisk, readNetwork
-// - monitor_windows.go: readCPU, readLoad, readMemory, readDisk, readNetwork
 
+// savePoint saves a single point using the repository
 func (s *MonitorService) savePoint(p *model.MonitorPoint) error {
-	_, err := s.db.Exec(
-		`INSERT INTO monitor_data
-		(cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
-		 mem_total, mem_used, mem_available, mem_usage,
-		 disk_total, disk_used, disk_free, disk_usage,
-		 net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.CPUPercent, p.CPULoad1m, p.CPULoad5m, p.CPULoad15m,
-		p.MemTotal, p.MemUsed, p.MemAvailable, p.MemPercent,
-		p.DiskTotal, p.DiskUsed, p.DiskFree, p.DiskPercent,
-		p.NetBytesSent, p.NetBytesRecv, p.NetPktsSent, p.NetPktsRecv, p.Timestamp,
-	)
-	return err
+	return s.monitorRepo.Save(context.Background(), p)
 }
 
 // addToBuffer adds a point to the ring buffer
@@ -319,38 +311,9 @@ func (s *MonitorService) flushBuffer() {
 	s.ringCount = 0
 	s.ringMu.Unlock()
 
-	// Batch insert
-	tx, err := s.db.Begin()
-	if err != nil {
-		log.Printf("monitor: flush begin error: %v", err)
-		return
-	}
-	stmt, err := tx.Prepare(`INSERT INTO monitor_data
-		(cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
-		 mem_total, mem_used, mem_available, mem_usage,
-		 disk_total, disk_used, disk_free, disk_usage,
-		 net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		tx.Rollback()
-		log.Printf("monitor: flush prepare error: %v", err)
-		return
-	}
-	defer stmt.Close()
-
-	for _, p := range points {
-		if _, err := stmt.Exec(
-			p.CPUPercent, p.CPULoad1m, p.CPULoad5m, p.CPULoad15m,
-			p.MemTotal, p.MemUsed, p.MemAvailable, p.MemPercent,
-			p.DiskTotal, p.DiskUsed, p.DiskFree, p.DiskPercent,
-			p.NetBytesSent, p.NetBytesRecv, p.NetPktsSent, p.NetPktsRecv, p.Timestamp,
-		); err != nil {
-			log.Printf("monitor: flush exec error: %v", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		log.Printf("monitor: flush commit error: %v", err)
+	// Batch insert using repository
+	if err := s.monitorRepo.SaveBatch(context.Background(), points); err != nil {
+		log.Printf("monitor: flush error: %v", err)
 	}
 }
 
@@ -366,13 +329,13 @@ func (s *MonitorService) GetLatestPoint() *model.MonitorPoint {
 }
 
 func (s *MonitorService) cleanup() {
+	ctx := context.Background()
 	since := time.Now().UTC().Add(-s.retention)
-	result, err := s.db.Exec("DELETE FROM monitor_data WHERE timestamp < ?", since.Format(time.RFC3339))
+	rows, err := s.monitorRepo.Clean(ctx, since)
 	if err != nil {
 		log.Printf("monitor: cleanup error: %v", err)
 		return
 	}
-	rows, _ := result.RowsAffected()
 	if rows > 0 {
 		log.Printf("monitor: cleaned up %d old records", rows)
 	}
@@ -382,25 +345,14 @@ func (s *MonitorService) GetCurrentStats(ctx context.Context) (*model.MonitorSna
 	// 性能优化：从环形缓冲读取最新数据
 	p := s.GetLatestPoint()
 	if p == nil {
-		// Fallback to DB if buffer is empty
-		p = &model.MonitorPoint{}
-		err := s.db.QueryRowContext(ctx,
-			`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
-			        mem_total, mem_used, mem_available, mem_usage,
-			        disk_total, disk_used, disk_free, disk_usage,
-			        net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp
-			 FROM monitor_data ORDER BY id DESC LIMIT 1`,
-		).Scan(
-			&p.CPUPercent, &p.CPULoad1m, &p.CPULoad5m, &p.CPULoad15m,
-			&p.MemTotal, &p.MemUsed, &p.MemAvailable, &p.MemPercent,
-			&p.DiskTotal, &p.DiskUsed, &p.DiskFree, &p.DiskPercent,
-			&p.NetBytesSent, &p.NetBytesRecv, &p.NetPktsSent, &p.NetPktsRecv, &p.Timestamp,
-		)
+		// Fallback to repository if buffer is empty
+		var err error
+		p, err = s.monitorRepo.GetLatest(ctx)
 		if err != nil {
-			if err == sql.ErrNoRows {
-				return nil, fmt.Errorf("no data yet")
-			}
 			return nil, err
+		}
+		if p == nil {
+			return nil, fmt.Errorf("no data yet")
 		}
 	}
 	snapshot := p.ToSnapshot()
@@ -414,33 +366,9 @@ func (s *MonitorService) GetCurrentStats(ctx context.Context) (*model.MonitorSna
 }
 
 func (s *MonitorService) GetHistory(ctx context.Context, start, end time.Time) ([]model.MonitorPoint, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
-		        mem_total, mem_used, mem_available, mem_usage,
-		        disk_total, disk_used, disk_free, disk_usage,
-		        net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp
-		 FROM monitor_data
-		 WHERE timestamp >= ? AND timestamp <= ?
-		 ORDER BY timestamp ASC`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339),
-	)
+	points, err := s.monitorRepo.GetHistory(ctx, start, end)
 	if err != nil {
 		return nil, err
-	}
-	defer rows.Close()
-
-	var points []model.MonitorPoint
-	for rows.Next() {
-		var p model.MonitorPoint
-		if err := rows.Scan(
-			&p.CPUPercent, &p.CPULoad1m, &p.CPULoad5m, &p.CPULoad15m,
-			&p.MemTotal, &p.MemUsed, &p.MemAvailable, &p.MemPercent,
-			&p.DiskTotal, &p.DiskUsed, &p.DiskFree, &p.DiskPercent,
-			&p.NetBytesSent, &p.NetBytesRecv, &p.NetPktsSent, &p.NetPktsRecv, &p.Timestamp,
-		); err != nil {
-			return nil, err
-		}
-		points = append(points, p)
 	}
 
 	// 性能优化：降采样到最多 maxHistoryPoints 个点

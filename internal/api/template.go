@@ -90,3 +90,9 @@ func (h *TemplateHandler) GetTemplateCategories(c *gin.Context) {
 
 	Success(c, names)
 }
+
+func registerTemplateRoutes(protected *gin.RouterGroup) {
+	handler := NewTemplateHandler("templates/docker-images.json")
+	protected.GET("/templates/docker-images", handler.GetDockerImages)
+	protected.GET("/templates/categories", handler.GetTemplateCategories)
+}

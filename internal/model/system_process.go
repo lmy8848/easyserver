@@ -40,24 +40,24 @@ type ServiceWhitelistEntry struct {
 
 // SystemOverview contains system-wide resource statistics
 type SystemOverview struct {
-	CPUUsage    float64          `json:"cpu_usage"`    // percent
-	MemoryTotal int64            `json:"memory_total"` // MB
-	MemoryUsed  int64            `json:"memory_used"`  // MB
-	MemoryUsage float64          `json:"memory_usage"` // percent
-	SwapTotal   int64            `json:"swap_total"`   // MB
-	SwapUsed    int64            `json:"swap_used"`    // MB
-	LoadAvg     [3]float64       `json:"load_avg"`     // 1min, 5min, 15min
-	Uptime      int64            `json:"uptime"`       // seconds
-	TopCPU      []SystemProcess  `json:"top_cpu"`      // top 5 by CPU
-	TopMem      []SystemProcess  `json:"top_mem"`      // top 5 by memory
-	TotalProcs  int              `json:"total_procs"`
+	CPUUsage     float64         `json:"cpu_usage"`    // percent
+	MemoryTotal  int64           `json:"memory_total"` // MB
+	MemoryUsed   int64           `json:"memory_used"`  // MB
+	MemoryUsage  float64         `json:"memory_usage"` // percent
+	SwapTotal    int64           `json:"swap_total"`   // MB
+	SwapUsed     int64           `json:"swap_used"`    // MB
+	LoadAvg      [3]float64      `json:"load_avg"`     // 1min, 5min, 15min
+	Uptime       int64           `json:"uptime"`       // seconds
+	TopCPU       []SystemProcess `json:"top_cpu"`      // top 5 by CPU
+	TopMem       []SystemProcess `json:"top_mem"`      // top 5 by memory
+	TotalProcs   int             `json:"total_procs"`
 	RunningProcs int             `json:"running_procs"`
 }
 
 // SystemProcessListRequest is the request for listing system processes
 type SystemProcessListRequest struct {
-	SortBy  string `form:"sort_by"`  // cpu, memory, pid, name
-	Order   string `form:"order"`    // asc, desc
-	Search  string `form:"search"`   // filter by name/command
-	Limit   int    `form:"limit"`    // max results (default 100)
+	SortBy string `form:"sort_by"` // cpu, memory, pid, name
+	Order  string `form:"order"`   // asc, desc
+	Search string `form:"search"`  // filter by name/command
+	Limit  int    `form:"limit"`   // max results (default 100)
 }

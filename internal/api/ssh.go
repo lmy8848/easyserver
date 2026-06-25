@@ -33,16 +33,16 @@ func (h *SSHHandler) GetConfig(c *gin.Context) {
 // SaveConfig saves the SSH configuration
 func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	var config struct {
-		Port                int    `json:"port"`
-		PermitRootLogin     string `json:"permit_root_login"`
+		Port                   int    `json:"port"`
+		PermitRootLogin        string `json:"permit_root_login"`
 		PasswordAuthentication string `json:"password_auth"`
 		PubkeyAuthentication   string `json:"pubkey_auth"`
-		MaxAuthTries        int    `json:"max_auth_tries"`
-		LoginGraceTime      int    `json:"login_grace_time"`
-		ClientAliveInterval int    `json:"client_alive_interval"`
-		ClientAliveCountMax int    `json:"client_alive_count_max"`
-		AllowUsers          string `json:"allow_users"`
-		DenyUsers           string `json:"deny_users"`
+		MaxAuthTries           int    `json:"max_auth_tries"`
+		LoginGraceTime         int    `json:"login_grace_time"`
+		ClientAliveInterval    int    `json:"client_alive_interval"`
+		ClientAliveCountMax    int    `json:"client_alive_count_max"`
+		AllowUsers             string `json:"allow_users"`
+		DenyUsers              string `json:"deny_users"`
 	}
 
 	if err := c.ShouldBindJSON(&config); err != nil {
@@ -100,16 +100,16 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 
 	// Save config
 	sshConfig := &model.SSHConfig{
-		Port:                config.Port,
-		PermitRootLogin:     config.PermitRootLogin,
+		Port:                   config.Port,
+		PermitRootLogin:        config.PermitRootLogin,
 		PasswordAuthentication: config.PasswordAuthentication,
 		PubkeyAuthentication:   config.PubkeyAuthentication,
-		MaxAuthTries:        config.MaxAuthTries,
-		LoginGraceTime:      config.LoginGraceTime,
-		ClientAliveInterval: config.ClientAliveInterval,
-		ClientAliveCountMax: config.ClientAliveCountMax,
-		AllowUsers:          config.AllowUsers,
-		DenyUsers:           config.DenyUsers,
+		MaxAuthTries:           config.MaxAuthTries,
+		LoginGraceTime:         config.LoginGraceTime,
+		ClientAliveInterval:    config.ClientAliveInterval,
+		ClientAliveCountMax:    config.ClientAliveCountMax,
+		AllowUsers:             config.AllowUsers,
+		DenyUsers:              config.DenyUsers,
 	}
 
 	if err := h.sshService.SaveConfig(sshConfig); err != nil {
@@ -189,4 +189,21 @@ func (h *SSHHandler) GetLoginHistory(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"records": records})
+}
+
+func registerSSHRoutes(protected *gin.RouterGroup, sshService *service.SSHConfigService) {
+	handler := NewSSHHandler(sshService)
+
+	// SSH Config
+	protected.GET("/ssh/config", handler.GetConfig)
+	protected.PUT("/ssh/config", handler.SaveConfig)
+	protected.POST("/ssh/config/test", handler.TestConfig)
+	protected.POST("/ssh/config/reload", handler.ReloadSSH)
+
+	// SSH Sessions
+	protected.GET("/ssh/sessions", handler.GetSessions)
+	protected.POST("/ssh/sessions/:pid/kill", handler.KillSession)
+
+	// SSH Login History
+	protected.GET("/ssh/logins", handler.GetLoginHistory)
 }

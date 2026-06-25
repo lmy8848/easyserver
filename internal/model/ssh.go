@@ -2,16 +2,16 @@ package model
 
 // SSHConfig represents SSH server configuration
 type SSHConfig struct {
-	Port                int    `json:"port"`
-	PermitRootLogin     string `json:"permit_root_login"`
+	Port                   int    `json:"port"`
+	PermitRootLogin        string `json:"permit_root_login"`
 	PasswordAuthentication string `json:"password_auth"`
 	PubkeyAuthentication   string `json:"pubkey_auth"`
-	MaxAuthTries        int    `json:"max_auth_tries"`
-	LoginGraceTime      int    `json:"login_grace_time"`
-	ClientAliveInterval int    `json:"client_alive_interval"`
-	ClientAliveCountMax int    `json:"client_alive_count_max"`
-	AllowUsers          string `json:"allow_users"`
-	DenyUsers           string `json:"deny_users"`
+	MaxAuthTries           int    `json:"max_auth_tries"`
+	LoginGraceTime         int    `json:"login_grace_time"`
+	ClientAliveInterval    int    `json:"client_alive_interval"`
+	ClientAliveCountMax    int    `json:"client_alive_count_max"`
+	AllowUsers             string `json:"allow_users"`
+	DenyUsers              string `json:"deny_users"`
 }
 
 // SSHSession represents an active SSH session

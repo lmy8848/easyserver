@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -386,9 +388,9 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 // validateScriptLanguage checks if the language is supported
 func validateScriptLanguage(language string) error {
 	supported := map[string]bool{
-		"sh":     true,
-		"bash":   true,
-		"python": true,
+		"sh":      true,
+		"bash":    true,
+		"python":  true,
 		"python3": true,
 	}
 	if !supported[language] {
@@ -839,7 +841,7 @@ func (h *CronHandler) CreateDoc(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	doc := &service.CronDoc{
+	doc := &model.CronDoc{
 		Title:     req.Title,
 		Content:   req.Content,
 		SortOrder: req.SortOrder,
@@ -900,4 +902,35 @@ func (h *CronHandler) DeleteDoc(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"message": "文档已删除"})
+}
+
+func registerCronRoutes(protected *gin.RouterGroup, cronService *service.CronService) {
+	// Seed default documentation (tables managed by migration system)
+	if err := cronService.SeedDefaultDocs(context.Background()); err != nil {
+		log.Printf("WARNING: seed default cron docs failed: %v", err)
+	}
+	handler := NewCronHandler(cronService)
+
+	protected.GET("/cron/presets", handler.GetPresets)
+	protected.GET("/cron/describe", handler.DescribeSchedule)
+	protected.GET("/cron/next-runs", handler.GetNextRuns)
+	protected.GET("/cron/tasks", handler.ListTasks)
+	protected.POST("/cron/tasks", handler.CreateTask)
+	protected.GET("/cron/tasks/:id", handler.GetTask)
+	protected.PUT("/cron/tasks/:id", handler.UpdateTask)
+	protected.DELETE("/cron/tasks/:id", handler.DeleteTask)
+	protected.POST("/cron/tasks/:id/enable", handler.EnableTask)
+	protected.POST("/cron/tasks/:id/disable", handler.DisableTask)
+	protected.POST("/cron/tasks/:id/run", handler.RunTask)
+	protected.GET("/cron/tasks/:id/logs", handler.GetTaskLogs)
+	protected.GET("/cron/scripts", handler.ListScripts)
+	protected.POST("/cron/scripts", handler.CreateScript)
+	protected.GET("/cron/scripts/:id", handler.GetScript)
+	protected.PUT("/cron/scripts/:id", handler.UpdateScript)
+	protected.DELETE("/cron/scripts/:id", handler.DeleteScript)
+	protected.GET("/cron/docs", handler.ListDocs)
+	protected.POST("/cron/docs", handler.CreateDoc)
+	protected.GET("/cron/docs/:id", handler.GetDoc)
+	protected.PUT("/cron/docs/:id", handler.UpdateDoc)
+	protected.DELETE("/cron/docs/:id", handler.DeleteDoc)
 }

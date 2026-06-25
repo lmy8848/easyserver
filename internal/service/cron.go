@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -11,169 +10,53 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 // CronService manages cron tasks and their execution
 type CronService struct {
-	db       *sql.DB
+	repo     repository.CronRepository
 	executor executor.CommandExecutor
 }
 
 // NewCronService creates a new CronService
-func NewCronService(db *sql.DB, exec executor.CommandExecutor) *CronService {
-	return &CronService{db: db, executor: exec}
+func NewCronService(repo repository.CronRepository, exec executor.CommandExecutor) *CronService {
+	return &CronService{repo: repo, executor: exec}
 }
 
 // List returns all cron tasks
 func (s *CronService) List(ctx context.Context) ([]model.CronTask, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, command, schedule, description,
-		 enabled, status, last_run, last_result, next_run,
-		 script_id, timeout, max_retry, env_vars, work_dir,
-		 created_at, updated_at
-		 FROM cron_tasks ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tasks []model.CronTask
-	for rows.Next() {
-		var t model.CronTask
-		var enabled int
-		var lastRun, lastResult, nextRun, envVars, workDir sql.NullString
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Command, &t.Schedule, &t.Description,
-			&enabled, &t.Status, &lastRun, &lastResult, &nextRun,
-			&t.ScriptID, &t.Timeout, &t.MaxRetry, &envVars, &workDir,
-			&t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan cron task: %w", err)
-		}
-		t.Enabled = enabled != 0
-		if lastRun.Valid {
-			t.LastRun = lastRun.String
-		}
-		if lastResult.Valid {
-			t.LastResult = lastResult.String
-		}
-		if nextRun.Valid {
-			t.NextRun = nextRun.String
-		}
-		if envVars.Valid {
-			t.EnvVars = envVars.String
-		}
-		if workDir.Valid {
-			t.WorkDir = workDir.String
-		}
-		tasks = append(tasks, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cron tasks: %w", err)
-	}
-	return tasks, nil
+	return s.repo.ListTasks(ctx)
 }
 
 // Get returns a cron task by ID
 func (s *CronService) Get(ctx context.Context, id int64) (*model.CronTask, error) {
-	var t model.CronTask
-	var enabled int
-	var lastRun, lastResult, nextRun, envVars, workDir sql.NullString
-
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, command, schedule, description,
-		 enabled, status, last_run, last_result, next_run,
-		 script_id, timeout, max_retry, env_vars, work_dir,
-		 created_at, updated_at
-		 FROM cron_tasks WHERE id = ?`, id,
-	).Scan(
-		&t.ID, &t.Name, &t.Command, &t.Schedule, &t.Description,
-		&enabled, &t.Status, &lastRun, &lastResult, &nextRun,
-		&t.ScriptID, &t.Timeout, &t.MaxRetry, &envVars, &workDir,
-		&t.CreatedAt, &t.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	t.Enabled = enabled != 0
-	if lastRun.Valid {
-		t.LastRun = lastRun.String
-	}
-	if lastResult.Valid {
-		t.LastResult = lastResult.String
-	}
-	if nextRun.Valid {
-		t.NextRun = nextRun.String
-	}
-	if envVars.Valid {
-		t.EnvVars = envVars.String
-	}
-	if workDir.Valid {
-		t.WorkDir = workDir.String
-	}
-	return &t, nil
+	return s.repo.GetTask(ctx, id)
 }
 
 // Create creates a new cron task
 func (s *CronService) Create(ctx context.Context, task *model.CronTask) error {
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO cron_tasks (name, command, schedule, description, enabled,
-		 script_id, timeout, max_retry, env_vars, work_dir)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		task.Name, task.Command, task.Schedule, task.Description, boolToInt(task.Enabled),
-		task.ScriptID, task.Timeout, task.MaxRetry, task.EnvVars, task.WorkDir,
-	)
-	if err != nil {
-		return err
-	}
-	task.ID, err = result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("get last insert id: %w", err)
-	}
-	return nil
+	return s.repo.CreateTask(ctx, task)
 }
 
 // Update updates an existing cron task
 func (s *CronService) Update(ctx context.Context, task *model.CronTask) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE cron_tasks SET name=?, command=?, schedule=?, description=?,
-		 script_id=?, timeout=?, max_retry=?, env_vars=?, work_dir=?,
-		 updated_at=datetime('now') WHERE id=?`,
-		task.Name, task.Command, task.Schedule, task.Description,
-		task.ScriptID, task.Timeout, task.MaxRetry, task.EnvVars, task.WorkDir, task.ID,
-	)
-	return err
+	return s.repo.UpdateTask(ctx, task)
 }
 
 // Delete deletes a cron task and its logs
 func (s *CronService) Delete(ctx context.Context, id int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM cron_logs WHERE task_id = ?", id); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM cron_tasks WHERE id = ?", id); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.repo.DeleteTask(ctx, id)
 }
 
 // Enable enables a cron task
 func (s *CronService) Enable(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE cron_tasks SET enabled=1, updated_at=datetime('now') WHERE id=?", id)
-	return err
+	return s.repo.EnableTask(ctx, id)
 }
 
 // Disable disables a cron task
 func (s *CronService) Disable(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE cron_tasks SET enabled=0, updated_at=datetime('now') WHERE id=?", id)
-	return err
+	return s.repo.DisableTask(ctx, id)
 }
 
 // RunNow executes a cron task immediately (async)
@@ -187,16 +70,11 @@ func (s *CronService) RunNow(ctx context.Context, id int64) error {
 	}
 
 	// Atomic concurrency guard: only proceed if not already running
-	result, err := s.db.ExecContext(ctx,
-		"UPDATE cron_tasks SET status='running', updated_at=datetime('now') WHERE id=? AND status != 'running'", id)
+	ok, err := s.repo.SetTaskRunning(ctx, id)
 	if err != nil {
 		return fmt.Errorf("failed to update task status: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	}
-	if affected == 0 {
+	if !ok {
 		return fmt.Errorf("task is already running")
 	}
 
@@ -241,7 +119,7 @@ func (s *CronService) executeTask(task *model.CronTask) {
 		// Build command
 		var command string
 		if task.ScriptID > 0 {
-			script, scriptErr := s.GetScript(ctx, int64(task.ScriptID))
+			script, scriptErr := s.repo.GetScript(ctx, int64(task.ScriptID))
 			if scriptErr != nil {
 				if cancel != nil {
 					cancel()
@@ -329,17 +207,13 @@ func (s *CronService) executeTask(task *model.CronTask) {
 	}
 
 	// Insert log
-	if _, err := s.db.ExecContext(ctx,
-		`INSERT INTO cron_logs (task_id, status, output, duration) VALUES (?, ?, ?, ?)`,
-		task.ID, status, outputStr, duration); err != nil {
+	if err := s.repo.CreateLog(ctx, task.ID, status, outputStr, duration); err != nil {
 		log.Printf("cron: failed to insert log for task %d: %v", task.ID, err)
 	}
 
 	// Update task status
 	const maxResultLen = 500
-	if _, err := s.db.ExecContext(ctx,
-		`UPDATE cron_tasks SET status=?, last_run=datetime('now'), last_result=?, updated_at=datetime('now') WHERE id=?`,
-		status, truncate(outputStr, maxResultLen), task.ID); err != nil {
+	if err := s.repo.UpdateTaskResult(ctx, task.ID, status, truncate(outputStr, maxResultLen)); err != nil {
 		log.Printf("cron: failed to update task %d status: %v", task.ID, err)
 	}
 
@@ -391,78 +265,12 @@ func (s *CronService) GetLogs(ctx context.Context, taskID int64, limit int) ([]m
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, task_id, status, output, duration, created_at
-		 FROM cron_logs WHERE task_id = ? ORDER BY id DESC LIMIT ?`,
-		taskID, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var logs []model.CronLog
-	for rows.Next() {
-		var l model.CronLog
-		if err := rows.Scan(&l.ID, &l.TaskID, &l.Status, &l.Output, &l.Duration, &l.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan cron log: %w", err)
-		}
-		logs = append(logs, l)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cron logs: %w", err)
-	}
-	return logs, nil
+	return s.repo.GetLogs(ctx, taskID, limit)
 }
 
 // ListEnabled returns all enabled cron tasks
 func (s *CronService) ListEnabled(ctx context.Context) ([]model.CronTask, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, command, schedule, description,
-		 enabled, status, last_run, last_result, next_run,
-		 script_id, timeout, max_retry, env_vars, work_dir,
-		 created_at, updated_at
-		 FROM cron_tasks WHERE enabled = 1 ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tasks []model.CronTask
-	for rows.Next() {
-		var t model.CronTask
-		var enabled int
-		var lastRun, lastResult, nextRun, envVars, workDir sql.NullString
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Command, &t.Schedule, &t.Description,
-			&enabled, &t.Status, &lastRun, &lastResult, &nextRun,
-			&t.ScriptID, &t.Timeout, &t.MaxRetry, &envVars, &workDir,
-			&t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan cron task: %w", err)
-		}
-		t.Enabled = enabled != 0
-		if lastRun.Valid {
-			t.LastRun = lastRun.String
-		}
-		if lastResult.Valid {
-			t.LastResult = lastResult.String
-		}
-		if nextRun.Valid {
-			t.NextRun = nextRun.String
-		}
-		if envVars.Valid {
-			t.EnvVars = envVars.String
-		}
-		if workDir.Valid {
-			t.WorkDir = workDir.String
-		}
-		tasks = append(tasks, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cron tasks: %w", err)
-	}
-	return tasks, nil
+	return s.repo.ListEnabledTasks(ctx)
 }
 
 // SyncToSystemCrontab writes enabled tasks to the system crontab
@@ -495,97 +303,44 @@ func (s *CronService) RemoveFromSystemCrontab(ctx context.Context, taskID int64)
 
 // ListScripts returns all scripts
 func (s *CronService) ListScripts(ctx context.Context) ([]model.Script, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, content, language, created_at, updated_at
-		 FROM scripts ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var scripts []model.Script
-	for rows.Next() {
-		var sc model.Script
-		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Content, &sc.Language, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan script: %w", err)
-		}
-		scripts = append(scripts, sc)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate scripts: %w", err)
-	}
-	return scripts, nil
+	return s.repo.ListScripts(ctx)
 }
 
 // GetScript returns a script by ID
 func (s *CronService) GetScript(ctx context.Context, id int64) (*model.Script, error) {
-	var sc model.Script
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description, content, language, created_at, updated_at
-		 FROM scripts WHERE id = ?`, id,
-	).Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Content, &sc.Language, &sc.CreatedAt, &sc.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &sc, nil
+	return s.repo.GetScript(ctx, id)
 }
 
 // CreateScript creates a new script
 func (s *CronService) CreateScript(ctx context.Context, script *model.Script) error {
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO scripts (name, description, content, language) VALUES (?, ?, ?, ?)`,
-		script.Name, script.Description, script.Content, script.Language,
-	)
-	if err != nil {
-		return err
-	}
-	script.ID, err = result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("get last insert id: %w", err)
-	}
-	return nil
+	return s.repo.CreateScript(ctx, script)
 }
 
 // UpdateScript updates an existing script
 func (s *CronService) UpdateScript(ctx context.Context, script *model.Script) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE scripts SET name=?, description=?, content=?, language=?, updated_at=datetime('now') WHERE id=?`,
-		script.Name, script.Description, script.Content, script.Language, script.ID,
-	)
-	return err
+	return s.repo.UpdateScript(ctx, script)
 }
 
 // DeleteScript deletes a script by ID
 func (s *CronService) DeleteScript(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM scripts WHERE id = ?", id)
-	return err
+	return s.repo.DeleteScript(ctx, id)
 }
 
 // ============================================================
 // Cron documentation management
 // ============================================================
 
-// CronDoc represents a documentation section
-type CronDoc struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	SortOrder int    `json:"sort_order"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-}
-
 // SeedDefaultDocs inserts default documentation if table is empty
 func (s *CronService) SeedDefaultDocs(ctx context.Context) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM cron_docs").Scan(&count); err != nil {
-		return fmt.Errorf("count cron docs: %w", err)
+	count, err := s.repo.CountDocs(ctx)
+	if err != nil {
+		return err
 	}
 	if count > 0 {
 		return nil
 	}
 
-	defaultDocs := []CronDoc{
+	defaultDocs := []model.CronDoc{
 		{
 			Title:     "Cron 表达式基础",
 			SortOrder: 1,
@@ -686,86 +441,32 @@ func (s *CronService) SeedDefaultDocs(ctx context.Context) error {
 		},
 	}
 
-	for _, doc := range defaultDocs {
-		_, err := s.db.ExecContext(ctx,
-			`INSERT INTO cron_docs (title, content, sort_order) VALUES (?, ?, ?)`,
-			doc.Title, doc.Content, doc.SortOrder)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.repo.BatchCreateDocs(ctx, defaultDocs)
 }
 
 // ListDocs returns all documentation sections
-func (s *CronService) ListDocs(ctx context.Context) ([]CronDoc, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, title, content, sort_order, created_at, updated_at FROM cron_docs ORDER BY sort_order")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var docs []CronDoc
-	for rows.Next() {
-		var d CronDoc
-		if err := rows.Scan(&d.ID, &d.Title, &d.Content, &d.SortOrder, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan cron doc: %w", err)
-		}
-		docs = append(docs, d)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cron docs: %w", err)
-	}
-	return docs, nil
+func (s *CronService) ListDocs(ctx context.Context) ([]model.CronDoc, error) {
+	return s.repo.ListDocs(ctx)
 }
 
 // GetDoc returns a documentation section by ID
-func (s *CronService) GetDoc(ctx context.Context, id int64) (*CronDoc, error) {
-	var d CronDoc
-	err := s.db.QueryRowContext(ctx,
-		"SELECT id, title, content, sort_order, created_at, updated_at FROM cron_docs WHERE id = ?", id,
-	).Scan(&d.ID, &d.Title, &d.Content, &d.SortOrder, &d.CreatedAt, &d.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &d, nil
+func (s *CronService) GetDoc(ctx context.Context, id int64) (*model.CronDoc, error) {
+	return s.repo.GetDoc(ctx, id)
 }
 
 // UpdateDoc updates a documentation section
-func (s *CronService) UpdateDoc(ctx context.Context, doc *CronDoc) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE cron_docs SET title=?, content=?, sort_order=?, updated_at=datetime('now') WHERE id=?`,
-		doc.Title, doc.Content, doc.SortOrder, doc.ID)
-	return err
+func (s *CronService) UpdateDoc(ctx context.Context, doc *model.CronDoc) error {
+	return s.repo.UpdateDoc(ctx, doc)
 }
 
 // CreateDoc creates a new documentation section
-func (s *CronService) CreateDoc(ctx context.Context, doc *CronDoc) error {
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO cron_docs (title, content, sort_order) VALUES (?, ?, ?)`,
-		doc.Title, doc.Content, doc.SortOrder)
-	if err != nil {
-		return err
-	}
-	doc.ID, err = result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("get last insert id: %w", err)
-	}
-	return nil
+func (s *CronService) CreateDoc(ctx context.Context, doc *model.CronDoc) error {
+	return s.repo.CreateDoc(ctx, doc)
 }
 
 // DeleteDoc deletes a documentation section
 func (s *CronService) DeleteDoc(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM cron_docs WHERE id = ?", id)
-	return err
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
+	return s.repo.DeleteDoc(ctx, id)
 }
 
 func truncate(s string, maxLen int) string {
@@ -773,4 +474,11 @@ func truncate(s string, maxLen int) string {
 		return s[:maxLen] + "..."
 	}
 	return s
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

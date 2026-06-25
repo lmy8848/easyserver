@@ -184,20 +184,20 @@ func (pm *ProcessManager) Create(ctx context.Context, req *model.CreateProcessRe
 		`INSERT OR IGNORE INTO process_status (process_id, status) VALUES (?, 'stopped')`, id)
 
 	return &model.Process{
-		ID:              id,
-		Name:            req.Name,
-		Command:         req.Command,
-		Args:            req.Args,
-		Dir:             req.Dir,
-		Env:             req.Env,
-		AutoRestart:     autoRestart,
-		MaxRestarts:     maxRestarts,
-		RestartDelay:    restartDelay,
-		StopTimeout:     stopTimeout,
-		StartupTimeout:  startupTimeout,
-		AutoStart:       autoStart,
-		LogFile:         req.LogFile,
-		GroupID:         req.GroupID,
+		ID:             id,
+		Name:           req.Name,
+		Command:        req.Command,
+		Args:           req.Args,
+		Dir:            req.Dir,
+		Env:            req.Env,
+		AutoRestart:    autoRestart,
+		MaxRestarts:    maxRestarts,
+		RestartDelay:   restartDelay,
+		StopTimeout:    stopTimeout,
+		StartupTimeout: startupTimeout,
+		AutoStart:      autoStart,
+		LogFile:        req.LogFile,
+		GroupID:        req.GroupID,
 	}, nil
 }
 

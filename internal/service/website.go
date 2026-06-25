@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -12,58 +11,17 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 type WebsiteService struct {
-	db       *sql.DB
-	executor executor.CommandExecutor
+	repo          repository.WebsiteRepository
+	webServerRepo repository.WebServerRepository
+	executor      executor.CommandExecutor
 }
 
-func NewWebsiteService(db *sql.DB, exec executor.CommandExecutor) *WebsiteService {
-	return &WebsiteService{db: db, executor: exec}
-}
-
-// Deprecated: InitTables is kept for backward compatibility only.
-// Table creation is now handled by the migration system (migrations/ directory).
-func (s *WebsiteService) InitTables(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS websites (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			web_server_id INTEGER NOT NULL DEFAULT 0,
-			name TEXT NOT NULL,
-			domain TEXT NOT NULL UNIQUE,
-			root_path TEXT NOT NULL,
-			port INTEGER DEFAULT 80,
-			ssl_enabled INTEGER DEFAULT 0,
-			ssl_cert_path TEXT DEFAULT '',
-			ssl_key_path TEXT DEFAULT '',
-			proxy_enabled INTEGER DEFAULT 0,
-			proxy_pass TEXT DEFAULT '',
-			custom_config TEXT DEFAULT '',
-			access_log TEXT DEFAULT '',
-			error_log TEXT DEFAULT '',
-			status TEXT DEFAULT 'active',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_websites_domain ON websites(domain)`,
-		`CREATE INDEX IF NOT EXISTS idx_websites_server ON websites(web_server_id)`,
-	}
-	for _, q := range queries {
-		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-
-	// Migration: add new columns if missing
-	s.db.ExecContext(ctx, "ALTER TABLE websites ADD COLUMN web_server_id INTEGER NOT NULL DEFAULT 0")
-	s.db.ExecContext(ctx, "ALTER TABLE websites ADD COLUMN project_type TEXT DEFAULT 'static'")
-	s.db.ExecContext(ctx, "ALTER TABLE websites ADD COLUMN app_port INTEGER DEFAULT 0")
-
-	return nil
+func NewWebsiteService(repo repository.WebsiteRepository, webServerRepo repository.WebServerRepository, exec executor.CommandExecutor) *WebsiteService {
+	return &WebsiteService{repo: repo, webServerRepo: webServerRepo, executor: exec}
 }
 
 // List returns websites for a specific web server
@@ -71,31 +29,7 @@ func (s *WebsiteService) List(ctx context.Context, webServerID int64) ([]model.W
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, web_server_id, name, domain, root_path, port,
-		project_type, app_port, ssl_enabled, ssl_cert_path, ssl_key_path, proxy_enabled, proxy_pass,
-		custom_config, access_log, error_log, status, created_at, updated_at
-		FROM websites WHERE web_server_id = ? ORDER BY id DESC`, webServerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sites []model.Website
-	for rows.Next() {
-		var w model.Website
-		var projectType string
-		var appPort int
-		err := rows.Scan(&w.ID, &w.WebServerID, &w.Name, &w.Domain, &w.RootPath, &w.Port,
-			&projectType, &appPort, &w.SSLEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.ProxyEnabled, &w.ProxyPass,
-			&w.CustomConfig, &w.AccessLog, &w.ErrorLog, &w.Status, &w.CreatedAt, &w.UpdatedAt)
-		if err != nil {
-			continue
-		}
-		w.ProjectType = projectType
-		w.AppPort = appPort
-		sites = append(sites, w)
-	}
-	return sites, nil
+	return s.repo.List(ctx, webServerID)
 }
 
 // Get returns a specific website
@@ -103,25 +37,7 @@ func (s *WebsiteService) Get(ctx context.Context, webServerID, id int64) (*model
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w := &model.Website{}
-	var projectType string
-	var appPort int
-	err := s.db.QueryRowContext(ctx, `SELECT id, web_server_id, name, domain, root_path, port,
-		project_type, app_port, ssl_enabled, ssl_cert_path, ssl_key_path, proxy_enabled, proxy_pass,
-		custom_config, access_log, error_log, status, created_at, updated_at
-		FROM websites WHERE id = ? AND web_server_id = ?`, id, webServerID).Scan(
-		&w.ID, &w.WebServerID, &w.Name, &w.Domain, &w.RootPath, &w.Port,
-		&projectType, &appPort, &w.SSLEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.ProxyEnabled, &w.ProxyPass,
-		&w.CustomConfig, &w.AccessLog, &w.ErrorLog, &w.Status, &w.CreatedAt, &w.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	w.ProjectType = projectType
-	w.AppPort = appPort
-	return w, nil
+	return s.repo.Get(ctx, webServerID, id)
 }
 
 // Create creates a new website
@@ -135,7 +51,7 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *mod
 	}
 
 	// Check web server is installed
-	ws, _ := s.getWebServer(ctx, webServerID)
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
 		return nil, fmt.Errorf("web server not found")
 	}
@@ -144,8 +60,7 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *mod
 	}
 
 	// Check domain uniqueness
-	var count int
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM websites WHERE domain = ?", req.Domain).Scan(&count)
+	count, _ := s.repo.CountByDomain(ctx, req.Domain)
 	if count > 0 {
 		return nil, fmt.Errorf("domain %s already exists", req.Domain)
 	}
@@ -199,22 +114,7 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *mod
 	accessLog := fmt.Sprintf("/var/log/nginx/%s_access.log", req.Domain)
 	errorLog := fmt.Sprintf("/var/log/nginx/%s_error.log", req.Domain)
 
-	result, err := s.db.ExecContext(ctx, `INSERT INTO websites
-		(web_server_id, name, domain, root_path, port, project_type, app_port, proxy_enabled, proxy_pass, custom_config, access_log, error_log)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		webServerID, req.Name, req.Domain, req.RootPath, port, projectType, appPort, proxyEnabled, proxyPass, req.CustomConfig, accessLog, errorLog)
-	if err != nil {
-		return nil, err
-	}
-
-	id, _ := result.LastInsertId()
-
-	// Create root directory
-	os.MkdirAll(req.RootPath, 0755)
-
-	// Write Nginx config
-	s.writeConfigForServer(webServerID, &model.Website{
-		ID:           id,
+	website := &model.Website{
 		WebServerID:  webServerID,
 		Name:         req.Name,
 		Domain:       req.Domain,
@@ -227,7 +127,19 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *mod
 		CustomConfig: req.CustomConfig,
 		AccessLog:    accessLog,
 		ErrorLog:     errorLog,
-	})
+	}
+
+	id, err := s.repo.Create(ctx, website)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create root directory
+	os.MkdirAll(req.RootPath, 0755)
+
+	// Write Nginx config
+	website.ID = id
+	s.writeConfigForServer(webServerID, website)
 
 	return &model.Website{
 		ID:          id,
@@ -247,7 +159,7 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w, err := s.Get(ctx, webServerID, id)
+	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
 	}
@@ -257,63 +169,37 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 
 	oldDomain := w.Domain
 
-	updates := []string{}
-	args := []interface{}{}
-
 	if req.Name != nil {
-		updates = append(updates, "name = ?")
-		args = append(args, *req.Name)
 		w.Name = *req.Name
 	}
 	if req.Domain != nil && *req.Domain != w.Domain {
 		// Check new domain uniqueness
-		var count int
-		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM websites WHERE domain = ? AND id != ?", *req.Domain, id).Scan(&count)
+		count, _ := s.repo.CountByDomainExcludingID(ctx, *req.Domain, id)
 		if count > 0 {
 			return fmt.Errorf("domain %s already exists", *req.Domain)
 		}
-		updates = append(updates, "domain = ?")
-		args = append(args, *req.Domain)
 		w.Domain = *req.Domain
 	}
 	if req.RootPath != nil {
 		if err := validateRootPath(*req.RootPath); err != nil {
 			return err
 		}
-		updates = append(updates, "root_path = ?")
-		args = append(args, *req.RootPath)
 		w.RootPath = *req.RootPath
 	}
 	if req.Port != nil {
-		updates = append(updates, "port = ?")
-		args = append(args, *req.Port)
 		w.Port = *req.Port
 	}
 	if req.ProjectType != nil {
-		updates = append(updates, "project_type = ?")
-		args = append(args, *req.ProjectType)
 		w.ProjectType = *req.ProjectType
 	}
 	if req.AppPort != nil {
-		updates = append(updates, "app_port = ?")
-		args = append(args, *req.AppPort)
 		w.AppPort = *req.AppPort
 	}
 	if req.CustomConfig != nil {
-		updates = append(updates, "custom_config = ?")
-		args = append(args, *req.CustomConfig)
 		w.CustomConfig = *req.CustomConfig
 	}
 
-	if len(updates) == 0 {
-		return nil
-	}
-
-	updates = append(updates, "updated_at = datetime('now')")
-	query := "UPDATE websites SET " + strings.Join(updates, ", ") + " WHERE id = ? AND web_server_id = ?"
-	args = append(args, id, webServerID)
-
-	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+	if err := s.repo.Update(ctx, w); err != nil {
 		return err
 	}
 
@@ -327,7 +213,7 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 
 	// If site is active and domain changed, create new symlink
 	if w.Status == "active" && oldDomain != w.Domain {
-		ws, _ := s.getWebServer(ctx, webServerID)
+		ws, _ := s.webServerRepo.Get(ctx, webServerID)
 		if ws != nil && ws.SitesAvailable != "" && ws.SitesEnabled != "" {
 			confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 			linkPath := filepath.Join(ws.SitesEnabled, w.Domain+".conf")
@@ -337,7 +223,7 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	}
 
 	// Reload web server
-	ws, _ := s.getWebServer(ctx, webServerID)
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws != nil && ws.Status == "running" {
 		s.reloadWebServer(ctx, ws)
 	}
@@ -350,7 +236,7 @@ func (s *WebsiteService) Delete(ctx context.Context, webServerID, id int64) erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w, err := s.Get(ctx, webServerID, id)
+	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
 	}
@@ -359,8 +245,7 @@ func (s *WebsiteService) Delete(ctx context.Context, webServerID, id int64) erro
 	}
 
 	s.removeConfigForServer(webServerID, w.Domain)
-	_, err = s.db.ExecContext(ctx, "DELETE FROM websites WHERE id = ? AND web_server_id = ?", id, webServerID)
-	return err
+	return s.repo.Delete(ctx, webServerID, id)
 }
 
 // Enable enables a website
@@ -368,7 +253,7 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w, err := s.Get(ctx, webServerID, id)
+	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
 	}
@@ -377,7 +262,7 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 	}
 
 	// Check web server is running
-	ws, _ := s.getWebServer(ctx, webServerID)
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
 		return fmt.Errorf("web server not found")
 	}
@@ -405,8 +290,7 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 	// Reload web server
 	s.reloadWebServer(ctx, ws)
 
-	s.db.ExecContext(ctx, "UPDATE websites SET status = 'active', updated_at = datetime('now') WHERE id = ? AND web_server_id = ?", id, webServerID)
-	return nil
+	return s.repo.UpdateStatus(ctx, webServerID, id, "active")
 }
 
 // Disable disables a website
@@ -414,7 +298,7 @@ func (s *WebsiteService) Disable(ctx context.Context, webServerID, id int64) err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w, err := s.Get(ctx, webServerID, id)
+	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
 	}
@@ -422,15 +306,14 @@ func (s *WebsiteService) Disable(ctx context.Context, webServerID, id int64) err
 		return fmt.Errorf("website not found")
 	}
 
-	ws, _ := s.getWebServer(ctx, webServerID)
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws != nil && ws.SitesEnabled != "" {
 		linkPath := filepath.Join(ws.SitesEnabled, w.Domain+".conf")
 		os.Remove(linkPath)
 		s.reloadWebServer(ctx, ws)
 	}
 
-	s.db.ExecContext(ctx, "UPDATE websites SET status = 'disabled', updated_at = datetime('now') WHERE id = ? AND web_server_id = ?", id, webServerID)
-	return nil
+	return s.repo.UpdateStatus(ctx, webServerID, id, "disabled")
 }
 
 // GetLogs returns logs for a website
@@ -438,7 +321,7 @@ func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, log
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w, err := s.Get(ctx, webServerID, id)
+	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return "", err
 	}
@@ -469,7 +352,7 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	w, err := s.Get(ctx, webServerID, id)
+	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
 	}
@@ -478,7 +361,7 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 	}
 
 	// Check web server is running
-	ws, _ := s.getWebServer(ctx, webServerID)
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil || ws.Status != "running" {
 		return fmt.Errorf("cannot apply SSL: web server is not running")
 	}
@@ -501,9 +384,7 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 
 	certPath := fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", w.Domain)
 	keyPath := fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", w.Domain)
-	s.db.ExecContext(ctx, "UPDATE websites SET ssl_enabled = 1, ssl_cert_path = ?, ssl_key_path = ?, updated_at = datetime('now') WHERE id = ?",
-		certPath, keyPath, id)
-	return nil
+	return s.repo.UpdateSSL(ctx, id, certPath, keyPath)
 }
 
 // Internal helpers
@@ -529,19 +410,8 @@ func validateRootPath(p string) error {
 	return nil
 }
 
-func (s *WebsiteService) getWebServer(ctx context.Context, id int64) (*model.WebServer, error) {
-	ws := &model.WebServer{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, display_name, config_path, sites_available, sites_enabled, service_name, status
-		FROM web_servers WHERE id = ?`, id).Scan(
-		&ws.ID, &ws.Name, &ws.DisplayName, &ws.ConfigPath, &ws.SitesAvailable, &ws.SitesEnabled, &ws.ServiceName, &ws.Status)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return ws, err
-}
-
 func (s *WebsiteService) writeConfigForServer(webServerID int64, w *model.Website) error {
-	ws, err := s.getWebServer(context.Background(), webServerID)
+	ws, err := s.webServerRepo.Get(context.Background(), webServerID)
 	if err != nil || ws == nil {
 		return fmt.Errorf("web server not found")
 	}
@@ -575,7 +445,7 @@ func (s *WebsiteService) writeConfigForServer(webServerID int64, w *model.Websit
 }
 
 func (s *WebsiteService) removeConfigForServer(webServerID int64, domain string) {
-	ws, _ := s.getWebServer(context.Background(), webServerID)
+	ws, _ := s.webServerRepo.Get(context.Background(), webServerID)
 	if ws == nil {
 		return
 	}

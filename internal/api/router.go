@@ -98,10 +98,10 @@ type RouterDeps struct {
 	CronService *service.CronService
 
 	// Database services
-	DBServerService   *service.DBServerService
+	DBServerService     *service.DBServerService
 	DatabaseMgmtService *service.DatabaseMgmtService
-	DBBackupService   *service.DBBackupService
-	SQLQueryService   *service.SQLQueryService
+	DBBackupService     *service.DBBackupService
+	SQLQueryService     *service.SQLQueryService
 
 	// Deploy service
 	DeployService *service.DeployService

@@ -12,7 +12,7 @@ import (
 )
 
 type FileManagerHandler struct {
-	fileManager *service.FileManager
+	fileManager  *service.FileManager
 	auditService *service.AuditService
 }
 
@@ -22,7 +22,7 @@ func NewFileManagerHandler(basePath string, auditService *service.AuditService) 
 		return nil, err
 	}
 	return &FileManagerHandler{
-		fileManager: fm,
+		fileManager:  fm,
 		auditService: auditService,
 	}, nil
 }

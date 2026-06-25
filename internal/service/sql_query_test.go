@@ -77,9 +77,9 @@ func TestValidateTableName(t *testing.T) {
 
 func TestParseMySQLListTables(t *testing.T) {
 	tests := []struct {
-		name  string
-		raw   string
-		want  int // expected table count
+		name string
+		raw  string
+		want int // expected table count
 	}{
 		{
 			name: "normal",
@@ -115,9 +115,9 @@ func TestParseMySQLListTables(t *testing.T) {
 
 func TestParsePostgreSQLListTables(t *testing.T) {
 	tests := []struct {
-		name  string
-		raw   string
-		want  int
+		name string
+		raw  string
+		want int
 	}{
 		{
 			name: "normal",
@@ -155,10 +155,10 @@ func TestParsePostgreSQLListTables(t *testing.T) {
 
 func TestParseMySQLQueryTable(t *testing.T) {
 	tests := []struct {
-		name       string
-		raw        string
-		wantCols   int
-		wantRows   int
+		name     string
+		raw      string
+		wantCols int
+		wantRows int
 	}{
 		{
 			name:     "normal",
@@ -201,10 +201,10 @@ func TestParseMySQLQueryTable(t *testing.T) {
 
 func TestParsePostgreSQLQueryTable(t *testing.T) {
 	tests := []struct {
-		name       string
-		raw        string
-		wantCols   int
-		wantRows   int
+		name     string
+		raw      string
+		wantCols int
+		wantRows int
 	}{
 		{
 			name:     "normal",
@@ -333,8 +333,8 @@ func splitNewline(s string) []string {
 	return result
 }
 
-func splitTab(s string) []string   { return splitChar(s, '\t') }
-func splitPipe(s string) []string  { return splitChar(s, '|') }
+func splitTab(s string) []string  { return splitChar(s, '\t') }
+func splitPipe(s string) []string { return splitChar(s, '|') }
 
 func splitChar(s string, sep byte) []string {
 	var result []string

@@ -24,12 +24,12 @@ const (
 )
 
 type TerminalSession struct {
-	ID       string
-	PTY      *os.File
-	Cmd      *exec.Cmd
-	Send     chan []byte
-	mu       sync.Mutex
-	closed   bool
+	ID     string
+	PTY    *os.File
+	Cmd    *exec.Cmd
+	Send   chan []byte
+	mu     sync.Mutex
+	closed bool
 	// LastActivity tracks the last time input was received
 	LastActivity time.Time
 }

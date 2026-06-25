@@ -12,7 +12,6 @@ import (
 // and logs them as audit events.
 // Platform-specific implementations are in:
 //   - system_monitor_linux.go
-//   - system_monitor_windows.go
 type SystemEventMonitor struct {
 	auditService *AuditService
 	executor     executor.CommandExecutor
@@ -77,7 +76,7 @@ func (m *SystemEventMonitor) monitorServiceFailures() {
 	}
 }
 
-// Platform-specific methods (defined in system_monitor_linux.go / system_monitor_windows.go):
+// Platform-specific methods (defined in system_monitor_linux.go):
 //   - checkDiskSpace()
 //   - checkMemoryUsage()
 //   - checkServiceFailures()

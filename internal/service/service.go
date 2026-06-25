@@ -35,11 +35,11 @@ type LogLine struct {
 
 // journalEntry represents a journalctl JSON output line
 type journalEntry struct {
-	Message              string `json:"MESSAGE"`
-	RealtimeTimestamp    string `json:"__REALTIME_TIMESTAMP"`
-	Priority             string `json:"PRIORITY"`
-	SyslogIdentifier    string `json:"SYSLOG_IDENTIFIER"`
-	Transport            string `json:"_TRANSPORT"`
+	Message           string `json:"MESSAGE"`
+	RealtimeTimestamp string `json:"__REALTIME_TIMESTAMP"`
+	Priority          string `json:"PRIORITY"`
+	SyslogIdentifier  string `json:"SYSLOG_IDENTIFIER"`
+	Transport         string `json:"_TRANSPORT"`
 }
 
 type ServiceManager struct {

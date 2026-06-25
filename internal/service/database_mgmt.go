@@ -2,13 +2,12 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,12 +34,12 @@ var validPrivileges = map[string]bool{
 }
 
 type DatabaseMgmtService struct {
-	db       *sql.DB
+	repo     repository.DatabaseMgmtRepository
 	executor executor.CommandExecutor
 }
 
-func NewDatabaseMgmtService(db *sql.DB, exec executor.CommandExecutor) *DatabaseMgmtService {
-	return &DatabaseMgmtService{db: db, executor: exec}
+func NewDatabaseMgmtService(repo repository.DatabaseMgmtRepository, exec executor.CommandExecutor) *DatabaseMgmtService {
+	return &DatabaseMgmtService{repo: repo, executor: exec}
 }
 
 // Database CRUD
@@ -49,30 +48,7 @@ func (s *DatabaseMgmtService) ListDatabases(ctx context.Context, dbServerID int6
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.db_server_id, d.db_version_id, d.name, d.charset, d.description,
-		d.size_bytes, d.status, d.created_at, d.updated_at, COALESCE(v.version, '') as version
-		FROM databases d
-		LEFT JOIN db_versions v ON d.db_version_id = v.id
-		WHERE d.db_server_id = ? ORDER BY d.id`, dbServerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var dbs []model.Database
-	for rows.Next() {
-		var d model.Database
-		if err := rows.Scan(&d.ID, &d.DBServerID, &d.DBVersionID, &d.Name, &d.Charset, &d.Description,
-			&d.SizeBytes, &d.Status, &d.CreatedAt, &d.UpdatedAt, &d.Version); err != nil {
-			log.Printf("scan database row: %v", err)
-			continue
-		}
-		dbs = append(dbs, d)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate databases: %w", err)
-	}
-	return dbs, nil
+	return s.repo.ListDatabases(ctx, dbServerID)
 }
 
 func (s *DatabaseMgmtService) CreateDatabase(ctx context.Context, dbServerID int64, req *model.CreateDatabaseRequest) (*model.Database, error) {
@@ -80,7 +56,7 @@ func (s *DatabaseMgmtService) CreateDatabase(ctx context.Context, dbServerID int
 		ctx = context.Background()
 	}
 	// Get version info
-	version, err := s.getVersion(ctx, req.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, req.DBVersionID)
 	if err != nil {
 		return nil, fmt.Errorf("get version: %w", err)
 	}
@@ -92,7 +68,7 @@ func (s *DatabaseMgmtService) CreateDatabase(ctx context.Context, dbServerID int
 	}
 
 	// Get server info
-	server, err := s.getServer(ctx, dbServerID)
+	server, err := s.repo.GetServer(ctx, dbServerID)
 	if err != nil {
 		return nil, fmt.Errorf("get server: %w", err)
 	}
@@ -132,16 +108,11 @@ func (s *DatabaseMgmtService) CreateDatabase(ctx context.Context, dbServerID int
 		return nil, fmt.Errorf("database creation not supported for %s", server.Name)
 	}
 
-	result, err := s.db.ExecContext(ctx, `INSERT INTO databases (db_server_id, db_version_id, name, charset, description)
-		VALUES (?, ?, ?, ?, ?)`, dbServerID, req.DBVersionID, req.Name, charset, req.Description)
+	id, err := s.repo.CreateDatabase(ctx, dbServerID, req.DBVersionID, req.Name, charset, req.Description)
 	if err != nil {
 		return nil, err
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("get last insert id: %w", err)
-	}
 	return &model.Database{
 		ID:          id,
 		DBServerID:  dbServerID,
@@ -157,7 +128,7 @@ func (s *DatabaseMgmtService) DeleteDatabase(ctx context.Context, dbServerID, id
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	d, err := s.getDatabase(ctx, dbServerID, id)
+	d, err := s.repo.GetDatabase(ctx, dbServerID, id)
 	if err != nil {
 		return fmt.Errorf("get database: %w", err)
 	}
@@ -165,7 +136,7 @@ func (s *DatabaseMgmtService) DeleteDatabase(ctx context.Context, dbServerID, id
 		return fmt.Errorf("database not found")
 	}
 
-	server, err := s.getServer(ctx, dbServerID)
+	server, err := s.repo.GetServer(ctx, dbServerID)
 	if err != nil {
 		return fmt.Errorf("get server: %w", err)
 	}
@@ -173,7 +144,7 @@ func (s *DatabaseMgmtService) DeleteDatabase(ctx context.Context, dbServerID, id
 		return fmt.Errorf("database server not found")
 	}
 
-	version, err := s.getVersion(ctx, d.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, d.DBVersionID)
 	if err != nil {
 		return fmt.Errorf("get version: %w", err)
 	}
@@ -197,8 +168,7 @@ func (s *DatabaseMgmtService) DeleteDatabase(ctx context.Context, dbServerID, id
 		return fmt.Errorf("database deletion not supported for %s", server.Name)
 	}
 
-	_, err = s.db.ExecContext(ctx, "DELETE FROM databases WHERE id = ? AND db_server_id = ?", id, dbServerID)
-	return err
+	return s.repo.DeleteDatabase(ctx, dbServerID, id)
 }
 
 // DB User CRUD
@@ -207,33 +177,14 @@ func (s *DatabaseMgmtService) ListDBUsers(ctx context.Context, dbServerID int64)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, db_server_id, username, host, privileges, created_at
-		FROM db_users WHERE db_server_id = ? ORDER BY id`, dbServerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var users []model.DBUser
-	for rows.Next() {
-		var u model.DBUser
-		if err := rows.Scan(&u.ID, &u.DBServerID, &u.Username, &u.Host, &u.Privileges, &u.CreatedAt); err != nil {
-			log.Printf("scan db user row: %v", err)
-			continue
-		}
-		users = append(users, u)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate db users: %w", err)
-	}
-	return users, nil
+	return s.repo.ListDBUsers(ctx, dbServerID)
 }
 
 func (s *DatabaseMgmtService) CreateDBUser(ctx context.Context, dbServerID int64, req *model.CreateDBUserRequest) (*model.DBUser, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	server, err := s.getServer(ctx, dbServerID)
+	server, err := s.repo.GetServer(ctx, dbServerID)
 	if err != nil {
 		return nil, fmt.Errorf("get server: %w", err)
 	}
@@ -242,7 +193,7 @@ func (s *DatabaseMgmtService) CreateDBUser(ctx context.Context, dbServerID int64
 	}
 
 	// Check any version is running
-	versions, err := s.listVersions(ctx, dbServerID)
+	versions, err := s.repo.ListVersions(ctx, dbServerID)
 	if err != nil {
 		return nil, fmt.Errorf("list versions: %w", err)
 	}
@@ -292,15 +243,9 @@ func (s *DatabaseMgmtService) CreateDBUser(ctx context.Context, dbServerID int64
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	result, err := s.db.ExecContext(ctx, `INSERT INTO db_users (db_server_id, username, password, host) VALUES (?, ?, ?, ?)`,
-		dbServerID, req.Username, string(hashedPassword), host)
+	id, err := s.repo.CreateDBUser(ctx, dbServerID, req.Username, string(hashedPassword), host)
 	if err != nil {
 		return nil, err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("get last insert id: %w", err)
 	}
 	return &model.DBUser{
 		ID:         id,
@@ -314,7 +259,7 @@ func (s *DatabaseMgmtService) DeleteDBUser(ctx context.Context, dbServerID, id i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	u, err := s.getDBUser(ctx, dbServerID, id)
+	u, err := s.repo.GetDBUser(ctx, dbServerID, id)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
@@ -322,7 +267,7 @@ func (s *DatabaseMgmtService) DeleteDBUser(ctx context.Context, dbServerID, id i
 		return fmt.Errorf("user not found")
 	}
 
-	server, err := s.getServer(ctx, dbServerID)
+	server, err := s.repo.GetServer(ctx, dbServerID)
 	if err != nil {
 		return fmt.Errorf("get server: %w", err)
 	}
@@ -331,7 +276,7 @@ func (s *DatabaseMgmtService) DeleteDBUser(ctx context.Context, dbServerID, id i
 	}
 
 	// Check any version is running
-	versions, err := s.listVersions(ctx, dbServerID)
+	versions, err := s.repo.ListVersions(ctx, dbServerID)
 	if err != nil {
 		return fmt.Errorf("list versions: %w", err)
 	}
@@ -363,15 +308,14 @@ func (s *DatabaseMgmtService) DeleteDBUser(ctx context.Context, dbServerID, id i
 		return fmt.Errorf("user deletion not supported for %s", server.Name)
 	}
 
-	_, err = s.db.ExecContext(ctx, "DELETE FROM db_users WHERE id = ? AND db_server_id = ?", id, dbServerID)
-	return err
+	return s.repo.DeleteDBUser(ctx, dbServerID, id)
 }
 
 func (s *DatabaseMgmtService) GrantPrivileges(ctx context.Context, dbServerID, userID int64, req *model.GrantRequest) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	u, err := s.getDBUser(ctx, dbServerID, userID)
+	u, err := s.repo.GetDBUser(ctx, dbServerID, userID)
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
@@ -379,7 +323,7 @@ func (s *DatabaseMgmtService) GrantPrivileges(ctx context.Context, dbServerID, u
 		return fmt.Errorf("user not found")
 	}
 
-	server, err := s.getServer(ctx, dbServerID)
+	server, err := s.repo.GetServer(ctx, dbServerID)
 	if err != nil {
 		return fmt.Errorf("get server: %w", err)
 	}
@@ -387,7 +331,7 @@ func (s *DatabaseMgmtService) GrantPrivileges(ctx context.Context, dbServerID, u
 		return fmt.Errorf("database server not found")
 	}
 
-	version, err := s.getVersion(ctx, req.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, req.DBVersionID)
 	if err != nil {
 		return fmt.Errorf("get version: %w", err)
 	}
@@ -430,7 +374,7 @@ func (s *DatabaseMgmtService) GrantPrivileges(ctx context.Context, dbServerID, u
 	if existing != "" {
 		existing += ";"
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE db_users SET privileges = ? WHERE id = ?", existing+privStr, userID); err != nil {
+	if err := s.repo.UpdateDBUserPrivileges(ctx, userID, existing+privStr); err != nil {
 		return fmt.Errorf("update privileges in db: %w", err)
 	}
 
@@ -504,72 +448,12 @@ func escapePGString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
 }
 
-// Internal helpers
-
-func (s *DatabaseMgmtService) getServer(ctx context.Context, id int64) (*model.DBServer, error) {
-	ds := &model.DBServer{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, display_name, status FROM db_servers WHERE id = ?`, id).Scan(
-		&ds.ID, &ds.Name, &ds.DisplayName, &ds.Status)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return ds, err
-}
-
-func (s *DatabaseMgmtService) getVersion(ctx context.Context, id int64) (*model.DBVersion, error) {
-	v := &model.DBVersion{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, db_server_id, version, service_name, port, status FROM db_versions WHERE id = ?`, id).Scan(
-		&v.ID, &v.DBServerID, &v.Version, &v.ServiceName, &v.Port, &v.Status)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return v, err
-}
-
-func (s *DatabaseMgmtService) listVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, db_server_id, version, service_name, port, status FROM db_versions WHERE db_server_id = ?`, dbServerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var versions []model.DBVersion
-	for rows.Next() {
-		var v model.DBVersion
-		if err := rows.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ServiceName, &v.Port, &v.Status); err != nil {
-			log.Printf("scan version row: %v", err)
-			continue
-		}
-		versions = append(versions, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate versions: %w", err)
-	}
-	return versions, nil
-}
-
-func (s *DatabaseMgmtService) getDatabase(ctx context.Context, dbServerID, id int64) (*model.Database, error) {
-	d := &model.Database{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, db_server_id, db_version_id, name FROM databases WHERE id = ? AND db_server_id = ?`,
-		id, dbServerID).Scan(&d.ID, &d.DBServerID, &d.DBVersionID, &d.Name)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return d, err
-}
-
 // GetDatabaseByID returns a database by its ID (exported for API handler)
 func (s *DatabaseMgmtService) GetDatabaseByID(ctx context.Context, id int64) (*model.Database, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	d := &model.Database{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, db_server_id, db_version_id, name FROM databases WHERE id = ?`, id).Scan(
-		&d.ID, &d.DBServerID, &d.DBVersionID, &d.Name)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return d, err
+	return s.repo.GetDatabaseByID(ctx, id)
 }
 
 // GetServerByID returns a server by its ID (exported for API handler)
@@ -577,15 +461,5 @@ func (s *DatabaseMgmtService) GetServerByID(ctx context.Context, id int64) (*mod
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.getServer(ctx, id)
-}
-
-func (s *DatabaseMgmtService) getDBUser(ctx context.Context, dbServerID, id int64) (*model.DBUser, error) {
-	u := &model.DBUser{}
-	err := s.db.QueryRowContext(ctx, `SELECT id, db_server_id, username, host FROM db_users WHERE id = ? AND db_server_id = ?`,
-		id, dbServerID).Scan(&u.ID, &u.DBServerID, &u.Username, &u.Host)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return u, err
+	return s.repo.GetServer(ctx, id)
 }
