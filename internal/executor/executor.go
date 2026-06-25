@@ -17,6 +17,7 @@ type CommandExecutor interface {
 	RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (output string, exitCode int, err error)
 	Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error)
 	Command(ctx context.Context, opts StartOptions, name string, args ...string) *exec.Cmd
+	LookPath(name string) (string, error)
 }
 
 type StartOptions struct {
@@ -151,6 +152,10 @@ func (e *OSExecutor) Start(ctx context.Context, opts StartOptions, name string, 
 		return nil, err
 	}
 	return &OSProcess{cmd: cmd}, nil
+}
+
+func (e *OSExecutor) LookPath(name string) (string, error) {
+	return exec.LookPath(name)
 }
 
 func applyCommandOptions(cmd *exec.Cmd, workDir string, env []string) {

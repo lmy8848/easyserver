@@ -134,6 +134,20 @@ func (m *MockExecutor) Command(ctx context.Context, opts StartOptions, name stri
 	return nil
 }
 
+// LookPath checks if a command is available (mock: returns default path or error).
+func (m *MockExecutor) LookPath(name string) (string, error) {
+	if resp, ok := m.Responses[name]; ok {
+		if resp.Error != nil {
+			return "", resp.Error
+		}
+		return "/usr/bin/" + name, nil
+	}
+	if m.Default.Error != nil {
+		return "", m.Default.Error
+	}
+	return "/usr/bin/" + name, nil
+}
+
 // Start starts a mock process
 func (m *MockExecutor) Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error) {
 	return NewMockProcess(12345), nil

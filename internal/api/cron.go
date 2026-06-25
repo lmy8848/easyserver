@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 	"easyserver/internal/service"
 
@@ -19,11 +19,12 @@ import (
 // CronHandler handles cron task API requests
 type CronHandler struct {
 	cronService *service.CronService
+	executor    executor.CommandExecutor
 }
 
 // NewCronHandler creates a new CronHandler
-func NewCronHandler(cronService *service.CronService) *CronHandler {
-	return &CronHandler{cronService: cronService}
+func NewCronHandler(cronService *service.CronService, exec executor.CommandExecutor) *CronHandler {
+	return &CronHandler{cronService: cronService, executor: exec}
 }
 
 // ListTasks returns all cron tasks
@@ -343,7 +344,7 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 	}
 
 	// Check language interpreter exists on server
-	if err := checkInterpreterInstalled(language); err != nil {
+	if err := h.checkInterpreterInstalled(language); err != nil {
 		BadRequest(c, fmt.Sprintf("language '%s' is not installed: %v", language, err))
 		return
 	}
@@ -400,8 +401,8 @@ func validateScriptLanguage(language string) error {
 }
 
 // checkInterpreterInstalled verifies the language interpreter exists on the server
-func checkInterpreterInstalled(language string) error {
-	path, err := exec.LookPath(language)
+func (h *CronHandler) checkInterpreterInstalled(language string) error {
+	path, err := h.executor.LookPath(language)
 	if err != nil {
 		return fmt.Errorf("interpreter '%s' not found in PATH", language)
 	}
@@ -464,7 +465,7 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 			BadRequest(c, err.Error())
 			return
 		}
-		if err := checkInterpreterInstalled(*req.Language); err != nil {
+		if err := h.checkInterpreterInstalled(*req.Language); err != nil {
 			BadRequest(c, fmt.Sprintf("language '%s' is not installed: %v", *req.Language, err))
 			return
 		}
@@ -904,12 +905,12 @@ func (h *CronHandler) DeleteDoc(c *gin.Context) {
 	Success(c, gin.H{"message": "文档已删除"})
 }
 
-func registerCronRoutes(protected *gin.RouterGroup, cronService *service.CronService) {
+func registerCronRoutes(protected *gin.RouterGroup, cronService *service.CronService, exec executor.CommandExecutor) {
 	// Seed default documentation (tables managed by migration system)
 	if err := cronService.SeedDefaultDocs(context.Background()); err != nil {
 		log.Printf("WARNING: seed default cron docs failed: %v", err)
 	}
-	handler := NewCronHandler(cronService)
+	handler := NewCronHandler(cronService, exec)
 
 	protected.GET("/cron/presets", handler.GetPresets)
 	protected.GET("/cron/describe", handler.DescribeSchedule)

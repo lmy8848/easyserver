@@ -1,19 +1,14 @@
 package api
 
 import (
-	"log"
-
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerFileRoutes registers file management routes
-func registerFileRoutes(protected *gin.RouterGroup, basePath string, auditService *service.AuditService) {
-	handler, err := NewFileManagerHandler(basePath, auditService)
-	if err != nil {
-		log.Fatalf("FATAL: failed to init file handler: %v", err)
-	}
+func registerFileRoutes(protected *gin.RouterGroup, fileManager *service.FileManager, auditService *service.AuditService) {
+	handler := NewFileManagerHandler(fileManager, auditService)
 	protected.GET("/files", handler.List)
 	protected.GET("/files/base-path", handler.GetBasePath)
 	protected.GET("/files/download", handler.Download)

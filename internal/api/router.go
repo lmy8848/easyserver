@@ -9,7 +9,6 @@ import (
 	"easyserver/internal/config"
 	"easyserver/internal/executor"
 	"easyserver/internal/middleware"
-	"easyserver/internal/model"
 	"easyserver/internal/repository"
 	"easyserver/internal/service"
 
@@ -69,6 +68,15 @@ type Router struct {
 	// Web server services
 	webServerService *service.WebServerService
 	websiteService   *service.WebsiteService
+
+	// Terminal manager
+	terminalManager *service.TerminalManager
+
+	// File manager
+	fileManager *service.FileManager
+
+	// Cloud service (nil if disabled)
+	cloudService *service.CloudService
 }
 
 // RouterDeps holds the shared service instances created once in main.go.
@@ -125,29 +133,22 @@ type RouterDeps struct {
 	// Web server services
 	WebServerService *service.WebServerService
 	WebsiteService   *service.WebsiteService
+
+	// Notify + Alert (wired in main.go)
+	NotifyService *service.NotifyService
+	AlertService  *service.AlertService
+
+	// Terminal manager
+	TerminalManager *service.TerminalManager
+
+	// File manager
+	FileManager *service.FileManager
+
+	// Cloud service (nil if disabled)
+	CloudService *service.CloudService
 }
 
 func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
-	// Wire notification + alert services onto the shared instances.
-	notifyService := service.NewNotifyService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
-	deps.AuthService.SetNotifyService(notifyService)
-
-	// Initialize alert service
-	alertService := service.NewAlertService(notifyService)
-	var alertRules []model.AlertRule
-	for i, rule := range cfg.Alerts.Rules {
-		alertRules = append(alertRules, model.AlertRule{
-			ID:        int64(i + 1),
-			Name:      rule.Name,
-			Metric:    rule.Metric,
-			Threshold: rule.Threshold,
-			Duration:  rule.Duration,
-			Enabled:   rule.Enabled,
-		})
-	}
-	alertService.SetRules(alertRules)
-	deps.MonitorService.SetAlertService(alertService)
-
 	return &Router{
 		cfg:                  cfg,
 		configPath:           configPath,
@@ -159,7 +160,7 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		auditService:         deps.AuditService,
 		sessionService:       deps.SessionService,
 		totpService:          deps.TotpService,
-		alertService:         alertService,
+		alertService:         deps.AlertService,
 		processManager:       deps.ProcessManager,
 		systemProcessService: deps.SystemProcessService,
 		notificationService:  deps.NotificationService,
@@ -201,6 +202,15 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		// Web server services
 		webServerService: deps.WebServerService,
 		websiteService:   deps.WebsiteService,
+
+		// Terminal manager
+		terminalManager: deps.TerminalManager,
+
+		// File manager
+		fileManager: deps.FileManager,
+
+		// Cloud service
+		cloudService: deps.CloudService,
 	}
 }
 
@@ -258,18 +268,18 @@ func (r *Router) Setup() *gin.Engine {
 	// Register domain routes
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerServiceRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerTerminalRoutes(protected, wsGroup, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerFileRoutes(protected, r.cfg.FileManager.BasePath, r.auditService)
+	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
+	registerFileRoutes(protected, r.fileManager, r.auditService)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor)
 	registerSystemRoutes(protected, r.executor)
-	registerCloudRoutes(protected, &r.cfg.TencentCloud, r.cfg.Server.Port)
+	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	registerDeployRoutes(protected, r.deployService)
 	registerRuntimeRoutes(protected, r.runtimeService, r.runtimeVersionService, r.packageManagerService)
 	registerEnvRoutes(protected, r.envConfigService)
 	registerWebServerRoutes(protected, r.webServerService, r.websiteService)
 	registerDatabaseRoutes(protected, r.dbServerService, r.databaseMgmtService, r.dbBackupService, r.sqlQueryService)
-	registerCronRoutes(protected, r.cronService)
+	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	registerSSHRoutes(protected, r.sshConfigService)
 	registerContainerRoutes(protected, r.containerService, r.dockerService, r.composeService, r.volumeService, r.networkService, r.auditService)

@@ -17,6 +17,7 @@ import (
 	"easyserver/internal/database"
 	"easyserver/internal/executor"
 	"easyserver/internal/middleware"
+	"easyserver/internal/model"
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/service"
 )
@@ -173,7 +174,7 @@ func main() {
 
 	// Initialize database services (single shared instance)
 	dbServerRepo := sqlite.NewDBServerRepository(db)
-	dbServerService := service.NewDBServerService(db, cmdExec, dbServerRepo)
+	dbServerService := service.NewDBServerService(cmdExec, dbServerRepo)
 	dbServerService.SeedPredefinedServers(context.Background())
 	databaseMgmtRepo := sqlite.NewDatabaseMgmtRepository(db)
 	databaseMgmtService := service.NewDatabaseMgmtService(databaseMgmtRepo, cmdExec)
@@ -211,6 +212,48 @@ func main() {
 	webServerService := service.NewWebServerService(webServerRepo, cmdExec)
 	webServerService.SeedPredefinedWebServers(context.Background())
 	websiteService := service.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
+
+	// Initialize notify + alert services (single shared instance)
+	notifyService := service.NewNotifyService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
+	authService.SetNotifyService(notifyService)
+
+	alertService := service.NewAlertService(notifyService)
+	var alertRules []model.AlertRule
+	for i, rule := range cfg.Alerts.Rules {
+		alertRules = append(alertRules, model.AlertRule{
+			ID:        int64(i + 1),
+			Name:      rule.Name,
+			Metric:    rule.Metric,
+			Threshold: rule.Threshold,
+			Duration:  rule.Duration,
+			Enabled:   rule.Enabled,
+		})
+	}
+	alertService.SetRules(alertRules)
+	monitorService.SetAlertService(alertService)
+
+	// Initialize terminal manager (single shared instance)
+	terminalManager := service.NewTerminalManager(cmdExec)
+
+	// Initialize file manager (single shared instance)
+	fileManager, err := service.NewFileManager(cfg.FileManager.BasePath)
+	if err != nil {
+		log.Fatalf("Failed to init file manager: %v", err)
+	}
+
+	// Initialize cloud service (single shared instance, nil if disabled)
+	var cloudService *service.CloudService
+	if cfg.TencentCloud.Enabled {
+		cloudService, err = service.NewCloudService(
+			cfg.TencentCloud.SecretID,
+			cfg.TencentCloud.SecretKey,
+			cfg.TencentCloud.Region,
+			cfg.TencentCloud.InstanceID,
+		)
+		if err != nil {
+			log.Printf("WARNING: failed to init cloud service: %v", err)
+		}
+	}
 
 	// Log server start
 	auditService.LogSystemEvent(context.Background(), "SERVER_START", "EasyServer started")
@@ -266,6 +309,19 @@ func main() {
 		// Web server services
 		WebServerService: webServerService,
 		WebsiteService:   websiteService,
+
+		// Notify + Alert services
+		NotifyService: notifyService,
+		AlertService:  alertService,
+
+		// Terminal manager
+		TerminalManager: terminalManager,
+
+		// File manager
+		FileManager: fileManager,
+
+		// Cloud service
+		CloudService: cloudService,
 	})
 	r := router.Setup()
 

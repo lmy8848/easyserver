@@ -16,15 +16,11 @@ type FileManagerHandler struct {
 	auditService *service.AuditService
 }
 
-func NewFileManagerHandler(basePath string, auditService *service.AuditService) (*FileManagerHandler, error) {
-	fm, err := service.NewFileManager(basePath)
-	if err != nil {
-		return nil, err
-	}
+func NewFileManagerHandler(fm *service.FileManager, auditService *service.AuditService) *FileManagerHandler {
 	return &FileManagerHandler{
 		fileManager:  fm,
 		auditService: auditService,
-	}, nil
+	}
 }
 
 // getUserInfo extracts user info from context

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -439,13 +438,13 @@ func (s *WebServerService) RefreshStatus(ctx context.Context, id int64) error {
 
 	switch ws.Name {
 	case "nginx":
-		if _, err := exec.LookPath("nginx"); err == nil {
+		if _, err := s.executor.LookPath("nginx"); err == nil {
 			installed = true
 			out, _, _ := s.executor.RunCombined(ctx, "nginx", "-v")
 			version = strings.TrimSpace(out)
 		}
 	case "apache":
-		if _, err := exec.LookPath("apache2"); err == nil {
+		if _, err := s.executor.LookPath("apache2"); err == nil {
 			installed = true
 			out, _, _ := s.executor.RunCombined(ctx, "apache2", "-v")
 			lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -459,7 +458,7 @@ func (s *WebServerService) RefreshStatus(ctx context.Context, id int64) error {
 			version = "tomcat9"
 		}
 	case "caddy":
-		if _, err := exec.LookPath("caddy"); err == nil {
+		if _, err := s.executor.LookPath("caddy"); err == nil {
 			installed = true
 			out, _, _ := s.executor.RunCombined(ctx, "caddy", "version")
 			version = strings.TrimSpace(out)
