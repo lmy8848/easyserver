@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"unsafe"
 
@@ -93,16 +92,15 @@ func (m *SystemEventMonitor) checkMemoryUsage() {
 // checkServiceFailures checks for failed Windows services.
 func (m *SystemEventMonitor) checkServiceFailures() {
 	// Use PowerShell to get stopped services that should be running
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+	output, _, _, err := m.executor.Run(context.Background(), "powershell", "-NoProfile", "-Command",
 		"Get-Service | Where-Object {$_.Status -eq 'Stopped' -and $_.StartType -eq 'Automatic'} | Select-Object -ExpandProperty Name")
-	output, err := cmd.Output()
 	if err != nil {
 		// PowerShell may not be available, try sc command
 		m.checkServiceFailuresSC()
 		return
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	lines := strings.Split(strings.TrimSpace(output), "\n")
 	for _, line := range lines {
 		serviceName := strings.TrimSpace(line)
 		if serviceName == "" {
@@ -115,13 +113,12 @@ func (m *SystemEventMonitor) checkServiceFailures() {
 
 // checkServiceFailuresSC is a fallback using the sc command.
 func (m *SystemEventMonitor) checkServiceFailuresSC() {
-	cmd := exec.Command("sc", "query", "type=", "service", "state=", "stopped")
-	output, err := cmd.Output()
+	output, _, _, err := m.executor.Run(context.Background(), "sc", "query", "type=", "service", "state=", "stopped")
 	if err != nil {
 		return
 	}
 
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "SERVICE_NAME:") {
