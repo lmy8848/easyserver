@@ -51,7 +51,7 @@ func ServeWeb(e *gin.Engine) {
 
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    40400,
-			"message": "not found",
+			"message": "页面未找到",
 		})
 	})
 }

@@ -25,6 +25,8 @@ interface TerminalTab {
   reconnectCount: number;
   onDataDisposable: { dispose: () => void } | null;
   disposed: boolean;
+  /** Guards against concurrent WebSocket writes */
+  writeLock: boolean;
 }
 
 const MIN_FONT_SIZE = 10;
@@ -50,6 +52,7 @@ export default function TerminalPage() {
   const tabCounter = useRef(0);
   const tabsRef = useRef<TerminalTab[]>([]);
   const mountGenRef = useRef(0);
+  const animFrameIdsRef = useRef<number[]>([]);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -78,8 +81,9 @@ export default function TerminalPage() {
     updateTabStatus(tab.key, isReconnect ? 'reconnecting' : 'connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${tab.key.replace('terminal-', '')}?token=${token}`;
-    const ws = new WebSocket(wsUrl);
+    const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${tab.key.replace('terminal-', '')}`;
+    // Pass token via Sec-WebSocket-Protocol header instead of URL parameter
+    const ws = new WebSocket(wsUrl, ['token', token]);
     tab.ws = ws;
 
     ws.onopen = () => {
@@ -112,7 +116,9 @@ export default function TerminalPage() {
       }
     };
 
-    ws.onerror = () => {};
+    ws.onerror = (event) => {
+      console.error('Terminal WebSocket error:', event);
+    };
 
     ws.onclose = () => {
       if (tab.disposed) return;
@@ -170,26 +176,37 @@ export default function TerminalPage() {
       reconnectCount: 0,
       onDataDisposable: null,
       disposed: false,
+      writeLock: false,
+    };
+
+    // Safe WS write helper to prevent concurrent writes
+    const safeSend = (tab: TerminalTab, data: string) => {
+      if (tab.writeLock || !tab.ws || tab.ws.readyState !== WebSocket.OPEN) return;
+      tab.writeLock = true;
+      try {
+        tab.ws.send(data);
+      } catch {
+        // ignore write errors
+      }
+      tab.writeLock = false;
     };
 
     // 只注册一次 onData，引用 tab.ws（重连时 ws 会更新）
     newTab.onDataDisposable = terminal.onData((data) => {
-      if (newTab.ws?.readyState === WebSocket.OPEN) {
-        newTab.ws.send(JSON.stringify({ type: 'input', data }));
-      }
+      safeSend(newTab, JSON.stringify({ type: 'input', data }));
     });
 
     setTabs(prev => [...prev, newTab]);
     setActiveKey(key);
 
     // 等待 DOM 渲染完成后再打开终端
-    requestAnimationFrame(() => {
+    const frameId1 = requestAnimationFrame(() => {
       if (mountGenRef.current !== gen) {
         newTab.disposed = true;
         newTab.terminal.dispose();
         return;
       }
-      requestAnimationFrame(() => {
+      const frameId2 = requestAnimationFrame(() => {
         if (mountGenRef.current !== gen) {
           newTab.disposed = true;
           newTab.terminal.dispose();
@@ -203,7 +220,9 @@ export default function TerminalPage() {
         }
         connectWs(newTab);
       });
+      animFrameIdsRef.current.push(frameId2);
     });
+    animFrameIdsRef.current.push(frameId1);
   }, [connectWs]);
 
   const closeTab = useCallback((key: string) => {
@@ -264,6 +283,9 @@ export default function TerminalPage() {
     createTerminal(gen);
     return () => {
       mountGenRef.current++;
+      // Cancel any pending animation frames to prevent memory leaks
+      animFrameIdsRef.current.forEach(id => cancelAnimationFrame(id));
+      animFrameIdsRef.current = [];
       tabsRef.current.forEach(tab => {
         tab.disposed = true;
         if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
@@ -280,13 +302,18 @@ export default function TerminalPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 通用 resize 发送
+  // 通用 resize 发送（带写锁防并发）
   const sendResize = useCallback((tab: TerminalTab) => {
-    if (tab.ws?.readyState === WebSocket.OPEN) {
-      const dims = tab.fitAddon.proposeDimensions();
-      if (dims) {
+    if (tab.writeLock || tab.ws?.readyState !== WebSocket.OPEN) return;
+    const dims = tab.fitAddon.proposeDimensions();
+    if (dims) {
+      tab.writeLock = true;
+      try {
         tab.ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+      } catch {
+        // ignore
       }
+      tab.writeLock = false;
     }
   }, []);
 

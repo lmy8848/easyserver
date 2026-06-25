@@ -122,7 +122,12 @@ func UserIPWhitelistMiddleware(getWhitelist UserIPWhitelistFunc) gin.HandlerFunc
 			return
 		}
 
-		whitelistStr, err := getWhitelist(userID.(int64))
+		uid, ok := userID.(int64)
+		if !ok {
+			c.Next()
+			return
+		}
+		whitelistStr, err := getWhitelist(uid)
 		if err != nil {
 			// On error, don't block — let request through
 			c.Next()

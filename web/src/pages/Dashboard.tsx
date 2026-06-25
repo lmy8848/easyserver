@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Row, Col, Card, Statistic, Spin, Descriptions, Table, Tag, Segmented } from 'antd';
 import {
   DesktopOutlined,
@@ -10,39 +10,17 @@ import {
 import ReactECharts from 'echarts-for-react';
 import { monitorApi } from '../services/api';
 import type { MonitorSnapshot, HistoryPoint, ProcessInfo } from '../types';
+import { formatBytes, formatUptime } from '../utils/format';
+import { getPercentColor } from '../utils/status';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 const MAX_HISTORY_POINTS = 360;
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${days}天${hours}小时${minutes}分钟`;
-  if (hours > 0) return `${hours}小时${minutes}分钟`;
-  return `${minutes}分钟`;
-}
-
-function getStatusColor(percent: number): string {
-  if (percent >= 90) return '#cf1322';
-  if (percent >= 70) return '#faad14';
-  return '#3f8600';
-}
 
 export default function Dashboard() {
   const [stats, setStats] = useState<MonitorSnapshot | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<string>('1h');
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
 
   const appendToHistory = useCallback((point: HistoryPoint) => {
     setHistory(prev => {
@@ -86,69 +64,52 @@ export default function Dashboard() {
       .catch(console.error);
   }, [timeRange]);
 
-  // WebSocket with reconnect
-  const connectWebSocket = useCallback(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/monitor?token=${token}`;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
+  // WebSocket via shared hook (token passed via Sec-WebSocket-Protocol header)
+  useWebSocket({
+    path: '/ws/monitor',
+    onMessage: (msg) => {
+      if (msg.type === 'stats' && msg.data) {
+        setStats(msg.data);
+        appendToHistory(msg.data);
       }
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'stats' && msg.data) {
-          setStats(msg.data);
-          appendToHistory(msg.data);
+    },
+    onClose: (event) => {
+      if (event.code === 4001 || event.code === 4003 || event.code === 1006) {
+        const currentToken = localStorage.getItem('token');
+        if (currentToken) {
+          fetch('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${currentToken}` },
+          }).then(res => {
+            if (res.status === 401) {
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              window.location.href = '/login';
+            }
+          }).catch(() => {});
         }
-      } catch (e) {
-        console.error('WebSocket message error:', e);
+        return true; // prevent auto-reconnect on auth failure
       }
-    };
+    },
+  });
 
-    ws.onclose = () => {
-      reconnectTimerRef.current = window.setTimeout(connectWebSocket, 3000);
-    };
+  /** Sanitize text for use inside ECharts HTML tooltip */
+  const sanitizeTooltipText = (text: string): string =>
+    text.replace(/[<>&"']/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] || ch));
 
-    const pingInterval = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      }
-    }, 30000);
-
-    return () => clearInterval(pingInterval);
-  }, [appendToHistory]);
-
-  useEffect(() => {
-    const cleanup = connectWebSocket();
-    return () => {
-      cleanup?.();
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
-    };
-  }, [connectWebSocket]);
-
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: 100 }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  const cpuChartOption = {
+  const cpuChartOption = useMemo(() => ({
     title: { text: 'CPU 使用率', left: 'center', textStyle: { fontSize: 14 } },
-    tooltip: { trigger: 'axis' as const },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: (params: any) => {
+        const time = sanitizeTooltipText(params[0]?.axisValue || '');
+        let html = `<div>${time}</div>`;
+        params.forEach((p: any) => {
+          const name = sanitizeTooltipText(p.seriesName || '');
+          html += `<div>${p.marker} ${name}: ${p.value}%</div>`;
+        });
+        return html;
+      },
+    },
     grid: { top: 40, right: 20, bottom: 30, left: 50 },
     xAxis: {
       type: 'category' as const,
@@ -169,11 +130,22 @@ export default function Dashboard() {
       areaStyle: { opacity: 0.3 },
       showSymbol: false,
     }],
-  };
+  }), [history]);
 
-  const memChartOption = {
+  const memChartOption = useMemo(() => ({
     title: { text: '内存使用率', left: 'center', textStyle: { fontSize: 14 } },
-    tooltip: { trigger: 'axis' as const },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: (params: any) => {
+        const time = sanitizeTooltipText(params[0]?.axisValue || '');
+        let html = `<div>${time}</div>`;
+        params.forEach((p: any) => {
+          const name = sanitizeTooltipText(p.seriesName || '');
+          html += `<div>${p.marker} ${name}: ${p.value}%</div>`;
+        });
+        return html;
+      },
+    },
     grid: { top: 40, right: 20, bottom: 30, left: 50 },
     xAxis: {
       type: 'category' as const,
@@ -195,17 +167,18 @@ export default function Dashboard() {
       itemStyle: { color: '#52c41a' },
       showSymbol: false,
     }],
-  };
+  }), [history]);
 
-  const netChartOption = {
+  const netChartOption = useMemo(() => ({
     title: { text: '网络流量', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
       formatter: (params: any) => {
-        const time = params[0]?.axisValue || '';
+        const time = sanitizeTooltipText(params[0]?.axisValue || '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
-          html += `<div>${p.marker} ${p.seriesName}: ${formatBytes(p.value)}/s</div>`;
+          const name = sanitizeTooltipText(p.seriesName || '');
+          html += `<div>${p.marker} ${name}: ${formatBytes(p.value)}/s</div>`;
         });
         return html;
       },
@@ -243,7 +216,15 @@ export default function Dashboard() {
         areaStyle: { opacity: 0.2 },
       },
     ],
-  };
+  }), [history]);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 100 }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
 
   const processColumns = [
     { title: 'PID', dataIndex: 'pid', key: 'pid', width: 70 },
@@ -300,7 +281,7 @@ export default function Dashboard() {
               precision={1}
               suffix="%"
               prefix={<DesktopOutlined />}
-              valueStyle={{ color: getStatusColor(stats?.cpu.usage_percent || 0) }}
+              styles={{ content: { color: getPercentColor(stats?.cpu.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
               负载: {stats?.cpu.load_1m?.toFixed(2) || '-'} / {stats?.cpu.load_5m?.toFixed(2) || '-'} / {stats?.cpu.load_15m?.toFixed(2) || '-'}
@@ -316,7 +297,7 @@ export default function Dashboard() {
               precision={1}
               suffix="%"
               prefix={<HddOutlined />}
-              valueStyle={{ color: getStatusColor(stats?.memory.usage_percent || 0) }}
+              styles={{ content: { color: getPercentColor(stats?.memory.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
               {formatBytes(stats?.memory.used_bytes || 0)} / {formatBytes(stats?.memory.total_bytes || 0)}
@@ -332,7 +313,7 @@ export default function Dashboard() {
               precision={1}
               suffix="%"
               prefix={<CloudServerOutlined />}
-              valueStyle={{ color: getStatusColor(stats?.disk?.[0]?.usage_percent || 0) }}
+              styles={{ content: { color: getPercentColor(stats?.disk?.[0]?.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
               {formatBytes(stats?.disk?.[0]?.used_bytes || 0)} / {formatBytes(stats?.disk?.[0]?.total_bytes || 0)}
@@ -421,7 +402,7 @@ export default function Dashboard() {
                   key: 'usage_percent',
                   width: 100,
                   render: (v: number) => (
-                    <span style={{ color: getStatusColor(v) }}>{v.toFixed(1)}%</span>
+                    <span style={{ color: getPercentColor(v) }}>{v.toFixed(1)}%</span>
                   ),
                 },
                 {
@@ -446,7 +427,7 @@ export default function Dashboard() {
               precision={1}
               suffix="%"
               prefix={<SwapOutlined />}
-              valueStyle={{ color: getStatusColor(swap?.usage_percent || 0) }}
+              styles={{ content: { color: getPercentColor(swap?.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
               {formatBytes(swap?.used_bytes || 0)} / {formatBytes(swap?.total_bytes || 0)}

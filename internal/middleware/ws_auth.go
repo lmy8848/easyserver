@@ -17,7 +17,7 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validato
 	return func(c *gin.Context) {
 		var tokenString string
 
-		// Try Sec-WebSocket-Protocol header first (preferred method)
+		// Extract token from Sec-WebSocket-Protocol header
 		protocols := c.GetHeader("Sec-WebSocket-Protocol")
 		if protocols != "" {
 			// Protocol format: "token, <jwt-token>" or just "<jwt-token>"
@@ -28,15 +28,6 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validato
 					tokenString = part
 					break
 				}
-			}
-		}
-
-		// Fallback to query parameter (deprecated)
-		if tokenString == "" {
-			tokenString = c.Query("token")
-			if tokenString != "" {
-				// Log deprecation warning
-				// TODO: Add proper logging/metrics for deprecated usage
 			}
 		}
 

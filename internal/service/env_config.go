@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -16,8 +17,12 @@ func NewEnvConfigService(db *sql.DB) *EnvConfigService {
 	return &EnvConfigService{db: db}
 }
 
-// InitTables creates environment config tables if they don't exist
-func (s *EnvConfigService) InitTables() error {
+// Deprecated: InitTables is kept for backward compatibility only.
+// Table creation is now handled by the migration system (migrations/ directory).
+func (s *EnvConfigService) InitTables(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS env_configs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,20 +59,23 @@ func (s *EnvConfigService) InitTables() error {
 	}
 
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
 
 	// Initialize default global configs
-	s.InitDefaultGlobalConfigs()
+	s.InitDefaultGlobalConfigs(ctx)
 
 	return nil
 }
 
 // ListEnvConfigs returns all environment configurations
-func (s *EnvConfigService) ListEnvConfigs(runtimeID int64) ([]model.EnvConfig, error) {
-	rows, err := s.db.Query(
+func (s *EnvConfigService) ListEnvConfigs(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE runtime_id = ? ORDER BY name",
 		runtimeID,
 	)
@@ -92,10 +100,13 @@ func (s *EnvConfigService) ListEnvConfigs(runtimeID int64) ([]model.EnvConfig, e
 }
 
 // GetEnvConfig returns a specific environment configuration
-func (s *EnvConfigService) GetEnvConfig(id int64) (*model.EnvConfig, error) {
+func (s *EnvConfigService) GetEnvConfig(ctx context.Context, id int64) (*model.EnvConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c := &model.EnvConfig{}
 	var isGlobal int
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE id = ?",
 		id,
 	).Scan(&c.ID, &c.Name, &c.Value, &c.RuntimeID, &isGlobal, &c.CreatedAt, &c.UpdatedAt)
@@ -110,13 +121,16 @@ func (s *EnvConfigService) GetEnvConfig(id int64) (*model.EnvConfig, error) {
 }
 
 // CreateEnvConfig creates a new environment configuration
-func (s *EnvConfigService) CreateEnvConfig(c *model.EnvConfig) error {
+func (s *EnvConfigService) CreateEnvConfig(ctx context.Context, c *model.EnvConfig) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Validate name
 	if !isValidEnvName(c.Name) {
 		return fmt.Errorf("invalid environment variable name: %s", c.Name)
 	}
 
-	result, err := s.db.Exec(
+	result, err := s.db.ExecContext(ctx,
 		"INSERT INTO env_configs (name, value, runtime_id, is_global) VALUES (?, ?, ?, ?)",
 		c.Name, c.Value, c.RuntimeID, c.IsGlobal,
 	)
@@ -128,13 +142,16 @@ func (s *EnvConfigService) CreateEnvConfig(c *model.EnvConfig) error {
 }
 
 // UpdateEnvConfig updates an environment configuration
-func (s *EnvConfigService) UpdateEnvConfig(c *model.EnvConfig) error {
+func (s *EnvConfigService) UpdateEnvConfig(ctx context.Context, c *model.EnvConfig) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Validate name
 	if !isValidEnvName(c.Name) {
 		return fmt.Errorf("invalid environment variable name: %s", c.Name)
 	}
 
-	_, err := s.db.Exec(
+	_, err := s.db.ExecContext(ctx,
 		"UPDATE env_configs SET name = ?, value = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		c.Name, c.Value, c.ID,
 	)
@@ -142,14 +159,20 @@ func (s *EnvConfigService) UpdateEnvConfig(c *model.EnvConfig) error {
 }
 
 // DeleteEnvConfig deletes an environment configuration
-func (s *EnvConfigService) DeleteEnvConfig(id int64) error {
-	_, err := s.db.Exec("DELETE FROM env_configs WHERE id = ?", id)
+func (s *EnvConfigService) DeleteEnvConfig(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := s.db.ExecContext(ctx, "DELETE FROM env_configs WHERE id = ?", id)
 	return err
 }
 
 // ListPathEntries returns all PATH entries
-func (s *EnvConfigService) ListPathEntries(runtimeID int64) ([]model.PathEntry, error) {
-	rows, err := s.db.Query(
+func (s *EnvConfigService) ListPathEntries(ctx context.Context, runtimeID int64) ([]model.PathEntry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, path, runtime_id, is_global, order_num, created_at FROM path_entries WHERE runtime_id = ? ORDER BY order_num",
 		runtimeID,
 	)
@@ -174,7 +197,10 @@ func (s *EnvConfigService) ListPathEntries(runtimeID int64) ([]model.PathEntry, 
 }
 
 // CreatePathEntry creates a new PATH entry
-func (s *EnvConfigService) CreatePathEntry(e *model.PathEntry) error {
+func (s *EnvConfigService) CreatePathEntry(ctx context.Context, e *model.PathEntry) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Validate path
 	if !isValidPath(e.Path) {
 		return fmt.Errorf("invalid path: %s", e.Path)
@@ -182,9 +208,9 @@ func (s *EnvConfigService) CreatePathEntry(e *model.PathEntry) error {
 
 	// Get max order
 	var maxOrder int
-	s.db.QueryRow("SELECT COALESCE(MAX(order_num), 0) FROM path_entries WHERE runtime_id = ?", e.RuntimeID).Scan(&maxOrder)
+	s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(order_num), 0) FROM path_entries WHERE runtime_id = ?", e.RuntimeID).Scan(&maxOrder)
 
-	result, err := s.db.Exec(
+	result, err := s.db.ExecContext(ctx,
 		"INSERT INTO path_entries (path, runtime_id, is_global, order_num) VALUES (?, ?, ?, ?)",
 		e.Path, e.RuntimeID, e.IsGlobal, maxOrder+1,
 	)
@@ -197,15 +223,21 @@ func (s *EnvConfigService) CreatePathEntry(e *model.PathEntry) error {
 }
 
 // DeletePathEntry deletes a PATH entry
-func (s *EnvConfigService) DeletePathEntry(id int64) error {
-	_, err := s.db.Exec("DELETE FROM path_entries WHERE id = ?", id)
+func (s *EnvConfigService) DeletePathEntry(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := s.db.ExecContext(ctx, "DELETE FROM path_entries WHERE id = ?", id)
 	return err
 }
 
 // ReorderPathEntries reorders PATH entries
-func (s *EnvConfigService) ReorderPathEntries(runtimeID int64, ids []int64) error {
+func (s *EnvConfigService) ReorderPathEntries(ctx context.Context, runtimeID int64, ids []int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	for i, id := range ids {
-		_, err := s.db.Exec(
+		_, err := s.db.ExecContext(ctx,
 			"UPDATE path_entries SET order_num = ? WHERE id = ? AND runtime_id = ?",
 			i+1, id, runtimeID,
 		)
@@ -217,11 +249,14 @@ func (s *EnvConfigService) ReorderPathEntries(runtimeID int64, ids []int64) erro
 }
 
 // GenerateEnvScript generates a shell script to set environment variables
-func (s *EnvConfigService) GenerateEnvScript(runtimeID int64) (string, error) {
+func (s *EnvConfigService) GenerateEnvScript(ctx context.Context, runtimeID int64) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var script strings.Builder
 
 	// Get environment variables
-	configs, err := s.ListEnvConfigs(runtimeID)
+	configs, err := s.ListEnvConfigs(ctx, runtimeID)
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +268,7 @@ func (s *EnvConfigService) GenerateEnvScript(runtimeID int64) (string, error) {
 	}
 
 	// Get PATH entries
-	entries, err := s.ListPathEntries(runtimeID)
+	entries, err := s.ListPathEntries(ctx, runtimeID)
 	if err != nil {
 		return "", err
 	}
@@ -316,17 +351,20 @@ func isValidPath(path string) bool {
 }
 
 // ListGlobalConfigs returns all global configurations
-func (s *EnvConfigService) ListGlobalConfigs(category string) ([]model.GlobalConfig, error) {
+func (s *EnvConfigService) ListGlobalConfigs(ctx context.Context, category string) ([]model.GlobalConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var rows *sql.Rows
 	var err error
 
 	if category != "" {
-		rows, err = s.db.Query(
+		rows, err = s.db.QueryContext(ctx,
 			"SELECT id, category, key, value, description, created_at, updated_at FROM global_configs WHERE category = ? ORDER BY category, key",
 			category,
 		)
 	} else {
-		rows, err = s.db.Query(
+		rows, err = s.db.QueryContext(ctx,
 			"SELECT id, category, key, value, description, created_at, updated_at FROM global_configs ORDER BY category, key",
 		)
 	}
@@ -349,9 +387,12 @@ func (s *EnvConfigService) ListGlobalConfigs(category string) ([]model.GlobalCon
 }
 
 // GetGlobalConfig returns a specific global configuration
-func (s *EnvConfigService) GetGlobalConfig(id int64) (*model.GlobalConfig, error) {
+func (s *EnvConfigService) GetGlobalConfig(ctx context.Context, id int64) (*model.GlobalConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c := &model.GlobalConfig{}
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		"SELECT id, category, key, value, description, created_at, updated_at FROM global_configs WHERE id = ?",
 		id,
 	).Scan(&c.ID, &c.Category, &c.Key, &c.Value, &c.Description, &c.CreatedAt, &c.UpdatedAt)
@@ -365,8 +406,11 @@ func (s *EnvConfigService) GetGlobalConfig(id int64) (*model.GlobalConfig, error
 }
 
 // CreateGlobalConfig creates a new global configuration
-func (s *EnvConfigService) CreateGlobalConfig(c *model.GlobalConfig) error {
-	result, err := s.db.Exec(
+func (s *EnvConfigService) CreateGlobalConfig(ctx context.Context, c *model.GlobalConfig) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := s.db.ExecContext(ctx,
 		"INSERT INTO global_configs (category, key, value, description) VALUES (?, ?, ?, ?)",
 		c.Category, c.Key, c.Value, c.Description,
 	)
@@ -378,8 +422,11 @@ func (s *EnvConfigService) CreateGlobalConfig(c *model.GlobalConfig) error {
 }
 
 // UpdateGlobalConfig updates a global configuration
-func (s *EnvConfigService) UpdateGlobalConfig(c *model.GlobalConfig) error {
-	_, err := s.db.Exec(
+func (s *EnvConfigService) UpdateGlobalConfig(ctx context.Context, c *model.GlobalConfig) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := s.db.ExecContext(ctx,
 		"UPDATE global_configs SET value = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		c.Value, c.Description, c.ID,
 	)
@@ -387,13 +434,19 @@ func (s *EnvConfigService) UpdateGlobalConfig(c *model.GlobalConfig) error {
 }
 
 // DeleteGlobalConfig deletes a global configuration
-func (s *EnvConfigService) DeleteGlobalConfig(id int64) error {
-	_, err := s.db.Exec("DELETE FROM global_configs WHERE id = ?", id)
+func (s *EnvConfigService) DeleteGlobalConfig(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := s.db.ExecContext(ctx, "DELETE FROM global_configs WHERE id = ?", id)
 	return err
 }
 
 // InitDefaultGlobalConfigs initializes default global configurations
-func (s *EnvConfigService) InitDefaultGlobalConfigs() error {
+func (s *EnvConfigService) InitDefaultGlobalConfigs(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	defaults := []model.GlobalConfig{
 		// Maven
 		{Category: "maven", Key: "mirror_url", Value: "https://maven.aliyun.com/repository/public", Description: "Maven 镜像地址"},
@@ -421,9 +474,9 @@ func (s *EnvConfigService) InitDefaultGlobalConfigs() error {
 	for _, c := range defaults {
 		// Only insert if not exists
 		var count int
-		s.db.QueryRow("SELECT COUNT(*) FROM global_configs WHERE category = ? AND key = ?", c.Category, c.Key).Scan(&count)
+		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM global_configs WHERE category = ? AND key = ?", c.Category, c.Key).Scan(&count)
 		if count == 0 {
-			s.db.Exec(
+			s.db.ExecContext(ctx,
 				"INSERT INTO global_configs (category, key, value, description) VALUES (?, ?, ?, ?)",
 				c.Category, c.Key, c.Value, c.Description,
 			)

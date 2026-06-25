@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -28,10 +29,11 @@ func NewWebServerHandler(webServerService *service.WebServerService, websiteServ
 // Web Server endpoints
 
 func (h *WebServerHandler) List(c *gin.Context) {
+	ctx := c.Request.Context()
 	// Refresh status for all servers
-	h.webServerService.RefreshAllStatus()
+	h.webServerService.RefreshAllStatus(ctx)
 
-	servers, err := h.webServerService.List()
+	servers, err := h.webServerService.List(ctx)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -40,34 +42,63 @@ func (h *WebServerHandler) List(c *gin.Context) {
 }
 
 func (h *WebServerHandler) Get(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	h.webServerService.RefreshStatus(id)
+	h.webServerService.RefreshStatus(ctx, id)
 
-	server, err := h.webServerService.Get(id)
+	server, err := h.webServerService.Get(ctx, id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if server == nil {
-		NotFound(c, "web server not found")
+		NotFound(c, "Web 服务器不存在")
 		return
 	}
 	Success(c, server)
 }
 
 func (h *WebServerHandler) Create(c *gin.Context) {
-	var ws model.WebServer
-	if err := c.ShouldBindJSON(&ws); err != nil {
+	var req model.CreateWebServerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
 	}
 
-	if err := h.webServerService.Create(&ws); err != nil {
+	// Validate Name format: alphanumeric, hyphen, underscore only
+	if !nameRegexp.MatchString(req.Name) {
+		BadRequest(c, "名称只能包含字母、数字、连字符或下划线")
+		return
+	}
+
+	// Validate DisplayName if provided
+	if req.DisplayName != "" && strings.TrimSpace(req.DisplayName) == "" {
+		BadRequest(c, "显示名称不能为空白")
+		return
+	}
+
+	// Look up the predefined template — only predefined server types are allowed
+	predef := model.FindPredefinedWebServer(req.Name)
+	if predef == nil {
+		BadRequest(c, fmt.Sprintf("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, model.GetPredefinedWebServerNames()))
+		return
+	}
+
+	// Build the WebServer from the trusted template, with optional display overrides
+	ws := *predef // copy all safe fields from template
+	if req.DisplayName != "" {
+		ws.DisplayName = req.DisplayName
+	}
+	if req.Description != "" {
+		ws.Description = req.Description
+	}
+
+	if err := h.webServerService.Create(c.Request.Context(), &ws); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -77,11 +108,11 @@ func (h *WebServerHandler) Create(c *gin.Context) {
 func (h *WebServerHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Delete(id); err != nil {
+	if err := h.webServerService.Delete(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -91,39 +122,39 @@ func (h *WebServerHandler) Delete(c *gin.Context) {
 func (h *WebServerHandler) Install(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Install(id); err != nil {
+	if err := h.webServerService.Install(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "installed"})
+	Success(c, gin.H{"message": "已安装"})
 }
 
 func (h *WebServerHandler) Uninstall(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Uninstall(id); err != nil {
+	if err := h.webServerService.Uninstall(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "uninstalled"})
+	Success(c, gin.H{"message": "已卸载"})
 }
 
 func (h *WebServerHandler) Start(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Start(id); err != nil {
+	if err := h.webServerService.Start(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -133,11 +164,11 @@ func (h *WebServerHandler) Start(c *gin.Context) {
 func (h *WebServerHandler) Stop(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Stop(id); err != nil {
+	if err := h.webServerService.Stop(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -147,11 +178,11 @@ func (h *WebServerHandler) Stop(c *gin.Context) {
 func (h *WebServerHandler) Restart(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Restart(id); err != nil {
+	if err := h.webServerService.Restart(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -161,19 +192,20 @@ func (h *WebServerHandler) Restart(c *gin.Context) {
 func (h *WebServerHandler) Status(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	h.webServerService.RefreshStatus(id)
+	ctx := c.Request.Context()
+	h.webServerService.RefreshStatus(ctx, id)
 
-	server, err := h.webServerService.Get(id)
+	server, err := h.webServerService.Get(ctx, id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if server == nil {
-		NotFound(c, "web server not found")
+		NotFound(c, "Web 服务器不存在")
 		return
 	}
 	Success(c, gin.H{"status": server.Status, "version": server.Version})
@@ -182,36 +214,36 @@ func (h *WebServerHandler) Status(c *gin.Context) {
 func (h *WebServerHandler) Reload(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.webServerService.Reload(id); err != nil {
+	if err := h.webServerService.Reload(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "reloaded"})
+	Success(c, gin.H{"message": "已重载"})
 }
 
 func (h *WebServerHandler) TestConfig(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	ok, msg := h.webServerService.TestConfig(id)
+	ok, msg := h.webServerService.TestConfig(c.Request.Context(), id)
 	Success(c, gin.H{"valid": ok, "message": msg})
 }
 
 func (h *WebServerHandler) GetConfig(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	content, err := h.webServerService.GetConfig(id)
+	content, err := h.webServerService.GetConfig(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -222,7 +254,7 @@ func (h *WebServerHandler) GetConfig(c *gin.Context) {
 func (h *WebServerHandler) SaveConfig(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -234,17 +266,17 @@ func (h *WebServerHandler) SaveConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.webServerService.SaveConfig(id, req.Content); err != nil {
+	if err := h.webServerService.SaveConfig(c.Request.Context(), id, req.Content); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "saved"})
+	Success(c, gin.H{"message": "已保存"})
 }
 
 func (h *WebServerHandler) GetServiceLogs(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -253,7 +285,7 @@ func (h *WebServerHandler) GetServiceLogs(c *gin.Context) {
 		lines = 100
 	}
 
-	logs, err := h.webServerService.GetServiceLogs(id, lines)
+	logs, err := h.webServerService.GetServiceLogs(c.Request.Context(), id, lines)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -264,7 +296,7 @@ func (h *WebServerHandler) GetServiceLogs(c *gin.Context) {
 func (h *WebServerHandler) SetAutoStart(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -276,7 +308,7 @@ func (h *WebServerHandler) SetAutoStart(c *gin.Context) {
 		return
 	}
 
-	if err := h.webServerService.SetAutoStart(id, req.Enabled); err != nil {
+	if err := h.webServerService.SetAutoStart(c.Request.Context(), id, req.Enabled); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -286,11 +318,11 @@ func (h *WebServerHandler) SetAutoStart(c *gin.Context) {
 func (h *WebServerHandler) GetProcessInfo(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	pid, mem, uptime, err := h.webServerService.GetProcessInfo(id)
+	pid, mem, uptime, err := h.webServerService.GetProcessInfo(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -303,11 +335,11 @@ func (h *WebServerHandler) GetProcessInfo(c *gin.Context) {
 func (h *WebServerHandler) ListWebsites(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 
-	sites, err := h.websiteService.List(sid)
+	sites, err := h.websiteService.List(c.Request.Context(), sid)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -318,22 +350,22 @@ func (h *WebServerHandler) ListWebsites(c *gin.Context) {
 func (h *WebServerHandler) GetWebsite(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	site, err := h.websiteService.Get(sid, id)
+	site, err := h.websiteService.Get(c.Request.Context(), sid, id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if site == nil {
-		NotFound(c, "website not found")
+		NotFound(c, "网站不存在")
 		return
 	}
 	Success(c, site)
@@ -342,7 +374,7 @@ func (h *WebServerHandler) GetWebsite(c *gin.Context) {
 func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 
@@ -352,7 +384,12 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 		return
 	}
 
-	site, err := h.websiteService.Create(sid, &req)
+	if err := req.ValidateDomain(); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	site, err := h.websiteService.Create(c.Request.Context(), sid, &req)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -363,12 +400,12 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 func (h *WebServerHandler) UpdateWebsite(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -378,7 +415,7 @@ func (h *WebServerHandler) UpdateWebsite(c *gin.Context) {
 		return
 	}
 
-	if err := h.websiteService.Update(sid, id, &req); err != nil {
+	if err := h.websiteService.Update(c.Request.Context(), sid, id, &req); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -388,16 +425,16 @@ func (h *WebServerHandler) UpdateWebsite(c *gin.Context) {
 func (h *WebServerHandler) DeleteWebsite(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.websiteService.Delete(sid, id); err != nil {
+	if err := h.websiteService.Delete(c.Request.Context(), sid, id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -407,16 +444,16 @@ func (h *WebServerHandler) DeleteWebsite(c *gin.Context) {
 func (h *WebServerHandler) EnableWebsite(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.websiteService.Enable(sid, id); err != nil {
+	if err := h.websiteService.Enable(c.Request.Context(), sid, id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -426,16 +463,16 @@ func (h *WebServerHandler) EnableWebsite(c *gin.Context) {
 func (h *WebServerHandler) DisableWebsite(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.websiteService.Disable(sid, id); err != nil {
+	if err := h.websiteService.Disable(c.Request.Context(), sid, id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -445,12 +482,12 @@ func (h *WebServerHandler) DisableWebsite(c *gin.Context) {
 func (h *WebServerHandler) GetWebsiteLogs(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -460,7 +497,7 @@ func (h *WebServerHandler) GetWebsiteLogs(c *gin.Context) {
 		lines = 200
 	}
 
-	logs, err := h.websiteService.GetLogs(sid, id, logType, lines)
+	logs, err := h.websiteService.GetLogs(c.Request.Context(), sid, id, logType, lines)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -471,12 +508,12 @@ func (h *WebServerHandler) GetWebsiteLogs(c *gin.Context) {
 func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -485,11 +522,11 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 
-	if err := h.websiteService.ApplySSL(sid, id, req.Email); err != nil {
+	if err := h.websiteService.ApplySSL(c.Request.Context(), sid, id, req.Email); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "SSL certificate applied"})
+	Success(c, gin.H{"message": "SSL 证书已应用"})
 }
 
 // GetProjectTypes returns available project types
@@ -498,6 +535,9 @@ func (h *WebServerHandler) GetProjectTypes(c *gin.Context) {
 }
 
 // Directory browser
+
+// nameRegexp validates web server Name: alphanumeric, hyphen, underscore only.
+var nameRegexp = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // allowedRoots defines safe base directories for website root paths
 var allowedRoots = []string{"/var/www", "/home", "/opt", "/srv", "/usr/share"}
@@ -518,24 +558,24 @@ func (h *WebServerHandler) BrowseDirs(c *gin.Context) {
 
 	// Security: must be under allowed roots
 	if !isAllowedPath(reqPath) {
-		BadRequest(c, fmt.Sprintf("path must be under: %s", strings.Join(allowedRoots, ", ")))
+		BadRequest(c, fmt.Sprintf("路径必须在以下目录下: %s", strings.Join(allowedRoots, ", ")))
 		return
 	}
 
 	// Check directory exists
 	info, err := os.Stat(reqPath)
 	if err != nil {
-		NotFound(c, "directory not found")
+		NotFound(c, "目录不存在")
 		return
 	}
 	if !info.IsDir() {
-		BadRequest(c, "not a directory")
+		BadRequest(c, "不是目录")
 		return
 	}
 
 	entries, err := os.ReadDir(reqPath)
 	if err != nil {
-		InternalError(c, "cannot read directory")
+		InternalError(c, "无法读取目录")
 		return
 	}
 
@@ -575,7 +615,7 @@ func (h *WebServerHandler) BrowseDirs(c *gin.Context) {
 func (h *WebServerHandler) ValidatePath(c *gin.Context) {
 	reqPath := c.Query("path")
 	if reqPath == "" {
-		BadRequest(c, "path is required")
+		BadRequest(c, "路径不能为空")
 		return
 	}
 
@@ -585,7 +625,7 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) {
 	if !isAllowedPath(reqPath) {
 		Success(c, gin.H{
 			"valid":   false,
-			"message": fmt.Sprintf("path must be under: %s", strings.Join(allowedRoots, ", ")),
+			"message": fmt.Sprintf("路径必须在以下目录下: %s", strings.Join(allowedRoots, ", ")),
 		})
 		return
 	}
@@ -597,14 +637,14 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) {
 			// Can be created
 			Success(c, gin.H{
 				"valid":   true,
-				"message": "directory will be created",
+				"message": "目录将会被创建",
 				"exists":  false,
 			})
 			return
 		}
 		Success(c, gin.H{
 			"valid":   false,
-			"message": "cannot access path",
+			"message": "无法访问路径",
 		})
 		return
 	}
@@ -612,18 +652,17 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) {
 	if !info.IsDir() {
 		Success(c, gin.H{
 			"valid":   false,
-			"message": "path is not a directory",
+			"message": "路径不是目录",
 		})
 		return
 	}
 
-	// Check readable
-	testFile := filepath.Join(reqPath, ".easyserver_test")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err == nil {
-		os.Remove(testFile)
+	// Check write permission via file mode bits
+	writable := info.Mode().Perm()&0200 != 0
+	if writable {
 		Success(c, gin.H{
 			"valid":    true,
-			"message":  "directory is ready",
+			"message":  "目录已就绪",
 			"exists":   true,
 			"writable": true,
 			"project":  detectProjectType(reqPath),
@@ -634,7 +673,7 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) {
 	// Readable but not writable
 	Success(c, gin.H{
 		"valid":    true,
-		"message":  "directory exists but may not be writable",
+		"message":  "目录存在但可能不可写",
 		"exists":   true,
 		"writable": false,
 		"project":  detectProjectType(reqPath),

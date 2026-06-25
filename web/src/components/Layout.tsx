@@ -1,271 +1,353 @@
-import { useState, useEffect } from 'react';
-import { Layout as AntLayout, Menu, Dropdown, Avatar, Space, Typography } from 'antd';
-import {
-  DashboardOutlined,
-  SettingOutlined,
-  CodeOutlined,
-  FolderOutlined,
-  UserOutlined,
-  CloudOutlined,
-  RocketOutlined,
-  LogoutOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  FileTextOutlined,
-  ToolOutlined,
-  ApiOutlined,
-  ControlOutlined,
-  GlobalOutlined,
-  DatabaseOutlined,
-} from '@ant-design/icons';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import ErrorBoundary from './ErrorBoundary';
 import { useAuthStore } from '../store/useAuthStore';
 import { hasPermission, PERMISSIONS, ROLE_LABELS } from '../utils/permissions';
+import { notificationApi } from '../services/api';
+import type { Notification } from '../types';
+import CommandPalette from './CommandPalette';
+import './Layout.css';
 
-const { Header, Sider, Content } = AntLayout;
-const { Text } = Typography;
-
-interface MenuItem {
-  key: string;
-  icon: React.ReactNode;
-  label: string;
-  permission?: readonly string[];
-}
-
-const menuItems: MenuItem[] = [
+const MENU_GROUPS = [
   {
-    key: '/',
-    icon: <DashboardOutlined />,
-    label: '系统监控',
-    permission: PERMISSIONS.MONITOR_VIEW,
+    label: '监控',
+    items: [
+      { key: '/', icon: 'dashboard', label: '系统概览', permission: PERMISSIONS.MONITOR_VIEW },
+      { key: '/processes', icon: 'cluster', label: '进程守护', permission: PERMISSIONS.DB_MANAGE },
+    ],
   },
   {
-    key: '/services',
-    icon: <SettingOutlined />,
-    label: '服务管理',
-    permission: PERMISSIONS.SERVICE_VIEW,
+    label: '管理',
+    items: [
+      { key: '/services', icon: 'settings', label: '服务管理', permission: PERMISSIONS.SERVICE_VIEW },
+      { key: '/terminal', icon: 'terminal', label: '终端访问', permission: PERMISSIONS.TERMINAL_ACCESS },
+      { key: '/files', icon: 'folder', label: '文件管理', permission: PERMISSIONS.FILE_VIEW },
+      { key: '/deploy', icon: 'rocket', label: '部署同步', permission: PERMISSIONS.DEPLOY_MANAGE },
+      { key: '/runtime', icon: 'api', label: '运行环境', permission: PERMISSIONS.DEPLOY_MANAGE },
+      { key: '/env-config', icon: 'control', label: '环境配置', permission: PERMISSIONS.DEPLOY_MANAGE },
+    ],
   },
   {
-    key: '/terminal',
-    icon: <CodeOutlined />,
-    label: '终端访问',
-    permission: PERMISSIONS.TERMINAL_ACCESS,
+    label: '业务',
+    items: [
+      { key: '/websites', icon: 'global', label: '网站管理', permission: PERMISSIONS.WEBSITE_MANAGE },
+      { key: '/databases', icon: 'database', label: '数据库管理', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/cron', icon: 'clock', label: '计划任务', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/scripts', icon: 'code', label: '脚本库', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/firewall', icon: 'shield', label: '防火墙', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/ssh', icon: 'key', label: 'SSH 管理', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/containers', icon: 'cloud', label: '容器管理', permission: PERMISSIONS.DB_MANAGE },
+    ],
   },
   {
-    key: '/files',
-    icon: <FolderOutlined />,
-    label: '文件管理',
-    permission: PERMISSIONS.FILE_VIEW,
-  },
-  {
-    key: '/deploy',
-    icon: <RocketOutlined />,
-    label: '部署同步',
-    permission: PERMISSIONS.DEPLOY_MANAGE,
-  },
-  {
-    key: '/runtime',
-    icon: <ApiOutlined />,
-    label: '运行环境',
-    permission: PERMISSIONS.DEPLOY_MANAGE, // admin only
-  },
-  {
-    key: '/env-config',
-    icon: <ControlOutlined />,
-    label: '环境配置',
-    permission: PERMISSIONS.DEPLOY_MANAGE, // admin only
-  },
-  {
-    key: '/websites',
-    icon: <GlobalOutlined />,
-    label: '网站管理',
-    permission: PERMISSIONS.WEBSITE_MANAGE, // admin only
-  },
-  {
-    key: '/databases',
-    icon: <DatabaseOutlined />,
-    label: '数据库管理',
-    permission: PERMISSIONS.DB_MANAGE, // admin only
-  },
-  {
-    key: '/users',
-    icon: <UserOutlined />,
-    label: '用户管理',
-    permission: PERMISSIONS.USER_MANAGE,
-  },
-  {
-    key: '/cloud',
-    icon: <CloudOutlined />,
-    label: '腾讯云',
-    permission: PERMISSIONS.CLOUD_VIEW,
-  },
-  {
-    key: '/audit',
-    icon: <FileTextOutlined />,
-    label: '操作日志',
-    permission: PERMISSIONS.AUDIT_VIEW,
-  },
-  {
-    key: '/settings',
-    icon: <ToolOutlined />,
-    label: '面板设置',
-    permission: PERMISSIONS.USER_MANAGE, // admin only
+    label: '系统',
+    items: [
+      { key: '/cloud', icon: 'cloud', label: '腾讯云', permission: PERMISSIONS.CLOUD_VIEW },
+      { key: '/audit', icon: 'file-text', label: '操作日志', permission: PERMISSIONS.AUDIT_VIEW },
+      { key: '/settings', icon: 'tool', label: '面板设置', permission: PERMISSIONS.USER_MANAGE },
+      { key: '/security', icon: 'shield', label: '安全设置' },
+    ],
   },
 ];
 
+const ICONS: Record<string, string> = {
+  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  cluster: '<path d="M12 20V10M18 20V4M6 20v-4"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+  folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  rocket: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
+  api: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  control: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  global: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+  cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  'file-text': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>',
+  tool: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  'menu-fold': '<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>',
+  'menu-unfold': '<polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
+  'log-out': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+};
+
+function Icon({ name, size = 18 }: { name: string; size?: number }) {
+  const path = ICONS[name];
+  if (!path) return null;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: path }} />
+  );
+}
+
+const PAGE_TITLES: Record<string, string> = {
+  '/': '系统概览',
+  '/processes': '进程守护',
+  '/services': '服务管理',
+  '/terminal': '终端访问',
+  '/files': '文件管理',
+  '/deploy': '部署同步',
+  '/runtime': '运行环境',
+  '/env-config': '环境配置',
+  '/websites': '网站管理',
+  '/databases': '数据库管理',
+  '/cron': '计划任务',
+  '/scripts': '脚本库',
+  '/firewall': '防火墙',
+  '/ssh': 'SSH 管理',
+  '/containers': '容器管理',
+  '/cloud': '腾讯云',
+  '/audit': '操作日志',
+  '/settings': '面板设置',
+  '/security': '安全设置',
+};
+
+const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {
+  info: '#6366f1',
+  warning: '#f59e0b',
+  error: '#ef4444',
+};
+
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout, loadUser } = useAuthStore();
 
-  useEffect(() => {
-    loadUser();
+  useEffect(() => { loadUser(); }, [loadUser]);
+
+  // Fetch notifications
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const [listRes, countRes] = await Promise.all([
+        notificationApi.list(false, 20),
+        notificationApi.unreadCount(),
+      ]);
+      setNotifications(listRes.data?.data || []);
+      setUnreadCount(countRes.data?.data?.count || 0);
+    } catch { /* silent */ }
   }, []);
 
-  const handleMenuClick = (info: { key: string }) => {
-    navigate(info.key);
-  };
+  useEffect(() => {
+    fetchNotifications();
+    const timer = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(timer);
+  }, [fetchNotifications]);
 
-  const handleLogout = () => {
+  // Cmd+K
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setCmdOpen(prev => !prev);
+      }
+      if (e.key === 'Escape') {
+        setCmdOpen(false);
+        setShowNotifications(false);
+        setShowUserMenu(false);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotifications(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleLogout = useCallback(() => {
     logout();
     navigate('/login');
+  }, [logout, navigate]);
+
+  const handleCmdSelect = useCallback((path: string) => {
+    setCmdOpen(false);
+    navigate(path);
+  }, [navigate]);
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationApi.markAllAsRead();
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    } catch { /* silent */ }
   };
 
-  // 根据用户角色过滤菜单
-  const filteredMenuItems = menuItems
-    .filter(item => {
-      if (!item.permission) return true;
-      return hasPermission(user?.role, item.permission);
-    })
-    .map(item => ({
-      key: item.key,
-      icon: item.icon,
-      label: item.label,
-    }));
-
-  const userMenuItems = [
-    {
-      key: 'profile',
-      label: '个人信息',
-      icon: <UserOutlined />,
-    },
-    {
-      key: 'password',
-      label: '修改密码',
-      icon: <SettingOutlined />,
-    },
-    {
-      type: 'divider' as const,
-    },
-    {
-      key: 'logout',
-      label: '退出登录',
-      icon: <LogoutOutlined />,
-      danger: true,
-    },
-  ];
-
-  const handleUserMenuClick = (info: { key: string }) => {
-    switch (info.key) {
-      case 'logout':
-        handleLogout();
-        break;
-      case 'password':
-        // TODO: show change password modal
-        break;
-    }
+  const handleMarkRead = async (id: number) => {
+    try {
+      await notificationApi.markAsRead(id);
+      setUnreadCount(prev => Math.max(0, prev - 1));
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    } catch { /* silent */ }
   };
+
+  const visibleGroups = MENU_GROUPS.map(group => ({
+    ...group,
+    items: group.items.filter(item => !item.permission || hasPermission(user?.role, item.permission)),
+  })).filter(group => group.items.length > 0);
+
+  const currentTitle = PAGE_TITLES[location.pathname] || '未知页面';
 
   return (
-    <AntLayout style={{ minHeight: '100vh' }}>
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={collapsed}
-        theme="dark"
-        width={200}
-        style={{ position: 'fixed', height: '100vh', left: 0, top: 0, bottom: 0, zIndex: 10, overflow: 'hidden' }}
-      >
-        <div style={{
-          height: 64,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#fff',
-          fontSize: collapsed ? 16 : 20,
-          fontWeight: 'bold',
-        }}>
-          {collapsed ? 'ES' : 'EasyServer'}
+    <div className="app-layout">
+      {/* Sidebar */}
+      <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-logo">
+          <div className="logo-icon">ES</div>
+          {!collapsed && <span className="logo-text">EasyServer</span>}
         </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          items={filteredMenuItems}
-          onClick={handleMenuClick}
-          style={{ flex: 1 }}
-        />
-        <div
-          onClick={() => setCollapsed(!collapsed)}
-          style={{
-            height: 48,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            color: 'rgba(255,255,255,0.65)',
-            borderTop: '1px solid rgba(255,255,255,0.1)',
-            transition: 'color 0.2s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
-          onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}
-        >
-          {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+        <nav className="sidebar-nav">
+          {visibleGroups.map(group => (
+            <div key={group.label} className="nav-group">
+              {!collapsed && <div className="nav-group-label">{group.label}</div>}
+              {group.items.map(item => (
+                <div
+                  key={item.key}
+                  className={`nav-item ${location.pathname === item.key ? 'active' : ''}`}
+                  onClick={() => navigate(item.key)}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon name={item.icon} />
+                  {!collapsed && <span>{item.label}</span>}
+                </div>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <button className="sidebar-collapse-btn" onClick={() => setCollapsed(!collapsed)}>
+            <Icon name={collapsed ? 'menu-unfold' : 'menu-fold'} />
+          </button>
         </div>
-      </Sider>
+      </aside>
 
-      <AntLayout style={{ marginLeft: collapsed ? 48 : 200, transition: 'margin-left 0.2s' }}>
-        <Header style={{
-          background: '#fff',
-          padding: '0 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 9,
-        }}>
-          <Space>
-            <Text type="secondary">
-              {ROLE_LABELS[user?.role || ''] || '未知角色'}
-            </Text>
-            <Dropdown
-              menu={{ items: userMenuItems, onClick: handleUserMenuClick }}
-              placement="bottomRight"
-            >
-              <Space style={{ cursor: 'pointer' }}>
-                <Avatar icon={<UserOutlined />} />
-                <Text>{user?.username || '用户'}</Text>
-              </Space>
-            </Dropdown>
-          </Space>
-        </Header>
+      {/* Main */}
+      <div className={`main-area ${collapsed ? 'sidebar-collapsed' : ''}`}>
+        <header className="header">
+          <div className="header-left">
+            <div className="header-breadcrumb">
+              <span>首页</span>
+              <span className="breadcrumb-sep">/</span>
+              <span className="current">{currentTitle}</span>
+            </div>
+          </div>
+          <div className="header-center">
+            <div className="search-trigger" onClick={() => setCmdOpen(true)}>
+              <Icon name="search" size={14} />
+              <span>搜索命令...</span>
+              <kbd>⌘K</kbd>
+            </div>
+          </div>
+          <div className="header-right">
+            {/* Notification Bell */}
+            <div className="notif-wrapper" ref={notifRef}>
+              <button className="header-btn" title="通知" onClick={() => { setShowNotifications(!showNotifications); setShowUserMenu(false); }}>
+                <Icon name="bell" />
+                {unreadCount > 0 && <span className="notif-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+              </button>
+              {showNotifications && (
+                <div className="notif-dropdown">
+                  <div className="notif-header">
+                    <span className="notif-title">通知</span>
+                    {unreadCount > 0 && (
+                      <button className="notif-mark-all" onClick={handleMarkAllRead}>全部已读</button>
+                    )}
+                  </div>
+                  <div className="notif-list">
+                    {notifications.length === 0 ? (
+                      <div className="notif-empty">暂无通知</div>
+                    ) : (
+                      notifications.map(n => (
+                        <div key={n.id} className={`notif-item ${n.is_read ? '' : 'unread'}`} onClick={() => !n.is_read && handleMarkRead(n.id)}>
+                          <div className="notif-dot" style={{ background: NOTIFICATION_LEVEL_COLORS[n.level] || '#6366f1' }} />
+                          <div className="notif-content">
+                            <div className="notif-item-title">{n.title}</div>
+                            <div className="notif-item-msg">{n.message}</div>
+                            <div className="notif-item-time">{n.created_at}</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="notif-footer" onClick={() => { setShowNotifications(false); navigate('/audit'); }}>
+                    查看全部
+                  </div>
+                </div>
+              )}
+            </div>
 
-        <Content style={{
-          margin: 24,
-          padding: 24,
-          background: '#fff',
-          borderRadius: 8,
-          minHeight: 280,
-        }}>
-          <ErrorBoundary>
-            <Outlet />
-          </ErrorBoundary>
-        </Content>
-      </AntLayout>
-    </AntLayout>
+            <div className="header-divider" />
+
+            {/* User Menu */}
+            <div className="user-menu-wrapper" ref={userMenuRef}>
+              <div className="user-info" onClick={() => { setShowUserMenu(!showUserMenu); setShowNotifications(false); }}>
+                <span className="user-role">{ROLE_LABELS[user?.role || ''] || '未知角色'}</span>
+                <div className="user-avatar">{user?.username?.[0]?.toUpperCase() || 'A'}</div>
+              </div>
+              {showUserMenu && (
+                <div className="user-dropdown">
+                  <div className="user-dropdown-header">
+                    <div className="user-avatar-lg">{user?.username?.[0]?.toUpperCase() || 'A'}</div>
+                    <div>
+                      <div className="user-dropdown-name">{user?.username || '用户'}</div>
+                      <div className="user-dropdown-role">{ROLE_LABELS[user?.role || ''] || '未知角色'}</div>
+                    </div>
+                  </div>
+                  <div className="user-dropdown-divider" />
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings'); }}>
+                    <Icon name="user" size={16} />
+                    <span>个人信息</span>
+                  </div>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/change-password'); }}>
+                    <Icon name="key" size={16} />
+                    <span>修改密码</span>
+                  </div>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/security'); }}>
+                    <Icon name="shield" size={16} />
+                    <span>两步验证</span>
+                  </div>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/audit'); }}>
+                    <Icon name="file-text" size={16} />
+                    <span>操作日志</span>
+                  </div>
+                  <div className="user-dropdown-divider" />
+                  <div className="user-dropdown-item danger" onClick={() => { setShowUserMenu(false); handleLogout(); }}>
+                    <Icon name="log-out" size={16} />
+                    <span>退出登录</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+        <main className="content"><Outlet /></main>
+      </div>
+
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onSelect={handleCmdSelect} />
+    </div>
   );
 }

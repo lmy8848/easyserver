@@ -1,26 +1,32 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os/exec"
 	"strings"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
 type PackageManagerService struct {
-	db *sql.DB
+	db       *sql.DB
+	executor executor.CommandExecutor
 }
 
-func NewPackageManagerService(db *sql.DB) *PackageManagerService {
-	return &PackageManagerService{db: db}
+func NewPackageManagerService(db *sql.DB, exec executor.CommandExecutor) *PackageManagerService {
+	return &PackageManagerService{db: db, executor: exec}
 }
 
-// InitTables creates package tables if they don't exist
-func (s *PackageManagerService) InitTables() error {
+// Deprecated: InitTables is kept for backward compatibility only.
+// Table creation is now handled by the migration system (migrations/ directory).
+func (s *PackageManagerService) InitTables(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS packages (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +42,7 @@ func (s *PackageManagerService) InitTables() error {
 	}
 
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
@@ -45,8 +51,11 @@ func (s *PackageManagerService) InitTables() error {
 }
 
 // ListPackages returns all packages for a runtime
-func (s *PackageManagerService) ListPackages(runtimeID int64) ([]model.Package, error) {
-	rows, err := s.db.Query(`
+func (s *PackageManagerService) ListPackages(ctx context.Context, runtimeID int64) ([]model.Package, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT p.id, p.runtime_id, r.name, p.name, p.version, p.scope, p.source, p.installed_at
 		FROM packages p
 		LEFT JOIN runtime_environments r ON p.runtime_id = r.id
@@ -72,19 +81,22 @@ func (s *PackageManagerService) ListPackages(runtimeID int64) ([]model.Package, 
 }
 
 // ScanPackages scans installed packages for a runtime
-func (s *PackageManagerService) ScanPackages(runtimeID int64, runtimeName, runtimePath string) ([]model.Package, error) {
+func (s *PackageManagerService) ScanPackages(ctx context.Context, runtimeID int64, runtimeName, runtimePath string) ([]model.Package, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var packages []model.Package
 	var err error
 
 	switch runtimeName {
 	case "node":
-		packages, err = s.scanNpmPackages(runtimeID, runtimePath)
+		packages, err = s.scanNpmPackages(ctx, runtimeID, runtimePath)
 	case "python":
-		packages, err = s.scanPipPackages(runtimeID, runtimePath)
+		packages, err = s.scanPipPackages(ctx, runtimeID, runtimePath)
 	case "java":
-		packages, err = s.scanMavenPackages(runtimeID, runtimePath)
+		packages, err = s.scanMavenPackages(ctx, runtimeID, runtimePath)
 	case "php":
-		packages, err = s.scanComposerPackages(runtimeID, runtimePath)
+		packages, err = s.scanComposerPackages(ctx, runtimeID, runtimePath)
 	default:
 		return []model.Package{}, nil
 	}
@@ -95,7 +107,7 @@ func (s *PackageManagerService) ScanPackages(runtimeID int64, runtimeName, runti
 
 	// Save to database
 	for _, pkg := range packages {
-		s.db.Exec(
+		s.db.ExecContext(ctx,
 			"INSERT OR REPLACE INTO packages (runtime_id, name, version, scope, source) VALUES (?, ?, ?, ?, ?)",
 			pkg.RuntimeID, pkg.Name, pkg.Version, pkg.Scope, pkg.Source,
 		)
@@ -105,78 +117,77 @@ func (s *PackageManagerService) ScanPackages(runtimeID int64, runtimeName, runti
 }
 
 // InstallPackage installs a package
-func (s *PackageManagerService) InstallPackage(req *model.PackageInstallRequest, runtimeName, runtimePath string) error {
+func (s *PackageManagerService) InstallPackage(ctx context.Context, req *model.PackageInstallRequest, runtimeName, runtimePath string) error {
 	switch runtimeName {
 	case "node":
-		return s.installNpmPackage(req, runtimePath)
+		return s.installNpmPackage(ctx, req, runtimePath)
 	case "python":
-		return s.installPipPackage(req, runtimePath)
+		return s.installPipPackage(ctx, req, runtimePath)
 	case "java":
-		return s.installMavenPackage(req, runtimePath)
+		return s.installMavenPackage(ctx, req, runtimePath)
 	case "php":
-		return s.installComposerPackage(req, runtimePath)
+		return s.installComposerPackage(ctx, req, runtimePath)
 	default:
 		return fmt.Errorf("package management not supported for %s", runtimeName)
 	}
 }
 
 // UninstallPackage uninstalls a package
-func (s *PackageManagerService) UninstallPackage(req *model.PackageUninstallRequest, runtimeName, runtimePath string) error {
+func (s *PackageManagerService) UninstallPackage(ctx context.Context, req *model.PackageUninstallRequest, runtimeName, runtimePath string) error {
 	switch runtimeName {
 	case "node":
-		return s.uninstallNpmPackage(req, runtimePath)
+		return s.uninstallNpmPackage(ctx, req, runtimePath)
 	case "python":
-		return s.uninstallPipPackage(req, runtimePath)
+		return s.uninstallPipPackage(ctx, req, runtimePath)
 	case "java":
-		return s.uninstallMavenPackage(req, runtimePath)
+		return s.uninstallMavenPackage(ctx, req, runtimePath)
 	case "php":
-		return s.uninstallComposerPackage(req, runtimePath)
+		return s.uninstallComposerPackage(ctx, req, runtimePath)
 	default:
 		return fmt.Errorf("package management not supported for %s", runtimeName)
 	}
 }
 
 // UpdatePackage updates a package
-func (s *PackageManagerService) UpdatePackage(req *model.PackageUpdateRequest, runtimeName, runtimePath string) error {
+func (s *PackageManagerService) UpdatePackage(ctx context.Context, req *model.PackageUpdateRequest, runtimeName, runtimePath string) error {
 	switch runtimeName {
 	case "node":
-		return s.updateNpmPackage(req, runtimePath)
+		return s.updateNpmPackage(ctx, req, runtimePath)
 	case "python":
-		return s.updatePipPackage(req, runtimePath)
+		return s.updatePipPackage(ctx, req, runtimePath)
 	default:
 		return fmt.Errorf("package update not supported for %s", runtimeName)
 	}
 }
 
 // SearchPackages searches for available packages
-func (s *PackageManagerService) SearchPackages(runtimeName, query string) ([]model.PackageInfo, error) {
+func (s *PackageManagerService) SearchPackages(ctx context.Context, runtimeName, query string) ([]model.PackageInfo, error) {
 	switch runtimeName {
 	case "node":
-		return s.searchNpmPackages(query)
+		return s.searchNpmPackages(ctx, query)
 	case "python":
-		return s.searchPipPackages(query)
+		return s.searchPipPackages(ctx, query)
 	default:
 		return []model.PackageInfo{}, nil
 	}
 }
 
 // GetPackageVersions returns available versions for a package
-func (s *PackageManagerService) GetPackageVersions(runtimeName, packageName string) ([]string, error) {
+func (s *PackageManagerService) GetPackageVersions(ctx context.Context, runtimeName, packageName string) ([]string, error) {
 	switch runtimeName {
 	case "node":
-		return s.getNpmPackageVersions(packageName)
+		return s.getNpmPackageVersions(ctx, packageName)
 	case "python":
-		return s.getPipPackageVersions(packageName)
+		return s.getPipPackageVersions(ctx, packageName)
 	default:
 		return []string{}, nil
 	}
 }
 
 // npm package search
-func (s *PackageManagerService) searchNpmPackages(query string) ([]model.PackageInfo, error) {
+func (s *PackageManagerService) searchNpmPackages(ctx context.Context, query string) ([]model.PackageInfo, error) {
 	// npm search --json
-	cmd := exec.Command("npm", "search", query, "--json")
-	output, err := cmd.Output()
+	output, _, _, err := s.executor.Run(ctx, "npm", "search", query, "--json")
 	if err != nil {
 		log.Printf("package: npm search error: %v", err)
 		return []model.PackageInfo{}, nil
@@ -188,7 +199,7 @@ func (s *PackageManagerService) searchNpmPackages(query string) ([]model.Package
 		Version     string `json:"version"`
 		Description string `json:"description"`
 	}
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		return nil, err
 	}
 
@@ -206,10 +217,9 @@ func (s *PackageManagerService) searchNpmPackages(query string) ([]model.Package
 }
 
 // npm package versions
-func (s *PackageManagerService) getNpmPackageVersions(packageName string) ([]string, error) {
+func (s *PackageManagerService) getNpmPackageVersions(ctx context.Context, packageName string) ([]string, error) {
 	// npm view <package> versions --json
-	cmd := exec.Command("npm", "view", packageName, "versions", "--json")
-	output, err := cmd.Output()
+	output, _, _, err := s.executor.Run(ctx, "npm", "view", packageName, "versions", "--json")
 	if err != nil {
 		log.Printf("package: npm view error: %v", err)
 		return []string{}, nil
@@ -217,10 +227,10 @@ func (s *PackageManagerService) getNpmPackageVersions(packageName string) ([]str
 
 	// Parse JSON output (array of versions)
 	var versions []string
-	if err := json.Unmarshal(output, &versions); err != nil {
+	if err := json.Unmarshal([]byte(output), &versions); err != nil {
 		// Try single version
 		var single string
-		if err2 := json.Unmarshal(output, &single); err2 == nil {
+		if err2 := json.Unmarshal([]byte(output), &single); err2 == nil {
 			versions = []string{single}
 		} else {
 			return nil, err
@@ -236,24 +246,23 @@ func (s *PackageManagerService) getNpmPackageVersions(packageName string) ([]str
 }
 
 // pip package search
-func (s *PackageManagerService) searchPipPackages(query string) ([]model.PackageInfo, error) {
+func (s *PackageManagerService) searchPipPackages(ctx context.Context, query string) ([]model.PackageInfo, error) {
 	// pip search is deprecated, use pip index versions
 	// For now, return a placeholder
 	return []model.PackageInfo{}, fmt.Errorf("pip search not supported, use pip install <package>")
 }
 
 // pip package versions
-func (s *PackageManagerService) getPipPackageVersions(packageName string) ([]string, error) {
+func (s *PackageManagerService) getPipPackageVersions(ctx context.Context, packageName string) ([]string, error) {
 	// pip index versions <package>
-	cmd := exec.Command("pip", "index", "versions", packageName)
-	output, err := cmd.Output()
+	output, _, _, err := s.executor.Run(ctx, "pip", "index", "versions", packageName)
 	if err != nil {
 		log.Printf("package: pip index error: %v", err)
 		return []string{}, nil
 	}
 
 	// Parse output: "package_name (X.Y.Z, X.Y.Z, ...)"
-	outputStr := string(output)
+	outputStr := output
 	start := strings.Index(outputStr, "(")
 	end := strings.Index(outputStr, ")")
 	if start == -1 || end == -1 {
@@ -272,10 +281,9 @@ func (s *PackageManagerService) getPipPackageVersions(packageName string) ([]str
 }
 
 // npm package management
-func (s *PackageManagerService) scanNpmPackages(runtimeID int64, runtimePath string) ([]model.Package, error) {
+func (s *PackageManagerService) scanNpmPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]model.Package, error) {
 	// npm list -g --json
-	cmd := exec.Command("npm", "list", "-g", "--json")
-	output, err := cmd.Output()
+	output, _, _, err := s.executor.Run(ctx, "npm", "list", "-g", "--json")
 	if err != nil {
 		log.Printf("package: npm list error: %v", err)
 		return []model.Package{}, nil
@@ -287,7 +295,7 @@ func (s *PackageManagerService) scanNpmPackages(runtimeID int64, runtimePath str
 			Version string `json:"version"`
 		} `json:"dependencies"`
 	}
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		return nil, err
 	}
 
@@ -305,7 +313,7 @@ func (s *PackageManagerService) scanNpmPackages(runtimeID int64, runtimePath str
 	return packages, nil
 }
 
-func (s *PackageManagerService) installNpmPackage(req *model.PackageInstallRequest, runtimePath string) error {
+func (s *PackageManagerService) installNpmPackage(ctx context.Context, req *model.PackageInstallRequest, runtimePath string) error {
 	args := []string{"install", "-g"}
 	if req.Version != "" {
 		args = append(args, fmt.Sprintf("%s@%s", req.Name, req.Version))
@@ -313,21 +321,19 @@ func (s *PackageManagerService) installNpmPackage(req *model.PackageInstallReque
 		args = append(args, req.Name)
 	}
 
-	cmd := exec.Command("npm", args...)
-	output, err := cmd.CombinedOutput()
+	output, _, err := s.executor.RunCombined(ctx, "npm", args...)
 	if err != nil {
-		return fmt.Errorf("npm install failed: %s", string(output))
+		return fmt.Errorf("npm install failed: %s", output)
 	}
 
 	log.Printf("package: installed %s via npm", req.Name)
 	return nil
 }
 
-func (s *PackageManagerService) uninstallNpmPackage(req *model.PackageUninstallRequest, runtimePath string) error {
-	cmd := exec.Command("npm", "uninstall", "-g", req.Name)
-	output, err := cmd.CombinedOutput()
+func (s *PackageManagerService) uninstallNpmPackage(ctx context.Context, req *model.PackageUninstallRequest, runtimePath string) error {
+	output, _, err := s.executor.RunCombined(ctx, "npm", "uninstall", "-g", req.Name)
 	if err != nil {
-		return fmt.Errorf("npm uninstall failed: %s", string(output))
+		return fmt.Errorf("npm uninstall failed: %s", output)
 	}
 
 	// Remove from database
@@ -337,11 +343,10 @@ func (s *PackageManagerService) uninstallNpmPackage(req *model.PackageUninstallR
 	return nil
 }
 
-func (s *PackageManagerService) updateNpmPackage(req *model.PackageUpdateRequest, runtimePath string) error {
-	cmd := exec.Command("npm", "update", "-g", req.Name)
-	output, err := cmd.CombinedOutput()
+func (s *PackageManagerService) updateNpmPackage(ctx context.Context, req *model.PackageUpdateRequest, runtimePath string) error {
+	output, _, err := s.executor.RunCombined(ctx, "npm", "update", "-g", req.Name)
 	if err != nil {
-		return fmt.Errorf("npm update failed: %s", string(output))
+		return fmt.Errorf("npm update failed: %s", output)
 	}
 
 	log.Printf("package: updated %s via npm", req.Name)
@@ -349,10 +354,9 @@ func (s *PackageManagerService) updateNpmPackage(req *model.PackageUpdateRequest
 }
 
 // pip package management
-func (s *PackageManagerService) scanPipPackages(runtimeID int64, runtimePath string) ([]model.Package, error) {
+func (s *PackageManagerService) scanPipPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]model.Package, error) {
 	// pip list --format=json
-	cmd := exec.Command("pip", "list", "--format=json")
-	output, err := cmd.Output()
+	output, _, _, err := s.executor.Run(ctx, "pip", "list", "--format=json")
 	if err != nil {
 		log.Printf("package: pip list error: %v", err)
 		return []model.Package{}, nil
@@ -363,7 +367,7 @@ func (s *PackageManagerService) scanPipPackages(runtimeID int64, runtimePath str
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		return nil, err
 	}
 
@@ -381,7 +385,7 @@ func (s *PackageManagerService) scanPipPackages(runtimeID int64, runtimePath str
 	return packages, nil
 }
 
-func (s *PackageManagerService) installPipPackage(req *model.PackageInstallRequest, runtimePath string) error {
+func (s *PackageManagerService) installPipPackage(ctx context.Context, req *model.PackageInstallRequest, runtimePath string) error {
 	args := []string{"install"}
 	if req.Version != "" {
 		args = append(args, fmt.Sprintf("%s==%s", req.Name, req.Version))
@@ -389,21 +393,19 @@ func (s *PackageManagerService) installPipPackage(req *model.PackageInstallReque
 		args = append(args, req.Name)
 	}
 
-	cmd := exec.Command("pip", args...)
-	output, err := cmd.CombinedOutput()
+	output, _, err := s.executor.RunCombined(ctx, "pip", args...)
 	if err != nil {
-		return fmt.Errorf("pip install failed: %s", string(output))
+		return fmt.Errorf("pip install failed: %s", output)
 	}
 
 	log.Printf("package: installed %s via pip", req.Name)
 	return nil
 }
 
-func (s *PackageManagerService) uninstallPipPackage(req *model.PackageUninstallRequest, runtimePath string) error {
-	cmd := exec.Command("pip", "uninstall", "-y", req.Name)
-	output, err := cmd.CombinedOutput()
+func (s *PackageManagerService) uninstallPipPackage(ctx context.Context, req *model.PackageUninstallRequest, runtimePath string) error {
+	output, _, err := s.executor.RunCombined(ctx, "pip", "uninstall", "-y", req.Name)
 	if err != nil {
-		return fmt.Errorf("pip uninstall failed: %s", string(output))
+		return fmt.Errorf("pip uninstall failed: %s", output)
 	}
 
 	// Remove from database
@@ -413,11 +415,10 @@ func (s *PackageManagerService) uninstallPipPackage(req *model.PackageUninstallR
 	return nil
 }
 
-func (s *PackageManagerService) updatePipPackage(req *model.PackageUpdateRequest, runtimePath string) error {
-	cmd := exec.Command("pip", "install", "--upgrade", req.Name)
-	output, err := cmd.CombinedOutput()
+func (s *PackageManagerService) updatePipPackage(ctx context.Context, req *model.PackageUpdateRequest, runtimePath string) error {
+	output, _, err := s.executor.RunCombined(ctx, "pip", "install", "--upgrade", req.Name)
 	if err != nil {
-		return fmt.Errorf("pip update failed: %s", string(output))
+		return fmt.Errorf("pip update failed: %s", output)
 	}
 
 	log.Printf("package: updated %s via pip", req.Name)
@@ -425,30 +426,30 @@ func (s *PackageManagerService) updatePipPackage(req *model.PackageUpdateRequest
 }
 
 // maven package management (placeholder)
-func (s *PackageManagerService) scanMavenPackages(runtimeID int64, runtimePath string) ([]model.Package, error) {
+func (s *PackageManagerService) scanMavenPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]model.Package, error) {
 	// Maven doesn't have a simple list command like npm/pip
 	// Would need to parse pom.xml or ~/.m2/repository
 	return []model.Package{}, nil
 }
 
-func (s *PackageManagerService) installMavenPackage(req *model.PackageInstallRequest, runtimePath string) error {
+func (s *PackageManagerService) installMavenPackage(ctx context.Context, req *model.PackageInstallRequest, runtimePath string) error {
 	return fmt.Errorf("maven package installation not yet supported")
 }
 
-func (s *PackageManagerService) uninstallMavenPackage(req *model.PackageUninstallRequest, runtimePath string) error {
+func (s *PackageManagerService) uninstallMavenPackage(ctx context.Context, req *model.PackageUninstallRequest, runtimePath string) error {
 	return fmt.Errorf("maven package uninstallation not yet supported")
 }
 
 // composer package management (placeholder)
-func (s *PackageManagerService) scanComposerPackages(runtimeID int64, runtimePath string) ([]model.Package, error) {
+func (s *PackageManagerService) scanComposerPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]model.Package, error) {
 	// composer show -i --format=json
 	return []model.Package{}, nil
 }
 
-func (s *PackageManagerService) installComposerPackage(req *model.PackageInstallRequest, runtimePath string) error {
+func (s *PackageManagerService) installComposerPackage(ctx context.Context, req *model.PackageInstallRequest, runtimePath string) error {
 	return fmt.Errorf("composer package installation not yet supported")
 }
 
-func (s *PackageManagerService) uninstallComposerPackage(req *model.PackageUninstallRequest, runtimePath string) error {
+func (s *PackageManagerService) uninstallComposerPackage(ctx context.Context, req *model.PackageUninstallRequest, runtimePath string) error {
 	return fmt.Errorf("composer package uninstallation not yet supported")
 }

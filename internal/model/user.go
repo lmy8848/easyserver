@@ -25,6 +25,9 @@ type User struct {
 	LockedUntil     sql.NullTime `json:"-" db:"locked_until"`
 	ExpiresAt       sql.NullTime `json:"expires_at" db:"expires_at"`
 	IPWhitelist     string       `json:"ip_whitelist" db:"ip_whitelist"`
+	TotpSecret      string       `json:"-" db:"totp_secret"`
+	TotpEnabled     bool         `json:"totp_enabled" db:"totp_enabled"`
+	TotpBackupCodes string       `json:"-" db:"totp_backup_codes"`
 	CreatedAt       time.Time    `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time    `json:"updated_at" db:"updated_at"`
 }

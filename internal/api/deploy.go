@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"strings"
 
 	"easyserver/internal/service"
 
@@ -19,7 +20,7 @@ func NewDeployHandler(db *service.DeployService) *DeployHandler {
 // Server endpoints
 
 func (h *DeployHandler) ListServers(c *gin.Context) {
-	servers, err := h.deployService.ListServers()
+	servers, err := h.deployService.ListServers(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -34,7 +35,7 @@ func (h *DeployHandler) GetServer(c *gin.Context) {
 		return
 	}
 
-	srv, err := h.deployService.GetServer(id)
+	srv, err := h.deployService.GetServer(c.Request.Context(), id)
 	if err != nil {
 		NotFound(c, err.Error())
 		return
@@ -50,7 +51,33 @@ func (h *DeployHandler) CreateServer(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.CreateServer(&srv); err != nil {
+	// Input validation
+	if srv.Name == "" {
+		BadRequest(c, "server name is required")
+		return
+	}
+	if srv.Host == "" {
+		BadRequest(c, "host is required")
+		return
+	}
+	if srv.Port < 1 || srv.Port > 65535 {
+		BadRequest(c, "port must be between 1 and 65535")
+		return
+	}
+	if srv.Username == "" {
+		BadRequest(c, "username is required")
+		return
+	}
+	if srv.AuthType != "password" && srv.AuthType != "key" {
+		BadRequest(c, "auth_type must be 'password' or 'key'")
+		return
+	}
+	if srv.AuthData == "" {
+		BadRequest(c, "auth_data is required")
+		return
+	}
+
+	if err := h.deployService.CreateServer(c.Request.Context(), &srv); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -74,7 +101,7 @@ func (h *DeployHandler) UpdateServer(c *gin.Context) {
 	}
 	srv.ID = id
 
-	if err := h.deployService.UpdateServer(&srv); err != nil {
+	if err := h.deployService.UpdateServer(c.Request.Context(), &srv); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -91,7 +118,12 @@ func (h *DeployHandler) DeleteServer(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.DeleteServer(id); err != nil {
+	if err := h.deployService.DeleteServer(c.Request.Context(), id); err != nil {
+		// Sub-resource conflict returns 409
+		if strings.Contains(err.Error(), "tasks") || strings.Contains(err.Error(), "versions") {
+			Conflict(c, err.Error())
+			return
+		}
 		InternalError(c, err.Error())
 		return
 	}
@@ -106,7 +138,7 @@ func (h *DeployHandler) TestConnection(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.TestConnection(id); err != nil {
+	if err := h.deployService.TestConnection(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -117,7 +149,7 @@ func (h *DeployHandler) TestConnection(c *gin.Context) {
 // Task endpoints
 
 func (h *DeployHandler) ListTasks(c *gin.Context) {
-	tasks, err := h.deployService.ListTasks()
+	tasks, err := h.deployService.ListTasks(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -132,7 +164,7 @@ func (h *DeployHandler) GetTask(c *gin.Context) {
 		return
 	}
 
-	task, err := h.deployService.GetTask(id)
+	task, err := h.deployService.GetTask(c.Request.Context(), id)
 	if err != nil {
 		NotFound(c, err.Error())
 		return
@@ -148,7 +180,25 @@ func (h *DeployHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.CreateTask(&task); err != nil {
+	// Input validation
+	if task.Name == "" {
+		BadRequest(c, "task name is required")
+		return
+	}
+	if task.Type != "sync" && task.Type != "command" && task.Type != "rollback" {
+		BadRequest(c, "task type must be 'sync', 'command', or 'rollback'")
+		return
+	}
+	if task.ServerID <= 0 {
+		BadRequest(c, "server_id is required")
+		return
+	}
+
+	if err := h.deployService.CreateTask(c.Request.Context(), &task); err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			NotFound(c, err.Error())
+			return
+		}
 		InternalError(c, err.Error())
 		return
 	}
@@ -163,7 +213,7 @@ func (h *DeployHandler) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.DeleteTask(id); err != nil {
+	if err := h.deployService.DeleteTask(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -178,7 +228,11 @@ func (h *DeployHandler) ExecuteTask(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.ExecuteTask(id); err != nil {
+	if err := h.deployService.ExecuteTask(c.Request.Context(), id); err != nil {
+		if strings.Contains(err.Error(), "already running") {
+			Conflict(c, err.Error())
+			return
+		}
 		InternalError(c, err.Error())
 		return
 	}
@@ -195,7 +249,7 @@ func (h *DeployHandler) ListVersions(c *gin.Context) {
 		return
 	}
 
-	versions, err := h.deployService.ListVersions(serverID)
+	versions, err := h.deployService.ListVersions(c.Request.Context(), serverID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -211,7 +265,7 @@ func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 		return
 	}
 
-	if err := h.deployService.RollbackVersion(id); err != nil {
+	if err := h.deployService.RollbackVersion(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}

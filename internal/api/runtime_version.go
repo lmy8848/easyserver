@@ -18,11 +18,11 @@ func NewRuntimeVersionHandler(versionService *service.RuntimeVersionService) *Ru
 func (h *RuntimeVersionHandler) List(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "runtime name is required")
+		BadRequest(c, "运行时名称不能为空")
 		return
 	}
 
-	versions, err := h.versionService.ListWithInstalledStatus(name)
+	versions, err := h.versionService.ListWithInstalledStatus(c.Request.Context(), name)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -37,7 +37,7 @@ func (h *RuntimeVersionHandler) List(c *gin.Context) {
 func (h *RuntimeVersionHandler) Fetch(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "runtime name is required")
+		BadRequest(c, "运行时名称不能为空")
 		return
 	}
 
@@ -46,25 +46,25 @@ func (h *RuntimeVersionHandler) Fetch(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[name] {
-		BadRequest(c, "unsupported runtime: "+name)
+		BadRequest(c, "不支持的运行时: "+name)
 		return
 	}
 
-	cached, err := h.versionService.FetchAndCache(name)
+	cached, err := h.versionService.FetchAndCache(c.Request.Context(), name)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
 	// Return updated list with installed status
-	versions, err := h.versionService.ListWithInstalledStatus(name)
+	versions, err := h.versionService.ListWithInstalledStatus(c.Request.Context(), name)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
 	Success(c, gin.H{
-		"message":  "versions fetched successfully",
+		"message":  "版本获取成功",
 		"cached":   cached,
 		"versions": versions,
 	})
@@ -76,11 +76,11 @@ func (h *RuntimeVersionHandler) ResolveAlias(c *gin.Context) {
 	alias := c.Param("alias")
 
 	if name == "" || alias == "" {
-		BadRequest(c, "runtime name and alias are required")
+		BadRequest(c, "运行时名称和别名不能为空")
 		return
 	}
 
-	resolved, err := h.versionService.ResolveAlias(name, alias)
+	resolved, err := h.versionService.ResolveAlias(c.Request.Context(), name, alias)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -96,11 +96,11 @@ func (h *RuntimeVersionHandler) ResolveAlias(c *gin.Context) {
 func (h *RuntimeVersionHandler) GetAliasSuggestions(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "runtime name is required")
+		BadRequest(c, "运行时名称不能为空")
 		return
 	}
 
-	suggestions := h.versionService.GetAliasSuggestions(name)
+	suggestions := h.versionService.GetAliasSuggestions(c.Request.Context(), name)
 
 	Success(c, gin.H{
 		"suggestions": suggestions,

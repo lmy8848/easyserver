@@ -28,6 +28,9 @@ func (ps *PasswordStrength) Validate(password string) (bool, string) {
 	if len(password) < ps.MinLength {
 		return false, "密码长度不足"
 	}
+	if len(password) > 128 {
+		return false, "密码长度不能超过128个字符"
+	}
 
 	var hasUpper, hasLower, hasDigit, hasSpecial bool
 

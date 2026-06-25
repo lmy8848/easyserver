@@ -20,6 +20,7 @@ export interface User {
   created_at?: string;
   is_locked?: boolean;
   ip_whitelist?: string;
+  totp_enabled?: boolean;
 }
 
 // Monitor types
@@ -137,7 +138,7 @@ export interface CloudInstance {
   expired_at: string;
 }
 
-export interface FirewallRule {
+export interface CloudFirewallRule {
   rule_id: string;
   protocol: string;
   port: string;
@@ -223,6 +224,21 @@ export interface DBServer {
   created_at: string;
 }
 
+// Database Backup types
+export interface DBBackup {
+  id: number;
+  db_server_id: number;
+  db_version_id: number;
+  database_id: number;
+  database_name: string;
+  backup_type: string; // manual, scheduled
+  file_path: string;
+  file_size: number;
+  status: string; // pending, completed, failed
+  error_message: string;
+  created_at: string;
+}
+
 export interface DBVersion {
   id: number;
   db_server_id: number;
@@ -259,5 +275,221 @@ export interface DBUser {
   username: string;
   host: string;
   privileges: string;
+  created_at: string;
+}
+
+// Cron task types
+export interface CronTask {
+  id: number;
+  name: string;
+  command: string;
+  schedule: string;
+  description: string;
+  enabled: boolean;
+  status: string; // idle, running, success, failed
+  last_run: string;
+  last_result: string;
+  next_run: string;
+  script_id: number;
+  timeout: number;
+  max_retry: number;
+  env_vars: string;
+  work_dir: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CronLog {
+  id: number;
+  task_id: number;
+  status: string; // success, failed
+  output: string;
+  duration: number;
+  created_at: string;
+}
+
+export interface Script {
+  id: number;
+  name: string;
+  description: string;
+  content: string;
+  language: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CronDoc {
+  id: number;
+  title: string;
+  content: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Firewall types
+export interface FirewallRule {
+  id: number;
+  chain: string; // INPUT, OUTPUT, FORWARD
+  protocol: string; // tcp, udp, all
+  port: string;
+  action: string; // ACCEPT, DROP, REJECT
+  source: string;
+  target: string;
+  enabled: boolean;
+  priority: number; // lower = higher precedence
+  ip_version: string; // ipv4, ipv6, both
+  remark: string;
+  created_at: string;
+}
+
+export interface FirewallStatus {
+  enabled: boolean;
+  tool: string; // iptables, nftables, ufw, none
+  version: string;
+  rule_count: number;
+  custom_rule_count: number;
+  default_in: string;
+  default_out: string;
+}
+
+export interface FirewallRuleTemplate {
+  name: string;
+  protocol: string;
+  port: string;
+  action: string;
+  remark: string;
+}
+
+export interface FirewallLogEntry {
+  timestamp: string;
+  action: string;
+  protocol: string;
+  src_ip: string;
+  dst_ip: string;
+  src_port: number;
+  dst_port: number;
+  interface: string;
+  raw: string;
+}
+
+// Process Guardian types
+export interface ManagedProcess {
+  id: number;
+  name: string;
+  command: string;
+  args: string;
+  dir: string;
+  env: string;
+  auto_restart: boolean;
+  max_restarts: number;
+  restart_delay: number;
+  stop_timeout: number;
+  startup_timeout: number;
+  auto_start: boolean;
+  log_file: string;
+  group_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProcessStatus {
+  id: number;
+  process_id: number;
+  status: 'running' | 'stopped' | 'error' | 'starting' | 'stopping';
+  pid: number;
+  uptime: number;
+  restarts: number;
+  cpu_percent: number;
+  memory_mb: number;
+  exit_code: number;
+  last_start: string;
+  last_error: string;
+  updated_at: string;
+}
+
+export interface ProcessLog {
+  id: number;
+  process_id: number;
+  type: 'stdout' | 'stderr' | 'system';
+  content: string;
+  created_at: string;
+}
+
+export interface ProcessGroup {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+}
+
+export interface ProcessWithStatus extends ManagedProcess {
+  status: ProcessStatus | null;
+  group: ProcessGroup | null;
+}
+
+export interface ProcessStats {
+  cpu_percent: number;
+  memory_mb: number;
+  pid: number;
+  uptime: number;
+  restarts: number;
+}
+
+// System Process types
+export interface SystemProcess {
+  pid: number;
+  ppid: number;
+  name: string;
+  user: string;
+  state: string;
+  cpu_percent: number;
+  memory_mb: number;
+  mem_percent: number;
+  start_time: string;
+  command: string;
+  threads: number;
+}
+
+export interface SystemOverview {
+  cpu_usage: number;
+  memory_total: number;
+  memory_used: number;
+  memory_usage: number;
+  swap_total: number;
+  swap_used: number;
+  load_avg: [number, number, number];
+  uptime: number;
+  top_cpu: SystemProcess[];
+  top_mem: SystemProcess[];
+  total_procs: number;
+  running_procs: number;
+}
+
+export interface SystemService {
+  name: string;
+  description: string;
+  active_state: string;
+  sub_state: string;
+  pid: number;
+  load_state: string;
+  enabled: boolean;
+}
+
+export interface ServiceWhitelistEntry {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+// Notification types
+export interface Notification {
+  id: number;
+  type: string;      // alert/security/deploy/cron/update/system
+  title: string;
+  message: string;
+  level: string;     // info/warning/error
+  is_read: boolean;
+  metadata: string;
   created_at: string;
 }

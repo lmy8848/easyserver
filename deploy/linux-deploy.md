@@ -22,7 +22,7 @@
 
 ```bash
 # 上传到服务器
-scp easyserver-linux-amd64 user@server:/opt/easyserver/easyserver
+scp easyserver-linux user@server:/opt/easyserver/easyserver
 scp config.yaml user@server:/opt/easyserver/
 ```
 
@@ -155,6 +155,7 @@ sudo journalctl -u easyserver -f
 server:
   port: 8080                    # 监听端口
   host: 0.0.0.0                 # 监听地址
+  serve_frontend: true          # 提供前端页面
   tls:
     enabled: false              # 是否启用 HTTPS
     cert_file: "/path/to/cert.pem"
@@ -169,6 +170,7 @@ auth:
   rate_limit: 100                   # 速率限制
   rate_interval: 1m                 # 速率限制间隔
   ip_whitelist: []                  # IP 白名单 (空=允许所有)
+  session_cleanup_interval: 5m      # 过期会话清理间隔
 
 monitor:
   history_retention: 24h        # 历史数据保留时长
@@ -180,9 +182,13 @@ database:
 audit:
   enabled: true
   log_path: "/opt/easyserver/data/audit.log"
+  retention_days: 90            # 审计日志保留天数
+
+deploy:
+  encryption_key: "change-me-to-a-random-32-byte-key"
 
 filemanager:
-  base_path: "/"                # 文件管理根目录
+  base_path: "/opt/easyserver/data"  # 文件管理根目录（限制访问范围）
 ```
 
 ### 5.2 环境变量覆盖

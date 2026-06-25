@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"easyserver/internal/service"
@@ -13,11 +14,24 @@ import (
 	gorillaWs "github.com/gorilla/websocket"
 )
 
+// Monitor WebSocket constants
+const (
+	// MonitorWSPingInterval is the interval for sending ping messages
+	MonitorWSPingInterval = 30 * time.Second
+	// MonitorWSWriteDeadline is the deadline for writing a message to the WebSocket
+	MonitorWSWriteDeadline = 10 * time.Second
+	// MonitorWSReadDeadline is the deadline for reading a message from the WebSocket
+	MonitorWSReadDeadline = 60 * time.Second
+	// MonitorWSReadLimit is the maximum message size for WebSocket reads
+	MonitorWSReadLimit = 512
+)
+
 // createUpgrader creates a WebSocket upgrader with origin checking
 func createUpgrader(allowedOrigins []string, devMode bool) gorillaWs.Upgrader {
 	return gorillaWs.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
+		Subprotocols:    []string{"token"},
 		CheckOrigin: func(r *http.Request) bool {
 			// In dev mode, allow localhost
 			if devMode {
@@ -60,7 +74,7 @@ func NewMonitorHandler(monitorService *service.MonitorService, jwtSecret string,
 }
 
 func (h *MonitorHandler) HandleStats(c *gin.Context) {
-	snapshot, err := h.monitorService.GetCurrentStats()
+	snapshot, err := h.monitorService.GetCurrentStats(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code":    0,
@@ -87,7 +101,7 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    40000,
-			"message": "invalid start time",
+			"message": "无效的开始时间",
 		})
 		return
 	}
@@ -96,16 +110,31 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    40000,
-			"message": "invalid end time",
+			"message": "无效的结束时间",
 		})
 		return
 	}
 
-	points, err := h.monitorService.GetHistory(start, end)
+	// Validate range
+	if start.After(end) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    40000,
+			"message": "开始时间必须早于结束时间",
+		})
+		return
+	}
+
+	// Cap maximum range to 7 days
+	maxRange := 7 * 24 * time.Hour
+	if end.Sub(start) > maxRange {
+		start = end.Add(-maxRange)
+	}
+
+	points, err := h.monitorService.GetHistory(c.Request.Context(), start, end)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    50000,
-			"message": "failed to query history",
+			"message": "查询历史数据失败",
 		})
 		return
 	}
@@ -143,33 +172,44 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 		conn.Close()
 	}()
 
+	// Write mutex ensures only one goroutine writes to the connection at a time
+	writeMu := &sync.Mutex{}
+
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(MonitorWSPingInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case msg, ok := <-client.Send:
 				if !ok {
+					writeMu.Lock()
 					conn.WriteMessage(gorillaWs.CloseMessage, []byte{})
+					writeMu.Unlock()
 					return
 				}
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				writeMu.Lock()
+				conn.SetWriteDeadline(time.Now().Add(MonitorWSWriteDeadline))
 				if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
+					writeMu.Unlock()
 					return
 				}
+				writeMu.Unlock()
 			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				writeMu.Lock()
+				conn.SetWriteDeadline(time.Now().Add(MonitorWSWriteDeadline))
 				if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
+					writeMu.Unlock()
 					return
 				}
+				writeMu.Unlock()
 			}
 		}
 	}()
 
-	conn.SetReadLimit(512)
+	conn.SetReadLimit(MonitorWSReadLimit)
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(MonitorWSReadDeadline))
 		return nil
 	})
 
@@ -185,7 +225,11 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 		}
 
 		if req["type"] == "ping" {
-			conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"pong"}`))
+			// Send pong through channel to avoid concurrent write
+			select {
+			case client.Send <- []byte(`{"type":"pong"}`):
+			default:
+			}
 		}
 	}
 }

@@ -62,6 +62,7 @@ func (s *MonitorService) readCPU(p *model.MonitorPoint) {
 func (s *MonitorService) readLoad(p *model.MonitorPoint) {
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {
+		log.Printf("monitor: failed to read /proc/loadavg: %v", err)
 		return
 	}
 
@@ -109,6 +110,7 @@ func (s *MonitorService) readMemory(p *model.MonitorPoint) {
 func (s *MonitorService) readDisk(p *model.MonitorPoint) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs("/", &stat); err != nil {
+		log.Printf("monitor: failed to statfs /: %v", err)
 		return
 	}
 
@@ -319,6 +321,26 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 		return nil
 	}
 
+	// 性能优化：预加载 uid 缓存（只读一次 /etc/passwd）
+	s.ensureUIDCache()
+
+	// 性能优化：只读一次 /proc/meminfo 获取总内存
+	var totalMem uint64
+	if memData, err := os.ReadFile("/proc/meminfo"); err == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(memData)))
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "MemTotal:") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					val, _ := strconv.ParseUint(fields[1], 10, 64)
+					totalMem = val * 1024
+				}
+				break
+			}
+		}
+	}
+
 	var processes []model.ProcessInfo
 
 	for _, entry := range entries {
@@ -360,7 +382,7 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 		pageSize := uint64(os.Getpagesize())
 		memBytes := rssPages * pageSize
 
-		// Read /proc/[pid]/status for user
+		// Read /proc/[pid]/status for user（使用缓存）
 		user := "root"
 		statusData, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
 		if err == nil {
@@ -371,17 +393,8 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 					uidFields := strings.Fields(line)
 					if len(uidFields) >= 2 {
 						uid := uidFields[1]
-						// Try to resolve username
-						if passwdData, err := os.ReadFile("/etc/passwd"); err == nil {
-							passScanner := bufio.NewScanner(strings.NewReader(string(passwdData)))
-							for passScanner.Scan() {
-								passLine := passScanner.Text()
-								passFields := strings.Split(passLine, ":")
-								if len(passFields) >= 3 && passFields[2] == uid {
-									user = passFields[0]
-									break
-								}
-							}
+						if name, ok := s.uidCache[uid]; ok {
+							user = name
 						}
 					}
 					break
@@ -390,27 +403,12 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 		}
 
 		// Calculate CPU percent (rough estimate based on total time)
-		// This is a simplified version - for accurate %, we'd need delta tracking per PID
 		cpuPercent := float64(totalTime) / 100.0 // Simplified
 
-		// Get total memory for percentage
+		// Get memory percentage（使用预加载的 totalMem）
 		var memPercent float64
-		if memData, err := os.ReadFile("/proc/meminfo"); err == nil {
-			memScanner := bufio.NewScanner(strings.NewReader(string(memData)))
-			for memScanner.Scan() {
-				line := memScanner.Text()
-				if strings.HasPrefix(line, "MemTotal:") {
-					fields := strings.Fields(line)
-					if len(fields) >= 2 {
-						val, _ := strconv.ParseUint(fields[1], 10, 64)
-						totalMem := val * 1024
-						if totalMem > 0 {
-							memPercent = math.Round(float64(memBytes)/float64(totalMem)*100*100) / 100
-						}
-					}
-					break
-				}
-			}
+		if totalMem > 0 {
+			memPercent = math.Round(float64(memBytes)/float64(totalMem)*100*100) / 100
 		}
 
 		processes = append(processes, model.ProcessInfo{
@@ -434,4 +432,32 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 	}
 
 	return processes
+}
+
+// ensureUIDCache 确保 uid→username 缓存已加载（只读一次 /etc/passwd）
+func (s *MonitorService) ensureUIDCache() {
+	s.processMu.RLock()
+	if len(s.uidCache) > 0 {
+		s.processMu.RUnlock()
+		return
+	}
+	s.processMu.RUnlock()
+
+	s.processMu.Lock()
+	defer s.processMu.Unlock()
+	// Double-check after acquiring write lock
+	if len(s.uidCache) > 0 {
+		return
+	}
+	passwdData, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(passwdData)))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), ":")
+		if len(fields) >= 3 {
+			s.uidCache[fields[2]] = fields[0]
+		}
+	}
 }

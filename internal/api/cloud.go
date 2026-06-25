@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strconv"
 	"time"
 
 	"easyserver/internal/config"
@@ -10,10 +11,12 @@ import (
 )
 
 type CloudHandler struct {
-	cloudService *service.CloudService
+	cloudService    *service.CloudService
+	currentInstance string // The instance running this panel
+	panelPort       int    // Panel port for self-protection
 }
 
-func NewCloudHandler(cfg *config.TencentCloudConfig) (*CloudHandler, error) {
+func NewCloudHandler(cfg *config.TencentCloudConfig, panelPort int) (*CloudHandler, error) {
 	if !cfg.Enabled {
 		return &CloudHandler{}, nil
 	}
@@ -29,8 +32,15 @@ func NewCloudHandler(cfg *config.TencentCloudConfig) (*CloudHandler, error) {
 	}
 
 	return &CloudHandler{
-		cloudService: cloudService,
+		cloudService:    cloudService,
+		currentInstance: cfg.InstanceID,
+		panelPort:       panelPort,
 	}, nil
+}
+
+// isCurrentInstance checks if the instance is the one running this panel
+func (h *CloudHandler) isCurrentInstance(instanceID string) bool {
+	return h.currentInstance != "" && h.currentInstance == instanceID
 }
 
 // GetInstances returns all instances
@@ -40,7 +50,7 @@ func (h *CloudHandler) GetInstances(c *gin.Context) {
 		return
 	}
 
-	instances, err := h.cloudService.GetInstances()
+	instances, err := h.cloudService.GetInstances(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -65,7 +75,7 @@ func (h *CloudHandler) GetInstance(c *gin.Context) {
 		return
 	}
 
-	instance, err := h.cloudService.GetInstance(instanceID)
+	instance, err := h.cloudService.GetInstance(c.Request.Context(), instanceID)
 	if err != nil {
 		NotFound(c, err.Error())
 		return
@@ -87,7 +97,7 @@ func (h *CloudHandler) StartInstance(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.StartInstance(instanceID); err != nil {
+	if err := h.cloudService.StartInstance(c.Request.Context(), instanceID); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -108,7 +118,13 @@ func (h *CloudHandler) StopInstance(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.StopInstance(instanceID); err != nil {
+	// Prevent stopping the current instance
+	if h.isCurrentInstance(instanceID) {
+		BadRequest(c, "cannot stop the instance running this panel")
+		return
+	}
+
+	if err := h.cloudService.StopInstance(c.Request.Context(), instanceID); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -129,7 +145,13 @@ func (h *CloudHandler) RestartInstance(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.RestartInstance(instanceID); err != nil {
+	// Prevent restarting the current instance (panel will be unavailable during restart)
+	if h.isCurrentInstance(instanceID) {
+		BadRequest(c, "cannot restart the instance running this panel, use /api/settings/restart instead")
+		return
+	}
+
+	if err := h.cloudService.RestartInstance(c.Request.Context(), instanceID); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -150,7 +172,7 @@ func (h *CloudHandler) GetFirewallRules(c *gin.Context) {
 		return
 	}
 
-	rules, err := h.cloudService.GetFirewallRules(instanceID)
+	rules, err := h.cloudService.GetFirewallRules(c.Request.Context(), instanceID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -178,7 +200,20 @@ func (h *CloudHandler) AddFirewallRule(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.AddFirewallRule(instanceID, rule); err != nil {
+	// Validate port format (e.g., "80", "443", "8000-9000", "ALL")
+	if rule.Port == "" {
+		BadRequest(c, "port is required")
+		return
+	}
+
+	// Prevent blocking panel port on current instance
+	panelPortStr := strconv.Itoa(h.panelPort)
+	if h.isCurrentInstance(instanceID) && rule.Port == panelPortStr && rule.Action != "ACCEPT" {
+		BadRequest(c, "cannot block panel port on the current instance")
+		return
+	}
+
+	if err := h.cloudService.AddFirewallRule(c.Request.Context(), instanceID, rule); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -196,7 +231,12 @@ func (h *CloudHandler) DeleteFirewallRule(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.DeleteFirewallRule(instanceID, ruleID); err != nil {
+	if instanceID == "" {
+		BadRequest(c, "instance ID is required")
+		return
+	}
+
+	if err := h.cloudService.DeleteFirewallRule(c.Request.Context(), instanceID, ruleID); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -213,7 +253,12 @@ func (h *CloudHandler) GetSnapshots(c *gin.Context) {
 		return
 	}
 
-	snapshots, err := h.cloudService.GetSnapshots(instanceID)
+	if instanceID == "" {
+		BadRequest(c, "instance_id query parameter is required")
+		return
+	}
+
+	snapshots, err := h.cloudService.GetSnapshots(c.Request.Context(), instanceID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -239,7 +284,7 @@ func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.CreateSnapshot(req.InstanceID, req.Name); err != nil {
+	if err := h.cloudService.CreateSnapshot(c.Request.Context(), req.InstanceID, req.Name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -260,7 +305,7 @@ func (h *CloudHandler) ApplySnapshot(c *gin.Context) {
 		return
 	}
 
-	if err := h.cloudService.ApplySnapshot(snapshotID); err != nil {
+	if err := h.cloudService.ApplySnapshot(c.Request.Context(), snapshotID); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -294,7 +339,7 @@ func (h *CloudHandler) GetMonitorData(c *gin.Context) {
 		}
 	}
 
-	data, err := h.cloudService.GetMonitorData(instanceID, metric, start, end)
+	data, err := h.cloudService.GetMonitorData(c.Request.Context(), instanceID, metric, start, end)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -315,7 +360,7 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 		return
 	}
 
-	traffic, err := h.cloudService.GetTraffic(instanceID)
+	traffic, err := h.cloudService.GetTraffic(c.Request.Context(), instanceID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return

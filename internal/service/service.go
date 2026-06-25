@@ -4,13 +4,15 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"easyserver/internal/executor"
 )
 
 type ServiceInfo struct {
@@ -41,27 +43,27 @@ type journalEntry struct {
 }
 
 type ServiceManager struct {
-	mu sync.RWMutex
+	mu       sync.RWMutex
+	executor executor.CommandExecutor
 }
 
-func NewServiceManager() *ServiceManager {
-	return &ServiceManager{}
+func NewServiceManager(exec executor.CommandExecutor) *ServiceManager {
+	return &ServiceManager{executor: exec}
 }
 
 // List returns all systemd services
-func (m *ServiceManager) List() ([]ServiceInfo, error) {
+func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	// Get list of services with detailed info in one call
-	cmd := exec.Command("systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
-	output, err := cmd.Output()
-	if err != nil {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
+	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
 	// Get all enabled/disabled status in one call
-	enabledMap := m.getAllEnabledStatus()
+	enabledMap := m.getAllEnabledStatus(ctx)
 
 	var services []ServiceInfo
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(stdout, "\n")
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -92,21 +94,20 @@ func (m *ServiceManager) List() ([]ServiceInfo, error) {
 	}
 
 	// Batch get PID and memory for all services
-	m.batchGetDetailedInfo(services)
+	m.batchGetDetailedInfo(ctx, services)
 
 	return services, nil
 }
 
 // getAllEnabledStatus gets enabled status for all services in one call
-func (m *ServiceManager) getAllEnabledStatus() map[string]bool {
-	cmd := exec.Command("systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain")
-	output, err := cmd.Output()
-	if err != nil {
+func (m *ServiceManager) getAllEnabledStatus(ctx context.Context) map[string]bool {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain")
+	if err != nil || exitCode != 0 {
 		return nil
 	}
 
 	result := make(map[string]bool)
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "UNIT") {
@@ -122,7 +123,7 @@ func (m *ServiceManager) getAllEnabledStatus() map[string]bool {
 }
 
 // batchGetDetailedInfo gets PID and memory for multiple services efficiently
-func (m *ServiceManager) batchGetDetailedInfo(services []ServiceInfo) {
+func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []ServiceInfo) {
 	if len(services) == 0 {
 		return
 	}
@@ -134,9 +135,8 @@ func (m *ServiceManager) batchGetDetailedInfo(services []ServiceInfo) {
 	}
 	args = append(args, "--property=Id,MainPID,MemoryCurrent,ActiveState")
 
-	cmd := exec.Command("systemctl", args...)
-	output, err := cmd.Output()
-	if err != nil {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", args...)
+	if err != nil || exitCode != 0 {
 		return
 	}
 
@@ -144,7 +144,7 @@ func (m *ServiceManager) batchGetDetailedInfo(services []ServiceInfo) {
 	currentName := ""
 	props := make(map[string]string)
 
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -193,11 +193,10 @@ func (m *ServiceManager) batchGetDetailedInfo(services []ServiceInfo) {
 }
 
 // Get returns info for a specific service
-func (m *ServiceManager) Get(name string) (*ServiceInfo, error) {
-	cmd := exec.Command("systemctl", "show", name+".service",
+func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, error) {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "show", name+".service",
 		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description")
-	output, err := cmd.Output()
-	if err != nil {
+	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("failed to get service info: %w", err)
 	}
 
@@ -205,7 +204,7 @@ func (m *ServiceManager) Get(name string) (*ServiceInfo, error) {
 		Name: name,
 	}
 
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
@@ -229,68 +228,107 @@ func (m *ServiceManager) Get(name string) (*ServiceInfo, error) {
 		}
 	}
 
-	svc.Enabled = m.isEnabled(name)
+	svc.Enabled = m.isEnabled(ctx, name)
 
 	return svc, nil
 }
 
 // Start starts a service
-func (m *ServiceManager) Start(name string) error {
-	cmd := exec.Command("systemctl", "start", name+".service")
-	output, err := cmd.CombinedOutput()
+func (m *ServiceManager) Start(ctx context.Context, name string) error {
+	if err := m.requireServiceExists(ctx, name); err != nil {
+		return err
+	}
+
+	info, err := m.Get(ctx, name)
 	if err != nil {
-		return fmt.Errorf("failed to start service: %s", string(output))
+		return fmt.Errorf("failed to get service state: %w", err)
+	}
+	if info.State == "active" {
+		return fmt.Errorf("service %s is already running", name)
+	}
+
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "start", name+".service")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to start service: %s", output)
 	}
 	log.Printf("service: started %s", name)
 	return nil
 }
 
 // Stop stops a service
-func (m *ServiceManager) Stop(name string) error {
-	cmd := exec.Command("systemctl", "stop", name+".service")
-	output, err := cmd.CombinedOutput()
+func (m *ServiceManager) Stop(ctx context.Context, name string) error {
+	if err := m.requireServiceExists(ctx, name); err != nil {
+		return err
+	}
+
+	info, err := m.Get(ctx, name)
 	if err != nil {
-		return fmt.Errorf("failed to stop service: %s", string(output))
+		return fmt.Errorf("failed to get service state: %w", err)
+	}
+	if info.State == "inactive" || info.State == "failed" {
+		return fmt.Errorf("service %s is already stopped", name)
+	}
+
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "stop", name+".service")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to stop service: %s", output)
 	}
 	log.Printf("service: stopped %s", name)
 	return nil
 }
 
 // Restart restarts a service
-func (m *ServiceManager) Restart(name string) error {
-	cmd := exec.Command("systemctl", "restart", name+".service")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to restart service: %s", string(output))
+func (m *ServiceManager) Restart(ctx context.Context, name string) error {
+	if err := m.requireServiceExists(ctx, name); err != nil {
+		return err
+	}
+
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "restart", name+".service")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to restart service: %s", output)
 	}
 	log.Printf("service: restarted %s", name)
 	return nil
 }
 
 // Enable enables a service for auto-start
-func (m *ServiceManager) Enable(name string) error {
-	cmd := exec.Command("systemctl", "enable", name+".service")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to enable service: %s", string(output))
+func (m *ServiceManager) Enable(ctx context.Context, name string) error {
+	if err := m.requireServiceExists(ctx, name); err != nil {
+		return err
+	}
+
+	if m.isEnabled(ctx, name) {
+		return fmt.Errorf("service %s is already enabled", name)
+	}
+
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "enable", name+".service")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to enable service: %s", output)
 	}
 	log.Printf("service: enabled %s", name)
 	return nil
 }
 
 // Disable disables a service from auto-start
-func (m *ServiceManager) Disable(name string) error {
-	cmd := exec.Command("systemctl", "disable", name+".service")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to disable service: %s", string(output))
+func (m *ServiceManager) Disable(ctx context.Context, name string) error {
+	if err := m.requireServiceExists(ctx, name); err != nil {
+		return err
+	}
+
+	if !m.isEnabled(ctx, name) {
+		return fmt.Errorf("service %s is already disabled", name)
+	}
+
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "disable", name+".service")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to disable service: %s", output)
 	}
 	log.Printf("service: disabled %s", name)
 	return nil
 }
 
 // GetLogs returns recent logs for a service
-func (m *ServiceManager) GetLogs(name string, tail int, since string) ([]LogLine, error) {
+func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, since string) ([]LogLine, error) {
 	args := []string{
 		"-u", name + ".service",
 		"--no-pager",
@@ -305,14 +343,13 @@ func (m *ServiceManager) GetLogs(name string, tail int, since string) ([]LogLine
 		args = append(args, "--since", since)
 	}
 
-	cmd := exec.Command("journalctl", args...)
-	output, err := cmd.Output()
-	if err != nil {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "journalctl", args...)
+	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("failed to get logs: %w", err)
 	}
 
 	var logs []LogLine
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(stdout, "\n")
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -372,11 +409,24 @@ func (m *ServiceManager) GetLogs(name string, tail int, since string) ([]LogLine
 }
 
 // isEnabled checks if a service is enabled
-func (m *ServiceManager) isEnabled(name string) bool {
-	cmd := exec.Command("systemctl", "is-enabled", name+".service")
-	output, err := cmd.Output()
-	if err != nil {
+func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "is-enabled", name+".service")
+	if err != nil || exitCode != 0 {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == "enabled"
+	return strings.TrimSpace(stdout) == "enabled"
+}
+
+// serviceExists checks if a service unit exists on the system
+func (m *ServiceManager) serviceExists(ctx context.Context, name string) bool {
+	_, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "cat", name+".service")
+	return err == nil && exitCode == 0
+}
+
+// requireServiceExists returns an error if the service does not exist
+func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) error {
+	if !m.serviceExists(ctx, name) {
+		return fmt.Errorf("service %s does not exist", name)
+	}
+	return nil
 }

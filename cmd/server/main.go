@@ -15,6 +15,8 @@ import (
 	"easyserver/internal/api"
 	"easyserver/internal/config"
 	"easyserver/internal/database"
+	"easyserver/internal/middleware"
+	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/service"
 )
 
@@ -89,9 +91,16 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize auth service and default admin
+	// Initialize repositories (single source of truth for data access)
+	userRepo := sqlite.NewUserRepository(db)
+	sessionRepo := sqlite.NewSessionRepository(db)
+	tokenRepo := sqlite.NewTokenBlacklistRepository(db)
+	auditRepo := sqlite.NewAuditRepository(db)
+
+	// Initialize auth service and default admin (single shared instance)
 	authService := service.NewAuthService(db, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration)
-	if err := authService.InitDefaultAdmin(); err != nil {
+	authService.SetRepositories(userRepo, tokenRepo)
+	if err := authService.InitDefaultAdmin(context.Background()); err != nil {
 		log.Fatalf("Failed to initialize default admin: %v", err)
 	}
 
@@ -104,28 +113,55 @@ func main() {
 		monitorService.Start()
 	}()
 
-	// Initialize audit service and system event monitor
-	auditService := service.NewAuditService(db)
+	// Initialize audit service and system event monitor (single shared instance)
+	auditService := service.NewAuditService(db, cfg.Audit.RetentionDays)
+	auditService.SetAuditRepository(auditRepo)
 	systemMonitor := service.NewSystemEventMonitor(auditService)
 	systemMonitor.Start()
 
-	// Initialize session service and start cleanup
-	sessionService := service.NewSessionService(db)
+	// Initialize session service and start cleanup (single shared instance)
+	sessionService := service.NewSessionServiceWithRepo(sessionRepo, db)
+	sessionDone := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(cfg.Auth.SessionCleanupInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			if err := sessionService.CleanupExpiredSessions(); err != nil {
-				log.Printf("session cleanup error: %v", err)
+		for {
+			select {
+			case <-ticker.C:
+				if err := sessionService.CleanupExpiredSessions(context.Background()); err != nil {
+					log.Printf("session cleanup error: %v", err)
+				}
+			case <-sessionDone:
+				return
 			}
 		}
 	}()
 
-	// Log server start
-	auditService.LogSystemEvent("SERVER_START", "EasyServer started")
+	// Initialize process guardian (single shared instance)
+	processManager := service.NewProcessManager(db)
 
-	// Setup router with shared monitor service instance
-	router := api.NewRouter(cfg, db, monitorService)
+	// Initialize system process service (single shared instance)
+	systemProcessService := service.NewSystemProcessService(db)
+
+	// Initialize notification service (single shared instance)
+	notificationService := service.NewNotificationService(db)
+
+	// Log server start
+	auditService.LogSystemEvent(context.Background(), "SERVER_START", "EasyServer started")
+
+	// Setup router with shared service instances (no duplicate creation)
+	router := api.NewRouter(cfg, *configPath, api.RouterDeps{
+		DB:                   db,
+		AuthService:          authService,
+		MonitorService:       monitorService,
+		AuditService:         auditService,
+		SessionService:       sessionService,
+		TotpService:          service.NewTOTPService(db),
+		AuditRepo:            auditRepo,
+		ProcessManager:       processManager,
+		SystemProcessService: systemProcessService,
+		NotificationService:  notificationService,
+	})
 	r := router.Setup()
 
 	// Create HTTP server with graceful shutdown support
@@ -173,15 +209,30 @@ func main() {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
 
+	// Stop rate limiter background goroutine
+	middleware.StopRateLimiter()
+
+	// Stop session heartbeat limiter background goroutine
+	middleware.StopSessionHeartbeatLimiter()
+
+	// Stop session cleanup goroutine
+	close(sessionDone)
+
 	// Stop system event monitor
 	systemMonitor.Stop()
 
 	// Log server shutdown
-	auditService.LogSystemEvent("SERVER_STOP", "EasyServer stopped")
+	auditService.LogSystemEvent(context.Background(), "SERVER_STOP", "EasyServer stopped")
+
+	// Flush remaining audit log entries
+	auditService.Close()
 
 	// Stop monitor service
 	monitorService.Stop()
 	monitorWg.Wait()
+
+	// Stop process guardian
+	processManager.Shutdown()
 
 	log.Println("Server exited properly")
 }

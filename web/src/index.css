@@ -1,41 +1,47 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
+/* --- Global Reset --- */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: #f0f2f5;
+  color: #1e293b;
 }
+#root { min-height: 100vh; }
 
-#root {
-  min-height: 100vh;
-}
+/* --- Scrollbar --- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
+/* --- Ant Design Light Theme Overrides --- */
+.ant-layout { background: #f0f2f5 !important; }
+.ant-layout-header { background: rgba(255,255,255,0.85) !important; }
 
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
+.ant-card { border-color: #e5e7eb !important; }
+.ant-card-head { border-bottom-color: #e5e7eb !important; }
 
-::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
-}
+.ant-table-thead > tr > th { background: #f9fafb !important; border-bottom-color: #e5e7eb !important; }
+.ant-table-tbody > tr > td { border-bottom-color: #f0f0f0 !important; }
+.ant-table-tbody > tr:hover > td { background: #f9fafb !important; }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
+.ant-btn-default { border-color: #d1d5db !important; }
+.ant-btn-default:hover { border-color: #6366f1 !important; color: #6366f1 !important; }
+
+.ant-input:focus, .ant-input-focused { border-color: #6366f1 !important; box-shadow: 0 0 0 2px rgba(99,102,241,0.1) !important; }
+
+.ant-select-dropdown { border-color: #e5e7eb !important; }
+.ant-select-item-option-active { background: #f3f4f6 !important; }
+.ant-select-item-option-selected { background: rgba(99,102,241,0.08) !important; color: #6366f1 !important; }
+
+.ant-modal-content { border-color: #e5e7eb !important; }
+.ant-modal-header { border-bottom-color: #e5e7eb !important; }
+
+.ant-pagination .ant-pagination-item { border-color: #d1d5db !important; }
+.ant-pagination .ant-pagination-item-active { background: #6366f1 !important; border-color: #6366f1 !important; }
+.ant-pagination .ant-pagination-item-active a { color: #fff !important; }
 
 /* Terminal styles */
-.xterm {
-  padding: 8px;
-}
-
-
+.xterm { padding: 8px; }

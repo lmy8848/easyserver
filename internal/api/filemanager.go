@@ -33,11 +33,11 @@ func (h *FileManagerHandler) getUserInfo(c *gin.Context) (int64, string) {
 	username, _ := c.Get("username")
 	var uid int64
 	var uname string
-	if userID != nil {
-		uid = userID.(int64)
+	if v, ok := userID.(int64); ok {
+		uid = v
 	}
-	if username != nil {
-		uname = username.(string)
+	if v, ok := username.(string); ok {
+		uname = v
 	}
 	return uid, uname
 }
@@ -52,8 +52,20 @@ func (h *FileManagerHandler) GetBasePath(c *gin.Context) {
 // List returns files in a directory
 func (h *FileManagerHandler) List(c *gin.Context) {
 	path := c.Query("path")
+
+	// Empty path means root - read basePath directly
 	if path == "" {
-		path = h.fileManager.BasePath()
+		files, err := h.fileManager.ListRoot()
+		if err != nil {
+			InternalError(c, err.Error())
+			return
+		}
+		Success(c, gin.H{
+			"path":    h.fileManager.BasePath(),
+			"parent":  h.fileManager.BasePath(),
+			"entries": files,
+		})
+		return
 	}
 
 	files, err := h.fileManager.List(path)
@@ -93,7 +105,7 @@ func (h *FileManagerHandler) Mkdir(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "MKDIR", req.Path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "MKDIR", req.Path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -123,7 +135,7 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "UPLOAD", path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "UPLOAD", path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, gin.H{
@@ -162,7 +174,7 @@ func (h *FileManagerHandler) Download(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "DOWNLOAD", path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "DOWNLOAD", path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	c.File(validPath)
@@ -188,7 +200,7 @@ func (h *FileManagerHandler) Rename(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "RENAME", req.OldPath+" -> "+req.NewPath, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "RENAME", req.OldPath+" -> "+req.NewPath, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -212,7 +224,7 @@ func (h *FileManagerHandler) Delete(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "DELETE", path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "DELETE", path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -238,7 +250,7 @@ func (h *FileManagerHandler) Move(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "MOVE", fmt.Sprintf("%v -> %s", req.Paths, req.Dest), c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "MOVE", fmt.Sprintf("%v -> %s", req.Paths, req.Dest), c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -264,7 +276,7 @@ func (h *FileManagerHandler) Copy(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "COPY", req.Source+" -> "+req.Dest, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "COPY", req.Source+" -> "+req.Dest, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -307,7 +319,7 @@ func (h *FileManagerHandler) SaveContent(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "EDIT", req.Path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "EDIT", req.Path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -317,7 +329,7 @@ func (h *FileManagerHandler) SaveContent(c *gin.Context) {
 func (h *FileManagerHandler) Search(c *gin.Context) {
 	rootPath := c.Query("path")
 	if rootPath == "" {
-		rootPath = "/"
+		rootPath = h.fileManager.BasePath()
 	}
 	pattern := c.Query("q")
 	if pattern == "" {
@@ -340,7 +352,7 @@ func (h *FileManagerHandler) Search(c *gin.Context) {
 func (h *FileManagerHandler) SearchContent(c *gin.Context) {
 	rootPath := c.Query("path")
 	if rootPath == "" {
-		rootPath = "/"
+		rootPath = h.fileManager.BasePath()
 	}
 	text := c.Query("q")
 	if text == "" {
@@ -379,7 +391,7 @@ func (h *FileManagerHandler) Compress(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "COMPRESS", req.Dest, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "COMPRESS", req.Dest, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -405,7 +417,7 @@ func (h *FileManagerHandler) Extract(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "EXTRACT", req.Source, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "EXTRACT", req.Source, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -438,7 +450,7 @@ func (h *FileManagerHandler) Chmod(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "CHMOD", req.Path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "CHMOD", req.Path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)
@@ -465,7 +477,7 @@ func (h *FileManagerHandler) Chown(c *gin.Context) {
 	// Log file operation
 	if h.auditService != nil {
 		uid, uname := h.getUserInfo(c)
-		h.auditService.LogFileOperation(uid, uname, "CHOWN", req.Path, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "CHOWN", req.Path, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	Success(c, nil)

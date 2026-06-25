@@ -1,0 +1,66 @@
+# Version control
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+easyserver
+easyserver-linux
+easyserver-linux-arm64
+*.test
+*.out
+
+# Node modules and frontend build
+web/node_modules
+web/dist
+web/.vite
+
+# Data and config (runtime, not build-time)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+config.yaml
+!config.yaml.example
+.env
+.env.local
+.env.development
+.env.production
+*.pem
+*.key
+
+# Build and release artifacts
+dist/
+build/
+release/
+
+# CodeGraph index
+.codegraph/
+
+# Claude Code local settings
+.claude/
+CLAUDE.md
+
+# Documentation (not needed in image)
+docs/
+*.md
+LICENSE
+
+# Temporary files
+*.bak
+*.tmp
+files.txt

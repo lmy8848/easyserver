@@ -4,7 +4,7 @@
 
 | 文件 | 大小 | 说明 |
 |------|------|------|
-| `easyserver` | 31MB | 主程序 (Linux amd64, 静态链接) |
+| `easyserver-linux` | 31MB | 主程序 (Linux amd64, 静态链接) |
 | `config.yaml` | 932B | 配置文件模板 |
 | `install.sh` | 4.4KB | 一键安装脚本 |
 | `linux-deploy.md` | 9.4KB | 详细部署文档 |
@@ -50,7 +50,7 @@ tar -xzf easyserver-v1.0.0-linux-amd64.tar.gz
 sudo mkdir -p /opt/easyserver/data
 
 # 3. 复制文件
-sudo cp easyserver /opt/easyserver/
+sudo cp easyserver-linux /opt/easyserver/easyserver
 sudo cp config.yaml /opt/easyserver/
 sudo chmod +x /opt/easyserver/easyserver
 

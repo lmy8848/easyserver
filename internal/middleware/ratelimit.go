@@ -18,6 +18,7 @@ type RateLimiter struct {
 	mu       sync.RWMutex
 	rate     int
 	interval time.Duration
+	done     chan struct{}
 }
 
 func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
@@ -25,6 +26,7 @@ func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 		visitors: make(map[string]*visitor),
 		rate:     rate,
 		interval: interval,
+		done:     make(chan struct{}),
 	}
 
 	// Cleanup old visitors every minute
@@ -33,16 +35,26 @@ func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 	return rl
 }
 
+func (rl *RateLimiter) Stop() {
+	close(rl.done)
+}
+
 func (rl *RateLimiter) cleanup() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
-		time.Sleep(time.Minute)
-		rl.mu.Lock()
-		for ip, v := range rl.visitors {
-			if time.Since(v.lastSeen) > rl.interval {
-				delete(rl.visitors, ip)
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			for ip, v := range rl.visitors {
+				if time.Since(v.lastSeen) > rl.interval {
+					delete(rl.visitors, ip)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.done:
+			return
 		}
-		rl.mu.Unlock()
 	}
 }
 
@@ -71,10 +83,22 @@ func (rl *RateLimiter) isAllowed(ip string) bool {
 	return true
 }
 
+// globalRateLimiter is the package-level rate limiter for Stop() access
+var globalRateLimiter *RateLimiter
+
+// StopRateLimiter stops the background cleanup goroutine.
+// Should be called during server shutdown.
+func StopRateLimiter() {
+	if globalRateLimiter != nil {
+		globalRateLimiter.Stop()
+	}
+}
+
 // RateLimitMiddleware limits request rate per IP
 // rate: max requests per interval, interval: sliding window duration
 func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
 	limiter := NewRateLimiter(rate, interval)
+	globalRateLimiter = limiter
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()

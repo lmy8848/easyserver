@@ -161,26 +161,138 @@ func (v *SQLValidator) ValidateDelete(table string, pkCol string, pkVal interfac
 	return &ValidationResult{Valid: true, Message: "valid", SQL: sql}
 }
 
-// ValidateSQL validates a raw SQL statement for safety
+// stripLeadingComments removes leading SQL comments and whitespace from a statement.
+// Handles both single-line (-- ...) and block (/* ... */) comments.
+func stripLeadingComments(sql string) string {
+	for {
+		sql = strings.TrimSpace(sql)
+		if strings.HasPrefix(sql, "--") {
+			// Single-line comment: skip to end of line
+			if idx := strings.Index(sql, "\n"); idx >= 0 {
+				sql = sql[idx+1:]
+			} else {
+				// Entire string is a comment
+				return ""
+			}
+		} else if strings.HasPrefix(sql, "/*") {
+			// Block comment: skip to closing */
+			if idx := strings.Index(sql, "*/"); idx >= 0 {
+				sql = sql[idx+2:]
+			} else {
+				// Unclosed block comment
+				return ""
+			}
+		} else {
+			break
+		}
+	}
+	return sql
+}
+
+// getFirstKeyword extracts the first 1-3 significant keywords from SQL,
+// skipping comments and whitespace. Returns uppercased keyword(s).
+func getFirstKeyword(sql string) string {
+	cleaned := stripLeadingComments(sql)
+	if cleaned == "" {
+		return ""
+	}
+	upper := strings.ToUpper(cleaned)
+
+	// Take up to first 3 words (enough for "DROP TABLE IF")
+	words := strings.Fields(upper)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > 3 {
+		words = words[:3]
+	}
+	return strings.Join(words, " ")
+}
+
+// validateSingleStatement validates a single SQL statement against the blocklist.
+func validateSingleStatement(sql string) *ValidationResult {
+	upper := strings.ToUpper(sql)
+
+	// --- Prefix blocklist (dangerous at start of statement) ---
+	prefixBlocked := []string{
+		"DROP DATABASE", "DROP SCHEMA",
+		"DROP TABLE",
+		"TRUNCATE",
+		"GRANT",
+		"REVOKE",
+		"ALTER USER", "ALTER SYSTEM",
+		"CREATE USER", "DROP USER",
+		"LOAD DATA", "LOAD FILE", "INTO OUTFILE", "INTO DUMPFILE",
+	}
+	for _, b := range prefixBlocked {
+		if strings.HasPrefix(upper, b) {
+			return &ValidationResult{Valid: false, Message: fmt.Sprintf("%s is not allowed", b)}
+		}
+	}
+
+	// --- Pattern-based checks: dangerous SQL without WHERE clause ---
+	// DELETE without WHERE
+	if strings.HasPrefix(upper, "DELETE") {
+		if !strings.Contains(upper, " WHERE ") {
+			return &ValidationResult{Valid: false, Message: "DELETE without WHERE clause is not allowed"}
+		}
+	}
+
+	// UPDATE without WHERE
+	if strings.HasPrefix(upper, "UPDATE") {
+		if !strings.Contains(upper, " WHERE ") {
+			return &ValidationResult{Valid: false, Message: "UPDATE without WHERE clause is not allowed"}
+		}
+	}
+
+	// Block SET PASSWORD or ALTER ... PASSWORD
+	if strings.Contains(upper, "SET PASSWORD") || strings.Contains(upper, "IDENTIFIED BY") {
+		return &ValidationResult{Valid: false, Message: "password modification is not allowed"}
+	}
+
+	// Block SLEEP() and BENCHMARK() DoS functions
+	if strings.Contains(upper, "SLEEP(") || strings.Contains(upper, "BENCHMARK(") {
+		return &ValidationResult{Valid: false, Message: "SLEEP/BENCHMARK functions are not allowed"}
+	}
+
+	// Block INTO OUTFILE / INTO DUMPFILE (file write)
+	if strings.Contains(upper, "INTO OUTFILE") || strings.Contains(upper, "INTO DUMPFILE") {
+		return &ValidationResult{Valid: false, Message: "writing to filesystem is not allowed"}
+	}
+
+	return nil // no violation
+}
+
+// ValidateSQL validates a raw SQL statement for safety.
+// It strips leading comments, splits by semicolons, and checks each statement
+// against a blocklist of dangerous operations.
 func (v *SQLValidator) ValidateSQL(sql string) *ValidationResult {
 	sql = strings.TrimSpace(sql)
 	if sql == "" {
 		return &ValidationResult{Valid: false, Message: "SQL cannot be empty"}
 	}
 
-	// Block dangerous statements
-	upper := strings.ToUpper(sql)
-	blocked := []string{
-		"DROP DATABASE", "DROP SCHEMA",
-		"TRUNCATE", "GRANT ALL",
-	}
-	for _, b := range blocked {
-		if strings.HasPrefix(upper, b) {
-			return &ValidationResult{Valid: false, Message: fmt.Sprintf("%s is not allowed", b)}
+	// Split by semicolons and validate each statement individually
+	statements := strings.Split(sql, ";")
+	for _, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+
+		// Strip leading comments to get the real statement content
+		cleanedStmt := stripLeadingComments(stmt)
+		if cleanedStmt == "" {
+			continue // statement was only comments
+		}
+
+		// Validate the statement with comments stripped for pattern matching
+		if result := validateSingleStatement(cleanedStmt); result != nil {
+			return result
 		}
 	}
 
-	// Basic syntax check: must end with semicolon
+	// Ensure trailing semicolon
 	if !strings.HasSuffix(sql, ";") {
 		sql += ";"
 	}

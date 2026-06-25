@@ -30,7 +30,10 @@ type SSHLogin struct {
 
 // GetSSHLogins returns recent SSH login history
 func (h *SystemHandler) GetSSHLogins(c *gin.Context) {
-	limit := 50
+	limit := 100
+	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
 
 	// Try to use `last` command first (more reliable)
 	logins, err := getLastLogins(limit)
@@ -99,7 +102,7 @@ func getLastLogins(limit int) ([]SSHLogin, error) {
 	return logins, nil
 }
 
-// getAuthLogins parses /var/log/auth.log for SSH logins
+// getAuthLogins parses /var/log/auth.log for SSH logins using a bounded ring buffer.
 func getAuthLogins(limit int) ([]SSHLogin, error) {
 	authLog := "/var/log/auth.log"
 	if _, err := os.Stat(authLog); os.IsNotExist(err) {
@@ -116,22 +119,19 @@ func getAuthLogins(limit int) ([]SSHLogin, error) {
 	}
 	defer file.Close()
 
-	var logins []SSHLogin
+	// Use a ring buffer to keep only the last `maxLines` lines in memory
+	const maxLines = 1000
+	lines := make([]string, 0, maxLines)
 	scanner := bufio.NewScanner(file)
-
-	// Read from end (last N lines)
-	lines := make([]string, 0, 1000)
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
+		if len(lines) > maxLines {
+			lines = lines[1:]
+		}
 	}
 
-	// Parse last N lines
-	start := len(lines) - 1000
-	if start < 0 {
-		start = 0
-	}
-
-	for _, line := range lines[start:] {
+	var logins []SSHLogin
+	for _, line := range lines {
 		if !strings.Contains(line, "sshd") {
 			continue
 		}
@@ -241,13 +241,13 @@ func (h *SystemHandler) GetSystemSSHConfig(c *gin.Context) {
 func (h *SystemHandler) CheckPort(c *gin.Context) {
 	portStr := c.Query("port")
 	if portStr == "" {
-		BadRequest(c, "port is required")
+		BadRequest(c, "端口不能为空")
 		return
 	}
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
-		BadRequest(c, "invalid port number (1-65535)")
+		BadRequest(c, "无效的端口号 (1-65535)")
 		return
 	}
 
@@ -311,7 +311,7 @@ func getPortProcess(port int) string {
 func (h *SystemHandler) CheckPorts(c *gin.Context) {
 	portsStr := c.Query("ports") // comma-separated: "80,443,3306"
 	if portsStr == "" {
-		BadRequest(c, "ports is required")
+		BadRequest(c, "端口列表不能为空")
 		return
 	}
 
@@ -321,7 +321,7 @@ func (h *SystemHandler) CheckPorts(c *gin.Context) {
 		port, err := strconv.Atoi(p)
 		if err != nil || port < 1 || port > 65535 {
 			results = append(results, map[string]interface{}{
-				"port": p, "available": false, "message": "invalid port",
+				"port": p, "available": false, "message": "无效端口",
 			})
 			continue
 		}

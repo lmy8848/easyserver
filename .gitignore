@@ -1,10 +1,11 @@
 # Binaries
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
 easyserver
+easyserver-linux
+easyserver-linux-arm64
 
 # Test binary, built with `go test -c`
 *.test
@@ -40,13 +41,32 @@ config.yaml
 web/node_modules/
 web/dist/
 web/.vite/
+web/.env.development
+web/.env.production
 
 # Build artifacts
 dist/
 build/
-*.exe
-*.dll
-web/node_modules/
-web/dist/
-data/
+release/
+
+# Embedded frontend (generated during build)
 internal/api/web/
+
+# CodeGraph index
+.codegraph/
+
+# Claude Code local settings
+.claude/
+CLAUDE.md
+
+# Temporary files
+files.txt
+*.bak
+*.tmp
+
+# Documentation (exclude all docs except README.md)
+docs/
+*.md
+!README.md
+!web/README.md
+!deploy/README.md

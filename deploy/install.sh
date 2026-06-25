@@ -66,13 +66,25 @@ install_binary() {
     info "安装 EasyServer..."
 
     # 检查二进制文件是否存在
-    if [ ! -f "easyserver-linux-amd64" ]; then
-        error "未找到 easyserver-linux-amd64 文件"
+    if [ ! -f "easyserver-linux" ]; then
+        error "未找到 easyserver-linux 文件"
         exit 1
     fi
 
+    # 校验二进制文件完整性（如果校验和文件存在）
+    if [ -f "easyserver-linux.sha256" ]; then
+        info "验证二进制文件校验和..."
+        if ! sha256sum -c easyserver-linux.sha256 2>/dev/null; then
+            error "二进制文件校验和验证失败，文件可能已损坏"
+            exit 1
+        fi
+        info "校验和验证通过"
+    else
+        warn "未找到校验和文件，跳过完整性验证"
+    fi
+
     # 复制二进制文件
-    cp easyserver-linux-amd64 /opt/easyserver/easyserver
+    cp easyserver-linux /opt/easyserver/easyserver
     chmod +x /opt/easyserver/easyserver
 
     info "二进制文件安装完成"
@@ -82,13 +94,18 @@ install_binary() {
 generate_config() {
     info "生成配置文件..."
 
-    # 生成随机 JWT 密钥
+    # 生成随机 JWT 密钥和部署加密密钥
     JWT_SECRET=$(openssl rand -base64 32)
+    ENCRYPTION_KEY=$(openssl rand -base64 32)
 
     cat > /opt/easyserver/config.yaml << EOF
 server:
   port: 8080
   host: 0.0.0.0
+  serve_frontend: true
+  dev_mode: false
+  allowed_origins:
+    - "http://localhost:5173"
   tls:
     enabled: false
     cert_file: ""
@@ -103,6 +120,7 @@ auth:
   rate_limit: 100
   rate_interval: 1m
   ip_whitelist: []
+  session_cleanup_interval: 5m
 
 monitor:
   history_retention: 24h
@@ -114,9 +132,20 @@ database:
 audit:
   enabled: true
   log_path: "/opt/easyserver/data/audit.log"
+  retention_days: 90
+
+deploy:
+  encryption_key: "${ENCRYPTION_KEY}"
 
 filemanager:
-  base_path: "/"
+  base_path: "/opt/easyserver/data"
+
+notify:
+  enabled: false
+  webhook_url: ""
+
+alerts:
+  rules: []
 EOF
 
     info "配置文件生成完成"
@@ -126,6 +155,12 @@ EOF
 # 创建 systemd 服务
 create_service() {
     info "创建 systemd 服务..."
+
+    # SECURITY NOTE: Running as root is required for system management features
+    # (service control, firewall, package management). For hardened environments,
+    # consider creating a dedicated user with specific sudo permissions.
+    warn "服务将以 root 用户运行，这是系统管理功能所必需的"
+    warn "如需更高安全级别，请创建专用用户并配置 sudo 权限"
 
     cat > /etc/systemd/system/easyserver.service << EOF
 [Unit]

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Card, Table, Input, Select, Button, Space, DatePicker, message,
   Tag, Tooltip, Modal, Descriptions, Typography, Row, Col, Segmented,
@@ -14,6 +14,20 @@ import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
+
+// 样式常量
+const RAW_DATA_STYLE: React.CSSProperties = {
+  background: '#f5f5f5',
+  padding: 12,
+  borderRadius: 4,
+  fontSize: 12,
+  maxHeight: 300,
+  overflow: 'auto',
+  margin: 0,
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+  maxWidth: '100%',
+};
 
 interface AuditLogItem {
   id: number;
@@ -71,11 +85,20 @@ export default function AuditLog() {
   const parseDetail = (detail: string): ParsedDetail => {
     try {
       const obj = JSON.parse(detail);
+      // 处理嵌套 JSON（detail 字段可能包含转义的 JSON 字符串）
+      let inner = obj;
+      if (obj.detail && typeof obj.detail === 'string') {
+        try {
+          inner = JSON.parse(obj.detail);
+        } catch {
+          inner = obj;
+        }
+      }
       return {
-        method: obj.method || '-',
-        path: obj.path || '-',
-        status: String(obj.status || '-'),
-        duration: obj.duration_ms ? `${obj.duration_ms}ms` : '-',
+        method: inner.method || obj.method || '-',
+        path: inner.path || obj.path || '-',
+        status: String(inner.status || obj.status || '-'),
+        duration: inner.duration_ms ? `${inner.duration_ms}ms` : obj.duration_ms ? `${obj.duration_ms}ms` : '-',
       };
     } catch {
       return { method: '-', path: detail, status: '-', duration: '-' };
@@ -124,7 +147,7 @@ export default function AuditLog() {
   const fetchSSHLogins = async () => {
     setSSHLoading(true);
     try {
-      const res = await systemApi.getSSHLogins(100);
+      const res = await systemApi.getSSHLogins(200);
       setSSHLogins(res.data.data || []);
     } catch (error) {
       console.error('Failed to fetch SSH logins:', error);
@@ -135,6 +158,7 @@ export default function AuditLog() {
 
   useEffect(() => {
     fetchActions();
+    fetchStats(); // 初始加载统计数据，显示异常告警角标
   }, []);
 
   useEffect(() => {
@@ -142,7 +166,7 @@ export default function AuditLog() {
   }, [page, pageSize, actionFilter]);
 
   useEffect(() => {
-    if (activeTab === 'stats') {
+    if (activeTab === 'stats' || activeTab === 'alerts') {
       fetchStats();
     }
     if (activeTab === 'ssh') {
@@ -232,8 +256,8 @@ export default function AuditLog() {
     return 'default';
   };
 
-  // 统计图表配置
-  const userChartOption = {
+  // 统计图表配置 (memoized to prevent unnecessary re-renders)
+  const userChartOption = useMemo(() => ({
     title: { text: '用户操作统计', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'axis' as const },
     xAxis: {
@@ -247,9 +271,9 @@ export default function AuditLog() {
       data: stats?.user_stats.map(s => s.count) || [],
       itemStyle: { color: '#1890ff' },
     }],
-  };
+  }), [stats?.user_stats]);
 
-  const actionChartOption = {
+  const actionChartOption = useMemo(() => ({
     title: { text: '操作类型分布', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'item' as const },
     series: [{
@@ -257,9 +281,9 @@ export default function AuditLog() {
       radius: '60%',
       data: stats?.action_stats.map(s => ({ name: s.action, value: s.count })) || [],
     }],
-  };
+  }), [stats?.action_stats]);
 
-  const dayChartOption = {
+  const dayChartOption = useMemo(() => ({
     title: { text: '每日操作趋势', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'axis' as const },
     xAxis: {
@@ -273,9 +297,9 @@ export default function AuditLog() {
       smooth: true,
       areaStyle: { opacity: 0.3 },
     }],
-  };
+  }), [stats?.day_stats]);
 
-  const statusChartOption = {
+  const statusChartOption = useMemo(() => ({
     title: { text: '响应状态分布', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: { trigger: 'item' as const },
     series: [{
@@ -289,7 +313,7 @@ export default function AuditLog() {
         },
       })) || [],
     }],
-  };
+  }), [stats?.status_stats]);
 
   const columns = [
     {
@@ -385,7 +409,7 @@ export default function AuditLog() {
               options={[
                 { label: '日志列表', value: 'list' },
                 { label: '统计分析', value: 'stats' },
-                { label: <Badge count={stats?.alerts?.length || 0} size="small"><span style={{ padding: '0 8px' }}>异常告警</span></Badge>, value: 'alerts' },
+                { label: <Badge key="alerts-badge" count={stats?.alerts?.length || 0} size="small"><span style={{ padding: '0 8px' }}>异常告警</span></Badge>, value: 'alerts' },
                 { label: 'SSH 登录', value: 'ssh' },
               ]}
               value={activeTab}
@@ -475,7 +499,7 @@ export default function AuditLog() {
               dataSource={stats?.alerts || []}
               rowKey="id"
               size="small"
-              pagination={{ pageSize: 20 }}
+              pagination={{ pageSize: 50, showTotal: (total) => `共 ${total} 条`, showQuickJumper: false, showSizeChanger: false }}
               columns={[
                 { title: '时间', dataIndex: 'created_at', width: 160 },
                 { title: '用户', dataIndex: 'username', width: 100 },
@@ -552,8 +576,17 @@ export default function AuditLog() {
               <Text ellipsis={{ tooltip: detailItem.user_agent }} style={{ maxWidth: 500 }}>{detailItem.user_agent || '-'}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="原始数据">
-              <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, fontSize: 12, maxHeight: 200, overflow: 'auto', margin: 0 }}>
-                {(() => { try { return JSON.stringify(JSON.parse(detailItem.detail), null, 2); } catch { return detailItem.detail; } })()}
+              <pre style={RAW_DATA_STYLE}>
+                {(() => {
+                  try {
+                    const obj = JSON.parse(detailItem.detail);
+                    // 解析嵌套的 JSON 字符串
+                    if (obj.detail && typeof obj.detail === 'string') {
+                      try { obj.detail = JSON.parse(obj.detail); } catch {}
+                    }
+                    return JSON.stringify(obj, null, 2);
+                  } catch { return detailItem.detail; }
+                })()}
               </pre>
             </Descriptions.Item>
           </Descriptions>

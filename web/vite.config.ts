@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 5173,
+      strictPort: true,
       proxy: {
         '/api': {
           target: apiTarget,
@@ -25,12 +26,19 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           // WebSocket 保活配置
           configure: (proxy) => {
-            proxy.on('error', (err) => {
-              console.log('proxy error', err);
+            proxy.on('error', (err, _req, res) => {
+              const timestamp = new Date().toISOString();
+              console.error(`[${timestamp}] proxy error:`, err.message);
+              // If res is a ServerResponse, send error status
+              if ('statusCode' in res) {
+                (res as import('http').ServerResponse).statusCode = 502;
+                (res as import('http').ServerResponse).end('Bad Gateway');
+              }
             });
             proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
               socket.on('error', (err) => {
-                console.log('socket error', err);
+                const timestamp = new Date().toISOString();
+                console.error(`[${timestamp}] WebSocket socket error:`, err.message);
               });
             });
           },

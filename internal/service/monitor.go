@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,12 @@ import (
 	"time"
 
 	"easyserver/internal/model"
+)
+
+const (
+	processCollectInterval = 5 * time.Second  // 进程采集间隔
+	cacheExpiry            = 60 * time.Second // 系统信息/Swap 缓存有效期
+	maxHistoryPoints       = 360              // 历史数据最大点数
 )
 
 type MonitorClient struct {
@@ -35,8 +42,10 @@ func (h *MonitorHub) Register(c *MonitorClient) {
 func (h *MonitorHub) Unregister(c *MonitorClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.clients, c)
-	close(c.Send)
+	if _, ok := h.clients[c]; ok {
+		delete(h.clients, c)
+		close(c.Send)
+	}
 }
 
 func (h *MonitorHub) Broadcast(data []byte) {
@@ -63,17 +72,47 @@ type MonitorService struct {
 	prevRecv     uint64
 	prevPktsSent uint64
 	prevPktsRecv uint64
-	stopCh       chan struct{}
-	sysInfo      *model.SystemInfo
+	stopCh     chan struct{}
+	lastCleanup time.Time
+
+	// 性能优化：进程采集降频
+	processInterval    time.Duration
+	lastProcessCollect time.Time
+	cachedProcesses    []model.ProcessInfo
+	processMu          sync.RWMutex
+
+	// 性能优化：系统信息缓存
+	cachedSystemInfo *model.SystemInfo
+	sysInfoExpire    time.Time
+	cachedSwap       *model.SwapInfo
+	swapExpire       time.Time
+
+	// 性能优化：uid→username 缓存
+	uidCache map[string]string
+
+	// 告警评估
+	alertService *AlertService
+
+	// 性能优化：环形缓冲 + 批量写入
+	ringBuffer   []*model.MonitorPoint
+	ringSize     int
+	ringHead     int
+	ringCount    int
+	ringMu       sync.Mutex
+	flushTicker  *time.Ticker
 }
 
 func NewMonitorService(db *sql.DB, interval, retention time.Duration) *MonitorService {
 	return &MonitorService{
-		db:        db,
-		interval:  interval,
-		retention: retention,
-		hub:       NewMonitorHub(),
-		stopCh:    make(chan struct{}),
+		db:              db,
+		interval:        interval,
+		retention:       retention,
+		hub:             NewMonitorHub(),
+		stopCh:          make(chan struct{}),
+		processInterval: processCollectInterval,
+		uidCache:        make(map[string]string),
+		ringBuffer:      make([]*model.MonitorPoint, 60), // 60 points buffer
+		ringSize:        60,
 	}
 }
 
@@ -81,9 +120,23 @@ func (s *MonitorService) Hub() *MonitorHub {
 	return s.hub
 }
 
+// SetAlertService sets the alert evaluation service
+func (s *MonitorService) SetAlertService(alertService *AlertService) {
+	s.alertService = alertService
+}
+
 func (s *MonitorService) Start() {
+	// 性能优化：创建时间戳索引（异步执行，不阻塞启动）
+	go func() {
+		s.db.Exec("CREATE INDEX IF NOT EXISTS idx_monitor_data_timestamp ON monitor_data(timestamp)")
+	}()
+
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
+
+	// 性能优化：批量写入 ticker（每 10 秒 flush 一次）
+	s.flushTicker = time.NewTicker(10 * time.Second)
+	defer s.flushTicker.Stop()
 
 	// First collection
 	s.collect()
@@ -92,7 +145,10 @@ func (s *MonitorService) Start() {
 		select {
 		case <-ticker.C:
 			s.collect()
+		case <-s.flushTicker.C:
+			go s.flushBuffer() // 异步 flush，不阻塞采集循环
 		case <-s.stopCh:
+			s.flushBuffer() // Final flush before stop
 			return
 		}
 	}
@@ -105,22 +161,40 @@ func (s *MonitorService) Stop() {
 func (s *MonitorService) collect() {
 	point := s.readAll()
 
-	if err := s.savePoint(point); err != nil {
-		log.Printf("monitor: save error: %v", err)
-	}
+	// 性能优化：添加到环形缓冲（不直接写 DB）
+	s.addToBuffer(point)
 
-	// Cleanup old data every 10 minutes (not every second)
-	if time.Now().Minute()%10 == 0 && time.Now().Second() < int(s.interval.Seconds()) {
+	// Cleanup old data every 10 minutes
+	if time.Since(s.lastCleanup) > 10*time.Minute {
+		s.lastCleanup = time.Now()
 		s.cleanup()
 	}
 
 	snapshot := point.ToSnapshot()
 
-	// Add extra data (system, swap, partitions, top processes)
-	snapshot.System = s.readSystemInfo()
-	snapshot.Swap = s.readSwap()
+	// 性能优化：系统信息缓存（60秒刷新）
+	snapshot.System = s.readSystemInfoCached()
+
+	// 性能优化：Swap 缓存（复用 meminfo，60秒刷新）
+	snapshot.Swap = s.readSwapCached()
+
 	snapshot.Partitions = s.readPartitions()
-	snapshot.TopProcess = s.readTopProcesses()
+
+	// 告警评估
+	if s.alertService != nil {
+		s.alertService.Evaluate(point)
+	}
+
+	// 性能优化：进程数据降频（5秒采集一次，其余时间用缓存）
+	s.processMu.RLock()
+	snapshot.TopProcess = s.cachedProcesses
+	needRefresh := time.Since(s.lastProcessCollect) >= s.processInterval
+	s.processMu.RUnlock()
+
+	// 异步刷新进程数据（不阻塞主采集循环）
+	if needRefresh {
+		go s.refreshProcesses()
+	}
 
 	data, err := json.Marshal(map[string]interface{}{
 		"type": "stats",
@@ -132,6 +206,57 @@ func (s *MonitorService) collect() {
 	}
 
 	s.hub.Broadcast(data)
+}
+
+// refreshProcesses 异步刷新进程缓存
+func (s *MonitorService) refreshProcesses() {
+	processes := s.readTopProcesses()
+	s.processMu.Lock()
+	s.cachedProcesses = processes
+	s.lastProcessCollect = time.Now()
+	s.processMu.Unlock()
+}
+
+// readSystemInfoCached 带缓存的系统信息读取（cacheExpiry 刷新）
+func (s *MonitorService) readSystemInfoCached() *model.SystemInfo {
+	s.mu.RLock()
+	if s.cachedSystemInfo != nil && time.Now().Before(s.sysInfoExpire) {
+		info := s.cachedSystemInfo
+		s.mu.RUnlock()
+		return info
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Double-check after acquiring write lock
+	if s.cachedSystemInfo != nil && time.Now().Before(s.sysInfoExpire) {
+		return s.cachedSystemInfo
+	}
+	s.cachedSystemInfo = s.readSystemInfo()
+	s.sysInfoExpire = time.Now().Add(cacheExpiry)
+	return s.cachedSystemInfo
+}
+
+// readSwapCached 带缓存的 Swap 读取（cacheExpiry 刷新）
+func (s *MonitorService) readSwapCached() *model.SwapInfo {
+	s.mu.RLock()
+	if s.cachedSwap != nil && time.Now().Before(s.swapExpire) {
+		swap := s.cachedSwap
+		s.mu.RUnlock()
+		return swap
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Double-check after acquiring write lock
+	if s.cachedSwap != nil && time.Now().Before(s.swapExpire) {
+		return s.cachedSwap
+	}
+	s.cachedSwap = s.readSwap()
+	s.swapExpire = time.Now().Add(cacheExpiry)
+	return s.cachedSwap
 }
 
 func (s *MonitorService) readAll() *model.MonitorPoint {
@@ -167,6 +292,79 @@ func (s *MonitorService) savePoint(p *model.MonitorPoint) error {
 	return err
 }
 
+// addToBuffer adds a point to the ring buffer
+func (s *MonitorService) addToBuffer(p *model.MonitorPoint) {
+	s.ringMu.Lock()
+	s.ringBuffer[s.ringHead] = p
+	s.ringHead = (s.ringHead + 1) % s.ringSize
+	if s.ringCount < s.ringSize {
+		s.ringCount++
+	}
+	s.ringMu.Unlock()
+}
+
+// flushBuffer writes all buffered points to the database
+func (s *MonitorService) flushBuffer() {
+	s.ringMu.Lock()
+	if s.ringCount == 0 {
+		s.ringMu.Unlock()
+		return
+	}
+	// Copy points to flush
+	points := make([]*model.MonitorPoint, s.ringCount)
+	tail := (s.ringHead - s.ringCount + s.ringSize) % s.ringSize
+	for i := 0; i < s.ringCount; i++ {
+		points[i] = s.ringBuffer[(tail+i)%s.ringSize]
+	}
+	s.ringCount = 0
+	s.ringMu.Unlock()
+
+	// Batch insert
+	tx, err := s.db.Begin()
+	if err != nil {
+		log.Printf("monitor: flush begin error: %v", err)
+		return
+	}
+	stmt, err := tx.Prepare(`INSERT INTO monitor_data
+		(cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
+		 mem_total, mem_used, mem_available, mem_usage,
+		 disk_total, disk_used, disk_free, disk_usage,
+		 net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		log.Printf("monitor: flush prepare error: %v", err)
+		return
+	}
+	defer stmt.Close()
+
+	for _, p := range points {
+		if _, err := stmt.Exec(
+			p.CPUPercent, p.CPULoad1m, p.CPULoad5m, p.CPULoad15m,
+			p.MemTotal, p.MemUsed, p.MemAvailable, p.MemPercent,
+			p.DiskTotal, p.DiskUsed, p.DiskFree, p.DiskPercent,
+			p.NetBytesSent, p.NetBytesRecv, p.NetPktsSent, p.NetPktsRecv, p.Timestamp,
+		); err != nil {
+			log.Printf("monitor: flush exec error: %v", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("monitor: flush commit error: %v", err)
+	}
+}
+
+// GetLatestPoint returns the latest point from the ring buffer
+func (s *MonitorService) GetLatestPoint() *model.MonitorPoint {
+	s.ringMu.Lock()
+	defer s.ringMu.Unlock()
+	if s.ringCount == 0 {
+		return nil
+	}
+	idx := (s.ringHead - 1 + s.ringSize) % s.ringSize
+	return s.ringBuffer[idx]
+}
+
 func (s *MonitorService) cleanup() {
 	since := time.Now().UTC().Add(-s.retention)
 	result, err := s.db.Exec("DELETE FROM monitor_data WHERE timestamp < ?", since.Format(time.RFC3339))
@@ -180,36 +378,43 @@ func (s *MonitorService) cleanup() {
 	}
 }
 
-func (s *MonitorService) GetCurrentStats() (*model.MonitorSnapshot, error) {
-	p := &model.MonitorPoint{}
-	err := s.db.QueryRow(
-		`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
-		        mem_total, mem_used, mem_available, mem_usage,
-		        disk_total, disk_used, disk_free, disk_usage,
-		        net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp
-		 FROM monitor_data ORDER BY id DESC LIMIT 1`,
-	).Scan(
-		&p.CPUPercent, &p.CPULoad1m, &p.CPULoad5m, &p.CPULoad15m,
-		&p.MemTotal, &p.MemUsed, &p.MemAvailable, &p.MemPercent,
-		&p.DiskTotal, &p.DiskUsed, &p.DiskFree, &p.DiskPercent,
-		&p.NetBytesSent, &p.NetBytesRecv, &p.NetPktsSent, &p.NetPktsRecv, &p.Timestamp,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("no data yet")
+func (s *MonitorService) GetCurrentStats(ctx context.Context) (*model.MonitorSnapshot, error) {
+	// 性能优化：从环形缓冲读取最新数据
+	p := s.GetLatestPoint()
+	if p == nil {
+		// Fallback to DB if buffer is empty
+		p = &model.MonitorPoint{}
+		err := s.db.QueryRowContext(ctx,
+			`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
+			        mem_total, mem_used, mem_available, mem_usage,
+			        disk_total, disk_used, disk_free, disk_usage,
+			        net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp
+			 FROM monitor_data ORDER BY id DESC LIMIT 1`,
+		).Scan(
+			&p.CPUPercent, &p.CPULoad1m, &p.CPULoad5m, &p.CPULoad15m,
+			&p.MemTotal, &p.MemUsed, &p.MemAvailable, &p.MemPercent,
+			&p.DiskTotal, &p.DiskUsed, &p.DiskFree, &p.DiskPercent,
+			&p.NetBytesSent, &p.NetBytesRecv, &p.NetPktsSent, &p.NetPktsRecv, &p.Timestamp,
+		)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, fmt.Errorf("no data yet")
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 	snapshot := p.ToSnapshot()
-	snapshot.System = s.readSystemInfo()
-	snapshot.Swap = s.readSwap()
+	snapshot.System = s.readSystemInfoCached()
+	snapshot.Swap = s.readSwapCached()
 	snapshot.Partitions = s.readPartitions()
-	snapshot.TopProcess = s.readTopProcesses()
+	s.processMu.RLock()
+	snapshot.TopProcess = s.cachedProcesses
+	s.processMu.RUnlock()
 	return snapshot, nil
 }
 
-func (s *MonitorService) GetHistory(start, end time.Time) ([]model.MonitorPoint, error) {
-	rows, err := s.db.Query(
+func (s *MonitorService) GetHistory(ctx context.Context, start, end time.Time) ([]model.MonitorPoint, error) {
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
 		        mem_total, mem_used, mem_available, mem_usage,
 		        disk_total, disk_used, disk_free, disk_usage,
@@ -237,5 +442,20 @@ func (s *MonitorService) GetHistory(start, end time.Time) ([]model.MonitorPoint,
 		}
 		points = append(points, p)
 	}
+
+	// 性能优化：降采样到最多 maxHistoryPoints 个点
+	if len(points) > maxHistoryPoints {
+		step := len(points) / maxHistoryPoints
+		sampled := make([]model.MonitorPoint, 0, maxHistoryPoints)
+		for i := 0; i < len(points); i += step {
+			sampled = append(sampled, points[i])
+		}
+		// 确保包含最后一点
+		if len(points) > 0 && (len(sampled) == 0 || sampled[len(sampled)-1].Timestamp != points[len(points)-1].Timestamp) {
+			sampled = append(sampled, points[len(points)-1])
+		}
+		return sampled, nil
+	}
+
 	return points, nil
 }

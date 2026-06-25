@@ -15,9 +15,9 @@ server:
     key_file: ""
 
 auth:
-  # IMPORTANT: Change this in production!
+  # IMPORTANT: Change this in production! Must be at least 32 bytes.
   # Or use EASYSERVER_JWT_SECRET environment variable
-  jwt_secret: "change-me-to-a-random-secret"
+  jwt_secret: "change-me-to-a-random-32byte-secret!!!"
   session_timeout: 24h
   idle_timeout: 30m
   max_login_attempts: 5
@@ -25,6 +25,7 @@ auth:
   rate_limit: 100        # Max requests per interval
   rate_interval: 1m      # Rate limit interval
   ip_whitelist: []       # Empty = allow all; e.g., ["192.168.1.0/24", "10.0.0.1"]
+  session_cleanup_interval: 5m  # 过期会话清理间隔
 
 monitor:
   history_retention: 24h
@@ -36,9 +37,13 @@ database:
 audit:
   enabled: true
   log_path: "./data/audit.log"
+  retention_days: 90
+
+deploy:
+  encryption_key: "change-me-to-a-random-32-byte-key"
 
 filemanager:
-  base_path: "/"  # Restrict file access to this path
+  base_path: "/opt/easyserver/data"  # Restrict file access to this path
 
 tencentcloud:
   enabled: false
@@ -46,3 +51,25 @@ tencentcloud:
   secret_key: ""
   region: "ap-guangzhou"
   instance_id: ""
+
+notify:
+  enabled: false
+  webhook_url: ""  # 钉钉/飞书/企微 Webhook URL
+
+alerts:
+  rules:
+    # - name: "CPU告警"
+    #   metric: "cpu_percent"
+    #   threshold: 90
+    #   duration: 60
+    #   enabled: true
+    # - name: "内存告警"
+    #   metric: "mem_percent"
+    #   threshold: 90
+    #   duration: 60
+    #   enabled: true
+    # - name: "磁盘告警"
+    #   metric: "disk_percent"
+    #   threshold: 90
+    #   duration: 60
+    #   enabled: true

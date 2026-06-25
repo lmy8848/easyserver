@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,20 +20,23 @@ import (
 type DBServerHandler struct {
 	dbServerService *service.DBServerService
 	dbMgmtService   *service.DatabaseMgmtService
+	dbBackupService *service.DBBackupService
 }
 
-func NewDBServerHandler(dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService) *DBServerHandler {
+func NewDBServerHandler(dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) *DBServerHandler {
 	return &DBServerHandler{
 		dbServerService: dbServerService,
 		dbMgmtService:   dbMgmtService,
+		dbBackupService: dbBackupService,
 	}
 }
 
 // DB Server endpoints
 
 func (h *DBServerHandler) List(c *gin.Context) {
-	h.dbServerService.RefreshAllStatus()
-	servers, err := h.dbServerService.List()
+	ctx := c.Request.Context()
+	h.dbServerService.RefreshAllStatus(ctx)
+	servers, err := h.dbServerService.List(ctx)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -41,19 +45,20 @@ func (h *DBServerHandler) List(c *gin.Context) {
 }
 
 func (h *DBServerHandler) Get(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
-	h.dbServerService.RefreshStatus(id)
-	server, err := h.dbServerService.Get(id)
+	h.dbServerService.RefreshStatus(ctx, id)
+	server, err := h.dbServerService.Get(ctx, id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if server == nil {
-		NotFound(c, "database server not found")
+		NotFound(c, "数据库服务器不存在")
 		return
 	}
 	Success(c, server)
@@ -64,12 +69,12 @@ func (h *DBServerHandler) Get(c *gin.Context) {
 func (h *DBServerHandler) GetVersionTemplates(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
-	server, err := h.dbServerService.Get(id)
+	server, err := h.dbServerService.Get(c.Request.Context(), id)
 	if err != nil || server == nil {
-		NotFound(c, "database server not found")
+		NotFound(c, "数据库服务器不存在")
 		return
 	}
 	templates := model.GetVersionTemplates(server.Name)
@@ -79,10 +84,10 @@ func (h *DBServerHandler) GetVersionTemplates(c *gin.Context) {
 func (h *DBServerHandler) ListVersions(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
-	versions, err := h.dbServerService.ListVersions(id)
+	versions, err := h.dbServerService.ListVersions(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -93,7 +98,7 @@ func (h *DBServerHandler) ListVersions(c *gin.Context) {
 func (h *DBServerHandler) InstallVersion(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 	var req model.CreateDBVersionRequest
@@ -101,7 +106,7 @@ func (h *DBServerHandler) InstallVersion(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	version, err := h.dbServerService.InstallVersion(id, &req)
+	version, err := h.dbServerService.InstallVersion(c.Request.Context(), id, &req)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -112,23 +117,23 @@ func (h *DBServerHandler) InstallVersion(c *gin.Context) {
 func (h *DBServerHandler) UninstallVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		BadRequest(c, "无效的版本ID")
 		return
 	}
-	if err := h.dbServerService.UninstallVersion(vid); err != nil {
+	if err := h.dbServerService.UninstallVersion(c.Request.Context(), vid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "uninstalled"})
+	Success(c, gin.H{"message": "已卸载"})
 }
 
 func (h *DBServerHandler) StartVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		BadRequest(c, "无效的版本ID")
 		return
 	}
-	if err := h.dbServerService.StartVersion(vid); err != nil {
+	if err := h.dbServerService.StartVersion(c.Request.Context(), vid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -138,10 +143,10 @@ func (h *DBServerHandler) StartVersion(c *gin.Context) {
 func (h *DBServerHandler) StopVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		BadRequest(c, "无效的版本ID")
 		return
 	}
-	if err := h.dbServerService.StopVersion(vid); err != nil {
+	if err := h.dbServerService.StopVersion(c.Request.Context(), vid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -151,10 +156,10 @@ func (h *DBServerHandler) StopVersion(c *gin.Context) {
 func (h *DBServerHandler) RestartVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		BadRequest(c, "无效的版本ID")
 		return
 	}
-	if err := h.dbServerService.RestartVersion(vid); err != nil {
+	if err := h.dbServerService.RestartVersion(c.Request.Context(), vid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -164,7 +169,7 @@ func (h *DBServerHandler) RestartVersion(c *gin.Context) {
 func (h *DBServerHandler) UpdateVersionPort(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		BadRequest(c, "无效的版本ID")
 		return
 	}
 
@@ -177,27 +182,27 @@ func (h *DBServerHandler) UpdateVersionPort(c *gin.Context) {
 	}
 
 	if req.Port < 1 || req.Port > 65535 {
-		BadRequest(c, "port must be between 1 and 65535")
+		BadRequest(c, "端口必须在 1 到 65535 之间")
 		return
 	}
 
 	// Check port availability
-	if err := h.dbServerService.UpdateVersionPort(vid, req.Port); err != nil {
+	if err := h.dbServerService.UpdateVersionPort(c.Request.Context(), vid, req.Port); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"message": "port updated", "port": req.Port})
+	Success(c, gin.H{"message": "端口已更新", "port": req.Port})
 }
 
 func (h *DBServerHandler) GetVersionLogs(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		BadRequest(c, "无效的版本ID")
 		return
 	}
 	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "200"))
-	logs, err := h.dbServerService.GetVersionServiceLogs(vid, lines)
+	logs, err := h.dbServerService.GetVersionServiceLogs(c.Request.Context(), vid, lines)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -210,10 +215,10 @@ func (h *DBServerHandler) GetVersionLogs(c *gin.Context) {
 func (h *DBServerHandler) ListDatabases(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
-	dbs, err := h.dbMgmtService.ListDatabases(sid)
+	dbs, err := h.dbMgmtService.ListDatabases(c.Request.Context(), sid)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -224,7 +229,7 @@ func (h *DBServerHandler) ListDatabases(c *gin.Context) {
 func (h *DBServerHandler) CreateDatabase(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	var req model.CreateDatabaseRequest
@@ -232,7 +237,7 @@ func (h *DBServerHandler) CreateDatabase(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	db, err := h.dbMgmtService.CreateDatabase(sid, &req)
+	db, err := h.dbMgmtService.CreateDatabase(c.Request.Context(), sid, &req)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -243,15 +248,15 @@ func (h *DBServerHandler) CreateDatabase(c *gin.Context) {
 func (h *DBServerHandler) DeleteDatabase(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	dbID, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
-	if err := h.dbMgmtService.DeleteDatabase(sid, dbID); err != nil {
+	if err := h.dbMgmtService.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -263,10 +268,10 @@ func (h *DBServerHandler) DeleteDatabase(c *gin.Context) {
 func (h *DBServerHandler) ListDBUsers(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
-	users, err := h.dbMgmtService.ListDBUsers(sid)
+	users, err := h.dbMgmtService.ListDBUsers(c.Request.Context(), sid)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -277,7 +282,7 @@ func (h *DBServerHandler) ListDBUsers(c *gin.Context) {
 func (h *DBServerHandler) CreateDBUser(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	var req model.CreateDBUserRequest
@@ -285,7 +290,7 @@ func (h *DBServerHandler) CreateDBUser(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	user, err := h.dbMgmtService.CreateDBUser(sid, &req)
+	user, err := h.dbMgmtService.CreateDBUser(c.Request.Context(), sid, &req)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -296,15 +301,15 @@ func (h *DBServerHandler) CreateDBUser(c *gin.Context) {
 func (h *DBServerHandler) DeleteDBUser(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid user id")
+		BadRequest(c, "无效的用户ID")
 		return
 	}
-	if err := h.dbMgmtService.DeleteDBUser(sid, uid); err != nil {
+	if err := h.dbMgmtService.DeleteDBUser(c.Request.Context(), sid, uid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -314,12 +319,12 @@ func (h *DBServerHandler) DeleteDBUser(c *gin.Context) {
 func (h *DBServerHandler) GrantPrivileges(c *gin.Context) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		BadRequest(c, "无效的服务器ID")
 		return
 	}
 	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid user id")
+		BadRequest(c, "无效的用户ID")
 		return
 	}
 	var req model.GrantRequest
@@ -327,11 +332,11 @@ func (h *DBServerHandler) GrantPrivileges(c *gin.Context) {
 		BadRequest(c, err.Error())
 		return
 	}
-	if err := h.dbMgmtService.GrantPrivileges(sid, uid, &req); err != nil {
+	if err := h.dbMgmtService.GrantPrivileges(c.Request.Context(), sid, uid, &req); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, gin.H{"message": "privileges granted"})
+	Success(c, gin.H{"message": "权限已授予"})
 }
 
 // Database introspection endpoints
@@ -340,19 +345,19 @@ func (h *DBServerHandler) GrantPrivileges(c *gin.Context) {
 func (h *DBServerHandler) ListTables(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
 
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -361,12 +366,14 @@ func (h *DBServerHandler) ListTables(c *gin.Context) {
 	case "mysql":
 		out, err := exec.Command("mysql", db.Name, "-e", "SHOW TABLES;").CombinedOutput()
 		if err != nil {
-			InternalError(c, fmt.Sprintf("failed to list tables: %s", string(out)))
+			InternalError(c, fmt.Sprintf("获取表列表失败: %s", string(out)))
 			return
 		}
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		for i, line := range lines {
-			if i == 0 { continue } // skip header
+			if i == 0 {
+				continue
+			} // skip header
 			line = strings.TrimSpace(line)
 			if line != "" {
 				tables = append(tables, map[string]interface{}{"name": line})
@@ -376,13 +383,15 @@ func (h *DBServerHandler) ListTables(c *gin.Context) {
 		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c",
 			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;").CombinedOutput()
 		if err != nil {
-			InternalError(c, fmt.Sprintf("failed to list tables: %s", string(out)))
+			InternalError(c, fmt.Sprintf("获取表列表失败: %s", string(out)))
 			return
 		}
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		for i, line := range lines {
 			line = strings.TrimSpace(line)
-			if i < 2 || line == "" || line == "(0 rows)" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "(") { continue }
+			if i < 2 || line == "" || line == "(0 rows)" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "(") {
+				continue
+			}
 			tables = append(tables, map[string]interface{}{"name": line})
 		}
 	}
@@ -394,28 +403,28 @@ func (h *DBServerHandler) ListTables(c *gin.Context) {
 func (h *DBServerHandler) DescribeTable(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 	tableName := c.Query("table")
 	if tableName == "" {
-		BadRequest(c, "table name is required")
+		BadRequest(c, "表名不能为空")
 		return
 	}
 	if !validateTableName(tableName) {
-		BadRequest(c, "invalid table name")
+		BadRequest(c, "无效的表名")
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
 
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -426,7 +435,7 @@ func (h *DBServerHandler) DescribeTable(c *gin.Context) {
 	case "postgresql":
 		dbType = service.DBTypePostgreSQL
 	default:
-		BadRequest(c, "unsupported database type")
+		BadRequest(c, "不支持的数据库类型")
 		return
 	}
 
@@ -442,7 +451,7 @@ func (h *DBServerHandler) DescribeTable(c *gin.Context) {
 		out, err = exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c", describeSQL).CombinedOutput()
 	}
 	if err != nil {
-		InternalError(c, fmt.Sprintf("failed to describe table: %s", string(out)))
+		InternalError(c, fmt.Sprintf("获取表结构失败: %s", string(out)))
 		return
 	}
 
@@ -470,38 +479,45 @@ func (h *DBServerHandler) DescribeTable(c *gin.Context) {
 		"columns":     columns,
 	})
 }
+
 // QueryTable returns table data with pagination
 func (h *DBServerHandler) QueryTable(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 	tableName := c.Query("table")
 	if tableName == "" {
-		BadRequest(c, "table name is required")
+		BadRequest(c, "表名不能为空")
 		return
 	}
 	if !validateTableName(tableName) {
-		BadRequest(c, "invalid table name")
+		BadRequest(c, "无效的表名")
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	if page < 1 { page = 1 }
-	if pageSize < 1 { pageSize = 50 }
-	if pageSize > 200 { pageSize = 200 }
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
 	offset := (page - 1) * pageSize
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
 
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -529,7 +545,7 @@ func (h *DBServerHandler) QueryTable(c *gin.Context) {
 		out, err := exec.Command("mysql", db.Name, "-e",
 			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset)).CombinedOutput()
 		if err != nil {
-			InternalError(c, fmt.Sprintf("failed to query: %s", string(out)))
+			InternalError(c, fmt.Sprintf("查询失败: %s", string(out)))
 			return
 		}
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
@@ -549,13 +565,15 @@ func (h *DBServerHandler) QueryTable(c *gin.Context) {
 		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c",
 			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset)).CombinedOutput()
 		if err != nil {
-			InternalError(c, fmt.Sprintf("failed to query: %s", string(out)))
+			InternalError(c, fmt.Sprintf("查询失败: %s", string(out)))
 			return
 		}
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		for i, line := range lines {
 			fields := strings.Split(line, "|")
-			for j := range fields { fields[j] = strings.TrimSpace(fields[j]) }
+			for j := range fields {
+				fields[j] = strings.TrimSpace(fields[j])
+			}
 			if i == 0 {
 				headers = fields
 			} else if i >= 2 && !strings.HasPrefix(line, "(") && line != "" {
@@ -577,11 +595,36 @@ func (h *DBServerHandler) QueryTable(c *gin.Context) {
 	})
 }
 
+// pathPattern matches filesystem paths that should be stripped from error output
+var pathPattern = regexp.MustCompile(`(?:/[\w.-]+){2,}`)
+
+// sanitizeSQLError strips sensitive information (file paths, internal details) from
+// SQL command output while preserving the useful error message for the user.
+func sanitizeSQLError(raw string) string {
+	lines := strings.Split(raw, "\n")
+	var sanitized []string
+	for _, line := range lines {
+		// Skip lines that contain filesystem paths
+		if pathPattern.MatchString(line) {
+			continue
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		sanitized = append(sanitized, line)
+	}
+	if len(sanitized) == 0 {
+		return "query execution failed"
+	}
+	return strings.Join(sanitized, "\n")
+}
+
 // ExecuteSQL executes a SQL query
 func (h *DBServerHandler) ExecuteSQL(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 
@@ -593,15 +636,15 @@ func (h *DBServerHandler) ExecuteSQL(c *gin.Context) {
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
 
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -618,14 +661,16 @@ func (h *DBServerHandler) ExecuteSQL(c *gin.Context) {
 	case "mysql":
 		out, err := exec.Command("mysql", db.Name, "-e", req.SQL).CombinedOutput()
 		if err != nil {
-			Success(c, gin.H{"success": false, "error": string(out)})
+			log.Printf("ExecuteSQL mysql error [db=%s]: %s", db.Name, string(out))
+			Success(c, gin.H{"success": false, "error": sanitizeSQLError(string(out))})
 			return
 		}
 		output = string(out)
 	case "postgresql":
 		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", db.Name, "-c", req.SQL).CombinedOutput()
 		if err != nil {
-			Success(c, gin.H{"success": false, "error": string(out)})
+			log.Printf("ExecuteSQL postgresql error [db=%s]: %s", db.Name, string(out))
+			Success(c, gin.H{"success": false, "error": sanitizeSQLError(string(out))})
 			return
 		}
 		output = string(out)
@@ -638,7 +683,7 @@ func (h *DBServerHandler) ExecuteSQL(c *gin.Context) {
 func (h *DBServerHandler) InsertRecord(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 
@@ -651,18 +696,18 @@ func (h *DBServerHandler) InsertRecord(c *gin.Context) {
 		return
 	}
 	if !validateTableName(req.Table) {
-		BadRequest(c, "invalid table name")
+		BadRequest(c, "无效的表名")
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -699,7 +744,7 @@ func (h *DBServerHandler) InsertRecord(c *gin.Context) {
 func (h *DBServerHandler) UpdateRecord(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 
@@ -714,18 +759,18 @@ func (h *DBServerHandler) UpdateRecord(c *gin.Context) {
 		return
 	}
 	if !validateTableName(req.Table) {
-		BadRequest(c, "invalid table name")
+		BadRequest(c, "无效的表名")
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -758,7 +803,7 @@ func (h *DBServerHandler) UpdateRecord(c *gin.Context) {
 func (h *DBServerHandler) DeleteRecord(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid database id")
+		BadRequest(c, "无效的数据库ID")
 		return
 	}
 
@@ -772,18 +817,18 @@ func (h *DBServerHandler) DeleteRecord(c *gin.Context) {
 		return
 	}
 	if !validateTableName(req.Table) {
-		BadRequest(c, "invalid table name")
+		BadRequest(c, "无效的表名")
 		return
 	}
 
-	db, err := h.dbMgmtService.GetDatabaseByID(did)
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil || db == nil {
-		NotFound(c, "database not found")
+		NotFound(c, "数据库不存在")
 		return
 	}
-	server, _ := h.dbMgmtService.GetServerByID(db.DBServerID)
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
 	if server == nil {
-		NotFound(c, "server not found")
+		NotFound(c, "服务器不存在")
 		return
 	}
 
@@ -817,7 +862,7 @@ func (h *DBServerHandler) DeleteRecord(c *gin.Context) {
 func (h *DBServerHandler) GetMySQLConfig(c *gin.Context) {
 	configPath := service.FindMySQLConfig()
 	if configPath == "" {
-		Success(c, gin.H{"found": false, "message": "MySQL config file not found"})
+		Success(c, gin.H{"found": false, "message": "未找到 MySQL 配置文件"})
 		return
 	}
 
@@ -848,10 +893,14 @@ func (h *DBServerHandler) GetMySQLConfig(c *gin.Context) {
 func saveRawConfig(filePath, content string) error {
 	backupPath := filePath + ".bak." + time.Now().Format("20060102150405")
 	if data, err := os.ReadFile(filePath); err == nil {
-		os.WriteFile(backupPath, data, 0644)
+		if err := os.WriteFile(backupPath, data, 0644); err != nil {
+			return fmt.Errorf("backup config: %w", err)
+		}
 	}
 	dir := filepath.Dir(filePath)
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
 	return os.WriteFile(filePath, []byte(content), 0644)
 }
 
@@ -882,7 +931,8 @@ func (h *DBServerHandler) SaveMySQLConfig(c *gin.Context) {
 
 	configPath := service.FindMySQLConfig()
 	if configPath == "" {
-		configPath = "/etc/mysql/my.cnf"
+		BadRequest(c, "未找到 MySQL 配置文件")
+		return
 	}
 
 	// Handle raw text save from the raw text modal
@@ -891,7 +941,7 @@ func (h *DBServerHandler) SaveMySQLConfig(c *gin.Context) {
 			InternalError(c, err.Error())
 			return
 		}
-		Success(c, gin.H{"message": "config saved", "path": configPath})
+		Success(c, gin.H{"message": "配置已保存", "path": configPath})
 		return
 	}
 
@@ -910,7 +960,7 @@ func (h *DBServerHandler) SaveMySQLConfig(c *gin.Context) {
 		return
 	}
 
-	Success(c, gin.H{"message": "config saved", "path": configPath})
+	Success(c, gin.H{"message": "配置已保存", "path": configPath})
 }
 
 func (h *DBServerHandler) GetMySQLCommonParams(c *gin.Context) {
@@ -924,7 +974,7 @@ func (h *DBServerHandler) GetMySQLCommonParams(c *gin.Context) {
 func (h *DBServerHandler) GetPostgreSQLConfig(c *gin.Context) {
 	configPath := service.FindPostgreSQLConfig()
 	if configPath == "" {
-		Success(c, gin.H{"found": false, "message": "PostgreSQL config file not found"})
+		Success(c, gin.H{"found": false, "message": "未找到 PostgreSQL 配置文件"})
 		return
 	}
 
@@ -964,7 +1014,8 @@ func (h *DBServerHandler) SavePostgreSQLConfig(c *gin.Context) {
 
 	configPath := service.FindPostgreSQLConfig()
 	if configPath == "" {
-		configPath = "/etc/postgresql/main/postgresql.conf"
+		BadRequest(c, "未找到 PostgreSQL 配置文件")
+		return
 	}
 
 	// Handle raw text save from the raw text modal
@@ -973,7 +1024,7 @@ func (h *DBServerHandler) SavePostgreSQLConfig(c *gin.Context) {
 			InternalError(c, err.Error())
 			return
 		}
-		Success(c, gin.H{"message": "config saved", "path": configPath})
+		Success(c, gin.H{"message": "配置已保存", "path": configPath})
 		return
 	}
 
@@ -992,7 +1043,7 @@ func (h *DBServerHandler) SavePostgreSQLConfig(c *gin.Context) {
 		return
 	}
 
-	Success(c, gin.H{"message": "config saved", "path": configPath})
+	Success(c, gin.H{"message": "配置已保存", "path": configPath})
 }
 
 func (h *DBServerHandler) GetPGCommonParams(c *gin.Context) {
@@ -1005,7 +1056,7 @@ func (h *DBServerHandler) GetPGCommonParams(c *gin.Context) {
 func (h *DBServerHandler) GetRedisConfig(c *gin.Context) {
 	configPath := service.FindRedisConfig()
 	if configPath == "" {
-		Success(c, gin.H{"found": false, "message": "Redis config file not found"})
+		Success(c, gin.H{"found": false, "message": "未找到 Redis 配置文件"})
 		return
 	}
 
@@ -1045,7 +1096,8 @@ func (h *DBServerHandler) SaveRedisConfig(c *gin.Context) {
 
 	configPath := service.FindRedisConfig()
 	if configPath == "" {
-		configPath = "/etc/redis/redis.conf"
+		BadRequest(c, "未找到 Redis 配置文件")
+		return
 	}
 
 	// Handle raw text save from the raw text modal
@@ -1054,7 +1106,7 @@ func (h *DBServerHandler) SaveRedisConfig(c *gin.Context) {
 			InternalError(c, err.Error())
 			return
 		}
-		Success(c, gin.H{"message": "config saved", "path": configPath})
+		Success(c, gin.H{"message": "配置已保存", "path": configPath})
 		return
 	}
 
@@ -1073,7 +1125,7 @@ func (h *DBServerHandler) SaveRedisConfig(c *gin.Context) {
 		return
 	}
 
-	Success(c, gin.H{"message": "config saved", "path": configPath})
+	Success(c, gin.H{"message": "配置已保存", "path": configPath})
 }
 
 func (h *DBServerHandler) GetRedisCommonParams(c *gin.Context) {
@@ -1110,5 +1162,310 @@ func executeSQL(dbType service.DBType, dbName string, sql string) (string, error
 		out, err := exec.Command("sudo", "-u", "postgres", "psql", "-d", dbName, "-c", sql).CombinedOutput()
 		return string(out), err
 	}
-	return "", fmt.Errorf("unsupported database type")
+	return "", fmt.Errorf("不支持的数据库类型")
+}
+
+// Backup endpoints
+
+// CreateBackup creates a backup of a database
+func (h *DBServerHandler) CreateBackup(c *gin.Context) {
+	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的数据库ID")
+		return
+	}
+
+	// Get database info
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	if err != nil {
+		NotFound(c, "数据库不存在")
+		return
+	}
+
+	// Get db server info to determine type
+	server, err := h.dbServerService.Get(c.Request.Context(), db.DBServerID)
+	if err != nil {
+		NotFound(c, "数据库服务器不存在")
+		return
+	}
+
+	backup, err := h.dbBackupService.CreateBackup(c.Request.Context(), db.DBServerID, db.DBVersionID, did, db.Name, server.Name)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, backup)
+}
+
+// ListBackups returns all backups for a database
+func (h *DBServerHandler) ListBackups(c *gin.Context) {
+	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的数据库ID")
+		return
+	}
+
+	backups, err := h.dbBackupService.ListBackups(c.Request.Context(), did)
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	if backups == nil {
+		backups = []model.DBBackup{}
+	}
+
+	Success(c, backups)
+}
+
+// DownloadBackup downloads a backup file
+func (h *DBServerHandler) DownloadBackup(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的备份ID")
+		return
+	}
+
+	backup, err := h.dbBackupService.GetBackup(c.Request.Context(), bid)
+	if err != nil {
+		NotFound(c, "备份不存在")
+		return
+	}
+
+	if backup.Status != "completed" {
+		BadRequest(c, "备份未完成")
+		return
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
+		NotFound(c, "备份文件不存在")
+		return
+	}
+
+	c.File(backup.FilePath)
+}
+
+// RestoreBackup restores a database from backup
+func (h *DBServerHandler) RestoreBackup(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的备份ID")
+		return
+	}
+
+	// Require confirmation
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
+		BadRequest(c, "请确认恢复，设置 {\"confirm\": true}")
+		return
+	}
+
+	backup, err := h.dbBackupService.GetBackup(c.Request.Context(), bid)
+	if err != nil {
+		NotFound(c, "备份不存在")
+		return
+	}
+
+	// Get db server info to determine type
+	server, err := h.dbServerService.Get(c.Request.Context(), backup.DBServerID)
+	if err != nil {
+		NotFound(c, "数据库服务器不存在")
+		return
+	}
+
+	if err := h.dbBackupService.RestoreBackup(c.Request.Context(), bid, server.Name); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "数据库恢复成功"})
+}
+
+// DeleteBackup deletes a backup
+func (h *DBServerHandler) DeleteBackup(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的备份ID")
+		return
+	}
+
+	if err := h.dbBackupService.DeleteBackup(c.Request.Context(), bid); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{"message": "备份已删除"})
+}
+
+// CreateTable creates a new table in a database
+func (h *DBServerHandler) CreateTable(c *gin.Context) {
+	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的数据库ID")
+		return
+	}
+
+	var req struct {
+		Name    string `json:"name" binding:"required"`
+		Columns []struct {
+			Name      string `json:"name"`
+			Type      string `json:"type"`
+			Nullable  bool   `json:"nullable"`
+			IsPrimary bool   `json:"is_primary"`
+			AutoIncr  bool   `json:"auto_incr"`
+		} `json:"columns" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+
+	if !validateTableName(req.Name) {
+		BadRequest(c, "无效的表名")
+		return
+	}
+
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	if err != nil || db == nil {
+		NotFound(c, "数据库不存在")
+		return
+	}
+
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
+	if server == nil {
+		NotFound(c, "服务器不存在")
+		return
+	}
+
+	// Validate column types against whitelist
+	allowedTypes := map[string]bool{
+		"INT": true, "INTEGER": true, "TINYINT": true, "SMALLINT": true, "MEDIUMINT": true, "BIGINT": true,
+		"FLOAT": true, "DOUBLE": true, "DECIMAL": true, "NUMERIC": true, "REAL": true,
+		"VARCHAR": true, "CHAR": true, "TEXT": true, "TINYTEXT": true, "MEDIUMTEXT": true, "LONGTEXT": true,
+		"BLOB": true, "TINYBLOB": true, "MEDIUMBLOB": true, "LONGBLOB": true, "BINARY": true, "VARBINARY": true,
+		"DATE": true, "TIME": true, "DATETIME": true, "TIMESTAMP": true, "YEAR": true,
+		"BOOLEAN": true, "BOOL": true, "BIT": true,
+		"JSON": true, "ENUM": true, "SET": true,
+		"SERIAL": true, "BIGSERIAL": true, "SMALLSERIAL": true, // PostgreSQL
+		"UUID": true, "JSONB": true, // PostgreSQL
+	}
+	for _, col := range req.Columns {
+		// Extract base type (strip length/precision like VARCHAR(255))
+		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
+		baseType = strings.TrimSpace(baseType)
+		if !allowedTypes[baseType] {
+			BadRequest(c, fmt.Sprintf("不支持的列类型: %s", col.Type))
+			return
+		}
+		if !validateTableName(col.Name) {
+			BadRequest(c, fmt.Sprintf("无效的列名: %s", col.Name))
+			return
+		}
+	}
+
+	// Build CREATE TABLE SQL
+	var columns []string
+	for _, col := range req.Columns {
+		parts := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
+		if col.IsPrimary {
+			parts = append(parts, "PRIMARY KEY")
+		}
+		if col.AutoIncr {
+			parts = append(parts, "AUTO_INCREMENT")
+		}
+		if !col.Nullable {
+			parts = append(parts, "NOT NULL")
+		}
+		columns = append(columns, strings.Join(parts, " "))
+	}
+
+	var sql string
+	switch server.Name {
+	case "mysql":
+		sql = fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+			req.Name, strings.Join(columns, ", "))
+	case "postgresql":
+		// PostgreSQL syntax adjustments
+		var pgColumns []string
+		for _, col := range req.Columns {
+			parts := []string{fmt.Sprintf("\"%s\"", col.Name), col.Type}
+			if col.IsPrimary {
+				parts = append(parts, "PRIMARY KEY")
+			}
+			if col.AutoIncr {
+				// PostgreSQL uses SERIAL for auto increment
+				parts = []string{fmt.Sprintf("\"%s\"", col.Name), "SERIAL", "PRIMARY KEY"}
+			}
+			if !col.Nullable && !col.IsPrimary {
+				parts = append(parts, "NOT NULL")
+			}
+			pgColumns = append(pgColumns, strings.Join(parts, " "))
+		}
+		sql = fmt.Sprintf("CREATE TABLE \"%s\" (%s);", req.Name, strings.Join(pgColumns, ", "))
+	default:
+		BadRequest(c, "不支持的数据库类型")
+		return
+	}
+
+	out, err := executeSQL(getDBType(server.Name), db.Name, sql)
+	if err != nil {
+		InternalError(c, fmt.Sprintf("创建表失败: %s", out))
+		return
+	}
+
+	Success(c, gin.H{"message": "表已创建", "name": req.Name})
+}
+
+// DropTable drops a table from a database
+func (h *DBServerHandler) DropTable(c *gin.Context) {
+	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的数据库ID")
+		return
+	}
+
+	tableName := c.Query("table")
+	if tableName == "" {
+		BadRequest(c, "表名不能为空")
+		return
+	}
+	if !validateTableName(tableName) {
+		BadRequest(c, "无效的表名")
+		return
+	}
+
+	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	if err != nil || db == nil {
+		NotFound(c, "数据库不存在")
+		return
+	}
+
+	server, _ := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
+	if server == nil {
+		NotFound(c, "服务器不存在")
+		return
+	}
+
+	var sql string
+	switch server.Name {
+	case "mysql":
+		sql = fmt.Sprintf("DROP TABLE `%s`;", tableName)
+	case "postgresql":
+		sql = fmt.Sprintf("DROP TABLE \"%s\";", tableName)
+	default:
+		BadRequest(c, "不支持的数据库类型")
+		return
+	}
+
+	out, err := executeSQL(getDBType(server.Name), db.Name, sql)
+	if err != nil {
+		InternalError(c, fmt.Sprintf("删除表失败: %s", out))
+		return
+	}
+
+	Success(c, gin.H{"message": "表已删除", "name": tableName})
 }

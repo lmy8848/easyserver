@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -21,6 +20,9 @@ type SearchResult struct {
 	Size  int64  `json:"size"`
 	Match string `json:"match,omitempty"` // Where the match was found
 }
+
+// errSearchLimit is returned when search reaches the maximum result count
+var errSearchLimit = fmt.Errorf("search result limit reached")
 
 // Search searches for files by name pattern
 func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]SearchResult, error) {
@@ -38,7 +40,7 @@ func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]Search
 
 	err = filepath.Walk(validPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			return nil // Skip inaccessible entries, continue walking
 		}
 
 		// Prevent symlink escape from sandbox
@@ -47,7 +49,7 @@ func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]Search
 		}
 
 		if len(results) >= maxResults {
-			return filepath.SkipDir
+			return errSearchLimit
 		}
 
 		name := strings.ToLower(info.Name())
@@ -64,7 +66,21 @@ func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]Search
 		return nil
 	})
 
-	return results, err
+	if err != nil && err != errSearchLimit {
+		return results, fmt.Errorf("search walk: %w", err)
+	}
+
+	return results, nil
+}
+
+// binaryExtensions is the set of file extensions to skip during content search
+var binaryExtensions = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+	".bmp": true, ".ico": true, ".svg": true, ".webp": true,
+	".mp3": true, ".mp4": true, ".avi": true, ".mov": true,
+	".zip": true, ".tar": true, ".gz": true, ".rar": true,
+	".exe": true, ".dll": true, ".so": true, ".dylib": true,
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true,
 }
 
 // SearchContent searches for files containing the specified text
@@ -83,7 +99,7 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 
 	err = filepath.Walk(validPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil // Skip inaccessible entries, continue walking
 		}
 
 		// Prevent symlink escape from sandbox
@@ -92,7 +108,7 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 		}
 
 		if len(results) >= maxResults {
-			return filepath.SkipDir
+			return errSearchLimit
 		}
 
 		// Skip directories and large files
@@ -102,22 +118,14 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 
 		// Skip binary files by extension
 		ext := strings.ToLower(filepath.Ext(info.Name()))
-		binaryExts := map[string]bool{
-			".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
-			".bmp": true, ".ico": true, ".svg": true, ".webp": true,
-			".mp3": true, ".mp4": true, ".avi": true, ".mov": true,
-			".zip": true, ".tar": true, ".gz": true, ".rar": true,
-			".exe": true, ".dll": true, ".so": true, ".dylib": true,
-			".pdf": true, ".doc": true, ".docx": true, ".xls": true,
-		}
-		if binaryExts[ext] {
+		if binaryExtensions[ext] {
 			return nil
 		}
 
 		// Read file content
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return nil // Skip unreadable files
 		}
 
 		content := strings.ToLower(string(data))
@@ -134,7 +142,11 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 		return nil
 	})
 
-	return results, err
+	if err != nil && err != errSearchLimit {
+		return results, fmt.Errorf("content search walk: %w", err)
+	}
+
+	return results, nil
 }
 
 // Compress creates a zip archive
@@ -207,9 +219,8 @@ func (m *FileManager) Compress(sourcePaths []string, destPath string) error {
 			if err != nil {
 				return err
 			}
-			defer file.Close()
-
 			_, err = io.Copy(writer, file)
+			file.Close() // Close immediately, not deferred (Walk calls this many times)
 			return err
 		})
 
@@ -286,7 +297,9 @@ func (m *FileManager) extractZip(zipPath, destPath string) error {
 		}
 
 		if file.FileInfo().IsDir() {
-			os.MkdirAll(path, 0755)
+			if err := os.MkdirAll(path, 0755); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -422,11 +435,21 @@ func (m *FileManager) extractGzip(gzPath, destPath string) error {
 	return err
 }
 
-// Chmod changes file permissions
+// Chmod changes file permissions. Rejects dangerous modes (setuid, setgid, world-writable).
 func (m *FileManager) Chmod(path string, mode os.FileMode) error {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
+	}
+
+	// Reject setuid, setgid, and sticky bits
+	if mode&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		return fmt.Errorf("setuid/setgid/sticky bits are not allowed")
+	}
+
+	// Reject world-writable (mode & 0002)
+	if mode.Perm()&0002 != 0 {
+		return fmt.Errorf("world-writable permissions (o+w) are not allowed")
 	}
 
 	return os.Chmod(validPath, mode)
@@ -451,24 +474,30 @@ func (m *FileManager) GetFileDetails(path string) (map[string]interface{}, error
 
 	info, err := os.Stat(validPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	stat := info.Sys().(*syscall.Stat_t)
+	result := map[string]interface{}{
+		"name":        info.Name(),
+		"path":        validPath,
+		"is_dir":      info.IsDir(),
+		"size_bytes":  info.Size(),
+		"mode":        info.Mode().String(),
+		"mode_octal":  fmt.Sprintf("%04o", info.Mode().Perm()),
+		"modified_at": info.ModTime().Format("2006-01-02T15:04:05Z"),
+		"is_symlink":  info.Mode()&os.ModeSymlink != 0,
+	}
 
-	return map[string]interface{}{
-		"name":         info.Name(),
-		"path":         validPath,
-		"is_dir":       info.IsDir(),
-		"size_bytes":   info.Size(),
-		"mode":         info.Mode().String(),
-		"mode_octal":   fmt.Sprintf("%04o", info.Mode().Perm()),
-		"modified_at":  info.ModTime().Format("2006-01-02T15:04:05Z"),
-		"is_symlink":   info.Mode()&os.ModeSymlink != 0,
-		"uid":          stat.Uid,
-		"gid":          stat.Gid,
-		"nlink":        stat.Nlink,
-	}, nil
+	// Extract Unix-specific stat info if available
+	if sys := info.Sys(); sys != nil {
+		if stat, ok := sys.(*syscall.Stat_t); ok {
+			result["uid"] = stat.Uid
+			result["gid"] = stat.Gid
+			result["nlink"] = stat.Nlink
+		}
+	}
+
+	return result, nil
 }
 
 // GetDiskUsage returns disk usage information
@@ -487,75 +516,72 @@ func (m *FileManager) GetDiskUsage(path string) (map[string]interface{}, error) 
 	free := stat.Bfree * uint64(stat.Bsize)
 	used := total - free
 
+	var usagePercent float64
+	if total > 0 {
+		usagePercent = float64(used) / float64(total) * 100
+	}
+
 	return map[string]interface{}{
-		"total_bytes": total,
-		"used_bytes":  used,
-		"free_bytes":  free,
-		"usage_percent": float64(used) / float64(total) * 100,
+		"total_bytes":   total,
+		"used_bytes":    used,
+		"free_bytes":    free,
+		"usage_percent": usagePercent,
 	}, nil
 }
 
-// GetMimeType returns the MIME type of a file
+// mimeTypes maps file extensions to MIME types
+var mimeTypes = map[string]string{
+	".html": "text/html",
+	".css":  "text/css",
+	".js":   "application/javascript",
+	".json": "application/json",
+	".xml":  "application/xml",
+	".txt":  "text/plain",
+	".md":   "text/markdown",
+	".csv":  "text/csv",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".svg":  "image/svg+xml",
+	".webp": "image/webp",
+	".ico":  "image/x-icon",
+	".mp3":  "audio/mpeg",
+	".mp4":  "video/mp4",
+	".avi":  "video/x-msvideo",
+	".mov":  "video/quicktime",
+	".pdf":  "application/pdf",
+	".zip":  "application/zip",
+	".tar":  "application/x-tar",
+	".gz":   "application/gzip",
+	".sh":   "application/x-sh",
+	".py":   "text/x-python",
+	".go":   "text/x-go",
+	".java": "text/x-java",
+	".c":    "text/x-c",
+	".cpp":  "text/x-c++",
+	".h":    "text/x-c",
+	".rs":   "text/x-rust",
+	".rb":   "text/x-ruby",
+	".php":  "text/x-php",
+	".sql":  "text/x-sql",
+	".yaml": "text/x-yaml",
+	".yml":  "text/x-yaml",
+	".toml": "text/x-toml",
+	".ini":  "text/x-ini",
+	".conf": "text/x-conf",
+	".log":  "text/x-log",
+}
+
+// GetMimeType returns the MIME type of a file based on its extension
 func (m *FileManager) GetMimeType(path string) (string, error) {
-	// Validate path first to prevent command injection
-	validPath, err := m.ValidatePath(path)
-	if err != nil {
+	if _, err := m.ValidatePath(path); err != nil {
 		return "", err
 	}
 
 	ext := strings.ToLower(filepath.Ext(path))
-	mimeTypes := map[string]string{
-		".html": "text/html",
-		".css":  "text/css",
-		".js":   "application/javascript",
-		".json": "application/json",
-		".xml":  "application/xml",
-		".txt":  "text/plain",
-		".md":   "text/markdown",
-		".csv":  "text/csv",
-		".jpg":  "image/jpeg",
-		".jpeg": "image/jpeg",
-		".png":  "image/png",
-		".gif":  "image/gif",
-		".svg":  "image/svg+xml",
-		".webp": "image/webp",
-		".ico":  "image/x-icon",
-		".mp3":  "audio/mpeg",
-		".mp4":  "video/mp4",
-		".avi":  "video/x-msvideo",
-		".mov":  "video/quicktime",
-		".pdf":  "application/pdf",
-		".zip":  "application/zip",
-		".tar":  "application/x-tar",
-		".gz":   "application/gzip",
-		".sh":   "application/x-sh",
-		".py":   "text/x-python",
-		".go":   "text/x-go",
-		".java": "text/x-java",
-		".c":    "text/x-c",
-		".cpp":  "text/x-c++",
-		".h":    "text/x-c",
-		".rs":   "text/x-rust",
-		".rb":   "text/x-ruby",
-		".php":  "text/x-php",
-		".sql":  "text/x-sql",
-		".yaml": "text/x-yaml",
-		".yml":  "text/x-yaml",
-		".toml": "text/x-toml",
-		".ini":  "text/x-ini",
-		".conf": "text/x-conf",
-		".log":  "text/x-log",
-	}
-
 	if mime, ok := mimeTypes[ext]; ok {
 		return mime, nil
-	}
-
-	// Use file command as fallback (only on validated path)
-	cmd := exec.Command("file", "--mime-type", "-b", validPath)
-	output, err := cmd.Output()
-	if err == nil {
-		return strings.TrimSpace(string(output)), nil
 	}
 
 	return "application/octet-stream", nil

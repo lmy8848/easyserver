@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -8,18 +9,25 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
 type DBServerService struct {
-	db *sql.DB
+	db       *sql.DB
+	executor executor.CommandExecutor
 }
 
-func NewDBServerService(db *sql.DB) *DBServerService {
-	return &DBServerService{db: db}
+func NewDBServerService(db *sql.DB, exec executor.CommandExecutor) *DBServerService {
+	return &DBServerService{db: db, executor: exec}
 }
 
-func (s *DBServerService) InitTables() error {
+// Deprecated: InitTables is kept for backward compatibility only.
+// Table creation is now handled by the migration system (migrations/ directory).
+func (s *DBServerService) InitTables(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS db_servers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +78,7 @@ func (s *DBServerService) InitTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_db_users_server ON db_users(db_server_id)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
@@ -78,24 +86,47 @@ func (s *DBServerService) InitTables() error {
 	// Insert predefined entries
 	for _, ds := range model.PredefinedDBServers() {
 		var count int
-		s.db.QueryRow("SELECT COUNT(*) FROM db_servers WHERE name = ?", ds.Name).Scan(&count)
+		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM db_servers WHERE name = ?", ds.Name).Scan(&count)
 		if count == 0 {
-			s.db.Exec(`INSERT INTO db_servers (name, display_name, description, default_port)
+			s.db.ExecContext(ctx, `INSERT INTO db_servers (name, display_name, description, default_port)
 				VALUES (?, ?, ?, ?)`,
 				ds.Name, ds.DisplayName, ds.Description, ds.DefaultPort)
 		}
 	}
 
-	// Migration: add columns to existing tables
-	s.db.Exec("ALTER TABLE databases ADD COLUMN db_version_id INTEGER NOT NULL DEFAULT 0")
+	// Migration: add columns to existing tables (ignore error if column already exists)
+	if _, err := s.db.ExecContext(ctx, "ALTER TABLE databases ADD COLUMN db_version_id INTEGER NOT NULL DEFAULT 0"); err != nil {
+		// Column may already exist - this is expected on subsequent runs
+		log.Printf("db migration: %v (may be expected if column exists)", err)
+	}
 
 	return nil
 }
 
+// SeedPredefinedServers inserts predefined database server entries if not exists.
+// Called at startup to ensure default entries are present.
+func (s *DBServerService) SeedPredefinedServers(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, ds := range model.PredefinedDBServers() {
+		var count int
+		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM db_servers WHERE name = ?", ds.Name).Scan(&count)
+		if count == 0 {
+			s.db.ExecContext(ctx, `INSERT INTO db_servers (name, display_name, description, default_port)
+				VALUES (?, ?, ?, ?)`,
+				ds.Name, ds.DisplayName, ds.Description, ds.DefaultPort)
+		}
+	}
+}
+
 // DB Server CRUD
 
-func (s *DBServerService) List() ([]model.DBServer, error) {
-	rows, err := s.db.Query(`SELECT id, name, display_name, description, default_port, status, version, created_at
+func (s *DBServerService) List(ctx context.Context) ([]model.DBServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, display_name, description, default_port, status, version, created_at
 		FROM db_servers ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -105,19 +136,25 @@ func (s *DBServerService) List() ([]model.DBServer, error) {
 	var servers []model.DBServer
 	for rows.Next() {
 		var ds model.DBServer
-		err := rows.Scan(&ds.ID, &ds.Name, &ds.DisplayName, &ds.Description,
-			&ds.DefaultPort, &ds.Status, &ds.Version, &ds.CreatedAt)
-		if err != nil {
+		if err := rows.Scan(&ds.ID, &ds.Name, &ds.DisplayName, &ds.Description,
+			&ds.DefaultPort, &ds.Status, &ds.Version, &ds.CreatedAt); err != nil {
+			log.Printf("scan db server row: %v", err)
 			continue
 		}
 		servers = append(servers, ds)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate db servers: %w", err)
+	}
 	return servers, nil
 }
 
-func (s *DBServerService) Get(id int64) (*model.DBServer, error) {
+func (s *DBServerService) Get(ctx context.Context, id int64) (*model.DBServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ds := &model.DBServer{}
-	err := s.db.QueryRow(`SELECT id, name, display_name, description, default_port, status, version, created_at
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, display_name, description, default_port, status, version, created_at
 		FROM db_servers WHERE id = ?`, id).Scan(
 		&ds.ID, &ds.Name, &ds.DisplayName, &ds.Description,
 		&ds.DefaultPort, &ds.Status, &ds.Version, &ds.CreatedAt)
@@ -132,8 +169,11 @@ func (s *DBServerService) Get(id int64) (*model.DBServer, error) {
 
 // Version management
 
-func (s *DBServerService) ListVersions(dbServerID int64) ([]model.DBVersion, error) {
-	rows, err := s.db.Query(`SELECT id, db_server_id, version, service_name, config_file, data_dir, port, status, created_at
+func (s *DBServerService) ListVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, db_server_id, version, service_name, config_file, data_dir, port, status, created_at
 		FROM db_versions WHERE db_server_id = ? ORDER BY id`, dbServerID)
 	if err != nil {
 		return nil, err
@@ -143,19 +183,25 @@ func (s *DBServerService) ListVersions(dbServerID int64) ([]model.DBVersion, err
 	var versions []model.DBVersion
 	for rows.Next() {
 		var v model.DBVersion
-		err := rows.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ServiceName,
-			&v.ConfigFile, &v.DataDir, &v.Port, &v.Status, &v.CreatedAt)
-		if err != nil {
+		if err := rows.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ServiceName,
+			&v.ConfigFile, &v.DataDir, &v.Port, &v.Status, &v.CreatedAt); err != nil {
+			log.Printf("scan version row: %v", err)
 			continue
 		}
 		versions = append(versions, v)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate versions: %w", err)
+	}
 	return versions, nil
 }
 
-func (s *DBServerService) GetVersion(id int64) (*model.DBVersion, error) {
+func (s *DBServerService) GetVersion(ctx context.Context, id int64) (*model.DBVersion, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	v := &model.DBVersion{}
-	err := s.db.QueryRow(`SELECT id, db_server_id, version, service_name, config_file, data_dir, port, status, created_at
+	err := s.db.QueryRowContext(ctx, `SELECT id, db_server_id, version, service_name, config_file, data_dir, port, status, created_at
 		FROM db_versions WHERE id = ?`, id).Scan(
 		&v.ID, &v.DBServerID, &v.Version, &v.ServiceName,
 		&v.ConfigFile, &v.DataDir, &v.Port, &v.Status, &v.CreatedAt)
@@ -168,15 +214,18 @@ func (s *DBServerService) GetVersion(id int64) (*model.DBVersion, error) {
 	return v, nil
 }
 
-func (s *DBServerService) InstallVersion(dbServerID int64, req *model.CreateDBVersionRequest) (*model.DBVersion, error) {
-	ds, err := s.Get(dbServerID)
+func (s *DBServerService) InstallVersion(ctx context.Context, dbServerID int64, req *model.CreateDBVersionRequest) (*model.DBVersion, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ds, err := s.Get(ctx, dbServerID)
 	if err != nil || ds == nil {
 		return nil, fmt.Errorf("database server not found")
 	}
 
 	// Check if version already installed
 	var count int
-	s.db.QueryRow("SELECT COUNT(*) FROM db_versions WHERE db_server_id = ? AND version = ?", dbServerID, req.Version).Scan(&count)
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM db_versions WHERE db_server_id = ? AND version = ?", dbServerID, req.Version).Scan(&count)
 	if count > 0 {
 		return nil, fmt.Errorf("version %s is already installed", req.Version)
 	}
@@ -196,10 +245,10 @@ func (s *DBServerService) InstallVersion(dbServerID int64, req *model.CreateDBVe
 
 	// Install
 	log.Printf("db: installing %s version %s (package: %s)", ds.Name, req.Version, packageName)
-	exec.Command("apt-get", "update", "-y").Run()
-	out, err := exec.Command("apt-get", "install", "-y", packageName).CombinedOutput()
+	s.executor.RunCombined(ctx, "apt-get", "update", "-y")
+	out, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", packageName)
 	if err != nil {
-		return nil, fmt.Errorf("install failed: %s", string(out))
+		return nil, fmt.Errorf("install failed: %s", out)
 	}
 
 	// Detect service name
@@ -212,25 +261,28 @@ func (s *DBServerService) InstallVersion(dbServerID int64, req *model.CreateDBVe
 	}
 
 	// Enable and start
-	exec.Command("systemctl", "enable", serviceName).Run()
-	startOut, startErr := exec.Command("systemctl", "start", serviceName).CombinedOutput()
+	s.executor.RunCombined(ctx, "systemctl", "enable", serviceName)
+	startOut, _, startErr := s.executor.RunCombined(ctx, "systemctl", "start", serviceName)
 	status := "running"
 	if startErr != nil {
 		status = "stopped"
-		log.Printf("db: failed to start %s: %s", serviceName, string(startOut))
+		log.Printf("db: failed to start %s: %s", serviceName, startOut)
 	}
 
 	// Save version record
-	result, err := s.db.Exec(`INSERT INTO db_versions (db_server_id, version, service_name, port, status)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO db_versions (db_server_id, version, service_name, port, status)
 		VALUES (?, ?, ?, ?, ?)`, dbServerID, req.Version, serviceName, port, status)
 	if err != nil {
 		return nil, err
 	}
 
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("get last insert id: %w", err)
+	}
 
 	// Update server summary
-	s.updateServerSummary(dbServerID)
+	s.updateServerSummary(ctx, dbServerID)
 
 	return &model.DBVersion{
 		ID:          id,
@@ -238,87 +290,103 @@ func (s *DBServerService) InstallVersion(dbServerID int64, req *model.CreateDBVe
 		Version:     req.Version,
 		ServiceName: serviceName,
 		Port:        port,
-		Status:      "running",
+		Status:      status,
 	}, nil
 }
 
-func (s *DBServerService) UninstallVersion(versionID int64) error {
-	v, err := s.GetVersion(versionID)
+func (s *DBServerService) UninstallVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
 
 	// Check if databases exist for this version
 	var dbCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM databases WHERE db_version_id = ?", versionID).Scan(&dbCount)
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM databases WHERE db_version_id = ?", versionID).Scan(&dbCount)
 	if dbCount > 0 {
 		return fmt.Errorf("cannot uninstall: %d databases still exist for this version", dbCount)
 	}
 
 	// Stop and remove
-	exec.Command("systemctl", "stop", v.ServiceName).Run()
-	exec.Command("systemctl", "disable", v.ServiceName).Run()
+	s.executor.RunCombined(ctx, "systemctl", "stop", v.ServiceName)
+	s.executor.RunCombined(ctx, "systemctl", "disable", v.ServiceName)
 
-	ds, _ := s.Get(v.DBServerID)
+	ds, _ := s.Get(ctx, v.DBServerID)
 	if ds != nil {
 		templates := model.GetVersionTemplates(ds.Name)
 		for _, t := range templates {
 			if t.Version == v.Version {
-				exec.Command("apt-get", "remove", "-y", t.Package).Run()
+				s.executor.RunCombined(ctx, "apt-get", "remove", "-y", t.Package)
 				break
 			}
 		}
 	}
 
-	s.db.Exec("DELETE FROM db_versions WHERE id = ?", versionID)
-	s.updateServerSummary(v.DBServerID)
+	s.db.ExecContext(ctx, "DELETE FROM db_versions WHERE id = ?", versionID)
+	s.updateServerSummary(ctx, v.DBServerID)
 	return nil
 }
 
-func (s *DBServerService) StartVersion(versionID int64) error {
-	v, err := s.GetVersion(versionID)
+func (s *DBServerService) StartVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	out, err := exec.Command("systemctl", "start", v.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", "start", v.ServiceName)
 	if err != nil {
-		return fmt.Errorf("start failed: %s", string(out))
+		return fmt.Errorf("start failed: %s", out)
 	}
-	s.db.Exec("UPDATE db_versions SET status = 'running' WHERE id = ?", versionID)
-	s.updateServerSummary(v.DBServerID)
+	s.db.ExecContext(ctx, "UPDATE db_versions SET status = 'running' WHERE id = ?", versionID)
+	s.updateServerSummary(ctx, v.DBServerID)
 	return nil
 }
 
-func (s *DBServerService) StopVersion(versionID int64) error {
-	v, err := s.GetVersion(versionID)
+func (s *DBServerService) StopVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	out, err := exec.Command("systemctl", "stop", v.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", "stop", v.ServiceName)
 	if err != nil {
-		return fmt.Errorf("stop failed: %s", string(out))
+		return fmt.Errorf("stop failed: %s", out)
 	}
-	s.db.Exec("UPDATE db_versions SET status = 'stopped' WHERE id = ?", versionID)
-	s.updateServerSummary(v.DBServerID)
+	s.db.ExecContext(ctx, "UPDATE db_versions SET status = 'stopped' WHERE id = ?", versionID)
+	s.updateServerSummary(ctx, v.DBServerID)
 	return nil
 }
 
-func (s *DBServerService) RestartVersion(versionID int64) error {
-	v, err := s.GetVersion(versionID)
+func (s *DBServerService) RestartVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	out, err := exec.Command("systemctl", "restart", v.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", "restart", v.ServiceName)
 	if err != nil {
-		return fmt.Errorf("restart failed: %s", string(out))
+		return fmt.Errorf("restart failed: %s", out)
 	}
-	s.db.Exec("UPDATE db_versions SET status = 'running' WHERE id = ?", versionID)
+	s.db.ExecContext(ctx, "UPDATE db_versions SET status = 'running' WHERE id = ?", versionID)
+	s.updateServerSummary(ctx, v.DBServerID)
 	return nil
 }
 
 // UpdateVersionPort updates the port for a database version
-func (s *DBServerService) UpdateVersionPort(versionID int64, newPort int) error {
-	v, err := s.GetVersion(versionID)
+func (s *DBServerService) UpdateVersionPort(ctx context.Context, versionID int64, newPort int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
@@ -327,12 +395,15 @@ func (s *DBServerService) UpdateVersionPort(versionID int64, newPort int) error 
 		return fmt.Errorf("cannot change port while service is running. Stop it first")
 	}
 
-	s.db.Exec("UPDATE db_versions SET port = ? WHERE id = ?", newPort, versionID)
+	s.db.ExecContext(ctx, "UPDATE db_versions SET port = ? WHERE id = ?", newPort, versionID)
 	return nil
 }
 
-func (s *DBServerService) GetVersionServiceLogs(versionID int64, lines int) (string, error) {
-	v, err := s.GetVersion(versionID)
+func (s *DBServerService) GetVersionServiceLogs(ctx context.Context, versionID int64, lines int) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
 	if err != nil || v == nil {
 		return "", fmt.Errorf("version not found")
 	}
@@ -342,39 +413,45 @@ func (s *DBServerService) GetVersionServiceLogs(versionID int64, lines int) (str
 	if lines > 5000 {
 		lines = 5000
 	}
-	out, err := exec.Command("journalctl", "-u", v.ServiceName, "-n", strconv.Itoa(lines), "--no-pager").CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "journalctl", "-u", v.ServiceName, "-n", strconv.Itoa(lines), "--no-pager")
 	if err != nil {
-		return string(out), nil
+		return out, nil
 	}
-	return string(out), nil
+	return out, nil
 }
 
 // RefreshStatus refreshes all versions for a server
-func (s *DBServerService) RefreshStatus(dbServerID int64) {
-	versions, _ := s.ListVersions(dbServerID)
+func (s *DBServerService) RefreshStatus(ctx context.Context, dbServerID int64) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	versions, _ := s.ListVersions(ctx, dbServerID)
 	for _, v := range versions {
-		out, _ := exec.Command("systemctl", "is-active", v.ServiceName).CombinedOutput()
+		out, _, _ := s.executor.RunCombined(ctx, "systemctl", "is-active", v.ServiceName)
 		status := "stopped"
-		if strings.TrimSpace(string(out)) == "active" {
+		if strings.TrimSpace(out) == "active" {
 			status = "running"
 		}
-		s.db.Exec("UPDATE db_versions SET status = ? WHERE id = ?", status, v.ID)
+		s.db.ExecContext(ctx, "UPDATE db_versions SET status = ? WHERE id = ?", status, v.ID)
 	}
-	s.updateServerSummary(dbServerID)
+	s.updateServerSummary(ctx, dbServerID)
 }
 
-func (s *DBServerService) RefreshAllStatus() {
-	servers, _ := s.List()
+func (s *DBServerService) RefreshAllStatus(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	servers, _ := s.List(ctx)
 	for _, ds := range servers {
-		s.RefreshStatus(ds.ID)
+		s.RefreshStatus(ctx, ds.ID)
 	}
 }
 
 // updateServerSummary updates the server's status and version summary
-func (s *DBServerService) updateServerSummary(dbServerID int64) {
-	versions, _ := s.ListVersions(dbServerID)
+func (s *DBServerService) updateServerSummary(ctx context.Context, dbServerID int64) {
+	versions, _ := s.ListVersions(ctx, dbServerID)
 	if len(versions) == 0 {
-		s.db.Exec("UPDATE db_servers SET status = 'not_installed', version = '' WHERE id = ?", dbServerID)
+		s.db.ExecContext(ctx, "UPDATE db_servers SET status = 'not_installed', version = '' WHERE id = ?", dbServerID)
 		return
 	}
 
@@ -395,7 +472,7 @@ func (s *DBServerService) updateServerSummary(dbServerID int64) {
 	}
 
 	summary := strings.Join(versionParts, ", ")
-	s.db.Exec("UPDATE db_servers SET status = ?, version = ? WHERE id = ?", status, summary, dbServerID)
+	s.db.ExecContext(ctx, "UPDATE db_servers SET status = ?, version = ? WHERE id = ?", status, summary, dbServerID)
 }
 
 // detectServiceName detects the systemd service name for a database version
@@ -418,7 +495,10 @@ func detectServiceName(dbName, version string) string {
 }
 
 // GetMySQLCmd returns the mysql command for executing SQL
-func (s *DBServerService) GetMySQLCmd() string {
+func (s *DBServerService) GetMySQLCmd(ctx context.Context) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if _, err := exec.LookPath("mysql"); err == nil {
 		return "mysql"
 	}

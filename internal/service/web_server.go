@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -9,18 +10,37 @@ import (
 	"strings"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
+// sanitizePackageName allows only alphanumeric characters, hyphens, dots, and plus signs
+// in package names to prevent shell injection.
+func sanitizePackageName(name string) string {
+	var b strings.Builder
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '+' || c == '_' {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
 type WebServerService struct {
-	db *sql.DB
+	db       *sql.DB
+	executor executor.CommandExecutor
 }
 
-func NewWebServerService(db *sql.DB) *WebServerService {
-	return &WebServerService{db: db}
+func NewWebServerService(db *sql.DB, exec executor.CommandExecutor) *WebServerService {
+	return &WebServerService{db: db, executor: exec}
 }
 
-func (s *WebServerService) InitTables() error {
+// Deprecated: InitTables is kept for backward compatibility only.
+// Table creation is now handled by the migration system (migrations/ directory).
+func (s *WebServerService) InitTables(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS web_servers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +64,7 @@ func (s *WebServerService) InitTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_web_servers_name ON web_servers(name)`,
 	}
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
@@ -58,22 +78,22 @@ func (s *WebServerService) InitTables() error {
 		{"log_dir", "TEXT DEFAULT ''"},
 	}
 	for _, c := range cols {
-		s.db.Exec(fmt.Sprintf("ALTER TABLE web_servers ADD COLUMN %s %s", c.name, c.typ))
+		s.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE web_servers ADD COLUMN %s %s", c.name, c.typ))
 	}
 
 	// Insert predefined web servers if not exists
 	for _, ws := range model.PredefinedWebServers() {
 		var count int
-		s.db.QueryRow("SELECT COUNT(*) FROM web_servers WHERE name = ?", ws.Name).Scan(&count)
+		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM web_servers WHERE name = ?", ws.Name).Scan(&count)
 		if count == 0 {
-			s.db.Exec(`INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
+			s.db.ExecContext(ctx, `INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				ws.Name, ws.DisplayName, ws.Description, ws.InstallCmd, ws.UninstallCmd,
 				ws.ConfigPath, ws.ConfigFile, ws.SitesAvailable, ws.SitesEnabled,
 				ws.ServiceName, ws.BinaryPath, ws.DefaultPort, ws.LogDir)
 		} else {
 			// Update existing with new fields
-			s.db.Exec(`UPDATE web_servers SET uninstall_cmd=?, config_file=?, binary_path=?, default_port=?, log_dir=?, description=? WHERE name=? AND (uninstall_cmd='' OR config_file='')`,
+			s.db.ExecContext(ctx, `UPDATE web_servers SET uninstall_cmd=?, config_file=?, binary_path=?, default_port=?, log_dir=?, description=? WHERE name=? AND (uninstall_cmd='' OR config_file='')`,
 				ws.UninstallCmd, ws.ConfigFile, ws.BinaryPath, ws.DefaultPort, ws.LogDir, ws.Description, ws.Name)
 		}
 	}
@@ -81,8 +101,34 @@ func (s *WebServerService) InitTables() error {
 	return nil
 }
 
-func (s *WebServerService) List() ([]model.WebServer, error) {
-	rows, err := s.db.Query(`SELECT id, name, display_name, description, install_cmd, uninstall_cmd,
+// SeedPredefinedWebServers inserts predefined web server entries if not exists.
+// Called at startup to ensure default entries are present.
+func (s *WebServerService) SeedPredefinedWebServers(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, ws := range model.PredefinedWebServers() {
+		var count int
+		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM web_servers WHERE name = ?", ws.Name).Scan(&count)
+		if count == 0 {
+			s.db.ExecContext(ctx, `INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				ws.Name, ws.DisplayName, ws.Description, ws.InstallCmd, ws.UninstallCmd,
+				ws.ConfigPath, ws.ConfigFile, ws.SitesAvailable, ws.SitesEnabled,
+				ws.ServiceName, ws.BinaryPath, ws.DefaultPort, ws.LogDir)
+		} else {
+			// Update existing with new fields
+			s.db.ExecContext(ctx, `UPDATE web_servers SET uninstall_cmd=?, config_file=?, binary_path=?, default_port=?, log_dir=?, description=? WHERE name=? AND (uninstall_cmd='' OR config_file='')`,
+				ws.UninstallCmd, ws.ConfigFile, ws.BinaryPath, ws.DefaultPort, ws.LogDir, ws.Description, ws.Name)
+		}
+	}
+}
+
+func (s *WebServerService) List(ctx context.Context) ([]model.WebServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, display_name, description, install_cmd, uninstall_cmd,
 		config_path, config_file, sites_available, sites_enabled, service_name, binary_path,
 		default_port, log_dir, status, version, created_at
 		FROM web_servers ORDER BY id`)
@@ -106,9 +152,12 @@ func (s *WebServerService) List() ([]model.WebServer, error) {
 	return servers, nil
 }
 
-func (s *WebServerService) Get(id int64) (*model.WebServer, error) {
+func (s *WebServerService) Get(ctx context.Context, id int64) (*model.WebServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ws := &model.WebServer{}
-	err := s.db.QueryRow(`SELECT id, name, display_name, description, install_cmd, uninstall_cmd,
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, display_name, description, install_cmd, uninstall_cmd,
 		config_path, config_file, sites_available, sites_enabled, service_name, binary_path,
 		default_port, log_dir, status, version, created_at
 		FROM web_servers WHERE id = ?`, id).Scan(
@@ -125,8 +174,11 @@ func (s *WebServerService) Get(id int64) (*model.WebServer, error) {
 	return ws, nil
 }
 
-func (s *WebServerService) Create(ws *model.WebServer) error {
-	result, err := s.db.Exec(`INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
+func (s *WebServerService) Create(ctx context.Context, ws *model.WebServer) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO web_servers (name, display_name, description, install_cmd, uninstall_cmd, config_path, config_file, sites_available, sites_enabled, service_name, binary_path, default_port, log_dir)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ws.Name, ws.DisplayName, ws.Description, ws.InstallCmd, ws.UninstallCmd,
 		ws.ConfigPath, ws.ConfigFile, ws.SitesAvailable, ws.SitesEnabled,
@@ -138,8 +190,11 @@ func (s *WebServerService) Create(ws *model.WebServer) error {
 	return nil
 }
 
-func (s *WebServerService) Delete(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) Delete(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -148,49 +203,63 @@ func (s *WebServerService) Delete(id int64) error {
 	}
 
 	var count int
-	s.db.QueryRow("SELECT COUNT(*) FROM websites WHERE web_server_id = ?", id).Scan(&count)
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM websites WHERE web_server_id = ?", id).Scan(&count)
 	if count > 0 {
 		return fmt.Errorf("cannot delete: %d websites are using this server", count)
 	}
 
-	_, err = s.db.Exec("DELETE FROM web_servers WHERE id = ?", id)
+	_, err = s.db.ExecContext(ctx, "DELETE FROM web_servers WHERE id = ?", id)
 	return err
 }
 
-// Install installs the web server software
-func (s *WebServerService) Install(id int64) error {
-	ws, err := s.Get(id)
+// Install installs the web server software.
+// The install command is always looked up from the predefined template to prevent
+// execution of arbitrary commands stored in the database (e.g. via SQL injection).
+func (s *WebServerService) Install(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if ws == nil {
 		return fmt.Errorf("web server not found")
 	}
-	if ws.InstallCmd == "" {
-		return fmt.Errorf("no install command configured")
+
+	// Always use the predefined install command, never trust the database value
+	predef := model.FindPredefinedWebServer(ws.Name)
+	if predef == nil {
+		return fmt.Errorf("unknown server type '%s'", ws.Name)
+	}
+	installCmd := predef.InstallCmd
+	if installCmd == "" {
+		return fmt.Errorf("no install command configured for server type '%s'", ws.Name)
 	}
 
-	exec.Command("apt-get", "update", "-y").Run()
+	s.executor.RunCombined(ctx, "apt-get", "update", "-y")
 
-	parts := strings.Fields(ws.InstallCmd)
-	cmd := exec.Command(parts[0], parts[1:]...)
-	out, err := cmd.CombinedOutput()
+	parts := strings.Fields(installCmd)
+	out, _, err := s.executor.RunCombined(ctx, parts[0], parts[1:]...)
 	if err != nil {
-		return fmt.Errorf("install failed: %s", string(out))
+		return fmt.Errorf("install failed: %s", out)
 	}
 
 	if ws.ServiceName != "" {
-		exec.Command("systemctl", "enable", ws.ServiceName).Run()
-		exec.Command("systemctl", "start", ws.ServiceName).Run()
+		s.executor.RunCombined(ctx, "systemctl", "enable", ws.ServiceName)
+		s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
 	}
 
-	s.RefreshStatus(id)
+	s.RefreshStatus(ctx, id)
 	return nil
 }
 
 // Uninstall removes the web server software
-func (s *WebServerService) Uninstall(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) Uninstall(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -199,33 +268,45 @@ func (s *WebServerService) Uninstall(id int64) error {
 	}
 
 	var count int
-	s.db.QueryRow("SELECT COUNT(*) FROM websites WHERE web_server_id = ?", id).Scan(&count)
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM websites WHERE web_server_id = ?", id).Scan(&count)
 	if count > 0 {
 		return fmt.Errorf("cannot uninstall: %d websites are using this server", count)
 	}
 
 	if ws.ServiceName != "" {
-		exec.Command("systemctl", "stop", ws.ServiceName).Run()
-		exec.Command("systemctl", "disable", ws.ServiceName).Run()
+		s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
+		s.executor.RunCombined(ctx, "systemctl", "disable", ws.ServiceName)
 	}
 
-	uninstallCmd := ws.UninstallCmd
-	if uninstallCmd == "" {
-		uninstallCmd = fmt.Sprintf("apt-get remove -y %s", ws.Name)
+	// Always use the predefined uninstall command, never trust the database value
+	predef := model.FindPredefinedWebServer(ws.Name)
+	var uninstallCmd string
+	if predef != nil && predef.UninstallCmd != "" {
+		uninstallCmd = predef.UninstallCmd
+	} else {
+		// Sanitize ws.Name to prevent shell injection - only allow alphanumeric, hyphens, dots
+		safeName := sanitizePackageName(ws.Name)
+		if safeName == "" {
+			return fmt.Errorf("invalid server name: %s", ws.Name)
+		}
+		uninstallCmd = fmt.Sprintf("apt-get remove -y %s", safeName)
 	}
 	parts := strings.Fields(uninstallCmd)
-	out, err := exec.Command(parts[0], parts[1:]...).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, parts[0], parts[1:]...)
 	if err != nil {
-		return fmt.Errorf("uninstall failed: %s", string(out))
+		return fmt.Errorf("uninstall failed: %s", out)
 	}
 
-	s.db.Exec("UPDATE web_servers SET status = 'not_installed', version = '' WHERE id = ?", id)
+	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'not_installed', version = '' WHERE id = ?", id)
 	return nil
 }
 
 // Start starts the web server service
-func (s *WebServerService) Start(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) Start(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -236,18 +317,21 @@ func (s *WebServerService) Start(id int64) error {
 		return fmt.Errorf("no service name configured")
 	}
 
-	out, err := exec.Command("systemctl", "start", ws.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
 	if err != nil {
-		return fmt.Errorf("start failed: %s", string(out))
+		return fmt.Errorf("start failed: %s", out)
 	}
 
-	s.db.Exec("UPDATE web_servers SET status = 'running' WHERE id = ?", id)
+	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'running' WHERE id = ?", id)
 	return nil
 }
 
 // Stop stops the web server service
-func (s *WebServerService) Stop(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) Stop(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -258,18 +342,21 @@ func (s *WebServerService) Stop(id int64) error {
 		return fmt.Errorf("no service name configured")
 	}
 
-	out, err := exec.Command("systemctl", "stop", ws.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
 	if err != nil {
-		return fmt.Errorf("stop failed: %s", string(out))
+		return fmt.Errorf("stop failed: %s", out)
 	}
 
-	s.db.Exec("UPDATE web_servers SET status = 'stopped' WHERE id = ?", id)
+	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'stopped' WHERE id = ?", id)
 	return nil
 }
 
 // Restart restarts the web server service
-func (s *WebServerService) Restart(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) Restart(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -280,18 +367,21 @@ func (s *WebServerService) Restart(id int64) error {
 		return fmt.Errorf("no service name configured")
 	}
 
-	out, err := exec.Command("systemctl", "restart", ws.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", "restart", ws.ServiceName)
 	if err != nil {
-		return fmt.Errorf("restart failed: %s", string(out))
+		return fmt.Errorf("restart failed: %s", out)
 	}
 
-	s.db.Exec("UPDATE web_servers SET status = 'running' WHERE id = ?", id)
+	s.db.ExecContext(ctx, "UPDATE web_servers SET status = 'running' WHERE id = ?", id)
 	return nil
 }
 
 // Reload reloads the web server config without restarting
-func (s *WebServerService) Reload(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) Reload(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -300,44 +390,47 @@ func (s *WebServerService) Reload(id int64) error {
 	}
 
 	// Test config first
-	if ok, _ := s.TestConfig(id); !ok {
+	if ok, _ := s.TestConfig(ctx, id); !ok {
 		return fmt.Errorf("config test failed, reload aborted")
 	}
 
 	if ws.ServiceName != "" {
-		out, err := exec.Command("systemctl", "reload", ws.ServiceName).CombinedOutput()
+		out, _, err := s.executor.RunCombined(ctx, "systemctl", "reload", ws.ServiceName)
 		if err != nil {
-			return fmt.Errorf("reload failed: %s", string(out))
+			return fmt.Errorf("reload failed: %s", out)
 		}
 	}
 	return nil
 }
 
 // TestConfig tests the web server configuration
-func (s *WebServerService) TestConfig(id int64) (bool, string) {
-	ws, err := s.Get(id)
+func (s *WebServerService) TestConfig(ctx context.Context, id int64) (bool, string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil || ws == nil {
 		return false, "web server not found"
 	}
 
 	switch ws.Name {
 	case "nginx":
-		out, err := exec.Command("nginx", "-t").CombinedOutput()
-		msg := strings.TrimSpace(string(out))
+		out, _, err := s.executor.RunCombined(ctx, "nginx", "-t")
+		msg := strings.TrimSpace(out)
 		if err != nil {
 			return false, msg
 		}
 		return true, msg
 	case "apache":
-		out, err := exec.Command("apache2ctl", "configtest").CombinedOutput()
-		msg := strings.TrimSpace(string(out))
+		out, _, err := s.executor.RunCombined(ctx, "apache2ctl", "configtest")
+		msg := strings.TrimSpace(out)
 		if err != nil {
 			return false, msg
 		}
 		return true, msg
 	case "caddy":
-		out, err := exec.Command("caddy", "validate", "--config", ws.ConfigFile).CombinedOutput()
-		msg := strings.TrimSpace(string(out))
+		out, _, err := s.executor.RunCombined(ctx, "caddy", "validate", "--config", ws.ConfigFile)
+		msg := strings.TrimSpace(out)
 		if err != nil {
 			return false, msg
 		}
@@ -348,8 +441,11 @@ func (s *WebServerService) TestConfig(id int64) (bool, string) {
 }
 
 // GetConfig reads the main config file content
-func (s *WebServerService) GetConfig(id int64) (string, error) {
-	ws, err := s.Get(id)
+func (s *WebServerService) GetConfig(ctx context.Context, id int64) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -368,8 +464,11 @@ func (s *WebServerService) GetConfig(id int64) (string, error) {
 }
 
 // SaveConfig writes content to the main config file
-func (s *WebServerService) SaveConfig(id int64, content string) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) SaveConfig(ctx context.Context, id int64, content string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -390,8 +489,11 @@ func (s *WebServerService) SaveConfig(id int64, content string) error {
 }
 
 // GetServiceLogs returns recent service logs via journalctl
-func (s *WebServerService) GetServiceLogs(id int64, lines int) (string, error) {
-	ws, err := s.Get(id)
+func (s *WebServerService) GetServiceLogs(ctx context.Context, id int64, lines int) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return "", err
 	}
@@ -405,16 +507,19 @@ func (s *WebServerService) GetServiceLogs(id int64, lines int) (string, error) {
 		lines = 100
 	}
 
-	out, err := exec.Command("journalctl", "-u", ws.ServiceName, "-n", strconv.Itoa(lines), "--no-pager").CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "journalctl", "-u", ws.ServiceName, "-n", strconv.Itoa(lines), "--no-pager")
 	if err != nil {
-		return string(out), nil
+		return out, nil
 	}
-	return string(out), nil
+	return out, nil
 }
 
 // SetAutoStart enables/disables auto-start on boot
-func (s *WebServerService) SetAutoStart(id int64, enabled bool) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) SetAutoStart(ctx context.Context, id int64, enabled bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -430,16 +535,19 @@ func (s *WebServerService) SetAutoStart(id int64, enabled bool) error {
 		action = "enable"
 	}
 
-	out, err := exec.Command("systemctl", action, ws.ServiceName).CombinedOutput()
+	out, _, err := s.executor.RunCombined(ctx, "systemctl", action, ws.ServiceName)
 	if err != nil {
-		return fmt.Errorf("systemctl %s failed: %s", action, string(out))
+		return fmt.Errorf("systemctl %s failed: %s", action, out)
 	}
 	return nil
 }
 
 // RefreshStatus detects full runtime state
-func (s *WebServerService) RefreshStatus(id int64) error {
-	ws, err := s.Get(id)
+func (s *WebServerService) RefreshStatus(ctx context.Context, id int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -454,14 +562,14 @@ func (s *WebServerService) RefreshStatus(id int64) error {
 	case "nginx":
 		if _, err := exec.LookPath("nginx"); err == nil {
 			installed = true
-			out, _ := exec.Command("nginx", "-v").CombinedOutput()
-			version = strings.TrimSpace(string(out))
+			out, _, _ := s.executor.RunCombined(ctx, "nginx", "-v")
+			version = strings.TrimSpace(out)
 		}
 	case "apache":
 		if _, err := exec.LookPath("apache2"); err == nil {
 			installed = true
-			out, _ := exec.Command("apache2", "-v").CombinedOutput()
-			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			out, _, _ := s.executor.RunCombined(ctx, "apache2", "-v")
+			lines := strings.Split(strings.TrimSpace(out), "\n")
 			if len(lines) > 0 {
 				version = strings.TrimSpace(lines[0])
 			}
@@ -474,8 +582,8 @@ func (s *WebServerService) RefreshStatus(id int64) error {
 	case "caddy":
 		if _, err := exec.LookPath("caddy"); err == nil {
 			installed = true
-			out, _ := exec.Command("caddy", "version").CombinedOutput()
-			version = strings.TrimSpace(string(out))
+			out, _, _ := s.executor.RunCombined(ctx, "caddy", "version")
+			version = strings.TrimSpace(out)
 		}
 	default:
 		if ws.BinaryPath != "" {
@@ -490,28 +598,34 @@ func (s *WebServerService) RefreshStatus(id int64) error {
 	if installed {
 		status = "stopped"
 		if ws.ServiceName != "" {
-			out, _ := exec.Command("systemctl", "is-active", ws.ServiceName).CombinedOutput()
-			if strings.TrimSpace(string(out)) == "active" {
+			out, _, _ := s.executor.RunCombined(ctx, "systemctl", "is-active", ws.ServiceName)
+			if strings.TrimSpace(out) == "active" {
 				status = "running"
 			}
 		}
 	}
 
-	s.db.Exec("UPDATE web_servers SET status = ?, version = ? WHERE id = ?", status, version, id)
+	s.db.ExecContext(ctx, "UPDATE web_servers SET status = ?, version = ? WHERE id = ?", status, version, id)
 	return nil
 }
 
 // RefreshAllStatus refreshes status for all web servers
-func (s *WebServerService) RefreshAllStatus() {
-	servers, _ := s.List()
+func (s *WebServerService) RefreshAllStatus(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	servers, _ := s.List(ctx)
 	for _, ws := range servers {
-		s.RefreshStatus(ws.ID)
+		s.RefreshStatus(ctx, ws.ID)
 	}
 }
 
 // GetConnections returns active connection count (for Nginx)
-func (s *WebServerService) GetConnections(id int64) (int, error) {
-	ws, err := s.Get(id)
+func (s *WebServerService) GetConnections(ctx context.Context, id int64) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, err := s.Get(ctx, id)
 	if err != nil {
 		return 0, err
 	}
@@ -520,9 +634,9 @@ func (s *WebServerService) GetConnections(id int64) (int, error) {
 	}
 
 	// Count connections from ss
-	out, _ := exec.Command("ss", "-tlnp").CombinedOutput()
+	out, _, _ := s.executor.RunCombined(ctx, "ss", "-tlnp")
 	count := 0
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		if ws.ServiceName != "" && strings.Contains(line, ws.ServiceName) {
 			count++
 		}
@@ -531,8 +645,11 @@ func (s *WebServerService) GetConnections(id int64) (int, error) {
 }
 
 // GetProcessInfo returns PID, memory, uptime for the service
-func (s *WebServerService) GetProcessInfo(id int64) (pid int, memBytes int64, uptime string, err error) {
-	ws, e := s.Get(id)
+func (s *WebServerService) GetProcessInfo(ctx context.Context, id int64) (pid int, memBytes int64, uptime string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ws, e := s.Get(ctx, id)
 	if e != nil {
 		return 0, 0, "", e
 	}
@@ -544,12 +661,12 @@ func (s *WebServerService) GetProcessInfo(id int64) (pid int, memBytes int64, up
 	}
 
 	// Get main PID via systemctl
-	out, e := exec.Command("systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp").CombinedOutput()
+	out, _, e := s.executor.RunCombined(ctx, "systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp")
 	if e != nil {
 		return 0, 0, "", nil
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
 		if strings.HasPrefix(line, "MainPID=") {
 			pidStr := strings.TrimPrefix(line, "MainPID=")

@@ -27,13 +27,13 @@ type MySQLConfig = DBConfig
 
 // CommonMySQLParams defines the UI metadata for common MySQL parameters
 type ParamMeta struct {
-	Key         string `json:"key"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-	Type        string `json:"type"` // text, number, select, boolean
-	Unit        string `json:"unit"` // MB, GB, etc.
+	Key         string   `json:"key"`
+	Label       string   `json:"label"`
+	Description string   `json:"description"`
+	Type        string   `json:"type"`              // text, number, select, boolean
+	Unit        string   `json:"unit"`              // MB, GB, etc.
 	Options     []string `json:"options,omitempty"` // for select type
-	Default     string `json:"default"`
+	Default     string   `json:"default"`
 }
 
 // GetCommonParams returns metadata for common MySQL configuration parameters
@@ -157,12 +157,28 @@ func ParseMySQLConfig(filePath string) (*MySQLConfig, error) {
 	return config, nil
 }
 
+// backupConfigFile creates a timestamped backup of the given config file.
+// Returns an error only if the source file exists but cannot be read/written;
+// a missing source file is not treated as an error (first-time save).
+func backupConfigFile(filePath string) error {
+	backupPath := filePath + ".bak." + time.Now().Format("20060102150405")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing to back up yet
+		}
+		return fmt.Errorf("read config for backup: %w", err)
+	}
+	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+		return fmt.Errorf("write backup: %w", err)
+	}
+	return nil
+}
+
 // SaveMySQLConfig saves the structured config back to file
 func SaveMySQLConfig(config *MySQLConfig) error {
-	// Backup original file
-	backupPath := config.FilePath + ".bak." + time.Now().Format("20060102150405")
-	if data, err := os.ReadFile(config.FilePath); err == nil {
-		os.WriteFile(backupPath, data, 0644)
+	if err := backupConfigFile(config.FilePath); err != nil {
+		return err
 	}
 
 	var sb strings.Builder
@@ -310,9 +326,8 @@ func pgNeedsQuote(value string) bool {
 
 // SavePostgreSQLConfig saves PostgreSQL config back to file
 func SavePostgreSQLConfig(config *MySQLConfig) error {
-	backupPath := config.FilePath + ".bak." + time.Now().Format("20060102150405")
-	if data, err := os.ReadFile(config.FilePath); err == nil {
-		os.WriteFile(backupPath, data, 0644)
+	if err := backupConfigFile(config.FilePath); err != nil {
+		return err
 	}
 
 	var sb strings.Builder
@@ -329,7 +344,8 @@ func SavePostgreSQLConfig(config *MySQLConfig) error {
 		for _, key := range keys {
 			value := config.Sections[0].Params[key]
 			if pgNeedsQuote(value) {
-				sb.WriteString(fmt.Sprintf("%s = '%s'\n", key, value))
+				escaped := strings.ReplaceAll(value, "'", "''")
+				sb.WriteString(fmt.Sprintf("%s = '%s'\n", key, escaped))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s = %s\n", key, value))
 			}
@@ -436,9 +452,8 @@ func ParseRedisConfig(filePath string) (*MySQLConfig, error) {
 
 // SaveRedisConfig saves Redis config back to file
 func SaveRedisConfig(config *MySQLConfig) error {
-	backupPath := config.FilePath + ".bak." + time.Now().Format("20060102150405")
-	if data, err := os.ReadFile(config.FilePath); err == nil {
-		os.WriteFile(backupPath, data, 0644)
+	if err := backupConfigFile(config.FilePath); err != nil {
+		return err
 	}
 
 	var sb strings.Builder

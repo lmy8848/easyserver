@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"easyserver/internal/service"
@@ -12,6 +15,23 @@ import (
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
 )
+
+// Terminal WebSocket constants
+const (
+	// TermWSWriteDeadline is the deadline for writing a message to the WebSocket
+	TermWSWriteDeadline = 10 * time.Second
+	// TermWSReadDeadline is the deadline for reading a message from the WebSocket
+	TermWSReadDeadline = 60 * time.Second
+	// TermWSPingInterval is the interval for sending ping messages
+	TermWSPingInterval = 30 * time.Second
+	// TermWSReadLimit is the maximum message size for WebSocket reads
+	TermWSReadLimit = 4096
+	// TermCmdBufLimit is the maximum size of the command buffer for audit logging
+	TermCmdBufLimit = 8192
+)
+
+// sessionIDRegex validates terminal session IDs to prevent injection
+var sessionIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // formatDuration formats a duration into a human-readable string
 func formatDuration(d time.Duration) string {
@@ -40,16 +60,44 @@ func NewTerminalHandler(jwtSecret string, auditService *service.AuditService, al
 	}
 }
 
+// wsMessage represents a WebSocket message from the client
+type wsMessage struct {
+	Type string `json:"type"`
+	Data string `json:"data"`
+}
+
 // HandleWebSocket handles terminal WebSocket connections
 func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// User info already set by WSAuthMiddleware
-	userID, _ := c.Get("user_id")
-	username, _ := c.Get("username")
+	userIDIface, ok := c.Get("user_id")
+	if !ok {
+		Unauthorized(c, "用户ID未找到")
+		return
+	}
+	userID, ok := userIDIface.(int64)
+	if !ok {
+		InternalError(c, "用户ID类型无效")
+		return
+	}
+	usernameIface, ok := c.Get("username")
+	if !ok {
+		Unauthorized(c, "用户名未找到")
+		return
+	}
+	username, ok := usernameIface.(string)
+	if !ok {
+		InternalError(c, "用户名类型无效")
+		return
+	}
 
-	// Get session ID from URL
+	// Get and validate session ID from URL
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		BadRequest(c, "session id is required")
+		BadRequest(c, "会话ID不能为空")
+		return
+	}
+	if !sessionIDRegex.MatchString(sessionID) {
+		BadRequest(c, "会话ID格式无效")
 		return
 	}
 
@@ -67,7 +115,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// Log terminal session start
 	sessionStartTime := time.Now()
 	if h.auditService != nil {
-		h.auditService.LogOperation(userID.(int64), username.(string), "TERMINAL_OPEN",
+		h.auditService.LogOperation(c.Request.Context(), userID, username, "TERMINAL_OPEN",
 			"/terminal/"+sessionID, "Terminal session opened", c.ClientIP(), c.Request.UserAgent())
 	}
 
@@ -79,53 +127,105 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	defer func() {
-		conn.Close()
-		h.terminalManager.CloseSession(sessionID)
-		// Log terminal session close with duration
-		if h.auditService != nil {
-			duration := time.Since(sessionStartTime)
-			durationStr := formatDuration(duration)
-			h.auditService.LogOperation(userID.(int64), username.(string), "TERMINAL_CLOSE",
-				"/terminal/"+sessionID,
-				fmt.Sprintf("Terminal session closed, duration: %s", durationStr),
-				c.ClientIP(), c.Request.UserAgent())
-		}
+	// wsWrite is the channel for serialized WebSocket writes.
+	// writePump reads from it; the forwarding goroutine and readPump write to it.
+	wsWrite := make(chan []byte, 256)
+
+	// Start writePump goroutine to serialize all WebSocket writes
+	var writePumpWg sync.WaitGroup
+	writePumpWg.Add(1)
+	go func() {
+		defer writePumpWg.Done()
+		h.writePump(conn, wsWrite)
 	}()
 
-	// Command buffer for logging
-	var commandBuffer strings.Builder
-	commandBuffer.Grow(256)
-
-	// Write goroutine - send terminal output to WebSocket
+	// Start forwarding goroutine: session.Send (PTY output) -> wsWrite
+	var fwdWg sync.WaitGroup
+	fwdWg.Add(1)
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
+		defer fwdWg.Done()
+		for msg := range session.Send {
 			select {
-			case msg, ok := <-session.Send:
-				if !ok {
-					conn.WriteMessage(gorillaWs.CloseMessage, []byte{})
-					return
-				}
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
-					return
-				}
-			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
-					return
-				}
+			case wsWrite <- msg:
+			default:
 			}
 		}
 	}()
 
-	// Read goroutine - receive input from WebSocket
-	conn.SetReadLimit(4096)
+	// readPump: reads from WebSocket, writes input to PTY
+	h.readPump(c, conn, session, wsWrite, userID, username, sessionID)
+
+	// Cleanup sequence:
+	// 1. Close session -> closes session.Send -> forwarding goroutine exits
+	// 2. Wait for forwarding goroutine
+	// 3. Close wsWrite -> writePump exits
+	// 4. Wait for writePump
+	// 5. Close WebSocket
+	h.terminalManager.CloseSession(sessionID)
+	fwdWg.Wait()
+	close(wsWrite)
+	writePumpWg.Wait()
+	conn.Close()
+
+	// Log terminal session close with duration
+	if h.auditService != nil {
+		duration := time.Since(sessionStartTime)
+		durationStr := formatDuration(duration)
+		h.auditService.LogOperation(context.Background(), userID, username, "TERMINAL_CLOSE",
+			"/terminal/"+sessionID,
+			fmt.Sprintf("Terminal session closed, duration: %s", durationStr),
+			c.ClientIP(), c.Request.UserAgent())
+	}
+}
+
+// writePump handles all writes to the WebSocket connection.
+// It reads from wsWrite (PTY output and pong responses) and sends periodic pings.
+// All writes go through a mutex to comply with gorilla/websocket's concurrency requirements.
+func (h *TerminalHandler) writePump(conn *gorillaWs.Conn, wsWrite <-chan []byte) {
+	ticker := time.NewTicker(TermWSPingInterval)
+	defer ticker.Stop()
+
+	writeMu := &sync.Mutex{}
+
+	writeMsg := func(msgType int, data []byte) bool {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		conn.SetWriteDeadline(time.Now().Add(TermWSWriteDeadline))
+		if err := conn.WriteMessage(msgType, data); err != nil {
+			return false
+		}
+		return true
+	}
+
+	for {
+		select {
+		case msg, ok := <-wsWrite:
+			if !ok {
+				writeMsg(gorillaWs.CloseMessage, []byte{})
+				return
+			}
+			if !writeMsg(gorillaWs.TextMessage, msg) {
+				return
+			}
+		case <-ticker.C:
+			if !writeMsg(gorillaWs.PingMessage, nil) {
+				return
+			}
+		}
+	}
+}
+
+// readPump reads messages from the WebSocket connection and handles them.
+// It writes ping/pong responses through wsWrite to ensure serialized WebSocket writes.
+func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session *service.TerminalSession, wsWrite chan<- []byte, userID int64, username string, sessionID string) {
+	// Command buffer for logging
+	var commandBuffer strings.Builder
+	commandBuffer.Grow(256)
+
+	// Set up read deadline and pong handler
+	conn.SetReadLimit(TermWSReadLimit)
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(TermWSReadDeadline))
 		return nil
 	})
 
@@ -139,17 +239,18 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		}
 
 		// Parse message type
-		var msgType struct {
-			Type string `json:"type"`
-			Data string `json:"data"`
-		}
+		var msgType wsMessage
 		if err := json.Unmarshal(msg, &msgType); err != nil {
 			continue
 		}
 
 		// Handle ping/pong
 		if msgType.Type == "ping" {
-			conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"pong"}`))
+			// Route pong through wsWrite to ensure serialized writes
+			select {
+			case wsWrite <- []byte(`{"type":"pong"}`):
+			default:
+			}
 			continue
 		}
 
@@ -161,7 +262,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 					cmd := strings.TrimSpace(commandBuffer.String())
 					if cmd != "" && h.auditService != nil {
 						h.auditService.LogTerminalCommand(
-							userID.(int64), username.(string), sessionID, cmd, c.ClientIP())
+							c.Request.Context(), userID, username, sessionID, cmd, c.ClientIP())
 					}
 					commandBuffer.Reset()
 				} else if ch == 127 || ch == '\b' {
@@ -172,8 +273,10 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 						commandBuffer.WriteString(str[:len(str)-1])
 					}
 				} else if ch >= 32 {
-					// Printable character
-					commandBuffer.WriteByte(byte(ch))
+					// Prevent unbounded growth of command buffer
+					if commandBuffer.Len() < TermCmdBufLimit {
+						commandBuffer.WriteByte(byte(ch))
+					}
 				}
 			}
 		}

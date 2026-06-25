@@ -25,7 +25,7 @@ func (h *EnvConfigHandler) ListEnvConfigs(c *gin.Context) {
 		fmt.Sscanf(runtimeIDStr, "%d", &runtimeID)
 	}
 
-	configs, err := h.envConfigService.ListEnvConfigs(runtimeID)
+	configs, err := h.envConfigService.ListEnvConfigs(c.Request.Context(), runtimeID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -41,17 +41,17 @@ func (h *EnvConfigHandler) GetEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	config, err := h.envConfigService.GetEnvConfig(id)
+	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if config == nil {
-		NotFound(c, "config not found")
+		NotFound(c, "配置不存在")
 		return
 	}
 
@@ -67,7 +67,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		IsGlobal  bool   `json:"is_global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
@@ -78,7 +78,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		IsGlobal:  req.IsGlobal,
 	}
 
-	if err := h.envConfigService.CreateEnvConfig(config); err != nil {
+	if err := h.envConfigService.CreateEnvConfig(c.Request.Context(), config); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -91,7 +91,7 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -100,24 +100,24 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 		Value string `json:"value" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	config, err := h.envConfigService.GetEnvConfig(id)
+	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if config == nil {
-		NotFound(c, "config not found")
+		NotFound(c, "配置不存在")
 		return
 	}
 
 	config.Name = req.Name
 	config.Value = req.Value
 
-	if err := h.envConfigService.UpdateEnvConfig(config); err != nil {
+	if err := h.envConfigService.UpdateEnvConfig(c.Request.Context(), config); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -130,16 +130,16 @@ func (h *EnvConfigHandler) DeleteEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.envConfigService.DeleteEnvConfig(id); err != nil {
+	if err := h.envConfigService.DeleteEnvConfig(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"message": "deleted successfully"})
+	Success(c, gin.H{"message": "删除成功"})
 }
 
 // ListPathEntries returns all PATH entries
@@ -150,7 +150,7 @@ func (h *EnvConfigHandler) ListPathEntries(c *gin.Context) {
 		fmt.Sscanf(runtimeIDStr, "%d", &runtimeID)
 	}
 
-	entries, err := h.envConfigService.ListPathEntries(runtimeID)
+	entries, err := h.envConfigService.ListPathEntries(c.Request.Context(), runtimeID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -169,7 +169,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		IsGlobal  bool   `json:"is_global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
@@ -179,7 +179,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		IsGlobal:  req.IsGlobal,
 	}
 
-	if err := h.envConfigService.CreatePathEntry(entry); err != nil {
+	if err := h.envConfigService.CreatePathEntry(c.Request.Context(), entry); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -192,16 +192,16 @@ func (h *EnvConfigHandler) DeletePathEntry(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.envConfigService.DeletePathEntry(id); err != nil {
+	if err := h.envConfigService.DeletePathEntry(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"message": "deleted successfully"})
+	Success(c, gin.H{"message": "删除成功"})
 }
 
 // GenerateEnvScript generates a shell script to set environment variables
@@ -212,7 +212,7 @@ func (h *EnvConfigHandler) GenerateEnvScript(c *gin.Context) {
 		fmt.Sscanf(runtimeIDStr, "%d", &runtimeID)
 	}
 
-	script, err := h.envConfigService.GenerateEnvScript(runtimeID)
+	script, err := h.envConfigService.GenerateEnvScript(c.Request.Context(), runtimeID)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -227,7 +227,7 @@ func (h *EnvConfigHandler) GenerateEnvScript(c *gin.Context) {
 func (h *EnvConfigHandler) ListGlobalConfigs(c *gin.Context) {
 	category := c.Query("category")
 
-	configs, err := h.envConfigService.ListGlobalConfigs(category)
+	configs, err := h.envConfigService.ListGlobalConfigs(c.Request.Context(), category)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -243,17 +243,17 @@ func (h *EnvConfigHandler) GetGlobalConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	config, err := h.envConfigService.GetGlobalConfig(id)
+	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if config == nil {
-		NotFound(c, "config not found")
+		NotFound(c, "配置不存在")
 		return
 	}
 
@@ -269,7 +269,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
@@ -280,7 +280,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		Description: req.Description,
 	}
 
-	if err := h.envConfigService.CreateGlobalConfig(config); err != nil {
+	if err := h.envConfigService.CreateGlobalConfig(c.Request.Context(), config); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -293,7 +293,7 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
@@ -302,24 +302,24 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	config, err := h.envConfigService.GetGlobalConfig(id)
+	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if config == nil {
-		NotFound(c, "config not found")
+		NotFound(c, "配置不存在")
 		return
 	}
 
 	config.Value = req.Value
 	config.Description = req.Description
 
-	if err := h.envConfigService.UpdateGlobalConfig(config); err != nil {
+	if err := h.envConfigService.UpdateGlobalConfig(c.Request.Context(), config); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -332,14 +332,14 @@ func (h *EnvConfigHandler) DeleteGlobalConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	if err := h.envConfigService.DeleteGlobalConfig(id); err != nil {
+	if err := h.envConfigService.DeleteGlobalConfig(c.Request.Context(), id); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
-	Success(c, gin.H{"message": "deleted successfully"})
+	Success(c, gin.H{"message": "删除成功"})
 }

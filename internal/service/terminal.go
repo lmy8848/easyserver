@@ -1,5 +1,5 @@
-//go:build linux
-// +build linux
+//go:build linux && cgo
+// +build linux,cgo
 
 package service
 
@@ -15,6 +15,14 @@ import (
 	"github.com/creack/pty"
 )
 
+// Terminal session constants
+const (
+	// TermPTYReadBufSize is the buffer size for reading from PTY
+	TermPTYReadBufSize = 4096
+	// TermSendChanSize is the buffer size for the terminal send channel
+	TermSendChanSize = 256
+)
+
 type TerminalSession struct {
 	ID       string
 	PTY      *os.File
@@ -22,6 +30,8 @@ type TerminalSession struct {
 	Send     chan []byte
 	mu       sync.Mutex
 	closed   bool
+	// LastActivity tracks the last time input was received
+	LastActivity time.Time
 }
 
 type TerminalManager struct {
@@ -62,10 +72,11 @@ func (m *TerminalManager) CreateSession(id string) (*TerminalSession, error) {
 	}
 
 	session := &TerminalSession{
-		ID:   id,
-		PTY:  ptmx,
-		Cmd:  cmd,
-		Send: make(chan []byte, 256),
+		ID:           id,
+		PTY:          ptmx,
+		Cmd:          cmd,
+		Send:         make(chan []byte, TermSendChanSize),
+		LastActivity: time.Now(),
 	}
 
 	m.sessions[id] = session
@@ -134,6 +145,20 @@ func (s *TerminalSession) Write(data []byte) error {
 	return err
 }
 
+// UpdateActivity records the last activity time
+func (s *TerminalSession) UpdateActivity() {
+	s.mu.Lock()
+	s.LastActivity = time.Now()
+	s.mu.Unlock()
+}
+
+// IsClosed returns whether the session is closed
+func (s *TerminalSession) IsClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 // Close closes the terminal session
 func (s *TerminalSession) Close() {
 	s.mu.Lock()
@@ -144,23 +169,31 @@ func (s *TerminalSession) Close() {
 	}
 
 	s.closed = true
-	s.PTY.Close()
 
+	// Kill process before closing PTY to avoid race condition:
+	// closing PTY while Read is blocked can cause FD reuse issues.
 	if s.Cmd.Process != nil {
 		s.Cmd.Process.Kill()
+		s.Cmd.Wait()
 	}
 
+	s.PTY.Close()
 	close(s.Send)
 }
 
 // readLoop reads from PTY and sends to WebSocket
 func (s *TerminalSession) readLoop() {
-	buf := make([]byte, 4096)
+	buf := make([]byte, TermPTYReadBufSize)
 
 	for {
+		// Check closed flag before attempting read
+		if s.IsClosed() {
+			return
+		}
+
 		n, err := s.PTY.Read(buf)
 		if err != nil {
-			if !s.closed {
+			if !s.IsClosed() {
 				// Send exit message
 				exitMsg, _ := json.Marshal(map[string]interface{}{
 					"type": "exit",
@@ -204,6 +237,7 @@ func (s *TerminalSession) HandleInput(msg []byte) error {
 
 	switch input.Type {
 	case "input":
+		s.UpdateActivity()
 		return s.Write([]byte(input.Data))
 	case "resize":
 		return s.Resize(input.Cols, input.Rows)
@@ -219,13 +253,17 @@ func (m *TerminalManager) StartIdleTimeout(timeout time.Duration) {
 		defer ticker.Stop()
 
 		for range ticker.C {
+			now := time.Now()
+
 			// Use RLock first to check sessions
 			m.mu.RLock()
 			var toClose []string
 			for id, session := range m.sessions {
-				if session.Cmd.Process != nil {
-					err := session.Cmd.Process.Signal(os.Signal(nil))
-					if err != nil {
+				if !session.IsClosed() {
+					session.mu.Lock()
+					idle := now.Sub(session.LastActivity)
+					session.mu.Unlock()
+					if idle >= timeout {
 						toClose = append(toClose, id)
 					}
 				}
@@ -239,7 +277,7 @@ func (m *TerminalManager) StartIdleTimeout(timeout time.Duration) {
 					if session, exists := m.sessions[id]; exists {
 						session.Close()
 						delete(m.sessions, id)
-						log.Printf("terminal: session %s timeout", id)
+						log.Printf("terminal: session %s idle timeout", id)
 					}
 				}
 				m.mu.Unlock()

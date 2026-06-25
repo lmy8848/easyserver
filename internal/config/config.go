@@ -12,11 +12,18 @@ type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	Auth         AuthConfig         `yaml:"auth"`
 	Monitor      MonitorConfig      `yaml:"monitor"`
+	Alerts       AlertConfig        `yaml:"alerts"`
 	Database     DatabaseConfig     `yaml:"database"`
 	Audit        AuditConfig        `yaml:"audit"`
 	FileManager  FileManagerConfig  `yaml:"filemanager"`
 	TencentCloud TencentCloudConfig `yaml:"tencentcloud"`
 	Deploy       DeployConfig       `yaml:"deploy"`
+	Notify       NotifyConfig       `yaml:"notify"`
+}
+
+type NotifyConfig struct {
+	WebhookURL string `yaml:"webhook_url"` // 钉钉/飞书/企微 Webhook URL
+	Enabled    bool   `yaml:"enabled"`
 }
 
 type ServerConfig struct {
@@ -35,14 +42,15 @@ type TLSConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret        string        `yaml:"jwt_secret"`
-	SessionTimeout   time.Duration `yaml:"session_timeout"`
-	IdleTimeout      time.Duration `yaml:"idle_timeout"`
-	MaxLoginAttempts int           `yaml:"max_login_attempts"`
-	LockoutDuration  time.Duration `yaml:"lockout_duration"`
-	RateLimit        int           `yaml:"rate_limit"`
-	RateInterval     time.Duration `yaml:"rate_interval"`
-	IPWhitelist      []string      `yaml:"ip_whitelist"`
+	JWTSecret              string        `yaml:"jwt_secret"`
+	SessionTimeout         time.Duration `yaml:"session_timeout"`
+	IdleTimeout            time.Duration `yaml:"idle_timeout"`
+	MaxLoginAttempts       int           `yaml:"max_login_attempts"`
+	LockoutDuration        time.Duration `yaml:"lockout_duration"`
+	RateLimit              int           `yaml:"rate_limit"`
+	RateInterval           time.Duration `yaml:"rate_interval"`
+	IPWhitelist            []string      `yaml:"ip_whitelist"`
+	SessionCleanupInterval time.Duration `yaml:"session_cleanup_interval"`
 }
 
 type MonitorConfig struct {
@@ -50,13 +58,26 @@ type MonitorConfig struct {
 	CollectInterval  time.Duration `yaml:"collect_interval"`
 }
 
+type AlertConfig struct {
+	Rules []AlertRuleConfig `yaml:"rules"`
+}
+
+type AlertRuleConfig struct {
+	Name      string  `yaml:"name"`
+	Metric    string  `yaml:"metric"`
+	Threshold float64 `yaml:"threshold"`
+	Duration  int     `yaml:"duration"`
+	Enabled   bool    `yaml:"enabled"`
+}
+
 type DatabaseConfig struct {
 	Path string `yaml:"path"`
 }
 
 type AuditConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	LogPath string `yaml:"log_path"`
+	Enabled      bool   `yaml:"enabled"`
+	LogPath      string `yaml:"log_path"`
+	RetentionDays int   `yaml:"retention_days"`
 }
 
 type FileManagerConfig struct {
@@ -87,12 +108,13 @@ func Load(path string) (*Config, error) {
 			Host: "0.0.0.0",
 		},
 		Auth: AuthConfig{
-			SessionTimeout:   24 * time.Hour,
-			IdleTimeout:      30 * time.Minute,
-			MaxLoginAttempts: 5,
-			LockoutDuration:  15 * time.Minute,
-			RateLimit:        1000,
-			RateInterval:     time.Minute,
+			SessionTimeout:         24 * time.Hour,
+			IdleTimeout:            30 * time.Minute,
+			MaxLoginAttempts:       5,
+			LockoutDuration:        15 * time.Minute,
+			RateLimit:              100,
+			RateInterval:           time.Minute,
+			SessionCleanupInterval: 5 * time.Minute,
 		},
 		Monitor: MonitorConfig{
 			HistoryRetention: 24 * time.Hour,
@@ -102,8 +124,9 @@ func Load(path string) (*Config, error) {
 			Path: "./data/easyserver.db",
 		},
 		Audit: AuditConfig{
-			Enabled: true,
-			LogPath: "./data/audit.log",
+			Enabled:       true,
+			LogPath:       "./data/audit.log",
+			RetentionDays: 90,
 		},
 	}
 
@@ -170,4 +193,13 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv("EASYSERVER_ENCRYPTION_KEY"); v != "" {
 		c.Deploy.EncryptionKey = v
 	}
+}
+
+// Save writes the configuration to a YAML file
+func Save(cfg *Config, path string) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
 }

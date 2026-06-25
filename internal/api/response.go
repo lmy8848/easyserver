@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ const (
 	CodeTokenExpired  = 40101
 	CodeForbidden     = 40300
 	CodeNotFound      = 40400
+	CodeConflict      = 40900
 	CodeRateLimit     = 42900
 	CodeInternalError = 50000
 )
@@ -68,9 +70,18 @@ func NotFound(c *gin.Context, message string) {
 	Error(c, http.StatusNotFound, CodeNotFound, message)
 }
 
-// InternalError returns a 500 error
+// Conflict returns a 409 error
+func Conflict(c *gin.Context, message string) {
+	Error(c, http.StatusConflict, CodeConflict, message)
+}
+
+// internalServerErrorMsg is the generic message returned to clients on internal errors
+const internalServerErrorMsg = "internal server error"
+
+// InternalError logs the full error server-side and returns a generic message to the client.
 func InternalError(c *gin.Context, message string) {
-	Error(c, http.StatusInternalServerError, CodeInternalError, message)
+	log.Printf("InternalError [%s %s]: %s", c.Request.Method, c.Request.URL.Path, message)
+	Error(c, http.StatusInternalServerError, CodeInternalError, internalServerErrorMsg)
 }
 
 // Paginated returns a paginated response

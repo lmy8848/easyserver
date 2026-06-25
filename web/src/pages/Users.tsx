@@ -11,6 +11,7 @@ import {
 import { userApi } from '../services/api';
 import type { User } from '../types';
 import { useAuthStore } from '../store/useAuthStore';
+import { COLORS } from '../utils/theme';
 
 export default function Users() {
   const [users, setUsers] = useState<User[]>([]);
@@ -244,7 +245,7 @@ export default function Users() {
       key: 'username',
       render: (text: string, record: User) => (
         <Space>
-          <UserOutlined style={{ color: record.role === 'admin' ? '#ff4d4f' : '#1890ff' }} />
+          <UserOutlined style={{ color: record.role === 'admin' ? COLORS.ERROR : COLORS.PRIMARY }} />
           {text}
           {record.id === currentUser?.id && <Tag color="blue">当前</Tag>}
         </Space>
@@ -351,16 +352,16 @@ export default function Users() {
           <Card size="small"><Statistic title="总用户" value={stats.total} prefix={<UserOutlined />} /></Card>
         </Col>
         <Col xs={12} sm={8} lg={4}>
-          <Card size="small"><Statistic title="管理员" value={stats.admin} valueStyle={{ color: '#ff4d4f' }} /></Card>
+          <Card size="small"><Statistic title="管理员" value={stats.admin} styles={{ content: { color: '#ff4d4f' } }} /></Card>
         </Col>
         <Col xs={12} sm={8} lg={4}>
-          <Card size="small"><Statistic title="操作员" value={stats.operator} valueStyle={{ color: '#1890ff' }} /></Card>
+          <Card size="small"><Statistic title="操作员" value={stats.operator} styles={{ content: { color: '#1890ff' } }} /></Card>
         </Col>
         <Col xs={12} sm={8} lg={4}>
-          <Card size="small"><Statistic title="观察者" value={stats.viewer} valueStyle={{ color: '#52c41a' }} /></Card>
+          <Card size="small"><Statistic title="观察者" value={stats.viewer} styles={{ content: { color: '#52c41a' } }} /></Card>
         </Col>
         <Col xs={12} sm={8} lg={4}>
-          <Card size="small"><Statistic title="已锁定" value={stats.locked} valueStyle={{ color: '#ff4d4f' }} prefix={<LockOutlined />} /></Card>
+          <Card size="small"><Statistic title="已锁定" value={stats.locked} styles={{ content: { color: '#ff4d4f' } }} prefix={<LockOutlined />} /></Card>
         </Col>
         <Col xs={12} sm={8} lg={4}>
           <Card size="small" style={{ cursor: 'pointer' }} onClick={showSessions}>

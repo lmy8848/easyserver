@@ -2,9 +2,11 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
+	"log"
+	"net/url"
 	"os"
 	"path/filepath"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -15,7 +17,17 @@ func Init(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_txlock=immediate")
+	// Build DSN using url.Parse for safe parameter encoding
+	dsn := &url.URL{
+		Path: dbPath,
+	}
+	params := dsn.Query()
+	params.Set("_journal_mode", "WAL")
+	params.Set("_busy_timeout", "5000")
+	params.Set("_txlock", "immediate")
+	dsn.RawQuery = params.Encode()
+
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, err
 	}
@@ -23,14 +35,32 @@ func Init(dbPath string) (*sql.DB, error) {
 	// Set connection pool settings for better concurrency
 	db.SetMaxOpenConns(1) // SQLite only supports one writer at a time
 	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(time.Hour)
 
 	if err := db.Ping(); err != nil {
 		return nil, err
 	}
 
-	if err := createTables(db); err != nil {
-		return nil, err
+	// Enable foreign key enforcement (SQLite has it OFF by default)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
+	// Try migration-based initialization first
+	// Resolve migrations directory relative to the executable
+	exePath, err := os.Executable()
+	migrationsDir := "migrations"
+	if err == nil {
+		migrationsDir = filepath.Join(filepath.Dir(exePath), "migrations")
+	}
+	if err := Migrate(db, migrationsDir); err != nil {
+		// Fallback to legacy initialization if migrations directory not found
+		log.Printf("migrate: falling back to legacy init: %v", err)
+		if err := createTables(db); err != nil {
+			return nil, err
+		}
+		if err := migrateDatabase(db); err != nil {
+			return nil, fmt.Errorf("database migration failed: %w", err)
+		}
 	}
 
 	return db, nil
@@ -108,7 +138,8 @@ func createTables(db *sql.DB) error {
 			detail TEXT,
 			ip TEXT,
 			user_agent TEXT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			signature TEXT DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS deploy_servers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +203,39 @@ func createTables(db *sql.DB) error {
 	for _, q := range queries {
 		if _, err := db.Exec(q); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// migrateDatabase handles schema migrations for existing databases
+func migrateDatabase(db *sql.DB) error {
+	migrations := []struct {
+		column string
+		query  string
+		table  string
+	}{
+		{"totp_secret", "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT ''", "users"},
+		{"totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0", "users"},
+		{"totp_backup_codes", "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT DEFAULT '[]'", "users"},
+		{"signature", "ALTER TABLE audit_logs ADD COLUMN signature TEXT DEFAULT ''", "audit_logs"},
+	}
+
+	for _, m := range migrations {
+		// Check if column already exists
+		var exists bool
+		err := db.QueryRow(`
+			SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?
+		`, m.table, m.column).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("check column %s: %w", m.column, err)
+		}
+
+		if !exists {
+			if _, err := db.Exec(m.query); err != nil {
+				return fmt.Errorf("add column %s: %w", m.column, err)
+			}
 		}
 	}
 

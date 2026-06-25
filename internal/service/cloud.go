@@ -1,17 +1,21 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	lighthouse "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse/v20200324"
+	monitor "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor/v20180724"
 )
 
 type CloudService struct {
 	client     *lighthouse.Client
+	credential *common.Credential
 	instanceID string
 	region     string
 }
@@ -78,17 +82,21 @@ func NewCloudService(secretID, secretKey, region, instanceID string) (*CloudServ
 
 	return &CloudService{
 		client:     client,
+		credential: credential,
 		instanceID: instanceID,
 		region:     region,
 	}, nil
 }
 
 // GetInstances returns all instances
-func (s *CloudService) GetInstances() ([]InstanceInfo, error) {
+func (s *CloudService) GetInstances(ctx context.Context) ([]InstanceInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewDescribeInstancesRequest()
 	request.Limit = common.Int64Ptr(100)
 
-	response, err := s.client.DescribeInstances(request)
+	response, err := s.client.DescribeInstancesWithContext(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to describe instances: %w", err)
 	}
@@ -121,11 +129,14 @@ func (s *CloudService) GetInstances() ([]InstanceInfo, error) {
 }
 
 // GetInstance returns a specific instance
-func (s *CloudService) GetInstance(instanceID string) (*InstanceInfo, error) {
+func (s *CloudService) GetInstance(ctx context.Context, instanceID string) (*InstanceInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewDescribeInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
-	response, err := s.client.DescribeInstances(request)
+	response, err := s.client.DescribeInstancesWithContext(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to describe instance: %w", err)
 	}
@@ -158,11 +169,14 @@ func (s *CloudService) GetInstance(instanceID string) (*InstanceInfo, error) {
 }
 
 // StartInstance starts an instance
-func (s *CloudService) StartInstance(instanceID string) error {
+func (s *CloudService) StartInstance(ctx context.Context, instanceID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewStartInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
-	_, err := s.client.StartInstances(request)
+	_, err := s.client.StartInstancesWithContext(ctx, request)
 	if err != nil {
 		return fmt.Errorf("failed to start instance: %w", err)
 	}
@@ -172,11 +186,14 @@ func (s *CloudService) StartInstance(instanceID string) error {
 }
 
 // StopInstance stops an instance
-func (s *CloudService) StopInstance(instanceID string) error {
+func (s *CloudService) StopInstance(ctx context.Context, instanceID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewStopInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
-	_, err := s.client.StopInstances(request)
+	_, err := s.client.StopInstancesWithContext(ctx, request)
 	if err != nil {
 		return fmt.Errorf("failed to stop instance: %w", err)
 	}
@@ -186,11 +203,14 @@ func (s *CloudService) StopInstance(instanceID string) error {
 }
 
 // RestartInstance restarts an instance
-func (s *CloudService) RestartInstance(instanceID string) error {
+func (s *CloudService) RestartInstance(ctx context.Context, instanceID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewRebootInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
-	_, err := s.client.RebootInstances(request)
+	_, err := s.client.RebootInstancesWithContext(ctx, request)
 	if err != nil {
 		return fmt.Errorf("failed to restart instance: %w", err)
 	}
@@ -200,18 +220,22 @@ func (s *CloudService) RestartInstance(instanceID string) error {
 }
 
 // GetFirewallRules returns firewall rules for an instance
-func (s *CloudService) GetFirewallRules(instanceID string) ([]FirewallRule, error) {
+func (s *CloudService) GetFirewallRules(ctx context.Context, instanceID string) ([]FirewallRule, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewDescribeFirewallRulesRequest()
 	request.InstanceId = common.StringPtr(instanceID)
 
-	response, err := s.client.DescribeFirewallRules(request)
+	response, err := s.client.DescribeFirewallRulesWithContext(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to describe firewall rules: %w", err)
 	}
 
 	var rules []FirewallRule
-	for _, rule := range response.Response.FirewallRuleSet {
+	for i, rule := range response.Response.FirewallRuleSet {
 		r := FirewallRule{
+			RuleID:   strconv.Itoa(i),
 			Protocol: *rule.Protocol,
 			Port:     *rule.Port,
 			Source:   *rule.CidrBlock,
@@ -229,7 +253,10 @@ func (s *CloudService) GetFirewallRules(instanceID string) ([]FirewallRule, erro
 }
 
 // AddFirewallRule adds a firewall rule
-func (s *CloudService) AddFirewallRule(instanceID string, rule FirewallRule) error {
+func (s *CloudService) AddFirewallRule(ctx context.Context, instanceID string, rule FirewallRule) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	request := lighthouse.NewCreateFirewallRulesRequest()
 	request.InstanceId = common.StringPtr(instanceID)
 
@@ -246,7 +273,7 @@ func (s *CloudService) AddFirewallRule(instanceID string, rule FirewallRule) err
 
 	request.FirewallRules = []*lighthouse.FirewallRule{firewallRule}
 
-	_, err := s.client.CreateFirewallRules(request)
+	_, err := s.client.CreateFirewallRulesWithContext(ctx, request)
 	if err != nil {
 		return fmt.Errorf("failed to create firewall rule: %w", err)
 	}
@@ -255,49 +282,300 @@ func (s *CloudService) AddFirewallRule(instanceID string, rule FirewallRule) err
 	return nil
 }
 
-// DeleteFirewallRule deletes a firewall rule
-func (s *CloudService) DeleteFirewallRule(instanceID string, ruleID string) error {
-	// Note: Tencent Cloud API doesn't support direct rule ID deletion
-	// Need to get current rules, remove the target, and update
-	// This is a simplified implementation
-	return fmt.Errorf("firewall rule deletion not implemented")
+// DeleteFirewallRule deletes a firewall rule by its index-based ID.
+// The Lighthouse DeleteFirewallRules API requires passing the full rule object,
+// so we first fetch all rules and identify the target by index.
+func (s *CloudService) DeleteFirewallRule(ctx context.Context, instanceID string, ruleID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Fetch all current rules to find the target
+	describeReq := lighthouse.NewDescribeFirewallRulesRequest()
+	describeReq.InstanceId = common.StringPtr(instanceID)
+	describeReq.Limit = common.Int64Ptr(100)
+
+	describeResp, err := s.client.DescribeFirewallRulesWithContext(ctx, describeReq)
+	if err != nil {
+		return fmt.Errorf("failed to list firewall rules for deletion: %w", err)
+	}
+
+	rules := describeResp.Response.FirewallRuleSet
+	if len(rules) == 0 {
+		return fmt.Errorf("no firewall rules found for instance %s", instanceID)
+	}
+
+	// Parse ruleID as a 0-based index
+	idx, err := strconv.Atoi(ruleID)
+	if err != nil || idx < 0 || idx >= len(rules) {
+		return fmt.Errorf("invalid firewall rule ID %q: must be 0-%d", ruleID, len(rules)-1)
+	}
+
+	targetRule := rules[idx]
+
+	// Convert FirewallRuleInfo to FirewallRule for deletion
+	deleteRule := &lighthouse.FirewallRule{
+		Protocol:  targetRule.Protocol,
+		Port:      targetRule.Port,
+		CidrBlock: targetRule.CidrBlock,
+		Action:    targetRule.Action,
+	}
+
+	// Call DeleteFirewallRules with the matched rule
+	deleteReq := lighthouse.NewDeleteFirewallRulesRequest()
+	deleteReq.InstanceId = common.StringPtr(instanceID)
+	deleteReq.FirewallRules = []*lighthouse.FirewallRule{deleteRule}
+
+	_, err = s.client.DeleteFirewallRulesWithContext(ctx, deleteReq)
+	if err != nil {
+		return fmt.Errorf("failed to delete firewall rule #%s: %w", ruleID, err)
+	}
+
+	log.Printf("cloud: deleted firewall rule #%s for instance %s (protocol=%s port=%s source=%s action=%s)",
+		ruleID, instanceID,
+		derefString(targetRule.Protocol), derefString(targetRule.Port),
+		derefString(targetRule.CidrBlock), derefString(targetRule.Action))
+	return nil
 }
 
 // GetSnapshots returns snapshots for an instance
-func (s *CloudService) GetSnapshots(instanceID string) ([]SnapshotInfo, error) {
-	// Note: Tencent Cloud Lighthouse API for snapshots may differ
-	// This is a placeholder implementation
-	return []SnapshotInfo{}, nil
+func (s *CloudService) GetSnapshots(ctx context.Context, instanceID string) ([]SnapshotInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request := lighthouse.NewDescribeSnapshotsRequest()
+	// Use Filter to filter by instance ID
+	request.Filters = []*lighthouse.Filter{
+		{
+			Name:   common.StringPtr("instance-id"),
+			Values: common.StringPtrs([]string{instanceID}),
+		},
+	}
+
+	response, err := s.client.DescribeSnapshotsWithContext(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe snapshots: %w", err)
+	}
+
+	var snapshots []SnapshotInfo
+	for _, snap := range response.Response.SnapshotSet {
+		info := SnapshotInfo{
+			SnapshotID: derefString(snap.SnapshotId),
+			InstanceID: instanceID,
+			Status:     derefString(snap.SnapshotState),
+			DiskGB:     derefInt64(snap.DiskSize),
+		}
+		if snap.SnapshotName != nil {
+			info.Name = *snap.SnapshotName
+		}
+		snapshots = append(snapshots, info)
+	}
+
+	return snapshots, nil
 }
 
-// CreateSnapshot creates a snapshot
-func (s *CloudService) CreateSnapshot(instanceID, name string) error {
-	// Note: Tencent Cloud Lighthouse API for snapshot creation may differ
-	// This is a placeholder implementation
-	return fmt.Errorf("snapshot creation not implemented yet")
+// CreateSnapshot creates a snapshot for an instance
+func (s *CloudService) CreateSnapshot(ctx context.Context, instanceID, name string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request := lighthouse.NewCreateInstanceSnapshotRequest()
+	request.InstanceId = common.StringPtr(instanceID)
+	request.SnapshotName = common.StringPtr(name)
+
+	_, err := s.client.CreateInstanceSnapshotWithContext(ctx, request)
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot: %w", err)
+	}
+
+	log.Printf("cloud: created snapshot %q for instance %s", name, instanceID)
+	return nil
 }
 
-// ApplySnapshot applies a snapshot (rollback)
-func (s *CloudService) ApplySnapshot(snapshotID string) error {
-	// Note: Tencent Cloud Lighthouse API for snapshot rollback may differ
-	// This is a placeholder implementation
-	return fmt.Errorf("snapshot rollback not implemented yet")
+// ApplySnapshot applies a snapshot (rollback an instance to a snapshot)
+func (s *CloudService) ApplySnapshot(ctx context.Context, snapshotID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// First verify the snapshot exists
+	describeReq := lighthouse.NewDescribeSnapshotsRequest()
+	describeReq.SnapshotIds = common.StringPtrs([]string{snapshotID})
+
+	describeResp, err := s.client.DescribeSnapshotsWithContext(ctx, describeReq)
+	if err != nil {
+		return fmt.Errorf("failed to describe snapshot %s: %w", snapshotID, err)
+	}
+
+	if len(describeResp.Response.SnapshotSet) == 0 {
+		return fmt.Errorf("snapshot %s not found", snapshotID)
+	}
+
+	// Apply the snapshot to the instance
+	request := lighthouse.NewApplyInstanceSnapshotRequest()
+	request.InstanceId = common.StringPtr(s.instanceID)
+	request.SnapshotId = common.StringPtr(snapshotID)
+
+	_, err = s.client.ApplyInstanceSnapshotWithContext(ctx, request)
+	if err != nil {
+		return fmt.Errorf("failed to apply snapshot: %w", err)
+	}
+
+	log.Printf("cloud: applied snapshot %s to instance %s", snapshotID, s.instanceID)
+	return nil
 }
 
-// GetMonitorData returns monitor data for an instance
-func (s *CloudService) GetMonitorData(instanceID, metric string, start, end time.Time) (*MonitorData, error) {
-	// Note: Tencent Cloud Lighthouse API for monitor data may differ
-	// This is a placeholder implementation
-	return &MonitorData{
+// derefString safely dereferences a string pointer, returns empty string if nil
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// derefInt64 safely dereferences an int64 pointer, returns 0 if nil
+func derefInt64(p *int64) int {
+	if p == nil {
+		return 0
+	}
+	return int(*p)
+}
+
+// GetMonitorData returns monitor data for an instance.
+// The Lighthouse SDK does not provide direct monitoring APIs, so this uses the
+// Cloud Monitor service (monitor.tencentcloudapi.com) with namespace QCE/LIGHTHOUSE.
+// metricConfig maps frontend metric names to Tencent Cloud Monitor metric names
+var metricConfig = map[string]struct {
+	TCMetric string
+	Unit     string
+}{
+	"CPU_USAGE":      {TCMetric: "CpuUsage", Unit: "%"},
+	"MEMORY_USAGE":   {TCMetric: "MemUsage", Unit: "%"},
+	"DISK_USAGE":     {TCMetric: "DiskUsage", Unit: "%"},
+	"NETWORK_IN_OUT": {TCMetric: "LanOuttraffic", Unit: "Bps"},
+}
+
+func (s *CloudService) GetMonitorData(ctx context.Context, instanceID, metric string, start, end time.Time) (*MonitorData, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	mc, ok := metricConfig[metric]
+	if !ok {
+		return nil, fmt.Errorf("unsupported metric: %s (supported: CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT)", metric)
+	}
+
+	// Create a Cloud Monitor client using the same credentials
+	cpf := profile.NewClientProfile()
+	cpf.HttpProfile.Endpoint = "monitor.tencentcloudapi.com"
+	monitorClient, err := monitor.NewClient(s.credential, s.region, cpf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create monitor client: %w", err)
+	}
+
+	// Build the GetMonitorData request
+	request := monitor.NewGetMonitorDataRequest()
+	request.Namespace = common.StringPtr("QCE/LIGHTHOUSE")
+	request.MetricName = common.StringPtr(mc.TCMetric)
+	request.Period = common.Uint64Ptr(60) // 60-second intervals
+	request.StartTime = common.StringPtr(start.Format(time.RFC3339))
+	request.EndTime = common.StringPtr(end.Format(time.RFC3339))
+	request.Instances = []*monitor.Instance{
+		{
+			Dimensions: []*monitor.Dimension{
+				{
+					Name:  common.StringPtr("InstanceId"),
+					Value: common.StringPtr(instanceID),
+				},
+			},
+		},
+	}
+
+	response, err := monitorClient.GetMonitorDataWithContext(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get monitor data for metric %s: %w", metric, err)
+	}
+
+	// Parse response into MonitorData
+	data := &MonitorData{
 		Metric: metric,
-		Unit:   "%",
-		Points: []MonitorPoint{},
-	}, nil
+		Unit:   mc.Unit,
+		Points: make([]MonitorPoint, 0),
+	}
+
+	if response.Response != nil {
+		for _, dp := range response.Response.DataPoints {
+			if dp == nil {
+				continue
+			}
+			for i, ts := range dp.Timestamps {
+				if ts == nil {
+					continue
+				}
+				value := 0.0
+				if i < len(dp.Values) && dp.Values[i] != nil {
+					value = *dp.Values[i]
+				}
+				data.Points = append(data.Points, MonitorPoint{
+					Timestamp: time.Unix(int64(*ts), 0).Format(time.RFC3339),
+					Value:     value,
+				})
+			}
+		}
+	}
+
+	log.Printf("cloud: retrieved %d monitor data points for instance %s (metric=%s)", len(data.Points), instanceID, metric)
+	return data, nil
 }
 
-// GetTraffic returns traffic package info
-func (s *CloudService) GetTraffic(instanceID string) (*TrafficInfo, error) {
-	// Note: Tencent Cloud Lighthouse API for traffic may differ
-	// This is a placeholder implementation
-	return &TrafficInfo{}, nil
+// GetTraffic returns traffic package info for an instance.
+// Uses DescribeInstancesTrafficPackages to retrieve traffic usage and quota.
+func (s *CloudService) GetTraffic(ctx context.Context, instanceID string) (*TrafficInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	request := lighthouse.NewDescribeInstancesTrafficPackagesRequest()
+	if instanceID != "" {
+		request.InstanceIds = common.StringPtrs([]string{instanceID})
+	}
+
+	response, err := s.client.DescribeInstancesTrafficPackagesWithContext(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe traffic packages: %w", err)
+	}
+
+	if len(response.Response.InstanceTrafficPackageSet) == 0 {
+		log.Printf("cloud: no traffic packages found for instance %s", instanceID)
+		return &TrafficInfo{}, nil
+	}
+
+	instanceTraffic := response.Response.InstanceTrafficPackageSet[0]
+
+	const bytesPerGB int64 = 1024 * 1024 * 1024
+	var totalBytes, usedBytes, remainingBytes int64
+	var latestExpiry string
+
+	for _, pkg := range instanceTraffic.TrafficPackageSet {
+		if pkg.TrafficPackageTotal != nil {
+			totalBytes += *pkg.TrafficPackageTotal
+		}
+		if pkg.TrafficUsed != nil {
+			usedBytes += *pkg.TrafficUsed
+		}
+		if pkg.TrafficPackageRemaining != nil {
+			remainingBytes += *pkg.TrafficPackageRemaining
+		}
+		if pkg.EndTime != nil && *pkg.EndTime > latestExpiry {
+			latestExpiry = *pkg.EndTime
+		}
+	}
+
+	info := &TrafficInfo{
+		PackageTotalGB:     int(totalBytes / bytesPerGB),
+		PackageUsedGB:      int(usedBytes / bytesPerGB),
+		PackageRemainingGB: int(remainingBytes / bytesPerGB),
+		PackageExpiredAt:   latestExpiry,
+	}
+
+	log.Printf("cloud: retrieved traffic info for instance %s (total=%dGB, used=%dGB, remaining=%dGB)",
+		instanceID, info.PackageTotalGB, info.PackageUsedGB, info.PackageRemainingGB)
+	return info, nil
 }

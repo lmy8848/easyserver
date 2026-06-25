@@ -21,7 +21,26 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Report error to monitoring endpoint
+    const errorReport = {
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+    };
+    // Log locally for development
     console.error('ErrorBoundary caught:', error, errorInfo);
+    // Send to backend error reporting endpoint (fire-and-forget)
+    try {
+      fetch('/api/system/error-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(errorReport),
+      }).catch(() => { /* ignore report failures */ });
+    } catch {
+      // Ignore errors in error reporting
+    }
   }
 
   handleReset = () => {

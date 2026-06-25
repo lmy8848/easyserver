@@ -1,26 +1,34 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
 type RuntimeService struct {
-	db *sql.DB
+	db       *sql.DB
+	executor executor.CommandExecutor
 }
 
-func NewRuntimeService(db *sql.DB) *RuntimeService {
-	return &RuntimeService{db: db}
+func NewRuntimeService(db *sql.DB, exec executor.CommandExecutor) *RuntimeService {
+	return &RuntimeService{db: db, executor: exec}
 }
 
-// InitTables creates runtime tables if they don't exist
-func (s *RuntimeService) InitTables() error {
+// Deprecated: InitTables is kept for backward compatibility only.
+// Table creation is now handled by the migration system (migrations/ directory).
+func (s *RuntimeService) InitTables(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS runtime_environments (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +48,7 @@ func (s *RuntimeService) InitTables() error {
 	}
 
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
@@ -54,15 +62,18 @@ func (s *RuntimeService) InitTables() error {
 	}
 
 	for _, m := range migrations {
-		s.db.Exec(m) // Ignore errors (column already exists)
+		s.db.ExecContext(ctx, m) // Ignore errors (column already exists)
 	}
 
 	return nil
 }
 
 // ListAll returns all installed runtime environments
-func (s *RuntimeService) ListAll() ([]model.RuntimeEnvironment, error) {
-	rows, err := s.db.Query(
+func (s *RuntimeService) ListAll(ctx context.Context) ([]model.RuntimeEnvironment, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments ORDER BY name, version",
 	)
 	if err != nil {
@@ -81,13 +92,19 @@ func (s *RuntimeService) ListAll() ([]model.RuntimeEnvironment, error) {
 		env.IsDefault = isDefault != 0
 		environments = append(environments, env)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
 
 	return environments, nil
 }
 
 // ListByName returns all versions of a specific runtime environment
-func (s *RuntimeService) ListByName(name string) ([]model.RuntimeEnvironment, error) {
-	rows, err := s.db.Query(
+func (s *RuntimeService) ListByName(ctx context.Context, name string) ([]model.RuntimeEnvironment, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments WHERE name = ? ORDER BY version",
 		name,
 	)
@@ -107,15 +124,21 @@ func (s *RuntimeService) ListByName(name string) ([]model.RuntimeEnvironment, er
 		env.IsDefault = isDefault != 0
 		environments = append(environments, env)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
 
 	return environments, nil
 }
 
 // GetDefault returns the default version of a runtime environment
-func (s *RuntimeService) GetDefault(name string) (*model.RuntimeEnvironment, error) {
+func (s *RuntimeService) GetDefault(ctx context.Context, name string) (*model.RuntimeEnvironment, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	env := &model.RuntimeEnvironment{}
 	var isDefault int
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		"SELECT id, name, version, path, is_default, status, installed_at FROM runtime_environments WHERE name = ? AND is_default = 1",
 		name,
 	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.InstalledAt)
@@ -130,10 +153,13 @@ func (s *RuntimeService) GetDefault(name string) (*model.RuntimeEnvironment, err
 }
 
 // GetByID returns a runtime environment by ID
-func (s *RuntimeService) GetByID(id int64) (*model.RuntimeEnvironment, error) {
+func (s *RuntimeService) GetByID(ctx context.Context, id int64) (*model.RuntimeEnvironment, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	env := &model.RuntimeEnvironment{}
 	var isDefault int
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments WHERE id = ?",
 		id,
 	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
@@ -155,7 +181,7 @@ type DependencyGroup struct {
 }
 
 // CheckDependencies checks if all required dependencies are installed
-func (s *RuntimeService) CheckDependencies(name string) ([]string, []string, []string, error) {
+func (s *RuntimeService) CheckDependencies(ctx context.Context, name string) ([]string, []string, []string, error) {
 	groups := getDependencyGroups(name)
 
 	var installed []string
@@ -220,7 +246,10 @@ func isCommandAvailable(name string) bool {
 }
 
 // Install installs a runtime environment
-func (s *RuntimeService) Install(name, version string) error {
+func (s *RuntimeService) Install(ctx context.Context, name, version string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return fmt.Errorf("invalid version format: %s", version)
@@ -228,7 +257,7 @@ func (s *RuntimeService) Install(name, version string) error {
 
 	// Check if already installed
 	var count int
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND version = ?",
 		name, version,
 	).Scan(&count)
@@ -240,7 +269,7 @@ func (s *RuntimeService) Install(name, version string) error {
 	}
 
 	// Insert with installing status
-	result, err := s.db.Exec(
+	result, err := s.db.ExecContext(ctx,
 		"INSERT INTO runtime_environments (name, version, path, status) VALUES (?, ?, ?, ?)",
 		name, version, "", "installing",
 	)
@@ -250,13 +279,13 @@ func (s *RuntimeService) Install(name, version string) error {
 	id, _ := result.LastInsertId()
 
 	// Install in background
-	go s.installRuntime(id, name, version)
+	go s.installRuntime(context.Background(), id, name, version)
 
 	return nil
 }
 
 // installRuntime performs the actual installation
-func (s *RuntimeService) installRuntime(id int64, name, version string) {
+func (s *RuntimeService) installRuntime(ctx context.Context, id int64, name, version string) {
 	var err error
 	var path string
 
@@ -265,15 +294,15 @@ func (s *RuntimeService) installRuntime(id int64, name, version string) {
 
 	switch name {
 	case "java":
-		path, err = s.installJava(id, version)
+		path, err = s.installJava(ctx, id, version)
 	case "node":
-		path, err = s.installNode(id, version)
+		path, err = s.installNode(ctx, id, version)
 	case "go":
-		path, err = s.installGo(id, version)
+		path, err = s.installGo(ctx, id, version)
 	case "python":
-		path, err = s.installPython(id, version)
+		path, err = s.installPython(ctx, id, version)
 	case "php":
-		path, err = s.installPHP(id, version)
+		path, err = s.installPHP(ctx, id, version)
 	default:
 		err = fmt.Errorf("unsupported runtime: %s", name)
 	}
@@ -348,10 +377,13 @@ func isValidVersion(version string) bool {
 }
 
 // GetProgress returns the installation progress for a runtime environment
-func (s *RuntimeService) GetProgress(id int64) (int, string, string, string, error) {
+func (s *RuntimeService) GetProgress(ctx context.Context, id int64) (int, string, string, string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var progress int
 	var step, logs, errorMessage string
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		"SELECT progress, progress_step, logs, error_message FROM runtime_environments WHERE id = ?",
 		id,
 	).Scan(&progress, &step, &logs, &errorMessage)
@@ -362,7 +394,7 @@ func (s *RuntimeService) GetProgress(id int64) (int, string, string, string, err
 }
 
 // installJava installs Java using apt or sdkman
-func (s *RuntimeService) installJava(id int64, version string) (string, error) {
+func (s *RuntimeService) installJava(ctx context.Context, id int64, version string) (string, error) {
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return "", fmt.Errorf("invalid version format: %s", version)
@@ -372,8 +404,7 @@ func (s *RuntimeService) installJava(id int64, version string) (string, error) {
 	s.updateProgress(id, 30, "compiling", "正在安装 JDK...")
 
 	// Try apt first
-	cmd := exec.Command("apt-get", "install", "-y", fmt.Sprintf("openjdk-%s-jdk", version))
-	output, err := cmd.CombinedOutput()
+	output, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", fmt.Sprintf("openjdk-%s-jdk", version))
 	if err == nil {
 		s.updateProgress(id, 70, "configuring", "JDK 安装完成，正在配置...")
 		return fmt.Sprintf("/usr/lib/jvm/java-%s-openjdk-amd64", version), nil
@@ -381,18 +412,17 @@ func (s *RuntimeService) installJava(id int64, version string) (string, error) {
 
 	// Try yum
 	s.updateProgress(id, 50, "compiling", "尝试使用 yum 安装...")
-	cmd = exec.Command("yum", "install", "-y", fmt.Sprintf("java-%s-openjdk-devel", version))
-	output, err = cmd.CombinedOutput()
+	output, _, err = s.executor.RunCombined(ctx, "yum", "install", "-y", fmt.Sprintf("java-%s-openjdk-devel", version))
 	if err == nil {
 		s.updateProgress(id, 70, "configuring", "JDK 安装完成，正在配置...")
 		return fmt.Sprintf("/usr/lib/jvm/java-%s-openjdk", version), nil
 	}
 
-	return "", fmt.Errorf("failed to install Java %s: %s", version, string(output))
+	return "", fmt.Errorf("failed to install Java %s: %s", version, output)
 }
 
 // installNode installs Node.js using nvm
-func (s *RuntimeService) installNode(id int64, version string) (string, error) {
+func (s *RuntimeService) installNode(ctx context.Context, id int64, version string) (string, error) {
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return "", fmt.Errorf("invalid version format: %s", version)
@@ -402,29 +432,35 @@ func (s *RuntimeService) installNode(id int64, version string) (string, error) {
 	s.updateProgress(id, 20, "compiling", "检查 nvm 安装状态...")
 
 	// Check if nvm is installed
-	nvmDir := fmt.Sprintf("%s/.nvm", os.Getenv("HOME"))
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/root"
+	}
+	nvmDir := filepath.Join(homeDir, ".nvm")
+
 	if _, err := exec.LookPath("nvm"); err != nil {
 		// Install nvm first
 		s.updateProgress(id, 30, "compiling", "正在安装 nvm...")
-		cmd := exec.Command("bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
-		if err := cmd.Run(); err != nil {
-			return "", fmt.Errorf("failed to install nvm: %v", err)
+		_, _, nvmErr := s.executor.RunCombined(ctx, "bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
+		if nvmErr != nil {
+			return "", fmt.Errorf("failed to install nvm: %v", nvmErr)
 		}
 	}
 
-	// Install Node.js version
+	// Install Node.js version (escape path to prevent injection)
 	s.updateProgress(id, 50, "compiling", fmt.Sprintf("正在安装 Node.js %s...", version))
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("source %s/nvm.sh && nvm install %s", nvmDir, version))
-	output, err := cmd.CombinedOutput()
+	safeNvmDir := shellEscape(nvmDir)
+	safeVersion := shellEscape(version)
+	output, _, err := s.executor.RunCombined(ctx, "bash", "-c", fmt.Sprintf("source %s/nvm.sh && nvm install %s", safeNvmDir, safeVersion))
 	if err != nil {
-		return "", fmt.Errorf("failed to install Node.js %s: %s", version, string(output))
+		return "", fmt.Errorf("failed to install Node.js %s: %s", version, output)
 	}
 
 	return fmt.Sprintf("%s/versions/node/v%s", nvmDir, version), nil
 }
 
 // installGo installs Go from official binary
-func (s *RuntimeService) installGo(id int64, version string) (string, error) {
+func (s *RuntimeService) installGo(ctx context.Context, id int64, version string) (string, error) {
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return "", fmt.Errorf("invalid version format: %s", version)
@@ -442,19 +478,18 @@ func (s *RuntimeService) installGo(id int64, version string) (string, error) {
 	// Download and install Go
 	url := fmt.Sprintf("https://go.dev/dl/go%s.linux-amd64.tar.gz", version)
 	s.updateProgress(id, 50, "compiling", "正在解压安装...")
-	cmd := exec.Command("bash", "-c", fmt.Sprintf(
+	output, _, err := s.executor.RunCombined(ctx, "bash", "-c", fmt.Sprintf(
 		"curl -L %s | tar -C %s -xzf -", url, installDir,
 	))
-	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to install Go %s: %s", version, string(output))
+		return "", fmt.Errorf("failed to install Go %s: %s", version, output)
 	}
 
 	return fmt.Sprintf("%s/go", installDir), nil
 }
 
 // installPython installs Python using apt or pyenv
-func (s *RuntimeService) installPython(id int64, version string) (string, error) {
+func (s *RuntimeService) installPython(ctx context.Context, id int64, version string) (string, error) {
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return "", fmt.Errorf("invalid version format: %s", version)
@@ -464,24 +499,22 @@ func (s *RuntimeService) installPython(id int64, version string) (string, error)
 	s.updateProgress(id, 30, "compiling", "正在安装 Python...")
 
 	// Try apt first
-	cmd := exec.Command("apt-get", "install", "-y", fmt.Sprintf("python%s", version))
-	output, err := cmd.CombinedOutput()
+	output, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", fmt.Sprintf("python%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/python%s", version), nil
 	}
 
 	// Try yum
-	cmd = exec.Command("yum", "install", "-y", fmt.Sprintf("python%s", version))
-	output, err = cmd.CombinedOutput()
+	output, _, err = s.executor.RunCombined(ctx, "yum", "install", "-y", fmt.Sprintf("python%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/python%s", version), nil
 	}
 
-	return "", fmt.Errorf("failed to install Python %s: %s", version, string(output))
+	return "", fmt.Errorf("failed to install Python %s: %s", version, output)
 }
 
 // installPHP installs PHP using apt or yum
-func (s *RuntimeService) installPHP(id int64, version string) (string, error) {
+func (s *RuntimeService) installPHP(ctx context.Context, id int64, version string) (string, error) {
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return "", fmt.Errorf("invalid version format: %s", version)
@@ -491,25 +524,26 @@ func (s *RuntimeService) installPHP(id int64, version string) (string, error) {
 	s.updateProgress(id, 30, "compiling", "正在安装 PHP...")
 
 	// Try apt first
-	cmd := exec.Command("apt-get", "install", "-y", fmt.Sprintf("php%s", version))
-	output, err := cmd.CombinedOutput()
+	output, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", fmt.Sprintf("php%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/php%s", version), nil
 	}
 
 	// Try yum
 	s.updateProgress(id, 50, "compiling", "尝试使用 yum 安装...")
-	cmd = exec.Command("yum", "install", "-y", fmt.Sprintf("php%s", version))
-	output, err = cmd.CombinedOutput()
+	output, _, err = s.executor.RunCombined(ctx, "yum", "install", "-y", fmt.Sprintf("php%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/php%s", version), nil
 	}
 
-	return "", fmt.Errorf("failed to install PHP %s: %s", version, string(output))
+	return "", fmt.Errorf("failed to install PHP %s: %s", version, output)
 }
 
 // Uninstall uninstalls a runtime environment
-func (s *RuntimeService) Uninstall(name, version string) error {
+func (s *RuntimeService) Uninstall(ctx context.Context, name, version string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Get the environment info
 	env, err := s.get(name, version)
 	if err != nil {
@@ -524,15 +558,24 @@ func (s *RuntimeService) Uninstall(name, version string) error {
 		return fmt.Errorf("cannot uninstall default version, please set another version as default first")
 	}
 
+	// Mark as uninstalling
+	_, err = s.db.ExecContext(ctx, "UPDATE runtime_environments SET status = 'uninstalling' WHERE id = ?", env.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update status: %w", err)
+	}
+
 	// Clean up related data before uninstalling
 	s.cleanupRelatedData(env.ID)
 
-	// Uninstall in background
-	go s.uninstallRuntime(env)
+	// Uninstall in background, delete DB row only on success
+	go func() {
+		bgCtx := context.Background()
+		s.uninstallRuntime(bgCtx, env)
+		// Delete from database
+		s.db.ExecContext(bgCtx, "DELETE FROM runtime_environments WHERE id = ?", env.ID)
+	}()
 
-	// Delete from database
-	_, err = s.db.Exec("DELETE FROM runtime_environments WHERE name = ? AND version = ?", name, version)
-	return err
+	return nil
 }
 
 // cleanupRelatedData cleans up environment variables and PATH entries
@@ -561,13 +604,12 @@ func (s *RuntimeService) cleanupRelatedData(runtimeID int64) {
 }
 
 // uninstallRuntime performs the actual uninstallation
-func (s *RuntimeService) uninstallRuntime(env *model.RuntimeEnvironment) {
+func (s *RuntimeService) uninstallRuntime(ctx context.Context, env *model.RuntimeEnvironment) {
 	var err error
 
 	switch env.Name {
 	case "java":
-		cmd := exec.Command("apt-get", "remove", "-y", fmt.Sprintf("openjdk-%s-jdk", env.Version))
-		err = cmd.Run()
+		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", fmt.Sprintf("openjdk-%s-jdk", env.Version))
 		// Clean up Java-specific residuals
 		s.cleanupJavaResiduals(env.Version)
 	case "node":
@@ -576,24 +618,20 @@ func (s *RuntimeService) uninstallRuntime(env *model.RuntimeEnvironment) {
 			log.Printf("runtime: refusing to delete path outside home directory: %s", env.Path)
 			return
 		}
-		cmd := exec.Command("rm", "-rf", env.Path)
-		err = cmd.Run()
+		_, _, err = s.executor.RunCombined(ctx, "rm", "-rf", env.Path)
 		// Clean up Node.js-specific residuals
 		s.cleanupNodeResiduals(env.Version)
 	case "go":
 		// Go is installed via apt or official binary, use apt to remove
-		cmd := exec.Command("apt-get", "remove", "-y", "golang-go")
-		err = cmd.Run()
+		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", "golang-go")
 		// Clean up Go-specific residuals
 		s.cleanupGoResiduals()
 	case "python":
-		cmd := exec.Command("apt-get", "remove", "-y", fmt.Sprintf("python%s", env.Version))
-		err = cmd.Run()
+		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", fmt.Sprintf("python%s", env.Version))
 		// Clean up Python-specific residuals
 		s.cleanupPythonResiduals(env.Version)
 	case "php":
-		cmd := exec.Command("apt-get", "remove", "-y", fmt.Sprintf("php%s", env.Version))
-		err = cmd.Run()
+		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", fmt.Sprintf("php%s", env.Version))
 		// Clean up PHP-specific residuals
 		s.cleanupPHPResiduals(env.Version)
 	}
@@ -664,8 +702,11 @@ func (s *RuntimeService) cleanupPHPResiduals(version string) {
 }
 
 // GetEnvConfigsByRuntimeID returns environment configs for a runtime
-func (s *RuntimeService) GetEnvConfigsByRuntimeID(runtimeID int64) ([]model.EnvConfig, error) {
-	rows, err := s.db.Query(
+func (s *RuntimeService) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE runtime_id = ?",
 		runtimeID,
 	)
@@ -685,13 +726,19 @@ func (s *RuntimeService) GetEnvConfigsByRuntimeID(runtimeID int64) ([]model.EnvC
 		c.IsGlobal = isGlobal != 0
 		configs = append(configs, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
 
 	return configs, nil
 }
 
 // GetPathEntriesByRuntimeID returns PATH entries for a runtime
-func (s *RuntimeService) GetPathEntriesByRuntimeID(runtimeID int64) ([]model.PathEntry, error) {
-	rows, err := s.db.Query(
+func (s *RuntimeService) GetPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]model.PathEntry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, path, runtime_id, is_global, order_num, created_at FROM path_entries WHERE runtime_id = ?",
 		runtimeID,
 	)
@@ -710,6 +757,9 @@ func (s *RuntimeService) GetPathEntriesByRuntimeID(runtimeID int64) ([]model.Pat
 		}
 		e.IsGlobal = isGlobal != 0
 		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
 	}
 
 	return entries, nil
@@ -745,7 +795,10 @@ func isValidUninstallPath(path string) bool {
 }
 
 // SetDefault sets a version as the default for a runtime environment
-func (s *RuntimeService) SetDefault(name, version string) error {
+func (s *RuntimeService) SetDefault(ctx context.Context, name, version string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return fmt.Errorf("invalid version format: %s", version)
@@ -761,42 +814,42 @@ func (s *RuntimeService) SetDefault(name, version string) error {
 	}
 
 	// Reset all versions of this runtime to non-default
-	_, err = s.db.Exec("UPDATE runtime_environments SET is_default = 0 WHERE name = ?", name)
+	_, err = s.db.ExecContext(ctx, "UPDATE runtime_environments SET is_default = 0 WHERE name = ?", name)
 	if err != nil {
 		return err
 	}
 
 	// Set this version as default
-	_, err = s.db.Exec("UPDATE runtime_environments SET is_default = 1 WHERE name = ? AND version = ?", name, version)
+	_, err = s.db.ExecContext(ctx, "UPDATE runtime_environments SET is_default = 1 WHERE name = ? AND version = ?", name, version)
 	return err
 }
 
 // Detect detects installed runtime environments on the system
-func (s *RuntimeService) Detect() ([]model.RuntimeDetectResult, error) {
+func (s *RuntimeService) Detect(ctx context.Context) ([]model.RuntimeDetectResult, error) {
 	var results []model.RuntimeDetectResult
 
 	// Detect Java
-	if versions, err := detectJava(); err == nil && len(versions) > 0 {
+	if versions, err := s.detectJava(ctx); err == nil && len(versions) > 0 {
 		results = append(results, model.RuntimeDetectResult{Name: "java", Versions: versions})
 	}
 
 	// Detect Node.js
-	if versions, err := detectNode(); err == nil && len(versions) > 0 {
+	if versions, err := s.detectNode(ctx); err == nil && len(versions) > 0 {
 		results = append(results, model.RuntimeDetectResult{Name: "node", Versions: versions})
 	}
 
 	// Detect Go
-	if versions, err := detectGo(); err == nil && len(versions) > 0 {
+	if versions, err := s.detectGo(ctx); err == nil && len(versions) > 0 {
 		results = append(results, model.RuntimeDetectResult{Name: "go", Versions: versions})
 	}
 
 	// Detect Python
-	if versions, err := detectPython(); err == nil && len(versions) > 0 {
+	if versions, err := s.detectPython(ctx); err == nil && len(versions) > 0 {
 		results = append(results, model.RuntimeDetectResult{Name: "python", Versions: versions})
 	}
 
 	// Detect PHP
-	if versions, err := detectPHP(); err == nil && len(versions) > 0 {
+	if versions, err := s.detectPHP(ctx); err == nil && len(versions) > 0 {
 		results = append(results, model.RuntimeDetectResult{Name: "php", Versions: versions})
 	}
 
@@ -804,8 +857,11 @@ func (s *RuntimeService) Detect() ([]model.RuntimeDetectResult, error) {
 }
 
 // ImportDetected imports detected runtime environments into the database
-func (s *RuntimeService) ImportDetected() (int, error) {
-	detected, err := s.Detect()
+func (s *RuntimeService) ImportDetected(ctx context.Context) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	detected, err := s.Detect(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -815,7 +871,7 @@ func (s *RuntimeService) ImportDetected() (int, error) {
 		for _, version := range runtime.Versions {
 			// Check if exact version already exists
 			var count int
-			err := s.db.QueryRow(
+			err := s.db.QueryRowContext(ctx,
 				"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND version = ?",
 				runtime.Name, version,
 			).Scan(&count)
@@ -829,7 +885,7 @@ func (s *RuntimeService) ImportDetected() (int, error) {
 			// Check if similar version exists (e.g., "17" matches "17.0.19")
 			majorVersion := strings.Split(version, ".")[0]
 			var similarCount int
-			err = s.db.QueryRow(
+			err = s.db.QueryRowContext(ctx,
 				"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND (version = ? OR version LIKE ?)",
 				runtime.Name, majorVersion, majorVersion+".%",
 			).Scan(&similarCount)
@@ -842,7 +898,7 @@ func (s *RuntimeService) ImportDetected() (int, error) {
 			path := getRuntimePath(runtime.Name, version)
 
 			// Insert into database
-			_, err = s.db.Exec(
+			_, err = s.db.ExecContext(ctx,
 				"INSERT INTO runtime_environments (name, version, path, status) VALUES (?, ?, ?, ?)",
 				runtime.Name, version, path, "installed",
 			)
@@ -852,9 +908,9 @@ func (s *RuntimeService) ImportDetected() (int, error) {
 
 			// If this is the first version of this runtime, set as default
 			var defaultCount int
-			s.db.QueryRow("SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND is_default = 1", runtime.Name).Scan(&defaultCount)
+			s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND is_default = 1", runtime.Name).Scan(&defaultCount)
 			if defaultCount == 0 {
-				s.db.Exec("UPDATE runtime_environments SET is_default = 1 WHERE name = ? AND version = ?", runtime.Name, version)
+				s.db.ExecContext(ctx, "UPDATE runtime_environments SET is_default = 1 WHERE name = ? AND version = ?", runtime.Name, version)
 			}
 
 			imported++
@@ -901,17 +957,15 @@ func (s *RuntimeService) get(name, version string) (*model.RuntimeEnvironment, e
 }
 
 // detectJava detects installed Java versions
-func detectJava() ([]string, error) {
-	cmd := exec.Command("bash", "-c", "java -version 2>&1 | head -1")
-	output, err := cmd.Output()
+func (s *RuntimeService) detectJava(ctx context.Context) ([]string, error) {
+	output, _, err := s.executor.RunCombined(ctx, "bash", "-c", "java -version 2>&1 | head -1")
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse version from output like: openjdk version "17.0.8" 2023-07-18
-	line := string(output)
-	if strings.Contains(line, "version") {
-		parts := strings.Split(line, "\"")
+	if strings.Contains(output, "version") {
+		parts := strings.Split(output, "\"")
 		if len(parts) >= 2 {
 			return []string{parts[1]}, nil
 		}
@@ -921,28 +975,26 @@ func detectJava() ([]string, error) {
 }
 
 // detectNode detects installed Node.js versions
-func detectNode() ([]string, error) {
-	cmd := exec.Command("node", "--version")
-	output, err := cmd.Output()
+func (s *RuntimeService) detectNode(ctx context.Context) ([]string, error) {
+	output, _, err := s.executor.RunCombined(ctx, "node", "--version")
 	if err != nil {
 		return nil, err
 	}
 
-	version := strings.TrimSpace(string(output))
+	version := strings.TrimSpace(output)
 	version = strings.TrimPrefix(version, "v")
 	return []string{version}, nil
 }
 
 // detectGo detects installed Go versions
-func detectGo() ([]string, error) {
-	cmd := exec.Command("go", "version")
-	output, err := cmd.Output()
+func (s *RuntimeService) detectGo(ctx context.Context) ([]string, error) {
+	output, _, err := s.executor.RunCombined(ctx, "go", "version")
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse version from output like: go version go1.21.0 linux/amd64
-	parts := strings.Fields(string(output))
+	parts := strings.Fields(output)
 	if len(parts) >= 3 {
 		version := strings.TrimPrefix(parts[2], "go")
 		return []string{version}, nil
@@ -952,23 +1004,21 @@ func detectGo() ([]string, error) {
 }
 
 // detectPython detects installed Python versions
-func detectPython() ([]string, error) {
+func (s *RuntimeService) detectPython(ctx context.Context) ([]string, error) {
 	var versions []string
 
 	// Check python3
-	cmd := exec.Command("python3", "--version")
-	output, err := cmd.Output()
+	output, _, err := s.executor.RunCombined(ctx, "python3", "--version")
 	if err == nil {
-		version := strings.TrimSpace(string(output))
+		version := strings.TrimSpace(output)
 		version = strings.TrimPrefix(version, "Python ")
 		versions = append(versions, version)
 	}
 
 	// Check python
-	cmd = exec.Command("python", "--version")
-	output, err = cmd.Output()
+	output, _, err = s.executor.RunCombined(ctx, "python", "--version")
 	if err == nil {
-		version := strings.TrimSpace(string(output))
+		version := strings.TrimSpace(output)
 		version = strings.TrimPrefix(version, "Python ")
 		if !contains(versions, version) {
 			versions = append(versions, version)
@@ -979,17 +1029,15 @@ func detectPython() ([]string, error) {
 }
 
 // detectPHP detects installed PHP versions
-func detectPHP() ([]string, error) {
-	cmd := exec.Command("php", "--version")
-	output, err := cmd.Output()
+func (s *RuntimeService) detectPHP(ctx context.Context) ([]string, error) {
+	output, _, err := s.executor.RunCombined(ctx, "php", "--version")
 	if err != nil {
 		return nil, err
 	}
 
 	// Parse version from output like: PHP 8.2.7 (cli) (built: Jun  9 2023 06:17:01) (NTS)
-	line := string(output)
-	if strings.HasPrefix(line, "PHP") {
-		parts := strings.Fields(line)
+	if strings.HasPrefix(output, "PHP") {
+		parts := strings.Fields(output)
 		if len(parts) >= 2 {
 			return []string{parts[1]}, nil
 		}

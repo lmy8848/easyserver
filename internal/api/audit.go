@@ -5,17 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
+
+	"easyserver/internal/repository"
+	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuditHandler struct {
-	db *sql.DB
+	db           *sql.DB
+	auditService *service.AuditService
+	auditRepo    repository.AuditRepository
 }
 
-func NewAuditHandler(db *sql.DB) *AuditHandler {
-	return &AuditHandler{db: db}
+func NewAuditHandler(db *sql.DB, auditService *service.AuditService) *AuditHandler {
+	return &AuditHandler{db: db, auditService: auditService}
+}
+
+// NewAuditHandlerWithRepo creates an AuditHandler with repository support
+func NewAuditHandlerWithRepo(db *sql.DB, auditService *service.AuditService, auditRepo repository.AuditRepository) *AuditHandler {
+	return &AuditHandler{db: db, auditService: auditService, auditRepo: auditRepo}
 }
 
 type AuditLogItem struct {
@@ -55,7 +66,45 @@ func (h *AuditHandler) List(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 
-	// Build query
+	// Use repository if available
+	if h.auditRepo != nil {
+		filter := repository.AuditFilter{
+			Username:  username,
+			Action:    action,
+			Resource:  resource,
+			IP:        ip,
+			StartDate: startDate,
+			EndDate:   endDate,
+			Offset:    offset,
+			Limit:     pageSize,
+		}
+		total, logs, err := h.auditRepo.Query(c.Request.Context(), filter)
+		if err != nil {
+			InternalError(c, err.Error())
+			return
+		}
+		items := make([]AuditLogItem, 0, len(logs))
+		for _, log := range logs {
+			items = append(items, AuditLogItem{
+				ID:        log.ID,
+				UserID:    log.UserID,
+				Username:   log.Username,
+				Action:    log.Action,
+				Resource:  log.Resource,
+				Detail:    log.Detail,
+				IP:        log.IP,
+				UserAgent: log.UserAgent,
+				CreatedAt: log.CreatedAt.Format("2006-01-02 15:04:05"),
+			})
+		}
+		Success(c, AuditLogListResponse{
+			Total: total,
+			Items: items,
+		})
+		return
+	}
+
+	// Fallback to direct SQL
 	where := "1=1"
 	args := []interface{}{}
 
@@ -87,7 +136,10 @@ func (h *AuditHandler) List(c *gin.Context) {
 	// Get total count
 	var total int64
 	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
-	h.db.QueryRow(countQuery, args...).Scan(&total)
+	if err := h.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
 
 	// Get items
 	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at
@@ -112,6 +164,10 @@ func (h *AuditHandler) List(c *gin.Context) {
 		item.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
 		items = append(items, item)
 	}
+	if err := rows.Err(); err != nil {
+		InternalError(c, err.Error())
+		return
+	}
 
 	Success(c, AuditLogListResponse{
 		Total: total,
@@ -121,6 +177,16 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 // GetActions returns distinct actions for filtering
 func (h *AuditHandler) GetActions(c *gin.Context) {
+	if h.auditRepo != nil {
+		actions, err := h.auditRepo.GetActions(c.Request.Context())
+		if err != nil {
+			InternalError(c, err.Error())
+			return
+		}
+		Success(c, actions)
+		return
+	}
+
 	rows, err := h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
 	if err != nil {
 		InternalError(c, err.Error())
@@ -266,7 +332,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		WHERE created_at >= ?
 		  AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 400
 		ORDER BY id DESC
-		LIMIT 20
+		LIMIT 200
 	`, since)
 	if err != nil {
 		InternalError(c, err.Error())
@@ -308,6 +374,18 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		"status_stats": statusStats,
 		"alerts":       alerts,
 	})
+}
+
+// sanitizeCSVField prevents CSV formula injection by prefixing dangerous leading characters.
+func sanitizeCSVField(field string) string {
+	if field == "" {
+		return field
+	}
+	// Characters that can trigger formula execution in spreadsheet applications
+	if strings.ContainsAny(string(field[0]), "=+-@\t\r") {
+		return "'" + field
+	}
+	return field
 }
 
 // GetCleanPolicy returns the current clean policy
@@ -372,6 +450,8 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	// Set CSV headers
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", "attachment; filename=audit_logs.csv")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Cache-Control", "no-cache")
 
 	// Write BOM for Excel
 	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
@@ -385,9 +465,15 @@ func (h *AuditHandler) Export(c *gin.Context) {
 		if err := rows.Scan(&id, &username, &action, &resource, &detail, &ip, &createdAt); err != nil {
 			continue
 		}
-		// Escape CSV fields
+		// Sanitize CSV fields to prevent formula injection
 		c.Writer.WriteString(fmt.Sprintf("%d,%s,%s,%s,\"%s\",%s,%s\n",
-			id, username, action, resource, detail, ip, createdAt))
+			id,
+			sanitizeCSVField(username),
+			sanitizeCSVField(action),
+			sanitizeCSVField(resource),
+			strings.ReplaceAll(detail, "\"", "\"\""),
+			sanitizeCSVField(ip),
+			createdAt))
 	}
 }
 
@@ -399,6 +485,17 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 	}
 
 	since := time.Now().AddDate(0, 0, -days)
+
+	if h.auditRepo != nil {
+		rows, err := h.auditRepo.Clean(c.Request.Context(), since)
+		if err != nil {
+			InternalError(c, err.Error())
+			return
+		}
+		Success(c, gin.H{"deleted": rows})
+		return
+	}
+
 	result, err := h.db.Exec("DELETE FROM audit_logs WHERE created_at < ?", since)
 	if err != nil {
 		InternalError(c, err.Error())
@@ -407,4 +504,24 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 
 	rows, _ := result.RowsAffected()
 	Success(c, gin.H{"deleted": rows})
+}
+
+// VerifyIntegrity verifies the integrity of audit log signatures
+func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
+	if h.auditService == nil {
+		InternalError(c, "audit service not available")
+		return
+	}
+
+	total, valid, invalid, err := h.auditService.VerifyAllSignatures(c.Request.Context())
+	if err != nil {
+		InternalError(c, err.Error())
+		return
+	}
+
+	Success(c, gin.H{
+		"total":   total,
+		"valid":   valid,
+		"invalid": invalid,
+	})
 }

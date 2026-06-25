@@ -1,5 +1,20 @@
 package model
 
+// DBBackup represents a database backup record
+type DBBackup struct {
+	ID           int64  `json:"id"`
+	DBServerID   int64  `json:"db_server_id"`
+	DBVersionID  int64  `json:"db_version_id"`
+	DatabaseID   int64  `json:"database_id"`
+	DatabaseName string `json:"database_name"`
+	BackupType   string `json:"backup_type"` // manual, scheduled
+	FilePath     string `json:"file_path"`
+	FileSize     int64  `json:"file_size"`
+	Status       string `json:"status"` // pending, completed, failed
+	ErrorMessage string `json:"error_message"`
+	CreatedAt    string `json:"created_at"`
+}
+
 // DBServer represents a database software type (MySQL, PostgreSQL, Redis)
 type DBServer struct {
 	ID          int64  `json:"id"`

@@ -1,5 +1,10 @@
 package model
 
+import (
+	"fmt"
+	"regexp"
+)
+
 // WebServer represents a web server software (Nginx, Tomcat, Apache, Caddy)
 type WebServer struct {
 	ID             int64  `json:"id"`
@@ -60,6 +65,20 @@ type CreateWebsiteRequest struct {
 	CustomConfig string `json:"custom_config"`
 }
 
+// domainRegexp validates RFC 1123 hostnames: labels of 1-63 alphanumeric or hyphen chars,
+// separated by dots, total length <= 253. Does not allow leading/trailing hyphens per label.
+var domainRegexp = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
+
+func (r *CreateWebsiteRequest) ValidateDomain() error {
+	if len(r.Domain) == 0 || len(r.Domain) > 253 {
+		return fmt.Errorf("domain length must be between 1 and 253 characters")
+	}
+	if !domainRegexp.MatchString(r.Domain) {
+		return fmt.Errorf("invalid domain format: must be a valid RFC 1123 hostname")
+	}
+	return nil
+}
+
 type UpdateWebsiteRequest struct {
 	Name         *string `json:"name"`
 	Domain       *string `json:"domain"`
@@ -88,6 +107,36 @@ func GetProjectTypes() []ProjectTypeConfig {
 		{Name: "java", Label: "Java", Description: "反向代理到 Java 应用（如 Spring Boot）", DefaultPort: 8080, Proxy: true},
 		{Name: "proxy", Label: "反向代理", Description: "纯反向代理到其他服务", DefaultPort: 8080, Proxy: true},
 	}
+}
+
+// CreateWebServerRequest is the safe input struct for creating a web server.
+// It only accepts display-level fields; install/uninstall commands are derived
+// from the predefined template matching the Name field.
+type CreateWebServerRequest struct {
+	Name        string `json:"name" binding:"required"`        // e.g. "nginx", "apache"
+	DisplayName string `json:"display_name"`                   // optional override
+	Description string `json:"description"`                    // optional override
+}
+
+// FindPredefinedWebServer looks up a predefined server config by name.
+// Returns nil if no match is found.
+func FindPredefinedWebServer(name string) *WebServer {
+	for _, ws := range PredefinedWebServers() {
+		if ws.Name == name {
+			return &ws
+		}
+	}
+	return nil
+}
+
+// GetPredefinedWebServerNames returns the list of valid predefined server names.
+func GetPredefinedWebServerNames() []string {
+	servers := PredefinedWebServers()
+	names := make([]string, len(servers))
+	for i, ws := range servers {
+		names[i] = ws.Name
+	}
+	return names
 }
 
 // PredefinedWebServers returns the default web server entries

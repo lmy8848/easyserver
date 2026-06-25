@@ -19,7 +19,7 @@ func NewRuntimeHandler(runtimeService *service.RuntimeService) *RuntimeHandler {
 
 // List returns all installed runtime environments
 func (h *RuntimeHandler) List(c *gin.Context) {
-	environments, err := h.runtimeService.ListAll()
+	environments, err := h.runtimeService.ListAll(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -34,11 +34,11 @@ func (h *RuntimeHandler) List(c *gin.Context) {
 func (h *RuntimeHandler) ListByName(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "runtime name is required")
+		BadRequest(c, "运行时名称不能为空")
 		return
 	}
 
-	environments, err := h.runtimeService.ListByName(name)
+	environments, err := h.runtimeService.ListByName(c.Request.Context(), name)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -53,7 +53,7 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) {
 func (h *RuntimeHandler) Install(c *gin.Context) {
 	var req model.RuntimeInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
@@ -62,17 +62,17 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[req.Name] {
-		BadRequest(c, "unsupported runtime: "+req.Name)
+		BadRequest(c, "不支持的运行时: "+req.Name)
 		return
 	}
 
-	if err := h.runtimeService.Install(req.Name, req.Version); err != nil {
+	if err := h.runtimeService.Install(c.Request.Context(), req.Name, req.Version); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
 	Success(c, gin.H{
-		"message": "installation started",
+		"message": "安装已启动",
 	})
 }
 
@@ -80,17 +80,17 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	var req model.RuntimeUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	if err := h.runtimeService.Uninstall(req.Name, req.Version); err != nil {
+	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
 	Success(c, gin.H{
-		"message": "uninstalled successfully",
+		"message": "卸载成功",
 	})
 }
 
@@ -98,23 +98,23 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 	var req model.RuntimeSetDefaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	if err := h.runtimeService.SetDefault(req.Name, req.Version); err != nil {
+	if err := h.runtimeService.SetDefault(c.Request.Context(), req.Name, req.Version); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
 	Success(c, gin.H{
-		"message": "default version set successfully",
+		"message": "默认版本设置成功",
 	})
 }
 
 // Detect detects installed runtime environments on the system
 func (h *RuntimeHandler) Detect(c *gin.Context) {
-	results, err := h.runtimeService.Detect()
+	results, err := h.runtimeService.Detect(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -127,14 +127,14 @@ func (h *RuntimeHandler) Detect(c *gin.Context) {
 
 // ImportDetected imports detected runtime environments into the database
 func (h *RuntimeHandler) ImportDetected(c *gin.Context) {
-	imported, err := h.runtimeService.ImportDetected()
+	imported, err := h.runtimeService.ImportDetected(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 
 	Success(c, gin.H{
-		"message":  "imported successfully",
+		"message":  "导入成功",
 		"imported": imported,
 	})
 }
@@ -143,18 +143,18 @@ func (h *RuntimeHandler) ImportDetected(c *gin.Context) {
 func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {
-		BadRequest(c, "id is required")
+		BadRequest(c, "ID 不能为空")
 		return
 	}
 
 	// Parse id
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
-	progress, step, logs, errorMessage, err := h.runtimeService.GetProgress(id)
+	progress, step, logs, errorMessage, err := h.runtimeService.GetProgress(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -172,7 +172,7 @@ func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "runtime name is required")
+		BadRequest(c, "运行时名称不能为空")
 		return
 	}
 
@@ -181,11 +181,11 @@ func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[name] {
-		BadRequest(c, "unsupported runtime: "+name)
+		BadRequest(c, "不支持的运行时: "+name)
 		return
 	}
 
-	installed, missing, optional, err := h.runtimeService.CheckDependencies(name)
+	installed, missing, optional, err := h.runtimeService.CheckDependencies(c.Request.Context(), name)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -205,25 +205,25 @@ func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {
-		BadRequest(c, "id is required")
+		BadRequest(c, "ID 不能为空")
 		return
 	}
 
 	// Parse id
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
 	// Get the environment info
-	env, err := h.runtimeService.GetByID(id)
+	env, err := h.runtimeService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if env == nil {
-		NotFound(c, "runtime environment not found")
+		NotFound(c, "运行时环境不存在")
 		return
 	}
 
@@ -243,36 +243,36 @@ func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {
-		BadRequest(c, "id is required")
+		BadRequest(c, "ID 不能为空")
 		return
 	}
 
 	// Parse id
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "invalid id")
+		BadRequest(c, "无效的 ID")
 		return
 	}
 
 	// Get the environment info
-	env, err := h.runtimeService.GetByID(id)
+	env, err := h.runtimeService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
 	if env == nil {
-		NotFound(c, "runtime environment not found")
+		NotFound(c, "运行时环境不存在")
 		return
 	}
 
 	// Get related environment variables
-	envConfigs, err := h.runtimeService.GetEnvConfigsByRuntimeID(id)
+	envConfigs, err := h.runtimeService.GetEnvConfigsByRuntimeID(c.Request.Context(), id)
 	if err != nil {
 		envConfigs = []model.EnvConfig{}
 	}
 
 	// Get related PATH entries
-	pathEntries, err := h.runtimeService.GetPathEntriesByRuntimeID(id)
+	pathEntries, err := h.runtimeService.GetPathEntriesByRuntimeID(c.Request.Context(), id)
 	if err != nil {
 		pathEntries = []model.PathEntry{}
 	}

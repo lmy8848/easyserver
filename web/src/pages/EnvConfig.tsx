@@ -251,63 +251,80 @@ export default function EnvConfig() {
   return (
     <div>
       <Card title="环境配置管理">
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          {/* 环境变量 */}
-          <Tabs.TabPane tab="环境变量" key="env">
-            <div style={{ marginBottom: 16 }}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-                setEditingEnv(null);
-                envForm.resetFields();
-                setEnvModalVisible(true);
-              }}>
-                添加环境变量
-              </Button>
-            </div>
-            <Table columns={envColumns} dataSource={envConfigs} rowKey="id" loading={loading} pagination={false} />
-          </Tabs.TabPane>
-
-          {/* PATH 管理 */}
-          <Tabs.TabPane tab="PATH 管理" key="path">
-            <div style={{ marginBottom: 16 }}>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-                pathForm.resetFields();
-                setPathModalVisible(true);
-              }}>
-                添加 PATH 条目
-              </Button>
-            </div>
-            <Table columns={pathColumns} dataSource={pathEntries} rowKey="id" pagination={false} />
-          </Tabs.TabPane>
-
-          {/* 全局配置 */}
-          <Tabs.TabPane tab="全局配置" key="global">
-            <div style={{ marginBottom: 16 }}>
-              <Space>
-                <Select
-                  placeholder="筛选分类"
-                  allowClear
-                  style={{ width: 150 }}
-                  onChange={(value) => {
-                    setSelectedCategory(value || '');
-                    fetchGlobalConfigs(value);
-                  }}
-                >
-                  {categories.map(cat => (
-                    <Select.Option key={cat} value={cat}>{cat}</Select.Option>
-                  ))}
-                </Select>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-                  setEditingGlobal(null);
-                  globalForm.resetFields();
-                  setGlobalModalVisible(true);
-                }}>
-                  添加全局配置
-                </Button>
-              </Space>
-            </div>
-            <Table columns={globalColumns} dataSource={globalConfigs} rowKey="id" pagination={false} />
-          </Tabs.TabPane>
-        </Tabs>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'env',
+              label: '环境变量',
+              children: (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                      setEditingEnv(null);
+                      envForm.resetFields();
+                      setEnvModalVisible(true);
+                    }}>
+                      添加环境变量
+                    </Button>
+                  </div>
+                  <Table columns={envColumns} dataSource={envConfigs} rowKey="id" loading={loading} pagination={false} />
+                </>
+              ),
+            },
+            {
+              key: 'path',
+              label: 'PATH 管理',
+              children: (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                      pathForm.resetFields();
+                      setPathModalVisible(true);
+                    }}>
+                      添加 PATH 条目
+                    </Button>
+                  </div>
+                  <Table columns={pathColumns} dataSource={pathEntries} rowKey="id" pagination={false} />
+                </>
+              ),
+            },
+            {
+              key: 'global',
+              label: '全局配置',
+              children: (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <Space>
+                      <Select
+                        placeholder="筛选分类"
+                        allowClear
+                        style={{ width: 150 }}
+                        onChange={(value) => {
+                          setSelectedCategory(value || '');
+                          fetchGlobalConfigs(value);
+                        }}
+                      >
+                        {categories.map(cat => (
+                          <Select.Option key={cat} value={cat}>{cat}</Select.Option>
+                        ))}
+                      </Select>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                        setEditingGlobal(null);
+                        globalForm.resetFields();
+                        setGlobalModalVisible(true);
+                      }}>
+                        添加全局配置
+                      </Button>
+                    </Space>
+                  </div>
+                  <Table columns={globalColumns} dataSource={globalConfigs} rowKey="id" pagination={false} />
+                </>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       {/* 环境变量弹窗 */}

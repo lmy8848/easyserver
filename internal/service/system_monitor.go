@@ -1,14 +1,16 @@
 package service
 
 import (
-	"bufio"
+	"context"
 	"log"
-	"os"
-	"os/exec"
-	"strings"
 	"time"
 )
 
+// SystemEventMonitor monitors system-level events (disk, memory, service failures)
+// and logs them as audit events.
+// Platform-specific implementations are in:
+//   - system_monitor_linux.go
+//   - system_monitor_windows.go
 type SystemEventMonitor struct {
 	auditService *AuditService
 	stopCh       chan struct{}
@@ -47,68 +49,14 @@ func (m *SystemEventMonitor) monitorSystemEvents() {
 	}
 }
 
+// checkSystemEvents checks for system-level events that may need attention.
+// Implementation is platform-specific.
 func (m *SystemEventMonitor) checkSystemEvents() {
-	// Check for recent reboots
-	if data, err := os.ReadFile("/proc/uptime"); err == nil {
-		fields := strings.Fields(string(data))
-		if len(fields) >= 1 {
-			// If uptime is less than 5 minutes, system might have rebooted
-			// This is a simplified check
-		}
-	}
-
 	// Check disk space
 	m.checkDiskSpace()
 
 	// Check memory usage
 	m.checkMemoryUsage()
-}
-
-func (m *SystemEventMonitor) checkDiskSpace() {
-	cmd := exec.Command("df", "-h", "/")
-	output, err := cmd.Output()
-	if err != nil {
-		return
-	}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "/") {
-			fields := strings.Fields(line)
-			if len(fields) >= 5 {
-				usage := fields[4]
-				usage = strings.TrimSuffix(usage, "%")
-				// Alert if disk usage > 90%
-				if len(usage) > 0 {
-					// Parse usage percentage
-					// If > 90%, log warning
-				}
-			}
-		}
-	}
-}
-
-func (m *SystemEventMonitor) checkMemoryUsage() {
-	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
-		mem := make(map[string]uint64)
-		scanner := bufio.NewScanner(strings.NewReader(string(data)))
-		for scanner.Scan() {
-			line := scanner.Text()
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			valStr := strings.TrimSpace(parts[1])
-			valStr = strings.TrimSuffix(valStr, " kB")
-			valStr = strings.TrimSpace(valStr)
-			// Parse value
-			mem[key] = 0
-			// Note: In production, parse the actual value
-			_ = valStr
-		}
-	}
 }
 
 func (m *SystemEventMonitor) monitorServiceFailures() {
@@ -125,23 +73,12 @@ func (m *SystemEventMonitor) monitorServiceFailures() {
 	}
 }
 
-func (m *SystemEventMonitor) checkServiceFailures() {
-	cmd := exec.Command("systemctl", "list-units", "--type=service", "--state=failed", "--no-pager", "--plain")
-	output, err := cmd.Output()
-	if err != nil {
-		return
-	}
+// Platform-specific methods (defined in system_monitor_linux.go / system_monitor_windows.go):
+//   - checkDiskSpace()
+//   - checkMemoryUsage()
+//   - checkServiceFailures()
 
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "failed") {
-			fields := strings.Fields(line)
-			if len(fields) >= 1 {
-				serviceName := strings.TrimSuffix(fields[0], ".service")
-				m.auditService.LogSystemEvent("SERVICE_FAILED",
-					"Service "+serviceName+" has failed")
-			}
-		}
-	}
+// logEvent is a helper to log a system event (avoids import in platform files).
+func (m *SystemEventMonitor) logEvent(ctx context.Context, action, detail string) {
+	m.auditService.LogSystemEvent(ctx, action, detail)
 }

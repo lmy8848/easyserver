@@ -9,8 +9,10 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -26,22 +28,34 @@ func validateServiceName(name string) bool {
 // logsUpgrader is now replaced by h.upgrader in ServiceHandler
 
 type ServiceHandler struct {
-	serviceManager *service.ServiceManager
-	jwtSecret      string
-	upgrader       gorillaWs.Upgrader
+	serviceManager    *service.ServiceManager
+	jwtSecret         string
+	upgrader          gorillaWs.Upgrader
+	protectedServices []string // Services that cannot be stopped/disabled
 }
 
 func NewServiceHandler(jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
 	return &ServiceHandler{
-		serviceManager: service.NewServiceManager(),
-		jwtSecret:      jwtSecret,
-		upgrader:       createUpgrader(allowedOrigins, devMode),
+		serviceManager:    service.NewServiceManager(executor.NewOSExecutor()),
+		jwtSecret:         jwtSecret,
+		upgrader:          createUpgrader(allowedOrigins, devMode),
+		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
+}
+
+// isProtectedService checks if a service is protected
+func (h *ServiceHandler) isProtectedService(name string) bool {
+	for _, svc := range h.protectedServices {
+		if svc == name {
+			return true
+		}
+	}
+	return false
 }
 
 // List returns all services
 func (h *ServiceHandler) List(c *gin.Context) {
-	services, err := h.serviceManager.List()
+	services, err := h.serviceManager.List(c.Request.Context())
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -54,11 +68,11 @@ func (h *ServiceHandler) List(c *gin.Context) {
 func (h *ServiceHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
-	svc, err := h.serviceManager.Get(name)
+	svc, err := h.serviceManager.Get(c.Request.Context(), name)
 	if err != nil {
 		NotFound(c, err.Error())
 		return
@@ -71,11 +85,11 @@ func (h *ServiceHandler) Get(c *gin.Context) {
 func (h *ServiceHandler) Start(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
-	if err := h.serviceManager.Start(name); err != nil {
+	if err := h.serviceManager.Start(c.Request.Context(), name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -87,11 +101,17 @@ func (h *ServiceHandler) Start(c *gin.Context) {
 func (h *ServiceHandler) Stop(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
-	if err := h.serviceManager.Stop(name); err != nil {
+	// Check if service is protected
+	if h.isProtectedService(name) {
+		BadRequest(c, "无法停止面板自身的服务")
+		return
+	}
+
+	if err := h.serviceManager.Stop(c.Request.Context(), name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -103,11 +123,17 @@ func (h *ServiceHandler) Stop(c *gin.Context) {
 func (h *ServiceHandler) Restart(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
-	if err := h.serviceManager.Restart(name); err != nil {
+	// Check if service is protected
+	if h.isProtectedService(name) {
+		BadRequest(c, "无法从此处重启面板自身服务，请使用 /api/settings/restart")
+		return
+	}
+
+	if err := h.serviceManager.Restart(c.Request.Context(), name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -119,11 +145,11 @@ func (h *ServiceHandler) Restart(c *gin.Context) {
 func (h *ServiceHandler) Enable(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
-	if err := h.serviceManager.Enable(name); err != nil {
+	if err := h.serviceManager.Enable(c.Request.Context(), name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -135,11 +161,17 @@ func (h *ServiceHandler) Enable(c *gin.Context) {
 func (h *ServiceHandler) Disable(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
-	if err := h.serviceManager.Disable(name); err != nil {
+	// Check if service is protected
+	if h.isProtectedService(name) {
+		BadRequest(c, "无法禁用面板自身的服务")
+		return
+	}
+
+	if err := h.serviceManager.Disable(c.Request.Context(), name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
@@ -151,7 +183,7 @@ func (h *ServiceHandler) Disable(c *gin.Context) {
 func (h *ServiceHandler) GetLogs(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "invalid service name")
+		BadRequest(c, "无效的服务名称")
 		return
 	}
 
@@ -163,7 +195,7 @@ func (h *ServiceHandler) GetLogs(c *gin.Context) {
 
 	since := c.Query("since")
 
-	logs, err := h.serviceManager.GetLogs(name, tail, since)
+	logs, err := h.serviceManager.GetLogs(c.Request.Context(), name, tail, since)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
@@ -176,10 +208,10 @@ func (h *ServiceHandler) GetLogs(c *gin.Context) {
 func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	// User info already set by WSAuthMiddleware
 	name := c.Param("name")
-	if name == "" {
+	if name == "" || !validateServiceName(name) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    40000,
-			"message": "service name is required",
+			"message": "无效的服务名称",
 			"data":    nil,
 		})
 		return
@@ -192,16 +224,23 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	}
 	defer conn.Close()
 
+	// Write mutex ensures only one goroutine writes to the connection at a time
+	writeMu := &sync.Mutex{}
+
 	// Start journalctl -f to follow logs
 	cmd := exec.Command("journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"failed to get log stream"}`))
+		writeMu.Lock()
+		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"获取日志流失败"}`))
+		writeMu.Unlock()
 		return
 	}
 
 	if err := cmd.Start(); err != nil {
-		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"failed to start log stream"}`))
+		writeMu.Lock()
+		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"启动日志流失败"}`))
+		writeMu.Unlock()
 		return
 	}
 	defer cmd.Process.Kill()
@@ -297,17 +336,23 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	for {
 		select {
 		case msg := <-msgCh:
+			writeMu.Lock()
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
+				writeMu.Unlock()
 				return
 			}
+			writeMu.Unlock()
 		case <-errCh:
 			return
 		case <-ticker.C:
+			writeMu.Lock()
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
+				writeMu.Unlock()
 				return
 			}
+			writeMu.Unlock()
 		case <-done:
 			return
 		}

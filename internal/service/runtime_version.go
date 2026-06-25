@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -21,8 +22,12 @@ func NewRuntimeVersionService(db *sql.DB) *RuntimeVersionService {
 	return &RuntimeVersionService{db: db}
 }
 
-// InitTables creates runtime version tables if they don't exist
-func (s *RuntimeVersionService) InitTables() error {
+// Deprecated: InitTables is kept for backward compatibility only.
+// Table creation is now handled by the migration system (migrations/ directory).
+func (s *RuntimeVersionService) InitTables(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS runtime_versions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +42,7 @@ func (s *RuntimeVersionService) InitTables() error {
 	}
 
 	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			return err
 		}
 	}
@@ -46,8 +51,11 @@ func (s *RuntimeVersionService) InitTables() error {
 }
 
 // List returns all cached versions for a runtime
-func (s *RuntimeVersionService) List(name string) ([]model.RuntimeVersion, error) {
-	rows, err := s.db.Query(
+func (s *RuntimeVersionService) List(ctx context.Context, name string) ([]model.RuntimeVersion, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx,
 		"SELECT id, name, version, lts, stable, updated_at FROM runtime_versions WHERE name = ? ORDER BY version DESC",
 		name,
 	)
@@ -68,6 +76,9 @@ func (s *RuntimeVersionService) List(name string) ([]model.RuntimeVersion, error
 		v.Stable = stable != 0
 		versions = append(versions, v)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
 
 	return versions, nil
 }
@@ -79,9 +90,12 @@ func (s *RuntimeVersionService) List(name string) ([]model.RuntimeVersion, error
 //   - "stable" -> latest stable version
 //   - "17" -> latest 17.x.x version
 //   - "17.0" -> latest 17.0.x version
-func (s *RuntimeVersionService) ResolveAlias(name, alias string) (string, error) {
+func (s *RuntimeVersionService) ResolveAlias(ctx context.Context, name, alias string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Get all versions
-	versions, err := s.List(name)
+	versions, err := s.List(ctx, name)
 	if err != nil {
 		return "", err
 	}
@@ -124,8 +138,8 @@ func (s *RuntimeVersionService) ResolveAlias(name, alias string) (string, error)
 }
 
 // GetAliasSuggestions returns alias suggestions for a runtime
-func (s *RuntimeVersionService) GetAliasSuggestions(name string) []string {
-	versions, err := s.List(name)
+func (s *RuntimeVersionService) GetAliasSuggestions(ctx context.Context, name string) []string {
+	versions, err := s.List(ctx, name)
 	if err != nil || len(versions) == 0 {
 		return []string{}
 	}
@@ -154,9 +168,12 @@ func (s *RuntimeVersionService) GetAliasSuggestions(name string) []string {
 }
 
 // ListWithInstalledStatus returns all cached versions with installed status
-func (s *RuntimeVersionService) ListWithInstalledStatus(name string) ([]model.RuntimeVersion, error) {
+func (s *RuntimeVersionService) ListWithInstalledStatus(ctx context.Context, name string) ([]model.RuntimeVersion, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// First get all versions
-	rows, err := s.db.Query(`
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, version, lts, stable, updated_at
 		FROM runtime_versions
 		WHERE name = ?
@@ -178,6 +195,9 @@ func (s *RuntimeVersionService) ListWithInstalledStatus(name string) ([]model.Ru
 		v.LTS = lts != 0
 		v.Stable = stable != 0
 		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
 	}
 
 	// Get installed environments for this runtime
@@ -232,12 +252,18 @@ func (s *RuntimeVersionService) getInstalledEnvironments(name string) ([]struct 
 			IsDefault bool
 		}{version, isDefault != 0})
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
 
 	return envs, nil
 }
 
 // FetchAndCache fetches versions from external sources and caches them
-func (s *RuntimeVersionService) FetchAndCache(name string) (int, error) {
+func (s *RuntimeVersionService) FetchAndCache(ctx context.Context, name string) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var versions []model.RuntimeVersion
 	var err error
 
@@ -263,7 +289,7 @@ func (s *RuntimeVersionService) FetchAndCache(name string) (int, error) {
 	// Cache versions
 	cached := 0
 	for _, v := range versions {
-		_, err := s.db.Exec(
+		_, err := s.db.ExecContext(ctx,
 			`INSERT OR REPLACE INTO runtime_versions (name, version, lts, stable, updated_at) VALUES (?, ?, ?, ?, ?)`,
 			name, v.Version, v.LTS, v.Stable, time.Now(),
 		)
