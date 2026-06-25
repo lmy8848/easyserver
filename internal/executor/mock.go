@@ -3,6 +3,10 @@ package executor
 import (
 	"context"
 	"fmt"
+	"io"
+	"os/exec"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -67,6 +71,66 @@ func (m *MockExecutor) RunCombined(ctx context.Context, name string, args ...str
 		return stdout + "\n" + stderr, exitCode, nil
 	}
 	return stdout, exitCode, nil
+}
+
+// RunWithOptions executes a mock command with custom options
+func (m *MockExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (string, int, error) {
+	return m.RunCombined(ctx, name, args...)
+}
+
+// MockProcess is a mock implementation of Process
+type MockProcess struct {
+	pid    int
+	waitCh chan error
+}
+
+// NewMockProcess creates a new MockProcess
+func NewMockProcess(pid int) *MockProcess {
+	return &MockProcess{
+		pid:    pid,
+		waitCh: make(chan error, 1),
+	}
+}
+
+// Pid returns the process ID
+func (p *MockProcess) Pid() int {
+	return p.pid
+}
+
+// StdoutPipe returns a reader for stdout
+func (p *MockProcess) StdoutPipe() (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+// StderrPipe returns a reader for stderr
+func (p *MockProcess) StderrPipe() (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+// Wait waits for the process to exit
+func (p *MockProcess) Wait() error {
+	return <-p.waitCh
+}
+
+// Kill kills the process
+func (p *MockProcess) Kill() error {
+	p.waitCh <- nil
+	return nil
+}
+
+// Signal sends a signal to the process
+func (p *MockProcess) Signal(sig syscall.Signal) error {
+	return nil
+}
+
+// Cmd returns the underlying exec.Cmd (for PTY usage)
+func (p *MockProcess) Cmd() *exec.Cmd {
+	return nil
+}
+
+// Start starts a mock process
+func (m *MockExecutor) Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error) {
+	return NewMockProcess(12345), nil
 }
 
 // Helper to create a success response

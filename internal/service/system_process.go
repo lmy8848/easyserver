@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
@@ -49,11 +49,14 @@ type cpuStat struct {
 
 // SystemProcessService provides system process monitoring and systemd management
 type SystemProcessService struct {
-	db         *sql.DB
-	cache      *model.SystemOverview
-	cacheMu    sync.RWMutex
-	cacheTime  time.Time
-	cacheTTL   time.Duration
+	db       *sql.DB
+	executor executor.CommandExecutor
+
+	cache    *model.SystemOverview
+	cacheMu  sync.RWMutex
+	cacheTime time.Time
+	cacheTTL time.Duration
+
 	cpuSamples map[int]*cpuSample // pid -> last sample
 	cpuMu      sync.RWMutex
 	prevCPU    *cpuStat // previous system-wide CPU snapshot
@@ -72,13 +75,14 @@ type SystemProcessService struct {
 }
 
 // NewSystemProcessService creates a new SystemProcessService
-func NewSystemProcessService(db *sql.DB) *SystemProcessService {
+func NewSystemProcessService(db *sql.DB, executor executor.CommandExecutor) *SystemProcessService {
 	sps := &SystemProcessService{
-		db:            db,
-		cacheTTL:      5 * time.Second,
-		procCacheTTL:  5 * time.Second,
-		svcCacheTTL:   10 * time.Second,
-		cpuSamples:    make(map[int]*cpuSample),
+		db:           db,
+		executor:     executor,
+		cacheTTL:     5 * time.Second,
+		procCacheTTL: 5 * time.Second,
+		svcCacheTTL:  10 * time.Second,
+		cpuSamples:   make(map[int]*cpuSample),
 	}
 	// Ensure whitelist table exists
 	sps.initDB()
@@ -305,13 +309,11 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 	whitelist, _ := s.GetWhitelist()
 
 	// Use systemctl list-units with format to get PID directly (avoids per-service calls)
-	cmd := exec.Command("systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend",
+	out, _, err := s.executor.RunCombined(nil, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend",
 		"--property=name,load,active,sub,description,main-pid")
-	out, err := cmd.Output()
 	if err != nil {
 		// Fallback to basic list
-		cmd = exec.Command("systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend")
-		out, err = cmd.Output()
+		out, _, err = s.executor.RunCombined(nil, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend")
 		if err != nil {
 			return nil, fmt.Errorf("systemctl list-units: %w", err)
 		}
@@ -319,10 +321,9 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 
 	// Batch get enabled status via list-unit-files
 	enabledMap := make(map[string]bool)
-	enabledCmd := exec.Command("systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain", "--no-legend")
-	enabledOut, err := enabledCmd.Output()
+	enabledOut, _, err := s.executor.RunCombined(nil, "systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain", "--no-legend")
 	if err == nil {
-		enabledScanner := bufio.NewScanner(strings.NewReader(string(enabledOut)))
+		enabledScanner := bufio.NewScanner(strings.NewReader(enabledOut))
 		for enabledScanner.Scan() {
 			line := strings.TrimSpace(enabledScanner.Text())
 			if line == "" {
@@ -437,10 +438,9 @@ func (s *SystemProcessService) ServiceAction(serviceName, action string, force b
 		}
 	}
 
-	cmd := exec.Command("systemctl", action, serviceName)
-	output, err := cmd.CombinedOutput()
+	output, _, err := s.executor.RunCombined(nil, "systemctl", action, serviceName)
 	if err != nil {
-		return fmt.Errorf("systemctl %s %s: %s", action, serviceName, string(output))
+		return fmt.Errorf("systemctl %s %s: %s", action, serviceName, output)
 	}
 
 	// Audit log
@@ -486,22 +486,21 @@ func (s *SystemProcessService) GetServiceLogs(serviceName string, lines int) (st
 		lines = defaultServiceLogLines
 	}
 
-	cmd := exec.Command("journalctl",
+	output, _, err := s.executor.RunCombined(nil, "journalctl",
 		"-u", serviceName,
 		"-n", strconv.Itoa(lines),
 		"--no-pager",
 		"--output=short-iso",
 	)
-	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// journalctl returns exit code 1 when no entries found
 		if len(output) > 0 {
-			return string(output), nil
+			return output, nil
 		}
 		return "", fmt.Errorf("journalctl failed: %w", err)
 	}
 
-	return string(output), nil
+	return output, nil
 }
 
 // IsProtectedService checks if a service is in the protected list

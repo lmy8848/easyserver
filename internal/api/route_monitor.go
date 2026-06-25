@@ -1,6 +1,7 @@
 package api
 
 import (
+	"easyserver/internal/executor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -29,11 +30,11 @@ func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerTerminalRoutes registers terminal routes
-func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) {
+func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, jwtSecret string, auditService *service.AuditService, exec executor.CommandExecutor, allowedOrigins []string, devMode bool) {
 	protected.GET("/terminal/:id", func(c *gin.Context) {
 		Success(c, nil)
 	})
-	handler := NewTerminalHandler(jwtSecret, auditService, allowedOrigins, devMode)
+	handler := NewTerminalHandler(jwtSecret, auditService, exec, allowedOrigins, devMode)
 	wsGroup.GET("/terminal/:id", handler.HandleWebSocket)
 }
 

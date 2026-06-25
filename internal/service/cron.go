@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -240,7 +239,7 @@ func (s *CronService) executeTask(task *model.CronTask) {
 		}
 
 		// Build command
-		var cmd *exec.Cmd
+		var command string
 		if task.ScriptID > 0 {
 			script, scriptErr := s.GetScript(ctx, int64(task.ScriptID))
 			if scriptErr != nil {
@@ -260,7 +259,7 @@ func (s *CronService) executeTask(task *model.CronTask) {
 				runErr = fmt.Errorf("invalid script content")
 				break
 			}
-			cmd = exec.CommandContext(runCtx, "sh", "-c", script.Content)
+			command = script.Content
 		} else {
 			// Validate command: reject null bytes and enforce max length
 			if strings.ContainsRune(task.Command, '\x00') {
@@ -280,24 +279,25 @@ func (s *CronService) executeTask(task *model.CronTask) {
 				runErr = fmt.Errorf("command too long")
 				break
 			}
-			cmd = exec.CommandContext(runCtx, "sh", "-c", task.Command)
+			command = task.Command
 		}
 
-		// Set working directory (validate existence)
+		// Build options
+		opts := executor.CommandOptions{}
 		if task.WorkDir != "" {
 			if _, err := os.Stat(task.WorkDir); err == nil {
-				cmd.Dir = task.WorkDir
+				opts.WorkDir = task.WorkDir
 			} else {
 				log.Printf("cron: work_dir %s does not exist, using default", task.WorkDir)
 			}
 		}
-
-		// Set environment variables (extend, not replace)
 		if task.EnvVars != "" {
-			cmd.Env = append(os.Environ(), parseEnvVars(task.EnvVars)...)
+			opts.Env = parseEnvVars(task.EnvVars)
+		}
 		}
 
-		output, runErr = cmd.CombinedOutput()
+		outputStr, _, runErr := s.executor.RunWithOptions(runCtx, opts, "sh", "-c", command)
+		output = []byte(outputStr)
 		if cancel != nil {
 			cancel()
 		}

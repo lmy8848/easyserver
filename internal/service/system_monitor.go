@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"time"
+
+	"easyserver/internal/executor"
 )
 
 // SystemEventMonitor monitors system-level events (disk, memory, service failures)
@@ -13,12 +15,14 @@ import (
 //   - system_monitor_windows.go
 type SystemEventMonitor struct {
 	auditService *AuditService
+	executor     executor.CommandExecutor
 	stopCh       chan struct{}
 }
 
-func NewSystemEventMonitor(auditService *AuditService) *SystemEventMonitor {
+func NewSystemEventMonitor(auditService *AuditService, exec executor.CommandExecutor) *SystemEventMonitor {
 	return &SystemEventMonitor{
 		auditService: auditService,
+		executor:     exec,
 		stopCh:       make(chan struct{}),
 	}
 }

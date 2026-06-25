@@ -9,11 +9,11 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 	"syscall"
 	"time"
 
+	"easyserver/internal/executor"
 	"easyserver/internal/model"
 )
 
@@ -29,7 +29,7 @@ const (
 // managedProcess tracks a running process instance
 type managedProcess struct {
 	ID        int64
-	cmd       *exec.Cmd
+	proc      executor.Process
 	cancel    context.CancelFunc
 	startedAt time.Time
 	mu        sync.Mutex
@@ -37,17 +37,21 @@ type managedProcess struct {
 
 // ProcessManager is the core service for managing background processes
 type ProcessManager struct {
-	db         *sql.DB
-	processes  map[int64]*managedProcess
-	mu         sync.RWMutex
-	stopCh     chan struct{}
+	db       *sql.DB
+	executor executor.CommandExecutor
+
+	processes map[int64]*managedProcess
+	mu        sync.RWMutex
+	stopCh    chan struct{}
 }
 
 // NewProcessManager creates a new ProcessManager.
 // It auto-starts processes that have auto_start=1.
-func NewProcessManager(db *sql.DB) *ProcessManager {
+func NewProcessManager(db *sql.DB, exec executor.CommandExecutor) *ProcessManager {
 	pm := &ProcessManager{
-		db:        db,
+		db:       db,
+		executor: exec,
+
 		processes: make(map[int64]*managedProcess),
 		stopCh:    make(chan struct{}),
 	}
@@ -315,43 +319,39 @@ func (pm *ProcessManager) Start(ctx context.Context, id int64) error {
 	// Update status to starting
 	pm.updateStatus(ctx, id, "starting", 0, 0, "")
 
-	// Build command
+	// Build options
 	args := parseArgs(p.Args)
-	cmd := exec.CommandContext(ctx, p.Command, args...)
-	if p.Dir != "" {
-		cmd.Dir = p.Dir
+	opts := executor.StartOptions{
+		Setpgid: true,
 	}
-
-	// Set environment variables
-	cmd.Env = os.Environ()
+	if p.Dir != "" {
+		opts.WorkDir = p.Dir
+	}
 	if p.Env != "" && p.Env != "{}" {
 		envMap := make(map[string]string)
 		if err := json.Unmarshal([]byte(p.Env), &envMap); err == nil {
 			for k, v := range envMap {
-				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+				opts.Env = append(opts.Env, fmt.Sprintf("%s=%s", k, v))
 			}
 		}
 	}
 
-	// Set process group so we can kill children
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	// Set up stdout/stderr capture
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-
-	mpCtx, cancel := context.WithCancel(context.Background())
-	mp := &managedProcess{
-		ID:        id,
-		cmd:       cmd,
-		cancel:    cancel,
-		startedAt: time.Now(),
+	// Start process
+	proc, err := pm.executor.Start(ctx, opts, p.Command, args...)
+	if err != nil {
+		pm.updateStatus(ctx, id, "failed", 0, 0, err.Error())
+		return fmt.Errorf("failed to start process: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		cancel()
-		pm.updateStatus(ctx, id, "error", 0, 0, err.Error())
-		return fmt.Errorf("start process %s: %w", p.Name, err)
+	// Set up stdout/stderr capture
+	stdout, _ := proc.StdoutPipe()
+	stderr, _ := proc.StderrPipe()
+
+	mp := &managedProcess{
+		ID:        id,
+		proc:      proc,
+		cancel:    cancel,
+		startedAt: time.Now(),
 	}
 
 	pm.mu.Lock()
@@ -359,8 +359,8 @@ func (pm *ProcessManager) Start(ctx context.Context, id int64) error {
 	pm.mu.Unlock()
 
 	// Update status to running
-	pm.updateStatus(ctx, id, "running", cmd.Process.Pid, 0, "")
-	pm.addLog(ctx, id, "system", fmt.Sprintf("Process started (PID: %d)", cmd.Process.Pid))
+	pm.updateStatus(ctx, id, "running", proc.Pid(), 0, "")
+	pm.addLog(ctx, id, "system", fmt.Sprintf("Process started (PID: %d)", proc.Pid()))
 
 	// Start log capture goroutines
 	go pm.captureOutput(ctx, id, stdout, "stdout")
@@ -393,7 +393,7 @@ func (pm *ProcessManager) Stop(ctx context.Context, id int64) error {
 		stopTimeout = p.StopTimeout
 	}
 
-	pm.updateStatus(ctx, id, "stopping", mp.cmd.Process.Pid, 0, "")
+	pm.updateStatus(ctx, id, "stopping", mp.proc.Pid(), 0, "")
 	pm.addLog(ctx, id, "system", "Stopping process...")
 
 	pm.stopProcess(mp, stopTimeout)
@@ -444,7 +444,7 @@ func (pm *ProcessManager) GetStats(ctx context.Context, id int64) (*model.Proces
 	mp, running := pm.processes[id]
 	pm.mu.RUnlock()
 
-	if running && mp.cmd.Process != nil {
+	if running && mp.proc != nil {
 		mp.mu.Lock()
 		stats.Uptime = int64(time.Since(mp.startedAt).Seconds())
 		mp.mu.Unlock()
@@ -640,12 +640,12 @@ func (pm *ProcessManager) Import(ctx context.Context, processes []model.Process)
 
 func (pm *ProcessManager) stopProcess(mp *managedProcess, stopTimeout int) {
 	mp.cancel()
-	if mp.cmd.Process != nil {
+	if mp.proc != nil {
 		// SIGTERM first for graceful shutdown
-		syscall.Kill(-mp.cmd.Process.Pid, syscall.SIGTERM)
+		mp.proc.Signal(syscall.SIGTERM)
 		done := make(chan error, 1)
 		go func() {
-			done <- mp.cmd.Wait()
+			done <- mp.proc.Wait()
 		}()
 		// Wait configured timeout, then SIGKILL
 		if stopTimeout <= 0 {
@@ -655,7 +655,7 @@ func (pm *ProcessManager) stopProcess(mp *managedProcess, stopTimeout int) {
 		case <-done:
 			// Process exited gracefully
 		case <-time.After(time.Duration(stopTimeout) * time.Second):
-			syscall.Kill(-mp.cmd.Process.Pid, syscall.SIGKILL)
+			mp.proc.Kill()
 			<-done // Wait for SIGKILL to take effect
 		}
 	}
@@ -663,12 +663,11 @@ func (pm *ProcessManager) stopProcess(mp *managedProcess, stopTimeout int) {
 
 func (pm *ProcessManager) waitForExit(ctx context.Context, mp *managedProcess, autoRestart bool, maxRestarts, restartDelay, startupTimeout int) {
 	startTime := time.Now()
-	err := mp.cmd.Wait()
+	err := mp.proc.Wait()
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
+		// Process exited with error
+		exitCode = 1
 	}
 
 	pm.mu.Lock()

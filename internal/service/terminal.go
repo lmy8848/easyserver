@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"sync"
 	"time"
+
+	"easyserver/internal/executor"
 
 	"github.com/creack/pty"
 )
@@ -36,11 +37,13 @@ type TerminalSession struct {
 
 type TerminalManager struct {
 	mu       sync.RWMutex
+	executor executor.CommandExecutor
 	sessions map[string]*TerminalSession
 }
 
-func NewTerminalManager() *TerminalManager {
+func NewTerminalManager(exec executor.CommandExecutor) *TerminalManager {
 	return &TerminalManager{
+		executor: exec,
 		sessions: make(map[string]*TerminalSession),
 	}
 }
@@ -61,11 +64,17 @@ func (m *TerminalManager) CreateSession(id string) (*TerminalSession, error) {
 		shell = "/bin/bash"
 	}
 
-	// Create command
-	cmd := exec.Command(shell)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	// Start process with PTY
+	opts := executor.StartOptions{
+		Env: []string{"TERM=xterm-256color"},
+	}
+	proc, err := m.executor.Start(nil, opts, shell)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start PTY: %w", err)
+	}
 
-	// Start PTY
+	// Get underlying cmd for PTY
+	cmd := proc.Cmd()
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start PTY: %w", err)

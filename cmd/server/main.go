@@ -114,10 +114,13 @@ func main() {
 		monitorService.Start()
 	}()
 
+	// Initialize shared command executor
+	cmdExec := executor.NewOSExecutor()
+
 	// Initialize audit service and system event monitor (single shared instance)
 	auditService := service.NewAuditService(db, cfg.Audit.RetentionDays)
 	auditService.SetAuditRepository(auditRepo)
-	systemMonitor := service.NewSystemEventMonitor(auditService)
+	systemMonitor := service.NewSystemEventMonitor(auditService, cmdExec)
 	systemMonitor.Start()
 
 	// Initialize session service and start cleanup (single shared instance)
@@ -139,16 +142,13 @@ func main() {
 	}()
 
 	// Initialize process guardian (single shared instance)
-	processManager := service.NewProcessManager(db)
+	processManager := service.NewProcessManager(db, cmdExec)
 
 	// Initialize system process service (single shared instance)
-	systemProcessService := service.NewSystemProcessService(db)
+	systemProcessService := service.NewSystemProcessService(db, cmdExec)
 
 	// Initialize notification service (single shared instance)
 	notificationService := service.NewNotificationService(db)
-
-	// Initialize shared command executor
-	cmdExec := executor.NewOSExecutor()
 
 	// Initialize container services (single shared instance)
 	containerService := service.NewContainerService(cmdExec)

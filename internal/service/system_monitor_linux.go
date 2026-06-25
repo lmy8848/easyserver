@@ -8,7 +8,6 @@ import (
 	"context"
 	"log"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -16,8 +15,7 @@ import (
 // checkDiskSpace checks disk usage on all mounted partitions.
 // Alerts if any partition exceeds 90% usage.
 func (m *SystemEventMonitor) checkDiskSpace() {
-	cmd := exec.Command("df", "-h", "--output=target,pcent")
-	output, err := cmd.Output()
+	output, _, err := m.executor.RunCombined(nil, "df", "-h", "--output=target,pcent")
 	if err != nil {
 		log.Printf("system_monitor: failed to run df: %v", err)
 		return
@@ -86,8 +84,7 @@ func (m *SystemEventMonitor) checkMemoryUsage() {
 
 // checkServiceFailures checks for failed systemd services.
 func (m *SystemEventMonitor) checkServiceFailures() {
-	cmd := exec.Command("systemctl", "list-units", "--type=service", "--state=failed", "--no-pager", "--plain")
-	output, err := cmd.Output()
+	output, _, err := m.executor.RunCombined(nil, "systemctl", "list-units", "--type=service", "--state=failed", "--no-pager", "--plain")
 	if err != nil {
 		return
 	}
