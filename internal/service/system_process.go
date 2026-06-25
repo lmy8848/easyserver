@@ -2,9 +2,8 @@ package service
 
 import (
 	"bufio"
-	"database/sql"
+	"context"
 	"fmt"
-	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 const (
@@ -47,10 +47,15 @@ type cpuStat struct {
 	at      time.Time
 }
 
+type serviceAuditLogger interface {
+	LogServiceOperation(ctx context.Context, userID int64, username, action, serviceName, ip, userAgent string)
+}
+
 // SystemProcessService provides system process monitoring and systemd management
 type SystemProcessService struct {
-	db       *sql.DB
-	executor executor.CommandExecutor
+	executor      executor.CommandExecutor
+	whitelistRepo repository.ServiceWhitelistRepository
+	auditLogger   serviceAuditLogger
 
 	cache     *model.SystemOverview
 	cacheMu   sync.RWMutex
@@ -75,26 +80,19 @@ type SystemProcessService struct {
 }
 
 // NewSystemProcessService creates a new SystemProcessService
-func NewSystemProcessService(db *sql.DB, executor executor.CommandExecutor) *SystemProcessService {
+func NewSystemProcessService(executor executor.CommandExecutor, whitelistRepo repository.ServiceWhitelistRepository, auditLogger serviceAuditLogger) *SystemProcessService {
 	sps := &SystemProcessService{
-		db:           db,
-		executor:     executor,
-		cacheTTL:     5 * time.Second,
-		procCacheTTL: 5 * time.Second,
-		svcCacheTTL:  10 * time.Second,
-		cpuSamples:   make(map[int]*cpuSample),
+		executor:      executor,
+		whitelistRepo: whitelistRepo,
+		auditLogger:   auditLogger,
+		cacheTTL:      5 * time.Second,
+		procCacheTTL:  5 * time.Second,
+		svcCacheTTL:   10 * time.Second,
+		cpuSamples:    make(map[int]*cpuSample),
 	}
 	// Ensure whitelist table exists
-	sps.initDB()
+	sps.whitelistRepo.Init(context.Background())
 	return sps
-}
-
-func (s *SystemProcessService) initDB() {
-	s.db.Exec(`CREATE TABLE IF NOT EXISTS service_whitelist (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT UNIQUE NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`)
 }
 
 // GetOverview returns system-wide resource statistics with caching
@@ -451,33 +449,17 @@ func (s *SystemProcessService) ServiceAction(serviceName, action string, force b
 
 // GetWhitelist returns all whitelisted services
 func (s *SystemProcessService) GetWhitelist() ([]model.ServiceWhitelistEntry, error) {
-	rows, err := s.db.Query("SELECT id, name, created_at FROM service_whitelist ORDER BY name")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []model.ServiceWhitelistEntry
-	for rows.Next() {
-		var e model.ServiceWhitelistEntry
-		if err := rows.Scan(&e.ID, &e.Name, &e.CreatedAt); err != nil {
-			continue
-		}
-		entries = append(entries, e)
-	}
-	return entries, nil
+	return s.whitelistRepo.List(context.Background())
 }
 
 // AddToWhitelist adds a service to the whitelist
 func (s *SystemProcessService) AddToWhitelist(name string) error {
-	_, err := s.db.Exec("INSERT OR IGNORE INTO service_whitelist (name) VALUES (?)", name)
-	return err
+	return s.whitelistRepo.Add(context.Background(), name)
 }
 
 // RemoveFromWhitelist removes a service from the whitelist
 func (s *SystemProcessService) RemoveFromWhitelist(name string) error {
-	_, err := s.db.Exec("DELETE FROM service_whitelist WHERE name = ?", name)
-	return err
+	return s.whitelistRepo.Delete(context.Background(), name)
 }
 
 // GetServiceLogs returns recent logs for a systemd service using journalctl
@@ -515,16 +497,10 @@ func ProtectedServices() map[string]string {
 }
 
 func (s *SystemProcessService) auditLog(serviceName, action string) {
-	_, err := s.db.Exec(
-		"INSERT INTO audit_logs (action, target, details, created_at) VALUES (?, ?, ?, ?)",
-		fmt.Sprintf("service_%s", action),
-		serviceName,
-		fmt.Sprintf("systemctl %s %s", action, serviceName),
-		time.Now().Format(time.RFC3339),
-	)
-	if err != nil {
-		log.Printf("audit log failed: %v", err)
+	if s.auditLogger == nil {
+		return
 	}
+	s.auditLogger.LogServiceOperation(context.Background(), 0, "system", action, serviceName, "127.0.0.1", "EasyServer")
 }
 
 // --- /proc parsing helpers ---

@@ -27,16 +27,16 @@ type auditEntry struct {
 }
 
 type AuditWriter struct {
-	db         *sql.DB
+	repo       repository.AuditRepository
 	ch         chan auditEntry
 	done       chan struct{}
 	finished   chan struct{}
 	signingKey []byte
 }
 
-func newAuditWriter(db *sql.DB, signingKey []byte) *AuditWriter {
+func newAuditWriter(repo repository.AuditRepository, signingKey []byte) *AuditWriter {
 	w := &AuditWriter{
-		db:         db,
+		repo:       repo,
 		ch:         make(chan auditEntry, 1000),
 		done:       make(chan struct{}),
 		finished:   make(chan struct{}),
@@ -85,30 +85,22 @@ func (w *AuditWriter) run() {
 }
 
 func (w *AuditWriter) flush(batch []auditEntry) {
-	tx, err := w.db.Begin()
-	if err != nil {
-		log.Printf("audit: failed to begin transaction: %v", err)
-		return
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.Prepare(`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, created_at, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		log.Printf("audit: failed to prepare statement: %v", err)
-		return
-	}
-	defer stmt.Close()
-
-	for _, e := range batch {
-		// Generate HMAC-SHA256 signature
-		signature := w.signEntry(e)
-		if _, err := stmt.Exec(e.userID, e.username, e.action, e.resource, e.detail, e.ip, e.userAgent, e.createdAt, signature); err != nil {
-			log.Printf("audit: failed to insert entry: %v", err)
+	entries := make([]repository.SignedAuditEntry, len(batch))
+	for i, e := range batch {
+		entries[i] = repository.SignedAuditEntry{
+			UserID:    e.userID,
+			Username:  e.username,
+			Action:    e.action,
+			Resource:  e.resource,
+			Detail:    e.detail,
+			IP:        e.ip,
+			UserAgent: e.userAgent,
+			CreatedAt: e.createdAt,
+			Signature: w.signEntry(e),
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		log.Printf("audit: failed to commit batch: %v", err)
+	if err := w.repo.AppendSignedBatch(context.Background(), entries); err != nil {
+		log.Printf("audit: failed to flush batch: %v", err)
 	}
 }
 
@@ -134,7 +126,7 @@ type AuditService struct {
 	retentionDays int
 }
 
-func NewAuditService(db *sql.DB, retentionDays int) *AuditService {
+func NewAuditService(db *sql.DB, auditRepo repository.AuditRepository, retentionDays int) *AuditService {
 	if retentionDays <= 0 {
 		retentionDays = 90
 	}
@@ -144,7 +136,8 @@ func NewAuditService(db *sql.DB, retentionDays int) *AuditService {
 
 	s := &AuditService{
 		db:            db,
-		writer:        newAuditWriter(db, key),
+		auditRepo:     auditRepo,
+		writer:        newAuditWriter(auditRepo, key),
 		signingKey:    key,
 		retentionDays: retentionDays,
 	}
@@ -187,11 +180,6 @@ func randomBytes(b []byte) (int, error) {
 	return rand.Read(b)
 }
 
-// SetAuditRepository sets the audit repository implementation
-func (s *AuditService) SetAuditRepository(repo repository.AuditRepository) {
-	s.auditRepo = repo
-}
-
 func (s *AuditService) Close() {
 	s.writer.close()
 }
@@ -211,19 +199,7 @@ func (s *AuditService) cleanupLoop() {
 // cleanupOldRecords deletes audit logs older than retentionDays and runs VACUUM
 func (s *AuditService) cleanupOldRecords() {
 	since := time.Now().AddDate(0, 0, -s.retentionDays)
-	var rows int64
-	var err error
-
-	if s.auditRepo != nil {
-		rows, err = s.auditRepo.Clean(context.Background(), since)
-	} else {
-		var result sql.Result
-		result, err = s.db.Exec("DELETE FROM audit_logs WHERE created_at < ?", since)
-		if err == nil {
-			rows, _ = result.RowsAffected()
-		}
-	}
-
+	rows, err := s.auditRepo.Clean(context.Background(), since)
 	if err != nil {
 		log.Printf("audit: cleanup error: %v", err)
 		return
@@ -356,104 +332,34 @@ func (s *AuditService) GetAuditLogs(ctx context.Context, page, pageSize int, use
 		ctx = context.Background()
 	}
 
-	if s.auditRepo != nil {
-		filter := repository.AuditFilter{
-			Username:  username,
-			Action:    action,
-			Resource:  resource,
-			IP:        ip,
-			StartDate: startDate,
-			EndDate:   endDate,
-			Offset:    (page - 1) * pageSize,
-			Limit:     pageSize,
-		}
-		total, logs, err := s.auditRepo.Query(ctx, filter)
-		if err != nil {
-			return 0, nil, err
-		}
-		items := make([]map[string]interface{}, 0, len(logs))
-		for _, log := range logs {
-			items = append(items, map[string]interface{}{
-				"id":         log.ID,
-				"user_id":    log.UserID,
-				"username":   log.Username,
-				"action":     log.Action,
-				"resource":   log.Resource,
-				"detail":     log.Detail,
-				"ip":         log.IP,
-				"user_agent": log.UserAgent,
-				"created_at": log.CreatedAt.Format("2006-01-02 15:04:05"),
-			})
-		}
-		return total, items, nil
+	filter := repository.AuditFilter{
+		Username:  username,
+		Action:    action,
+		Resource:  resource,
+		IP:        ip,
+		StartDate: startDate,
+		EndDate:   endDate,
+		Offset:    (page - 1) * pageSize,
+		Limit:     pageSize,
 	}
-
-	where := "1=1"
-	args := []interface{}{}
-
-	if username != "" {
-		where += " AND username LIKE ?"
-		args = append(args, "%"+username+"%")
-	}
-	if action != "" {
-		where += " AND action LIKE ?"
-		args = append(args, "%"+action+"%")
-	}
-	if resource != "" {
-		where += " AND resource LIKE ?"
-		args = append(args, "%"+resource+"%")
-	}
-	if ip != "" {
-		where += " AND ip LIKE ?"
-		args = append(args, "%"+ip+"%")
-	}
-	if startDate != "" {
-		where += " AND created_at >= ?"
-		args = append(args, startDate)
-	}
-	if endDate != "" {
-		where += " AND created_at <= ?"
-		args = append(args, endDate+" 23:59:59")
-	}
-
-	// Get total count
-	var total int64
-	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
-	s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
-
-	// Get items
-	offset := (page - 1) * pageSize
-	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at
-	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
-	args = append(args, pageSize, offset)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	total, logs, err := s.auditRepo.Query(ctx, filter)
 	if err != nil {
 		return 0, nil, err
 	}
-	defer rows.Close()
-
-	var items []map[string]interface{}
-	for rows.Next() {
-		var id, userID int64
-		var username, action, resource, detail, ip, userAgent string
-		var createdAt time.Time
-		if err := rows.Scan(&id, &userID, &username, &action, &resource, &detail, &ip, &userAgent, &createdAt); err != nil {
-			continue
-		}
+	items := make([]map[string]interface{}, 0, len(logs))
+	for _, log := range logs {
 		items = append(items, map[string]interface{}{
-			"id":         id,
-			"user_id":    userID,
-			"username":   username,
-			"action":     action,
-			"resource":   resource,
-			"detail":     detail,
-			"ip":         ip,
-			"user_agent": userAgent,
-			"created_at": createdAt.Format("2006-01-02 15:04:05"),
+			"id":         log.ID,
+			"user_id":    log.UserID,
+			"username":   log.Username,
+			"action":     log.Action,
+			"resource":   log.Resource,
+			"detail":     log.Detail,
+			"ip":         log.IP,
+			"user_agent": log.UserAgent,
+			"created_at": log.CreatedAt.Format("2006-01-02 15:04:05"),
 		})
 	}
-
 	return total, items, nil
 }
 
@@ -462,25 +368,19 @@ func (s *AuditService) VerifySignature(ctx context.Context, id int64) (bool, err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var userID int64
-	var username, action, resource, detail, ip, userAgent, signature string
-	var createdAt time.Time
-	err := s.db.QueryRowContext(ctx,
-		`SELECT user_id, username, action, resource, detail, ip, user_agent, created_at, signature
-		 FROM audit_logs WHERE id = ?`, id,
-	).Scan(&userID, &username, &action, &resource, &detail, &ip, &userAgent, &createdAt, &signature)
+	entry, err := s.auditRepo.GetSignedEntry(ctx, id)
 	if err != nil {
 		return false, err
 	}
 
 	// Regenerate signature
 	data := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s|%s",
-		userID, username, action, resource, detail, ip, userAgent, createdAt.Format(time.RFC3339Nano))
+		entry.UserID, entry.Username, entry.Action, entry.Resource, entry.Detail, entry.IP, entry.UserAgent, entry.CreatedAt.Format(time.RFC3339Nano))
 	mac := hmac.New(sha256.New, s.signingKey)
 	mac.Write([]byte(data))
 	expected := hex.EncodeToString(mac.Sum(nil))
 
-	return hmac.Equal([]byte(signature), []byte(expected)), nil
+	return hmac.Equal([]byte(entry.Signature), []byte(expected)), nil
 }
 
 // VerifyAllSignatures verifies integrity of all audit log entries
@@ -488,17 +388,12 @@ func (s *AuditService) VerifyAllSignatures(ctx context.Context) (total, valid, i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM audit_logs ORDER BY id DESC LIMIT 1000`)
+	ids, err := s.auditRepo.ListIDsForVerification(ctx, 1000)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
+	for _, id := range ids {
 		total++
 		ok, err := s.VerifySignature(ctx, id)
 		if err != nil {

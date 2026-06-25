@@ -54,12 +54,34 @@ type TokenBlacklistRepository interface {
 	Clean(ctx context.Context) error
 }
 
+// SignedAuditEntry represents an audit log entry with HMAC signature,
+// used by AuditWriter.flush and VerifySignature.
+type SignedAuditEntry struct {
+	ID        int64
+	UserID    int64
+	Username  string
+	Action    string
+	Resource  string
+	Detail    string
+	IP        string
+	UserAgent string
+	CreatedAt time.Time
+	Signature string
+}
+
 // AuditRepository defines the interface for audit log data access
 type AuditRepository interface {
 	Log(ctx context.Context, entry *model.AuditLog) error
 	Query(ctx context.Context, filter AuditFilter) (int64, []model.AuditLog, error)
 	GetActions(ctx context.Context) ([]string, error)
 	Clean(ctx context.Context, before time.Time) (int64, error)
+
+	// AppendSignedBatch inserts a batch of signed audit entries in a single transaction.
+	AppendSignedBatch(ctx context.Context, entries []SignedAuditEntry) error
+	// GetSignedEntry returns a single signed audit entry by ID (including signature).
+	GetSignedEntry(ctx context.Context, id int64) (*SignedAuditEntry, error)
+	// ListIDsForVerification returns up to limit audit log IDs ordered by id DESC.
+	ListIDsForVerification(ctx context.Context, limit int) ([]int64, error)
 }
 
 // AuditFilter defines the filter criteria for audit log queries
@@ -286,11 +308,54 @@ type EnvConfigRepository interface {
 	CreateGlobalConfigIfNotExists(ctx context.Context, config *model.GlobalConfig) error
 }
 
+// ServiceWhitelistRepository defines the interface for service whitelist data access
+type ServiceWhitelistRepository interface {
+	Init(ctx context.Context) error
+	List(ctx context.Context) ([]model.ServiceWhitelistEntry, error)
+	Add(ctx context.Context, name string) error
+	Delete(ctx context.Context, name string) error
+}
+
 // ActivityRepository defines the interface for user activity log data access
 type ActivityRepository interface {
 	Log(ctx context.Context, entry *model.UserActivity) error
 	GetByUserID(ctx context.Context, userID int64, limit int) ([]model.UserActivity, error)
 	GetAll(ctx context.Context, limit int) ([]model.UserActivity, error)
+}
+
+// PackageRepository defines the interface for package data access
+type PackageRepository interface {
+	List(ctx context.Context, runtimeID int64) ([]model.Package, error)
+	Upsert(ctx context.Context, runtimeID int64, name, version, scope, source string) error
+	Delete(ctx context.Context, runtimeID int64, name, scope string) error
+}
+
+// ProcessRepository defines the interface for process/process-group/process-log data access
+type ProcessRepository interface {
+	// Process CRUD
+	ListProcesses(ctx context.Context) ([]model.Process, error)
+	GetProcessByID(ctx context.Context, id int64) (*model.Process, error)
+	CreateProcess(ctx context.Context, p *model.Process) (int64, error)
+	UpdateProcess(ctx context.Context, id int64, req *model.UpdateProcessRequest) error
+	DeleteProcess(ctx context.Context, id int64) error
+	GetAutoStartIDs(ctx context.Context) ([]int64, error)
+
+	// Process status
+	UpsertStatus(ctx context.Context, processID int64, status string, pid int, exitCode int, lastError string) error
+	GetStatus(ctx context.Context, processID int64) (*model.ProcessStatus, error)
+	IncrementRestarts(ctx context.Context, processID int64) error
+	ClearExitInfo(ctx context.Context, processID int64) error
+
+	// Process logs
+	AppendLog(ctx context.Context, processID int64, logType, content string) error
+	ListLogs(ctx context.Context, processID int64, limit, offset int) ([]model.ProcessLog, int, error)
+
+	// Process groups
+	ListGroups(ctx context.Context) ([]model.ProcessGroup, error)
+	GetGroup(ctx context.Context, id int64) (*model.ProcessGroup, error)
+	CreateGroup(ctx context.Context, name, description string) (int64, error)
+	UpdateGroup(ctx context.Context, id int64, req *model.UpdateProcessGroupRequest) error
+	DeleteGroup(ctx context.Context, id int64) error
 }
 
 // RuntimeRepository defines the interface for runtime environment data access
@@ -330,4 +395,9 @@ type RuntimeRepository interface {
 	// Related resource queries
 	ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error)
 	ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]model.PathEntry, error)
+
+	// Runtime version cache
+	InitRuntimeVersionsTable(ctx context.Context) error
+	ListRuntimeVersions(ctx context.Context, name string) ([]model.RuntimeVersion, error)
+	UpsertRuntimeVersion(ctx context.Context, name, version string, lts bool, stable bool) error
 }

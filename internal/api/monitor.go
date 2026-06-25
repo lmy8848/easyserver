@@ -257,11 +257,11 @@ func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerTerminalRoutes registers terminal routes
-func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, exec executor.CommandExecutor, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) {
+func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *service.TerminalManager, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) {
 	protected.GET("/terminal/:id", func(c *gin.Context) {
 		Success(c, nil)
 	})
-	handler := NewTerminalHandler(exec, jwtSecret, auditService, allowedOrigins, devMode)
+	handler := NewTerminalHandler(terminalManager, jwtSecret, auditService, allowedOrigins, devMode)
 	wsGroup.GET("/terminal/:id", handler.HandleWebSocket)
 }
 

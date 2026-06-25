@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,43 +9,22 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/repository"
 )
 
 type PackageManagerService struct {
-	db       *sql.DB
+	repo     repository.PackageRepository
 	executor executor.CommandExecutor
 }
 
-func NewPackageManagerService(db *sql.DB, exec executor.CommandExecutor) *PackageManagerService {
-	return &PackageManagerService{db: db, executor: exec}
+func NewPackageManagerService(repo repository.PackageRepository, exec executor.CommandExecutor) *PackageManagerService {
+	return &PackageManagerService{repo: repo, executor: exec}
 }
 
 // Deprecated: InitTables is kept for backward compatibility only.
 // Table creation is now handled by the migration system (migrations/ directory).
-func (s *PackageManagerService) InitTables(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS packages (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			runtime_id INTEGER NOT NULL,
-			name TEXT NOT NULL,
-			version TEXT NOT NULL,
-			scope TEXT DEFAULT 'global',
-			source TEXT NOT NULL,
-			installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(runtime_id, name, scope)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_packages_runtime ON packages(runtime_id)`,
-	}
-
-	for _, q := range queries {
-		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-
+// This is a no-op since the repository handles its own schema.
+func (s *PackageManagerService) InitTables(_ context.Context) error {
 	return nil
 }
 
@@ -55,29 +33,7 @@ func (s *PackageManagerService) ListPackages(ctx context.Context, runtimeID int6
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.id, p.runtime_id, r.name, p.name, p.version, p.scope, p.source, p.installed_at
-		FROM packages p
-		LEFT JOIN runtime_environments r ON p.runtime_id = r.id
-		WHERE p.runtime_id = ?
-		ORDER BY p.name
-	`, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var packages []model.Package
-	for rows.Next() {
-		var pkg model.Package
-		err := rows.Scan(&pkg.ID, &pkg.RuntimeID, &pkg.RuntimeName, &pkg.Name, &pkg.Version, &pkg.Scope, &pkg.Source, &pkg.InstalledAt)
-		if err != nil {
-			continue
-		}
-		packages = append(packages, pkg)
-	}
-
-	return packages, nil
+	return s.repo.List(ctx, runtimeID)
 }
 
 // ScanPackages scans installed packages for a runtime
@@ -107,10 +63,7 @@ func (s *PackageManagerService) ScanPackages(ctx context.Context, runtimeID int6
 
 	// Save to database
 	for _, pkg := range packages {
-		s.db.ExecContext(ctx,
-			"INSERT OR REPLACE INTO packages (runtime_id, name, version, scope, source) VALUES (?, ?, ?, ?, ?)",
-			pkg.RuntimeID, pkg.Name, pkg.Version, pkg.Scope, pkg.Source,
-		)
+		s.repo.Upsert(ctx, pkg.RuntimeID, pkg.Name, pkg.Version, pkg.Scope, pkg.Source)
 	}
 
 	return packages, nil
@@ -337,7 +290,7 @@ func (s *PackageManagerService) uninstallNpmPackage(ctx context.Context, req *mo
 	}
 
 	// Remove from database
-	s.db.Exec("DELETE FROM packages WHERE runtime_id = ? AND name = ? AND scope = 'global'", req.RuntimeID, req.Name)
+	s.repo.Delete(ctx, req.RuntimeID, req.Name, "global")
 
 	log.Printf("package: uninstalled %s via npm", req.Name)
 	return nil
@@ -409,7 +362,7 @@ func (s *PackageManagerService) uninstallPipPackage(ctx context.Context, req *mo
 	}
 
 	// Remove from database
-	s.db.Exec("DELETE FROM packages WHERE runtime_id = ? AND name = ? AND scope = 'global'", req.RuntimeID, req.Name)
+	s.repo.Delete(ctx, req.RuntimeID, req.Name, "global")
 
 	log.Printf("package: uninstalled %s via pip", req.Name)
 	return nil

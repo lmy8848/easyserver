@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -15,94 +13,12 @@ import (
 )
 
 type DBServerService struct {
-	db       *sql.DB
 	executor executor.CommandExecutor
 	repo     repository.DBServerRepository
 }
 
-func NewDBServerService(db *sql.DB, exec executor.CommandExecutor, repo repository.DBServerRepository) *DBServerService {
-	return &DBServerService{db: db, executor: exec, repo: repo}
-}
-
-// Deprecated: InitTables is kept for backward compatibility only.
-// Table creation is now handled by the migration system (migrations/ directory).
-func (s *DBServerService) InitTables(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS db_servers (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			display_name TEXT NOT NULL,
-			description TEXT DEFAULT '',
-			default_port INTEGER DEFAULT 0,
-			status TEXT DEFAULT 'not_installed',
-			version TEXT DEFAULT '',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS db_versions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			db_server_id INTEGER NOT NULL DEFAULT 0,
-			version TEXT NOT NULL,
-			service_name TEXT DEFAULT '',
-			config_file TEXT DEFAULT '',
-			data_dir TEXT DEFAULT '',
-			port INTEGER DEFAULT 0,
-			status TEXT DEFAULT 'stopped',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(db_server_id, version)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_db_versions_server ON db_versions(db_server_id)`,
-		`CREATE TABLE IF NOT EXISTS databases (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			db_server_id INTEGER NOT NULL DEFAULT 0,
-			db_version_id INTEGER NOT NULL DEFAULT 0,
-			name TEXT NOT NULL,
-			charset TEXT DEFAULT 'utf8mb4',
-			description TEXT DEFAULT '',
-			size_bytes INTEGER DEFAULT 0,
-			status TEXT DEFAULT 'active',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_databases_server ON databases(db_server_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_databases_version ON databases(db_version_id)`,
-		`CREATE TABLE IF NOT EXISTS db_users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			db_server_id INTEGER NOT NULL DEFAULT 0,
-			username TEXT NOT NULL,
-			password TEXT DEFAULT '',
-			host TEXT DEFAULT 'localhost',
-			privileges TEXT DEFAULT '',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_db_users_server ON db_users(db_server_id)`,
-	}
-	for _, q := range queries {
-		if _, err := s.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-
-	// Insert predefined entries
-	for _, ds := range model.PredefinedDBServers() {
-		var count int
-		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM db_servers WHERE name = ?", ds.Name).Scan(&count)
-		if count == 0 {
-			s.db.ExecContext(ctx, `INSERT INTO db_servers (name, display_name, description, default_port)
-				VALUES (?, ?, ?, ?)`,
-				ds.Name, ds.DisplayName, ds.Description, ds.DefaultPort)
-		}
-	}
-
-	// Migration: add columns to existing tables (ignore error if column already exists)
-	if _, err := s.db.ExecContext(ctx, "ALTER TABLE databases ADD COLUMN db_version_id INTEGER NOT NULL DEFAULT 0"); err != nil {
-		// Column may already exist - this is expected on subsequent runs
-		log.Printf("db migration: %v (may be expected if column exists)", err)
-	}
-
-	return nil
+func NewDBServerService(exec executor.CommandExecutor, repo repository.DBServerRepository) *DBServerService {
+	return &DBServerService{executor: exec, repo: repo}
 }
 
 // SeedPredefinedServers inserts predefined database server entries if not exists.
@@ -190,7 +106,7 @@ func (s *DBServerService) InstallVersion(ctx context.Context, dbServerID int64, 
 	}
 
 	// Detect service name
-	serviceName := detectServiceName(ds.Name, req.Version)
+	serviceName := s.detectServiceName(ds.Name, req.Version)
 
 	// Set port
 	port := req.Port
@@ -409,7 +325,7 @@ func (s *DBServerService) updateServerSummary(ctx context.Context, dbServerID in
 }
 
 // detectServiceName detects the systemd service name for a database version
-func detectServiceName(dbName, version string) string {
+func (s *DBServerService) detectServiceName(dbName, version string) string {
 	switch dbName {
 	case "mysql":
 		return "mariadb"
@@ -417,7 +333,7 @@ func detectServiceName(dbName, version string) string {
 		// PostgreSQL uses version-specific service: postgresql@15-main or postgresql
 		// Try version-specific first, fallback to generic
 		versionService := fmt.Sprintf("postgresql@%s-main", version)
-		if _, err := exec.LookPath("pg_ctlcluster"); err == nil {
+		if _, err := s.executor.LookPath("pg_ctlcluster"); err == nil {
 			return versionService
 		}
 		return "postgresql"
@@ -432,10 +348,10 @@ func (s *DBServerService) GetMySQLCmd(ctx context.Context) string {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, err := exec.LookPath("mariadb"); err == nil {
+	if _, err := s.executor.LookPath("mariadb"); err == nil {
 		return "mariadb"
 	}
-	if _, err := exec.LookPath("mysql"); err == nil {
+	if _, err := s.executor.LookPath("mysql"); err == nil {
 		return "mysql"
 	}
 	return ""

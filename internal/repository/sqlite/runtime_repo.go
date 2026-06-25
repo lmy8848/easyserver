@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"easyserver/internal/model"
 	"easyserver/internal/repository"
@@ -35,7 +36,7 @@ func (r *RuntimeRepository) ListAll(ctx context.Context) ([]model.RuntimeEnviron
 		var isDefault int
 		err := rows.Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		env.IsDefault = isDefault != 0
 		environments = append(environments, env)
@@ -64,7 +65,7 @@ func (r *RuntimeRepository) ListByName(ctx context.Context, name string) ([]mode
 		var isDefault int
 		err := rows.Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		env.IsDefault = isDefault != 0
 		environments = append(environments, env)
@@ -299,7 +300,7 @@ func (r *RuntimeRepository) ListEnvConfigsByRuntimeID(ctx context.Context, runti
 		var isGlobal int
 		err := rows.Scan(&c.ID, &c.Name, &c.Value, &c.RuntimeID, &isGlobal, &c.CreatedAt, &c.UpdatedAt)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		c.IsGlobal = isGlobal != 0
 		configs = append(configs, c)
@@ -328,7 +329,7 @@ func (r *RuntimeRepository) ListPathEntriesByRuntimeID(ctx context.Context, runt
 		var isGlobal int
 		err := rows.Scan(&e.ID, &e.Path, &e.RuntimeID, &isGlobal, &e.Order, &e.CreatedAt)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		e.IsGlobal = isGlobal != 0
 		entries = append(entries, e)
@@ -338,4 +339,64 @@ func (r *RuntimeRepository) ListPathEntriesByRuntimeID(ctx context.Context, runt
 	}
 
 	return entries, nil
+}
+
+// InitRuntimeVersionsTable creates the runtime_versions table and index (deprecated, handled by migrations)
+func (r *RuntimeRepository) InitRuntimeVersionsTable(ctx context.Context) error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS runtime_versions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			lts INTEGER DEFAULT 0,
+			stable INTEGER DEFAULT 1,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(name, version)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_runtime_versions_name ON runtime_versions(name)`,
+	}
+	for _, q := range queries {
+		if _, err := r.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListRuntimeVersions returns all cached versions for a runtime name
+func (r *RuntimeRepository) ListRuntimeVersions(ctx context.Context, name string) ([]model.RuntimeVersion, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT id, name, version, lts, stable, updated_at FROM runtime_versions WHERE name = ? ORDER BY version DESC",
+		name,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var versions []model.RuntimeVersion
+	for rows.Next() {
+		var v model.RuntimeVersion
+		var lts, stable int
+		err := rows.Scan(&v.ID, &v.Name, &v.Version, &lts, &stable, &v.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		v.LTS = lts != 0
+		v.Stable = stable != 0
+		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate: %w", err)
+	}
+	return versions, nil
+}
+
+// UpsertRuntimeVersion inserts or replaces a cached runtime version
+func (r *RuntimeRepository) UpsertRuntimeVersion(ctx context.Context, name, version string, lts, stable bool) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO runtime_versions (name, version, lts, stable, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		name, version, lts, stable, time.Now(),
+	)
+	return err
 }

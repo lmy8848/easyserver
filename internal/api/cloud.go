@@ -1,7 +1,6 @@
 package api
 
 import (
-	"log"
 	"strconv"
 	"time"
 
@@ -17,26 +16,12 @@ type CloudHandler struct {
 	panelPort       int    // Panel port for self-protection
 }
 
-func NewCloudHandler(cfg *config.TencentCloudConfig, panelPort int) (*CloudHandler, error) {
-	if !cfg.Enabled {
-		return &CloudHandler{}, nil
-	}
-
-	cloudService, err := service.NewCloudService(
-		cfg.SecretID,
-		cfg.SecretKey,
-		cfg.Region,
-		cfg.InstanceID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
+func NewCloudHandler(cloudService *service.CloudService, currentInstance string, panelPort int) *CloudHandler {
 	return &CloudHandler{
 		cloudService:    cloudService,
-		currentInstance: cfg.InstanceID,
+		currentInstance: currentInstance,
 		panelPort:       panelPort,
-	}, nil
+	}
 }
 
 // isCurrentInstance checks if the instance is the one running this panel
@@ -370,12 +355,8 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 	Success(c, traffic)
 }
 
-func registerCloudRoutes(protected *gin.RouterGroup, cfg *config.TencentCloudConfig, panelPort int) {
-	handler, err := NewCloudHandler(cfg, panelPort)
-	if err != nil {
-		log.Printf("Warning: failed to init cloud handler: %v", err)
-		handler = &CloudHandler{}
-	}
+func registerCloudRoutes(protected *gin.RouterGroup, cloudService *service.CloudService, cfg *config.TencentCloudConfig, panelPort int) {
+	handler := NewCloudHandler(cloudService, cfg.InstanceID, panelPort)
 	protected.GET("/cloud/instances", handler.GetInstances)
 	protected.GET("/cloud/instances/:id", handler.GetInstance)
 	protected.GET("/cloud/monitor/:id", handler.GetMonitorData)

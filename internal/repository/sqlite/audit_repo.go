@@ -89,9 +89,12 @@ func (r *AuditRepository) Query(ctx context.Context, filter repository.AuditFilt
 			&log.ID, &log.UserID, &log.Username, &log.Action,
 			&log.Resource, &log.Detail, &log.IP, &log.UserAgent, &log.CreatedAt,
 		); err != nil {
-			continue
+			return 0, nil, err
 		}
 		logs = append(logs, log)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, err
 	}
 
 	return total, logs, nil
@@ -109,11 +112,68 @@ func (r *AuditRepository) GetActions(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var action string
 		if err := rows.Scan(&action); err != nil {
-			continue
+			return nil, err
 		}
 		actions = append(actions, action)
 	}
-	return actions, nil
+	return actions, rows.Err()
+}
+
+// AppendSignedBatch inserts a batch of signed audit entries in a single transaction.
+func (r *AuditRepository) AppendSignedBatch(ctx context.Context, entries []repository.SignedAuditEntry) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, created_at, signature)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
+		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.CreatedAt, e.Signature); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetSignedEntry returns a single signed audit entry by ID (including signature).
+func (r *AuditRepository) GetSignedEntry(ctx context.Context, id int64) (*repository.SignedAuditEntry, error) {
+	var e repository.SignedAuditEntry
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at, signature
+		 FROM audit_logs WHERE id = ?`, id,
+	).Scan(&e.ID, &e.UserID, &e.Username, &e.Action, &e.Resource, &e.Detail, &e.IP, &e.UserAgent, &e.CreatedAt, &e.Signature)
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+// ListIDsForVerification returns up to limit audit log IDs ordered by id DESC.
+func (r *AuditRepository) ListIDsForVerification(ctx context.Context, limit int) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM audit_logs ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // Clean deletes audit logs older than the specified time

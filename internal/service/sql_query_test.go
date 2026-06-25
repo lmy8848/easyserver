@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -60,8 +61,8 @@ func TestValidateTableName(t *testing.T) {
 		{"table name", false},
 		{"table-name", false}, // hyphens not allowed (differs from SQLValidator.ValidateIdentifier)
 		{"a", true},
-		{string(make([]byte, 65)), false}, // 65 chars, too long
-		{string(make([]byte, 64)), true},  // 64 chars, max
+		{strings.Repeat("a", 65), false}, // 65 chars, too long
+		{strings.Repeat("a", 64), true},  // 64 chars, max
 	}
 
 	for _, tt := range tests {
@@ -327,7 +328,7 @@ func splitNewline(s string) []string {
 			start = i + 1
 		}
 	}
-	if start <= len(s) {
+	if start < len(s) {
 		result = append(result, s[start:])
 	}
 	return result

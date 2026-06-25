@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -366,7 +365,7 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 		return fmt.Errorf("cannot apply SSL: web server is not running")
 	}
 
-	if _, err := exec.LookPath("certbot"); err != nil {
+	if _, err := s.executor.LookPath("certbot"); err != nil {
 		return fmt.Errorf("certbot is not installed. Install with: apt install certbot python3-certbot-nginx")
 	}
 
