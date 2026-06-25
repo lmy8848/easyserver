@@ -307,6 +307,8 @@ func (s *RuntimeService) installNode(ctx context.Context, id int64, version stri
 
 	if _, err := s.executor.LookPath("nvm"); err != nil {
 		// Install nvm first
+		// SECURITY WARNING: Piping curl to bash is inherently risky (MITM, compromised CDN).
+		// For production, consider downloading the script first, verifying its checksum, then executing.
 		s.updateProgress(ctx, id, 30, "compiling", "正在安装 nvm...")
 		_, _, nvmErr := s.executor.RunCombined(ctx, "bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
 		if nvmErr != nil {

@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, Select,
-  message, Popconfirm, Table, Empty, Tooltip,
+  message, Popconfirm, Table, Empty, Tooltip, Collapse, Spin,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
-  CodeOutlined, CopyOutlined,
+  CodeOutlined, CopyOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import type { Script } from '../types';
-import { cronApi } from '../services/api';
+import { cronApi, templateApi } from '../services/api';
 
 const LANG_OPTIONS = [
   { label: 'Shell', value: 'sh' },
@@ -22,11 +22,26 @@ const LANG_COLORS: Record<string, string> = {
   python: 'orange',
 };
 
+interface ScriptTemplate {
+  name: string;
+  language: string;
+  description: string;
+  content: string;
+}
+
+interface TemplateCategory {
+  name: string;
+  templates: ScriptTemplate[];
+}
+
 export default function ScriptPage() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [templateModalVisible, setTemplateModalVisible] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
+  const [templateCategories, setTemplateCategories] = useState<TemplateCategory[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
   const [form] = Form.useForm();
 
   const fetchScripts = useCallback(async () => {
@@ -43,10 +58,39 @@ export default function ScriptPage() {
 
   useEffect(() => { fetchScripts(); }, [fetchScripts]);
 
+  const fetchTemplates = async () => {
+    setTemplatesLoading(true);
+    try {
+      const res = await templateApi.getScriptTemplates();
+      setTemplateCategories(res.data?.data?.categories || []);
+    } catch (error: any) {
+      message.error(error.message || '加载模板失败');
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
   const handleCreate = () => {
     setEditingScript(null);
     form.resetFields();
     form.setFieldsValue({ language: 'sh' });
+    setModalVisible(true);
+  };
+
+  const handleCreateFromTemplate = () => {
+    fetchTemplates();
+    setTemplateModalVisible(true);
+  };
+
+  const handleSelectTemplate = (template: ScriptTemplate) => {
+    setEditingScript(null);
+    form.setFieldsValue({
+      name: template.name,
+      language: template.language,
+      description: template.description,
+      content: template.content,
+    });
+    setTemplateModalVisible(false);
     setModalVisible(true);
   };
 
@@ -174,6 +218,7 @@ export default function ScriptPage() {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={fetchScripts} loading={loading}>刷新</Button>
+            <Button icon={<FileTextOutlined />} onClick={handleCreateFromTemplate}>从模板创建</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>创建脚本</Button>
           </Space>
         }
@@ -215,6 +260,55 @@ export default function ScriptPage() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Template Selection Modal */}
+      <Modal
+        title="选择脚本模板"
+        open={templateModalVisible}
+        onCancel={() => setTemplateModalVisible(false)}
+        footer={null}
+        width={700}
+        styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
+      >
+        {templatesLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <Spin size="large" />
+          </div>
+        ) : templateCategories.length === 0 ? (
+          <Empty description="暂无模板" />
+        ) : (
+          <Collapse
+            defaultActiveKey={templateCategories.map((_, i) => String(i))}
+            items={templateCategories.map((category, index) => ({
+              key: String(index),
+              label: <Space><FileTextOutlined /> {category.name}</Space>,
+              children: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {category.templates.map((template, tIndex) => (
+                    <Card
+                      key={tIndex}
+                      size="small"
+                      hoverable
+                      onClick={() => handleSelectTemplate(template)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        <Space>
+                          <Tag color={LANG_COLORS[template.language] || 'default'}>
+                            {template.language}
+                          </Tag>
+                          <span style={{ fontWeight: 500 }}>{template.name}</span>
+                        </Space>
+                        <div style={{ color: '#666', fontSize: 13 }}>{template.description}</div>
+                      </Space>
+                    </Card>
+                  ))}
+                </div>
+              ),
+            }))}
+          />
+        )}
       </Modal>
     </div>
   );

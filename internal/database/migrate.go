@@ -92,6 +92,19 @@ func extractVersion(name string) int {
 	return version
 }
 
+// stripLeadingComments removes leading comment lines and blank lines from a SQL statement
+func stripLeadingComments(stmt string) string {
+	lines := strings.Split(stmt, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		return trimmed
+	}
+	return ""
+}
+
 // runMigration executes a single migration file
 func runMigration(db *sql.DB, path string, version int, name string) error {
 	content, err := os.ReadFile(path)
@@ -110,7 +123,12 @@ func runMigration(db *sql.DB, path string, version int, name string) error {
 
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
-		if stmt == "" || strings.HasPrefix(stmt, "--") {
+		if stmt == "" {
+			continue
+		}
+		// Check if statement is only comments (no actual SQL)
+		cleaned := stripLeadingComments(stmt)
+		if cleaned == "" {
 			continue
 		}
 		if _, err := tx.Exec(stmt); err != nil {

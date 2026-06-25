@@ -56,6 +56,17 @@ func (h *FirewallRuleHandler) GetRule(c *gin.Context) {
 
 // CreateRule creates a new firewall rule
 func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
+	// Check if firewall is enabled
+	status, err := h.firewallService.GetStatus(c.Request.Context())
+	if err != nil {
+		InternalError(c, "获取防火墙状态失败")
+		return
+	}
+	if !status.Enabled {
+		BadRequest(c, "防火墙已禁用，请先启用防火墙")
+		return
+	}
+
 	var req model.CreateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
@@ -248,6 +259,18 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
 		BadRequest(c, "无效的规则ID")
 		return
 	}
+
+	// Check if firewall is enabled
+	status, err := h.firewallService.GetStatus(c.Request.Context())
+	if err != nil {
+		InternalError(c, "获取防火墙状态失败")
+		return
+	}
+	if !status.Enabled {
+		BadRequest(c, "防火墙已禁用，请先启用防火墙")
+		return
+	}
+
 	// Check existence
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
@@ -325,6 +348,17 @@ func (h *FirewallRuleHandler) MoveRuleDown(c *gin.Context) {
 
 // BulkEnableRules enables multiple firewall rules
 func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
+	// Check if firewall is enabled
+	status, err := h.firewallService.GetStatus(c.Request.Context())
+	if err != nil {
+		InternalError(c, "获取防火墙状态失败")
+		return
+	}
+	if !status.Enabled {
+		BadRequest(c, "防火墙已禁用，请先启用防火墙")
+		return
+	}
+
 	var req model.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())

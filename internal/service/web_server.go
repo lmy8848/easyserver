@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -319,6 +320,34 @@ func (s *WebServerService) TestConfig(ctx context.Context, id int64) (bool, stri
 }
 
 // GetConfig reads the main config file content
+// validateConfigPath checks that a config file path is safe and within allowed directories.
+// This prevents path traversal or manipulation of ConfigFile stored in the database.
+func validateConfigPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("config path is empty")
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("config path must not contain '..'")
+	}
+	// Clean the path to resolve any . or extra slashes
+	cleaned := filepath.Clean(path)
+	// Allowlist of config directory prefixes
+	allowedPrefixes := []string{
+		"/etc/nginx/",
+		"/etc/apache2/",
+		"/etc/tomcat9/",
+		"/etc/caddy/",
+		"/etc/httpd/",
+		"/etc/lighttpd/",
+	}
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(cleaned, prefix) || cleaned == strings.TrimSuffix(prefix, "/") {
+			return nil
+		}
+	}
+	return fmt.Errorf("config path %q is not within an allowed config directory", path)
+}
+
 func (s *WebServerService) GetConfig(ctx context.Context, id int64) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -332,6 +361,9 @@ func (s *WebServerService) GetConfig(ctx context.Context, id int64) (string, err
 	}
 	if ws.ConfigFile == "" {
 		return "", fmt.Errorf("no config file path configured")
+	}
+	if err := validateConfigPath(ws.ConfigFile); err != nil {
+		return "", fmt.Errorf("invalid config path: %w", err)
 	}
 
 	data, err := os.ReadFile(ws.ConfigFile)
@@ -355,6 +387,9 @@ func (s *WebServerService) SaveConfig(ctx context.Context, id int64, content str
 	}
 	if ws.ConfigFile == "" {
 		return fmt.Errorf("no config file path configured")
+	}
+	if err := validateConfigPath(ws.ConfigFile); err != nil {
+		return fmt.Errorf("invalid config path: %w", err)
 	}
 
 	// Backup current config

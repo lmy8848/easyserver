@@ -13,6 +13,8 @@ type visitor struct {
 	lastSeen time.Time
 }
 
+const maxVisitors = 10000
+
 type RateLimiter struct {
 	visitors map[string]*visitor
 	mu       sync.RWMutex
@@ -64,6 +66,11 @@ func (rl *RateLimiter) isAllowed(ip string) bool {
 
 	v, exists := rl.visitors[ip]
 	if !exists {
+		// Enforce max visitors limit to prevent memory exhaustion
+		if len(rl.visitors) >= maxVisitors {
+			// Evict oldest visitors
+			rl.evictOldest()
+		}
 		rl.visitors[ip] = &visitor{count: 1, lastSeen: time.Now()}
 		return true
 	}
@@ -95,6 +102,34 @@ func StopRateLimiter() {
 }
 
 // RateLimitMiddleware limits request rate per IP
+// evictOldest removes the oldest 10% of visitors to free memory
+func (rl *RateLimiter) evictOldest() {
+	type entry struct {
+		ip   string
+		time time.Time
+	}
+	var entries []entry
+	for ip, v := range rl.visitors {
+		entries = append(entries, entry{ip, v.lastSeen})
+	}
+	// Sort by lastSeen ascending
+	for i := 0; i < len(entries); i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[j].time.Before(entries[i].time) {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+	// Remove oldest 10%
+	toRemove := len(entries) / 10
+	if toRemove < 1 {
+		toRemove = 1
+	}
+	for i := 0; i < toRemove; i++ {
+		delete(rl.visitors, entries[i].ip)
+	}
+}
+
 // rate: max requests per interval, interval: sliding window duration
 func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
 	limiter := NewRateLimiter(rate, interval)

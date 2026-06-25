@@ -10,12 +10,16 @@ import (
 
 // TemplateHandler handles template management
 type TemplateHandler struct {
-	templatePath string
+	templatePath       string
+	scriptTemplatesPath string
 }
 
 // NewTemplateHandler creates a new TemplateHandler
-func NewTemplateHandler(templatePath string) *TemplateHandler {
-	return &TemplateHandler{templatePath: templatePath}
+func NewTemplateHandler(templatePath string, scriptTemplatesPath string) *TemplateHandler {
+	return &TemplateHandler{
+		templatePath:       templatePath,
+		scriptTemplatesPath: scriptTemplatesPath,
+	}
 }
 
 // GetDockerImages returns the Docker image templates
@@ -91,8 +95,26 @@ func (h *TemplateHandler) GetTemplateCategories(c *gin.Context) {
 	Success(c, names)
 }
 
+// GetScriptTemplates returns script templates
+func (h *TemplateHandler) GetScriptTemplates(c *gin.Context) {
+	data, err := os.ReadFile(h.scriptTemplatesPath)
+	if err != nil {
+		Success(c, gin.H{"categories": []interface{}{}})
+		return
+	}
+
+	var templates map[string]interface{}
+	if err := json.Unmarshal(data, &templates); err != nil {
+		Success(c, gin.H{"categories": []interface{}{}})
+		return
+	}
+
+	Success(c, templates)
+}
+
 func registerTemplateRoutes(protected *gin.RouterGroup) {
-	handler := NewTemplateHandler("templates/docker-images.json")
+	handler := NewTemplateHandler("templates/docker-images.json", "templates/script-templates.json")
 	protected.GET("/templates/docker-images", handler.GetDockerImages)
 	protected.GET("/templates/categories", handler.GetTemplateCategories)
+	protected.GET("/templates/scripts", handler.GetScriptTemplates)
 }

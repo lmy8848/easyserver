@@ -65,7 +65,8 @@ files.txt
 *.tmp
 
 # Documentation (exclude all docs except README.md)
-docs/
+docs/*
+!docs/screenshot.jpg
 *.md
 !README.md
 !web/README.md

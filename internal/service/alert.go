@@ -28,15 +28,17 @@ type AlertService struct {
 	rules     []model.AlertRule
 	states    map[int64]*model.AlertState // ruleID -> state
 	notify    *NotifyService
+	notifSvc  *NotificationService
 	cooldowns map[int64]time.Time // ruleID -> last notification time
 }
 
 // NewAlertService creates a new alert evaluation service
-func NewAlertService(notify *NotifyService) *AlertService {
+func NewAlertService(notify *NotifyService, notifSvc *NotificationService) *AlertService {
 	return &AlertService{
 		states:    make(map[int64]*model.AlertState),
 		cooldowns: make(map[int64]time.Time),
 		notify:    notify,
+		notifSvc:  notifSvc,
 	}
 }
 
@@ -131,10 +133,6 @@ func (s *AlertService) extractMetric(p *model.MonitorPoint, metric string) float
 
 // sendAlert sends a notification for a triggered alert
 func (s *AlertService) sendAlert(rule model.AlertRule, value float64) {
-	if s.notify == nil {
-		return
-	}
-
 	metricNames := map[string]string{
 		"cpu_percent":  "CPU 使用率",
 		"mem_percent":  "内存使用率",
@@ -149,18 +147,33 @@ func (s *AlertService) sendAlert(rule model.AlertRule, value float64) {
 		metricName = rule.Metric
 	}
 
-	event := AlertEvent{
-		RuleName:  rule.Name,
-		Metric:    metricName,
-		Value:     value,
-		Threshold: rule.Threshold,
-		Duration:  rule.Duration,
-		Timestamp: time.Now().Format(time.RFC3339),
-		Message:   fmt.Sprintf("⚠️ 告警：%s %s 当前 %.1f%% 超过阈值 %.1f%%（持续 %d 秒）", rule.Name, metricName, value, rule.Threshold, rule.Duration),
+	message := fmt.Sprintf("⚠️ 告警：%s %s 当前 %.1f%% 超过阈值 %.1f%%（持续 %d 秒）", rule.Name, metricName, value, rule.Threshold, rule.Duration)
+
+	// Create notification in database
+	if s.notifSvc != nil {
+		s.notifSvc.CreateIfNotExists(model.CreateNotificationRequest{
+			Type:    "alert",
+			Title:   fmt.Sprintf("告警：%s", rule.Name),
+			Message: message,
+			Level:   "warning",
+		})
 	}
 
-	log.Printf("alert: triggered rule %q: %s = %.1f (threshold: %.1f)", rule.Name, rule.Metric, value, rule.Threshold)
-	s.notify.NotifyAlert(event)
+	// Send webhook notification
+	if s.notify != nil {
+		event := AlertEvent{
+			RuleName:  rule.Name,
+			Metric:    metricName,
+			Value:     value,
+			Threshold: rule.Threshold,
+			Duration:  rule.Duration,
+			Timestamp: time.Now().Format(time.RFC3339),
+			Message:   message,
+		}
+
+		log.Printf("alert: triggered rule %q: %s = %.1f (threshold: %.1f)", rule.Name, rule.Metric, value, rule.Threshold)
+		s.notify.NotifyAlert(event)
+	}
 }
 
 // GetRules returns the current alert rules
