@@ -4,9 +4,8 @@ import (
 	"os"
 	"strconv"
 
+	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
-	"easyserver/internal/model"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,15 +13,13 @@ import (
 // BackupHandler handles database backup endpoints.
 type BackupHandler struct {
 	dbServerService *dbserver.Service
-	dbMgmtService   *service.DatabaseMgmtService
-	dbBackupService *service.DBBackupService
+	dbMgmtService   *database_mgmt.Service
 }
 
-func NewBackupHandler(dbServerService *dbserver.Service, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) *BackupHandler {
+func NewBackupHandler(dbServerService *dbserver.Service, dbMgmtService *database_mgmt.Service) *BackupHandler {
 	return &BackupHandler{
 		dbServerService: dbServerService,
 		dbMgmtService:   dbMgmtService,
-		dbBackupService: dbBackupService,
 	}
 }
 
@@ -39,20 +36,23 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 		NotFound(c, "数据库不存在")
 		return
 	}
-
-	// Get db server info to determine type
-	server, err := h.dbServerService.Get(c.Request.Context(), db.DBServerID)
-	if err != nil {
-		NotFound(c, "数据库服务器不存在")
+	if db == nil {
+		NotFound(c, "数据库不存在")
 		return
 	}
 
-	backup, err := h.dbBackupService.CreateBackup(c.Request.Context(), db.DBServerID, db.DBVersionID, did, db.Name, server.Name)
+	// Get server info to determine db type
+	server, err := h.dbMgmtService.GetServerByID(c.Request.Context(), db.DBServerID)
+	if err != nil || server == nil {
+		InternalError(c, "获取服务器信息失败")
+		return
+	}
+
+	backup, err := h.dbMgmtService.CreateBackup(c.Request.Context(), db.DBServerID, db.DBVersionID, did, db.Name, server.Name)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, backup)
 }
 
@@ -63,16 +63,11 @@ func (h *BackupHandler) ListBackups(c *gin.Context) {
 		return
 	}
 
-	backups, err := h.dbBackupService.ListBackups(c.Request.Context(), did)
+	backups, err := h.dbMgmtService.ListBackups(c.Request.Context(), did)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
-	if backups == nil {
-		backups = []model.DBBackup{}
-	}
-
 	Success(c, backups)
 }
 
@@ -83,18 +78,17 @@ func (h *BackupHandler) DownloadBackup(c *gin.Context) {
 		return
 	}
 
-	backup, err := h.dbBackupService.GetBackup(c.Request.Context(), bid)
-	if err != nil {
+	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
+	if err != nil || backup == nil {
 		NotFound(c, "备份不存在")
 		return
 	}
 
 	if backup.Status != "completed" {
-		BadRequest(c, "备份未完成")
+		BadRequest(c, "备份尚未完成")
 		return
 	}
 
-	// Check if file exists
 	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
 		NotFound(c, "备份文件不存在")
 		return
@@ -110,34 +104,24 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		return
 	}
 
-	// Require confirmation
-	var req struct {
-		Confirm bool `json:"confirm"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
-		BadRequest(c, "请确认恢复，设置 {\"confirm\": true}")
-		return
-	}
-
-	backup, err := h.dbBackupService.GetBackup(c.Request.Context(), bid)
-	if err != nil {
+	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
+	if err != nil || backup == nil {
 		NotFound(c, "备份不存在")
 		return
 	}
 
-	// Get db server info to determine type
-	server, err := h.dbServerService.Get(c.Request.Context(), backup.DBServerID)
-	if err != nil {
-		NotFound(c, "数据库服务器不存在")
+	// Get server info to determine db type
+	server, err := h.dbMgmtService.GetServerByID(c.Request.Context(), backup.DBServerID)
+	if err != nil || server == nil {
+		InternalError(c, "获取服务器信息失败")
 		return
 	}
 
-	if err := h.dbBackupService.RestoreBackup(c.Request.Context(), bid, server.Name); err != nil {
+	if err := h.dbMgmtService.RestoreBackup(c.Request.Context(), bid, server.Name); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
-	Success(c, gin.H{"message": "数据库恢复成功"})
+	Success(c, gin.H{"message": "备份已恢复"})
 }
 
 func (h *BackupHandler) DeleteBackup(c *gin.Context) {
@@ -147,10 +131,9 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 		return
 	}
 
-	if err := h.dbBackupService.DeleteBackup(c.Request.Context(), bid); err != nil {
+	if err := h.dbMgmtService.DeleteBackup(c.Request.Context(), bid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, gin.H{"message": "备份已删除"})
 }

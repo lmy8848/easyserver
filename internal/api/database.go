@@ -1,19 +1,19 @@
 package api
 
 import (
+	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerDatabaseRoutes registers database management routes
-func registerDatabaseRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Service, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService, sqlService *service.SQLQueryService) {
+func registerDatabaseRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Service, dbMgmtService *database_mgmt.Service) {
 	handler := NewDBServerHandler(dbServerService)
 	versionHandler := NewVersionHandler(dbServerService)
-	dbHandler := NewDatabaseHandler(dbMgmtService, sqlService)
+	dbHandler := NewDatabaseHandler(dbMgmtService)
 	userHandler := NewUserHandler(dbMgmtService)
-	backupHandler := NewBackupHandler(dbServerService, dbMgmtService, dbBackupService)
+	backupHandler := NewBackupHandler(dbServerService, dbMgmtService)
 	configHandler := NewConfigHandler()
 
 	protected.GET("/db-servers", handler.List)

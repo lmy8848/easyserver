@@ -1,47 +1,21 @@
-package service
+package database_mgmt
 
 import (
 	"fmt"
 	"strings"
 )
 
-// DBType represents the database engine type
-type DBType string
-
-const (
-	DBTypeMySQL      DBType = "mysql"
-	DBTypePostgreSQL DBType = "postgresql"
-	DBTypeRedis      DBType = "redis"
-)
-
-// ColumnInfo represents a column's metadata
-type ColumnInfo struct {
-	Name         string
-	Type         string
-	IsPrimaryKey bool
-	IsAutoIncr   bool
-	HasDefault   bool
-	DefaultValue string
-	IsNullable   bool
-}
-
-// TableInfo represents a table's metadata
-type TableInfo struct {
-	Name       string
-	PrimaryKey string
-	Columns    []ColumnInfo
-}
-
-// SQLBuilder generates SQL statements per database type
+// SQLBuilder generates SQL statements per database type.
 type SQLBuilder struct {
 	dbType DBType
 }
 
+// NewSQLBuilder creates a new SQLBuilder.
 func NewSQLBuilder(dbType DBType) *SQLBuilder {
 	return &SQLBuilder{dbType: dbType}
 }
 
-// QuoteIdentifier quotes a table/column identifier
+// QuoteIdentifier quotes a table/column identifier.
 func (b *SQLBuilder) QuoteIdentifier(name string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -52,7 +26,7 @@ func (b *SQLBuilder) QuoteIdentifier(name string) string {
 	return name
 }
 
-// EscapeString escapes a string value for use in SQL
+// EscapeString escapes a string value for use in SQL.
 func (b *SQLBuilder) EscapeString(s string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -70,14 +44,12 @@ func (b *SQLBuilder) EscapeString(s string) string {
 	return s
 }
 
-// BuildInsert generates an INSERT statement
-// If data omits auto-increment fields, they are excluded
+// BuildInsert generates an INSERT statement.
 func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tableInfo *TableInfo) string {
 	var cols []string
 	var vals []string
 
 	for col, val := range data {
-		// Skip auto-increment fields if value is nil/empty
 		if tableInfo != nil {
 			for _, ci := range tableInfo.Columns {
 				if ci.Name == col && ci.IsAutoIncr && (val == nil || val == "") {
@@ -96,12 +68,12 @@ func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tabl
 		strings.Join(vals, ", "))
 }
 
-// BuildUpdate generates an UPDATE statement
+// BuildUpdate generates an UPDATE statement.
 func (b *SQLBuilder) BuildUpdate(table string, data map[string]interface{}, pkCol string, pkVal interface{}) string {
 	var sets []string
 	for col, val := range data {
 		if col == pkCol {
-			continue // don't update primary key
+			continue
 		}
 		sets = append(sets, fmt.Sprintf("%s = %s", b.QuoteIdentifier(col), b.formatValue(val)))
 	}
@@ -113,7 +85,7 @@ func (b *SQLBuilder) BuildUpdate(table string, data map[string]interface{}, pkCo
 		b.formatValue(pkVal))
 }
 
-// BuildDelete generates a DELETE statement
+// BuildDelete generates a DELETE statement.
 func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) string {
 	return fmt.Sprintf("DELETE FROM %s WHERE %s = %s;",
 		b.QuoteIdentifier(table),
@@ -121,7 +93,7 @@ func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) 
 		b.formatValue(pkVal))
 }
 
-// BuildSelect generates a SELECT statement with pagination
+// BuildSelect generates a SELECT statement with pagination.
 func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize int) string {
 	cols := "*"
 	if len(columns) > 0 {
@@ -137,12 +109,12 @@ func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize 
 		cols, b.QuoteIdentifier(table), pageSize, offset)
 }
 
-// BuildCount generates a COUNT query
+// BuildCount generates a COUNT query.
 func (b *SQLBuilder) BuildCount(table string) string {
 	return fmt.Sprintf("SELECT COUNT(*) FROM %s;", b.QuoteIdentifier(table))
 }
 
-// BuildListTables generates a query to list tables
+// BuildListTables generates a query to list tables.
 func (b *SQLBuilder) BuildListTables() string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -153,7 +125,7 @@ func (b *SQLBuilder) BuildListTables() string {
 	return ""
 }
 
-// BuildDescribeTable generates a query to describe table structure
+// BuildDescribeTable generates a query to describe table structure.
 func (b *SQLBuilder) BuildDescribeTable(table string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -171,7 +143,7 @@ func (b *SQLBuilder) BuildDescribeTable(table string) string {
 	return ""
 }
 
-// formatValue formats a value for SQL
+// BuildCreateDatabase generates a CREATE DATABASE statement.
 func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -189,7 +161,7 @@ func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) string {
 	return ""
 }
 
-// BuildDropDatabase generates a DROP DATABASE statement
+// BuildDropDatabase generates a DROP DATABASE statement.
 func (b *SQLBuilder) BuildDropDatabase(name string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -200,7 +172,7 @@ func (b *SQLBuilder) BuildDropDatabase(name string) string {
 	return ""
 }
 
-// BuildCreateUser generates a CREATE USER statement
+// BuildCreateUser generates a CREATE USER statement.
 func (b *SQLBuilder) BuildCreateUser(username, password, host string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -213,7 +185,7 @@ func (b *SQLBuilder) BuildCreateUser(username, password, host string) string {
 	return ""
 }
 
-// BuildDropUser generates a DROP USER statement
+// BuildDropUser generates a DROP USER statement.
 func (b *SQLBuilder) BuildDropUser(username, host string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -224,7 +196,7 @@ func (b *SQLBuilder) BuildDropUser(username, host string) string {
 	return ""
 }
 
-// BuildGrant generates a GRANT statement
+// BuildGrant generates a GRANT statement.
 func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) string {
 	switch b.dbType {
 	case DBTypeMySQL:

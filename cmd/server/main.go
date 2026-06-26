@@ -18,6 +18,7 @@ import (
 	"easyserver/internal/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
+	"easyserver/internal/database_mgmt"
 	"easyserver/internal/database"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
@@ -211,10 +212,7 @@ func main() {
 	dbServerService := dbserver.NewService(cmdExec, dbServerRepo)
 	dbServerService.SeedPredefinedServers(context.Background())
 	databaseMgmtRepo := sqlite.NewDatabaseMgmtRepository(db)
-	databaseMgmtService := service.NewDatabaseMgmtService(databaseMgmtRepo, cmdExec)
-	dbBackupRepo := sqlite.NewDBBackupRepository(db)
-	dbBackupService := service.NewDBBackupService(dbBackupRepo, cmdExec)
-	sqlQueryService := service.NewSQLQueryService(databaseMgmtService, cmdExec)
+	databaseMgmtService := database_mgmt.NewService(databaseMgmtRepo, cmdExec)
 
 	// Initialize deploy service (single shared instance)
 	deployRepo := sqlite.NewDeployRepository(db)
@@ -318,8 +316,6 @@ func main() {
 		// Database services
 		DBServerService:     dbServerService,
 		DatabaseMgmtService: databaseMgmtService,
-		DBBackupService:     dbBackupService,
-		SQLQueryService:     sqlQueryService,
 
 		// Deploy service
 		DeployService: deploySvc,

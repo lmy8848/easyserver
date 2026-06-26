@@ -11,6 +11,7 @@ import (
 	"easyserver/internal/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
+	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
 	"easyserver/internal/executor"
@@ -55,9 +56,7 @@ type Router struct {
 
 	// Database services
 	dbServerService     *dbserver.Service
-	databaseMgmtService *service.DatabaseMgmtService
-	dbBackupService     *service.DBBackupService
-	sqlQueryService     *service.SQLQueryService
+	databaseMgmtService *database_mgmt.Service
 
 	// Deploy service
 	deployService *deploy.Service
@@ -116,9 +115,7 @@ type RouterDeps struct {
 
 	// Database services
 	DBServerService     *dbserver.Service
-	DatabaseMgmtService *service.DatabaseMgmtService
-	DBBackupService     *service.DBBackupService
-	SQLQueryService     *service.SQLQueryService
+	DatabaseMgmtService *database_mgmt.Service
 
 	// Deploy service
 	DeployService *deploy.Service
@@ -182,8 +179,6 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		// Database services
 		dbServerService:     deps.DBServerService,
 		databaseMgmtService: deps.DatabaseMgmtService,
-		dbBackupService:     deps.DBBackupService,
-		sqlQueryService:     deps.SQLQueryService,
 
 		// Deploy service
 		deployService: deps.DeployService,
@@ -281,7 +276,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerRuntimeRoutes(protected, r.runtimeService, r.runtimeVersionService, r.packageManagerService)
 	registerEnvRoutes(protected, r.envConfigService)
 	registerWebServerRoutes(protected, r.webServerService, r.websiteService)
-	registerDatabaseRoutes(protected, r.dbServerService, r.databaseMgmtService, r.dbBackupService, r.sqlQueryService)
+	registerDatabaseRoutes(protected, r.dbServerService, r.databaseMgmtService)
 	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	registerSSHRoutes(protected, r.sshConfigService)

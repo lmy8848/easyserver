@@ -4,22 +4,19 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/database_mgmt"
 
 	"github.com/gin-gonic/gin"
 )
 
 // DatabaseHandler handles database CRUD, introspection, and table management endpoints.
 type DatabaseHandler struct {
-	dbMgmtService *service.DatabaseMgmtService
-	sqlService    *service.SQLQueryService
+	dbMgmtService *database_mgmt.Service
 }
 
-func NewDatabaseHandler(dbMgmtService *service.DatabaseMgmtService, sqlService *service.SQLQueryService) *DatabaseHandler {
+func NewDatabaseHandler(dbMgmtService *database_mgmt.Service) *DatabaseHandler {
 	return &DatabaseHandler{
 		dbMgmtService: dbMgmtService,
-		sqlService:    sqlService,
 	}
 }
 
@@ -31,6 +28,7 @@ func (h *DatabaseHandler) ListDatabases(c *gin.Context) {
 		BadRequest(c, "无效的服务器ID")
 		return
 	}
+
 	dbs, err := h.dbMgmtService.ListDatabases(c.Request.Context(), sid)
 	if err != nil {
 		InternalError(c, err.Error())
@@ -45,11 +43,13 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 		BadRequest(c, "无效的服务器ID")
 		return
 	}
-	var req model.CreateDatabaseRequest
+
+	var req database_mgmt.CreateDatabaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
+
 	db, err := h.dbMgmtService.CreateDatabase(c.Request.Context(), sid, &req)
 	if err != nil {
 		InternalError(c, err.Error())
@@ -64,19 +64,20 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 		BadRequest(c, "无效的服务器ID")
 		return
 	}
-	dbID, err := strconv.ParseInt(c.Param("did"), 10, 64)
+	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
 	if err != nil {
 		BadRequest(c, "无效的数据库ID")
 		return
 	}
-	if err := h.dbMgmtService.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
+
+	if err := h.dbMgmtService.DeleteDatabase(c.Request.Context(), sid, did); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, nil)
+	Success(c, gin.H{"message": "数据库已删除"})
 }
 
-// --- Database introspection ---
+// --- Database Introspection ---
 
 func (h *DatabaseHandler) ListTables(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
@@ -85,12 +86,11 @@ func (h *DatabaseHandler) ListTables(c *gin.Context) {
 		return
 	}
 
-	tables, err := h.sqlService.ListTables(c.Request.Context(), did)
+	tables, err := h.dbMgmtService.ListTables(c.Request.Context(), did)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, tables)
 }
 
@@ -105,17 +105,12 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 		BadRequest(c, "表名不能为空")
 		return
 	}
-	if !service.ValidateTableName(tableName) {
-		BadRequest(c, "无效的表名")
-		return
-	}
 
-	result, err := h.sqlService.DescribeTable(c.Request.Context(), did, tableName)
+	result, err := h.dbMgmtService.DescribeTable(c.Request.Context(), did, tableName)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, result)
 }
 
@@ -130,26 +125,16 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 		BadRequest(c, "表名不能为空")
 		return
 	}
-	if !service.ValidateTableName(tableName) {
-		BadRequest(c, "无效的表名")
-		return
-	}
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
 
-	result, err := h.sqlService.QueryTable(c.Request.Context(), did, tableName, page, pageSize)
+	result, err := h.dbMgmtService.QueryTable(c.Request.Context(), did, tableName, page, pageSize)
 	if err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-
-	Success(c, gin.H{
-		"headers":   result.Headers,
-		"rows":      result.Rows,
-		"total":     result.Total,
-		"page":      result.Page,
-		"page_size": result.PageSize,
-	})
+	Success(c, result)
 }
 
 func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
@@ -163,22 +148,16 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		SQL string `json:"sql" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	result, err := h.sqlService.ExecuteSQL(c.Request.Context(), did, req.SQL)
+	result, err := h.dbMgmtService.ExecuteSQL(c.Request.Context(), did, req.SQL)
 	if err != nil {
-		NotFound(c, err.Error())
+		InternalError(c, err.Error())
 		return
 	}
-
-	if !result.Success {
-		Success(c, gin.H{"success": false, "error": result.Error})
-		return
-	}
-
-	Success(c, gin.H{"success": true, "output": result.Output})
+	Success(c, result)
 }
 
 func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
@@ -193,16 +172,16 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
 		Data  map[string]interface{} `json:"data" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	result, err := h.sqlService.InsertRecord(c.Request.Context(), did, req.Table, req.Data, c.Query("dry_run") == "true")
+	dryRun := c.Query("dry_run") == "true"
+	result, err := h.dbMgmtService.InsertRecord(c.Request.Context(), did, req.Table, req.Data, dryRun)
 	if err != nil {
-		BadRequest(c, err.Error())
+		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, result)
 }
 
@@ -214,22 +193,22 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
 	}
 
 	var req struct {
-		Table      string                 `json:"table" binding:"required"`
-		Data       map[string]interface{} `json:"data" binding:"required"`
-		PrimaryKey string                 `json:"primary_key" binding:"required"`
-		PrimaryVal interface{}            `json:"primary_val" binding:"required"`
+		Table  string                 `json:"table" binding:"required"`
+		Data   map[string]interface{} `json:"data" binding:"required"`
+		PK     string                 `json:"pk" binding:"required"`
+		PKVal  interface{}            `json:"pk_val" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	result, err := h.sqlService.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
+	dryRun := c.Query("dry_run") == "true"
+	result, err := h.dbMgmtService.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PK, req.PKVal, dryRun)
 	if err != nil {
-		BadRequest(c, err.Error())
+		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, result)
 }
 
@@ -241,25 +220,25 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
 	}
 
 	var req struct {
-		Table      string      `json:"table" binding:"required"`
-		PrimaryKey string      `json:"primary_key" binding:"required"`
-		PrimaryVal interface{} `json:"primary_val" binding:"required"`
+		Table string      `json:"table" binding:"required"`
+		PK    string      `json:"pk" binding:"required"`
+		PKVal interface{} `json:"pk_val" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	result, err := h.sqlService.DeleteRecord(c.Request.Context(), did, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
+	dryRun := c.Query("dry_run") == "true"
+	result, err := h.dbMgmtService.DeleteRecord(c.Request.Context(), did, req.Table, req.PK, req.PKVal, dryRun)
 	if err != nil {
-		BadRequest(c, err.Error())
+		InternalError(c, err.Error())
 		return
 	}
-
 	Success(c, result)
 }
 
-// --- Table management ---
+// --- Table Management ---
 
 func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
@@ -269,41 +248,19 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	}
 
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		Columns []struct {
-			Name      string `json:"name"`
-			Type      string `json:"type"`
-			Nullable  bool   `json:"nullable"`
-			IsPrimary bool   `json:"is_primary"`
-			AutoIncr  bool   `json:"auto_incr"`
-		} `json:"columns" binding:"required,min=1"`
+		Name    string                   `json:"name" binding:"required"`
+		Columns []database_mgmt.TableColumn `json:"columns" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
 
-	var columns []service.TableColumn
-	for _, col := range req.Columns {
-		columns = append(columns, service.TableColumn{
-			Name:      col.Name,
-			Type:      col.Type,
-			Nullable:  col.Nullable,
-			IsPrimary: col.IsPrimary,
-			AutoIncr:  col.AutoIncr,
-		})
-	}
-
-	if err := h.sqlService.CreateTable(c.Request.Context(), did, req.Name, columns); err != nil {
-		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
-			BadRequest(c, err.Error())
-		} else {
-			InternalError(c, err.Error())
-		}
+	if err := h.dbMgmtService.CreateTable(c.Request.Context(), did, req.Name, req.Columns); err != nil {
+		InternalError(c, err.Error())
 		return
 	}
-
-	Success(c, gin.H{"message": "表已创建", "name": req.Name})
+	Success(c, gin.H{"message": "表已创建"})
 }
 
 func (h *DatabaseHandler) DropTable(c *gin.Context) {
@@ -319,14 +276,31 @@ func (h *DatabaseHandler) DropTable(c *gin.Context) {
 		return
 	}
 
-	if err := h.sqlService.DropTable(c.Request.Context(), did, tableName); err != nil {
-		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
-			BadRequest(c, err.Error())
-		} else {
-			InternalError(c, err.Error())
-		}
+	if err := h.dbMgmtService.DropTable(c.Request.Context(), did, tableName); err != nil {
+		InternalError(c, err.Error())
 		return
 	}
+	Success(c, gin.H{"message": "表已删除"})
+}
 
-	Success(c, gin.H{"message": "表已删除", "name": tableName})
+// sanitizeSQLError is a helper to strip file paths from SQL errors.
+func sanitizeSQLError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return database_mgmt.SanitizeSQLError(err.Error())
+}
+
+// validateTableName is a helper to validate table names.
+func validateTableName(name string) bool {
+	return database_mgmt.ValidateTableName(name)
+}
+
+// splitQualifiedName splits "schema.table" or "table" into (schema, table).
+func splitQualifiedName(name string) (string, string) {
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "public", name
 }

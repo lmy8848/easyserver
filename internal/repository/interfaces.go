@@ -6,9 +6,9 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/cron"
+	"easyserver/internal/database_mgmt"
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
-	"easyserver/internal/model"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/process"
@@ -53,27 +53,9 @@ type TOTPRepository interface {
 // Kept as alias for backward compatibility.
 type CronRepository = cron.Repository
 
-// DatabaseMgmtRepository defines the interface for database management data access
-type DatabaseMgmtRepository interface {
-	// Database operations
-	ListDatabases(ctx context.Context, dbServerID int64) ([]model.Database, error)
-	GetDatabase(ctx context.Context, dbServerID, id int64) (*model.Database, error)
-	GetDatabaseByID(ctx context.Context, id int64) (*model.Database, error)
-	CreateDatabase(ctx context.Context, dbServerID, dbVersionID int64, name, charset, description string) (int64, error)
-	DeleteDatabase(ctx context.Context, dbServerID, id int64) error
-
-	// DB User operations
-	ListDBUsers(ctx context.Context, dbServerID int64) ([]model.DBUser, error)
-	GetDBUser(ctx context.Context, dbServerID, id int64) (*model.DBUser, error)
-	CreateDBUser(ctx context.Context, dbServerID int64, username, hashedPassword, host string) (int64, error)
-	DeleteDBUser(ctx context.Context, dbServerID, id int64) error
-	UpdateDBUserPrivileges(ctx context.Context, id int64, privileges string) error
-
-	// Lookup helpers (lightweight queries)
-	GetServer(ctx context.Context, id int64) (*model.DBServer, error)
-	GetVersion(ctx context.Context, id int64) (*model.DBVersion, error)
-	ListVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error)
-}
+// DatabaseMgmtRepository is now defined in easyserver/internal/database_mgmt.Repository.
+// Kept as alias for backward compatibility.
+type DatabaseMgmtRepository = database_mgmt.Repository
 
 // WebServerRepository is now defined in internal/web.ServerRepository.
 // Kept as alias for backward compatibility.
@@ -87,14 +69,9 @@ type WebsiteRepository = web.WebsiteRepository
 // Kept as alias for backward compatibility.
 type DeployRepository = deploy.Repository
 
-// DBBackupRepository defines the interface for database backup data access
-type DBBackupRepository interface {
-	CreateBackup(ctx context.Context, backup *model.DBBackup) (int64, error)
-	UpdateBackupStatus(ctx context.Context, id int64, status string, fileSize int64, errorMessage string) error
-	ListBackups(ctx context.Context, databaseID int64) ([]model.DBBackup, error)
-	GetBackup(ctx context.Context, id int64) (*model.DBBackup, error)
-	DeleteBackup(ctx context.Context, id int64) error
-}
+// DBBackupRepository is now defined in easyserver/internal/database_mgmt.Repository.
+// Kept as alias for backward compatibility.
+type DBBackupRepository = database_mgmt.Repository
 
 // EnvConfigRepository is now defined in easyserver/internal/envconfig.Repository.
 // Kept as alias for backward compatibility.
@@ -110,4 +87,3 @@ type ServiceWhitelistRepository = systemprocess.Repository
 // ProcessRepository is now defined in easyserver/internal/process.Repository.
 // Kept as alias for backward compatibility.
 type ProcessRepository = process.Repository
-

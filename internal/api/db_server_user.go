@@ -3,18 +3,17 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/database_mgmt"
 
 	"github.com/gin-gonic/gin"
 )
 
 // UserHandler handles DB user management endpoints.
 type UserHandler struct {
-	dbMgmtService *service.DatabaseMgmtService
+	dbMgmtService *database_mgmt.Service
 }
 
-func NewUserHandler(dbMgmtService *service.DatabaseMgmtService) *UserHandler {
+func NewUserHandler(dbMgmtService *database_mgmt.Service) *UserHandler {
 	return &UserHandler{dbMgmtService: dbMgmtService}
 }
 
@@ -38,11 +37,13 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) {
 		BadRequest(c, "无效的服务器ID")
 		return
 	}
-	var req model.CreateDBUserRequest
+
+	var req database_mgmt.CreateDBUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
+
 	user, err := h.dbMgmtService.CreateDBUser(c.Request.Context(), sid, &req)
 	if err != nil {
 		InternalError(c, err.Error())
@@ -62,11 +63,12 @@ func (h *UserHandler) DeleteDBUser(c *gin.Context) {
 		BadRequest(c, "无效的用户ID")
 		return
 	}
+
 	if err := h.dbMgmtService.DeleteDBUser(c.Request.Context(), sid, uid); err != nil {
 		InternalError(c, err.Error())
 		return
 	}
-	Success(c, nil)
+	Success(c, gin.H{"message": "用户已删除"})
 }
 
 func (h *UserHandler) GrantPrivileges(c *gin.Context) {
@@ -80,11 +82,13 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 		BadRequest(c, "无效的用户ID")
 		return
 	}
-	var req model.GrantRequest
+
+	var req database_mgmt.GrantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "无效的请求: "+err.Error())
 		return
 	}
+
 	if err := h.dbMgmtService.GrantPrivileges(c.Request.Context(), sid, uid, &req); err != nil {
 		InternalError(c, err.Error())
 		return
