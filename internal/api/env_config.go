@@ -3,17 +3,17 @@ package api
 import (
 	"fmt"
 
+	"easyserver/internal/envconfig"
 	"easyserver/internal/model"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 type EnvConfigHandler struct {
-	envConfigService *service.EnvConfigService
+	envConfigService *envconfig.Service
 }
 
-func NewEnvConfigHandler(envConfigService *service.EnvConfigService) *EnvConfigHandler {
+func NewEnvConfigHandler(envConfigService *envconfig.Service) *EnvConfigHandler {
 	return &EnvConfigHandler{envConfigService: envConfigService}
 }
 

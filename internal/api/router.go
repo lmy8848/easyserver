@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
+	"easyserver/internal/envconfig"
 	"easyserver/internal/executor"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
@@ -66,7 +67,7 @@ type Router struct {
 	deployService *deploy.Service
 
 	// Environment config service
-	envConfigService *service.EnvConfigService
+	envConfigService *envconfig.Service
 
 	// Firewall service
 	firewallService *firewall.Service
@@ -124,7 +125,7 @@ type RouterDeps struct {
 	DeployService *deploy.Service
 
 	// Environment config service
-	EnvConfigService *service.EnvConfigService
+	EnvConfigService *envconfig.Service
 
 	// Firewall service
 	FirewallService *firewall.Service

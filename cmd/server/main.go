@@ -23,6 +23,7 @@ import (
 	"easyserver/internal/database"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
+	"easyserver/internal/envconfig"
 	"easyserver/internal/executor"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
@@ -225,7 +226,7 @@ func main() {
 
 	// Initialize environment config service (single shared instance)
 	envConfigRepo := sqlite.NewEnvConfigRepository(db)
-	envConfigService := service.NewEnvConfigService(envConfigRepo)
+	envConfigService := envconfig.NewService(envConfigRepo)
 	envConfigService.InitDefaultGlobalConfigs(context.Background())
 
 	// Initialize firewall service (single shared instance)
