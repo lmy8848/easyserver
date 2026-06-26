@@ -289,12 +289,6 @@ type ActivityRepository interface {
 	GetAll(ctx context.Context, limit int) ([]model.UserActivity, error)
 }
 
-// PackageRepository defines the interface for package data access
-type PackageRepository interface {
-	List(ctx context.Context, runtimeID int64) ([]model.Package, error)
-	Upsert(ctx context.Context, runtimeID int64, name, version, scope, source string) error
-	Delete(ctx context.Context, runtimeID int64, name, scope string) error
-}
 
 // ProcessRepository defines the interface for process/process-group/process-log data access
 type ProcessRepository interface {

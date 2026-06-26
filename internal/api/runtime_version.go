@@ -1,16 +1,16 @@
 package api
 
 import (
-	"easyserver/internal/runtimeversion"
+	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
 )
 
 type RuntimeVersionHandler struct {
-	versionService *runtimeversion.Service
+	versionService *runtimeenv.VersionService
 }
 
-func NewRuntimeVersionHandler(versionService *runtimeversion.Service) *RuntimeVersionHandler {
+func NewRuntimeVersionHandler(versionService *runtimeenv.VersionService) *RuntimeVersionHandler {
 	return &RuntimeVersionHandler{versionService: versionService}
 }
 

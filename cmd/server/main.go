@@ -23,7 +23,6 @@ import (
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/runtimeversion"
 	"easyserver/internal/service"
 )
 
@@ -229,7 +228,7 @@ func main() {
 	// Initialize runtime services (single shared instance)
 	runtimeRepo := sqlite.NewRuntimeRepository(db)
 	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec)
-	runtimeVersionService := runtimeversion.NewService(runtimeRepo)
+	runtimeVersionService := runtimeenv.NewVersionService(runtimeRepo)
 	packageRepo := sqlite.NewPackageRepository(db)
 	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)
 

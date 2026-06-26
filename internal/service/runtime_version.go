@@ -2,13 +2,12 @@ package service
 
 import (
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/runtimeversion"
 )
 
-// RuntimeVersionService is kept as a compatibility alias for the runtimeversion module.
-type RuntimeVersionService = runtimeversion.Service
+// RuntimeVersionService is kept as a compatibility alias for the runtimeenv.VersionService.
+type RuntimeVersionService = runtimeenv.VersionService
 
-// NewRuntimeVersionService is a compatibility wrapper; prefer runtimeversion.NewService directly.
+// NewRuntimeVersionService is a compatibility wrapper; prefer runtimeenv.NewVersionService directly.
 func NewRuntimeVersionService(repo runtimeenv.Repository) *RuntimeVersionService {
-	return runtimeversion.NewService(repo)
+	return runtimeenv.NewVersionService(repo)
 }

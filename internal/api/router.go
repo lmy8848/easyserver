@@ -14,7 +14,6 @@ import (
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/runtimeversion"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -64,7 +63,7 @@ type Router struct {
 
 	// Runtime services
 	runtimeService        *runtimeenv.Service
-	runtimeVersionService *runtimeversion.Service
+	runtimeVersionService *runtimeenv.VersionService
 	packageManagerService *packagemanager.Service
 
 	// SSH service
@@ -129,7 +128,7 @@ type RouterDeps struct {
 
 	// Runtime services
 	RuntimeService        *runtimeenv.Service
-	RuntimeVersionService *runtimeversion.Service
+	RuntimeVersionService *runtimeenv.VersionService
 	PackageManagerService *packagemanager.Service
 
 	// SSH service

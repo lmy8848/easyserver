@@ -6,7 +6,6 @@ import (
 	"easyserver/internal/model"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/runtimeversion"
 
 	"github.com/gin-gonic/gin"
 )
@@ -290,7 +289,7 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	})
 }
 
-func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeversion.Service, packageService *packagemanager.Service) {
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeenv.VersionService, packageService *packagemanager.Service) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)
