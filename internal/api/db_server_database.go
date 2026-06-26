@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
 
 	"easyserver/internal/database_mgmt"
 	"github.com/gin-gonic/gin"
