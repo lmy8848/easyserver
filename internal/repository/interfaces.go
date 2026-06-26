@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"easyserver/internal/cron"
 	"easyserver/internal/model"
 )
 
@@ -131,42 +132,9 @@ type TOTPRepository interface {
 	StorePendingSecret(ctx context.Context, userID int64, secret string) error
 }
 
-// CronRepository defines the interface for cron task data access
-type CronRepository interface {
-	// Task CRUD
-	ListTasks(ctx context.Context) ([]model.CronTask, error)
-	GetTask(ctx context.Context, id int64) (*model.CronTask, error)
-	CreateTask(ctx context.Context, task *model.CronTask) error
-	UpdateTask(ctx context.Context, task *model.CronTask) error
-	DeleteTask(ctx context.Context, id int64) error
-
-	// Task status management
-	ListEnabledTasks(ctx context.Context) ([]model.CronTask, error)
-	EnableTask(ctx context.Context, id int64) error
-	DisableTask(ctx context.Context, id int64) error
-	SetTaskRunning(ctx context.Context, id int64) (bool, error)
-	UpdateTaskResult(ctx context.Context, id int64, status string, lastResult string) error
-
-	// Logs
-	CreateLog(ctx context.Context, taskID int64, status string, output string, duration int) error
-	GetLogs(ctx context.Context, taskID int64, limit int) ([]model.CronLog, error)
-
-	// Scripts
-	ListScripts(ctx context.Context) ([]model.Script, error)
-	GetScript(ctx context.Context, id int64) (*model.Script, error)
-	CreateScript(ctx context.Context, script *model.Script) error
-	UpdateScript(ctx context.Context, script *model.Script) error
-	DeleteScript(ctx context.Context, id int64) error
-
-	// Documentation
-	ListDocs(ctx context.Context) ([]model.CronDoc, error)
-	GetDoc(ctx context.Context, id int64) (*model.CronDoc, error)
-	CreateDoc(ctx context.Context, doc *model.CronDoc) error
-	UpdateDoc(ctx context.Context, doc *model.CronDoc) error
-	DeleteDoc(ctx context.Context, id int64) error
-	CountDocs(ctx context.Context) (int, error)
-	BatchCreateDocs(ctx context.Context, docs []model.CronDoc) error
-}
+// CronRepository is now defined in easyserver/internal/cron.Repository.
+// Kept as alias for backward compatibility.
+type CronRepository = cron.Repository
 
 // DatabaseMgmtRepository defines the interface for database management data access
 type DatabaseMgmtRepository interface {
