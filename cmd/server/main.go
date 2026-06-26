@@ -23,6 +23,7 @@ import (
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
 	"easyserver/internal/executor"
+	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
 	"easyserver/internal/model"
@@ -270,7 +271,7 @@ func main() {
 	terminalManager.StartIdleTimeout(cfg.Auth.IdleTimeout)
 
 	// Initialize file manager (single shared instance)
-	fileManager, err := service.NewFileManager(cfg.FileManager.BasePath)
+	fileManager, err := filemanager.NewManager(cfg.FileManager.BasePath)
 	if err != nil {
 		log.Fatalf("Failed to init file manager: %v", err)
 	}

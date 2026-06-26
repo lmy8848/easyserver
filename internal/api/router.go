@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
 	"easyserver/internal/executor"
+	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
 	"easyserver/internal/monitor"
@@ -84,7 +85,7 @@ type Router struct {
 	terminalManager *terminal.Manager
 
 	// File manager
-	fileManager *service.FileManager
+	fileManager *filemanager.Manager
 
 	// Cloud service (nil if disabled)
 	cloudService *service.CloudService
@@ -146,7 +147,7 @@ type RouterDeps struct {
 	TerminalManager *terminal.Manager
 
 	// File manager
-	FileManager *service.FileManager
+	FileManager *filemanager.Manager
 
 	// Cloud service (nil if disabled)
 	CloudService *service.CloudService
