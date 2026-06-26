@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package service
+package monitor
 
 import (
 	"bufio"
@@ -14,7 +14,7 @@ import (
 
 // checkDiskSpace checks disk usage on all mounted partitions.
 // Alerts if any partition exceeds 90% usage.
-func (m *SystemEventMonitor) checkDiskSpace() {
+func (m *EventMonitor) checkDiskSpace() {
 	output, _, err := m.executor.RunCombined(nil, "df", "-h", "--output=target,pcent")
 	if err != nil {
 		log.Printf("system_monitor: failed to run df: %v", err)
@@ -45,7 +45,7 @@ func (m *SystemEventMonitor) checkDiskSpace() {
 
 // checkMemoryUsage checks memory usage from /proc/meminfo.
 // Alerts if memory usage exceeds 90%.
-func (m *SystemEventMonitor) checkMemoryUsage() {
+func (m *EventMonitor) checkMemoryUsage() {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return
@@ -83,7 +83,7 @@ func (m *SystemEventMonitor) checkMemoryUsage() {
 }
 
 // checkServiceFailures checks for failed systemd services.
-func (m *SystemEventMonitor) checkServiceFailures() {
+func (m *EventMonitor) checkServiceFailures() {
 	output, _, err := m.executor.RunCombined(nil, "systemctl", "list-units", "--type=service", "--state=failed", "--no-pager", "--plain")
 	if err != nil {
 		return

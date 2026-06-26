@@ -161,7 +161,7 @@ func main() {
 
 	// Initialize audit service and system event monitor (single shared instance)
 	auditSvc := audit.NewService(db, auditRepo, cfg.Audit.RetentionDays)
-	systemMonitor := service.NewSystemEventMonitor(auditSvc, cmdExec)
+	systemMonitor := monitor.NewEventMonitor(auditSvc, cmdExec)
 	systemMonitor.Start()
 
 	// Initialize session service and start cleanup (single shared instance)
