@@ -8,6 +8,7 @@ import (
 	"easyserver/internal/cron"
 	"easyserver/internal/deploy"
 	"easyserver/internal/model"
+	"easyserver/internal/notification"
 )
 
 // UserRepository defines the interface for user data access
@@ -108,17 +109,9 @@ type MonitorRepository interface {
 	Clean(ctx context.Context, before time.Time) (int64, error)
 }
 
-// NotificationRepository defines the interface for notification data access
-type NotificationRepository interface {
-	List(ctx context.Context, unreadOnly bool, limit int) ([]model.Notification, error)
-	CountUnread(ctx context.Context) (int, error)
-	Create(ctx context.Context, req model.CreateNotificationRequest) error
-	CreateIfNotExists(ctx context.Context, req model.CreateNotificationRequest) error
-	MarkAsRead(ctx context.Context, id int64) error
-	MarkAllAsRead(ctx context.Context) error
-	Delete(ctx context.Context, id int64) error
-	CleanOld(ctx context.Context, days int) (int64, error)
-}
+// NotificationRepository is now defined in easyserver/internal/notification.Repository.
+// Kept as alias for backward compatibility.
+type NotificationRepository = notification.Repository
 
 // TOTPRepository defines the interface for TOTP data access
 type TOTPRepository interface {
