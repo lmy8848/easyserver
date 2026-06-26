@@ -22,6 +22,18 @@ export default function WebsitePage() {
   // ConfigEditor ref for calling showConfig/showServiceLogs from WebsiteList
   const configEditorRef = useRef<ConfigEditorRef>(null);
 
+  const fetchServers = async () => {
+    setLoading(true);
+    try {
+      const res = await webServerApi.list();
+      setServers(res.data.data || []);
+    } catch (error) {
+      console.error('Failed to fetch servers:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Fetch servers on mount
   useEffect(() => {
     fetchServers();
@@ -53,19 +65,7 @@ export default function WebsitePage() {
     refresh(); // immediate
     const timer = setInterval(refresh, 10000);
     return () => clearInterval(timer);
-  }, [selectedServer?.id, selectedServer?.status]);
-
-  const fetchServers = async () => {
-    setLoading(true);
-    try {
-      const res = await webServerApi.list();
-      setServers(res.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch servers:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [selectedServer]);
 
   // Enter server detail
   const enterServer = async (server: WebServer) => {

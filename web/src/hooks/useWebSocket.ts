@@ -63,6 +63,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   } = options;
 
   const wsRef = useRef<WebSocket | null>(null);
+  const [ws, setWs] = useState<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -71,15 +72,18 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
   // Stable callback refs
   const onOpenRef = useRef(onOpen);
-  onOpenRef.current = onOpen;
   const onMessageRef = useRef(onMessage);
-  onMessageRef.current = onMessage;
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const onErrorRef = useRef(onError);
-  onErrorRef.current = onError;
   const onStatusChangeRef = useRef(onStatusChange);
-  onStatusChangeRef.current = onStatusChange;
+
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+    onMessageRef.current = onMessage;
+    onCloseRef.current = onClose;
+    onErrorRef.current = onError;
+    onStatusChangeRef.current = onStatusChange;
+  });
 
   const setStatusInternal = useCallback((newStatus: WSStatus) => {
     setStatus(newStatus);
@@ -97,6 +101,8 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     }
   }, []);
 
+  const connectRef = useRef<() => void>(() => {});
+
   const connect = useCallback(() => {
     if (disposedRef.current) return;
     const token = localStorage.getItem('token');
@@ -106,7 +112,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
     // Close existing connection
     if (wsRef.current) {
-      try { wsRef.current.close(); } catch {}
+      try { wsRef.current.close(); } catch (e) { console.debug('WebSocket close error:', e); }
     }
 
     const isReconnect = reconnectAttemptsRef.current > 0;
@@ -118,6 +124,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     // Pass token via Sec-WebSocket-Protocol header (server already supports this)
     const ws = new WebSocket(wsUrl, ['token', token]);
     wsRef.current = ws;
+    setWs(ws);
 
     ws.onopen = () => {
       reconnectAttemptsRef.current = 0;
@@ -178,9 +185,13 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
       console.log(`WebSocket reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
       setStatusInternal('reconnecting');
-      reconnectTimerRef.current = setTimeout(connect, delay);
+      reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
     };
-  }, [path, autoReconnect, maxReconnectAttempts, reconnectDelay, pingInterval, pingMessage, cleanupTimers, setStatus]);
+  }, [path, autoReconnect, maxReconnectAttempts, reconnectDelay, pingInterval, pingMessage, cleanupTimers, setStatusInternal]);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const send = useCallback((data: string | object) => {
     const ws = wsRef.current;
@@ -193,11 +204,12 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     disposedRef.current = true;
     cleanupTimers();
     if (wsRef.current) {
-      try { wsRef.current.close(); } catch {}
+      try { wsRef.current.close(); } catch (e) { console.debug('WebSocket close error:', e); }
       wsRef.current = null;
+      setWs(null);
     }
     setStatusInternal('disconnected');
-  }, [cleanupTimers, setStatus]);
+  }, [cleanupTimers, setStatusInternal]);
 
   const reconnect = useCallback(() => {
     reconnectAttemptsRef.current = 0;
@@ -214,11 +226,12 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       disposedRef.current = true;
       cleanupTimers();
       if (wsRef.current) {
-        try { wsRef.current.close(); } catch {}
+        try { wsRef.current.close(); } catch { /* ignore close error */ }
         wsRef.current = null;
+        setWs(null);
       }
     };
   }, [connect, enabled, cleanupTimers]);
 
-  return { send, close, reconnect, status, ws: wsRef.current };
+  return { send, close, reconnect, status, ws };
 }

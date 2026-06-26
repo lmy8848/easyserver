@@ -11,13 +11,12 @@ import { formatBytes } from './types';
 
 export default function ImageTab() {
   const [images, setImages] = useState<Image[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [pullVisible, setPullVisible] = useState(false);
   const [pullForm] = Form.useForm();
   const [templates, setTemplates] = useState<ImageCategory[]>([]);
 
   const loadImages = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/images');
       setImages(res.data?.data?.images || []);
@@ -46,6 +45,7 @@ export default function ImageTab() {
       message.success('镜像拉取成功');
       setPullVisible(false);
       pullForm.resetFields();
+      setLoading(true);
       loadImages();
     } catch {
       message.error('拉取失败');
@@ -56,6 +56,7 @@ export default function ImageTab() {
     try {
       await api.delete(`/images/${id}?force=true`);
       message.success('镜像已删除');
+      setLoading(true);
       loadImages();
     } catch {
       message.error('删除失败');
@@ -89,7 +90,7 @@ export default function ImageTab() {
         extra={
           <Space>
             <Button icon={<CloudDownloadOutlined />} type="primary" onClick={() => setPullVisible(true)}>拉取镜像</Button>
-            <Button icon={<ReloadOutlined />} onClick={loadImages}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); loadImages(); }}>刷新</Button>
           </Space>
         }
       >

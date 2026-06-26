@@ -15,7 +15,7 @@ import { COLORS } from '../utils/theme';
 
 export default function Users() {
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [form] = Form.useForm();
@@ -47,12 +47,7 @@ export default function Users() {
   const [ipWhitelistUser, setIpWhitelistUser] = useState<User | null>(null);
   const [ipWhitelistForm] = Form.useForm();
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   const fetchUsers = async () => {
-    setLoading(true);
     try {
       const res = await userApi.list();
       setUsers(res.data.data || []);
@@ -62,6 +57,10 @@ export default function Users() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
 
   const handleCreate = () => {
     setEditingUser(null);
@@ -83,6 +82,7 @@ export default function Users() {
     try {
       await userApi.delete(id);
       message.success('删除成功');
+      setLoading(true);
       fetchUsers();
     } catch (error: any) {
       message.error(error.message || '删除失败');
@@ -93,6 +93,7 @@ export default function Users() {
     try {
       await userApi.unlock(id);
       message.success('解锁成功');
+      setLoading(true);
       fetchUsers();
     } catch (error: any) {
       message.error(error.message || '解锁失败');
@@ -107,6 +108,7 @@ export default function Users() {
       } else {
         message.success(`已解锁用户 ${user.username}`);
       }
+      setLoading(true);
       fetchUsers();
     } catch (error: any) {
       message.error(error.message || '操作失败');
@@ -130,6 +132,7 @@ export default function Users() {
       }
 
       setModalVisible(false);
+      setLoading(true);
       fetchUsers();
     } catch (error: any) {
       if (error.message) {

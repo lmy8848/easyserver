@@ -4,6 +4,7 @@ import { Tag } from 'antd';
  * Get color for percentage-based metrics (CPU, memory, disk).
  * Used by Dashboard.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getPercentColor(percent: number): string {
   if (percent >= 90) return '#cf1322';
   if (percent >= 70) return '#faad14';
@@ -14,6 +15,7 @@ export function getPercentColor(percent: number): string {
  * Get Ant Design tag color for service status strings.
  * Used by Services, Database, Website pages.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getServiceStatusColor(status: string): string {
   if (!status) return 'default';
   const s = status.toLowerCase();
@@ -31,6 +33,7 @@ export function getServiceStatusColor(status: string): string {
  * Get Ant Design tag color for HTTP status codes.
  * Used by AuditLog.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getHttpStatusColor(status: string): string {
   const code = parseInt(status);
   if (code >= 200 && code < 300) return 'success';

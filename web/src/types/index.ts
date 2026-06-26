@@ -1,5 +1,5 @@
 // API Response types
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = void> {
   code: number;
   message: string;
   data: T;
@@ -89,9 +89,7 @@ export interface MonitorSnapshot {
   timestamp: string;
 }
 
-export interface HistoryPoint extends MonitorSnapshot {
-	// Matches backend MonitorSnapshot nested format
-}
+export type HistoryPoint = MonitorSnapshot;
 
 // Service types
 export interface Service {
@@ -492,4 +490,67 @@ export interface Notification {
   is_read: boolean;
   metadata: string;
   created_at: string;
+}
+
+// User Activity
+export interface UserActivity {
+  id: number;
+  user_id: number;
+  username: string;
+  action: string;
+  ip: string;
+  user_agent: string;
+  created_at: string;
+}
+
+// SSH types
+export interface SSHLogin {
+  username: string;
+  ip: string;
+  time: string;
+  type: string; // login, logout, failed
+  terminal: string;
+}
+
+export interface SSHConfig {
+  port: number;
+  permit_root_login: string;
+  password_auth: string;
+  status: string;
+}
+
+// File search
+export interface FileSearchResult {
+  path: string;
+  name: string;
+  is_dir: boolean;
+  size: number;
+  match?: string;
+}
+
+// DB config
+export interface ConfigSection {
+  name: string;
+  params: Record<string, string>;
+}
+
+export interface ParamMeta {
+  key: string;
+  label: string;
+  description: string;
+  type: string;
+  unit?: string;
+  options?: string[];
+  default: string;
+}
+
+// Settings
+export interface AppSettings {
+  server: { port: number; host: string; serve_frontend: boolean; tls_enabled: boolean };
+  auth: { session_timeout: string; idle_timeout: string; max_login_attempts: number; lockout_duration: string; rate_limit: number; rate_interval: string };
+  monitor: { history_retention: string; collect_interval: string };
+  database: { path: string };
+  audit: { enabled: boolean; log_path: string };
+  notify: { enabled: boolean; webhook_url: string };
+  tencentcloud: { enabled: boolean; region: string; instance_id: string; has_secret: boolean };
 }

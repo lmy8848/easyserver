@@ -11,7 +11,7 @@ import type { ComposeProject } from './types';
 
 export default function ComposeTab() {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [logsVisible, setLogsVisible] = useState(false);
   const [configVisible, setConfigVisible] = useState(false);
   const [configDir, setConfigDir] = useState('');
@@ -19,7 +19,6 @@ export default function ComposeTab() {
   const [configForm] = Form.useForm();
 
   const loadProjects = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/compose/projects');
       setProjects(res.data?.data?.projects || []);
@@ -36,6 +35,7 @@ export default function ComposeTab() {
     try {
       await api.post(`/compose/${action}`, { project_dir: dir });
       message.success(`compose ${action} 成功`);
+      setLoading(true);
       loadProjects();
     } catch {
       message.error(`compose ${action} 失败`);
@@ -111,7 +111,7 @@ export default function ComposeTab() {
 
   return (
     <>
-      <Card extra={<Button icon={<ReloadOutlined />} onClick={loadProjects}>刷新</Button>}>
+      <Card extra={<Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); loadProjects(); }}>刷新</Button>}>
         <Table columns={columns} dataSource={projects} rowKey="name" loading={loading} locale={{ emptyText: '暂无 Compose 项目' }} />
       </Card>
 

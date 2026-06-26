@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './CommandPalette.css';
 
 interface CommandItem {
@@ -49,17 +49,26 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     return acc;
   }, {});
 
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open && !prevOpen) {
+    setQuery('');
+    setSelectedIndex(0);
+  }
+  if (prevOpen !== open) setPrevOpen(open);
+
   useEffect(() => {
     if (open) {
-      setQuery('');
-      setSelectedIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
 
-  useEffect(() => { setSelectedIndex(0); }, [query]);
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (prevQuery !== query) {
+    setPrevQuery(query);
+    setSelectedIndex(0);
+  }
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedIndex(i => Math.min(i + 1, filtered.length - 1));
@@ -72,7 +81,7 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     } else if (e.key === 'Escape') {
       onClose();
     }
-  }, [filtered, selectedIndex, onClose]);
+  };
 
   if (!open) return null;
 

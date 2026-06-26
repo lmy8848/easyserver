@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Card, Table, Input, Select, Button, Space, DatePicker, message,
   Tag, Tooltip, Modal, Descriptions, Typography, Row, Col, Segmented,
@@ -114,10 +114,10 @@ export default function AuditLog() {
     }
   };
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const params: any = { page, page_size: pageSize };
+      const params: { page: number; page_size: number; username?: string; action?: string; resource?: string; ip?: string; start_date?: string; end_date?: string } = { page, page_size: pageSize };
       if (username) params.username = username;
       if (actionFilter) params.action = actionFilter;
       if (resource) params.resource = resource;
@@ -133,16 +133,16 @@ export default function AuditLog() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize, username, actionFilter, resource, ipFilter, dateRange]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const res = await auditApi.getStats(statsDays);
       setStats(res.data.data || null);
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     }
-  };
+  }, [statsDays]);
 
   const fetchSSHLogins = async () => {
     setSSHLoading(true);
@@ -159,11 +159,11 @@ export default function AuditLog() {
   useEffect(() => {
     fetchActions();
     fetchStats(); // 初始加载统计数据，显示异常告警角标
-  }, []);
+  }, [fetchStats]);
 
   useEffect(() => {
     fetchLogs();
-  }, [page, pageSize, actionFilter]);
+  }, [fetchLogs]);
 
   useEffect(() => {
     if (activeTab === 'stats' || activeTab === 'alerts') {
@@ -172,7 +172,7 @@ export default function AuditLog() {
     if (activeTab === 'ssh') {
       fetchSSHLogins();
     }
-  }, [activeTab, statsDays]);
+  }, [activeTab, statsDays, fetchStats]);
 
   const handleSearch = () => {
     setPage(1);
@@ -582,7 +582,7 @@ export default function AuditLog() {
                     const obj = JSON.parse(detailItem.detail);
                     // 解析嵌套的 JSON 字符串
                     if (obj.detail && typeof obj.detail === 'string') {
-                      try { obj.detail = JSON.parse(obj.detail); } catch {}
+                      try { obj.detail = JSON.parse(obj.detail); } catch { /* detail is not JSON */ }
                     }
                     return JSON.stringify(obj, null, 2);
                   } catch { return detailItem.detail; }

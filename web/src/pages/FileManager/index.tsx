@@ -19,7 +19,7 @@ export default function FileManager() {
   const [basePath, setBasePath] = useState<string>('');
   const [currentPath, setCurrentPath] = useState<string>('');
   const [files, setFiles] = useState<FileEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // 编辑文件
   const [editVisible, setEditVisible] = useState(false);
@@ -85,12 +85,6 @@ export default function FileManager() {
     initPath();
   }, []);
 
-  useEffect(() => {
-    if (currentPath && basePath) {
-      fetchFiles(currentPath);
-    }
-  }, [currentPath, basePath]);
-
   // Convert absolute path to relative path (strip basePath prefix)
   const toRelativePath = (absolutePath: string): string => {
     if (basePath && absolutePath === basePath) {
@@ -107,7 +101,6 @@ export default function FileManager() {
       message.error('路径不合法');
       return;
     }
-    setLoading(true);
     try {
       const relativePath = toRelativePath(path);
       const res = await fileApi.list(relativePath);
@@ -119,6 +112,23 @@ export default function FileManager() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!currentPath || !basePath) return;
+    if (!isValidPath(currentPath)) {
+      message.error('路径不合法');
+      return;
+    }
+    const relativePath = toRelativePath(currentPath);
+    fileApi.list(relativePath).then(
+      res => setFiles(res.data.data?.entries || []),
+      error => {
+        console.error('Failed to fetch files:', error);
+        message.error('获取文件列表失败');
+      },
+    ).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toRelativePath only depends on basePath
+  }, [currentPath, basePath]);
 
   const handleClick = (file: FileEntry) => {
     if (file.is_dir) {
@@ -165,6 +175,7 @@ export default function FileManager() {
         try {
           await fileApi.delete(toRelativePath(path), isDir);
           message.success('删除成功');
+          setLoading(true);
           fetchFiles(currentPath);
         } catch (error) {
           message.error('删除失败');
@@ -185,6 +196,7 @@ export default function FileManager() {
       message.success('创建成功');
       setMkdirVisible(false);
       setNewDirName('');
+      setLoading(true);
       fetchFiles(currentPath);
     } catch (error) {
       message.error('创建失败');
@@ -253,6 +265,7 @@ export default function FileManager() {
         message.success('移动成功');
       }
       setCopyMoveVisible(false);
+      setLoading(true);
       fetchFiles(currentPath);
     } catch (error) {
       message.error(copyMoveMode === 'copy' ? '复制失败' : '移动失败');
@@ -277,6 +290,7 @@ export default function FileManager() {
     try {
       await fileApi.extract(toRelativePath(path), toRelativePath(destPath));
       message.success('解压成功');
+      setLoading(true);
       fetchFiles(currentPath);
     } catch (error) {
       message.error('解压失败');
@@ -293,6 +307,7 @@ export default function FileManager() {
       await fileApi.chmod(toRelativePath(chmodPath), chmodMode);
       message.success('权限修改成功');
       setChmodVisible(false);
+      setLoading(true);
       fetchFiles(currentPath);
     } catch (error) {
       message.error('权限修改失败');
@@ -350,6 +365,7 @@ export default function FileManager() {
           await Promise.all(selectedKeys.map(path => fileApi.delete(toRelativePath(path), true)));
           message.success(`已删除 ${selectedKeys.length} 个文件`);
           setSelectedKeys([]);
+          setLoading(true);
           fetchFiles(currentPath);
         } catch (error) {
           message.error('批量删除失败');
@@ -361,6 +377,7 @@ export default function FileManager() {
   const handleUpload = async (file: File) => {
     await fileApi.upload(file, toRelativePath(currentPath));
     message.success('上传成功');
+    setLoading(true);
     fetchFiles(currentPath);
   };
 
@@ -416,7 +433,7 @@ export default function FileManager() {
         onBatchDelete={handleBatchDelete}
         onSortFieldChange={setSortField}
         onSortOrderChange={setSortOrder}
-        onRefresh={() => fetchFiles(currentPath)}
+        onRefresh={() => { setLoading(true); fetchFiles(currentPath); }}
       >
         <FileManagerTable
           files={sortedFiles}

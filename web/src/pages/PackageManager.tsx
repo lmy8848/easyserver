@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, Table, Button, Space, Tag, Modal, Form, Input, Select, message, Popconfirm, Typography } from 'antd';
 import { PlusOutlined, DeleteOutlined, SyncOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../services/api';
@@ -34,17 +34,7 @@ export default function PackageManager() {
   const [installVisible, setInstallVisible] = useState(false);
   const [form] = Form.useForm();
 
-  useEffect(() => {
-    fetchRuntimes();
-  }, []);
-
-  useEffect(() => {
-    if (selectedRuntime) {
-      fetchPackages(selectedRuntime);
-    }
-  }, [selectedRuntime]);
-
-  const fetchRuntimes = async () => {
+  const fetchRuntimes = useCallback(async () => {
     try {
       const res = await api.get('/runtime');
       const installedRuntimes = (res.data.data?.environments || []).filter(
@@ -57,7 +47,7 @@ export default function PackageManager() {
     } catch (error) {
       message.error('获取运行环境列表失败');
     }
-  };
+  }, [selectedRuntime]);
 
   const fetchPackages = async (runtimeId: number) => {
     setLoading(true);
@@ -86,6 +76,16 @@ export default function PackageManager() {
       setScanLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchRuntimes();
+  }, [fetchRuntimes]);
+
+  useEffect(() => {
+    if (selectedRuntime) {
+      fetchPackages(selectedRuntime);
+    }
+  }, [selectedRuntime]);
 
   const handleInstall = async (values: { name: string; version: string }) => {
     if (!selectedRuntime) return;

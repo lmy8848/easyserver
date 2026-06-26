@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select,
   message, Popconfirm, Tooltip, Row, Col,
@@ -59,7 +59,7 @@ export default function WebsiteList({
 }: WebsiteListProps) {
   // Website data
   const [websites, setWebsites] = useState<Website[]>([]);
-  const [sitesLoading, setSitesLoading] = useState(false);
+  const [sitesLoading, setSitesLoading] = useState(true);
 
   // Create/Edit modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -94,15 +94,7 @@ export default function WebsiteList({
   // Debounce timer for path validation
   const pathTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch websites on mount
-  useEffect(() => {
-    fetchWebsites();
-    fetchProjectTypes();
-    return () => { if (pathTimerRef.current) clearTimeout(pathTimerRef.current); };
-  }, []);
-
-  const fetchWebsites = async () => {
-    setSitesLoading(true);
+  const fetchWebsites = useCallback(async () => {
     try {
       const res = await websiteApi.list(selectedServer.id);
       setWebsites(res.data.data || []);
@@ -111,14 +103,23 @@ export default function WebsiteList({
     } finally {
       setSitesLoading(false);
     }
-  };
+  }, [selectedServer.id]);
 
   const fetchProjectTypes = async () => {
     try {
       const res = await webServerApi.getProjectTypes();
       setProjectTypes(res.data.data || []);
-    } catch {}
+    } catch (error) {
+      console.error('Failed to fetch project types:', error);
+    }
   };
+
+  // Fetch websites on mount
+  useEffect(() => {
+    fetchWebsites();
+    fetchProjectTypes();
+    return () => { if (pathTimerRef.current) clearTimeout(pathTimerRef.current); };
+  }, [fetchWebsites]);
 
   // Directory browser functions
   const openDirBrowser = async (currentPath?: string) => {
@@ -152,7 +153,8 @@ export default function WebsiteList({
     try {
       const res = await webServerApi.validatePath(path);
       setPathValidation(res.data.data || null);
-    } catch {
+    } catch (e) {
+      console.debug('Path validation failed:', e);
       setPathValidation(null);
     }
   };
@@ -190,6 +192,7 @@ export default function WebsiteList({
         message.success('创建成功');
       }
       setModalVisible(false);
+      setSitesLoading(true);
       fetchWebsites();
     } catch (error: any) {
       if (error.message) message.error(error.message);
@@ -200,6 +203,7 @@ export default function WebsiteList({
     try {
       await websiteApi.delete(selectedServer.id, id);
       message.success('删除成功');
+      setSitesLoading(true);
       fetchWebsites();
     } catch (error: any) {
       message.error(error.message || '删除失败');
@@ -215,6 +219,7 @@ export default function WebsiteList({
         await websiteApi.enable(selectedServer.id, site.id);
         message.success('已启用');
       }
+      setSitesLoading(true);
       fetchWebsites();
     } catch (error: any) {
       message.error(error.message || '操作失败');
@@ -411,7 +416,7 @@ export default function WebsiteList({
         title={`${selectedServer.display_name} - 网站列表`}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} loading={sitesLoading} onClick={fetchWebsites}>
+            <Button icon={<ReloadOutlined />} loading={sitesLoading} onClick={() => { setSitesLoading(true); fetchWebsites(); }}>
               刷新
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateSite}

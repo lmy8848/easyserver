@@ -14,7 +14,7 @@ import type { VersionTemplate, TableData, TableInfo, SqlResult } from './types';
 export default function DatabasePage() {
   // ===== Navigation state =====
   const [servers, setServers] = useState<DBServer[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [selectedServer, setSelectedServer] = useState<DBServer | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<DBVersion | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
@@ -92,6 +92,14 @@ export default function DatabasePage() {
   const [recordForm] = Form.useForm();
   const [recordSaving, setRecordSaving] = useState(false);
 
+  // ===== Fetch functions =====
+  const fetchServers = async () => {
+    try {
+      const res = await dbServerApi.list();
+      setServers(res.data?.data || []);
+    } catch (error) { console.error('Failed to fetch servers:', error); message.error('加载服务器列表失败'); } finally { setLoading(false); }
+  };
+
   // ===== Effects =====
   useEffect(() => { fetchServers(); }, []);
 
@@ -105,22 +113,13 @@ export default function DatabasePage() {
     };
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
-  }, [logVisible, logVersion?.id]);
+  }, [logVisible, logVersion]);
 
   useEffect(() => {
     if (logFollow && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [logContent, logFollow]);
-
-  // ===== Fetch functions =====
-  const fetchServers = async () => {
-    setLoading(true);
-    try {
-      const res = await dbServerApi.list();
-      setServers(res.data?.data || []);
-    } catch (error) { console.error('Failed to fetch servers:', error); message.error('加载服务器列表失败'); } finally { setLoading(false); }
-  };
 
   const refreshServer = async (serverId: number) => {
     try {
@@ -438,9 +437,10 @@ export default function DatabasePage() {
       else { setConfigContent('# Unsupported database type'); return; }
 
       const data = res?.data?.data;
-      if (data?.found && data.config?.sections?.length > 0) {
-        let content = `# ${selectedServer?.display_name} Config: ${data.config.file_path}\n\n`;
-        for (const section of data.config.sections) {
+      const config = data?.config;
+      if (data?.found && config && config.sections.length > 0) {
+        let content = `# ${selectedServer?.display_name} Config: ${config.file_path}\n\n`;
+        for (const section of config.sections) {
           if (section.name !== 'main') content += `[${section.name}]\n`;
           for (const [key, val] of Object.entries(section.params || {})) {
             content += serverName === 'redis' ? `${key} ${val}\n` : `${key} = ${val}\n`;
@@ -775,7 +775,7 @@ export default function DatabasePage() {
       servers={servers}
       loading={loading}
       onEnterServer={enterServer}
-      onRefresh={fetchServers}
+      onRefresh={() => { setLoading(true); fetchServers(); }}
       installVersionVisible={installVersionVisible}
       onInstallVersionVisibleChange={setInstallVersionVisible}
       versionTemplates={versionTemplates}

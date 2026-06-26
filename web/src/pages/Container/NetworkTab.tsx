@@ -10,12 +10,11 @@ import type { Network } from './types';
 
 export default function NetworkTab() {
   const [networks, setNetworks] = useState<Network[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
   const [createForm] = Form.useForm();
 
   const loadNetworks = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/networks');
       setNetworks(res.data?.data?.networks || []);
@@ -35,6 +34,7 @@ export default function NetworkTab() {
       message.success('网络创建成功');
       setCreateVisible(false);
       createForm.resetFields();
+      setLoading(true);
       loadNetworks();
     } catch {
       message.error('创建失败');
@@ -45,6 +45,7 @@ export default function NetworkTab() {
     try {
       await api.delete(`/networks/${id}`);
       message.success('网络已删除');
+      setLoading(true);
       loadNetworks();
     } catch {
       message.error('删除失败');
@@ -79,7 +80,7 @@ export default function NetworkTab() {
         extra={
           <Space>
             <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateVisible(true)}>创建网络</Button>
-            <Button icon={<ReloadOutlined />} onClick={loadNetworks}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); loadNetworks(); }}>刷新</Button>
           </Space>
         }
       >

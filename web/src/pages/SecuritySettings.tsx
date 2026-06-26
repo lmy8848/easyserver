@@ -33,10 +33,14 @@ export default function SecuritySettings() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
-  useEffect(() => {
-    checkTOTPStatus();
-    fetchSessions();
-  }, []);
+  const checkTOTPStatus = async () => {
+    try {
+      const response = await authApi.getTOTPStatus();
+      setTotpEnabled(response.data.data.enabled);
+    } catch (error) {
+      console.error('Failed to check TOTP status:', error);
+    }
+  };
 
   const fetchSessions = async () => {
     setSessionsLoading(true);
@@ -49,6 +53,11 @@ export default function SecuritySettings() {
       setSessionsLoading(false);
     }
   };
+
+  useEffect(() => {
+    checkTOTPStatus();
+    fetchSessions();
+  }, []);
 
   const handleKickSession = async (token: string) => {
     try {
@@ -67,15 +76,6 @@ export default function SecuritySettings() {
       fetchSessions();
     } catch (error: any) {
       message.error(error.message || '踢出会话失败');
-    }
-  };
-
-  const checkTOTPStatus = async () => {
-    try {
-      const response = await authApi.getTOTPStatus();
-      setTotpEnabled(response.data.data.enabled);
-    } catch (error) {
-      console.error('Failed to check TOTP status:', error);
     }
   };
 

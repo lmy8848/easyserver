@@ -11,18 +11,13 @@ import CloudTraffic from './CloudTraffic';
 
 export default function Cloud() {
   const [instances, setInstances] = useState<CloudInstance[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedInstance, setSelectedInstance] = useState('');
   const [firewallRules, setFirewallRules] = useState<CloudFirewallRule[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
 
-  useEffect(() => {
-    fetchInstances();
-  }, []);
-
   const fetchInstances = async () => {
-    setLoading(true);
     setError(null);
     try {
       const res = await cloudApi.getInstances();
@@ -34,6 +29,10 @@ export default function Cloud() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchInstances();
+  }, []);
 
   const fetchFirewall = async (instanceId: string) => {
     try {
@@ -76,6 +75,7 @@ export default function Cloud() {
           message.success('实例已重启');
           break;
       }
+      setLoading(true);
       fetchInstances();
     } catch (error: any) {
       message.error(error.message || '操作失败');
@@ -103,7 +103,7 @@ export default function Cloud() {
                 当前实例: {instances.find(i => i.instance_id === selectedInstance)?.name || selectedInstance}
               </Tag>
             )}
-            <Button icon={<ReloadOutlined />} onClick={fetchInstances} loading={loading}>
+            <Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); fetchInstances(); }} loading={loading}>
               刷新
             </Button>
           </Space>

@@ -24,7 +24,7 @@ const LANG_COLORS: Record<string, string> = {
 
 interface ScriptTemplate {
   name: string;
-  language: string;
+  language?: string;
   description: string;
   content: string;
 }
@@ -295,8 +295,8 @@ export default function ScriptPage() {
                     >
                       <Space direction="vertical" style={{ width: '100%' }}>
                         <Space>
-                          <Tag color={LANG_COLORS[template.language] || 'default'}>
-                            {template.language}
+                          <Tag color={LANG_COLORS[template.language || ''] || 'default'}>
+                            {template.language || 'unknown'}
                           </Tag>
                           <span style={{ fontWeight: 500 }}>{template.name}</span>
                         </Space>

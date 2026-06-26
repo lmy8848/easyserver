@@ -59,6 +59,18 @@ export default function Runtime() {
 
   // ==================== Lifecycle ====================
 
+  const fetchEnvironments = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/runtime');
+      setEnvironments(res.data.data?.environments || []);
+    } catch (error) {
+      message.error('获取运行环境列表失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchEnvironments();
   }, []);
@@ -87,18 +99,6 @@ export default function Runtime() {
   }, [installingEnvs.length]);
 
   // ==================== Runtime list actions ====================
-
-  const fetchEnvironments = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/runtime');
-      setEnvironments(res.data.data?.environments || []);
-    } catch (error) {
-      message.error('获取运行环境列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSetDefault = async (name: string, version: string) => {
     try {

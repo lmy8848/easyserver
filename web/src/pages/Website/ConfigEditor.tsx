@@ -91,7 +91,9 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
         try {
           const res = await webServerApi.getServiceLogs(selectedServer.id, 200);
           setSvcLogContent(res.data.data?.logs || '(empty)');
-        } catch {}
+        } catch (e) {
+          console.debug('Service log refresh failed:', e);
+        }
       };
 
       const timer = setInterval(refresh, 5000);

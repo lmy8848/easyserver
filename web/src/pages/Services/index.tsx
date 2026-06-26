@@ -41,9 +41,11 @@ export default function Services() {
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // 筛选/搜索变化时重置页码
-  useEffect(() => {
+  const [prevFilters, setPrevFilters] = useState({ statusFilter, searchText });
+  if (prevFilters.statusFilter !== statusFilter || prevFilters.searchText !== searchText) {
+    setPrevFilters({ statusFilter, searchText });
     setCurrentPage(1);
-  }, [statusFilter, searchText]);
+  }
 
   const fetchServices = useCallback(async () => {
     setLoading(true);
@@ -154,7 +156,7 @@ export default function Services() {
     wsRef.current?.close();
     try {
       const res = await serviceApi.getLogs(service.name, 100);
-      setLogs(res.data.data?.lines || []);
+      setLogs((res.data.data?.lines || []).map(line => ({ time: '', message: line, priority: 'info' })));
     } catch (error) {
       console.error('Failed to fetch logs:', error);
       setLogs([]);

@@ -14,7 +14,7 @@ import { formatBytes, getStatusColor } from './types';
 
 export default function ContainerTab() {
   const [containers, setContainers] = useState<Container[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
   const [execVisible, setExecVisible] = useState(false);
   const [logsVisible, setLogsVisible] = useState(false);
@@ -27,7 +27,6 @@ export default function ContainerTab() {
   const [templates, setTemplates] = useState<ImageCategory[]>([]);
 
   const loadContainers = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/containers?all=true');
       setContainers(res.data?.data?.containers || []);
@@ -38,8 +37,6 @@ export default function ContainerTab() {
     }
   };
 
-  useEffect(() => { loadContainers(); loadTemplates(); }, []);
-
   const loadTemplates = async () => {
     try {
       const res = await api.get('/templates/docker-images');
@@ -49,10 +46,13 @@ export default function ContainerTab() {
     }
   };
 
+  useEffect(() => { loadContainers(); loadTemplates(); }, []);
+
   const handleAction = async (action: string, id: string) => {
     try {
       await api.post(`/containers/${id}/${action}`);
       message.success('操作成功');
+      setLoading(true);
       loadContainers();
     } catch {
       message.error('操作失败');
@@ -63,6 +63,7 @@ export default function ContainerTab() {
     try {
       await api.delete(`/containers/${id}?force=${force}`);
       message.success('容器已删除');
+      setLoading(true);
       loadContainers();
     } catch {
       message.error('删除失败');
@@ -76,6 +77,7 @@ export default function ContainerTab() {
       message.success('容器创建成功');
       setCreateVisible(false);
       createForm.resetFields();
+      setLoading(true);
       loadContainers();
     } catch {
       message.error('创建失败');
@@ -217,7 +219,7 @@ export default function ContainerTab() {
         extra={
           <Space>
             <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateVisible(true)}>创建容器</Button>
-            <Button icon={<ReloadOutlined />} onClick={loadContainers}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); loadContainers(); }}>刷新</Button>
           </Space>
         }
       >

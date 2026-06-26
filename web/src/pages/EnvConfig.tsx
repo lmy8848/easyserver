@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Input, Select, message, Popconfirm, Tabs } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import api from '../services/api';
@@ -47,12 +47,6 @@ export default function EnvConfig() {
   const [globalForm] = Form.useForm();
   const [activeTab, setActiveTab] = useState('env');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
-
-  useEffect(() => {
-    fetchEnvConfigs();
-    fetchPathEntries();
-    fetchGlobalConfigs();
-  }, []);
 
   const fetchEnvConfigs = async () => {
     setLoading(true);

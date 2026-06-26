@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Card, Table, Tag, Space, Input, Select, Button, Statistic, Row, Col,
   Progress, message, Badge, Tooltip, Typography, Empty, Modal,
@@ -54,7 +54,7 @@ const SERVICE_STATE_MAP: Record<string, { color: string; label: string }> = {
 
 export default function SystemMonitor() {
   const [overview, setOverview] = useState<SystemOverview | null>(null);
-  const [processes, setProcesses] = useState<SystemProcess[]>([]);
+
   const [allProcesses, setAllProcesses] = useState<SystemProcess[]>([]);
   const [services, setServices] = useState<SystemService[]>([]);
   const [whitelist, setWhitelist] = useState<ServiceWhitelistEntry[]>([]);
@@ -120,12 +120,16 @@ export default function SystemMonitor() {
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => {
+  const processes = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    setProcesses(allProcesses.slice(start, start + pageSize));
+    return allProcesses.slice(start, start + pageSize);
   }, [allProcesses, currentPage, pageSize]);
 
-  useEffect(() => { setCurrentPage(1); }, [debouncedSearch, sortBy]);
+  const [prevFilters, setPrevFilters] = useState({ debouncedSearch, sortBy });
+  if (prevFilters.debouncedSearch !== debouncedSearch || prevFilters.sortBy !== sortBy) {
+    setPrevFilters({ debouncedSearch, sortBy });
+    setCurrentPage(1);
+  }
 
   useEffect(() => {
     fetchOverview();

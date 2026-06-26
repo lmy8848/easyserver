@@ -49,19 +49,13 @@ export default function Deploy() {
   const [servers, setServers] = useState<DeployServer[]>([]);
   const [tasks, setTasks] = useState<DeployTask[]>([]);
   const [versions, setVersions] = useState<DeployVersion[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [serverModalVisible, setServerModalVisible] = useState(false);
   const [taskModalVisible, setTaskModalVisible] = useState(false);
   const [editingServer, setEditingServer] = useState<DeployServer | null>(null);
   const [form] = Form.useForm();
 
-  useEffect(() => {
-    fetchServers();
-    fetchTasks();
-  }, []);
-
   const fetchServers = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/deploy/servers');
       setServers(res.data.data || []);
@@ -80,6 +74,11 @@ export default function Deploy() {
       console.error('Failed to fetch tasks:', error);
     }
   };
+
+  useEffect(() => {
+    fetchServers();
+    fetchTasks();
+  }, []);
 
   const fetchVersions = async (serverId: number) => {
     try {
@@ -113,6 +112,7 @@ export default function Deploy() {
         message.success('服务器已添加');
       }
       setServerModalVisible(false);
+      setLoading(true);
       fetchServers();
     } catch (error: any) {
       if (error.message) {
@@ -125,6 +125,7 @@ export default function Deploy() {
     try {
       await api.delete(`/deploy/servers/${id}`);
       message.success('服务器已删除');
+      setLoading(true);
       fetchServers();
     } catch (error: any) {
       message.error(error.message || '删除失败');
@@ -135,6 +136,7 @@ export default function Deploy() {
     try {
       await api.post(`/deploy/servers/${id}/test`);
       message.success('连接成功');
+      setLoading(true);
       fetchServers();
     } catch (error: any) {
       message.error(error.message || '连接失败');

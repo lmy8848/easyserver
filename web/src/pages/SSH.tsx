@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Tabs, Form, Input, InputNumber, Select, Button, Space, message,
   Table, Tag, Popconfirm, Alert, Spin,
@@ -28,29 +28,14 @@ interface SSHLoginRecord {
 
 export default function SSH() {
   const [configForm] = Form.useForm();
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SSHSession[]>([]);
   const [logins, setLogins] = useState<SSHLoginRecord[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [loginsLoading, setLoginsLoading] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [loginsLoading, setLoginsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('config');
 
-  // Load SSH config on mount
-  useEffect(() => {
-    loadConfig();
-  }, []);
-
-  // Auto-load data when switching tabs
-  useEffect(() => {
-    if (activeTab === 'sessions') {
-      loadSessions();
-    } else if (activeTab === 'history') {
-      loadLogins();
-    }
-  }, [activeTab]);
-
-  const loadConfig = async () => {
-    setLoading(true);
+  const loadConfig = useCallback(async () => {
     try {
       const res = await api.get('/ssh/config');
       const config = res.data?.data;
@@ -62,7 +47,43 @@ export default function SSH() {
     } finally {
       setLoading(false);
     }
+  }, [configForm]);
+
+  const loadSessions = async () => {
+    try {
+      const res = await api.get('/ssh/sessions');
+      setSessions(res.data?.data?.sessions || []);
+    } catch {
+      message.error('加载会话列表失败');
+    } finally {
+      setSessionsLoading(false);
+    }
   };
+
+  const loadLogins = async () => {
+    try {
+      const res = await api.get('/ssh/logins');
+      setLogins(res.data?.data?.records || []);
+    } catch {
+      message.error('加载登录历史失败');
+    } finally {
+      setLoginsLoading(false);
+    }
+  };
+
+  // Load SSH config on mount
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  // Auto-load data when switching tabs
+  useEffect(() => {
+    if (activeTab === 'sessions') {
+      loadSessions();
+    } else if (activeTab === 'history') {
+      loadLogins();
+    }
+  }, [activeTab]);
 
   // Save config
   const handleSave = async () => {
@@ -95,40 +116,15 @@ export default function SSH() {
     }
   };
 
-  // Load sessions
-  const loadSessions = async () => {
-    setSessionsLoading(true);
-    try {
-      const res = await api.get('/ssh/sessions');
-      setSessions(res.data?.data?.sessions || []);
-    } catch {
-      message.error('加载会话列表失败');
-    } finally {
-      setSessionsLoading(false);
-    }
-  };
-
   // Kill session
   const handleKillSession = async (pid: number) => {
     try {
       await api.post(`/ssh/sessions/${pid}/kill`);
       message.success('会话已终止');
+      setSessionsLoading(true);
       loadSessions();
     } catch {
       message.error('终止失败');
-    }
-  };
-
-  // Load login history
-  const loadLogins = async () => {
-    setLoginsLoading(true);
-    try {
-      const res = await api.get('/ssh/logins?limit=100');
-      setLogins(res.data?.data?.records || []);
-    } catch {
-      message.error('加载登录历史失败');
-    } finally {
-      setLoginsLoading(false);
     }
   };
 
@@ -280,7 +276,7 @@ export default function SSH() {
               <Card
                 title="在线 SSH 会话"
                 extra={
-                  <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={sessionsLoading}>
+                  <Button icon={<ReloadOutlined />} onClick={() => { setSessionsLoading(true); loadSessions(); }} loading={sessionsLoading}>
                     刷新
                   </Button>
                 }
@@ -302,7 +298,7 @@ export default function SSH() {
               <Card
                 title="SSH 登录历史"
                 extra={
-                  <Button icon={<ReloadOutlined />} onClick={loadLogins} loading={loginsLoading}>
+                  <Button icon={<ReloadOutlined />} onClick={() => { setLoginsLoading(true); loadLogins(); }} loading={loginsLoading}>
                     刷新
                   </Button>
                 }

@@ -70,12 +70,14 @@ export default function TerminalPage() {
   }, []);
 
   // 连接 WebSocket
+  const connectWsRef = useRef<(tab: TerminalTab, isReconnect?: boolean) => void>(() => {});
+
   const connectWs = useCallback((tab: TerminalTab, isReconnect = false) => {
     const token = localStorage.getItem('token');
     if (!token) return;
 
     if (tab.ws) {
-      try { tab.ws.close(); } catch {}
+      try { tab.ws.close(); } catch (e) { console.debug('WebSocket close error:', e); }
     }
 
     updateTabStatus(tab.key, isReconnect ? 'reconnecting' : 'connecting');
@@ -132,12 +134,16 @@ export default function TerminalPage() {
         if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
         tab.reconnectTimer = window.setTimeout(() => {
           if (!tab.disposed && tabsRef.current.includes(tab)) {
-            connectWs(tab, true);
+            connectWsRef.current(tab, true);
           }
         }, 3000);
       }
     };
   }, [updateTabStatus]);
+
+  useEffect(() => {
+    connectWsRef.current = connectWs;
+  }, [connectWs]);
 
   const createTerminal = useCallback((gen: number) => {
     const token = localStorage.getItem('token');
@@ -185,8 +191,8 @@ export default function TerminalPage() {
       tab.writeLock = true;
       try {
         tab.ws.send(data);
-      } catch {
-        // ignore write errors
+      } catch (e) {
+        console.debug('WebSocket send error:', e);
       }
       tab.writeLock = false;
     };
@@ -282,6 +288,7 @@ export default function TerminalPage() {
     const gen = ++mountGenRef.current;
     createTerminal(gen);
     return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: increment generation to invalidate pending operations
       mountGenRef.current++;
       // Cancel any pending animation frames to prevent memory leaks
       animFrameIdsRef.current.forEach(id => cancelAnimationFrame(id));
@@ -310,8 +317,8 @@ export default function TerminalPage() {
       tab.writeLock = true;
       try {
         tab.ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-      } catch {
-        // ignore
+      } catch (e) {
+        console.debug('WebSocket send error:', e);
       }
       tab.writeLock = false;
     }

@@ -3,10 +3,12 @@ import type {
   ApiResponse, CronTask, CronLog, Script, CronDoc,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
-  CloudInstance, WebServer, Website, DBServer, DBVersion, Database, DBUser,
+  CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
+  WebServer, Website, DBServer, DBVersion, Database, DBUser,
   ManagedProcess, ProcessWithStatus, ProcessLog, ProcessGroup, ProcessStats, PaginatedData,
   SystemProcess, SystemOverview, SystemService, ServiceWhitelistEntry,
-  Notification,
+  Notification, UserActivity, SSHLogin, SSHConfig, FileSearchResult,
+  ConfigSection, ParamMeta, AppSettings,
 } from '../types';
 
 const api = axios.create({
@@ -134,7 +136,7 @@ export const serviceApi = {
     api.post<ApiResponse>(`/services/${name}/disable`),
 
   getLogs: (name: string, tail?: number) =>
-    api.get<ApiResponse<{ lines: any[] }>>(`/services/${name}/logs`, { params: { tail } }),
+    api.get<ApiResponse<{ lines: string[] }>>(`/services/${name}/logs`, { params: { tail } }),
 };
 
 // File API
@@ -180,13 +182,13 @@ export const fileApi = {
 
   // New file operations
   search: (path: string, query: string, limit?: number) =>
-    api.get<ApiResponse<any[]>>('/files/search', { params: { path, q: query, limit } }),
+    api.get<ApiResponse<FileSearchResult[]>>('/files/search', { params: { path, q: query, limit } }),
 
   searchContent: (path: string, query: string, limit?: number) =>
-    api.get<ApiResponse<any[]>>('/files/search-content', { params: { path, q: query, limit } }),
+    api.get<ApiResponse<FileSearchResult[]>>('/files/search-content', { params: { path, q: query, limit } }),
 
   getDetails: (path: string) =>
-    api.get<ApiResponse<any>>('/files/details', { params: { path } }),
+    api.get<ApiResponse<Record<string, unknown>>>('/files/details', { params: { path } }),
 
   getMimeType: (path: string) =>
     api.get<ApiResponse<{ path: string; mime_type: string }>>('/files/mime-type', { params: { path } }),
@@ -225,10 +227,10 @@ export const userApi = {
     api.post<ApiResponse>(`/users/${id}/reset-password`, { password }),
 
   getActivities: (id: number, limit?: number) =>
-    api.get<ApiResponse<any[]>>(`/users/${id}/activities`, { params: { limit } }),
+    api.get<ApiResponse<UserActivity[]>>(`/users/${id}/activities`, { params: { limit } }),
 
   getAllActivities: (limit?: number) =>
-    api.get<ApiResponse<any[]>>('/users/activities', { params: { limit } }),
+    api.get<ApiResponse<UserActivity[]>>('/users/activities', { params: { limit } }),
 
   setExpiry: (id: number, expiresAt: string | null) =>
     api.put<ApiResponse>(`/users/${id}/expiry`, { expires_at: expiresAt }),
@@ -237,7 +239,7 @@ export const userApi = {
     api.put<ApiResponse>(`/users/${id}/ip-whitelist`, { ip_whitelist: ipWhitelist }),
 
   getSessions: () =>
-    api.get<ApiResponse<any[]>>('/users/sessions'),
+    api.get<ApiResponse<Array<{ user_id: number; username: string; role: string; ip: string; user_agent: string; login_at: string; expires_at: string }>>>('/users/sessions'),
 };
 
 // Cloud API
@@ -258,19 +260,19 @@ export const cloudApi = {
     api.post<ApiResponse>(`/cloud/instances/${id}/restart`),
 
   getMonitor: (id: string, metric: string, start: string, end: string) =>
-    api.get<ApiResponse<any>>(`/cloud/monitor/${id}`, { params: { metric, start, end } }),
+    api.get<ApiResponse<{ metric: string; points: Array<{ timestamp: string; value: number }> }>>(`/cloud/monitor/${id}`, { params: { metric, start, end } }),
 
   getFirewall: (id: string) =>
-    api.get<ApiResponse<{ rules: any[] }>>(`/cloud/firewall/${id}`),
+    api.get<ApiResponse<{ rules: CloudFirewallRule[] }>>(`/cloud/firewall/${id}`),
 
-  addFirewallRule: (id: string, rule: any) =>
+  addFirewallRule: (id: string, rule: Omit<CloudFirewallRule, 'rule_id'>) =>
     api.post<ApiResponse>(`/cloud/firewall/${id}`, rule),
 
   deleteFirewallRule: (id: string, ruleId: string) =>
     api.delete<ApiResponse>(`/cloud/firewall/${id}/${ruleId}`),
 
   getSnapshots: () =>
-    api.get<ApiResponse<{ snapshots: any[] }>>('/cloud/snapshots'),
+    api.get<ApiResponse<{ snapshots: Snapshot[] }>>('/cloud/snapshots'),
 
   createSnapshot: (instanceId: string, name: string) =>
     api.post<ApiResponse>('/cloud/snapshots', { instance_id: instanceId, name }),
@@ -279,16 +281,16 @@ export const cloudApi = {
     api.post<ApiResponse>(`/cloud/snapshots/${id}/apply`),
 
   getTraffic: () =>
-    api.get<ApiResponse<any>>('/cloud/traffic'),
+    api.get<ApiResponse<TrafficInfo>>('/cloud/traffic'),
 };
 
 // System API
 export const systemApi = {
   getSSHLogins: (limit?: number) =>
-    api.get<ApiResponse<any[]>>('/system/ssh-logins', { params: { limit } }),
+    api.get<ApiResponse<SSHLogin[]>>('/system/ssh-logins', { params: { limit } }),
 
   getSSHConfig: () =>
-    api.get<ApiResponse<any>>('/system/ssh-config'),
+    api.get<ApiResponse<SSHConfig>>('/system/ssh-config'),
 
   checkPort: (port: number) =>
     api.get<ApiResponse<{ available: boolean; port: number; process?: string; message: string }>>('/system/check-port', { params: { port } }),
@@ -308,7 +310,7 @@ export const auditApi = {
     ip?: string;
     start_date?: string;
     end_date?: string;
-  }) => api.get<ApiResponse<{ total: number; items: any[] }>>('/audit-logs', { params }),
+  }) => api.get<ApiResponse<{ total: number; items: Array<{ id: number; user_id: number; username: string; action: string; resource: string; detail: string; status: number; ip: string; user_agent: string; created_at: string }> }>>('/audit-logs', { params }),
 
   getActions: () =>
     api.get<ApiResponse<string[]>>('/audit-logs/actions'),
@@ -346,7 +348,7 @@ export const webServerApi = {
   get: (id: number) =>
     api.get<ApiResponse<WebServer>>(`/web-servers/${id}`),
 
-  create: (data: any) =>
+  create: (data: Partial<WebServer>) =>
     api.post<ApiResponse>('/web-servers', data),
 
   delete: (id: number) =>
@@ -409,10 +411,10 @@ export const websiteApi = {
   get: (serverId: number, id: number) =>
     api.get<ApiResponse<Website>>(`/web-servers/${serverId}/websites/${id}`),
 
-  create: (serverId: number, data: any) =>
+  create: (serverId: number, data: Partial<Website>) =>
     api.post<ApiResponse>(`/web-servers/${serverId}/websites`, data),
 
-  update: (serverId: number, id: number, data: any) =>
+  update: (serverId: number, id: number, data: Partial<Website>) =>
     api.put<ApiResponse>(`/web-servers/${serverId}/websites/${id}`, data),
 
   delete: (serverId: number, id: number) =>
@@ -471,7 +473,7 @@ export const dbServerApi = {
   listDatabases: (serverId: number) =>
     api.get<ApiResponse<Database[]>>(`/db-servers/${serverId}/databases`),
 
-  createDatabase: (serverId: number, data: any) =>
+  createDatabase: (serverId: number, data: { name: string; charset?: string; description?: string }) =>
     api.post<ApiResponse>(`/db-servers/${serverId}/databases`, data),
 
   deleteDatabase: (serverId: number, dbId: number) =>
@@ -481,13 +483,13 @@ export const dbServerApi = {
   listUsers: (serverId: number) =>
     api.get<ApiResponse<DBUser[]>>(`/db-servers/${serverId}/users`),
 
-  createUser: (serverId: number, data: any) =>
+  createUser: (serverId: number, data: { username: string; password: string; host?: string }) =>
     api.post<ApiResponse>(`/db-servers/${serverId}/users`, data),
 
   deleteUser: (serverId: number, userId: number) =>
     api.delete<ApiResponse>(`/db-servers/${serverId}/users/${userId}`),
 
-  grantPrivileges: (serverId: number, userId: number, data: any) =>
+  grantPrivileges: (serverId: number, userId: number, data: { privileges: string; database?: string }) =>
     api.post<ApiResponse>(`/db-servers/${serverId}/users/${userId}/grant`, data),
 
   // Database introspection
@@ -505,23 +507,23 @@ export const dbServerApi = {
     api.delete<ApiResponse>(`/db-servers/databases/${dbId}/tables`, { params: { table } }),
 
   queryTable: (dbId: number, table: string, page: number = 1, pageSize: number = 50) =>
-    api.get<ApiResponse<{ headers: string[]; rows: any[][]; total: number; page: number; page_size: number }>>(`/db-servers/databases/${dbId}/query`, { params: { table, page, page_size: pageSize } }),
+    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db-servers/databases/${dbId}/query`, { params: { table, page, page_size: pageSize } }),
 
   executeSQL: (dbId: number, sql: string) =>
     api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db-servers/databases/${dbId}/execute`, { sql }),
 
-  insertRecord: (dbId: number, table: string, data: Record<string, any>) =>
+  insertRecord: (dbId: number, table: string, data: Record<string, string | number | null>) =>
     api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db-servers/databases/${dbId}/insert`, { table, data }),
 
-  updateRecord: (dbId: number, table: string, data: Record<string, any>, primaryKey: string, primaryVal: any) =>
+  updateRecord: (dbId: number, table: string, data: Record<string, string | number | null>, primaryKey: string, primaryVal: string | number) =>
     api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db-servers/databases/${dbId}/update`, { table, data, primary_key: primaryKey, primary_val: primaryVal }),
 
-  deleteRecord: (dbId: number, table: string, primaryKey: string, primaryVal: any) =>
+  deleteRecord: (dbId: number, table: string, primaryKey: string, primaryVal: string | number) =>
     api.post<ApiResponse<{ success: boolean; error?: string }>>(`/db-servers/databases/${dbId}/delete`, { table, primary_key: primaryKey, primary_val: primaryVal }),
 
   // MySQL config management
   getMySQLConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: any; sections?: Record<string, { params: Record<string, string>; meta: any[] }> }>>('/db-servers/mysql/config'),
+    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db-servers/mysql/config'),
 
   saveMySQLConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
     api.post<ApiResponse>('/db-servers/mysql/config', { sections }),
@@ -531,7 +533,7 @@ export const dbServerApi = {
 
   // PostgreSQL config management
   getPostgreSQLConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: any; sections?: Record<string, { params: Record<string, string>; meta: any[] }> }>>('/db-servers/postgresql/config'),
+    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db-servers/postgresql/config'),
 
   savePostgreSQLConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
     api.post<ApiResponse>('/db-servers/postgresql/config', { sections }),
@@ -541,7 +543,7 @@ export const dbServerApi = {
 
   // Redis config management
   getRedisConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: any; sections?: Record<string, { params: Record<string, string>; meta: any[] }> }>>('/db-servers/redis/config'),
+    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db-servers/redis/config'),
 
   saveRedisConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
     api.post<ApiResponse>('/db-servers/redis/config', { sections }),
@@ -700,7 +702,7 @@ export const firewallApi = {
     api.post<ApiResponse<FirewallRule>>('/firewall/templates/apply', { name }),
 
   exportRules: () =>
-    api.get('/firewall/rules/export', { responseType: 'blob' as any }),
+    api.get('/firewall/rules/export', { responseType: 'blob' as const }),
 
   importRules: (data: { version: number; exported_at: string; rules: Array<{ chain: string; protocol: string; port: string; action: string; source: string; remark: string }> }) =>
     api.post<ApiResponse<{ succeeded: number; failed: number; errors: string[] }>>('/firewall/rules/import', data),
@@ -712,7 +714,7 @@ export const firewallApi = {
 // Settings API
 export const settingsApi = {
   get: () =>
-    api.get<ApiResponse<any>>('/settings'),
+    api.get<ApiResponse<AppSettings>>('/settings'),
 
   getSystem: () =>
     api.get<ApiResponse<{ version: string; go_version: string; platform: string }>>('/settings/system'),
@@ -745,7 +747,7 @@ export const settingsApi = {
     api.post<ApiResponse>('/settings/notify/test'),
 
   getAlertRules: () =>
-    api.get<ApiResponse>('/alerts/rules'),
+    api.get<ApiResponse<{ rules: Array<{ name: string; metric: string; threshold: number; duration: number; enabled: boolean }> }>>('/alerts/rules'),
 
   updateAlertRules: (rules: Array<{ name: string; metric: string; threshold: number; duration: number; enabled: boolean }>) =>
     api.put<ApiResponse>('/alerts/rules', { rules }),
@@ -868,10 +870,10 @@ export const notificationApi = {
 // Template API
 export const templateApi = {
   getDockerImages: () =>
-    api.get<ApiResponse>('/templates/docker-images'),
+    api.get<ApiResponse<{ categories: Array<{ name: string; description: string; images: Array<{ name: string; tag: string; description: string }> }> }>>('/templates/docker-images'),
 
   getScriptTemplates: () =>
-    api.get<ApiResponse>('/templates/scripts'),
+    api.get<ApiResponse<{ categories: Array<{ name: string; description: string; templates: Array<{ name: string; description: string; content: string }> }> }>>('/templates/scripts'),
 };
 
 export default api;

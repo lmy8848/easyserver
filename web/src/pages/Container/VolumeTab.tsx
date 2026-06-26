@@ -10,12 +10,11 @@ import type { Volume } from './types';
 
 export default function VolumeTab() {
   const [volumes, setVolumes] = useState<Volume[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
   const [createForm] = Form.useForm();
 
   const loadVolumes = async () => {
-    setLoading(true);
     try {
       const res = await api.get('/volumes');
       setVolumes(res.data?.data?.volumes || []);
@@ -35,6 +34,7 @@ export default function VolumeTab() {
       message.success('存储卷创建成功');
       setCreateVisible(false);
       createForm.resetFields();
+      setLoading(true);
       loadVolumes();
     } catch {
       message.error('创建失败');
@@ -45,6 +45,7 @@ export default function VolumeTab() {
     try {
       await api.delete(`/volumes/${name}?force=true`);
       message.success('存储卷已删除');
+      setLoading(true);
       loadVolumes();
     } catch {
       message.error('删除失败');
@@ -73,7 +74,7 @@ export default function VolumeTab() {
         extra={
           <Space>
             <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateVisible(true)}>创建存储卷</Button>
-            <Button icon={<ReloadOutlined />} onClick={loadVolumes}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); loadVolumes(); }}>刷新</Button>
           </Space>
         }
       >

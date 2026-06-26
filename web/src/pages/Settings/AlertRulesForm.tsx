@@ -9,11 +9,10 @@ import type { AlertRule } from './types';
 
 export default function AlertRulesForm() {
   const [rules, setRules] = useState<AlertRule[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
     settingsApi.getAlertRules()
       .then(res => {
         setRules(res.data?.data?.rules || []);
