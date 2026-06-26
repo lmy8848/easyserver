@@ -3,7 +3,7 @@ package api
 import (
 	"fmt"
 
-	"easyserver/internal/model"
+	"easyserver/internal/envconfig"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/runtimeenv"
 
@@ -269,13 +269,13 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	// Get related environment variables
 	envConfigs, err := h.runtimeService.GetEnvConfigsByRuntimeID(c.Request.Context(), id)
 	if err != nil {
-		envConfigs = []model.EnvConfig{}
+		envConfigs = []envconfig.EnvConfig{}
 	}
 
 	// Get related PATH entries
 	pathEntries, err := h.runtimeService.GetPathEntriesByRuntimeID(c.Request.Context(), id)
 	if err != nil {
-		pathEntries = []model.PathEntry{}
+		pathEntries = []envconfig.PathEntry{}
 	}
 
 	Success(c, gin.H{

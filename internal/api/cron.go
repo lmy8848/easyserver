@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"easyserver/internal/executor"
-	"easyserver/internal/model"
 	"easyserver/internal/cron"
 
 	"github.com/gin-gonic/gin"
@@ -54,7 +53,7 @@ func (h *CronHandler) GetTask(c *gin.Context) {
 
 // CreateTask creates a new cron task
 func (h *CronHandler) CreateTask(c *gin.Context) {
-	var req model.CreateCronTaskRequest
+	var req cron.CreateCronTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -96,7 +95,7 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		}
 	}
 
-	task := &model.CronTask{
+	task := &cron.CronTask{
 		Name:        req.Name,
 		Command:     req.Command,
 		Schedule:    req.Schedule,
@@ -131,7 +130,7 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
-	var req model.UpdateCronTaskRequest
+	var req cron.UpdateCronTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -325,7 +324,7 @@ func (h *CronHandler) GetScript(c *gin.Context) {
 
 // CreateScript creates a new script
 func (h *CronHandler) CreateScript(c *gin.Context) {
-	var req model.CreateScriptRequest
+	var req cron.CreateScriptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -368,7 +367,7 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 		}
 	}
 
-	script := &model.Script{
+	script := &cron.Script{
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
@@ -429,7 +428,7 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 		return
 	}
 
-	var req model.UpdateScriptRequest
+	var req cron.UpdateScriptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -842,7 +841,7 @@ func (h *CronHandler) CreateDoc(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
-	doc := &model.CronDoc{
+	doc := &cron.CronDoc{
 		Title:     req.Title,
 		Content:   req.Content,
 		SortOrder: req.SortOrder,

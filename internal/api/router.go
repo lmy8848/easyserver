@@ -26,7 +26,6 @@ import (
 	"easyserver/internal/notify"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
-	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
@@ -42,7 +41,7 @@ type Router struct {
 	configPath           string
 	db                   *sql.DB
 	executor             executor.CommandExecutor
-	auditRepo            repository.AuditRepository
+	auditRepo            audit.Repository
 	authService          *auth.AuthService
 	monitorService       *monitor.MonitorService
 	auditService         *audit.Service
@@ -105,7 +104,7 @@ type RouterDeps struct {
 	MonitorService       *monitor.MonitorService
 	AuditService         *audit.Service
 	SessionService       *auth.SessionService
-	AuditRepo            repository.AuditRepository
+	AuditRepo            audit.Repository
 	ProcessManager       *process.Service
 	SystemProcessService *systemprocess.Service
 	NotificationService  *notification.Service

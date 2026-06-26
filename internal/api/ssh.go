@@ -4,8 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
-	
 	"easyserver/internal/ssh"
 	"github.com/gin-gonic/gin"
 )
@@ -99,7 +97,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	config.DenyUsers = strings.NewReplacer("\n", "", "\r", "").Replace(config.DenyUsers)
 
 	// Save config
-	sshConfig := &model.SSHConfig{
+	sshConfig := &ssh.Config{
 		Port:                   config.Port,
 		PermitRootLogin:        config.PermitRootLogin,
 		PasswordAuthentication: config.PasswordAuthentication,

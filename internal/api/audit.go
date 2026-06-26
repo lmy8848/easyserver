@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/repository"
 	"easyserver/internal/audit"
 
 	"github.com/gin-gonic/gin"
@@ -17,7 +16,7 @@ import (
 type AuditHandler struct {
 	db           *sql.DB
 	auditService *audit.Service
-	auditRepo    repository.AuditRepository
+	auditRepo    audit.Repository
 }
 
 func NewAuditHandler(db *sql.DB, auditService *audit.Service) *AuditHandler {
@@ -25,7 +24,7 @@ func NewAuditHandler(db *sql.DB, auditService *audit.Service) *AuditHandler {
 }
 
 // NewAuditHandlerWithRepo creates an AuditHandler with repository support
-func NewAuditHandlerWithRepo(db *sql.DB, auditService *audit.Service, auditRepo repository.AuditRepository) *AuditHandler {
+func NewAuditHandlerWithRepo(db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) *AuditHandler {
 	return &AuditHandler{db: db, auditService: auditService, auditRepo: auditRepo}
 }
 
@@ -68,7 +67,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 	// Use repository if available
 	if h.auditRepo != nil {
-		filter := repository.AuditFilter{
+		filter := audit.AuditFilter{
 			Username:  username,
 			Action:    action,
 			Resource:  resource,
@@ -526,7 +525,7 @@ func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
 	})
 }
 
-func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo repository.AuditRepository) {
+func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) {
 	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
 	protected.GET("/audit-logs", handler.List)
 	protected.GET("/audit-logs/actions", handler.GetActions)

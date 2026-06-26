@@ -3,7 +3,7 @@ package runtimeenv
 import (
 	"context"
 
-	"easyserver/internal/model"
+	"easyserver/internal/envconfig"
 )
 
 // Repository defines the interface for runtime environment data access
@@ -41,8 +41,8 @@ type Repository interface {
 	CleanupPathEntries(ctx context.Context, runtimeID int64) (int64, error)
 
 	// Related resource queries
-	ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error)
-	ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]model.PathEntry, error)
+	ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error)
+	ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error)
 
 	// Runtime version cache
 	InitRuntimeVersionsTable(ctx context.Context) error

@@ -3,7 +3,6 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/model"
 	"easyserver/internal/process"
 
 	"github.com/gin-gonic/gin"
@@ -50,7 +49,7 @@ func (h *ProcessHandler) GetProcess(c *gin.Context) {
 
 // CreateProcess creates a new process configuration
 func (h *ProcessHandler) CreateProcess(c *gin.Context) {
-	var req model.CreateProcessRequest
+	var req process.CreateProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -70,7 +69,7 @@ func (h *ProcessHandler) UpdateProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
-	var req model.UpdateProcessRequest
+	var req process.UpdateProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -172,7 +171,7 @@ func (h *ProcessHandler) GetProcessStats(c *gin.Context) {
 
 // BatchStart starts multiple processes
 func (h *ProcessHandler) BatchStart(c *gin.Context) {
-	var req model.BatchProcessIDs
+	var req process.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -187,7 +186,7 @@ func (h *ProcessHandler) BatchStart(c *gin.Context) {
 
 // BatchStop stops multiple processes
 func (h *ProcessHandler) BatchStop(c *gin.Context) {
-	var req model.BatchProcessIDs
+	var req process.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -202,7 +201,7 @@ func (h *ProcessHandler) BatchStop(c *gin.Context) {
 
 // BatchRestart restarts multiple processes
 func (h *ProcessHandler) BatchRestart(c *gin.Context) {
-	var req model.BatchProcessIDs
+	var req process.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -248,7 +247,7 @@ func (h *ProcessHandler) GetGroup(c *gin.Context) {
 
 // CreateGroup creates a new process group
 func (h *ProcessHandler) CreateGroup(c *gin.Context) {
-	var req model.CreateProcessGroupRequest
+	var req process.CreateProcessGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -268,7 +267,7 @@ func (h *ProcessHandler) UpdateGroup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的分组ID"))
 		return
 	}
-	var req model.UpdateProcessGroupRequest
+	var req process.UpdateProcessGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
@@ -306,7 +305,7 @@ func (h *ProcessHandler) ExportProcesses(c *gin.Context) {
 
 // ImportProcesses imports process configs from JSON
 func (h *ProcessHandler) ImportProcesses(c *gin.Context) {
-	var processes []model.Process
+	var processes []process.Process
 	if err := c.ShouldBindJSON(&processes); err != nil {
 		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return

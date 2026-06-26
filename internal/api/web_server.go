@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
 	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -64,7 +63,7 @@ func (h *WebServerHandler) Get(c *gin.Context) {
 }
 
 func (h *WebServerHandler) Create(c *gin.Context) {
-	var req model.CreateWebServerRequest
+	var req web.CreateWebServerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -83,9 +82,9 @@ func (h *WebServerHandler) Create(c *gin.Context) {
 	}
 
 	// Look up the predefined template — only predefined server types are allowed
-	predef := model.FindPredefinedWebServer(req.Name)
+	predef := web.FindPredefinedWebServer(req.Name)
 	if predef == nil {
-		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, model.GetPredefinedWebServerNames())))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, web.GetPredefinedWebServerNames())))
 		return
 	}
 
@@ -378,7 +377,7 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 		return
 	}
 
-	var req model.CreateWebsiteRequest
+	var req web.CreateWebsiteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -409,7 +408,7 @@ func (h *WebServerHandler) UpdateWebsite(c *gin.Context) {
 		return
 	}
 
-	var req model.UpdateWebsiteRequest
+	var req web.UpdateWebsiteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -531,7 +530,7 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 
 // GetProjectTypes returns available project types
 func (h *WebServerHandler) GetProjectTypes(c *gin.Context) {
-	Success(c, model.GetProjectTypes())
+	Success(c, web.GetProjectTypes())
 }
 
 // Directory browser

@@ -4,10 +4,8 @@ import (
 	"os"
 	"strconv"
 
-	"easyserver/internal/dbserver"
-	"easyserver/internal/model"
-	
 	"easyserver/internal/database_mgmt"
+	"easyserver/internal/dbserver"
 	"github.com/gin-gonic/gin"
 )
 
@@ -69,7 +67,7 @@ func (h *BackupHandler) ListBackups(c *gin.Context) {
 	}
 
 	if backups == nil {
-		backups = []model.DBBackup{}
+		backups = []database_mgmt.DBBackup{}
 	}
 
 	Success(c, backups)

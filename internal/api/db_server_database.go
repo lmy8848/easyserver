@@ -4,8 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
-
 	"easyserver/internal/database_mgmt"
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +42,7 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
 		return
 	}
-	var req model.CreateDatabaseRequest
+	var req database_mgmt.CreateDatabaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return

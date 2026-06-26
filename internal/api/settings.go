@@ -16,7 +16,6 @@ import (
 	"easyserver/internal/cloud"
 	"easyserver/internal/config"
 	"easyserver/internal/executor"
-	"easyserver/internal/model"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -596,9 +595,9 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 
 	// Update AlertService at runtime
 	if h.alertService != nil {
-		var alertRules []model.AlertRule
+		var alertRules []alert.AlertRule
 		for i, rule := range req.Rules {
-			alertRules = append(alertRules, model.AlertRule{
+			alertRules = append(alertRules, alert.AlertRule{
 				ID:        int64(i + 1),
 				Name:      rule.Name,
 				Metric:    rule.Metric,

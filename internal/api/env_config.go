@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"easyserver/internal/envconfig"
-	"easyserver/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -71,7 +70,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		return
 	}
 
-	config := &model.EnvConfig{
+	config := &envconfig.EnvConfig{
 		Name:      req.Name,
 		Value:     req.Value,
 		RuntimeID: req.RuntimeID,
@@ -173,7 +172,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		return
 	}
 
-	entry := &model.PathEntry{
+	entry := &envconfig.PathEntry{
 		Path:      req.Path,
 		RuntimeID: req.RuntimeID,
 		IsGlobal:  req.IsGlobal,
@@ -273,7 +272,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		return
 	}
 
-	config := &model.GlobalConfig{
+	config := &envconfig.GlobalConfig{
 		Category:    req.Category,
 		Key:         req.Key,
 		Value:       req.Value,
