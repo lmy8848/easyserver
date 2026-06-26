@@ -3,6 +3,7 @@ package model
 import "time"
 
 // RuntimeVersion represents an available version for a runtime environment
+// ponytail: kept as canonical definition; runtimeenv has its own copy for domain cohesion.
 type RuntimeVersion struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`       // java, node, go, python, php

@@ -3,18 +3,17 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/dbserver"
 
 	"github.com/gin-gonic/gin"
 )
 
 // VersionHandler handles DB version management endpoints.
 type VersionHandler struct {
-	dbServerService *service.DBServerService
+	dbServerService *dbserver.Service
 }
 
-func NewVersionHandler(dbServerService *service.DBServerService) *VersionHandler {
+func NewVersionHandler(dbServerService *dbserver.Service) *VersionHandler {
 	return &VersionHandler{dbServerService: dbServerService}
 }
 
@@ -29,7 +28,7 @@ func (h *VersionHandler) GetVersionTemplates(c *gin.Context) {
 		NotFound(c, "数据库服务器不存在")
 		return
 	}
-	templates := model.GetVersionTemplates(server.Name)
+	templates := dbserver.GetVersionTemplates(server.Name)
 	Success(c, templates)
 }
 
@@ -53,7 +52,7 @@ func (h *VersionHandler) InstallVersion(c *gin.Context) {
 		BadRequest(c, "无效的 ID")
 		return
 	}
-	var req model.CreateDBVersionRequest
+	var req dbserver.CreateDBVersionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return

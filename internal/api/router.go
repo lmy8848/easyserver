@@ -7,9 +7,14 @@ import (
 	"time"
 
 	"easyserver/internal/config"
+	"easyserver/internal/dbserver"
 	"easyserver/internal/executor"
+	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
+	"easyserver/internal/packagemanager"
 	"easyserver/internal/repository"
+	"easyserver/internal/runtimeenv"
+	"easyserver/internal/runtimeversion"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -43,7 +48,7 @@ type Router struct {
 	cronService *service.CronService
 
 	// Database services
-	dbServerService     *service.DBServerService
+	dbServerService     *dbserver.Service
 	databaseMgmtService *service.DatabaseMgmtService
 	dbBackupService     *service.DBBackupService
 	sqlQueryService     *service.SQLQueryService
@@ -55,12 +60,12 @@ type Router struct {
 	envConfigService *service.EnvConfigService
 
 	// Firewall service
-	firewallService *service.FirewallService
+	firewallService *firewall.Service
 
 	// Runtime services
-	runtimeService        *service.RuntimeService
-	runtimeVersionService *service.RuntimeVersionService
-	packageManagerService *service.PackageManagerService
+	runtimeService        *runtimeenv.Service
+	runtimeVersionService *runtimeversion.Service
+	packageManagerService *packagemanager.Service
 
 	// SSH service
 	sshConfigService *service.SSHConfigService
@@ -108,7 +113,7 @@ type RouterDeps struct {
 	CronService *service.CronService
 
 	// Database services
-	DBServerService     *service.DBServerService
+	DBServerService     *dbserver.Service
 	DatabaseMgmtService *service.DatabaseMgmtService
 	DBBackupService     *service.DBBackupService
 	SQLQueryService     *service.SQLQueryService
@@ -120,12 +125,12 @@ type RouterDeps struct {
 	EnvConfigService *service.EnvConfigService
 
 	// Firewall service
-	FirewallService *service.FirewallService
+	FirewallService *firewall.Service
 
 	// Runtime services
-	RuntimeService        *service.RuntimeService
-	RuntimeVersionService *service.RuntimeVersionService
-	PackageManagerService *service.PackageManagerService
+	RuntimeService        *runtimeenv.Service
+	RuntimeVersionService *runtimeversion.Service
+	PackageManagerService *packagemanager.Service
 
 	// SSH service
 	SSHConfigService *service.SSHConfigService

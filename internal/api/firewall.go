@@ -9,20 +9,19 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
 )
 
 // FirewallHandler handles firewall status, control, and log API requests
 type FirewallHandler struct {
-	firewallService *service.FirewallService
+	firewallService *firewall.Service
 	panelPort       string
 }
 
 // NewFirewallHandler creates a new FirewallHandler
-func NewFirewallHandler(firewallService *service.FirewallService, panelPort int) *FirewallHandler {
+func NewFirewallHandler(firewallService *firewall.Service, panelPort int) *FirewallHandler {
 	return &FirewallHandler{
 		firewallService: firewallService,
 		panelPort:       strconv.Itoa(panelPort),
@@ -68,7 +67,7 @@ func (h *FirewallHandler) DisableFirewall(c *gin.Context) {
 
 // SetDefaultPolicy sets the default policy for a chain (INPUT or OUTPUT)
 func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) {
-	var req model.SetDefaultPolicyRequest
+	var req firewall.SetDefaultPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, err.Error())
 		return
@@ -113,7 +112,7 @@ func (h *FirewallHandler) GetLogs(c *gin.Context) {
 		"/var/log/messages",
 	}
 
-	var allEntries []model.FirewallLogEntry
+	var allEntries []firewall.FirewallLogEntry
 
 	for _, logFile := range logFiles {
 		entries, err := readFirewallLog(logFile, lines)
@@ -146,7 +145,7 @@ var ufwActionRegex = regexp.MustCompile(`\[UFW\s+(\w+)\]`)
 
 // readFirewallLog reads a log file and parses firewall entries.
 // Uses a ring buffer to keep only the last maxLines matching lines in memory.
-func readFirewallLog(filePath string, maxLines int) ([]model.FirewallLogEntry, error) {
+func readFirewallLog(filePath string, maxLines int) ([]firewall.FirewallLogEntry, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -182,7 +181,7 @@ func readFirewallLog(filePath string, maxLines int) ([]model.FirewallLogEntry, e
 	}
 
 	// Parse lines into entries
-	entries := make([]model.FirewallLogEntry, 0, len(lines))
+	entries := make([]firewall.FirewallLogEntry, 0, len(lines))
 	for _, line := range lines {
 		entry := parseFirewallLogLine(line)
 		if entry != nil {
@@ -212,8 +211,8 @@ func isFirewallLogLine(line string) bool {
 }
 
 // parseFirewallLogLine parses a single firewall log line into a structured entry
-func parseFirewallLogLine(line string) *model.FirewallLogEntry {
-	entry := &model.FirewallLogEntry{
+func parseFirewallLogLine(line string) *firewall.FirewallLogEntry {
+	entry := &firewall.FirewallLogEntry{
 		Raw: line,
 	}
 
@@ -317,7 +316,7 @@ func isValidCIDR(s string) bool {
 	return false
 }
 
-func registerFirewallRoutes(protected *gin.RouterGroup, firewallService *service.FirewallService, panelPort int) {
+func registerFirewallRoutes(protected *gin.RouterGroup, firewallService *firewall.Service, panelPort int) {
 	// Set protected ports: SSH (22) + panel port from config
 	firewallService.SetProtectedPorts([]string{"22", strconv.Itoa(panelPort)})
 

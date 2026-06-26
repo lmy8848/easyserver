@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 
+	"easyserver/internal/dbserver"
 	"easyserver/internal/model"
 	"easyserver/internal/service"
 
@@ -12,12 +13,12 @@ import (
 
 // BackupHandler handles database backup endpoints.
 type BackupHandler struct {
-	dbServerService *service.DBServerService
+	dbServerService *dbserver.Service
 	dbMgmtService   *service.DatabaseMgmtService
 	dbBackupService *service.DBBackupService
 }
 
-func NewBackupHandler(dbServerService *service.DBServerService, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) *BackupHandler {
+func NewBackupHandler(dbServerService *dbserver.Service, dbMgmtService *service.DatabaseMgmtService, dbBackupService *service.DBBackupService) *BackupHandler {
 	return &BackupHandler{
 		dbServerService: dbServerService,
 		dbMgmtService:   dbMgmtService,

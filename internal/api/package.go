@@ -4,17 +4,18 @@ import (
 	"fmt"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/packagemanager"
+	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
 )
 
 type PackageManagerHandler struct {
-	packageService *service.PackageManagerService
-	runtimeService *service.RuntimeService
+	packageService *packagemanager.Service
+	runtimeService *runtimeenv.Service
 }
 
-func NewPackageManagerHandler(packageService *service.PackageManagerService, runtimeService *service.RuntimeService) *PackageManagerHandler {
+func NewPackageManagerHandler(packageService *packagemanager.Service, runtimeService *runtimeenv.Service) *PackageManagerHandler {
 	return &PackageManagerHandler{
 		packageService: packageService,
 		runtimeService: runtimeService,

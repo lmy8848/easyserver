@@ -4,16 +4,18 @@ import (
 	"fmt"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/packagemanager"
+	"easyserver/internal/runtimeenv"
+	"easyserver/internal/runtimeversion"
 
 	"github.com/gin-gonic/gin"
 )
 
 type RuntimeHandler struct {
-	runtimeService *service.RuntimeService
+	runtimeService *runtimeenv.Service
 }
 
-func NewRuntimeHandler(runtimeService *service.RuntimeService) *RuntimeHandler {
+func NewRuntimeHandler(runtimeService *runtimeenv.Service) *RuntimeHandler {
 	return &RuntimeHandler{runtimeService: runtimeService}
 }
 
@@ -51,7 +53,7 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) {
 
 // Install installs a runtime environment
 func (h *RuntimeHandler) Install(c *gin.Context) {
-	var req model.RuntimeInstallRequest
+	var req runtimeenv.RuntimeInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "无效的请求: "+err.Error())
 		return
@@ -78,7 +80,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 
 // Uninstall uninstalls a runtime environment
 func (h *RuntimeHandler) Uninstall(c *gin.Context) {
-	var req model.RuntimeUninstallRequest
+	var req runtimeenv.RuntimeUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "无效的请求: "+err.Error())
 		return
@@ -96,7 +98,7 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 
 // SetDefault sets a version as the default for a runtime environment
 func (h *RuntimeHandler) SetDefault(c *gin.Context) {
-	var req model.RuntimeSetDefaultRequest
+	var req runtimeenv.RuntimeSetDefaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "无效的请求: "+err.Error())
 		return
@@ -288,7 +290,7 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	})
 }
 
-func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *service.RuntimeService, runtimeVersionService *service.RuntimeVersionService, packageService *service.PackageManagerService) {
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeversion.Service, packageService *packagemanager.Service) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)

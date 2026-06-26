@@ -15,10 +15,15 @@ import (
 	"easyserver/internal/api"
 	"easyserver/internal/config"
 	"easyserver/internal/database"
+	"easyserver/internal/dbserver"
 	"easyserver/internal/executor"
+	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
 	"easyserver/internal/model"
+	"easyserver/internal/packagemanager"
 	"easyserver/internal/repository/sqlite"
+	"easyserver/internal/runtimeenv"
+	"easyserver/internal/runtimeversion"
 	"easyserver/internal/service"
 )
 
@@ -197,7 +202,7 @@ func main() {
 
 	// Initialize database services (single shared instance)
 	dbServerRepo := sqlite.NewDBServerRepository(db)
-	dbServerService := service.NewDBServerService(cmdExec, dbServerRepo)
+	dbServerService := dbserver.NewService(cmdExec, dbServerRepo)
 	dbServerService.SeedPredefinedServers(context.Background())
 	databaseMgmtRepo := sqlite.NewDatabaseMgmtRepository(db)
 	databaseMgmtService := service.NewDatabaseMgmtService(databaseMgmtRepo, cmdExec)
@@ -218,15 +223,15 @@ func main() {
 	envConfigService.InitDefaultGlobalConfigs(context.Background())
 
 	// Initialize firewall service (single shared instance)
-	firewallRepo := sqlite.NewFirewallRepository(db)
-	firewallService := service.NewFirewallService(firewallRepo, cmdExec)
+	firewallRepo := firewall.NewSQLiteRepository(db)
+	firewallService := firewall.NewService(firewallRepo, cmdExec)
 
 	// Initialize runtime services (single shared instance)
 	runtimeRepo := sqlite.NewRuntimeRepository(db)
-	runtimeService := service.NewRuntimeService(db, cmdExec)
-	runtimeVersionService := service.NewRuntimeVersionService(runtimeRepo)
+	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec)
+	runtimeVersionService := runtimeversion.NewService(runtimeRepo)
 	packageRepo := sqlite.NewPackageRepository(db)
-	packageManagerService := service.NewPackageManagerService(packageRepo, cmdExec)
+	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)
 
 	// Initialize SSH service (single shared instance)
 	sshConfigService := service.NewSSHConfigService(cmdExec)

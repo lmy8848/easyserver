@@ -131,19 +131,6 @@ type TOTPRepository interface {
 	StorePendingSecret(ctx context.Context, userID int64, secret string) error
 }
 
-// FirewallRepository defines the interface for firewall rule data access
-type FirewallRepository interface {
-	CountEnabledRules(ctx context.Context) (int, error)
-	ListRules(ctx context.Context) ([]model.FirewallRule, error)
-	GetRule(ctx context.Context, id int64) (*model.FirewallRule, error)
-	CreateRule(ctx context.Context, rule *model.FirewallRule) error
-	UpdateRule(ctx context.Context, rule *model.FirewallRule) error
-	DeleteRule(ctx context.Context, id int64) error
-	EnableRule(ctx context.Context, id int64) error
-	DisableRule(ctx context.Context, id int64) error
-	SwapPriorities(ctx context.Context, id1 int64, priority1 int64, id2 int64, priority2 int64) error
-}
-
 // CronRepository defines the interface for cron task data access
 type CronRepository interface {
 	// Task CRUD
@@ -179,27 +166,6 @@ type CronRepository interface {
 	DeleteDoc(ctx context.Context, id int64) error
 	CountDocs(ctx context.Context) (int, error)
 	BatchCreateDocs(ctx context.Context, docs []model.CronDoc) error
-}
-
-// DBServerRepository defines the interface for database server data access
-type DBServerRepository interface {
-	// Server operations
-	ListServers(ctx context.Context) ([]model.DBServer, error)
-	GetServer(ctx context.Context, id int64) (*model.DBServer, error)
-	SeedServer(ctx context.Context, name, displayName, description string, defaultPort int) error
-
-	// Version operations
-	ListVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error)
-	GetVersion(ctx context.Context, id int64) (*model.DBVersion, error)
-	CountVersionsByServerAndVersion(ctx context.Context, dbServerID int64, version string) (int, error)
-	CreateVersion(ctx context.Context, dbServerID int64, version, serviceName string, port int, status string) (int64, error)
-	DeleteVersion(ctx context.Context, id int64) error
-	CountDatabasesByVersion(ctx context.Context, versionID int64) (int, error)
-
-	// Status updates
-	UpdateVersionStatus(ctx context.Context, id int64, status string) error
-	UpdateVersionPort(ctx context.Context, id int64, port int) error
-	UpdateServerStatus(ctx context.Context, id int64, status, versionSummary string) error
 }
 
 // DatabaseMgmtRepository defines the interface for database management data access
@@ -358,46 +324,3 @@ type ProcessRepository interface {
 	DeleteGroup(ctx context.Context, id int64) error
 }
 
-// RuntimeRepository defines the interface for runtime environment data access
-type RuntimeRepository interface {
-	// Query
-	ListAll(ctx context.Context) ([]model.RuntimeEnvironment, error)
-	ListByName(ctx context.Context, name string) ([]model.RuntimeEnvironment, error)
-	GetDefault(ctx context.Context, name string) (*model.RuntimeEnvironment, error)
-	GetByID(ctx context.Context, id int64) (*model.RuntimeEnvironment, error)
-	GetByNameAndVersion(ctx context.Context, name, version string) (*model.RuntimeEnvironment, error)
-	GetProgress(ctx context.Context, id int64) (progress int, step, logs, errorMessage string, err error)
-
-	// Existence checks
-	ExistsByNameAndVersion(ctx context.Context, name, version string) (bool, error)
-	ExistsSimilarVersion(ctx context.Context, name, majorVersion string) (bool, error)
-	HasDefault(ctx context.Context, name string) (bool, error)
-
-	// Create/Delete
-	Create(ctx context.Context, name, version, path, status string) (int64, error)
-	Delete(ctx context.Context, id int64) error
-
-	// Status & progress updates
-	UpdateProgress(ctx context.Context, id int64, progress int, step, logs string) error
-	UpdateStatus(ctx context.Context, id int64, status string) error
-	UpdateStatusToFailed(ctx context.Context, id int64, errorMessage string) error
-	UpdateStatusToInstalled(ctx context.Context, id int64, path string) error
-
-	// Default management
-	ResetDefaults(ctx context.Context, name string) error
-	SetDefaultByID(ctx context.Context, id int64) error
-	SetDefaultByNameAndVersion(ctx context.Context, name, version string) error
-
-	// Cleanup related data
-	CleanupEnvConfigs(ctx context.Context, runtimeID int64) (int64, error)
-	CleanupPathEntries(ctx context.Context, runtimeID int64) (int64, error)
-
-	// Related resource queries
-	ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error)
-	ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]model.PathEntry, error)
-
-	// Runtime version cache
-	InitRuntimeVersionsTable(ctx context.Context) error
-	ListRuntimeVersions(ctx context.Context, name string) ([]model.RuntimeVersion, error)
-	UpsertRuntimeVersion(ctx context.Context, name, version string, lts bool, stable bool) error
-}
