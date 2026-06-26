@@ -562,6 +562,9 @@ func (s *Service) waitForExit(ctx context.Context, mp *managedProcess, autoResta
 }
 
 func (s *Service) captureOutput(ctx context.Context, processID int64, r io.Reader, logType string) {
+	if r == nil {
+		return
+	}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 1MB max line
 	for scanner.Scan() {
