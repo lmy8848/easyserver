@@ -105,7 +105,7 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
-	if !service.ValidateTableName(tableName) {
+	if !database_mgmt.ValidateTableName(tableName) {
 		c.Error(ErrBadRequest.WithMessage("无效的表名"))
 		return
 	}
@@ -130,7 +130,7 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
-	if !service.ValidateTableName(tableName) {
+	if !database_mgmt.ValidateTableName(tableName) {
 		c.Error(ErrBadRequest.WithMessage("无效的表名"))
 		return
 	}
