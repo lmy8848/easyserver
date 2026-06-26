@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"easyserver/internal/executor"
-	"easyserver/internal/service"
+	"easyserver/internal/systemd"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
@@ -28,14 +28,14 @@ func validateServiceName(name string) bool {
 // logsUpgrader is now replaced by h.upgrader in ServiceHandler
 
 type ServiceHandler struct {
-	serviceManager    *service.ServiceManager
+	serviceManager    *systemd.ServiceManager
 	executor          executor.CommandExecutor
 	jwtSecret         string
 	upgrader          gorillaWs.Upgrader
 	protectedServices []string // Services that cannot be stopped/disabled
 }
 
-func NewServiceHandler(serviceManager *service.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
+func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
 	return &ServiceHandler{
 		serviceManager:    serviceManager,
 		executor:          exec,

@@ -8,7 +8,6 @@ import (
 	"easyserver/internal/model"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,17 +16,15 @@ type AuthHandler struct {
 	authService    *auth.AuthService
 	auditService   *audit.Service
 	sessionService *auth.SessionService
-	totpService    *service.TOTPService
 	jwtSecret      string
 	sessionTimeout time.Duration
 }
 
-func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditService *audit.Service, sessionService *auth.SessionService, totpService *service.TOTPService, sessionTimeout time.Duration) *AuthHandler {
+func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditService *audit.Service, sessionService *auth.SessionService, sessionTimeout time.Duration) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		auditService:   auditService,
 		sessionService: sessionService,
-		totpService:    totpService,
 		jwtSecret:      jwtSecret,
 		sessionTimeout: sessionTimeout,
 	}
@@ -249,7 +246,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	}
 
 	// Verify TOTP code
-	if !h.totpService.VerifyTOTP(secret, req.Code) {
+	if !h.authService.VerifyTOTP(secret, req.Code) {
 		// Log failed TOTP verification
 		if h.auditService != nil {
 			user, _ := h.authService.GetUserByID(c.Request.Context(), userID)
@@ -314,7 +311,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	}
 
 	// Verify backup code
-	valid, err := h.totpService.VerifyBackupCode(c.Request.Context(), userID, req.BackupCode)
+	valid, err := h.authService.VerifyBackupCode(c.Request.Context(), userID, req.BackupCode)
 	if err != nil {
 		InternalError(c, "验证备用码失败")
 		return
@@ -374,7 +371,7 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	username, _ := c.Get("username")
 
 	// Check if TOTP is already enabled
-	enabled, err := h.totpService.IsTOTPEnabled(c.Request.Context(), userID)
+	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
 	if err != nil {
 		InternalError(c, "检查 TOTP 状态失败")
 		return
@@ -386,14 +383,14 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 
 	// Generate TOTP setup
 	unameStr, _ := username.(string)
-	result, err := h.totpService.GenerateTOTP(userID, unameStr)
+	result, err := h.authService.GenerateTOTP(userID, unameStr)
 	if err != nil {
 		InternalError(c, "生成 TOTP 设置失败")
 		return
 	}
 
 	// Store the secret temporarily (totp_enabled = 0, secret stored for verification)
-	err = h.totpService.StorePendingSecret(c.Request.Context(), userID, result.Secret)
+	err = h.authService.StorePendingSecret(c.Request.Context(), userID, result.Secret)
 	if err != nil {
 		InternalError(c, "存储 TOTP 密钥失败")
 		return
@@ -414,7 +411,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	}
 
 	// Get the pending secret from setup step
-	secret, err := h.totpService.GetPendingSecret(c.Request.Context(), userID)
+	secret, err := h.authService.GetPendingSecret(c.Request.Context(), userID)
 	if err != nil {
 		// If no pending secret, need to setup first
 		BadRequest(c, "请先设置 TOTP")
@@ -422,7 +419,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	}
 
 	// Enable TOTP
-	backupCodes, err := h.totpService.EnableTOTP(c.Request.Context(), userID, secret, req.Code)
+	backupCodes, err := h.authService.EnableTOTP(c.Request.Context(), userID, secret, req.Code)
 	if err != nil {
 		// Log failed enable attempt
 		if h.auditService != nil {
@@ -460,7 +457,7 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 	}
 
 	// Disable TOTP
-	if err := h.totpService.DisableTOTP(c.Request.Context(), userID, req.Password); err != nil {
+	if err := h.authService.DisableTOTP(c.Request.Context(), userID, req.Password); err != nil {
 		// Log failed disable attempt
 		if h.auditService != nil {
 			if unameStr, ok := username.(string); ok {
@@ -487,7 +484,7 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 func (h *AuthHandler) GetTOTPStatus(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 
-	enabled, err := h.totpService.IsTOTPEnabled(c.Request.Context(), userID)
+	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
 	if err != nil {
 		InternalError(c, "检查 TOTP 状态失败")
 		return
@@ -607,7 +604,6 @@ func registerAuthRoutes(
 	authService *auth.AuthService,
 	auditService *audit.Service,
 	sessionService *auth.SessionService,
-	totpService *service.TOTPService,
 	jwtSecret string,
 	sessionValidator func(string) (bool, error),
 	tokenValidator func(int64, string, time.Time) (bool, error),
@@ -615,7 +611,7 @@ func registerAuthRoutes(
 ) {
 	// Public auth routes
 	auth := api.Group("/auth")
-	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, totpService, sessionTimeout)
+	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout)
 	{
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/verify-totp", authHandler.VerifyTOTP)

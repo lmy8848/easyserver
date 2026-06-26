@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
-	"easyserver/internal/service"
+	"easyserver/internal/terminal"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
@@ -46,13 +46,13 @@ func formatDuration(d time.Duration) string {
 }
 
 type TerminalHandler struct {
-	terminalManager *service.TerminalManager
+	terminalManager *terminal.Manager
 	auditService    *audit.Service
 	jwtSecret       string
 	upgrader        gorillaWs.Upgrader
 }
 
-func NewTerminalHandler(terminalManager *service.TerminalManager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) *TerminalHandler {
+func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) *TerminalHandler {
 	return &TerminalHandler{
 		terminalManager: terminalManager,
 		auditService:    auditService,
@@ -218,7 +218,7 @@ func (h *TerminalHandler) writePump(conn *gorillaWs.Conn, wsWrite <-chan []byte)
 
 // readPump reads messages from the WebSocket connection and handles them.
 // It writes ping/pong responses through wsWrite to ensure serialized WebSocket writes.
-func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session *service.TerminalSession, wsWrite chan<- []byte, userID int64, username string, sessionID string) {
+func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session *terminal.Session, wsWrite chan<- []byte, userID int64, username string, sessionID string) {
 	// Command buffer for logging
 	var commandBuffer strings.Builder
 	commandBuffer.Grow(256)

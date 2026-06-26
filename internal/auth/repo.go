@@ -60,3 +60,15 @@ type TOTPer interface {
 	IsTOTPEnabled(ctx context.Context, userID int64) (bool, error)
 	GetTOTPSecret(ctx context.Context, userID int64) (string, error)
 }
+
+// TOTPRepo defines the interface for TOTP data access.
+type TOTPRepo interface {
+	TOTPer
+	EnableTOTP(ctx context.Context, userID int64, secret string, hashedCodesJSON string) error
+	DisableTOTP(ctx context.Context, userID int64) error
+	GetPasswordHash(ctx context.Context, userID int64) (string, error)
+	GetBackupCodes(ctx context.Context, userID int64) (string, error)
+	UpdateBackupCodes(ctx context.Context, userID int64, codesJSON string) error
+	GetPendingSecret(ctx context.Context, userID int64) (string, error)
+	StorePendingSecret(ctx context.Context, userID int64, secret string) error
+}

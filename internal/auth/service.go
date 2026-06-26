@@ -4,15 +4,21 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
+	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -20,6 +26,17 @@ const (
 	TokenExpiry          = 24 * time.Hour
 	CacheCleanupInterval = 5 * time.Minute
 	InvalidationExpiry   = 365 * TokenExpiry
+
+	// TOTP settings
+	totpIssuer       = "EasyServer"
+	totpPeriod       = 30 // seconds
+	totpDigits       = 6
+	totpAlgorithm    = "SHA1"
+	totpSecretLength = 20 // bytes
+
+	// Backup code settings
+	backupCodeLength = 8
+	backupCodeCount  = 10
 )
 
 type tokenCache struct {
@@ -31,7 +48,7 @@ type AuthService struct {
 	userRepo        UserRepo
 	tokenRepo       TokenBlacklistRepo
 	activityRepo    ActivityRepo
-	totpRepo        TOTPer
+	totpRepo        TOTPRepo
 	maxAttempts     int
 	lockoutDuration time.Duration
 	cache           tokenCache
@@ -58,7 +75,7 @@ func (s *AuthService) Close() {
 	}
 }
 
-func (s *AuthService) SetRepositories(userRepo UserRepo, tokenRepo TokenBlacklistRepo, activityRepo ActivityRepo, totpRepo TOTPer) {
+func (s *AuthService) SetRepositories(userRepo UserRepo, tokenRepo TokenBlacklistRepo, activityRepo ActivityRepo, totpRepo TOTPRepo) {
 	s.userRepo = userRepo
 	s.tokenRepo = tokenRepo
 	s.activityRepo = activityRepo
@@ -509,4 +526,191 @@ func (s *AuthService) IsAccountExpired(ctx context.Context, userID int64) (bool,
 	}
 
 	return expiresAt.Time.Before(time.Now()), nil
+}
+
+// TOTPSetupResult contains the TOTP setup information.
+type TOTPSetupResult struct {
+	Secret       string `json:"secret"`
+	OtpauthURL   string `json:"otpauth_url"`
+	QRCodeBase64 string `json:"qr_code_base64"`
+}
+
+// GenerateTOTP generates a new TOTP secret and QR code for setup.
+func (s *AuthService) GenerateTOTP(userID int64, username string) (*TOTPSetupResult, error) {
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      totpIssuer,
+		AccountName: username,
+		Period:      totpPeriod,
+		Digits:      totpDigits,
+		Algorithm:   otp.AlgorithmSHA1,
+		SecretSize:  totpSecretLength,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("generate TOTP key: %w", err)
+	}
+
+	qrCode, err := qrcode.Encode(key.URL(), qrcode.Medium, 256)
+	if err != nil {
+		return nil, fmt.Errorf("generate QR code: %w", err)
+	}
+
+	qrCodeBase64 := fmt.Sprintf("data:image/png;base64,%s", base64Encode(qrCode))
+
+	return &TOTPSetupResult{
+		Secret:       key.Secret(),
+		OtpauthURL:   key.URL(),
+		QRCodeBase64: qrCodeBase64,
+	}, nil
+}
+
+// VerifyTOTP verifies a TOTP code against a secret.
+func (s *AuthService) VerifyTOTP(secret, code string) bool {
+	return totp.Validate(code, secret)
+}
+
+// EnableTOTP enables 2FA for a user after verifying the code.
+func (s *AuthService) EnableTOTP(ctx context.Context, userID int64, secret, code string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !s.VerifyTOTP(secret, code) {
+		return nil, fmt.Errorf("invalid TOTP code")
+	}
+
+	backupCodes, err := s.GenerateBackupCodes()
+	if err != nil {
+		return nil, fmt.Errorf("generate backup codes: %w", err)
+	}
+
+	hashedCodes := make([]string, len(backupCodes))
+	for i, code := range backupCodes {
+		hash, err := hashPassword(code)
+		if err != nil {
+			return nil, fmt.Errorf("hash backup code: %w", err)
+		}
+		hashedCodes[i] = hash
+	}
+
+	hashedCodesJSON, err := json.Marshal(hashedCodes)
+	if err != nil {
+		return nil, fmt.Errorf("marshal backup codes: %w", err)
+	}
+
+	if err := s.totpRepo.EnableTOTP(ctx, userID, secret, string(hashedCodesJSON)); err != nil {
+		return nil, err
+	}
+
+	return backupCodes, nil
+}
+
+// DisableTOTP disables 2FA for a user after verifying the password.
+func (s *AuthService) DisableTOTP(ctx context.Context, userID int64, password string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	passwordHash, err := s.totpRepo.GetPasswordHash(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	if !verifyPassword(password, passwordHash) {
+		return fmt.Errorf("invalid password")
+	}
+
+	return s.totpRepo.DisableTOTP(ctx, userID)
+}
+
+// GenerateBackupCodes generates random backup codes.
+func (s *AuthService) GenerateBackupCodes() ([]string, error) {
+	codes := make([]string, backupCodeCount)
+	for i := 0; i < backupCodeCount; i++ {
+		code, err := generateRandomCode(backupCodeLength)
+		if err != nil {
+			return nil, fmt.Errorf("generate random code: %w", err)
+		}
+		codes[i] = code
+	}
+	return codes, nil
+}
+
+// VerifyBackupCode verifies and consumes a backup code.
+func (s *AuthService) VerifyBackupCode(ctx context.Context, userID int64, code string) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	backupCodesJSON, err := s.totpRepo.GetBackupCodes(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+
+	var hashedCodes []string
+	if err := json.Unmarshal([]byte(backupCodesJSON), &hashedCodes); err != nil {
+		return false, fmt.Errorf("parse backup codes: %w", err)
+	}
+
+	for i, hashedCode := range hashedCodes {
+		if verifyPassword(code, hashedCode) {
+			hashedCodes = append(hashedCodes[:i], hashedCodes[i+1:]...)
+			newJSON, err := json.Marshal(hashedCodes)
+			if err != nil {
+				return false, fmt.Errorf("marshal updated backup codes: %w", err)
+			}
+
+			if err := s.totpRepo.UpdateBackupCodes(ctx, userID, string(newJSON)); err != nil {
+				return false, err
+			}
+
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// GetPendingSecret gets the pending TOTP secret for a user (during setup).
+func (s *AuthService) GetPendingSecret(ctx context.Context, userID int64) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.totpRepo.GetPendingSecret(ctx, userID)
+}
+
+// StorePendingSecret stores a TOTP secret temporarily during setup.
+func (s *AuthService) StorePendingSecret(ctx context.Context, userID int64, secret string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.totpRepo.StorePendingSecret(ctx, userID, secret)
+}
+
+// Helper functions
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+func generateRandomCode(length int) (string, error) {
+	const digits = "0123456789"
+	code := make([]byte, length)
+	for i := 0; i < length; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(digits))))
+		if err != nil {
+			return "", err
+		}
+		code[i] = digits[num.Int64()]
+	}
+	return string(code), nil
+}
+
+func hashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func verifyPassword(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }

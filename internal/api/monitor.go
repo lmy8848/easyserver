@@ -11,7 +11,8 @@ import (
 	"easyserver/internal/executor"
 	"easyserver/internal/audit"
 	"easyserver/internal/monitor"
-	"easyserver/internal/service"
+	"easyserver/internal/systemd"
+	"easyserver/internal/terminal"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
@@ -245,7 +246,7 @@ func registerMonitorRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerServiceRoutes registers service management routes
-func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *service.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
+func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
 	handler := NewServiceHandler(serviceManager, exec, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
 	protected.GET("/services/:name", handler.Get)
@@ -259,7 +260,7 @@ func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerTerminalRoutes registers terminal routes
-func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *service.TerminalManager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
+func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
 	protected.GET("/terminal/:id", func(c *gin.Context) {
 		Success(c, nil)
 	})

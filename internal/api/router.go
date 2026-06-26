@@ -25,7 +25,9 @@ import (
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
 	"easyserver/internal/ssh"
+	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
+	"easyserver/internal/terminal"
 	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -41,12 +43,11 @@ type Router struct {
 	monitorService       *monitor.MonitorService
 	auditService         *audit.Service
 	sessionService       *auth.SessionService
-	totpService          *service.TOTPService
 	alertService         *service.AlertService
 	processManager       *process.Service
 	systemProcessService *systemprocess.Service
 	notificationService  *notification.Service
-	serviceManager       *service.ServiceManager
+	serviceManager       *systemd.ServiceManager
 
 	// Container service
 	containerService *container.Service
@@ -80,7 +81,7 @@ type Router struct {
 	websiteService   *web.WebsiteService
 
 	// Terminal manager
-	terminalManager *service.TerminalManager
+	terminalManager *terminal.Manager
 
 	// File manager
 	fileManager *service.FileManager
@@ -100,12 +101,11 @@ type RouterDeps struct {
 	MonitorService       *monitor.MonitorService
 	AuditService         *audit.Service
 	SessionService       *auth.SessionService
-	TotpService          *service.TOTPService
 	AuditRepo            repository.AuditRepository
 	ProcessManager       *process.Service
 	SystemProcessService *systemprocess.Service
 	NotificationService  *notification.Service
-	ServiceManager       *service.ServiceManager
+	ServiceManager       *systemd.ServiceManager
 
 	// Container service
 	ContainerService *container.Service
@@ -143,7 +143,7 @@ type RouterDeps struct {
 	AlertService  *service.AlertService
 
 	// Terminal manager
-	TerminalManager *service.TerminalManager
+	TerminalManager *terminal.Manager
 
 	// File manager
 	FileManager *service.FileManager
@@ -163,7 +163,6 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		monitorService:       deps.MonitorService,
 		auditService:         deps.AuditService,
 		sessionService:       deps.SessionService,
-		totpService:          deps.TotpService,
 		alertService:         deps.AlertService,
 		processManager:       deps.ProcessManager,
 		systemProcessService: deps.SystemProcessService,
@@ -245,7 +244,7 @@ func (r *Router) Setup() *gin.Engine {
 	api := e.Group("/api")
 
 	// Auth routes (public + protected)
-	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.totpService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout)
+	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout)
 
 	// Protected routes (JWT + SingleAdmin + Audit + Session Heartbeat)
 	protected := api.Group("")

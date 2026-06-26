@@ -34,7 +34,9 @@ import (
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
 	"easyserver/internal/ssh"
+	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
+	"easyserver/internal/terminal"
 	"easyserver/internal/web"
 )
 
@@ -137,7 +139,7 @@ func main() {
 	tokenRepo := sqlite.NewTokenBlacklistRepository(db)
 	auditRepo := sqlite.NewAuditRepository(db)
 	activityRepo := sqlite.NewActivityRepository(db)
-	totpRepo := sqlite.NewTOTPRepository(db)
+	totpRepo := auth.NewTOTPRepository(db)
 	monitorRepo := sqlite.NewMonitorRepository(db)
 
 	// Initialize auth service and default admin (single shared instance)
@@ -194,14 +196,11 @@ func main() {
 	notificationRepo := sqlite.NewNotificationRepository(db)
 	notificationSvc := notification.NewService(notificationRepo)
 
-	// Initialize TOTP service (single shared instance)
-	totpService := service.NewTOTPService(totpRepo)
-
 	// Initialize container service (single shared instance)
 	containerService := container.NewService(cmdExec)
 
 	// Initialize service manager (single shared instance)
-	serviceManager := service.NewServiceManager(cmdExec)
+	serviceManager := systemd.NewServiceManager(cmdExec)
 
 	// Initialize cron service (single shared instance)
 	cronRepo := sqlite.NewCronRepository(db)
@@ -267,7 +266,7 @@ func main() {
 	monitorSvc.SetAlertService(alertService)
 
 	// Initialize terminal manager (single shared instance)
-	terminalManager := service.NewTerminalManager(cmdExec)
+	terminalManager := terminal.NewManager(cmdExec)
 
 	// Initialize file manager (single shared instance)
 	fileManager, err := service.NewFileManager(cfg.FileManager.BasePath)
@@ -300,7 +299,6 @@ func main() {
 		MonitorService:       monitorSvc,
 		AuditService:         auditSvc,
 		SessionService:       sessionSvc,
-		TotpService:          totpService,
 		AuditRepo:            auditRepo,
 		ProcessManager:       processMgr,
 		SystemProcessService: systemProcessService,
