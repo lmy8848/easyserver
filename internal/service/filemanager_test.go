@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"easyserver/internal/database_mgmt"
 	"easyserver/internal/firewall"
 )
 
@@ -245,7 +246,7 @@ func TestIsProtectedPort_SetProtectedPorts(t *testing.T) {
 // --- TestIsValidDBName (via SQLValidator) ---
 
 func TestIsValidDBName(t *testing.T) {
-	v := NewSQLValidator("sqlite")
+	v := database_mgmt.NewSQLValidator(database_mgmt.DBTypeMySQL)
 
 	tests := []struct {
 		name    string
