@@ -1,0 +1,8 @@
+title: EasyServer
+description: 一站式 Linux 服务器管理面板
+theme: jekyll-theme-minimal
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: true

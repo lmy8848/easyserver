@@ -64,8 +64,12 @@ files.txt
 *.bak
 *.tmp
 
-# Documentation (exclude all docs except README.md)
+# Documentation (exclude all docs except GitHub Pages files)
 docs/*
+!docs/index.md
+!docs/_config.yml
+!docs/api-reference.md
+!docs/linux-deploy.md
 !docs/screenshot.jpg
 *.md
 !README.md
