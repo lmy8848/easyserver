@@ -3,13 +3,13 @@ package api
 import (
 	"context"
 
-	"easyserver/internal/service"
+	"easyserver/internal/envconfig"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerEnvRoutes registers environment configuration routes
-func registerEnvRoutes(protected *gin.RouterGroup, envConfigService *service.EnvConfigService) {
+func registerEnvRoutes(protected *gin.RouterGroup, envConfigService *envconfig.Service) {
 	// Initialize default global configs (tables managed by migration system)
 	envConfigService.InitDefaultGlobalConfigs(context.Background())
 	handler := NewEnvConfigHandler(envConfigService)

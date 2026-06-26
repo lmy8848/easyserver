@@ -3,17 +3,16 @@ package api
 import (
 	"fmt"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/envconfig"
 
 	"github.com/gin-gonic/gin"
 )
 
 type EnvConfigHandler struct {
-	envConfigService *service.EnvConfigService
+	envConfigService *envconfig.Service
 }
 
-func NewEnvConfigHandler(envConfigService *service.EnvConfigService) *EnvConfigHandler {
+func NewEnvConfigHandler(envConfigService *envconfig.Service) *EnvConfigHandler {
 	return &EnvConfigHandler{envConfigService: envConfigService}
 }
 
@@ -71,7 +70,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		return
 	}
 
-	config := &model.EnvConfig{
+	config := &envconfig.EnvConfig{
 		Name:      req.Name,
 		Value:     req.Value,
 		RuntimeID: req.RuntimeID,
@@ -173,7 +172,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		return
 	}
 
-	entry := &model.PathEntry{
+	entry := &envconfig.PathEntry{
 		Path:      req.Path,
 		RuntimeID: req.RuntimeID,
 		IsGlobal:  req.IsGlobal,
@@ -273,7 +272,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		return
 	}
 
-	config := &model.GlobalConfig{
+	config := &envconfig.GlobalConfig{
 		Category:    req.Category,
 		Key:         req.Key,
 		Value:       req.Value,

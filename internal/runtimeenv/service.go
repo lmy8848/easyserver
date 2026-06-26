@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"easyserver/internal/envconfig"
 	"easyserver/internal/executor"
-	"easyserver/internal/model"
 )
 
 type Service struct {
@@ -561,7 +561,7 @@ func (s *Service) cleanupPHPResiduals(version string) {
 }
 
 // GetEnvConfigsByRuntimeID returns environment configs for a runtime
-func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error) {
+func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -569,7 +569,7 @@ func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64)
 }
 
 // GetPathEntriesByRuntimeID returns PATH entries for a runtime
-func (s *Service) GetPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]model.PathEntry, error) {
+func (s *Service) GetPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}

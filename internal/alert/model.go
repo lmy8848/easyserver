@@ -1,4 +1,4 @@
-package model
+package alert
 
 import "time"
 

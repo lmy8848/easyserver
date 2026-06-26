@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 
-	"easyserver/internal/model"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/runtimeenv"
 
@@ -75,7 +74,7 @@ func (h *PackageManagerHandler) ScanPackages(c *gin.Context) {
 
 // InstallPackage installs a package
 func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
-	var req model.PackageInstallRequest
+	var req packagemanager.PackageInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
@@ -104,7 +103,7 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 
 // UninstallPackage uninstalls a package
 func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
-	var req model.PackageUninstallRequest
+	var req packagemanager.PackageUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
@@ -133,7 +132,7 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 
 // UpdatePackage updates a package
 func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
-	var req model.PackageUpdateRequest
+	var req packagemanager.PackageUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return

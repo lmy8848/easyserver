@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"easyserver/internal/model"
+	"easyserver/internal/envconfig"
 )
 
 // sqliteRepo implements Repository for SQLite
@@ -283,7 +283,7 @@ func (r *sqliteRepo) CleanupPathEntries(ctx context.Context, runtimeID int64) (i
 }
 
 // ListEnvConfigsByRuntimeID returns environment configs for a runtime
-func (r *sqliteRepo) ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error) {
+func (r *sqliteRepo) ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE runtime_id = ?",
 		runtimeID,
@@ -293,9 +293,9 @@ func (r *sqliteRepo) ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID in
 	}
 	defer rows.Close()
 
-	var configs []model.EnvConfig
+	var configs []envconfig.EnvConfig
 	for rows.Next() {
-		var c model.EnvConfig
+		var c envconfig.EnvConfig
 		var isGlobal int
 		err := rows.Scan(&c.ID, &c.Name, &c.Value, &c.RuntimeID, &isGlobal, &c.CreatedAt, &c.UpdatedAt)
 		if err != nil {
@@ -312,7 +312,7 @@ func (r *sqliteRepo) ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID in
 }
 
 // ListPathEntriesByRuntimeID returns PATH entries for a runtime
-func (r *sqliteRepo) ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]model.PathEntry, error) {
+func (r *sqliteRepo) ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error) {
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT id, path, runtime_id, is_global, order_num, created_at FROM path_entries WHERE runtime_id = ?",
 		runtimeID,
@@ -322,9 +322,9 @@ func (r *sqliteRepo) ListPathEntriesByRuntimeID(ctx context.Context, runtimeID i
 	}
 	defer rows.Close()
 
-	var entries []model.PathEntry
+	var entries []envconfig.PathEntry
 	for rows.Next() {
-		var e model.PathEntry
+		var e envconfig.PathEntry
 		var isGlobal int
 		err := rows.Scan(&e.ID, &e.Path, &e.RuntimeID, &isGlobal, &e.Order, &e.CreatedAt)
 		if err != nil {

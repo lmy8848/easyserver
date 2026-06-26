@@ -2,13 +2,13 @@ package api
 
 import (
 	"easyserver/internal/audit"
-	"easyserver/internal/service"
+	"easyserver/internal/filemanager"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerFileRoutes registers file management routes
-func registerFileRoutes(protected *gin.RouterGroup, fileManager *service.FileManager, auditService *audit.Service) {
+func registerFileRoutes(protected *gin.RouterGroup, fileManager *filemanager.Manager, auditService *audit.Service) {
 	handler := NewFileManagerHandler(fileManager, auditService)
 	protected.GET("/files", handler.List)
 	protected.GET("/files/base-path", handler.GetBasePath)

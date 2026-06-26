@@ -6,24 +6,27 @@ import (
 	"net/http"
 	"time"
 
+	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/cloud"
 	"easyserver/internal/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
+	"easyserver/internal/envconfig"
 	"easyserver/internal/executor"
+	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	"easyserver/internal/notify"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
-	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/service"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
@@ -38,12 +41,12 @@ type Router struct {
 	configPath           string
 	db                   *sql.DB
 	executor             executor.CommandExecutor
-	auditRepo            repository.AuditRepository
+	auditRepo            audit.Repository
 	authService          *auth.AuthService
 	monitorService       *monitor.MonitorService
 	auditService         *audit.Service
 	sessionService       *auth.SessionService
-	alertService         *service.AlertService
+	alertService         *alert.Service
 	processManager       *process.Service
 	systemProcessService *systemprocess.Service
 	notificationService  *notification.Service
@@ -63,7 +66,7 @@ type Router struct {
 	deployService *deploy.Service
 
 	// Environment config service
-	envConfigService *service.EnvConfigService
+	envConfigService *envconfig.Service
 
 	// Firewall service
 	firewallService *firewall.Service
@@ -84,10 +87,10 @@ type Router struct {
 	terminalManager *terminal.Manager
 
 	// File manager
-	fileManager *service.FileManager
+	fileManager *filemanager.Manager
 
 	// Cloud service (nil if disabled)
-	cloudService *service.CloudService
+	cloudService *cloud.Service
 }
 
 // RouterDeps holds the shared service instances created once in main.go.
@@ -101,7 +104,7 @@ type RouterDeps struct {
 	MonitorService       *monitor.MonitorService
 	AuditService         *audit.Service
 	SessionService       *auth.SessionService
-	AuditRepo            repository.AuditRepository
+	AuditRepo            audit.Repository
 	ProcessManager       *process.Service
 	SystemProcessService *systemprocess.Service
 	NotificationService  *notification.Service
@@ -121,7 +124,7 @@ type RouterDeps struct {
 	DeployService *deploy.Service
 
 	// Environment config service
-	EnvConfigService *service.EnvConfigService
+	EnvConfigService *envconfig.Service
 
 	// Firewall service
 	FirewallService *firewall.Service
@@ -139,17 +142,17 @@ type RouterDeps struct {
 	WebsiteService   *web.WebsiteService
 
 	// Notify + Alert (wired in main.go)
-	NotifyService *service.NotifyService
-	AlertService  *service.AlertService
+	NotifyService *notify.Service
+	AlertService  *alert.Service
 
 	// Terminal manager
 	TerminalManager *terminal.Manager
 
 	// File manager
-	FileManager *service.FileManager
+	FileManager *filemanager.Manager
 
 	// Cloud service (nil if disabled)
-	CloudService *service.CloudService
+	CloudService *cloud.Service
 }
 
 func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {

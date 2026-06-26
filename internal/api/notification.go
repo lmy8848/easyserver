@@ -3,7 +3,6 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/model"
 	"easyserver/internal/notification"
 
 	"github.com/gin-gonic/gin"
@@ -45,7 +44,7 @@ func (h *NotificationHandler) CountUnread(c *gin.Context) {
 
 // Create adds a new notification (admin only)
 func (h *NotificationHandler) Create(c *gin.Context) {
-	var req model.CreateNotificationRequest
+	var req notification.CreateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求参数"))
 		return

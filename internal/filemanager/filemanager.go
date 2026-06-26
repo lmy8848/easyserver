@@ -1,6 +1,4 @@
-//go:build linux
-
-package service
+package filemanager
 
 import (
 	"archive/tar"
@@ -14,20 +12,10 @@ import (
 	"syscall"
 )
 
-// SearchResult represents a search result
-type SearchResult struct {
-	Path  string `json:"path"`
-	Name  string `json:"name"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size"`
-	Match string `json:"match,omitempty"` // Where the match was found
-}
-
-// errSearchLimit is returned when search reaches the maximum result count
 var errSearchLimit = fmt.Errorf("search result limit reached")
 
-// Search searches for files by name pattern
-func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]SearchResult, error) {
+// Search searches for files by name pattern.
+func (m *Manager) Search(rootPath, pattern string, maxResults int) ([]SearchResult, error) {
 	validPath, err := m.ValidatePath(rootPath)
 	if err != nil {
 		return nil, err
@@ -42,10 +30,9 @@ func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]Search
 
 	err = filepath.Walk(validPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip inaccessible entries, continue walking
+			return nil
 		}
 
-		// Prevent symlink escape from sandbox
 		if _, vErr := m.ValidatePath(path); vErr != nil {
 			return filepath.SkipDir
 		}
@@ -75,7 +62,6 @@ func (m *FileManager) Search(rootPath, pattern string, maxResults int) ([]Search
 	return results, nil
 }
 
-// binaryExtensions is the set of file extensions to skip during content search
 var binaryExtensions = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
 	".bmp": true, ".ico": true, ".svg": true, ".webp": true,
@@ -85,8 +71,8 @@ var binaryExtensions = map[string]bool{
 	".pdf": true, ".doc": true, ".docx": true, ".xls": true,
 }
 
-// SearchContent searches for files containing the specified text
-func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]SearchResult, error) {
+// SearchContent searches for files containing the specified text.
+func (m *Manager) SearchContent(rootPath, text string, maxResults int) ([]SearchResult, error) {
 	validPath, err := m.ValidatePath(rootPath)
 	if err != nil {
 		return nil, err
@@ -101,10 +87,9 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 
 	err = filepath.Walk(validPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip inaccessible entries, continue walking
+			return nil
 		}
 
-		// Prevent symlink escape from sandbox
 		if _, vErr := m.ValidatePath(path); vErr != nil {
 			return filepath.SkipDir
 		}
@@ -113,21 +98,18 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 			return errSearchLimit
 		}
 
-		// Skip directories and large files
 		if info.IsDir() || info.Size() > 10*1024*1024 {
 			return nil
 		}
 
-		// Skip binary files by extension
 		ext := strings.ToLower(filepath.Ext(info.Name()))
 		if binaryExtensions[ext] {
 			return nil
 		}
 
-		// Read file content
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil // Skip unreadable files
+			return nil
 		}
 
 		content := strings.ToLower(string(data))
@@ -151,19 +133,17 @@ func (m *FileManager) SearchContent(rootPath, text string, maxResults int) ([]Se
 	return results, nil
 }
 
-// Compress creates a zip archive
-func (m *FileManager) Compress(sourcePaths []string, destPath string) error {
+// Compress creates a zip archive.
+func (m *Manager) Compress(sourcePaths []string, destPath string) error {
 	validDest, err := m.ValidatePath(destPath)
 	if err != nil {
 		return err
 	}
 
-	// Ensure destination has .zip extension
 	if !strings.HasSuffix(validDest, ".zip") {
 		validDest += ".zip"
 	}
 
-	// Create the zip file
 	zipFile, err := os.Create(validDest)
 	if err != nil {
 		return err
@@ -184,45 +164,38 @@ func (m *FileManager) Compress(sourcePaths []string, destPath string) error {
 				return err
 			}
 
-			// Prevent symlink escape from sandbox
 			if _, vErr := m.ValidatePath(path); vErr != nil {
 				return filepath.SkipDir
 			}
 
-			// Create header
 			header, err := zip.FileInfoHeader(info)
 			if err != nil {
 				return err
 			}
 
-			// Set compression method
 			header.Method = zip.Deflate
 
-			// Set relative path
 			relPath, err := filepath.Rel(filepath.Dir(validSource), path)
 			if err != nil {
 				return err
 			}
 			header.Name = relPath
 
-			// Create writer
 			writer, err := zipWriter.CreateHeader(header)
 			if err != nil {
 				return err
 			}
 
-			// Skip directories
 			if info.IsDir() {
 				return nil
 			}
 
-			// Copy file content
 			file, err := os.Open(path)
 			if err != nil {
 				return err
 			}
 			_, err = io.Copy(writer, file)
-			file.Close() // Close immediately, not deferred (Walk calls this many times)
+			file.Close()
 			return err
 		})
 
@@ -234,8 +207,8 @@ func (m *FileManager) Compress(sourcePaths []string, destPath string) error {
 	return nil
 }
 
-// Extract extracts a zip or tar.gz archive
-func (m *FileManager) Extract(archivePath, destPath string) error {
+// Extract extracts a zip or tar.gz archive.
+func (m *Manager) Extract(archivePath, destPath string) error {
 	validArchive, err := m.ValidatePath(archivePath)
 	if err != nil {
 		return err
@@ -246,17 +219,15 @@ func (m *FileManager) Extract(archivePath, destPath string) error {
 		return err
 	}
 
-	// Create destination directory
 	if err := os.MkdirAll(validDest, 0755); err != nil {
 		return err
 	}
 
-	// Determine archive type
-	ext := strings.ToLower(filepath.Ext(validArchive))
 	if strings.HasSuffix(validArchive, ".tar.gz") || strings.HasSuffix(validArchive, ".tgz") {
 		return m.extractTarGz(validArchive, validDest)
 	}
 
+	ext := strings.ToLower(filepath.Ext(validArchive))
 	switch ext {
 	case ".zip":
 		return m.extractZip(validArchive, validDest)
@@ -267,7 +238,7 @@ func (m *FileManager) Extract(archivePath, destPath string) error {
 	}
 }
 
-func (m *FileManager) extractZip(zipPath, destPath string) error {
+func (m *Manager) extractZip(zipPath, destPath string) error {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
@@ -277,23 +248,18 @@ func (m *FileManager) extractZip(zipPath, destPath string) error {
 	for _, file := range reader.File {
 		path := filepath.Join(destPath, file.Name)
 
-		// Check for path traversal
 		if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(destPath)) {
 			return fmt.Errorf("invalid file path: %s", file.Name)
 		}
 
-		// Reject absolute paths in archive
 		if filepath.IsAbs(file.Name) {
 			return fmt.Errorf("absolute path not allowed in archive: %s", file.Name)
 		}
 
-		// Reject paths with ".." components
 		if strings.Contains(file.Name, "..") {
 			return fmt.Errorf("path traversal not allowed in archive: %s", file.Name)
 		}
 
-		// Check for symlinks (external attributes check)
-		// Unix symlink has mode 0120000 (octal)
 		if file.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("symlinks not allowed in archive: %s", file.Name)
 		}
@@ -305,12 +271,10 @@ func (m *FileManager) extractZip(zipPath, destPath string) error {
 			continue
 		}
 
-		// Create directory
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
 
-		// Extract file
 		outFile, err := os.Create(path)
 		if err != nil {
 			return err
@@ -333,7 +297,7 @@ func (m *FileManager) extractZip(zipPath, destPath string) error {
 	return nil
 }
 
-func (m *FileManager) extractTarGz(tarPath, destPath string) error {
+func (m *Manager) extractTarGz(tarPath, destPath string) error {
 	file, err := os.Open(tarPath)
 	if err != nil {
 		return err
@@ -359,39 +323,32 @@ func (m *FileManager) extractTarGz(tarPath, destPath string) error {
 
 		path := filepath.Join(destPath, header.Name)
 
-		// Check for path traversal
 		if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(destPath)) {
 			return fmt.Errorf("invalid file path: %s", header.Name)
 		}
 
-		// Reject absolute paths in archive
 		if filepath.IsAbs(header.Name) {
 			return fmt.Errorf("absolute path not allowed in archive: %s", header.Name)
 		}
 
-		// Reject paths with ".." components
 		if strings.Contains(header.Name, "..") {
 			return fmt.Errorf("path traversal not allowed in archive: %s", header.Name)
 		}
 
 		switch header.Typeflag {
 		case tar.TypeSymlink:
-			// Reject symlinks in archives
 			return fmt.Errorf("symlinks not allowed in archive: %s", header.Name)
 		case tar.TypeLink:
-			// Reject hard links in archives
 			return fmt.Errorf("hard links not allowed in archive: %s", header.Name)
 		case tar.TypeDir:
 			if err := os.MkdirAll(path, 0755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			// Create directory
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				return err
 			}
 
-			// Extract file
 			outFile, err := os.Create(path)
 			if err != nil {
 				return err
@@ -408,7 +365,7 @@ func (m *FileManager) extractTarGz(tarPath, destPath string) error {
 	return nil
 }
 
-func (m *FileManager) extractGzip(gzPath, destPath string) error {
+func (m *Manager) extractGzip(gzPath, destPath string) error {
 	file, err := os.Open(gzPath)
 	if err != nil {
 		return err
@@ -421,7 +378,6 @@ func (m *FileManager) extractGzip(gzPath, destPath string) error {
 	}
 	defer gzReader.Close()
 
-	// Create output file (remove .gz extension)
 	outPath := strings.TrimSuffix(destPath, ".gz")
 	if outPath == destPath {
 		outPath = destPath + ".extracted"
@@ -437,19 +393,17 @@ func (m *FileManager) extractGzip(gzPath, destPath string) error {
 	return err
 }
 
-// Chmod changes file permissions. Rejects dangerous modes (setuid, setgid, world-writable).
-func (m *FileManager) Chmod(path string, mode os.FileMode) error {
+// Chmod changes file permissions.
+func (m *Manager) Chmod(path string, mode os.FileMode) error {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
 	}
 
-	// Reject setuid, setgid, and sticky bits
 	if mode&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 		return fmt.Errorf("setuid/setgid/sticky bits are not allowed")
 	}
 
-	// Reject world-writable (mode & 0002)
 	if mode.Perm()&0002 != 0 {
 		return fmt.Errorf("world-writable permissions (o+w) are not allowed")
 	}
@@ -457,8 +411,8 @@ func (m *FileManager) Chmod(path string, mode os.FileMode) error {
 	return os.Chmod(validPath, mode)
 }
 
-// Chown changes file ownership
-func (m *FileManager) Chown(path string, uid, gid int) error {
+// Chown changes file ownership.
+func (m *Manager) Chown(path string, uid, gid int) error {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
@@ -467,8 +421,8 @@ func (m *FileManager) Chown(path string, uid, gid int) error {
 	return os.Chown(validPath, uid, gid)
 }
 
-// GetFileDetails returns detailed file information
-func (m *FileManager) GetFileDetails(path string) (map[string]interface{}, error) {
+// GetFileDetails returns detailed file information.
+func (m *Manager) GetFileDetails(path string) (map[string]interface{}, error) {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -490,7 +444,6 @@ func (m *FileManager) GetFileDetails(path string) (map[string]interface{}, error
 		"is_symlink":  info.Mode()&os.ModeSymlink != 0,
 	}
 
-	// Extract Unix-specific stat info if available
 	if sys := info.Sys(); sys != nil {
 		if stat, ok := sys.(*syscall.Stat_t); ok {
 			result["uid"] = stat.Uid
@@ -502,8 +455,8 @@ func (m *FileManager) GetFileDetails(path string) (map[string]interface{}, error
 	return result, nil
 }
 
-// GetDiskUsage returns disk usage information
-func (m *FileManager) GetDiskUsage(path string) (map[string]interface{}, error) {
+// GetDiskUsage returns disk usage information.
+func (m *Manager) GetDiskUsage(path string) (map[string]interface{}, error) {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -531,7 +484,6 @@ func (m *FileManager) GetDiskUsage(path string) (map[string]interface{}, error) 
 	}, nil
 }
 
-// mimeTypes maps file extensions to MIME types
 var mimeTypes = map[string]string{
 	".html": "text/html",
 	".css":  "text/css",
@@ -575,8 +527,8 @@ var mimeTypes = map[string]string{
 	".log":  "text/x-log",
 }
 
-// GetMimeType returns the MIME type of a file based on its extension
-func (m *FileManager) GetMimeType(path string) (string, error) {
+// GetMimeType returns the MIME type of a file based on its extension.
+func (m *Manager) GetMimeType(path string) (string, error) {
 	if _, err := m.ValidatePath(path); err != nil {
 		return "", err
 	}

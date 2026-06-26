@@ -1,4 +1,4 @@
-package service
+package filemanager
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"syscall"
 )
 
+// FileEntry represents a file or directory entry.
 type FileEntry struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
@@ -20,24 +21,34 @@ type FileEntry struct {
 	IsSymlink  bool   `json:"is_symlink"`
 }
 
+// FileContent represents file content.
 type FileContent struct {
 	Path     string `json:"path"`
 	Content  string `json:"content"`
 	Encoding string `json:"encoding"`
 }
 
-type FileManager struct {
-	basePath string // Root path for security (required)
+// SearchResult represents a search result.
+type SearchResult struct {
+	Path  string `json:"path"`
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+	Size  int64  `json:"size"`
+	Match string `json:"match,omitempty"`
 }
 
-// BasePath returns the base path of the file manager
-func (m *FileManager) BasePath() string {
+// Manager manages file operations within a sandboxed base path.
+type Manager struct {
+	basePath string
+}
+
+// BasePath returns the base path of the file manager.
+func (m *Manager) BasePath() string {
 	return m.basePath
 }
 
-// NewFileManager creates a new FileManager with a required base path
-// Returns error if basePath is empty or "/" (root)
-func NewFileManager(basePath string) (*FileManager, error) {
+// NewManager creates a new file Manager with a required base path.
+func NewManager(basePath string) (*Manager, error) {
 	if basePath == "" {
 		return nil, fmt.Errorf("filemanager base_path is required")
 	}
@@ -45,36 +56,29 @@ func NewFileManager(basePath string) (*FileManager, error) {
 		return nil, fmt.Errorf("filemanager base_path cannot be '/' for security reasons")
 	}
 
-	// Clean and resolve the base path
 	absBase, err := filepath.Abs(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base_path: %w", err)
 	}
 
-	return &FileManager{
+	return &Manager{
 		basePath: absBase,
 	}, nil
 }
 
-// ValidatePath checks if path is safe (no path traversal, no symlink escape)
-func (m *FileManager) ValidatePath(path string) (string, error) {
-	// Clean the path
+// ValidatePath checks if path is safe (no path traversal, no symlink escape).
+func (m *Manager) ValidatePath(path string) (string, error) {
 	cleanPath := filepath.Clean(path)
 
-	// Reject absolute paths from user input - only relative paths allowed
 	if filepath.IsAbs(cleanPath) {
 		return "", fmt.Errorf("absolute paths are not allowed, use relative paths")
 	}
 
-	// Join basePath with the relative path to get absolute path
 	absBase := m.basePath
-
 	absPath := filepath.Join(absBase, cleanPath)
 
-	// Resolve symlinks to prevent symlink attacks
 	resolvedPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		// If file doesn't yet, check parent directory
 		if os.IsNotExist(err) {
 			parent := filepath.Dir(absPath)
 			resolvedParent, err := filepath.EvalSymlinks(parent)
@@ -87,13 +91,11 @@ func (m *FileManager) ValidatePath(path string) (string, error) {
 		}
 	}
 
-	// Ensure base path ends with separator for proper prefix check
 	basePrefix := absBase
 	if !strings.HasSuffix(basePrefix, string(filepath.Separator)) {
 		basePrefix += string(filepath.Separator)
 	}
 
-	// Check if resolved path is within base
 	if resolvedPath != absBase && !strings.HasPrefix(resolvedPath, basePrefix) {
 		return "", fmt.Errorf("path traversal detected: path escapes base directory")
 	}
@@ -101,13 +103,13 @@ func (m *FileManager) ValidatePath(path string) (string, error) {
 	return resolvedPath, nil
 }
 
-// ListRoot returns files in the base directory (no path validation needed)
-func (m *FileManager) ListRoot() ([]FileEntry, error) {
+// ListRoot returns files in the base directory.
+func (m *Manager) ListRoot() ([]FileEntry, error) {
 	return m.listDir(m.basePath)
 }
 
-// List returns files in a directory
-func (m *FileManager) List(path string) ([]FileEntry, error) {
+// List returns files in a directory.
+func (m *Manager) List(path string) ([]FileEntry, error) {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -115,8 +117,7 @@ func (m *FileManager) List(path string) ([]FileEntry, error) {
 	return m.listDir(validPath)
 }
 
-// listDir reads directory entries (common logic)
-func (m *FileManager) listDir(dirPath string) ([]FileEntry, error) {
+func (m *Manager) listDir(dirPath string) ([]FileEntry, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("readdir %s: %w", dirPath, err)
@@ -126,7 +127,6 @@ func (m *FileManager) listDir(dirPath string) ([]FileEntry, error) {
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
-			// Log but continue - entry may have been deleted between readdir and info
 			log.Printf("filemanager: info error for %s: %v", entry.Name(), err)
 			continue
 		}
@@ -146,8 +146,8 @@ func (m *FileManager) listDir(dirPath string) ([]FileEntry, error) {
 	return files, nil
 }
 
-// Mkdir creates a directory
-func (m *FileManager) Mkdir(path string) error {
+// Mkdir creates a directory.
+func (m *Manager) Mkdir(path string) error {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
@@ -159,11 +159,10 @@ func (m *FileManager) Mkdir(path string) error {
 	return nil
 }
 
-// maxReadFileSize is the maximum file size for ReadContent (10MB)
 const maxReadFileSize = 10 * 1024 * 1024
 
-// ReadContent reads file content. Rejects files larger than 10MB to prevent OOM.
-func (m *FileManager) ReadContent(path string) (*FileContent, error) {
+// ReadContent reads file content. Rejects files larger than 10MB.
+func (m *Manager) ReadContent(path string) (*FileContent, error) {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -194,8 +193,8 @@ func (m *FileManager) ReadContent(path string) (*FileContent, error) {
 	}, nil
 }
 
-// WriteContent writes content to a file
-func (m *FileManager) WriteContent(path, content string) error {
+// WriteContent writes content to a file.
+func (m *Manager) WriteContent(path, content string) error {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
@@ -208,20 +207,15 @@ func (m *FileManager) WriteContent(path, content string) error {
 }
 
 // Upload writes content from a reader to a file.
-// Uses O_NOFOLLOW to prevent symlink-based TOCTOU attacks: if the final
-// path component is a symlink, the open fails instead of following it.
-func (m *FileManager) Upload(src io.Reader, path string) (int64, error) {
+func (m *Manager) Upload(src io.Reader, path string) (int64, error) {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return 0, err
 	}
 
-	// Open the file with O_CREATE|O_WRONLY|O_TRUNC and O_NOFOLLOW to prevent
-	// symlink race conditions between ValidatePath and file creation.
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC | syscall.O_NOFOLLOW
 	dst, err := os.OpenFile(validPath, flags, 0644)
 	if err != nil {
-		// If O_NOFOLLOW fails because the target is a symlink, return a clear error
 		if os.IsExist(err) || strings.Contains(err.Error(), "not a directory") {
 			return 0, fmt.Errorf("upload %s: target is a symlink, refused for security", path)
 		}
@@ -236,8 +230,8 @@ func (m *FileManager) Upload(src io.Reader, path string) (int64, error) {
 	return n, nil
 }
 
-// Delete deletes a file or directory
-func (m *FileManager) Delete(path string, recursive bool) error {
+// Delete deletes a file or directory.
+func (m *Manager) Delete(path string, recursive bool) error {
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
@@ -256,8 +250,8 @@ func (m *FileManager) Delete(path string, recursive bool) error {
 	return nil
 }
 
-// Rename renames/moves a file
-func (m *FileManager) Rename(oldPath, newPath string) error {
+// Rename renames/moves a file.
+func (m *Manager) Rename(oldPath, newPath string) error {
 	validOld, err := m.ValidatePath(oldPath)
 	if err != nil {
 		return err
@@ -274,8 +268,8 @@ func (m *FileManager) Rename(oldPath, newPath string) error {
 	return nil
 }
 
-// Copy copies a file
-func (m *FileManager) Copy(src, dst string) error {
+// Copy copies a file.
+func (m *Manager) Copy(src, dst string) error {
 	validSrc, err := m.ValidatePath(src)
 	if err != nil {
 		return err
@@ -318,14 +312,13 @@ func (m *FileManager) Copy(src, dst string) error {
 	return nil
 }
 
-// Move moves files to a destination directory
-func (m *FileManager) Move(paths []string, dest string) error {
+// Move moves files to a destination directory.
+func (m *Manager) Move(paths []string, dest string) error {
 	validDest, err := m.ValidatePath(dest)
 	if err != nil {
 		return err
 	}
 
-	// Validate all paths first
 	validPaths := make([]string, len(paths))
 	for i, path := range paths {
 		validPath, err := m.ValidatePath(path)
@@ -335,12 +328,10 @@ func (m *FileManager) Move(paths []string, dest string) error {
 		validPaths[i] = validPath
 	}
 
-	// Ensure destination exists
 	if err := os.MkdirAll(validDest, 0755); err != nil {
 		return fmt.Errorf("create dest %s: %w", dest, err)
 	}
 
-	// Execute moves
 	for _, validPath := range validPaths {
 		filename := filepath.Base(validPath)
 		newPath := filepath.Join(validDest, filename)

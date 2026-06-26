@@ -3,8 +3,6 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/model"
-	
 	"easyserver/internal/database_mgmt"
 	"github.com/gin-gonic/gin"
 )
@@ -38,7 +36,7 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
 		return
 	}
-	var req model.CreateDBUserRequest
+	var req database_mgmt.CreateDBUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -80,7 +78,7 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的用户ID"))
 		return
 	}
-	var req model.GrantRequest
+	var req database_mgmt.GrantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return

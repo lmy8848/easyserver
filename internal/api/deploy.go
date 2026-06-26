@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
 	"easyserver/internal/deploy"
 
 	"github.com/gin-gonic/gin"
@@ -46,7 +45,7 @@ func (h *DeployHandler) GetServer(c *gin.Context) {
 }
 
 func (h *DeployHandler) CreateServer(c *gin.Context) {
-	var srv model.DeployServer
+	var srv deploy.Server
 	if err := c.ShouldBindJSON(&srv); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -95,7 +94,7 @@ func (h *DeployHandler) UpdateServer(c *gin.Context) {
 		return
 	}
 
-	var srv model.DeployServer
+	var srv deploy.Server
 	if err := c.ShouldBindJSON(&srv); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -175,7 +174,7 @@ func (h *DeployHandler) GetTask(c *gin.Context) {
 }
 
 func (h *DeployHandler) CreateTask(c *gin.Context) {
-	var task model.DeployTask
+	var task deploy.Task
 	if err := c.ShouldBindJSON(&task); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return

@@ -1,4 +1,4 @@
-package service
+package cloud
 
 import (
 	"context"
@@ -10,16 +10,10 @@ import (
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	lighthouse "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse/v20200324"
-	monitor "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor/v20180724"
+	tcmonitor "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor/v20180724"
 )
 
-type CloudService struct {
-	client     *lighthouse.Client
-	credential *common.Credential
-	instanceID string
-	region     string
-}
-
+// InstanceInfo represents a cloud instance.
 type InstanceInfo struct {
 	InstanceID string `json:"instance_id"`
 	Name       string `json:"name"`
@@ -34,6 +28,7 @@ type InstanceInfo struct {
 	ExpiredAt  string `json:"expired_at"`
 }
 
+// FirewallRule represents a cloud firewall rule.
 type FirewallRule struct {
 	RuleID   string `json:"rule_id"`
 	Protocol string `json:"protocol"`
@@ -43,6 +38,7 @@ type FirewallRule struct {
 	Remark   string `json:"remark"`
 }
 
+// SnapshotInfo represents a cloud snapshot.
 type SnapshotInfo struct {
 	SnapshotID string `json:"snapshot_id"`
 	Name       string `json:"name"`
@@ -52,6 +48,7 @@ type SnapshotInfo struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// TrafficInfo represents traffic package information.
 type TrafficInfo struct {
 	PackageTotalGB     int    `json:"package_total_gb"`
 	PackageUsedGB      int    `json:"package_used_gb"`
@@ -59,18 +56,29 @@ type TrafficInfo struct {
 	PackageExpiredAt   string `json:"package_expired_at"`
 }
 
+// MonitorData represents monitor data.
 type MonitorData struct {
 	Metric string         `json:"metric"`
 	Unit   string         `json:"unit"`
 	Points []MonitorPoint `json:"points"`
 }
 
+// MonitorPoint represents a single monitor data point.
 type MonitorPoint struct {
 	Timestamp string  `json:"timestamp"`
 	Value     float64 `json:"value"`
 }
 
-func NewCloudService(secretID, secretKey, region, instanceID string) (*CloudService, error) {
+// Service manages Tencent Cloud Lighthouse operations.
+type Service struct {
+	client     *lighthouse.Client
+	credential *common.Credential
+	instanceID string
+	region     string
+}
+
+// NewService creates a new cloud Service.
+func NewService(secretID, secretKey, region, instanceID string) (*Service, error) {
 	credential := common.NewCredential(secretID, secretKey)
 	cpf := profile.NewClientProfile()
 	cpf.HttpProfile.Endpoint = "lighthouse.tencentcloudapi.com"
@@ -80,7 +88,7 @@ func NewCloudService(secretID, secretKey, region, instanceID string) (*CloudServ
 		return nil, fmt.Errorf("failed to create cloud client: %w", err)
 	}
 
-	return &CloudService{
+	return &Service{
 		client:     client,
 		credential: credential,
 		instanceID: instanceID,
@@ -88,8 +96,8 @@ func NewCloudService(secretID, secretKey, region, instanceID string) (*CloudServ
 	}, nil
 }
 
-// GetInstances returns all instances
-func (s *CloudService) GetInstances(ctx context.Context) ([]InstanceInfo, error) {
+// GetInstances returns all instances.
+func (s *Service) GetInstances(ctx context.Context) ([]InstanceInfo, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -128,8 +136,8 @@ func (s *CloudService) GetInstances(ctx context.Context) ([]InstanceInfo, error)
 	return instances, nil
 }
 
-// GetInstance returns a specific instance
-func (s *CloudService) GetInstance(ctx context.Context, instanceID string) (*InstanceInfo, error) {
+// GetInstance returns a specific instance.
+func (s *Service) GetInstance(ctx context.Context, instanceID string) (*InstanceInfo, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -168,8 +176,8 @@ func (s *CloudService) GetInstance(ctx context.Context, instanceID string) (*Ins
 	return instance, nil
 }
 
-// StartInstance starts an instance
-func (s *CloudService) StartInstance(ctx context.Context, instanceID string) error {
+// StartInstance starts an instance.
+func (s *Service) StartInstance(ctx context.Context, instanceID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -185,8 +193,8 @@ func (s *CloudService) StartInstance(ctx context.Context, instanceID string) err
 	return nil
 }
 
-// StopInstance stops an instance
-func (s *CloudService) StopInstance(ctx context.Context, instanceID string) error {
+// StopInstance stops an instance.
+func (s *Service) StopInstance(ctx context.Context, instanceID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -202,8 +210,8 @@ func (s *CloudService) StopInstance(ctx context.Context, instanceID string) erro
 	return nil
 }
 
-// RestartInstance restarts an instance
-func (s *CloudService) RestartInstance(ctx context.Context, instanceID string) error {
+// RestartInstance restarts an instance.
+func (s *Service) RestartInstance(ctx context.Context, instanceID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -219,8 +227,8 @@ func (s *CloudService) RestartInstance(ctx context.Context, instanceID string) e
 	return nil
 }
 
-// GetFirewallRules returns firewall rules for an instance
-func (s *CloudService) GetFirewallRules(ctx context.Context, instanceID string) ([]FirewallRule, error) {
+// GetFirewallRules returns firewall rules for an instance.
+func (s *Service) GetFirewallRules(ctx context.Context, instanceID string) ([]FirewallRule, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -252,8 +260,8 @@ func (s *CloudService) GetFirewallRules(ctx context.Context, instanceID string) 
 	return rules, nil
 }
 
-// AddFirewallRule adds a firewall rule
-func (s *CloudService) AddFirewallRule(ctx context.Context, instanceID string, rule FirewallRule) error {
+// AddFirewallRule adds a firewall rule.
+func (s *Service) AddFirewallRule(ctx context.Context, instanceID string, rule FirewallRule) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -283,13 +291,10 @@ func (s *CloudService) AddFirewallRule(ctx context.Context, instanceID string, r
 }
 
 // DeleteFirewallRule deletes a firewall rule by its index-based ID.
-// The Lighthouse DeleteFirewallRules API requires passing the full rule object,
-// so we first fetch all rules and identify the target by index.
-func (s *CloudService) DeleteFirewallRule(ctx context.Context, instanceID string, ruleID string) error {
+func (s *Service) DeleteFirewallRule(ctx context.Context, instanceID string, ruleID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Fetch all current rules to find the target
 	describeReq := lighthouse.NewDescribeFirewallRulesRequest()
 	describeReq.InstanceId = common.StringPtr(instanceID)
 	describeReq.Limit = common.Int64Ptr(100)
@@ -304,7 +309,6 @@ func (s *CloudService) DeleteFirewallRule(ctx context.Context, instanceID string
 		return fmt.Errorf("no firewall rules found for instance %s", instanceID)
 	}
 
-	// Parse ruleID as a 0-based index
 	idx, err := strconv.Atoi(ruleID)
 	if err != nil || idx < 0 || idx >= len(rules) {
 		return fmt.Errorf("invalid firewall rule ID %q: must be 0-%d", ruleID, len(rules)-1)
@@ -312,7 +316,6 @@ func (s *CloudService) DeleteFirewallRule(ctx context.Context, instanceID string
 
 	targetRule := rules[idx]
 
-	// Convert FirewallRuleInfo to FirewallRule for deletion
 	deleteRule := &lighthouse.FirewallRule{
 		Protocol:  targetRule.Protocol,
 		Port:      targetRule.Port,
@@ -320,7 +323,6 @@ func (s *CloudService) DeleteFirewallRule(ctx context.Context, instanceID string
 		Action:    targetRule.Action,
 	}
 
-	// Call DeleteFirewallRules with the matched rule
 	deleteReq := lighthouse.NewDeleteFirewallRulesRequest()
 	deleteReq.InstanceId = common.StringPtr(instanceID)
 	deleteReq.FirewallRules = []*lighthouse.FirewallRule{deleteRule}
@@ -337,13 +339,12 @@ func (s *CloudService) DeleteFirewallRule(ctx context.Context, instanceID string
 	return nil
 }
 
-// GetSnapshots returns snapshots for an instance
-func (s *CloudService) GetSnapshots(ctx context.Context, instanceID string) ([]SnapshotInfo, error) {
+// GetSnapshots returns snapshots for an instance.
+func (s *Service) GetSnapshots(ctx context.Context, instanceID string) ([]SnapshotInfo, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	request := lighthouse.NewDescribeSnapshotsRequest()
-	// Use Filter to filter by instance ID
 	request.Filters = []*lighthouse.Filter{
 		{
 			Name:   common.StringPtr("instance-id"),
@@ -373,8 +374,8 @@ func (s *CloudService) GetSnapshots(ctx context.Context, instanceID string) ([]S
 	return snapshots, nil
 }
 
-// CreateSnapshot creates a snapshot for an instance
-func (s *CloudService) CreateSnapshot(ctx context.Context, instanceID, name string) error {
+// CreateSnapshot creates a snapshot for an instance.
+func (s *Service) CreateSnapshot(ctx context.Context, instanceID, name string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -391,12 +392,11 @@ func (s *CloudService) CreateSnapshot(ctx context.Context, instanceID, name stri
 	return nil
 }
 
-// ApplySnapshot applies a snapshot (rollback an instance to a snapshot)
-func (s *CloudService) ApplySnapshot(ctx context.Context, snapshotID string) error {
+// ApplySnapshot applies a snapshot (rollback an instance to a snapshot).
+func (s *Service) ApplySnapshot(ctx context.Context, snapshotID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// First verify the snapshot exists
 	describeReq := lighthouse.NewDescribeSnapshotsRequest()
 	describeReq.SnapshotIds = common.StringPtrs([]string{snapshotID})
 
@@ -409,7 +409,6 @@ func (s *CloudService) ApplySnapshot(ctx context.Context, snapshotID string) err
 		return fmt.Errorf("snapshot %s not found", snapshotID)
 	}
 
-	// Apply the snapshot to the instance
 	request := lighthouse.NewApplyInstanceSnapshotRequest()
 	request.InstanceId = common.StringPtr(s.instanceID)
 	request.SnapshotId = common.StringPtr(snapshotID)
@@ -423,7 +422,6 @@ func (s *CloudService) ApplySnapshot(ctx context.Context, snapshotID string) err
 	return nil
 }
 
-// derefString safely dereferences a string pointer, returns empty string if nil
 func derefString(p *string) string {
 	if p == nil {
 		return ""
@@ -431,7 +429,6 @@ func derefString(p *string) string {
 	return *p
 }
 
-// derefInt64 safely dereferences an int64 pointer, returns 0 if nil
 func derefInt64(p *int64) int {
 	if p == nil {
 		return 0
@@ -439,10 +436,6 @@ func derefInt64(p *int64) int {
 	return int(*p)
 }
 
-// GetMonitorData returns monitor data for an instance.
-// The Lighthouse SDK does not provide direct monitoring APIs, so this uses the
-// Cloud Monitor service (monitor.tencentcloudapi.com) with namespace QCE/LIGHTHOUSE.
-// metricConfig maps frontend metric names to Tencent Cloud Monitor metric names
 var metricConfig = map[string]struct {
 	TCMetric string
 	Unit     string
@@ -453,7 +446,8 @@ var metricConfig = map[string]struct {
 	"NETWORK_IN_OUT": {TCMetric: "LanOuttraffic", Unit: "Bps"},
 }
 
-func (s *CloudService) GetMonitorData(ctx context.Context, instanceID, metric string, start, end time.Time) (*MonitorData, error) {
+// GetMonitorData returns monitor data for an instance.
+func (s *Service) GetMonitorData(ctx context.Context, instanceID, metric string, start, end time.Time) (*MonitorData, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -463,24 +457,22 @@ func (s *CloudService) GetMonitorData(ctx context.Context, instanceID, metric st
 		return nil, fmt.Errorf("unsupported metric: %s (supported: CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT)", metric)
 	}
 
-	// Create a Cloud Monitor client using the same credentials
 	cpf := profile.NewClientProfile()
 	cpf.HttpProfile.Endpoint = "monitor.tencentcloudapi.com"
-	monitorClient, err := monitor.NewClient(s.credential, s.region, cpf)
+	monitorClient, err := tcmonitor.NewClient(s.credential, s.region, cpf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create monitor client: %w", err)
 	}
 
-	// Build the GetMonitorData request
-	request := monitor.NewGetMonitorDataRequest()
+	request := tcmonitor.NewGetMonitorDataRequest()
 	request.Namespace = common.StringPtr("QCE/LIGHTHOUSE")
 	request.MetricName = common.StringPtr(mc.TCMetric)
-	request.Period = common.Uint64Ptr(60) // 60-second intervals
+	request.Period = common.Uint64Ptr(60)
 	request.StartTime = common.StringPtr(start.Format(time.RFC3339))
 	request.EndTime = common.StringPtr(end.Format(time.RFC3339))
-	request.Instances = []*monitor.Instance{
+	request.Instances = []*tcmonitor.Instance{
 		{
-			Dimensions: []*monitor.Dimension{
+			Dimensions: []*tcmonitor.Dimension{
 				{
 					Name:  common.StringPtr("InstanceId"),
 					Value: common.StringPtr(instanceID),
@@ -494,7 +486,6 @@ func (s *CloudService) GetMonitorData(ctx context.Context, instanceID, metric st
 		return nil, fmt.Errorf("failed to get monitor data for metric %s: %w", metric, err)
 	}
 
-	// Parse response into MonitorData
 	data := &MonitorData{
 		Metric: metric,
 		Unit:   mc.Unit,
@@ -527,8 +518,7 @@ func (s *CloudService) GetMonitorData(ctx context.Context, instanceID, metric st
 }
 
 // GetTraffic returns traffic package info for an instance.
-// Uses DescribeInstancesTrafficPackages to retrieve traffic usage and quota.
-func (s *CloudService) GetTraffic(ctx context.Context, instanceID string) (*TrafficInfo, error) {
+func (s *Service) GetTraffic(ctx context.Context, instanceID string) (*TrafficInfo, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}

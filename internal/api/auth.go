@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"easyserver/internal/middleware"
-	"easyserver/internal/model"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 
@@ -506,7 +505,7 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 	}
 
 	if sessions == nil {
-		sessions = []model.Session{}
+		sessions = []auth.Session{}
 	}
 
 	Success(c, sessions)

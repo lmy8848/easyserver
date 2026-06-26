@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"easyserver/internal/api"
+	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/cloud"
 	"easyserver/internal/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
@@ -22,17 +24,17 @@ import (
 	"easyserver/internal/database"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
+	"easyserver/internal/envconfig"
 	"easyserver/internal/executor"
+	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
-	"easyserver/internal/model"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	"easyserver/internal/notify"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
-	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/service"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
@@ -134,13 +136,13 @@ func main() {
 	defer db.Close()
 
 	// Initialize repositories (single source of truth for data access)
-	userRepo := sqlite.NewUserRepository(db)
-	sessionRepo := sqlite.NewSessionRepository(db)
-	tokenRepo := sqlite.NewTokenBlacklistRepository(db)
-	auditRepo := sqlite.NewAuditRepository(db)
-	activityRepo := sqlite.NewActivityRepository(db)
+	userRepo := auth.NewSQLiteUserRepository(db)
+	sessionRepo := auth.NewSQLiteSessionRepository(db)
+	tokenRepo := auth.NewSQLiteTokenRepository(db)
+	auditRepo := audit.NewSQLiteRepository(db)
+	activityRepo := auth.NewSQLiteActivityRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
-	monitorRepo := sqlite.NewMonitorRepository(db)
+	monitorRepo := monitor.NewSQLiteRepository(db)
 
 	// Initialize auth service and default admin (single shared instance)
 	authSvc := auth.NewAuthService(cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration)
@@ -185,15 +187,15 @@ func main() {
 	}()
 
 	// Initialize process guardian (single shared instance)
-	processRepo := sqlite.NewProcessRepository(db)
+	processRepo := process.NewSQLiteRepository(db)
 	processMgr := process.NewService(processRepo, cmdExec)
 
 	// Initialize system process service (single shared instance)
-	serviceWhitelistRepo := sqlite.NewServiceWhitelistRepository(db)
+	serviceWhitelistRepo := systemprocess.NewSQLiteRepository(db)
 	systemProcessService := systemprocess.NewService(cmdExec, serviceWhitelistRepo, auditSvc)
 
 	// Initialize notification service (single shared instance)
-	notificationRepo := sqlite.NewNotificationRepository(db)
+	notificationRepo := notification.NewSQLiteRepository(db)
 	notificationSvc := notification.NewService(notificationRepo)
 
 	// Initialize container service (single shared instance)
@@ -203,26 +205,26 @@ func main() {
 	serviceManager := systemd.NewServiceManager(cmdExec)
 
 	// Initialize cron service (single shared instance)
-	cronRepo := sqlite.NewCronRepository(db)
+	cronRepo := cron.NewSQLiteRepository(db)
 	cronSvc := cron.NewService(cronRepo, cmdExec)
 
 	// Initialize database services (single shared instance)
-	dbServerRepo := sqlite.NewDBServerRepository(db)
+	dbServerRepo := dbserver.NewSQLiteRepository(db)
 	dbServerService := dbserver.NewService(cmdExec, dbServerRepo)
 	dbServerService.SeedPredefinedServers(context.Background())
-	databaseMgmtRepo := sqlite.NewDatabaseMgmtRepository(db)
+	databaseMgmtRepo := database_mgmt.NewSQLiteRepository(db)
 	databaseMgmtService := database_mgmt.NewService(databaseMgmtRepo, cmdExec)
 
 	// Initialize deploy service (single shared instance)
-	deployRepo := sqlite.NewDeployRepository(db)
+	deployRepo := deploy.NewSQLiteRepository(db)
 	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)
 	if err != nil {
 		log.Fatalf("Failed to init deploy service: %v", err)
 	}
 
 	// Initialize environment config service (single shared instance)
-	envConfigRepo := sqlite.NewEnvConfigRepository(db)
-	envConfigService := service.NewEnvConfigService(envConfigRepo)
+	envConfigRepo := envconfig.NewSQLiteRepository(db)
+	envConfigService := envconfig.NewService(envConfigRepo)
 	envConfigService.InitDefaultGlobalConfigs(context.Background())
 
 	// Initialize firewall service (single shared instance)
@@ -230,30 +232,30 @@ func main() {
 	firewallService := firewall.NewService(firewallRepo, cmdExec)
 
 	// Initialize runtime services (single shared instance)
-	runtimeRepo := sqlite.NewRuntimeRepository(db)
+	runtimeRepo := runtimeenv.NewSQLiteRepository(db)
 	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec)
 	runtimeVersionService := runtimeenv.NewVersionService(runtimeRepo)
-	packageRepo := sqlite.NewPackageRepository(db)
+	packageRepo := packagemanager.NewSQLiteRepository(db)
 	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)
 
 	// Initialize SSH service (single shared instance)
 	sshConfigService := ssh.NewService(cmdExec)
 
 	// Initialize web server services (single shared instance)
-	webServerRepo := sqlite.NewWebServerRepository(db)
-	websiteRepo := sqlite.NewWebsiteRepository(db)
+	webServerRepo := web.NewSQLiteServerRepository(db)
+	websiteRepo := web.NewSQLiteWebsiteRepository(db)
 	webServerSvc := web.NewService(webServerRepo, cmdExec)
 	webServerSvc.SeedPredefinedWebServers(context.Background())
 	websiteSvc := web.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
 
 	// Initialize notify + alert services (single shared instance)
-	notifyService := service.NewNotifyService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
+	notifyService := notify.NewService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
 	authSvc.SetNotifyService(notifyService)
 
-	alertService := service.NewAlertService(notifyService, notificationSvc)
-	var alertRules []model.AlertRule
+	alertService := alert.NewService(notifyService, notificationSvc)
+	var alertRules []alert.AlertRule
 	for i, rule := range cfg.Alerts.Rules {
-		alertRules = append(alertRules, model.AlertRule{
+		alertRules = append(alertRules, alert.AlertRule{
 			ID:        int64(i + 1),
 			Name:      rule.Name,
 			Metric:    rule.Metric,
@@ -270,15 +272,15 @@ func main() {
 	terminalManager.StartIdleTimeout(cfg.Auth.IdleTimeout)
 
 	// Initialize file manager (single shared instance)
-	fileManager, err := service.NewFileManager(cfg.FileManager.BasePath)
+	fileManager, err := filemanager.NewManager(cfg.FileManager.BasePath)
 	if err != nil {
 		log.Fatalf("Failed to init file manager: %v", err)
 	}
 
 	// Initialize cloud service (single shared instance, nil if disabled)
-	var cloudService *service.CloudService
+	var cloudService *cloud.Service
 	if cfg.TencentCloud.Enabled {
-		cloudService, err = service.NewCloudService(
+		cloudService, err = cloud.NewService(
 			cfg.TencentCloud.SecretID,
 			cfg.TencentCloud.SecretKey,
 			cfg.TencentCloud.Region,

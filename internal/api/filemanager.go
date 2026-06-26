@@ -7,7 +7,7 @@ import (
 	"strconv"
 	
 	"easyserver/internal/audit"
-	"easyserver/internal/service"
+	"easyserver/internal/filemanager"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,11 +15,11 @@ import (
 
 
 type FileManagerHandler struct {
-	fileManager  *service.FileManager
+	fileManager  *filemanager.Manager
 	auditService *audit.Service
 }
 
-func NewFileManagerHandler(fm *service.FileManager, auditService *audit.Service) *FileManagerHandler {
+func NewFileManagerHandler(fm *filemanager.Manager, auditService *audit.Service) *FileManagerHandler {
 	return &FileManagerHandler{
 		fileManager:  fm,
 		auditService: auditService,

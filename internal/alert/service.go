@@ -1,4 +1,4 @@
-package service
+package alert
 
 import (
 	"fmt"
@@ -6,49 +6,38 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/model"
+	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	"easyserver/internal/notify"
 )
 
-// AlertEvent represents a triggered alert for notification
-type AlertEvent struct {
-	RuleName  string  `json:"rule_name"`
-	Metric    string  `json:"metric"`
-	Value     float64 `json:"value"`
-	Threshold float64 `json:"threshold"`
-	Duration  int     `json:"duration"`
-	Timestamp string  `json:"timestamp"`
-	Message   string  `json:"message"`
-}
+const cooldownDuration = 5 * time.Minute
 
-const alertCooldownDuration = 5 * time.Minute // 同一规则冷却时间
-
-// AlertService evaluates alert rules against monitoring data
-type AlertService struct {
+// Service evaluates alert rules against monitoring data.
+type Service struct {
 	mu        sync.RWMutex
-	rules     []model.AlertRule
-	states    map[int64]*model.AlertState // ruleID -> state
-	notify    *NotifyService
+	rules     []AlertRule
+	states    map[int64]*AlertState
+	notifier  *notify.Service
 	notifSvc  *notification.Service
-	cooldowns map[int64]time.Time // ruleID -> last notification time
+	cooldowns map[int64]time.Time
 }
 
-// NewAlertService creates a new alert evaluation service
-func NewAlertService(notify *NotifyService, notifSvc *notification.Service) *AlertService {
-	return &AlertService{
-		states:    make(map[int64]*model.AlertState),
+// NewService creates a new alert evaluation service.
+func NewService(notifier *notify.Service, notifSvc *notification.Service) *Service {
+	return &Service{
+		states:    make(map[int64]*AlertState),
 		cooldowns: make(map[int64]time.Time),
-		notify:    notify,
+		notifier:  notifier,
 		notifSvc:  notifSvc,
 	}
 }
 
-// SetRules updates the active alert rules
-func (s *AlertService) SetRules(rules []model.AlertRule) {
+// SetRules updates the active alert rules.
+func (s *Service) SetRules(rules []AlertRule) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.rules = rules
-	// Clean up states for removed rules
 	activeIDs := make(map[int64]bool)
 	for _, r := range rules {
 		activeIDs[r.ID] = true
@@ -60,10 +49,10 @@ func (s *AlertService) SetRules(rules []model.AlertRule) {
 	}
 }
 
-// Evaluate checks a monitor point against all active rules
-func (s *AlertService) Evaluate(point *model.MonitorPoint) {
+// Evaluate checks a monitor point against all active rules.
+func (s *Service) Evaluate(point *monitor.MonitorPoint) {
 	s.mu.RLock()
-	rules := make([]model.AlertRule, len(s.rules))
+	rules := make([]AlertRule, len(s.rules))
 	copy(rules, s.rules)
 	s.mu.RUnlock()
 
@@ -84,7 +73,7 @@ func (s *AlertService) Evaluate(point *model.MonitorPoint) {
 		s.mu.Lock()
 		state, exists := s.states[rule.ID]
 		if !exists {
-			state = &model.AlertState{}
+			state = &AlertState{}
 			s.states[rule.ID] = state
 		}
 
@@ -92,10 +81,8 @@ func (s *AlertService) Evaluate(point *model.MonitorPoint) {
 			if state.FirstAbove.IsZero() {
 				state.FirstAbove = now
 			}
-			// Check if duration threshold is met
 			if !state.Triggered && now.Sub(state.FirstAbove) >= time.Duration(rule.Duration)*time.Second {
-				// Check cooldown
-				if last, ok := s.cooldowns[rule.ID]; !ok || now.Sub(last) >= alertCooldownDuration {
+				if last, ok := s.cooldowns[rule.ID]; !ok || now.Sub(last) >= cooldownDuration {
 					state.Triggered = true
 					s.cooldowns[rule.ID] = now
 					s.mu.Unlock()
@@ -104,7 +91,6 @@ func (s *AlertService) Evaluate(point *model.MonitorPoint) {
 				}
 			}
 		} else {
-			// Reset state when value drops below threshold
 			state.FirstAbove = time.Time{}
 			state.Triggered = false
 		}
@@ -112,8 +98,7 @@ func (s *AlertService) Evaluate(point *model.MonitorPoint) {
 	}
 }
 
-// extractMetric gets the metric value from a monitor point
-func (s *AlertService) extractMetric(p *model.MonitorPoint, metric string) float64 {
+func (s *Service) extractMetric(p *monitor.MonitorPoint, metric string) float64 {
 	switch metric {
 	case "cpu_percent":
 		return p.CPUPercent
@@ -132,8 +117,7 @@ func (s *AlertService) extractMetric(p *model.MonitorPoint, metric string) float
 	}
 }
 
-// sendAlert sends a notification for a triggered alert
-func (s *AlertService) sendAlert(rule model.AlertRule, value float64) {
+func (s *Service) sendAlert(rule AlertRule, value float64) {
 	metricNames := map[string]string{
 		"cpu_percent":  "CPU 使用率",
 		"mem_percent":  "内存使用率",
@@ -150,9 +134,8 @@ func (s *AlertService) sendAlert(rule model.AlertRule, value float64) {
 
 	message := fmt.Sprintf("⚠️ 告警：%s %s 当前 %.1f%% 超过阈值 %.1f%%（持续 %d 秒）", rule.Name, metricName, value, rule.Threshold, rule.Duration)
 
-	// Create notification in database
 	if s.notifSvc != nil {
-		s.notifSvc.CreateIfNotExists(model.CreateNotificationRequest{
+		s.notifSvc.CreateIfNotExists(notification.CreateNotificationRequest{
 			Type:    "alert",
 			Title:   fmt.Sprintf("告警：%s", rule.Name),
 			Message: message,
@@ -160,9 +143,8 @@ func (s *AlertService) sendAlert(rule model.AlertRule, value float64) {
 		})
 	}
 
-	// Send webhook notification
-	if s.notify != nil {
-		event := AlertEvent{
+	if s.notifier != nil {
+		event := notify.AlertEvent{
 			RuleName:  rule.Name,
 			Metric:    metricName,
 			Value:     value,
@@ -173,15 +155,15 @@ func (s *AlertService) sendAlert(rule model.AlertRule, value float64) {
 		}
 
 		log.Printf("alert: triggered rule %q: %s = %.1f (threshold: %.1f)", rule.Name, rule.Metric, value, rule.Threshold)
-		s.notify.NotifyAlert(event)
+		s.notifier.NotifyAlert(event)
 	}
 }
 
-// GetRules returns the current alert rules
-func (s *AlertService) GetRules() []model.AlertRule {
+// GetRules returns the current alert rules.
+func (s *Service) GetRules() []AlertRule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rules := make([]model.AlertRule, len(s.rules))
+	rules := make([]AlertRule, len(s.rules))
 	copy(rules, s.rules)
 	return rules
 }
