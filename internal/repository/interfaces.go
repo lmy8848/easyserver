@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
-	"time"
 
+	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/cron"
 	"easyserver/internal/deploy"
@@ -20,47 +20,10 @@ type SessionRepository = auth.SessionRepo
 type TokenBlacklistRepository = auth.TokenBlacklistRepo
 type ActivityRepository = auth.ActivityRepo
 
-// SignedAuditEntry represents an audit log entry with HMAC signature,
-// used by AuditWriter.flush and VerifySignature.
-type SignedAuditEntry struct {
-	ID        int64
-	UserID    int64
-	Username  string
-	Action    string
-	Resource  string
-	Detail    string
-	IP        string
-	UserAgent string
-	CreatedAt time.Time
-	Signature string
-}
-
-// AuditRepository defines the interface for audit log data access
-type AuditRepository interface {
-	Log(ctx context.Context, entry *model.AuditLog) error
-	Query(ctx context.Context, filter AuditFilter) (int64, []model.AuditLog, error)
-	GetActions(ctx context.Context) ([]string, error)
-	Clean(ctx context.Context, before time.Time) (int64, error)
-
-	// AppendSignedBatch inserts a batch of signed audit entries in a single transaction.
-	AppendSignedBatch(ctx context.Context, entries []SignedAuditEntry) error
-	// GetSignedEntry returns a single signed audit entry by ID (including signature).
-	GetSignedEntry(ctx context.Context, id int64) (*SignedAuditEntry, error)
-	// ListIDsForVerification returns up to limit audit log IDs ordered by id DESC.
-	ListIDsForVerification(ctx context.Context, limit int) ([]int64, error)
-}
-
-// AuditFilter defines the filter criteria for audit log queries
-type AuditFilter struct {
-	Username  string
-	Action    string
-	Resource  string
-	IP        string
-	StartDate string
-	EndDate   string
-	Offset    int
-	Limit     int
-}
+// SignedAuditEntry, AuditRepository, AuditFilter are now defined in internal/audit; kept as aliases.
+type SignedAuditEntry = audit.SignedAuditEntry
+type AuditRepository = audit.Repository
+type AuditFilter = audit.AuditFilter
 
 // MonitorRepository is now defined in easyserver/internal/monitor.Repository.
 // Kept as alias for backward compatibility.
