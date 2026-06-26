@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-package service
+package monitor
 
 import (
 	"bufio"
@@ -14,11 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-
-	"easyserver/internal/model"
 )
 
-func (s *MonitorService) readCPU(p *model.MonitorPoint) {
+func (s *MonitorService) readCPU(p *MonitorPoint) {
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {
 		log.Printf("monitor: failed to read /proc/stat: %v", err)
@@ -59,7 +57,7 @@ func (s *MonitorService) readCPU(p *model.MonitorPoint) {
 	}
 }
 
-func (s *MonitorService) readLoad(p *model.MonitorPoint) {
+func (s *MonitorService) readLoad(p *MonitorPoint) {
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {
 		log.Printf("monitor: failed to read /proc/loadavg: %v", err)
@@ -76,7 +74,7 @@ func (s *MonitorService) readLoad(p *model.MonitorPoint) {
 	p.CPULoad15m, _ = strconv.ParseFloat(fields[2], 64)
 }
 
-func (s *MonitorService) readMemory(p *model.MonitorPoint) {
+func (s *MonitorService) readMemory(p *MonitorPoint) {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		log.Printf("monitor: failed to read /proc/meminfo: %v", err)
@@ -107,7 +105,7 @@ func (s *MonitorService) readMemory(p *model.MonitorPoint) {
 	}
 }
 
-func (s *MonitorService) readDisk(p *model.MonitorPoint) {
+func (s *MonitorService) readDisk(p *MonitorPoint) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs("/", &stat); err != nil {
 		log.Printf("monitor: failed to statfs /: %v", err)
@@ -122,7 +120,7 @@ func (s *MonitorService) readDisk(p *model.MonitorPoint) {
 	}
 }
 
-func (s *MonitorService) readNetwork(p *model.MonitorPoint) {
+func (s *MonitorService) readNetwork(p *MonitorPoint) {
 	data, err := os.ReadFile("/proc/net/dev")
 	if err != nil {
 		log.Printf("monitor: failed to read /proc/net/dev: %v", err)
@@ -174,8 +172,8 @@ func (s *MonitorService) readNetwork(p *model.MonitorPoint) {
 	s.prevPktsRecv = totalPktsRecv
 }
 
-func (s *MonitorService) readSystemInfo() *model.SystemInfo {
-	info := &model.SystemInfo{
+func (s *MonitorService) readSystemInfo() *SystemInfo {
+	info := &SystemInfo{
 		Arch:     runtime.GOARCH,
 		CPUCores: runtime.NumCPU(),
 	}
@@ -221,7 +219,7 @@ func (s *MonitorService) readSystemInfo() *model.SystemInfo {
 }
 
 // readSwap reads swap memory info from /proc/meminfo
-func (s *MonitorService) readSwap() *model.SwapInfo {
+func (s *MonitorService) readSwap() *SwapInfo {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return nil
@@ -243,7 +241,7 @@ func (s *MonitorService) readSwap() *model.SwapInfo {
 		mem[key] = val * 1024
 	}
 
-	swap := &model.SwapInfo{
+	swap := &SwapInfo{
 		TotalBytes: mem["SwapTotal"],
 		FreeBytes:  mem["SwapFree"],
 	}
@@ -256,13 +254,13 @@ func (s *MonitorService) readSwap() *model.SwapInfo {
 }
 
 // readPartitions reads all disk partitions from /proc/mounts
-func (s *MonitorService) readPartitions() []model.DiskPartition {
+func (s *MonitorService) readPartitions() []DiskPartition {
 	data, err := os.ReadFile("/proc/mounts")
 	if err != nil {
 		return nil
 	}
 
-	var partitions []model.DiskPartition
+	var partitions []DiskPartition
 	seen := make(map[string]bool)
 
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
@@ -300,7 +298,7 @@ func (s *MonitorService) readPartitions() []model.DiskPartition {
 			percent = math.Round(float64(used)/float64(total)*100*100) / 100
 		}
 
-		partitions = append(partitions, model.DiskPartition{
+		partitions = append(partitions, DiskPartition{
 			MountPoint:   mountPoint,
 			Device:       device,
 			FSType:       fsType,
@@ -315,7 +313,7 @@ func (s *MonitorService) readPartitions() []model.DiskPartition {
 }
 
 // readTopProcesses reads top 8 processes by CPU+Memory usage
-func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
+func (s *MonitorService) readTopProcesses() []ProcessInfo {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil
@@ -341,7 +339,7 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 		}
 	}
 
-	var processes []model.ProcessInfo
+	var processes []ProcessInfo
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -411,7 +409,7 @@ func (s *MonitorService) readTopProcesses() []model.ProcessInfo {
 			memPercent = math.Round(float64(memBytes)/float64(totalMem)*100*100) / 100
 		}
 
-		processes = append(processes, model.ProcessInfo{
+		processes = append(processes, ProcessInfo{
 			PID:        pid,
 			Name:       name,
 			User:       user,

@@ -8,6 +8,7 @@ import (
 	"easyserver/internal/cron"
 	"easyserver/internal/deploy"
 	"easyserver/internal/model"
+	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 )
 
@@ -99,15 +100,9 @@ type AuditFilter struct {
 	Limit     int
 }
 
-// MonitorRepository defines the interface for monitor data access
-type MonitorRepository interface {
-	EnsureIndexes(ctx context.Context) error
-	Save(ctx context.Context, point *model.MonitorPoint) error
-	SaveBatch(ctx context.Context, points []*model.MonitorPoint) error
-	GetLatest(ctx context.Context) (*model.MonitorPoint, error)
-	GetHistory(ctx context.Context, start, end time.Time) ([]model.MonitorPoint, error)
-	Clean(ctx context.Context, before time.Time) (int64, error)
-}
+// MonitorRepository is now defined in easyserver/internal/monitor.Repository.
+// Kept as alias for backward compatibility.
+type MonitorRepository = monitor.Repository
 
 // NotificationRepository is now defined in easyserver/internal/notification.Repository.
 // Kept as alias for backward compatibility.
