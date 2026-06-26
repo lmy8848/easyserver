@@ -10,6 +10,7 @@ import (
 	"easyserver/internal/model"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	"easyserver/internal/process"
 )
 
 // UserRepository defines the interface for user data access
@@ -224,31 +225,7 @@ type ActivityRepository interface {
 }
 
 
-// ProcessRepository defines the interface for process/process-group/process-log data access
-type ProcessRepository interface {
-	// Process CRUD
-	ListProcesses(ctx context.Context) ([]model.Process, error)
-	GetProcessByID(ctx context.Context, id int64) (*model.Process, error)
-	CreateProcess(ctx context.Context, p *model.Process) (int64, error)
-	UpdateProcess(ctx context.Context, id int64, req *model.UpdateProcessRequest) error
-	DeleteProcess(ctx context.Context, id int64) error
-	GetAutoStartIDs(ctx context.Context) ([]int64, error)
-
-	// Process status
-	UpsertStatus(ctx context.Context, processID int64, status string, pid int, exitCode int, lastError string) error
-	GetStatus(ctx context.Context, processID int64) (*model.ProcessStatus, error)
-	IncrementRestarts(ctx context.Context, processID int64) error
-	ClearExitInfo(ctx context.Context, processID int64) error
-
-	// Process logs
-	AppendLog(ctx context.Context, processID int64, logType, content string) error
-	ListLogs(ctx context.Context, processID int64, limit, offset int) ([]model.ProcessLog, int, error)
-
-	// Process groups
-	ListGroups(ctx context.Context) ([]model.ProcessGroup, error)
-	GetGroup(ctx context.Context, id int64) (*model.ProcessGroup, error)
-	CreateGroup(ctx context.Context, name, description string) (int64, error)
-	UpdateGroup(ctx context.Context, id int64, req *model.UpdateProcessGroupRequest) error
-	DeleteGroup(ctx context.Context, id int64) error
-}
+// ProcessRepository is now defined in easyserver/internal/process.Repository.
+// Kept as alias for backward compatibility.
+type ProcessRepository = process.Repository
 
