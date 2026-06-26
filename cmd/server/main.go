@@ -267,6 +267,7 @@ func main() {
 
 	// Initialize terminal manager (single shared instance)
 	terminalManager := terminal.NewManager(cmdExec)
+	terminalManager.StartIdleTimeout(cfg.Auth.IdleTimeout)
 
 	// Initialize file manager (single shared instance)
 	fileManager, err := service.NewFileManager(cfg.FileManager.BasePath)
@@ -407,6 +408,9 @@ func main() {
 
 	// Stop system event monitor
 	systemMonitor.Stop()
+
+	// Stop terminal idle timeout checker
+	terminalManager.StopIdleTimeout()
 
 	// Log server shutdown
 	auditSvc.LogSystemEvent(context.Background(), "SERVER_STOP", "EasyServer stopped")

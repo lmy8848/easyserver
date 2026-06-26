@@ -356,6 +356,9 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 }
 
 func registerCloudRoutes(protected *gin.RouterGroup, cloudService *service.CloudService, cfg *config.TencentCloudConfig, panelPort int) {
+	if cloudService == nil {
+		return // Cloud service not enabled, skip route registration
+	}
 	handler := NewCloudHandler(cloudService, cfg.InstanceID, panelPort)
 	protected.GET("/cloud/instances", handler.GetInstances)
 	protected.GET("/cloud/instances/:id", handler.GetInstance)

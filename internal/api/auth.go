@@ -94,7 +94,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Create session (single session per user - remove old sessions first)
 	if h.sessionService != nil {
 		// Remove all existing sessions for this user
-		h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID)
+		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil { log.Printf("warning: remove old sessions: %v", err) }
 		// Create new session
 		expiresAt := time.Now().Add(h.sessionTimeout)
 		h.sessionService.CreateSession(c.Request.Context(), token, user.ID, user.Username, string(user.Role), ip, userAgent, expiresAt)
@@ -277,7 +277,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	if h.sessionService != nil {
-		h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID)
+		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil { log.Printf("warning: remove old sessions: %v", err) }
 		expiresAt := time.Now().Add(h.sessionTimeout)
 		h.sessionService.CreateSession(c.Request.Context(), token, user.ID, user.Username, string(user.Role), ip, userAgent, expiresAt)
 	}
@@ -347,7 +347,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	if h.sessionService != nil {
-		h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID)
+		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil { log.Printf("warning: remove old sessions: %v", err) }
 		expiresAt := time.Now().Add(h.sessionTimeout)
 		h.sessionService.CreateSession(c.Request.Context(), token, user.ID, user.Username, string(user.Role), ip, userAgent, expiresAt)
 	}
