@@ -1,4 +1,4 @@
-package service
+package deploy
 
 import (
 	"bytes"
@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"crypto/x509"
-
-	"easyserver/internal/model"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -35,9 +33,9 @@ type SSHClient struct {
 	username string
 }
 
-// NewSSHClient creates an SSHClient connected to the given DeployServer.
+// NewSSHClient creates an SSHClient connected to the given Server.
 // authData is the decrypted password or private key content.
-func NewSSHClient(srv *model.DeployServer, authData string) (*SSHClient, error) {
+func NewSSHClient(srv *Server, authData string) (*SSHClient, error) {
 	if srv == nil {
 		return nil, fmt.Errorf("ssh: deploy server is nil")
 	}

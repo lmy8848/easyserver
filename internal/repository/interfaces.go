@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"easyserver/internal/cron"
+	"easyserver/internal/deploy"
 	"easyserver/internal/model"
 )
 
@@ -182,32 +183,9 @@ type WebsiteRepository interface {
 	CountByDomainExcludingID(ctx context.Context, domain string, excludeID int64) (int, error)
 }
 
-// DeployRepository defines the interface for deploy data access
-type DeployRepository interface {
-	// Server CRUD
-	ListServers(ctx context.Context) ([]model.DeployServer, error)
-	GetServer(ctx context.Context, id int64) (*model.DeployServer, error)
-	GetServerAuthData(ctx context.Context, id int64) (string, error)
-	CreateServer(ctx context.Context, srv *model.DeployServer) error
-	UpdateServer(ctx context.Context, srv *model.DeployServer) error
-	DeleteServer(ctx context.Context, id int64) error
-	UpdateServerStatus(ctx context.Context, id int64, status string, lastPing string) error
-	CountServerTasks(ctx context.Context, serverID int64) (int, error)
-	CountServerVersions(ctx context.Context, serverID int64) (int, error)
-
-	// Task CRUD
-	ListTasks(ctx context.Context) ([]model.DeployTask, error)
-	GetTask(ctx context.Context, id int64) (*model.DeployTask, error)
-	ServerExists(ctx context.Context, id int64) (bool, error)
-	CreateTask(ctx context.Context, task *model.DeployTask) error
-	DeleteTask(ctx context.Context, id int64) error
-	UpdateTaskStatus(ctx context.Context, id int64, status string, result string) error
-
-	// Version CRUD
-	ListVersions(ctx context.Context, serverID int64) ([]model.DeployVersion, error)
-	GetVersion(ctx context.Context, id int64) (*model.DeployVersion, error)
-	CreateVersion(ctx context.Context, ver *model.DeployVersion) error
-}
+// DeployRepository is now defined in easyserver/internal/deploy.Repository.
+// Kept as alias for backward compatibility.
+type DeployRepository = deploy.Repository
 
 // DBBackupRepository defines the interface for database backup data access
 type DBBackupRepository interface {

@@ -1,4 +1,4 @@
-package service
+package deploy
 
 import (
 	"crypto/aes"
