@@ -262,13 +262,13 @@ export default function AuditLog() {
     tooltip: { trigger: 'axis' as const },
     xAxis: {
       type: 'category' as const,
-      data: stats?.user_stats.map(s => s.username) || [],
+      data: stats?.user_stats?.map(s => s.username) || [],
       axisLabel: { rotate: 30 },
     },
     yAxis: { type: 'value' as const },
     series: [{
       type: 'bar',
-      data: stats?.user_stats.map(s => s.count) || [],
+      data: stats?.user_stats?.map(s => s.count) || [],
       itemStyle: { color: '#1890ff' },
     }],
   }), [stats?.user_stats]);
@@ -279,7 +279,7 @@ export default function AuditLog() {
     series: [{
       type: 'pie',
       radius: '60%',
-      data: stats?.action_stats.map(s => ({ name: s.action, value: s.count })) || [],
+      data: stats?.action_stats?.map(s => ({ name: s.action, value: s.count })) || [],
     }],
   }), [stats?.action_stats]);
 
@@ -288,12 +288,12 @@ export default function AuditLog() {
     tooltip: { trigger: 'axis' as const },
     xAxis: {
       type: 'category' as const,
-      data: stats?.day_stats.map(s => s.day) || [],
+      data: stats?.day_stats?.map(s => s.day) || [],
     },
     yAxis: { type: 'value' as const },
     series: [{
       type: 'line',
-      data: stats?.day_stats.map(s => s.count) || [],
+      data: stats?.day_stats?.map(s => s.count) || [],
       smooth: true,
       areaStyle: { opacity: 0.3 },
     }],
@@ -305,7 +305,7 @@ export default function AuditLog() {
     series: [{
       type: 'pie',
       radius: ['40%', '70%'],
-      data: stats?.status_stats.map(s => ({
+      data: stats?.status_stats?.map(s => ({
         name: s.status,
         value: s.count,
         itemStyle: {
@@ -425,7 +425,7 @@ export default function AuditLog() {
           <>
             <Space wrap style={{ marginBottom: 16 }}>
               <Input placeholder="用户名" value={username} onChange={e => setUsername(e.target.value)} style={{ width: 120 }} allowClear />
-              <Select placeholder="操作类型" value={actionFilter || undefined} onChange={v => setActionFilter(v || '')} style={{ width: 120 }} allowClear options={actions.map(a => ({ label: a, value: a }))} />
+              <Select placeholder="操作类型" value={actionFilter || undefined} onChange={v => setActionFilter(v || '')} style={{ width: 120 }} allowClear options={actions?.map(a => ({ label: a, value: a })) || []} />
               <Input placeholder="资源路径" value={resource} onChange={e => setResource(e.target.value)} style={{ width: 180 }} allowClear />
               <Input placeholder="IP 地址" value={ipFilter} onChange={e => setIpFilter(e.target.value)} style={{ width: 140 }} allowClear />
               <RangePicker value={dateRange as any} onChange={(dates) => setDateRange(dates as any)} placeholder={['开始日期', '结束日期']} />
