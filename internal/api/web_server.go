@@ -9,17 +9,17 @@ import (
 	"strings"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
 )
 
 type WebServerHandler struct {
-	webServerService *service.WebServerService
-	websiteService   *service.WebsiteService
+	webServerService *web.Service
+	websiteService   *web.WebsiteService
 }
 
-func NewWebServerHandler(webServerService *service.WebServerService, websiteService *service.WebsiteService) *WebServerHandler {
+func NewWebServerHandler(webServerService *web.Service, websiteService *web.WebsiteService) *WebServerHandler {
 	return &WebServerHandler{
 		webServerService: webServerService,
 		websiteService:   websiteService,

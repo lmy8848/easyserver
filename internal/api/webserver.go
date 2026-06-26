@@ -1,13 +1,13 @@
 package api
 
 import (
-	"easyserver/internal/service"
+	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
 )
 
 // registerWebServerRoutes registers web server and website management routes
-func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *service.WebServerService, websiteService *service.WebsiteService) {
+func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *web.Service, websiteService *web.WebsiteService) {
 	handler := NewWebServerHandler(webServerService, websiteService)
 
 	// Utilities (must be before /:id to avoid conflict)

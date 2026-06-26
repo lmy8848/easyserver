@@ -4,18 +4,18 @@ import (
 	"strconv"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/process"
 
 	"github.com/gin-gonic/gin"
 )
 
 // ProcessHandler handles process guardian API requests
 type ProcessHandler struct {
-	pm *service.ProcessManager
+	pm *process.Service
 }
 
 // NewProcessHandler creates a new ProcessHandler
-func NewProcessHandler(pm *service.ProcessManager) *ProcessHandler {
+func NewProcessHandler(pm *process.Service) *ProcessHandler {
 	return &ProcessHandler{pm: pm}
 }
 
@@ -299,7 +299,7 @@ func (h *ProcessHandler) ImportProcesses(c *gin.Context) {
 	}
 	Success(c, gin.H{"imported": count})
 }
-func registerProcessRoutes(protected *gin.RouterGroup, pm *service.ProcessManager) {
+func registerProcessRoutes(protected *gin.RouterGroup, pm *process.Service) {
 	handler := NewProcessHandler(pm)
 
 	// Process CRUD

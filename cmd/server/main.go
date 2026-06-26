@@ -13,17 +13,25 @@ import (
 	"time"
 
 	"easyserver/internal/api"
+	"easyserver/internal/audit"
+	"easyserver/internal/auth"
 	"easyserver/internal/config"
+	"easyserver/internal/cron"
 	"easyserver/internal/database"
 	"easyserver/internal/dbserver"
+	"easyserver/internal/deploy"
 	"easyserver/internal/executor"
 	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
 	"easyserver/internal/model"
+	"easyserver/internal/monitor"
+	"easyserver/internal/notification"
 	"easyserver/internal/packagemanager"
+	"easyserver/internal/process"
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
+	"easyserver/internal/web"
 )
 
 func main() {
@@ -129,31 +137,31 @@ func main() {
 	monitorRepo := sqlite.NewMonitorRepository(db)
 
 	// Initialize auth service and default admin (single shared instance)
-	authService := service.NewAuthService(cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration)
-	authService.SetRepositories(userRepo, tokenRepo, activityRepo, totpRepo)
-	if err := authService.InitDefaultAdmin(context.Background()); err != nil {
+	authSvc := auth.NewAuthService(cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration)
+	authSvc.SetRepositories(userRepo, tokenRepo, activityRepo, totpRepo)
+	if err := authSvc.InitDefaultAdmin(context.Background()); err != nil {
 		log.Fatalf("Failed to initialize default admin: %v", err)
 	}
 
 	// Initialize monitor service with WaitGroup for proper shutdown
 	var monitorWg sync.WaitGroup
-	monitorService := service.NewMonitorService(monitorRepo, cfg.Monitor.CollectInterval, cfg.Monitor.HistoryRetention)
+	monitorSvc := monitor.NewMonitorService(monitorRepo, cfg.Monitor.CollectInterval, cfg.Monitor.HistoryRetention)
 	monitorWg.Add(1)
 	go func() {
 		defer monitorWg.Done()
-		monitorService.Start()
+		monitorSvc.Start()
 	}()
 
 	// Initialize shared command executor
 	cmdExec := executor.NewOSExecutor()
 
 	// Initialize audit service and system event monitor (single shared instance)
-	auditService := service.NewAuditService(db, auditRepo, cfg.Audit.RetentionDays)
-	systemMonitor := service.NewSystemEventMonitor(auditService, cmdExec)
+	auditSvc := audit.NewService(db, auditRepo, cfg.Audit.RetentionDays)
+	systemMonitor := service.NewSystemEventMonitor(auditSvc, cmdExec)
 	systemMonitor.Start()
 
 	// Initialize session service and start cleanup (single shared instance)
-	sessionService := service.NewSessionService(sessionRepo)
+	sessionSvc := auth.NewSessionService(sessionRepo)
 	sessionDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(cfg.Auth.SessionCleanupInterval)
@@ -161,7 +169,7 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := sessionService.CleanupExpiredSessions(context.Background()); err != nil {
+				if err := sessionSvc.CleanupExpiredSessions(context.Background()); err != nil {
 					log.Printf("session cleanup error: %v", err)
 				}
 			case <-sessionDone:
@@ -172,15 +180,15 @@ func main() {
 
 	// Initialize process guardian (single shared instance)
 	processRepo := sqlite.NewProcessRepository(db)
-	processManager := service.NewProcessManager(processRepo, cmdExec)
+	processMgr := process.NewService(processRepo, cmdExec)
 
 	// Initialize system process service (single shared instance)
 	serviceWhitelistRepo := sqlite.NewServiceWhitelistRepository(db)
-	systemProcessService := service.NewSystemProcessService(cmdExec, serviceWhitelistRepo, auditService)
+	systemProcessService := service.NewSystemProcessService(cmdExec, serviceWhitelistRepo, auditSvc)
 
 	// Initialize notification service (single shared instance)
 	notificationRepo := sqlite.NewNotificationRepository(db)
-	notificationService := service.NewNotificationService(notificationRepo)
+	notificationSvc := notification.NewService(notificationRepo)
 
 	// Initialize TOTP service (single shared instance)
 	totpService := service.NewTOTPService(totpRepo)
@@ -197,7 +205,7 @@ func main() {
 
 	// Initialize cron service (single shared instance)
 	cronRepo := sqlite.NewCronRepository(db)
-	cronService := service.NewCronService(cronRepo, cmdExec)
+	cronSvc := cron.NewService(cronRepo, cmdExec)
 
 	// Initialize database services (single shared instance)
 	dbServerRepo := sqlite.NewDBServerRepository(db)
@@ -211,7 +219,7 @@ func main() {
 
 	// Initialize deploy service (single shared instance)
 	deployRepo := sqlite.NewDeployRepository(db)
-	deployService, err := service.NewDeployService(deployRepo, cfg.Deploy.EncryptionKey)
+	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)
 	if err != nil {
 		log.Fatalf("Failed to init deploy service: %v", err)
 	}
@@ -238,15 +246,15 @@ func main() {
 	// Initialize web server services (single shared instance)
 	webServerRepo := sqlite.NewWebServerRepository(db)
 	websiteRepo := sqlite.NewWebsiteRepository(db)
-	webServerService := service.NewWebServerService(webServerRepo, cmdExec)
-	webServerService.SeedPredefinedWebServers(context.Background())
-	websiteService := service.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
+	webServerSvc := web.NewService(webServerRepo, cmdExec)
+	webServerSvc.SeedPredefinedWebServers(context.Background())
+	websiteSvc := web.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
 
 	// Initialize notify + alert services (single shared instance)
 	notifyService := service.NewNotifyService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
-	authService.SetNotifyService(notifyService)
+	authSvc.SetNotifyService(notifyService)
 
-	alertService := service.NewAlertService(notifyService, notificationService)
+	alertService := service.NewAlertService(notifyService, notificationSvc)
 	var alertRules []model.AlertRule
 	for i, rule := range cfg.Alerts.Rules {
 		alertRules = append(alertRules, model.AlertRule{
@@ -259,7 +267,7 @@ func main() {
 		})
 	}
 	alertService.SetRules(alertRules)
-	monitorService.SetAlertService(alertService)
+	monitorSvc.SetAlertService(alertService)
 
 	// Initialize terminal manager (single shared instance)
 	terminalManager := service.NewTerminalManager(cmdExec)
@@ -285,21 +293,21 @@ func main() {
 	}
 
 	// Log server start
-	auditService.LogSystemEvent(context.Background(), "SERVER_START", "EasyServer started")
+	auditSvc.LogSystemEvent(context.Background(), "SERVER_START", "EasyServer started")
 
 	// Setup router with shared service instances (no duplicate creation)
 	router := api.NewRouter(cfg, *configPath, api.RouterDeps{
 		DB:                   db,
 		Executor:             cmdExec,
-		AuthService:          authService,
-		MonitorService:       monitorService,
-		AuditService:         auditService,
-		SessionService:       sessionService,
+		AuthService:          authSvc,
+		MonitorService:       monitorSvc,
+		AuditService:         auditSvc,
+		SessionService:       sessionSvc,
 		TotpService:          totpService,
 		AuditRepo:            auditRepo,
-		ProcessManager:       processManager,
+		ProcessManager:       processMgr,
 		SystemProcessService: systemProcessService,
-		NotificationService:  notificationService,
+		NotificationService:  notificationSvc,
 		ServiceManager:       serviceManager,
 
 		// Container services
@@ -310,7 +318,7 @@ func main() {
 		NetworkService:   networkService,
 
 		// Cron service
-		CronService: cronService,
+		CronService: cronSvc,
 
 		// Database services
 		DBServerService:     dbServerService,
@@ -319,7 +327,7 @@ func main() {
 		SQLQueryService:     sqlQueryService,
 
 		// Deploy service
-		DeployService: deployService,
+		DeployService: deploySvc,
 
 		// Environment config service
 		EnvConfigService: envConfigService,
@@ -336,8 +344,8 @@ func main() {
 		SSHConfigService: sshConfigService,
 
 		// Web server services
-		WebServerService: webServerService,
-		WebsiteService:   websiteService,
+		WebServerService: webServerSvc,
+		WebsiteService:   websiteSvc,
 
 		// Notify + Alert services
 		NotifyService: notifyService,
@@ -412,17 +420,17 @@ func main() {
 	systemMonitor.Stop()
 
 	// Log server shutdown
-	auditService.LogSystemEvent(context.Background(), "SERVER_STOP", "EasyServer stopped")
+	auditSvc.LogSystemEvent(context.Background(), "SERVER_STOP", "EasyServer stopped")
 
 	// Flush remaining audit log entries
-	auditService.Close()
+	auditSvc.Close()
 
 	// Stop monitor service
-	monitorService.Stop()
+	monitorSvc.Stop()
 	monitorWg.Wait()
 
 	// Stop process guardian
-	processManager.Shutdown()
+	processMgr.Shutdown()
 
 	log.Println("Server exited properly")
 }

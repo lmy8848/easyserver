@@ -6,21 +6,23 @@ import (
 
 	"easyserver/internal/middleware"
 	"easyserver/internal/model"
+	"easyserver/internal/audit"
+	"easyserver/internal/auth"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
-	authService    *service.AuthService
-	auditService   *service.AuditService
-	sessionService *service.SessionService
+	authService    *auth.AuthService
+	auditService   *audit.Service
+	sessionService *auth.SessionService
 	totpService    *service.TOTPService
 	jwtSecret      string
 	sessionTimeout time.Duration
 }
 
-func NewAuthHandler(authService *service.AuthService, jwtSecret string, auditService *service.AuditService, sessionService *service.SessionService, totpService *service.TOTPService, sessionTimeout time.Duration) *AuthHandler {
+func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditService *audit.Service, sessionService *auth.SessionService, totpService *service.TOTPService, sessionTimeout time.Duration) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		auditService:   auditService,
@@ -602,9 +604,9 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 
 func registerAuthRoutes(
 	api *gin.RouterGroup,
-	authService *service.AuthService,
-	auditService *service.AuditService,
-	sessionService *service.SessionService,
+	authService *auth.AuthService,
+	auditService *audit.Service,
+	sessionService *auth.SessionService,
 	totpService *service.TOTPService,
 	jwtSecret string,
 	sessionValidator func(string) (bool, error),

@@ -5,18 +5,19 @@ import (
 	"log"
 	"time"
 
+	"easyserver/internal/audit"
 	"easyserver/internal/executor"
 )
 
 // SystemEventMonitor monitors system-level events (disk, memory, service failures)
 // and logs them as audit events. Linux implementation lives in system_monitor_linux.go.
 type SystemEventMonitor struct {
-	auditService *AuditService
+	auditService *audit.Service
 	executor     executor.CommandExecutor
 	stopCh       chan struct{}
 }
 
-func NewSystemEventMonitor(auditService *AuditService, exec executor.CommandExecutor) *SystemEventMonitor {
+func NewSystemEventMonitor(auditService *audit.Service, exec executor.CommandExecutor) *SystemEventMonitor {
 	return &SystemEventMonitor{
 		auditService: auditService,
 		executor:     exec,

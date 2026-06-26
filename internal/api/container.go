@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"easyserver/internal/model"
+	"easyserver/internal/audit"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -27,7 +28,7 @@ type ContainerHandler struct {
 	composeService   *service.ComposeService
 	volumeService    *service.VolumeService
 	networkService   *service.NetworkService
-	auditService     *service.AuditService
+	auditService     *audit.Service
 }
 
 // NewContainerHandler creates a new ContainerHandler
@@ -37,7 +38,7 @@ func NewContainerHandler(
 	composeService *service.ComposeService,
 	volumeService *service.VolumeService,
 	networkService *service.NetworkService,
-	auditService *service.AuditService,
+	auditService *audit.Service,
 ) *ContainerHandler {
 	return &ContainerHandler{
 		containerService: containerService,
@@ -621,7 +622,7 @@ func (h *ContainerHandler) RemoveNetwork(c *gin.Context) {
 	Success(c, gin.H{"message": "网络已删除"})
 }
 
-func registerContainerRoutes(protected *gin.RouterGroup, containerService *service.ContainerService, dockerService *service.DockerService, composeService *service.ComposeService, volumeService *service.VolumeService, networkService *service.NetworkService, auditService *service.AuditService) {
+func registerContainerRoutes(protected *gin.RouterGroup, containerService *service.ContainerService, dockerService *service.DockerService, composeService *service.ComposeService, volumeService *service.VolumeService, networkService *service.NetworkService, auditService *audit.Service) {
 	handler := NewContainerHandler(containerService, dockerService, composeService, volumeService, networkService, auditService)
 
 	// Docker management

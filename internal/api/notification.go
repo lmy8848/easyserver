@@ -4,18 +4,18 @@ import (
 	"strconv"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/notification"
 
 	"github.com/gin-gonic/gin"
 )
 
 // NotificationHandler handles notification API requests
 type NotificationHandler struct {
-	ns *service.NotificationService
+	ns *notification.Service
 }
 
 // NewNotificationHandler creates a new NotificationHandler
-func NewNotificationHandler(ns *service.NotificationService) *NotificationHandler {
+func NewNotificationHandler(ns *notification.Service) *NotificationHandler {
 	return &NotificationHandler{ns: ns}
 }
 
@@ -96,7 +96,7 @@ func (h *NotificationHandler) Delete(c *gin.Context) {
 	Success(c, gin.H{"message": "已删除"})
 }
 
-func registerNotificationRoutes(protected *gin.RouterGroup, ns *service.NotificationService) {
+func registerNotificationRoutes(protected *gin.RouterGroup, ns *notification.Service) {
 	handler := NewNotificationHandler(ns)
 
 	notifGroup := protected.Group("/notifications")

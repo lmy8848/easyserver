@@ -5,16 +5,16 @@ import (
 	"strings"
 
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/deploy"
 
 	"github.com/gin-gonic/gin"
 )
 
 type DeployHandler struct {
-	deployService *service.DeployService
+	deployService *deploy.Service
 }
 
-func NewDeployHandler(db *service.DeployService) *DeployHandler {
+func NewDeployHandler(db *deploy.Service) *DeployHandler {
 	return &DeployHandler{deployService: db}
 }
 
@@ -274,7 +274,7 @@ func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 	Success(c, gin.H{"status": "rolling_back"})
 }
 
-func registerDeployRoutes(protected *gin.RouterGroup, deployService *service.DeployService) {
+func registerDeployRoutes(protected *gin.RouterGroup, deployService *deploy.Service) {
 	handler := NewDeployHandler(deployService)
 	protected.GET("/deploy/servers", handler.ListServers)
 	protected.POST("/deploy/servers", handler.CreateServer)

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/service"
+	"easyserver/internal/auth"
 
 	"github.com/gin-gonic/gin"
 )
@@ -91,7 +91,7 @@ func StopSessionHeartbeatLimiter() {
 // SessionHeartbeatMiddleware updates the session's last_active on every request
 // If session doesn't exist, creates one (for tokens obtained before session management)
 // Rate-limited to one update per 30 seconds per token to reduce DB writes.
-func SessionHeartbeatMiddleware(sessionService *service.SessionService, sessionTimeout time.Duration) gin.HandlerFunc {
+func SessionHeartbeatMiddleware(sessionService *auth.SessionService, sessionTimeout time.Duration) gin.HandlerFunc {
 	limiter := newSessionHeartbeatLimiter(30*time.Second, 5*time.Minute)
 	globalSessionLimiter = limiter
 	return func(c *gin.Context) {

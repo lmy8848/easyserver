@@ -6,15 +6,23 @@ import (
 	"net/http"
 	"time"
 
+	"easyserver/internal/audit"
+	"easyserver/internal/auth"
 	"easyserver/internal/config"
+	"easyserver/internal/cron"
 	"easyserver/internal/dbserver"
+	"easyserver/internal/deploy"
 	"easyserver/internal/executor"
 	"easyserver/internal/firewall"
 	"easyserver/internal/middleware"
+	"easyserver/internal/monitor"
+	"easyserver/internal/notification"
 	"easyserver/internal/packagemanager"
+	"easyserver/internal/process"
 	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
+	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,15 +33,15 @@ type Router struct {
 	db                   *sql.DB
 	executor             executor.CommandExecutor
 	auditRepo            repository.AuditRepository
-	authService          *service.AuthService
-	monitorService       *service.MonitorService
-	auditService         *service.AuditService
-	sessionService       *service.SessionService
+	authService          *auth.AuthService
+	monitorService       *monitor.MonitorService
+	auditService         *audit.Service
+	sessionService       *auth.SessionService
 	totpService          *service.TOTPService
 	alertService         *service.AlertService
-	processManager       *service.ProcessManager
+	processManager       *process.Service
 	systemProcessService *service.SystemProcessService
-	notificationService  *service.NotificationService
+	notificationService  *notification.Service
 	serviceManager       *service.ServiceManager
 
 	// Container services
@@ -44,7 +52,7 @@ type Router struct {
 	networkService   *service.NetworkService
 
 	// Cron service
-	cronService *service.CronService
+	cronService *cron.Service
 
 	// Database services
 	dbServerService     *dbserver.Service
@@ -53,7 +61,7 @@ type Router struct {
 	sqlQueryService     *service.SQLQueryService
 
 	// Deploy service
-	deployService *service.DeployService
+	deployService *deploy.Service
 
 	// Environment config service
 	envConfigService *service.EnvConfigService
@@ -70,8 +78,8 @@ type Router struct {
 	sshConfigService *service.SSHConfigService
 
 	// Web server services
-	webServerService *service.WebServerService
-	websiteService   *service.WebsiteService
+	webServerService *web.Service
+	websiteService   *web.WebsiteService
 
 	// Terminal manager
 	terminalManager *service.TerminalManager
@@ -90,15 +98,15 @@ type Router struct {
 type RouterDeps struct {
 	DB                   *sql.DB
 	Executor             executor.CommandExecutor
-	AuthService          *service.AuthService
-	MonitorService       *service.MonitorService
-	AuditService         *service.AuditService
-	SessionService       *service.SessionService
+	AuthService          *auth.AuthService
+	MonitorService       *monitor.MonitorService
+	AuditService         *audit.Service
+	SessionService       *auth.SessionService
 	TotpService          *service.TOTPService
 	AuditRepo            repository.AuditRepository
-	ProcessManager       *service.ProcessManager
+	ProcessManager       *process.Service
 	SystemProcessService *service.SystemProcessService
-	NotificationService  *service.NotificationService
+	NotificationService  *notification.Service
 	ServiceManager       *service.ServiceManager
 
 	// Container services
@@ -109,7 +117,7 @@ type RouterDeps struct {
 	NetworkService   *service.NetworkService
 
 	// Cron service
-	CronService *service.CronService
+	CronService *cron.Service
 
 	// Database services
 	DBServerService     *dbserver.Service
@@ -118,7 +126,7 @@ type RouterDeps struct {
 	SQLQueryService     *service.SQLQueryService
 
 	// Deploy service
-	DeployService *service.DeployService
+	DeployService *deploy.Service
 
 	// Environment config service
 	EnvConfigService *service.EnvConfigService
@@ -135,8 +143,8 @@ type RouterDeps struct {
 	SSHConfigService *service.SSHConfigService
 
 	// Web server services
-	WebServerService *service.WebServerService
-	WebsiteService   *service.WebsiteService
+	WebServerService *web.Service
+	WebsiteService   *web.WebsiteService
 
 	// Notify + Alert (wired in main.go)
 	NotifyService *service.NotifyService

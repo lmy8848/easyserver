@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"easyserver/internal/executor"
+	"easyserver/internal/audit"
+	"easyserver/internal/monitor"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -61,12 +63,12 @@ func createUpgrader(allowedOrigins []string, devMode bool) gorillaWs.Upgrader {
 }
 
 type MonitorHandler struct {
-	monitorService *service.MonitorService
+	monitorService *monitor.MonitorService
 	jwtSecret      string
 	upgrader       gorillaWs.Upgrader
 }
 
-func NewMonitorHandler(monitorService *service.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
+func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
 	return &MonitorHandler{
 		monitorService: monitorService,
 		jwtSecret:      jwtSecret,
@@ -162,7 +164,7 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	client := &service.MonitorClient{
+	client := &monitor.MonitorClient{
 		Send: make(chan []byte, 16),
 	}
 
@@ -235,7 +237,7 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 	}
 }
 
-func registerMonitorRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *service.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) {
+func registerMonitorRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) {
 	handler := NewMonitorHandler(monitorService, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/monitor/stats", handler.HandleStats)
 	protected.GET("/monitor/history", handler.HandleHistory)
@@ -257,7 +259,7 @@ func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerTerminalRoutes registers terminal routes
-func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *service.TerminalManager, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) {
+func registerTerminalRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *service.TerminalManager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
 	protected.GET("/terminal/:id", func(c *gin.Context) {
 		Success(c, nil)
 	})

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/audit"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -22,10 +23,10 @@ func isPathError(err error) bool {
 
 type FileManagerHandler struct {
 	fileManager  *service.FileManager
-	auditService *service.AuditService
+	auditService *audit.Service
 }
 
-func NewFileManagerHandler(fm *service.FileManager, auditService *service.AuditService) *FileManagerHandler {
+func NewFileManagerHandler(fm *service.FileManager, auditService *audit.Service) *FileManagerHandler {
 	return &FileManagerHandler{
 		fileManager:  fm,
 		auditService: auditService,

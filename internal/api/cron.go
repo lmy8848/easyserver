@@ -11,19 +11,19 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/cron"
 
 	"github.com/gin-gonic/gin"
 )
 
 // CronHandler handles cron task API requests
 type CronHandler struct {
-	cronService *service.CronService
+	cronService *cron.Service
 	executor    executor.CommandExecutor
 }
 
 // NewCronHandler creates a new CronHandler
-func NewCronHandler(cronService *service.CronService, exec executor.CommandExecutor) *CronHandler {
+func NewCronHandler(cronService *cron.Service, exec executor.CommandExecutor) *CronHandler {
 	return &CronHandler{cronService: cronService, executor: exec}
 }
 
@@ -905,7 +905,7 @@ func (h *CronHandler) DeleteDoc(c *gin.Context) {
 	Success(c, gin.H{"message": "文档已删除"})
 }
 
-func registerCronRoutes(protected *gin.RouterGroup, cronService *service.CronService, exec executor.CommandExecutor) {
+func registerCronRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
 	// Seed default documentation (tables managed by migration system)
 	if err := cronService.SeedDefaultDocs(context.Background()); err != nil {
 		log.Printf("WARNING: seed default cron docs failed: %v", err)

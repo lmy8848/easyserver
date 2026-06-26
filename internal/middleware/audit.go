@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"easyserver/internal/service"
+	"easyserver/internal/audit"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,7 +16,7 @@ import (
 const maxAuditBodySize = 64 * 1024
 
 // AuditMiddleware logs non-GET requests using the batched writer
-func AuditMiddleware(auditService *service.AuditService) gin.HandlerFunc {
+func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 

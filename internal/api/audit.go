@@ -9,23 +9,23 @@ import (
 	"time"
 
 	"easyserver/internal/repository"
-	"easyserver/internal/service"
+	"easyserver/internal/audit"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuditHandler struct {
 	db           *sql.DB
-	auditService *service.AuditService
+	auditService *audit.Service
 	auditRepo    repository.AuditRepository
 }
 
-func NewAuditHandler(db *sql.DB, auditService *service.AuditService) *AuditHandler {
+func NewAuditHandler(db *sql.DB, auditService *audit.Service) *AuditHandler {
 	return &AuditHandler{db: db, auditService: auditService}
 }
 
 // NewAuditHandlerWithRepo creates an AuditHandler with repository support
-func NewAuditHandlerWithRepo(db *sql.DB, auditService *service.AuditService, auditRepo repository.AuditRepository) *AuditHandler {
+func NewAuditHandlerWithRepo(db *sql.DB, auditService *audit.Service, auditRepo repository.AuditRepository) *AuditHandler {
 	return &AuditHandler{db: db, auditService: auditService, auditRepo: auditRepo}
 }
 
@@ -526,7 +526,7 @@ func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
 	})
 }
 
-func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *service.AuditService, auditRepo repository.AuditRepository) {
+func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo repository.AuditRepository) {
 	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
 	protected.GET("/audit-logs", handler.List)
 	protected.GET("/audit-logs/actions", handler.GetActions)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"easyserver/internal/model"
+	"easyserver/internal/notification"
 )
 
 // AlertEvent represents a triggered alert for notification
@@ -28,12 +29,12 @@ type AlertService struct {
 	rules     []model.AlertRule
 	states    map[int64]*model.AlertState // ruleID -> state
 	notify    *NotifyService
-	notifSvc  *NotificationService
+	notifSvc  *notification.Service
 	cooldowns map[int64]time.Time // ruleID -> last notification time
 }
 
 // NewAlertService creates a new alert evaluation service
-func NewAlertService(notify *NotifyService, notifSvc *NotificationService) *AlertService {
+func NewAlertService(notify *NotifyService, notifSvc *notification.Service) *AlertService {
 	return &AlertService{
 		states:    make(map[int64]*model.AlertState),
 		cooldowns: make(map[int64]time.Time),

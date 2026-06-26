@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/audit"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -46,12 +47,12 @@ func formatDuration(d time.Duration) string {
 
 type TerminalHandler struct {
 	terminalManager *service.TerminalManager
-	auditService    *service.AuditService
+	auditService    *audit.Service
 	jwtSecret       string
 	upgrader        gorillaWs.Upgrader
 }
 
-func NewTerminalHandler(terminalManager *service.TerminalManager, jwtSecret string, auditService *service.AuditService, allowedOrigins []string, devMode bool) *TerminalHandler {
+func NewTerminalHandler(terminalManager *service.TerminalManager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) *TerminalHandler {
 	return &TerminalHandler{
 		terminalManager: terminalManager,
 		auditService:    auditService,
