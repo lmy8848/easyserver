@@ -8,16 +8,14 @@ import (
 	"strings"
 
 	"easyserver/internal/executor"
-	"easyserver/internal/model"
-	"easyserver/internal/repository"
 )
 
 type Service struct {
 	executor executor.CommandExecutor
-	repo     repository.DBServerRepository
+	repo     Repository
 }
 
-func NewService(exec executor.CommandExecutor, repo repository.DBServerRepository) *Service {
+func NewService(exec executor.CommandExecutor, repo Repository) *Service {
 	return &Service{executor: exec, repo: repo}
 }
 
@@ -27,7 +25,7 @@ func (s *Service) SeedPredefinedServers(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	for _, ds := range model.PredefinedDBServers() {
+	for _, ds := range PredefinedDBServers() {
 		if err := s.repo.SeedServer(ctx, ds.Name, ds.DisplayName, ds.Description, ds.DefaultPort); err != nil {
 			log.Printf("seed server %s: %v", ds.Name, err)
 		}
@@ -36,14 +34,14 @@ func (s *Service) SeedPredefinedServers(ctx context.Context) {
 
 // DB Server CRUD
 
-func (s *Service) List(ctx context.Context) ([]model.DBServer, error) {
+func (s *Service) List(ctx context.Context) ([]DBServer, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return s.repo.ListServers(ctx)
 }
 
-func (s *Service) Get(ctx context.Context, id int64) (*model.DBServer, error) {
+func (s *Service) Get(ctx context.Context, id int64) (*DBServer, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -52,21 +50,21 @@ func (s *Service) Get(ctx context.Context, id int64) (*model.DBServer, error) {
 
 // Version management
 
-func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error) {
+func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]DBVersion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return s.repo.ListVersions(ctx, dbServerID)
 }
 
-func (s *Service) GetVersion(ctx context.Context, id int64) (*model.DBVersion, error) {
+func (s *Service) GetVersion(ctx context.Context, id int64) (*DBVersion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return s.repo.GetVersion(ctx, id)
 }
 
-func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *model.CreateDBVersionRequest) (*model.DBVersion, error) {
+func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *CreateDBVersionRequest) (*DBVersion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -86,7 +84,7 @@ func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *mod
 
 	// Find package name from templates
 	packageName := ""
-	templates := model.GetVersionTemplates(ds.Name)
+	templates := GetVersionTemplates(ds.Name)
 	for _, t := range templates {
 		if t.Version == req.Version {
 			packageName = t.Package
@@ -132,7 +130,7 @@ func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *mod
 	// Update server summary
 	s.updateServerSummary(ctx, dbServerID)
 
-	return &model.DBVersion{
+	return &DBVersion{
 		ID:          id,
 		DBServerID:  dbServerID,
 		Version:     req.Version,
@@ -166,7 +164,7 @@ func (s *Service) UninstallVersion(ctx context.Context, versionID int64) error {
 
 	ds, _ := s.Get(ctx, v.DBServerID)
 	if ds != nil {
-		templates := model.GetVersionTemplates(ds.Name)
+		templates := GetVersionTemplates(ds.Name)
 		for _, t := range templates {
 			if t.Version == v.Version {
 				s.executor.RunCombined(ctx, "apt-get", "remove", "-y", t.Package)

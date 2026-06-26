@@ -168,27 +168,6 @@ type CronRepository interface {
 	BatchCreateDocs(ctx context.Context, docs []model.CronDoc) error
 }
 
-// DBServerRepository defines the interface for database server data access
-type DBServerRepository interface {
-	// Server operations
-	ListServers(ctx context.Context) ([]model.DBServer, error)
-	GetServer(ctx context.Context, id int64) (*model.DBServer, error)
-	SeedServer(ctx context.Context, name, displayName, description string, defaultPort int) error
-
-	// Version operations
-	ListVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error)
-	GetVersion(ctx context.Context, id int64) (*model.DBVersion, error)
-	CountVersionsByServerAndVersion(ctx context.Context, dbServerID int64, version string) (int, error)
-	CreateVersion(ctx context.Context, dbServerID int64, version, serviceName string, port int, status string) (int64, error)
-	DeleteVersion(ctx context.Context, id int64) error
-	CountDatabasesByVersion(ctx context.Context, versionID int64) (int, error)
-
-	// Status updates
-	UpdateVersionStatus(ctx context.Context, id int64, status string) error
-	UpdateVersionPort(ctx context.Context, id int64, port int) error
-	UpdateServerStatus(ctx context.Context, id int64, status, versionSummary string) error
-}
-
 // DatabaseMgmtRepository defines the interface for database management data access
 type DatabaseMgmtRepository interface {
 	// Database operations
