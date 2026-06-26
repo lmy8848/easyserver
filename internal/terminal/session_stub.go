@@ -3,12 +3,7 @@
 
 package terminal
 
-import (
-	"fmt"
-	"time"
-
-	"easyserver/internal/executor"
-)
+import "fmt"
 
 // CreateSession creates a new terminal session (stub: CGO required for PTY).
 func (m *Manager) CreateSession(id string) (*Session, error) {
@@ -20,7 +15,9 @@ func (s *Session) HandleInput(msg []byte) error {
 	return fmt.Errorf("terminal requires CGO; rebuild with CGO_ENABLED=1")
 }
 
-// StartIdleTimeout is a no-op without CGO.
-func (m *Manager) StartIdleTimeout(timeout time.Duration) {
-	// No-op without CGO
+// Close closes the terminal session (stub: no-op without CGO).
+func (s *Session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
 }
