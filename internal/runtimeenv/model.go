@@ -1,9 +1,8 @@
-package model
+package runtimeenv
 
 import "time"
 
 // RuntimeEnvironment represents a runtime environment (Java, Node.js, PHP, Python, Go)
-// ponytail: kept as canonical definition; runtimeenv has its own copy for domain cohesion.
 type RuntimeEnvironment struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`          // java, node, php, python, go
@@ -16,6 +15,18 @@ type RuntimeEnvironment struct {
 	Logs         string    `json:"logs"`          // Installation logs
 	ErrorMessage string    `json:"error_message"` // Error message if failed
 	InstalledAt  time.Time `json:"installed_at"`
+}
+
+// RuntimeVersion represents an available version for a runtime environment
+type RuntimeVersion struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`       // java, node, go, python, php
+	Version   string    `json:"version"`    // 17.0.19, 20.10.0, 1.21.5
+	LTS       bool      `json:"lts"`        // Long Term Support
+	Stable    bool      `json:"stable"`     // Stable release
+	Installed bool      `json:"installed"`  // Whether this version is installed
+	IsDefault bool      `json:"is_default"` // Whether this is the default version
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // RuntimeInstallRequest represents a request to install a runtime environment

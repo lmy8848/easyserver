@@ -228,7 +228,7 @@ func main() {
 
 	// Initialize runtime services (single shared instance)
 	runtimeRepo := sqlite.NewRuntimeRepository(db)
-	runtimeService := runtimeenv.NewService(db, cmdExec)
+	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec)
 	runtimeVersionService := runtimeversion.NewService(runtimeRepo)
 	packageRepo := sqlite.NewPackageRepository(db)
 	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)

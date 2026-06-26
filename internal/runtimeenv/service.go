@@ -2,7 +2,6 @@ package runtimeenv
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -11,24 +10,22 @@ import (
 
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
-	"easyserver/internal/repository"
-	"easyserver/internal/repository/sqlite"
 )
 
 type Service struct {
-	repo     repository.RuntimeRepository
+	repo     Repository
 	executor executor.CommandExecutor
 }
 
-func NewService(db *sql.DB, exec executor.CommandExecutor) *Service {
+func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 	return &Service{
-		repo:     sqlite.NewRuntimeRepository(db),
+		repo:     repo,
 		executor: exec,
 	}
 }
 
 // ListAll returns all installed runtime environments
-func (s *Service) ListAll(ctx context.Context) ([]model.RuntimeEnvironment, error) {
+func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -36,7 +33,7 @@ func (s *Service) ListAll(ctx context.Context) ([]model.RuntimeEnvironment, erro
 }
 
 // ListByName returns all versions of a specific runtime environment
-func (s *Service) ListByName(ctx context.Context, name string) ([]model.RuntimeEnvironment, error) {
+func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnvironment, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -44,7 +41,7 @@ func (s *Service) ListByName(ctx context.Context, name string) ([]model.RuntimeE
 }
 
 // GetDefault returns the default version of a runtime environment
-func (s *Service) GetDefault(ctx context.Context, name string) (*model.RuntimeEnvironment, error) {
+func (s *Service) GetDefault(ctx context.Context, name string) (*RuntimeEnvironment, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -52,7 +49,7 @@ func (s *Service) GetDefault(ctx context.Context, name string) (*model.RuntimeEn
 }
 
 // GetByID returns a runtime environment by ID
-func (s *Service) GetByID(ctx context.Context, id int64) (*model.RuntimeEnvironment, error) {
+func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -466,7 +463,7 @@ func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
 }
 
 // uninstallRuntime performs the actual uninstallation
-func (s *Service) uninstallRuntime(ctx context.Context, env *model.RuntimeEnvironment) {
+func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) {
 	var err error
 
 	switch env.Name {
@@ -637,32 +634,32 @@ func (s *Service) SetDefault(ctx context.Context, name, version string) error {
 }
 
 // Detect detects installed runtime environments on the system
-func (s *Service) Detect(ctx context.Context) ([]model.RuntimeDetectResult, error) {
-	var results []model.RuntimeDetectResult
+func (s *Service) Detect(ctx context.Context) ([]RuntimeDetectResult, error) {
+	var results []RuntimeDetectResult
 
 	// Detect Java
 	if versions, err := s.detectJava(ctx); err == nil && len(versions) > 0 {
-		results = append(results, model.RuntimeDetectResult{Name: "java", Versions: versions})
+		results = append(results, RuntimeDetectResult{Name: "java", Versions: versions})
 	}
 
 	// Detect Node.js
 	if versions, err := s.detectNode(ctx); err == nil && len(versions) > 0 {
-		results = append(results, model.RuntimeDetectResult{Name: "node", Versions: versions})
+		results = append(results, RuntimeDetectResult{Name: "node", Versions: versions})
 	}
 
 	// Detect Go
 	if versions, err := s.detectGo(ctx); err == nil && len(versions) > 0 {
-		results = append(results, model.RuntimeDetectResult{Name: "go", Versions: versions})
+		results = append(results, RuntimeDetectResult{Name: "go", Versions: versions})
 	}
 
 	// Detect Python
 	if versions, err := s.detectPython(ctx); err == nil && len(versions) > 0 {
-		results = append(results, model.RuntimeDetectResult{Name: "python", Versions: versions})
+		results = append(results, RuntimeDetectResult{Name: "python", Versions: versions})
 	}
 
 	// Detect PHP
 	if versions, err := s.detectPHP(ctx); err == nil && len(versions) > 0 {
-		results = append(results, model.RuntimeDetectResult{Name: "php", Versions: versions})
+		results = append(results, RuntimeDetectResult{Name: "php", Versions: versions})
 	}
 
 	return results, nil

@@ -9,15 +9,14 @@ import (
 	"net/http"
 	"strings"
 
-	"easyserver/internal/model"
-	"easyserver/internal/repository"
+	"easyserver/internal/runtimeenv"
 )
 
 type Service struct {
-	repo repository.RuntimeRepository
+	repo runtimeenv.Repository
 }
 
-func NewService(repo repository.RuntimeRepository) *Service {
+func NewService(repo runtimeenv.Repository) *Service {
 	return &Service{repo: repo}
 }
 
@@ -31,7 +30,7 @@ func (s *Service) InitTables(ctx context.Context) error {
 }
 
 // List returns all cached versions for a runtime
-func (s *Service) List(ctx context.Context, name string) ([]model.RuntimeVersion, error) {
+func (s *Service) List(ctx context.Context, name string) ([]runtimeenv.RuntimeVersion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -123,7 +122,7 @@ func (s *Service) GetAliasSuggestions(ctx context.Context, name string) []string
 }
 
 // ListWithInstalledStatus returns all cached versions with installed status
-func (s *Service) ListWithInstalledStatus(ctx context.Context, name string) ([]model.RuntimeVersion, error) {
+func (s *Service) ListWithInstalledStatus(ctx context.Context, name string) ([]runtimeenv.RuntimeVersion, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -158,7 +157,7 @@ func (s *Service) FetchAndCache(ctx context.Context, name string) (int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var versions []model.RuntimeVersion
+	var versions []runtimeenv.RuntimeVersion
 	var err error
 
 	switch name {
@@ -194,7 +193,7 @@ func (s *Service) FetchAndCache(ctx context.Context, name string) (int, error) {
 }
 
 // fetchJavaVersions fetches Java versions from Adoptium API
-func fetchJavaVersions() ([]model.RuntimeVersion, error) {
+func fetchJavaVersions() ([]runtimeenv.RuntimeVersion, error) {
 	resp, err := http.Get("https://api.adoptium.net/v3/info/available_releases")
 	if err != nil {
 		return nil, err
@@ -219,9 +218,9 @@ func fetchJavaVersions() ([]model.RuntimeVersion, error) {
 		ltsSet[v] = true
 	}
 
-	var versions []model.RuntimeVersion
+	var versions []runtimeenv.RuntimeVersion
 	for _, v := range result.AvailableReleases {
-		versions = append(versions, model.RuntimeVersion{
+		versions = append(versions, runtimeenv.RuntimeVersion{
 			Name:    "java",
 			Version: fmt.Sprintf("%d", v),
 			LTS:     ltsSet[v],
@@ -233,7 +232,7 @@ func fetchJavaVersions() ([]model.RuntimeVersion, error) {
 }
 
 // fetchNodeVersions fetches Node.js versions from official API
-func fetchNodeVersions() ([]model.RuntimeVersion, error) {
+func fetchNodeVersions() ([]runtimeenv.RuntimeVersion, error) {
 	resp, err := http.Get("https://nodejs.org/dist/index.json")
 	if err != nil {
 		return nil, err
@@ -256,7 +255,7 @@ func fetchNodeVersions() ([]model.RuntimeVersion, error) {
 
 	// Deduplicate major.minor versions
 	seen := make(map[string]bool)
-	var versions []model.RuntimeVersion
+	var versions []runtimeenv.RuntimeVersion
 	for _, r := range rawReleases {
 		// Parse lts field - can be string or bool
 		isLTS := false
@@ -274,7 +273,7 @@ func fetchNodeVersions() ([]model.RuntimeVersion, error) {
 			seen[key] = true
 		}
 
-		versions = append(versions, model.RuntimeVersion{
+		versions = append(versions, runtimeenv.RuntimeVersion{
 			Name:    "node",
 			Version: v,
 			LTS:     isLTS,
@@ -286,7 +285,7 @@ func fetchNodeVersions() ([]model.RuntimeVersion, error) {
 }
 
 // fetchGoVersions fetches Go versions from official API
-func fetchGoVersions() ([]model.RuntimeVersion, error) {
+func fetchGoVersions() ([]runtimeenv.RuntimeVersion, error) {
 	resp, err := http.Get("https://go.dev/dl/?mode=json")
 	if err != nil {
 		return nil, err
@@ -306,10 +305,10 @@ func fetchGoVersions() ([]model.RuntimeVersion, error) {
 		return nil, err
 	}
 
-	var versions []model.RuntimeVersion
+	var versions []runtimeenv.RuntimeVersion
 	for _, r := range releases {
 		v := strings.TrimPrefix(r.Version, "go")
-		versions = append(versions, model.RuntimeVersion{
+		versions = append(versions, runtimeenv.RuntimeVersion{
 			Name:    "go",
 			Version: v,
 			LTS:     false,
@@ -321,7 +320,7 @@ func fetchGoVersions() ([]model.RuntimeVersion, error) {
 }
 
 // fetchPythonVersions fetches Python versions from endoflife.date API
-func fetchPythonVersions() ([]model.RuntimeVersion, error) {
+func fetchPythonVersions() ([]runtimeenv.RuntimeVersion, error) {
 	resp, err := http.Get("https://endoflife.date/api/python.json")
 	if err != nil {
 		return nil, err
@@ -343,11 +342,11 @@ func fetchPythonVersions() ([]model.RuntimeVersion, error) {
 		return nil, err
 	}
 
-	var versions []model.RuntimeVersion
+	var versions []runtimeenv.RuntimeVersion
 	for _, r := range releases {
 		// Check if still in support
 		isSupported := r.Support != "" && r.EOL != ""
-		versions = append(versions, model.RuntimeVersion{
+		versions = append(versions, runtimeenv.RuntimeVersion{
 			Name:    "python",
 			Version: r.Latest,
 			LTS:     false,
@@ -359,7 +358,7 @@ func fetchPythonVersions() ([]model.RuntimeVersion, error) {
 }
 
 // fetchPHPVersions fetches PHP versions from endoflife.date API
-func fetchPHPVersions() ([]model.RuntimeVersion, error) {
+func fetchPHPVersions() ([]runtimeenv.RuntimeVersion, error) {
 	resp, err := http.Get("https://endoflife.date/api/php.json")
 	if err != nil {
 		return nil, err
@@ -381,10 +380,10 @@ func fetchPHPVersions() ([]model.RuntimeVersion, error) {
 		return nil, err
 	}
 
-	var versions []model.RuntimeVersion
+	var versions []runtimeenv.RuntimeVersion
 	for _, r := range releases {
 		isSupported := r.Support != "" && r.EOL != ""
-		versions = append(versions, model.RuntimeVersion{
+		versions = append(versions, runtimeenv.RuntimeVersion{
 			Name:    "php",
 			Version: r.Latest,
 			LTS:     false,

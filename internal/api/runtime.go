@@ -53,7 +53,7 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) {
 
 // Install installs a runtime environment
 func (h *RuntimeHandler) Install(c *gin.Context) {
-	var req model.RuntimeInstallRequest
+	var req runtimeenv.RuntimeInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "无效的请求: "+err.Error())
 		return
@@ -80,7 +80,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 
 // Uninstall uninstalls a runtime environment
 func (h *RuntimeHandler) Uninstall(c *gin.Context) {
-	var req model.RuntimeUninstallRequest
+	var req runtimeenv.RuntimeUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "无效的请求: "+err.Error())
 		return
@@ -98,7 +98,7 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 
 // SetDefault sets a version as the default for a runtime environment
 func (h *RuntimeHandler) SetDefault(c *gin.Context) {
-	var req model.RuntimeSetDefaultRequest
+	var req runtimeenv.RuntimeSetDefaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "无效的请求: "+err.Error())
 		return
