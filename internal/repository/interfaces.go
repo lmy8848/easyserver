@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"time"
 
+	"easyserver/internal/cron"
+	"easyserver/internal/deploy"
 	"easyserver/internal/model"
+	"easyserver/internal/notification"
 )
 
 // UserRepository defines the interface for user data access
@@ -106,17 +109,9 @@ type MonitorRepository interface {
 	Clean(ctx context.Context, before time.Time) (int64, error)
 }
 
-// NotificationRepository defines the interface for notification data access
-type NotificationRepository interface {
-	List(ctx context.Context, unreadOnly bool, limit int) ([]model.Notification, error)
-	CountUnread(ctx context.Context) (int, error)
-	Create(ctx context.Context, req model.CreateNotificationRequest) error
-	CreateIfNotExists(ctx context.Context, req model.CreateNotificationRequest) error
-	MarkAsRead(ctx context.Context, id int64) error
-	MarkAllAsRead(ctx context.Context) error
-	Delete(ctx context.Context, id int64) error
-	CleanOld(ctx context.Context, days int) (int64, error)
-}
+// NotificationRepository is now defined in easyserver/internal/notification.Repository.
+// Kept as alias for backward compatibility.
+type NotificationRepository = notification.Repository
 
 // TOTPRepository defines the interface for TOTP data access
 type TOTPRepository interface {
@@ -131,42 +126,9 @@ type TOTPRepository interface {
 	StorePendingSecret(ctx context.Context, userID int64, secret string) error
 }
 
-// CronRepository defines the interface for cron task data access
-type CronRepository interface {
-	// Task CRUD
-	ListTasks(ctx context.Context) ([]model.CronTask, error)
-	GetTask(ctx context.Context, id int64) (*model.CronTask, error)
-	CreateTask(ctx context.Context, task *model.CronTask) error
-	UpdateTask(ctx context.Context, task *model.CronTask) error
-	DeleteTask(ctx context.Context, id int64) error
-
-	// Task status management
-	ListEnabledTasks(ctx context.Context) ([]model.CronTask, error)
-	EnableTask(ctx context.Context, id int64) error
-	DisableTask(ctx context.Context, id int64) error
-	SetTaskRunning(ctx context.Context, id int64) (bool, error)
-	UpdateTaskResult(ctx context.Context, id int64, status string, lastResult string) error
-
-	// Logs
-	CreateLog(ctx context.Context, taskID int64, status string, output string, duration int) error
-	GetLogs(ctx context.Context, taskID int64, limit int) ([]model.CronLog, error)
-
-	// Scripts
-	ListScripts(ctx context.Context) ([]model.Script, error)
-	GetScript(ctx context.Context, id int64) (*model.Script, error)
-	CreateScript(ctx context.Context, script *model.Script) error
-	UpdateScript(ctx context.Context, script *model.Script) error
-	DeleteScript(ctx context.Context, id int64) error
-
-	// Documentation
-	ListDocs(ctx context.Context) ([]model.CronDoc, error)
-	GetDoc(ctx context.Context, id int64) (*model.CronDoc, error)
-	CreateDoc(ctx context.Context, doc *model.CronDoc) error
-	UpdateDoc(ctx context.Context, doc *model.CronDoc) error
-	DeleteDoc(ctx context.Context, id int64) error
-	CountDocs(ctx context.Context) (int, error)
-	BatchCreateDocs(ctx context.Context, docs []model.CronDoc) error
-}
+// CronRepository is now defined in easyserver/internal/cron.Repository.
+// Kept as alias for backward compatibility.
+type CronRepository = cron.Repository
 
 // DatabaseMgmtRepository defines the interface for database management data access
 type DatabaseMgmtRepository interface {
@@ -214,32 +176,9 @@ type WebsiteRepository interface {
 	CountByDomainExcludingID(ctx context.Context, domain string, excludeID int64) (int, error)
 }
 
-// DeployRepository defines the interface for deploy data access
-type DeployRepository interface {
-	// Server CRUD
-	ListServers(ctx context.Context) ([]model.DeployServer, error)
-	GetServer(ctx context.Context, id int64) (*model.DeployServer, error)
-	GetServerAuthData(ctx context.Context, id int64) (string, error)
-	CreateServer(ctx context.Context, srv *model.DeployServer) error
-	UpdateServer(ctx context.Context, srv *model.DeployServer) error
-	DeleteServer(ctx context.Context, id int64) error
-	UpdateServerStatus(ctx context.Context, id int64, status string, lastPing string) error
-	CountServerTasks(ctx context.Context, serverID int64) (int, error)
-	CountServerVersions(ctx context.Context, serverID int64) (int, error)
-
-	// Task CRUD
-	ListTasks(ctx context.Context) ([]model.DeployTask, error)
-	GetTask(ctx context.Context, id int64) (*model.DeployTask, error)
-	ServerExists(ctx context.Context, id int64) (bool, error)
-	CreateTask(ctx context.Context, task *model.DeployTask) error
-	DeleteTask(ctx context.Context, id int64) error
-	UpdateTaskStatus(ctx context.Context, id int64, status string, result string) error
-
-	// Version CRUD
-	ListVersions(ctx context.Context, serverID int64) ([]model.DeployVersion, error)
-	GetVersion(ctx context.Context, id int64) (*model.DeployVersion, error)
-	CreateVersion(ctx context.Context, ver *model.DeployVersion) error
-}
+// DeployRepository is now defined in easyserver/internal/deploy.Repository.
+// Kept as alias for backward compatibility.
+type DeployRepository = deploy.Repository
 
 // DBBackupRepository defines the interface for database backup data access
 type DBBackupRepository interface {
