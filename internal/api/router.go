@@ -9,6 +9,7 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/config"
+	"easyserver/internal/container"
 	"easyserver/internal/cron"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
@@ -46,12 +47,8 @@ type Router struct {
 	notificationService  *notification.Service
 	serviceManager       *service.ServiceManager
 
-	// Container services
-	containerService *service.ContainerService
-	dockerService    *service.DockerService
-	composeService   *service.ComposeService
-	volumeService    *service.VolumeService
-	networkService   *service.NetworkService
+	// Container service
+	containerService *container.Service
 
 	// Cron service
 	cronService *cron.Service
@@ -111,12 +108,8 @@ type RouterDeps struct {
 	NotificationService  *notification.Service
 	ServiceManager       *service.ServiceManager
 
-	// Container services
-	ContainerService *service.ContainerService
-	DockerService    *service.DockerService
-	ComposeService   *service.ComposeService
-	VolumeService    *service.VolumeService
-	NetworkService   *service.NetworkService
+	// Container service
+	ContainerService *container.Service
 
 	// Cron service
 	CronService *cron.Service
@@ -180,12 +173,8 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		notificationService:  deps.NotificationService,
 		serviceManager:       deps.ServiceManager,
 
-		// Container services
+		// Container service
 		containerService: deps.ContainerService,
-		dockerService:    deps.DockerService,
-		composeService:   deps.ComposeService,
-		volumeService:    deps.VolumeService,
-		networkService:   deps.NetworkService,
 
 		// Cron service
 		cronService: deps.CronService,
@@ -296,7 +285,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	registerSSHRoutes(protected, r.sshConfigService)
-	registerContainerRoutes(protected, r.containerService, r.dockerService, r.composeService, r.volumeService, r.networkService, r.auditService)
+	registerContainerRoutes(protected, r.containerService, r.auditService)
 	registerTemplateRoutes(protected)
 	registerProcessRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)

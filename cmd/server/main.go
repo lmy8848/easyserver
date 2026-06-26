@@ -16,6 +16,7 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/config"
+	"easyserver/internal/container"
 	"easyserver/internal/cron"
 	"easyserver/internal/database"
 	"easyserver/internal/dbserver"
@@ -195,12 +196,8 @@ func main() {
 	// Initialize TOTP service (single shared instance)
 	totpService := service.NewTOTPService(totpRepo)
 
-	// Initialize container services (single shared instance)
-	containerService := service.NewContainerService(cmdExec)
-	dockerService := service.NewDockerService(cmdExec)
-	composeService := service.NewComposeService(cmdExec)
-	volumeService := service.NewVolumeService(cmdExec)
-	networkService := service.NewNetworkService(cmdExec)
+	// Initialize container service (single shared instance)
+	containerService := container.NewService(cmdExec)
 
 	// Initialize service manager (single shared instance)
 	serviceManager := service.NewServiceManager(cmdExec)
@@ -312,12 +309,8 @@ func main() {
 		NotificationService:  notificationSvc,
 		ServiceManager:       serviceManager,
 
-		// Container services
+		// Container service
 		ContainerService: containerService,
-		DockerService:    dockerService,
-		ComposeService:   composeService,
-		VolumeService:    volumeService,
-		NetworkService:   networkService,
 
 		// Cron service
 		CronService: cronSvc,
