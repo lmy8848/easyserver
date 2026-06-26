@@ -16,6 +16,7 @@ import (
 	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/cloud"
 	"easyserver/internal/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
@@ -36,7 +37,6 @@ import (
 	"easyserver/internal/process"
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/service"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
@@ -280,9 +280,9 @@ func main() {
 	}
 
 	// Initialize cloud service (single shared instance, nil if disabled)
-	var cloudService *service.CloudService
+	var cloudService *cloud.Service
 	if cfg.TencentCloud.Enabled {
-		cloudService, err = service.NewCloudService(
+		cloudService, err = cloud.NewService(
 			cfg.TencentCloud.SecretID,
 			cfg.TencentCloud.SecretKey,
 			cfg.TencentCloud.Region,

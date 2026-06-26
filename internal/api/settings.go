@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"easyserver/internal/alert"
+	"easyserver/internal/cloud"
 	"easyserver/internal/config"
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
 	"easyserver/internal/notify"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -510,7 +510,7 @@ func (h *SettingsHandler) TestCloudConnection(c *gin.Context) {
 		return
 	}
 
-	cloudService, err := service.NewCloudService(
+	cloudService, err := cloud.NewService(
 		h.cfg.TencentCloud.SecretID,
 		h.cfg.TencentCloud.SecretKey,
 		h.cfg.TencentCloud.Region,

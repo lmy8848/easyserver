@@ -4,19 +4,19 @@ import (
 	"strconv"
 	"time"
 
+	"easyserver/internal/cloud"
 	"easyserver/internal/config"
-	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 type CloudHandler struct {
-	cloudService    *service.CloudService
+	cloudService    *cloud.Service
 	currentInstance string // The instance running this panel
 	panelPort       int    // Panel port for self-protection
 }
 
-func NewCloudHandler(cloudService *service.CloudService, currentInstance string, panelPort int) *CloudHandler {
+func NewCloudHandler(cloudService *cloud.Service, currentInstance string, panelPort int) *CloudHandler {
 	return &CloudHandler{
 		cloudService:    cloudService,
 		currentInstance: currentInstance,
@@ -180,7 +180,7 @@ func (h *CloudHandler) AddFirewallRule(c *gin.Context) {
 		return
 	}
 
-	var rule service.FirewallRule
+	var rule cloud.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
@@ -355,7 +355,7 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 	Success(c, traffic)
 }
 
-func registerCloudRoutes(protected *gin.RouterGroup, cloudService *service.CloudService, cfg *config.TencentCloudConfig, panelPort int) {
+func registerCloudRoutes(protected *gin.RouterGroup, cloudService *cloud.Service, cfg *config.TencentCloudConfig, panelPort int) {
 	if cloudService == nil {
 		return // Cloud service not enabled, skip route registration
 	}

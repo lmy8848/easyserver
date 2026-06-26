@@ -9,6 +9,7 @@ import (
 	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/cloud"
 	"easyserver/internal/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
@@ -27,7 +28,6 @@ import (
 	"easyserver/internal/process"
 	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
-	"easyserver/internal/service"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
@@ -91,7 +91,7 @@ type Router struct {
 	fileManager *filemanager.Manager
 
 	// Cloud service (nil if disabled)
-	cloudService *service.CloudService
+	cloudService *cloud.Service
 }
 
 // RouterDeps holds the shared service instances created once in main.go.
@@ -153,7 +153,7 @@ type RouterDeps struct {
 	FileManager *filemanager.Manager
 
 	// Cloud service (nil if disabled)
-	CloudService *service.CloudService
+	CloudService *cloud.Service
 }
 
 func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
