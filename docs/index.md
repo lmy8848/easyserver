@@ -1,7 +1,8 @@
 ---
 layout: default
-title: EasyServer - Linux 服务器管理面板
-description: 一站式 Linux 服务器管理面板，Go + React 构建
+title: 首页
+nav_order: 1
+permalink: /
 ---
 
 # EasyServer

@@ -1,3 +1,10 @@
+---
+layout: default
+title: 部署指南
+nav_order: 3
+permalink: /deploy
+---
+
 # EasyServer Linux 部署手册
 
 > 版本：v1.0.0 | 更新日期：2026-06-15
