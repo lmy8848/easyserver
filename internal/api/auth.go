@@ -616,7 +616,6 @@ func registerAuthRoutes(
 	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, totpService, sessionTimeout)
 	{
 		auth.POST("/login", authHandler.Login)
-		auth.POST("/logout", authHandler.Logout)
 		auth.POST("/verify-totp", authHandler.VerifyTOTP)
 		auth.POST("/verify-backup", authHandler.VerifyBackupCode)
 	}
@@ -625,6 +624,7 @@ func registerAuthRoutes(
 	authProtected := api.Group("/auth")
 	authProtected.Use(middleware.JWTMiddleware(jwtSecret, sessionValidator, tokenValidator))
 	{
+		authProtected.POST("/logout", authHandler.Logout)
 		authProtected.GET("/me", authHandler.GetProfile)
 		authProtected.POST("/change-password", authHandler.ChangePassword)
 		authProtected.POST("/totp/setup", authHandler.SetupTOTP)

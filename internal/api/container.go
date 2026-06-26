@@ -3,12 +3,22 @@ package api
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"easyserver/internal/model"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// isDockerNotInstalled checks if the error is about Docker not being available
+func isDockerNotInstalled(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "docker info failed") ||
+		strings.Contains(msg, "Cannot connect to the Docker daemon") ||
+		strings.Contains(msg, "docker: command not found") ||
+		strings.Contains(msg, "executable file not found")
+}
 
 // ContainerHandler handles all container-related requests
 type ContainerHandler struct {
@@ -91,7 +101,11 @@ func (h *ContainerHandler) RestartDocker(c *gin.Context) {
 func (h *ContainerHandler) GetDockerInfo(c *gin.Context) {
 	info, err := h.dockerService.GetDockerInfo(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		if isDockerNotInstalled(err) {
+			BadRequest(c, "Docker 未安装或未启动")
+		} else {
+			InternalError(c, err.Error())
+		}
 		return
 	}
 	Success(c, info)
@@ -524,7 +538,11 @@ func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) {
 func (h *ContainerHandler) ListVolumes(c *gin.Context) {
 	volumes, err := h.volumeService.ListVolumes(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		if isDockerNotInstalled(err) {
+			BadRequest(c, "Docker 未安装或未启动")
+		} else {
+			InternalError(c, err.Error())
+		}
 		return
 	}
 	Success(c, gin.H{"volumes": volumes})
@@ -565,7 +583,11 @@ func (h *ContainerHandler) RemoveVolume(c *gin.Context) {
 func (h *ContainerHandler) ListNetworks(c *gin.Context) {
 	networks, err := h.networkService.ListNetworks(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		if isDockerNotInstalled(err) {
+			BadRequest(c, "Docker 未安装或未启动")
+		} else {
+			InternalError(c, err.Error())
+		}
 		return
 	}
 	Success(c, gin.H{"networks": networks})

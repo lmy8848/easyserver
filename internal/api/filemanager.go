@@ -5,11 +5,20 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// isPathError checks if the error is a path validation error (should return 403)
+func isPathError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "path traversal") ||
+		strings.Contains(msg, "absolute paths are not allowed") ||
+		strings.Contains(msg, "cannot resolve path")
+}
 
 type FileManagerHandler struct {
 	fileManager  *service.FileManager
@@ -66,7 +75,11 @@ func (h *FileManagerHandler) List(c *gin.Context) {
 
 	files, err := h.fileManager.List(path)
 	if err != nil {
-		InternalError(c, err.Error())
+		if isPathError(err) {
+			Forbidden(c, err.Error())
+		} else {
+			InternalError(c, err.Error())
+		}
 		return
 	}
 
@@ -493,7 +506,11 @@ func (h *FileManagerHandler) GetDetails(c *gin.Context) {
 			NotFound(c, "文件不存在")
 			return
 		}
-		InternalError(c, err.Error())
+		if isPathError(err) {
+			Forbidden(c, err.Error())
+		} else {
+			InternalError(c, err.Error())
+		}
 		return
 	}
 
