@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"easyserver/internal/auth"
 )
 
 // NotifyService handles sending notifications (webhook, etc.)
@@ -26,15 +28,8 @@ func NewNotifyService(webhookURL string, enabled bool) *NotifyService {
 	}
 }
 
-// LoginEvent represents a login event for notification
-type LoginEvent struct {
-	Username  string `json:"username"`
-	IP        string `json:"ip"`
-	UserAgent string `json:"user_agent"`
-	Time      string `json:"time"`
-	Success   bool   `json:"success"`
-	Reason    string `json:"reason,omitempty"`
-}
+// LoginEvent migrated to auth package; kept as alias.
+type LoginEvent = auth.LoginEvent
 
 // TestWebhook sends a test notification synchronously and returns any error
 func (s *NotifyService) TestWebhook() error {
