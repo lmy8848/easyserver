@@ -4,23 +4,22 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/model"
-	"easyserver/internal/service"
+	"easyserver/internal/ssh"
 
 	"github.com/gin-gonic/gin"
 )
 
-// SSHHandler handles SSH management requests
+// SSHHandler handles SSH management requests.
 type SSHHandler struct {
-	sshService *service.SSHConfigService
+	sshService *ssh.Service
 }
 
-// NewSSHHandler creates a new SSH handler
-func NewSSHHandler(sshService *service.SSHConfigService) *SSHHandler {
+// NewSSHHandler creates a new SSH handler.
+func NewSSHHandler(sshService *ssh.Service) *SSHHandler {
 	return &SSHHandler{sshService: sshService}
 }
 
-// GetConfig returns the current SSH configuration
+// GetConfig returns the current SSH configuration.
 func (h *SSHHandler) GetConfig(c *gin.Context) {
 	config, err := h.sshService.GetConfig()
 	if err != nil {
@@ -30,7 +29,7 @@ func (h *SSHHandler) GetConfig(c *gin.Context) {
 	Success(c, config)
 }
 
-// SaveConfig saves the SSH configuration
+// SaveConfig saves the SSH configuration.
 func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	var config struct {
 		Port                   int    `json:"port"`
@@ -99,7 +98,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	config.DenyUsers = strings.NewReplacer("\n", "", "\r", "").Replace(config.DenyUsers)
 
 	// Save config
-	sshConfig := &model.SSHConfig{
+	sshConfig := &ssh.Config{
 		Port:                   config.Port,
 		PermitRootLogin:        config.PermitRootLogin,
 		PasswordAuthentication: config.PasswordAuthentication,
@@ -120,7 +119,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	Success(c, gin.H{"message": "SSH 配置已保存"})
 }
 
-// TestConfig tests the SSH configuration
+// TestConfig tests the SSH configuration.
 func (h *SSHHandler) TestConfig(c *gin.Context) {
 	output, err := h.sshService.TestConfig(c.Request.Context())
 	if err != nil {
@@ -130,7 +129,7 @@ func (h *SSHHandler) TestConfig(c *gin.Context) {
 	Success(c, gin.H{"message": output})
 }
 
-// ReloadSSH reloads the SSH service
+// ReloadSSH reloads the SSH service.
 func (h *SSHHandler) ReloadSSH(c *gin.Context) {
 	if err := h.sshService.ReloadSSH(c.Request.Context()); err != nil {
 		InternalError(c, "重载 SSH 失败: "+err.Error())
@@ -139,7 +138,7 @@ func (h *SSHHandler) ReloadSSH(c *gin.Context) {
 	Success(c, gin.H{"message": "SSH 服务已重载"})
 }
 
-// GetSessions returns active SSH sessions
+// GetSessions returns active SSH sessions.
 func (h *SSHHandler) GetSessions(c *gin.Context) {
 	sessions, err := h.sshService.GetSessions(c.Request.Context())
 	if err != nil {
@@ -149,7 +148,7 @@ func (h *SSHHandler) GetSessions(c *gin.Context) {
 	Success(c, gin.H{"sessions": sessions})
 }
 
-// KillSession kills an SSH session
+// KillSession kills an SSH session.
 func (h *SSHHandler) KillSession(c *gin.Context) {
 	pidStr := c.Param("pid")
 	pid, err := strconv.Atoi(pidStr)
@@ -158,12 +157,11 @@ func (h *SSHHandler) KillSession(c *gin.Context) {
 		return
 	}
 
-	// Validate PID bounds
 	if pid <= 1 {
 		BadRequest(c, "无效的 PID: 必须大于 1")
 		return
 	}
-	if pid > 4194304 { // Max PID on Linux
+	if pid > 4194304 {
 		BadRequest(c, "无效的 PID: 数值过大")
 		return
 	}
@@ -175,7 +173,7 @@ func (h *SSHHandler) KillSession(c *gin.Context) {
 	Success(c, gin.H{"message": "会话已终止"})
 }
 
-// GetLoginHistory returns SSH login history
+// GetLoginHistory returns SSH login history.
 func (h *SSHHandler) GetLoginHistory(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "50")
 	limit, err := strconv.Atoi(limitStr)
@@ -191,7 +189,7 @@ func (h *SSHHandler) GetLoginHistory(c *gin.Context) {
 	Success(c, gin.H{"records": records})
 }
 
-func registerSSHRoutes(protected *gin.RouterGroup, sshService *service.SSHConfigService) {
+func registerSSHRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 	handler := NewSSHHandler(sshService)
 
 	// SSH Config

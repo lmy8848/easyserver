@@ -1,4 +1,4 @@
-package service
+package ssh
 
 import (
 	"bufio"
@@ -10,28 +10,27 @@ import (
 	"strings"
 
 	"easyserver/internal/executor"
-	"easyserver/internal/model"
 )
 
 const sshdConfigPath = "/etc/ssh/sshd_config"
 
-// SSHConfigService manages SSH server configuration
-type SSHConfigService struct {
+// Service manages SSH server configuration.
+type Service struct {
 	configPath string
 	executor   executor.CommandExecutor
 }
 
-// NewSSHConfigService creates a new SSH config service
-func NewSSHConfigService(exec executor.CommandExecutor) *SSHConfigService {
-	return &SSHConfigService{
+// NewService creates a new SSH service.
+func NewService(exec executor.CommandExecutor) *Service {
+	return &Service{
 		configPath: sshdConfigPath,
 		executor:   exec,
 	}
 }
 
-// GetConfig parses and returns the current SSH configuration
-func (s *SSHConfigService) GetConfig() (*model.SSHConfig, error) {
-	config := &model.SSHConfig{
+// GetConfig parses and returns the current SSH configuration.
+func (s *Service) GetConfig() (*Config, error) {
+	config := &Config{
 		Port:                   22,
 		PermitRootLogin:        "yes",
 		PasswordAuthentication: "yes",
@@ -101,8 +100,8 @@ func (s *SSHConfigService) GetConfig() (*model.SSHConfig, error) {
 	return config, nil
 }
 
-// SaveConfig saves the SSH configuration
-func (s *SSHConfigService) SaveConfig(config *model.SSHConfig) error {
+// SaveConfig saves the SSH configuration.
+func (s *Service) SaveConfig(config *Config) error {
 	// Backup original file
 	backupPath := s.configPath + ".bak"
 	if err := copyFile(s.configPath, backupPath); err != nil {
@@ -199,8 +198,8 @@ func (s *SSHConfigService) SaveConfig(config *model.SSHConfig) error {
 	return nil
 }
 
-// TestConfig tests the SSH configuration
-func (s *SSHConfigService) TestConfig(ctx context.Context) (string, error) {
+// TestConfig tests the SSH configuration.
+func (s *Service) TestConfig(ctx context.Context) (string, error) {
 	output, exitCode, err := s.executor.RunCombined(ctx, "sshd", "-t")
 	if err != nil {
 		return output, fmt.Errorf("config test failed: %w", err)
@@ -211,8 +210,8 @@ func (s *SSHConfigService) TestConfig(ctx context.Context) (string, error) {
 	return "Configuration is valid", nil
 }
 
-// ReloadSSH reloads the SSH service
-func (s *SSHConfigService) ReloadSSH(ctx context.Context) error {
+// ReloadSSH reloads the SSH service.
+func (s *Service) ReloadSSH(ctx context.Context) error {
 	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "reload", "sshd")
 	if err != nil || exitCode != 0 {
 		// Try ssh service name
@@ -229,9 +228,9 @@ func (s *SSHConfigService) ReloadSSH(ctx context.Context) error {
 	return nil
 }
 
-// GetSessions returns active SSH sessions
-func (s *SSHConfigService) GetSessions(ctx context.Context) ([]model.SSHSession, error) {
-	var sessions []model.SSHSession
+// GetSessions returns active SSH sessions.
+func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
+	var sessions []Session
 	seenPIDs := make(map[int]bool)
 
 	// Method 1: Use `who -u` for interactive sessions (with TTY)
@@ -249,7 +248,6 @@ func (s *SSHConfigService) GetSessions(ctx context.Context) ([]model.SSHSession,
 	}
 
 	// Method 2: Use `ss` to detect all SSH connections (including non-interactive)
-	// Read the actual SSH port from config instead of hardcoding 22
 	sshPort := 22
 	if cfg, err := s.GetConfig(); err == nil && cfg.Port > 0 {
 		sshPort = cfg.Port
@@ -262,11 +260,9 @@ func (s *SSHConfigService) GetSessions(ctx context.Context) ([]model.SSHSession,
 		scanner := bufio.NewScanner(strings.NewReader(ssOut))
 		for scanner.Scan() {
 			line := scanner.Text()
-			// Filter for SSH port
 			if !strings.Contains(line, sshPortStr) && !strings.Contains(line, sshPortTab) {
 				continue
 			}
-			// Skip header lines
 			if strings.HasPrefix(line, "State") || strings.HasPrefix(line, "Netid") {
 				continue
 			}
@@ -285,11 +281,9 @@ func (s *SSHConfigService) GetSessions(ctx context.Context) ([]model.SSHSession,
 		scanner := bufio.NewScanner(strings.NewReader(psOut))
 		for scanner.Scan() {
 			line := scanner.Text()
-			// Look for sshd processes with user sessions (sshd: user@pts/N or sshd: user@notty)
 			if !strings.Contains(line, "sshd:") || strings.Contains(line, "grep") {
 				continue
 			}
-			// Skip the main sshd listener process
 			if strings.Contains(line, "/usr/sbin/sshd") || strings.Contains(line, "-D") {
 				continue
 			}
@@ -305,24 +299,89 @@ func (s *SSHConfigService) GetSessions(ctx context.Context) ([]model.SSHSession,
 	return sessions, nil
 }
 
-// parseSSLine parses a line from `ss -tnp` output
-// Format: ESTAB 0 0 10.0.16.14:22 121.30.119.137:53061 users:(("sshd",pid=3096292,fd=4))
-func parseSSLine(line string) *model.SSHSession {
+// KillSession kills an SSH session by PID.
+func (s *Service) KillSession(ctx context.Context, pid int) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, "kill", strconv.Itoa(pid))
+	if err != nil {
+		return fmt.Errorf("kill failed: %s: %w", output, err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("kill failed: %s (exit code %d)", output, exitCode)
+	}
+	log.Printf("ssh: killed session %d", pid)
+	return nil
+}
+
+// GetLoginHistory returns recent SSH login attempts.
+func (s *Service) GetLoginHistory(ctx context.Context, limit int) ([]LoginRecord, error) {
+	// Try journalctl first
+	stdout, _, exitCode, err := s.executor.Run(ctx, "journalctl", "-u", "sshd", "-u", "ssh", "--no-pager", "-n", strconv.Itoa(limit), "--output=short-iso")
+	if err != nil || exitCode != 0 {
+		// Fallback to /var/log/auth.log
+		return s.getLoginHistoryFromAuthLog(limit)
+	}
+
+	var records []LoginRecord
+	scanner := bufio.NewScanner(strings.NewReader(stdout))
+	for scanner.Scan() {
+		line := scanner.Text()
+		record := parseSSHLogLine(line)
+		if record != nil {
+			records = append(records, *record)
+		}
+	}
+
+	return records, nil
+}
+
+func (s *Service) getLoginHistoryFromAuthLog(limit int) ([]LoginRecord, error) {
+	logPaths := []string{"/var/log/auth.log", "/var/log/secure"}
+	var file *os.File
+	for _, path := range logPaths {
+		var err error
+		file, err = os.Open(path)
+		if err == nil {
+			break
+		}
+	}
+	if file == nil {
+		return nil, fmt.Errorf("no SSH log file found (tried auth.log and secure)")
+	}
+	defer file.Close()
+
+	var records []LoginRecord
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "sshd") && (strings.Contains(line, "Accepted") || strings.Contains(line, "Failed")) {
+			record := parseSSHLogLine(line)
+			if record != nil {
+				records = append(records, *record)
+			}
+		}
+	}
+
+	if len(records) > limit {
+		records = records[len(records)-limit:]
+	}
+
+	return records, nil
+}
+
+// --- Parsing helpers ---
+
+func parseSSLine(line string) *Session {
 	fields := strings.Fields(line)
 	if len(fields) < 6 {
 		return nil
 	}
 
-	// Extract local and remote addresses
 	remoteAddr := fields[4]
-
-	// Extract remote IP (before the colon)
 	remoteIP := remoteAddr
 	if idx := strings.LastIndex(remoteAddr, ":"); idx > 0 {
 		remoteIP = remoteAddr[:idx]
 	}
 
-	// Extract PID from "users:(("sshd",pid=XXXXX,fd=N))"
 	pid := 0
 	pidIdx := strings.Index(line, "pid=")
 	if pidIdx > 0 {
@@ -339,7 +398,6 @@ func parseSSLine(line string) *model.SSHSession {
 		return nil
 	}
 
-	// Determine session type
 	sessionType := "ssh"
 	tty := "notty"
 	if strings.Contains(line, "@pts/") {
@@ -347,19 +405,16 @@ func parseSSLine(line string) *model.SSHSession {
 		sessionType = "interactive"
 	}
 
-	return &model.SSHSession{
-		User:      "root", // Will be updated if we can determine the user
-		TTY:       tty,
-		PID:       pid,
-		From:      remoteIP,
-		LoginTime: "", // Will be filled if available
-		Type:      sessionType,
+	return &Session{
+		User: "root",
+		TTY:  tty,
+		PID:  pid,
+		From: remoteIP,
+		Type: sessionType,
 	}
 }
 
-// parsePSLine parses a line from `ps aux` output for sshd processes
-// Format: root 3096292 0.0 0.5 18004 11288 ? Ss 20:48 0:00 sshd: root@notty
-func parsePSLine(line string) *model.SSHSession {
+func parsePSLine(line string) *Session {
 	fields := strings.Fields(line)
 	if len(fields) < 11 {
 		return nil
@@ -368,7 +423,6 @@ func parsePSLine(line string) *model.SSHSession {
 	user := fields[0]
 	pidStr := fields[1]
 
-	// Find the sshd: user@tty part
 	sshdPart := ""
 	for i, f := range fields {
 		if f == "sshd:" && i+1 < len(fields) {
@@ -381,7 +435,6 @@ func parsePSLine(line string) *model.SSHSession {
 		return nil
 	}
 
-	// Parse user@tty
 	tty := "notty"
 	sessionUser := user
 	if atIdx := strings.Index(sshdPart, "@"); atIdx > 0 {
@@ -389,7 +442,6 @@ func parsePSLine(line string) *model.SSHSession {
 		tty = sshdPart[atIdx+1:]
 	}
 
-	// Parse PID
 	pid := 0
 	if p, err := strconv.Atoi(pidStr); err == nil {
 		pid = p
@@ -399,8 +451,7 @@ func parsePSLine(line string) *model.SSHSession {
 		return nil
 	}
 
-	// Get the start time from ps output (field 9)
-	loginTime := fields[8] // HH:MM format
+	loginTime := fields[8]
 
 	sessionType := "ssh"
 	if tty == "notty" {
@@ -409,31 +460,21 @@ func parsePSLine(line string) *model.SSHSession {
 		sessionType = "interactive"
 	}
 
-	return &model.SSHSession{
+	return &Session{
 		User:      sessionUser,
 		TTY:       tty,
 		PID:       pid,
-		From:      "", // Will be filled by ss method if available
 		LoginTime: loginTime,
 		Type:      sessionType,
 	}
 }
 
-// parseWhoLine parses a single line from `who -u` output.
-// The output format varies by locale and date format:
-//
-//	ISO date:   root  pts/0  2024-06-23 10:00  .  12345 (192.168.1.1)
-//	Traditional: root  pts/0  Jun 23 10:00  .  12345 (192.168.1.1)
-//
-// Strategy: find FROM field (starts with "(" and ends with ")"), PID is the
-// numeric field right before it, then work forward to extract user/tty/time.
-func parseWhoLine(line string) *model.SSHSession {
+func parseWhoLine(line string) *Session {
 	fields := strings.Fields(line)
 	if len(fields) < 3 {
 		return nil
 	}
 
-	// Find the FROM field: starts with "(" and ends with ")"
 	fromIdx := -1
 	for i, f := range fields {
 		if strings.HasPrefix(f, "(") && strings.HasSuffix(f, ")") {
@@ -442,37 +483,30 @@ func parseWhoLine(line string) *model.SSHSession {
 		}
 	}
 
-	// If no FROM field found, this is not an SSH (remote) session
 	if fromIdx < 0 {
 		return nil
 	}
 
-	// PID is the field right before FROM
 	pidIdx := fromIdx - 1
 	if pidIdx < 2 {
-		return nil // Not enough fields before FROM
+		return nil
 	}
 
-	// Parse PID
 	pid := 0
 	if p, err := strconv.Atoi(fields[pidIdx]); err == nil {
 		pid = p
 	}
 
-	// Parse FROM IP
 	from := strings.TrimPrefix(fields[fromIdx], "(")
 	from = strings.TrimSuffix(from, ")")
 
-	// User and TTY are always the first two fields
-	session := &model.SSHSession{
+	session := &Session{
 		User: fields[0],
 		TTY:  fields[1],
 		PID:  pid,
 		From: from,
 	}
 
-	// Login time is everything between TTY (index 1) and the IDLE/PID fields.
-	// pidIdx-1 is the IDLE field; time fields are [2 .. pidIdx-2]
 	if pidIdx >= 3 {
 		session.LoginTime = strings.Join(fields[2:pidIdx-1], " ")
 	}
@@ -480,81 +514,8 @@ func parseWhoLine(line string) *model.SSHSession {
 	return session
 }
 
-// KillSession kills an SSH session by PID
-func (s *SSHConfigService) KillSession(ctx context.Context, pid int) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "kill", strconv.Itoa(pid))
-	if err != nil {
-		return fmt.Errorf("kill failed: %s: %w", output, err)
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("kill failed: %s (exit code %d)", output, exitCode)
-	}
-	log.Printf("ssh: killed session %d", pid)
-	return nil
-}
-
-// GetLoginHistory returns recent SSH login attempts
-func (s *SSHConfigService) GetLoginHistory(ctx context.Context, limit int) ([]model.SSHLoginRecord, error) {
-	// Try journalctl first
-	stdout, _, exitCode, err := s.executor.Run(ctx, "journalctl", "-u", "sshd", "-u", "ssh", "--no-pager", "-n", strconv.Itoa(limit), "--output=short-iso")
-	if err != nil || exitCode != 0 {
-		// Fallback to /var/log/auth.log
-		return s.getLoginHistoryFromAuthLog(limit)
-	}
-
-	var records []model.SSHLoginRecord
-	scanner := bufio.NewScanner(strings.NewReader(stdout))
-	for scanner.Scan() {
-		line := scanner.Text()
-		record := parseSSHLogLine(line)
-		if record != nil {
-			records = append(records, *record)
-		}
-	}
-
-	return records, nil
-}
-
-// getLoginHistoryFromAuthLog reads from /var/log/auth.log or /var/log/secure
-func (s *SSHConfigService) getLoginHistoryFromAuthLog(limit int) ([]model.SSHLoginRecord, error) {
-	// Try /var/log/auth.log first (Debian/Ubuntu), then /var/log/secure (RHEL/CentOS)
-	logPaths := []string{"/var/log/auth.log", "/var/log/secure"}
-	var file *os.File
-	for _, path := range logPaths {
-		var err error
-		file, err = os.Open(path)
-		if err == nil {
-			break
-		}
-	}
-	if file == nil {
-		return nil, fmt.Errorf("no SSH log file found (tried auth.log and secure)")
-	}
-	defer file.Close()
-
-	var records []model.SSHLoginRecord
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "sshd") && (strings.Contains(line, "Accepted") || strings.Contains(line, "Failed")) {
-			record := parseSSHLogLine(line)
-			if record != nil {
-				records = append(records, *record)
-			}
-		}
-	}
-
-	// Return last N records
-	if len(records) > limit {
-		records = records[len(records)-limit:]
-	}
-
-	return records, nil
-}
-
-// parseSSHLogLine parses a syslog line for SSH events
-func parseSSHLogLine(line string) *model.SSHLoginRecord {
-	record := &model.SSHLoginRecord{}
+func parseSSHLogLine(line string) *LoginRecord {
+	record := &LoginRecord{}
 
 	if strings.Contains(line, "Accepted") {
 		record.Status = "success"
@@ -564,7 +525,6 @@ func parseSSHLogLine(line string) *model.SSHLoginRecord {
 		return nil
 	}
 
-	// Extract IP
 	if idx := strings.Index(line, "from "); idx >= 0 {
 		rest := line[idx+5:]
 		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
@@ -572,7 +532,6 @@ func parseSSHLogLine(line string) *model.SSHLoginRecord {
 		}
 	}
 
-	// Extract port
 	if idx := strings.Index(line, "port "); idx >= 0 {
 		rest := line[idx+5:]
 		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
@@ -582,7 +541,6 @@ func parseSSHLogLine(line string) *model.SSHLoginRecord {
 		}
 	}
 
-	// Extract user
 	if idx := strings.Index(line, "for "); idx >= 0 {
 		rest := line[idx+4:]
 		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
@@ -590,14 +548,12 @@ func parseSSHLogLine(line string) *model.SSHLoginRecord {
 		}
 	}
 
-	// Extract method
 	if strings.Contains(line, "password") {
 		record.Method = "password"
 	} else if strings.Contains(line, "publickey") {
 		record.Method = "publickey"
 	}
 
-	// Extract time (first 15 chars usually)
 	if len(line) >= 15 {
 		record.Time = line[:15]
 	}
@@ -605,7 +561,8 @@ func parseSSHLogLine(line string) *model.SSHLoginRecord {
 	return record
 }
 
-// Helper functions
+// --- File helpers ---
+
 func coalesceErr(errs ...error) error {
 	for _, err := range errs {
 		if err != nil {

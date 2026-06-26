@@ -22,6 +22,7 @@ import (
 	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
+	"easyserver/internal/ssh"
 	"easyserver/internal/systemprocess"
 	"easyserver/internal/web"
 
@@ -76,7 +77,7 @@ type Router struct {
 	packageManagerService *packagemanager.Service
 
 	// SSH service
-	sshConfigService *service.SSHConfigService
+	sshConfigService *ssh.Service
 
 	// Web server services
 	webServerService *web.Service
@@ -141,7 +142,7 @@ type RouterDeps struct {
 	PackageManagerService *packagemanager.Service
 
 	// SSH service
-	SSHConfigService *service.SSHConfigService
+	SSHConfigService *ssh.Service
 
 	// Web server services
 	WebServerService *web.Service

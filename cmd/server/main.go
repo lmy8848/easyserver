@@ -31,6 +31,7 @@ import (
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
+	"easyserver/internal/ssh"
 	"easyserver/internal/systemprocess"
 	"easyserver/internal/web"
 )
@@ -242,7 +243,7 @@ func main() {
 	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)
 
 	// Initialize SSH service (single shared instance)
-	sshConfigService := service.NewSSHConfigService(cmdExec)
+	sshConfigService := ssh.NewService(cmdExec)
 
 	// Initialize web server services (single shared instance)
 	webServerRepo := sqlite.NewWebServerRepository(db)
