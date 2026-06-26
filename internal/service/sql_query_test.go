@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"easyserver/internal/database_mgmt"
 )
 
 // --- SanitizeSQLError tests ---
@@ -38,9 +40,9 @@ func TestSanitizeSQLError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := SanitizeSQLError(tt.input)
+			got := database_mgmt.SanitizeSQLError(tt.input)
 			if got != tt.want {
-				t.Errorf("SanitizeSQLError() = %q, want %q", got, tt.want)
+				t.Errorf("database_mgmt.SanitizeSQLError() = %q, want %q", got, tt.want)
 			}
 		})
 	}
