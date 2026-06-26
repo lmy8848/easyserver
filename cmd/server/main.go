@@ -31,6 +31,7 @@ import (
 	"easyserver/internal/repository/sqlite"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
+	"easyserver/internal/systemprocess"
 	"easyserver/internal/web"
 )
 
@@ -184,7 +185,7 @@ func main() {
 
 	// Initialize system process service (single shared instance)
 	serviceWhitelistRepo := sqlite.NewServiceWhitelistRepository(db)
-	systemProcessService := service.NewSystemProcessService(cmdExec, serviceWhitelistRepo, auditSvc)
+	systemProcessService := systemprocess.NewService(cmdExec, serviceWhitelistRepo, auditSvc)
 
 	// Initialize notification service (single shared instance)
 	notificationRepo := sqlite.NewNotificationRepository(db)

@@ -22,6 +22,7 @@ import (
 	"easyserver/internal/repository"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/service"
+	"easyserver/internal/systemprocess"
 	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -40,7 +41,7 @@ type Router struct {
 	totpService          *service.TOTPService
 	alertService         *service.AlertService
 	processManager       *process.Service
-	systemProcessService *service.SystemProcessService
+	systemProcessService *systemprocess.Service
 	notificationService  *notification.Service
 	serviceManager       *service.ServiceManager
 
@@ -105,7 +106,7 @@ type RouterDeps struct {
 	TotpService          *service.TOTPService
 	AuditRepo            repository.AuditRepository
 	ProcessManager       *process.Service
-	SystemProcessService *service.SystemProcessService
+	SystemProcessService *systemprocess.Service
 	NotificationService  *notification.Service
 	ServiceManager       *service.ServiceManager
 

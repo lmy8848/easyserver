@@ -6,22 +6,22 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/service"
+	"easyserver/internal/systemprocess"
 
 	"github.com/gin-gonic/gin"
 )
 
-// SystemProcessHandler handles system process monitoring and service management API requests
+// SystemProcessHandler handles system process monitoring and service management API requests.
 type SystemProcessHandler struct {
-	sps *service.SystemProcessService
+	sps *systemprocess.Service
 }
 
-// NewSystemProcessHandler creates a new SystemProcessHandler
-func NewSystemProcessHandler(sps *service.SystemProcessService) *SystemProcessHandler {
+// NewSystemProcessHandler creates a new SystemProcessHandler.
+func NewSystemProcessHandler(sps *systemprocess.Service) *SystemProcessHandler {
 	return &SystemProcessHandler{sps: sps}
 }
 
-// GetSystemOverview returns system-wide resource statistics
+// GetSystemOverview returns system-wide resource statistics.
 func (h *SystemProcessHandler) GetSystemOverview(c *gin.Context) {
 	overview, err := h.sps.GetOverview()
 	if err != nil {
@@ -31,7 +31,7 @@ func (h *SystemProcessHandler) GetSystemOverview(c *gin.Context) {
 	Success(c, overview)
 }
 
-// ListSystemProcesses returns all running system processes
+// ListSystemProcesses returns all running system processes.
 func (h *SystemProcessHandler) ListSystemProcesses(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort_by", "memory")
 	order := c.DefaultQuery("order", "desc")
@@ -47,7 +47,7 @@ func (h *SystemProcessHandler) ListSystemProcesses(c *gin.Context) {
 	Success(c, processes)
 }
 
-// GetSystemProcess returns details for a specific process
+// GetSystemProcess returns details for a specific process.
 func (h *SystemProcessHandler) GetSystemProcess(c *gin.Context) {
 	pidStr := c.Param("pid")
 	pid, err := strconv.Atoi(pidStr)
@@ -56,7 +56,7 @@ func (h *SystemProcessHandler) GetSystemProcess(c *gin.Context) {
 		return
 	}
 
-	proc, err := service.GetSystemProcess(pid)
+	proc, err := systemprocess.GetSystemProcess(pid)
 	if err != nil {
 		NotFound(c, fmt.Sprintf("进程 %d 不存在", pid))
 		return
@@ -64,7 +64,7 @@ func (h *SystemProcessHandler) GetSystemProcess(c *gin.Context) {
 	Success(c, proc)
 }
 
-// ListSystemServices returns systemd services
+// ListSystemServices returns systemd services.
 func (h *SystemProcessHandler) ListSystemServices(c *gin.Context) {
 	services, err := h.sps.ListServices()
 	if err != nil {
@@ -74,7 +74,7 @@ func (h *SystemProcessHandler) ListSystemServices(c *gin.Context) {
 	Success(c, services)
 }
 
-// ServiceAction performs an action on a systemd service
+// ServiceAction performs an action on a systemd service.
 func (h *SystemProcessHandler) ServiceAction(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
@@ -114,7 +114,7 @@ func (h *SystemProcessHandler) ServiceAction(c *gin.Context) {
 	Success(c, gin.H{"message": fmt.Sprintf("服务 %s %s 成功", name, req.Action)})
 }
 
-// GetServiceLogs returns recent logs for a systemd service
+// GetServiceLogs returns recent logs for a systemd service.
 func (h *SystemProcessHandler) GetServiceLogs(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
@@ -133,16 +133,16 @@ func (h *SystemProcessHandler) GetServiceLogs(c *gin.Context) {
 	Success(c, gin.H{"logs": logs, "service": name})
 }
 
-// ListProtectedServices returns the list of protected services
+// ListProtectedServices returns the list of protected services.
 func (h *SystemProcessHandler) ListProtectedServices(c *gin.Context) {
 	protected := make([]gin.H, 0)
-	for name, reason := range service.ProtectedServices() {
+	for name, reason := range systemprocess.ProtectedServices() {
 		protected = append(protected, gin.H{"name": name, "reason": reason})
 	}
 	Success(c, protected)
 }
 
-// ListWhitelist returns the service whitelist
+// ListWhitelist returns the service whitelist.
 func (h *SystemProcessHandler) ListWhitelist(c *gin.Context) {
 	entries, err := h.sps.GetWhitelist()
 	if err != nil {
@@ -152,7 +152,7 @@ func (h *SystemProcessHandler) ListWhitelist(c *gin.Context) {
 	Success(c, entries)
 }
 
-// AddToWhitelist adds a service to the whitelist
+// AddToWhitelist adds a service to the whitelist.
 func (h *SystemProcessHandler) AddToWhitelist(c *gin.Context) {
 	var req struct {
 		Name string `json:"name" binding:"required"`
@@ -169,7 +169,7 @@ func (h *SystemProcessHandler) AddToWhitelist(c *gin.Context) {
 	Success(c, gin.H{"message": fmt.Sprintf("已添加 %s 到白名单", req.Name)})
 }
 
-// RemoveFromWhitelist removes a service from the whitelist
+// RemoveFromWhitelist removes a service from the whitelist.
 func (h *SystemProcessHandler) RemoveFromWhitelist(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
@@ -184,7 +184,7 @@ func (h *SystemProcessHandler) RemoveFromWhitelist(c *gin.Context) {
 	Success(c, gin.H{"message": fmt.Sprintf("已从白名单移除 %s", name)})
 }
 
-func registerSystemProcessRoutes(protected *gin.RouterGroup, sps *service.SystemProcessService) {
+func registerSystemProcessRoutes(protected *gin.RouterGroup, sps *systemprocess.Service) {
 	handler := NewSystemProcessHandler(sps)
 
 	sysGroup := protected.Group("/system")

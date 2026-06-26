@@ -12,6 +12,7 @@ import (
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/process"
+	"easyserver/internal/systemprocess"
 	"easyserver/internal/web"
 )
 
@@ -99,13 +100,9 @@ type DBBackupRepository interface {
 // Kept as alias for backward compatibility.
 type EnvConfigRepository = envconfig.Repository
 
-// ServiceWhitelistRepository defines the interface for service whitelist data access
-type ServiceWhitelistRepository interface {
-	Init(ctx context.Context) error
-	List(ctx context.Context) ([]model.ServiceWhitelistEntry, error)
-	Add(ctx context.Context, name string) error
-	Delete(ctx context.Context, name string) error
-}
+// ServiceWhitelistRepository is now defined in easyserver/internal/systemprocess.Repository.
+// Kept as alias for backward compatibility.
+type ServiceWhitelistRepository = systemprocess.Repository
 
 // ActivityRepository is now aliased above (auth.ActivityRepo).
 

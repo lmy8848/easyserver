@@ -1,4 +1,4 @@
-package service
+package systemprocess
 
 import (
 	"bufio"
@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"easyserver/internal/executor"
-	"easyserver/internal/model"
-	"easyserver/internal/repository"
 )
 
 const (
@@ -47,17 +45,18 @@ type cpuStat struct {
 	at      time.Time
 }
 
-type serviceAuditLogger interface {
+// AuditLogger defines the interface for audit logging of service operations.
+type AuditLogger interface {
 	LogServiceOperation(ctx context.Context, userID int64, username, action, serviceName, ip, userAgent string)
 }
 
-// SystemProcessService provides system process monitoring and systemd management
-type SystemProcessService struct {
+// Service provides system process monitoring and systemd management.
+type Service struct {
 	executor      executor.CommandExecutor
-	whitelistRepo repository.ServiceWhitelistRepository
-	auditLogger   serviceAuditLogger
+	whitelistRepo Repository
+	auditLogger   AuditLogger
 
-	cache     *model.SystemOverview
+	cache     *SystemOverview
 	cacheMu   sync.RWMutex
 	cacheTime time.Time
 	cacheTTL  time.Duration
@@ -67,21 +66,21 @@ type SystemProcessService struct {
 	prevCPU    *cpuStat // previous system-wide CPU snapshot
 
 	// Process list cache
-	procCache     []model.SystemProcess
+	procCache     []SystemProcess
 	procCacheMu   sync.RWMutex
 	procCacheTime time.Time
 	procCacheTTL  time.Duration
 
 	// Service list cache
-	svcCache     []model.SystemService
+	svcCache     []SystemService
 	svcCacheMu   sync.RWMutex
 	svcCacheTime time.Time
 	svcCacheTTL  time.Duration
 }
 
-// NewSystemProcessService creates a new SystemProcessService
-func NewSystemProcessService(executor executor.CommandExecutor, whitelistRepo repository.ServiceWhitelistRepository, auditLogger serviceAuditLogger) *SystemProcessService {
-	sps := &SystemProcessService{
+// NewService creates a new systemprocess.Service.
+func NewService(executor executor.CommandExecutor, whitelistRepo Repository, auditLogger AuditLogger) *Service {
+	s := &Service{
 		executor:      executor,
 		whitelistRepo: whitelistRepo,
 		auditLogger:   auditLogger,
@@ -91,12 +90,12 @@ func NewSystemProcessService(executor executor.CommandExecutor, whitelistRepo re
 		cpuSamples:    make(map[int]*cpuSample),
 	}
 	// Ensure whitelist table exists
-	sps.whitelistRepo.Init(context.Background())
-	return sps
+	s.whitelistRepo.Init(context.Background())
+	return s
 }
 
-// GetOverview returns system-wide resource statistics with caching
-func (s *SystemProcessService) GetOverview() (*model.SystemOverview, error) {
+// GetOverview returns system-wide resource statistics with caching.
+func (s *Service) GetOverview() (*SystemOverview, error) {
 	s.cacheMu.RLock()
 	if s.cache != nil && time.Since(s.cacheTime) < s.cacheTTL {
 		defer s.cacheMu.RUnlock()
@@ -104,7 +103,7 @@ func (s *SystemProcessService) GetOverview() (*model.SystemOverview, error) {
 	}
 	s.cacheMu.RUnlock()
 
-	overview := &model.SystemOverview{}
+	overview := &SystemOverview{}
 
 	// CPU usage
 	cpuUsage, err := s.getCPUUsage()
@@ -149,7 +148,7 @@ func (s *SystemProcessService) GetOverview() (*model.SystemOverview, error) {
 		if len(procs) < limit {
 			limit = len(procs)
 		}
-		overview.TopCPU = make([]model.SystemProcess, limit)
+		overview.TopCPU = make([]SystemProcess, limit)
 		copy(overview.TopCPU, procs[:limit])
 
 		// Top 5 by memory
@@ -157,7 +156,7 @@ func (s *SystemProcessService) GetOverview() (*model.SystemOverview, error) {
 		if len(procs) < limit {
 			limit = len(procs)
 		}
-		overview.TopMem = make([]model.SystemProcess, limit)
+		overview.TopMem = make([]SystemProcess, limit)
 		copy(overview.TopMem, procs[:limit])
 	}
 
@@ -169,16 +168,15 @@ func (s *SystemProcessService) GetOverview() (*model.SystemOverview, error) {
 	return overview, nil
 }
 
-// ListSystemProcesses reads processes from /proc
-// procWithCPU holds process data plus raw CPU ticks for delta calculation
+// procWithCPU holds process data plus raw CPU ticks for delta calculation.
 type procWithCPU struct {
-	model.SystemProcess
+	SystemProcess
 	utime int64
 	stime int64
 }
 
-// ListSystemProcesses reads processes from /proc and calculates instantaneous CPU usage
-func (s *SystemProcessService) ListSystemProcesses(sortBy, order, search string, limit int) ([]model.SystemProcess, error) {
+// ListSystemProcesses reads processes from /proc and calculates instantaneous CPU usage.
+func (s *Service) ListSystemProcesses(sortBy, order, search string, limit int) ([]SystemProcess, error) {
 	if limit <= 0 || limit > defaultProcLimit {
 		limit = defaultProcLimit
 	}
@@ -187,7 +185,7 @@ func (s *SystemProcessService) ListSystemProcesses(sortBy, order, search string,
 	if search == "" {
 		s.procCacheMu.RLock()
 		if s.procCache != nil && time.Since(s.procCacheTime) < s.procCacheTTL {
-			cached := make([]model.SystemProcess, len(s.procCache))
+			cached := make([]SystemProcess, len(s.procCache))
 			copy(cached, s.procCache)
 			s.procCacheMu.RUnlock()
 
@@ -258,7 +256,7 @@ func (s *SystemProcessService) ListSystemProcesses(sortBy, order, search string,
 	s.cpuMu.Unlock()
 
 	// Convert to result
-	var processes []model.SystemProcess
+	var processes []SystemProcess
 	for _, rp := range rawProcs {
 		processes = append(processes, rp.SystemProcess)
 	}
@@ -282,8 +280,8 @@ func (s *SystemProcessService) ListSystemProcesses(sortBy, order, search string,
 	return processes, nil
 }
 
-// GetSystemProcess returns details for a specific process by PID
-func GetSystemProcess(pid int) (*model.SystemProcess, error) {
+// GetSystemProcess returns details for a specific process by PID.
+func GetSystemProcess(pid int) (*SystemProcess, error) {
 	proc, err := readProcStatus(pid)
 	if err != nil {
 		return nil, err
@@ -291,12 +289,12 @@ func GetSystemProcess(pid int) (*model.SystemProcess, error) {
 	return &proc, nil
 }
 
-// ListServices returns systemd services (filtered by whitelist if entries exist)
-func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
+// ListServices returns systemd services (filtered by whitelist if entries exist).
+func (s *Service) ListServices() ([]SystemService, error) {
 	// Check cache
 	s.svcCacheMu.RLock()
 	if s.svcCache != nil && time.Since(s.svcCacheTime) < s.svcCacheTTL {
-		cached := make([]model.SystemService, len(s.svcCache))
+		cached := make([]SystemService, len(s.svcCache))
 		copy(cached, s.svcCache)
 		s.svcCacheMu.RUnlock()
 		return cached, nil
@@ -335,7 +333,7 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 		}
 	}
 
-	var services []model.SystemService
+	var services []SystemService
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -348,7 +346,7 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 		}
 
 		name := strings.TrimSuffix(fields[0], ".service")
-		svc := model.SystemService{
+		svc := SystemService{
 			Name:        name,
 			LoadState:   fields[1],
 			ActiveState: fields[2],
@@ -356,12 +354,6 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 		}
 		if len(fields) > 4 {
 			svc.Description = strings.Join(fields[4:], " ")
-		}
-
-		// Get PID from enabled map (avoids per-service systemctl call)
-		if svc.ActiveState == "active" && svc.SubState == "running" {
-			// Try to extract PID from --property output if available
-			// Otherwise leave as 0
 		}
 
 		// Get enabled status from batch result
@@ -393,7 +385,7 @@ func (s *SystemProcessService) ListServices() ([]model.SystemService, error) {
 	return services, nil
 }
 
-// protectedServices are services that cannot be stopped/restarted without force flag
+// protectedServices are services that cannot be stopped/restarted without force flag.
 var protectedServices = map[string]string{
 	"easyserver":     "EasyServer 面板进程",
 	"ssh":            "SSH 远程访问服务",
@@ -403,8 +395,8 @@ var protectedServices = map[string]string{
 	"systemd-logind": "登录管理服务",
 }
 
-// ServiceAction performs an action on a systemd service
-func (s *SystemProcessService) ServiceAction(serviceName, action string, force bool) error {
+// ServiceAction performs an action on a systemd service.
+func (s *Service) ServiceAction(serviceName, action string, force bool) error {
 	// Validate action
 	validActions := map[string]bool{
 		"start": true, "stop": true, "restart": true,
@@ -447,23 +439,23 @@ func (s *SystemProcessService) ServiceAction(serviceName, action string, force b
 	return nil
 }
 
-// GetWhitelist returns all whitelisted services
-func (s *SystemProcessService) GetWhitelist() ([]model.ServiceWhitelistEntry, error) {
+// GetWhitelist returns all whitelisted services.
+func (s *Service) GetWhitelist() ([]ServiceWhitelistEntry, error) {
 	return s.whitelistRepo.List(context.Background())
 }
 
-// AddToWhitelist adds a service to the whitelist
-func (s *SystemProcessService) AddToWhitelist(name string) error {
+// AddToWhitelist adds a service to the whitelist.
+func (s *Service) AddToWhitelist(name string) error {
 	return s.whitelistRepo.Add(context.Background(), name)
 }
 
-// RemoveFromWhitelist removes a service from the whitelist
-func (s *SystemProcessService) RemoveFromWhitelist(name string) error {
+// RemoveFromWhitelist removes a service from the whitelist.
+func (s *Service) RemoveFromWhitelist(name string) error {
 	return s.whitelistRepo.Delete(context.Background(), name)
 }
 
-// GetServiceLogs returns recent logs for a systemd service using journalctl
-func (s *SystemProcessService) GetServiceLogs(serviceName string, lines int) (string, error) {
+// GetServiceLogs returns recent logs for a systemd service using journalctl.
+func (s *Service) GetServiceLogs(serviceName string, lines int) (string, error) {
 	if lines <= 0 || lines > maxServiceLogLines {
 		lines = defaultServiceLogLines
 	}
@@ -485,18 +477,18 @@ func (s *SystemProcessService) GetServiceLogs(serviceName string, lines int) (st
 	return output, nil
 }
 
-// IsProtectedService checks if a service is in the protected list
+// IsProtectedService checks if a service is in the protected list.
 func IsProtectedService(serviceName string) (string, bool) {
 	reason, ok := protectedServices[serviceName]
 	return reason, ok
 }
 
-// ProtectedServices returns the map of protected services
+// ProtectedServices returns the map of protected services.
 func ProtectedServices() map[string]string {
 	return protectedServices
 }
 
-func (s *SystemProcessService) auditLog(serviceName, action string) {
+func (s *Service) auditLog(serviceName, action string) {
 	if s.auditLogger == nil {
 		return
 	}
@@ -505,15 +497,15 @@ func (s *SystemProcessService) auditLog(serviceName, action string) {
 
 // --- /proc parsing helpers ---
 
-func readProcStatus(pid int) (model.SystemProcess, error) {
+func readProcStatus(pid int) (SystemProcess, error) {
 	proc, _, _, err := readProcStatusWithTicks(pid)
 	return proc, err
 }
 
-// readProcStatusWithTicks returns the process info plus raw utime/stime for CPU delta calculation
-func readProcStatusWithTicks(pid int) (model.SystemProcess, int64, int64, error) {
+// readProcStatusWithTicks returns the process info plus raw utime/stime for CPU delta calculation.
+func readProcStatusWithTicks(pid int) (SystemProcess, int64, int64, error) {
 	var utime, stime int64
-	proc := model.SystemProcess{PID: pid}
+	proc := SystemProcess{PID: pid}
 
 	// Read /proc/[pid]/status
 	statusFile := fmt.Sprintf("%s/%d/status", procDir, pid)
@@ -627,8 +619,8 @@ func getBootTime() int64 {
 	return 0
 }
 
-// getCPUUsage reads /proc/stat and calculates instantaneous CPU usage using delta with previous sample
-func (s *SystemProcessService) getCPUUsage() (float64, error) {
+// getCPUUsage reads /proc/stat and calculates instantaneous CPU usage using delta with previous sample.
+func (s *Service) getCPUUsage() (float64, error) {
 	f, err := os.Open(statFile)
 	if err != nil {
 		return 0, err
@@ -741,7 +733,7 @@ func getUptime() (int64, error) {
 	return 0, fmt.Errorf("invalid uptime format")
 }
 
-func sortProcesses(procs []model.SystemProcess, sortBy, order string) {
+func sortProcesses(procs []SystemProcess, sortBy, order string) {
 	asc := order != "desc"
 	sort.Slice(procs, func(i, j int) bool {
 		switch sortBy {
