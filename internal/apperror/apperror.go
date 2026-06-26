@@ -144,8 +144,35 @@ func IsDockerNotInstalled(err error) bool {
 		contains(msg, "not accessible")
 }
 
+// errorPattern maps error message patterns to AppError types
+type errorPattern struct {
+	matches []string    // substrings to match
+	target  *AppError   // target error type
+}
+
+// errorRegistry is the ordered list of error patterns.
+// First match wins. Add new patterns here instead of modifying WrapError.
+var errorRegistry = []errorPattern{
+	// Security: path traversal
+	{matches: []string{"path traversal", "absolute paths are not allowed", "cannot resolve path"}, target: ErrPathViolation},
+	// Docker not available
+	{matches: []string{"docker info failed", "Cannot connect to the Docker daemon", "docker: command not found", "executable file not found", "docker is not installed", "not accessible"}, target: ErrDockerNotInstalled},
+	// Auth errors
+	{matches: []string{"invalid password", "invalid TOTP code", "invalid credentials"}, target: ErrUnauthorized},
+	// Not found
+	{matches: []string{"not found", "未安装", "不存在"}, target: ErrNotFound},
+	// Already exists / installed / running
+	{matches: []string{"already installed", "已安装", "已存在", "is already running"}, target: ErrConflict},
+	// Bad state / precondition
+	{matches: []string{"is not running", "cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
+	// UNIQUE constraint violation (SQLite)
+	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
+	// No data available
+	{matches: []string{"no versions available", "无可用版本"}, target: ErrBadRequest},
+}
+
 // WrapError automatically wraps an error into the appropriate AppError
-// based on error type detection.
+// based on error pattern matching. Add new patterns to errorRegistry.
 func WrapError(err error) error {
 	if err == nil {
 		return nil
@@ -154,12 +181,16 @@ func WrapError(err error) error {
 	if errors.As(err, &appErr) {
 		return err
 	}
-	if IsPathError(err) {
-		return ErrPathViolation.Wrap(err)
+
+	msg := err.Error()
+	for _, p := range errorRegistry {
+		for _, pattern := range p.matches {
+			if contains(msg, pattern) {
+				return p.target.WithMessage(msg)
+			}
+		}
 	}
-	if IsDockerNotInstalled(err) {
-		return ErrDockerNotInstalled.Wrap(err)
-	}
+
 	return ErrInternal.Wrap(err)
 }
 

@@ -10,6 +10,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// getProgressStatus derives a status string from progress state
+func getProgressStatus(progress int, step, errorMessage string) string {
+	if errorMessage != "" {
+		return "failed"
+	}
+	if progress >= 100 {
+		return "completed"
+	}
+	if step != "" {
+		return "running"
+	}
+	return "pending"
+}
+
 type RuntimeHandler struct {
 	runtimeService *runtimeenv.Service
 }
@@ -164,6 +178,7 @@ func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	Success(c, gin.H{
 		"progress":      progress,
 		"step":          step,
+		"status":        getProgressStatus(progress, step, errorMessage),
 		"logs":          logs,
 		"error_message": errorMessage,
 	})
