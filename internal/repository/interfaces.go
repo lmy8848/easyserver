@@ -7,6 +7,7 @@ import (
 
 	"easyserver/internal/cron"
 	"easyserver/internal/deploy"
+	"easyserver/internal/envconfig"
 	"easyserver/internal/model"
 	"easyserver/internal/notification"
 )
@@ -189,29 +190,9 @@ type DBBackupRepository interface {
 	DeleteBackup(ctx context.Context, id int64) error
 }
 
-// EnvConfigRepository defines the interface for environment config data access
-type EnvConfigRepository interface {
-	// EnvConfig CRUD
-	ListEnvConfigs(ctx context.Context, runtimeID int64) ([]model.EnvConfig, error)
-	GetEnvConfig(ctx context.Context, id int64) (*model.EnvConfig, error)
-	CreateEnvConfig(ctx context.Context, config *model.EnvConfig) error
-	UpdateEnvConfig(ctx context.Context, config *model.EnvConfig) error
-	DeleteEnvConfig(ctx context.Context, id int64) error
-
-	// PathEntry CRUD
-	ListPathEntries(ctx context.Context, runtimeID int64) ([]model.PathEntry, error)
-	CreatePathEntry(ctx context.Context, entry *model.PathEntry) error
-	DeletePathEntry(ctx context.Context, id int64) error
-	ReorderPathEntries(ctx context.Context, runtimeID int64, ids []int64) error
-
-	// GlobalConfig CRUD
-	ListGlobalConfigs(ctx context.Context, category string) ([]model.GlobalConfig, error)
-	GetGlobalConfig(ctx context.Context, id int64) (*model.GlobalConfig, error)
-	CreateGlobalConfig(ctx context.Context, config *model.GlobalConfig) error
-	UpdateGlobalConfig(ctx context.Context, config *model.GlobalConfig) error
-	DeleteGlobalConfig(ctx context.Context, id int64) error
-	CreateGlobalConfigIfNotExists(ctx context.Context, config *model.GlobalConfig) error
-}
+// EnvConfigRepository is now defined in easyserver/internal/envconfig.Repository.
+// Kept as alias for backward compatibility.
+type EnvConfigRepository = envconfig.Repository
 
 // ServiceWhitelistRepository defines the interface for service whitelist data access
 type ServiceWhitelistRepository interface {
