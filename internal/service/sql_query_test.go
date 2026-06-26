@@ -69,8 +69,8 @@ func TestValidateTableName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%q", tt.name), func(t *testing.T) {
-			if got := ValidateTableName(tt.name); got != tt.want {
-				t.Errorf("ValidateTableName(%q) = %v, want %v", tt.name, got, tt.want)
+			if got := database_mgmt.ValidateTableName(tt.name); got != tt.want {
+				t.Errorf("database_mgmt.ValidateTableName(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}
