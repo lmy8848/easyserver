@@ -93,7 +93,7 @@ var (
 	ErrTokenExpired = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeTokenExpired, Message: "token 已过期"}
 
 	// 403 Forbidden
-	ErrForbidden    = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "禁止访问"}
+	ErrForbidden     = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "禁止访问"}
 	ErrPathViolation = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "路径越权"}
 
 	// 404 Not Found

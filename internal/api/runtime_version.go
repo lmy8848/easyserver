@@ -46,7 +46,7 @@ func (h *RuntimeVersionHandler) Fetch(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[name] {
-		c.Error(ErrBadRequest.WithMessage("不支持的运行时: "+name))
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
 		return
 	}
 

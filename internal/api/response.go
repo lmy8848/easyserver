@@ -47,9 +47,9 @@ const (
 
 // 错误分类和包装函数
 var (
-	IsPathError           = apperror.IsPathError
-	IsDockerNotInstalled  = apperror.IsDockerNotInstalled
-	WrapError             = apperror.WrapError
+	IsPathError          = apperror.IsPathError
+	IsDockerNotInstalled = apperror.IsDockerNotInstalled
+	WrapError            = apperror.WrapError
 )
 
 // ============================================================

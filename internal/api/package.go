@@ -76,7 +76,7 @@ func (h *PackageManagerHandler) ScanPackages(c *gin.Context) {
 func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 	var req packagemanager.PackageInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -105,7 +105,7 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 	var req packagemanager.PackageUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -134,7 +134,7 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
 	var req packagemanager.PackageUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 

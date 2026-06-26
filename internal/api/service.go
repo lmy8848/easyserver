@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-		"regexp"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"

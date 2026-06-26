@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"fmt"
-		"strings"
+	"strings"
 
 	"easyserver/internal/apperror"
 	"github.com/gin-gonic/gin"

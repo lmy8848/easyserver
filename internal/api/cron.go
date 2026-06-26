@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/executor"
 	"easyserver/internal/cron"
+	"easyserver/internal/executor"
 
 	"github.com/gin-gonic/gin"
 )
@@ -85,7 +85,7 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	// Validate name uniqueness
 	existing, err := h.cronService.List(c.Request.Context())
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查任务名称失败: "+err.Error()))
+		c.Error(ErrInternal.WithMessage("检查任务名称失败: " + err.Error()))
 		return
 	}
 	for _, t := range existing {
@@ -141,7 +141,7 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		// Check name uniqueness (exclude current task)
 		existing, listErr := h.cronService.List(c.Request.Context())
 		if listErr != nil {
-			c.Error(ErrInternal.WithMessage("检查任务名称失败: "+listErr.Error()))
+			c.Error(ErrInternal.WithMessage("检查任务名称失败: " + listErr.Error()))
 			return
 		}
 		for _, t := range existing {
@@ -357,7 +357,7 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 	// Validate name uniqueness
 	existingScripts, err := h.cronService.ListScripts(c.Request.Context())
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查脚本名称失败: "+err.Error()))
+		c.Error(ErrInternal.WithMessage("检查脚本名称失败: " + err.Error()))
 		return
 	}
 	for _, s := range existingScripts {
@@ -438,7 +438,7 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 		// Check name uniqueness (exclude current script)
 		existingScripts, listErr := h.cronService.ListScripts(c.Request.Context())
 		if listErr != nil {
-			c.Error(ErrInternal.WithMessage("检查脚本名称失败: "+listErr.Error()))
+			c.Error(ErrInternal.WithMessage("检查脚本名称失败: " + listErr.Error()))
 			return
 		}
 		for _, s := range existingScripts {
@@ -493,7 +493,7 @@ func (h *CronHandler) DeleteScript(c *gin.Context) {
 	// Check for dependent tasks
 	tasks, listErr := h.cronService.List(c.Request.Context())
 	if listErr != nil {
-		c.Error(ErrInternal.WithMessage("检查依赖任务失败: "+listErr.Error()))
+		c.Error(ErrInternal.WithMessage("检查依赖任务失败: " + listErr.Error()))
 		return
 	}
 	for _, t := range tasks {
@@ -547,7 +547,7 @@ func (h *CronHandler) GetNextRuns(c *gin.Context) {
 
 	runs, err := calculateNextRuns(schedule, 5)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
 		return
 	}
 	Success(c, gin.H{"next_runs": runs})

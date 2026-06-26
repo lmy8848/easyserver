@@ -469,7 +469,7 @@ func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) {
 func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
 	var rule firewall.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.Error(ErrBadRequest.WithMessage("invalid request: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("invalid request: " + err.Error()))
 		return
 	}
 
@@ -544,7 +544,7 @@ func (h *FirewallRuleHandler) ExportRules(c *gin.Context) {
 func (h *FirewallRuleHandler) ImportRules(c *gin.Context) {
 	var data FirewallExportData
 	if err := c.ShouldBindJSON(&data); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 JSON: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的 JSON: " + err.Error()))
 		return
 	}
 

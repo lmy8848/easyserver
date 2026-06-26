@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-		"net/url"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -553,7 +553,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 		Rules []config.AlertRuleConfig `json:"rules"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -574,7 +574,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 			"load_1m": true, "load_5m": true, "load_15m": true,
 		}
 		if !validMetrics[rule.Metric] {
-			c.Error(ErrBadRequest.WithMessage("无效的指标: "+rule.Metric))
+			c.Error(ErrBadRequest.WithMessage("无效的指标: " + rule.Metric))
 			return
 		}
 		if rule.Threshold <= 0 || rule.Threshold > 100 {
@@ -589,7 +589,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 
 	h.cfg.Alerts.Rules = req.Rules
 	if err := h.saveConfig(); err != nil {
-		c.Error(ErrInternal.WithMessage("保存配置失败: "+err.Error()))
+		c.Error(ErrInternal.WithMessage("保存配置失败: " + err.Error()))
 		return
 	}
 

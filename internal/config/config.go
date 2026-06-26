@@ -75,9 +75,9 @@ type DatabaseConfig struct {
 }
 
 type AuditConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	LogPath      string `yaml:"log_path"`
-	RetentionDays int   `yaml:"retention_days"`
+	Enabled       bool   `yaml:"enabled"`
+	LogPath       string `yaml:"log_path"`
+	RetentionDays int    `yaml:"retention_days"`
 }
 
 type FileManagerConfig struct {

@@ -68,7 +68,7 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) {
 func (h *RuntimeHandler) Install(c *gin.Context) {
 	var req runtimeenv.RuntimeInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -77,7 +77,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[req.Name] {
-		c.Error(ErrBadRequest.WithMessage("不支持的运行时: "+req.Name))
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
 		return
 	}
 
@@ -95,7 +95,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	var req runtimeenv.RuntimeUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 	var req runtimeenv.RuntimeSetDefaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -197,7 +197,7 @@ func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[name] {
-		c.Error(ErrBadRequest.WithMessage("不支持的运行时: "+name))
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
 		return
 	}
 

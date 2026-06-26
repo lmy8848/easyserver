@@ -151,4 +151,3 @@ func TestFileManagerCopy(t *testing.T) {
 		t.Errorf("Expected 'hello', got '%s'", string(content))
 	}
 }
-

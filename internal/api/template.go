@@ -2,21 +2,21 @@ package api
 
 import (
 	"encoding/json"
-		"os"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
 
 // TemplateHandler handles template management
 type TemplateHandler struct {
-	templatePath       string
+	templatePath        string
 	scriptTemplatesPath string
 }
 
 // NewTemplateHandler creates a new TemplateHandler
 func NewTemplateHandler(templatePath string, scriptTemplatesPath string) *TemplateHandler {
 	return &TemplateHandler{
-		templatePath:       templatePath,
+		templatePath:        templatePath,
 		scriptTemplatesPath: scriptTemplatesPath,
 	}
 }

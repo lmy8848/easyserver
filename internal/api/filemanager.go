@@ -5,14 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	
+
 	"easyserver/internal/audit"
 	"easyserver/internal/filemanager"
 
 	"github.com/gin-gonic/gin"
 )
-
-
 
 type FileManagerHandler struct {
 	fileManager  *filemanager.Manager

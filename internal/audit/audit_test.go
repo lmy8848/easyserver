@@ -16,6 +16,8 @@ func setupAuditTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// :memory: gives each connection its own DB; pin to one connection.
+	db.SetMaxOpenConns(1)
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS audit_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,41 +98,31 @@ func TestLogOperation(t *testing.T) {
 	defer db.Close()
 	svc := newTestAuditService(db)
 
-	// LogOperation sends to writer channel; we need to drain it manually
 	svc.LogOperation(context.Background(), 1, "admin", "TEST_ACTION", "/test", "test detail", "127.0.0.1", "test-agent")
+	svc.Close() // drain and flush to DB
 
-	// Drain the channel and flush manually
-	batch := make([]auditEntry, 0)
-	for {
-		select {
-		case entry := <-svc.writer.ch:
-			batch = append(batch, entry)
-		default:
-			goto done
-		}
+	var userID int64
+	var username, action, ip, detail string
+	err := db.QueryRow("SELECT user_id, username, action, ip, detail FROM audit_logs WHERE action = 'TEST_ACTION'").
+		Scan(&userID, &username, &action, &ip, &detail)
+	if err != nil {
+		t.Fatalf("query audit_logs: %v", err)
 	}
-done:
-	if len(batch) != 1 {
-		t.Fatalf("expected 1 entry in channel, got %d", len(batch))
+	if userID != 1 {
+		t.Errorf("userID = %d, want 1", userID)
 	}
-
-	entry := batch[0]
-		if entry.userID != 1 {
-		t.Errorf("userID = %d, want 1", entry.userID)
+	if username != "admin" {
+		t.Errorf("username = %q, want %q", username, "admin")
 	}
-	if entry.username != "admin" {
-		t.Errorf("username = %q, want %q", entry.username, "admin")
+	if action != "TEST_ACTION" {
+		t.Errorf("action = %q, want %q", action, "TEST_ACTION")
 	}
-	if entry.action != "TEST_ACTION" {
-		t.Errorf("action = %q, want %q", entry.action, "TEST_ACTION")
-	}
-	if entry.ip != "127.0.0.1" {
-		t.Errorf("ip = %q, want %q", entry.ip, "127.0.0.1")
+	if ip != "127.0.0.1" {
+		t.Errorf("ip = %q, want %q", ip, "127.0.0.1")
 	}
 
-	// Verify detail is valid JSON
 	var detailMap map[string]interface{}
-	if err := json.Unmarshal([]byte(entry.detail), &detailMap); err != nil {
+	if err := json.Unmarshal([]byte(detail), &detailMap); err != nil {
 		t.Errorf("detail should be valid JSON: %v", err)
 	}
 }
@@ -142,12 +134,14 @@ func TestLogOperation_NilContext(t *testing.T) {
 
 	// Should not panic
 	svc.LogOperation(nil, 1, "admin", "TEST", "/test", "detail", "127.0.0.1", "agent")
+	svc.Close()
 
-	// Drain channel
-	select {
-	case <-svc.writer.ch:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected entry in channel")
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE action = 'TEST'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 entry, got %d", count)
 	}
 }
 
@@ -159,17 +153,19 @@ func TestLogSecurityEvent(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	svc.LogSecurityEvent(context.Background(), "admin", "LOGIN_FAILED", "wrong password", "192.168.1.1", "Mozilla/5.0")
+	svc.Close()
 
-	select {
-	case entry := <-svc.writer.ch:
-		if entry.action != "SECURITY_LOGIN_FAILED" {
-			t.Errorf("action = %q, want %q", entry.action, "SECURITY_LOGIN_FAILED")
-		}
-		if entry.resource != "/auth" {
-			t.Errorf("resource = %q, want %q", entry.resource, "/auth")
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected entry in channel")
+	var action, resource string
+	err := db.QueryRow("SELECT action, resource FROM audit_logs WHERE action = 'SECURITY_LOGIN_FAILED'").
+		Scan(&action, &resource)
+	if err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if action != "SECURITY_LOGIN_FAILED" {
+		t.Errorf("action = %q, want %q", action, "SECURITY_LOGIN_FAILED")
+	}
+	if resource != "/auth" {
+		t.Errorf("resource = %q, want %q", resource, "/auth")
 	}
 }
 
@@ -181,23 +177,24 @@ func TestLogTerminalCommand(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	svc.LogTerminalCommand(context.Background(), 1, "admin", "sess-123", "ls -la", "127.0.0.1")
+	svc.Close()
 
-	select {
-	case entry := <-svc.writer.ch:
-		if entry.action != "TERMINAL" {
-			t.Errorf("action = %q, want %q", entry.action, "TERMINAL")
-		}
-		if entry.resource != "/terminal/sess-123" {
-			t.Errorf("resource = %q, want %q", entry.resource, "/terminal/sess-123")
-		}
-		// Verify detail contains command
-		var detailMap map[string]interface{}
-		json.Unmarshal([]byte(entry.detail), &detailMap)
-		if detailMap["command"] != "ls -la" {
-			t.Errorf("command = %v, want %q", detailMap["command"], "ls -la")
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected entry in channel")
+	var action, resource, detail string
+	err := db.QueryRow("SELECT action, resource, detail FROM audit_logs WHERE action = 'TERMINAL'").
+		Scan(&action, &resource, &detail)
+	if err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if action != "TERMINAL" {
+		t.Errorf("action = %q, want %q", action, "TERMINAL")
+	}
+	if resource != "/terminal/sess-123" {
+		t.Errorf("resource = %q, want %q", resource, "/terminal/sess-123")
+	}
+	var detailMap map[string]interface{}
+	json.Unmarshal([]byte(detail), &detailMap)
+	if detailMap["command"] != "ls -la" {
+		t.Errorf("command = %v, want %q", detailMap["command"], "ls -la")
 	}
 }
 

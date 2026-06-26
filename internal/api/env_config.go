@@ -66,7 +66,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		IsGlobal  bool   `json:"is_global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 		Value string `json:"value" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		IsGlobal  bool   `json:"is_global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -301,7 +301,7 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 

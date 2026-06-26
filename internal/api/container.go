@@ -3,9 +3,9 @@ package api
 import (
 	"fmt"
 	"strconv"
-	
-	"easyserver/internal/container"
+
 	"easyserver/internal/audit"
+	"easyserver/internal/container"
 	"github.com/gin-gonic/gin"
 )
 
@@ -90,7 +90,7 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 		MirrorURL string `json:"mirror_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *ContainerHandler) GetContainer(c *gin.Context) {
 func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 	var req container.CreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -228,7 +228,7 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 		Command string `json:"command" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -282,7 +282,7 @@ func (h *ContainerHandler) CopyToContainer(c *gin.Context) {
 		DestPath string `json:"dest_path" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -301,7 +301,7 @@ func (h *ContainerHandler) CopyFromContainer(c *gin.Context) {
 		DestPath string `json:"dest_path" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -319,7 +319,7 @@ func (h *ContainerHandler) RenameContainer(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -335,7 +335,7 @@ func (h *ContainerHandler) UpdateContainer(c *gin.Context) {
 	id := c.Param("id")
 	var req container.UpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -364,7 +364,7 @@ func (h *ContainerHandler) PullImage(c *gin.Context) {
 		Image string `json:"image" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -404,7 +404,7 @@ func (h *ContainerHandler) ComposeUp(c *gin.Context) {
 		ProjectDir string `json:"project_dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -421,7 +421,7 @@ func (h *ContainerHandler) ComposeDown(c *gin.Context) {
 		ProjectDir string `json:"project_dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -438,7 +438,7 @@ func (h *ContainerHandler) ComposeRestart(c *gin.Context) {
 		ProjectDir string `json:"project_dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -486,7 +486,7 @@ func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) {
 		Content    string `json:"content" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -516,7 +516,7 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 		Driver string `json:"driver"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -557,7 +557,7 @@ func (h *ContainerHandler) CreateNetwork(c *gin.Context) {
 		Driver string `json:"driver"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 

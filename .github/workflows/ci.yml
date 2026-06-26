@@ -17,16 +17,34 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          cache: true
+          cache: true # caches both GOMODCACHE and GOCACHE
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Build
-        run: CGO_ENABLED=0 go build -tags dev -o easyserver ./cmd/server
+      # embed.go (non-dev) requires internal/api/web/dist to exist.
+      # See Makefile `build-web`. CI uses a placeholder; real prod release
+      # copies web/dist there via `make build`.
+      - name: Stub web/dist for embed
+        run: mkdir -p internal/api/web/dist && echo '<html></html>' > internal/api/web/dist/index.html
+
+      - name: Format check (gofmt)
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::Files not gofmt'd:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Build (production, CGO disabled)
+        run: CGO_ENABLED=0 go build -o easyserver ./cmd/server
 
       - name: Vet
-        run: go vet -tags dev ./...
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
 
   frontend:
     name: Build Frontend

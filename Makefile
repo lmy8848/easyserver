@@ -31,7 +31,7 @@ build-dev:
 
 # Clean build artifacts
 clean:
-	rm -f easyserver easyserver.exe
+	rm -f easyserver
 	rm -rf web/dist
 	rm -rf internal/api/web/dist
 
@@ -43,13 +43,8 @@ run: build
 dev: build-dev
 	@echo "Starting backend on :8080..."
 	@echo "Starting frontend on :5173..."
-ifeq ($(OS),Windows_NT)
-	start /B easyserver.exe -config config.yaml -dev
-	cd web && npm run dev
-else
 	./easyserver -config config.yaml -dev &
 	cd web && npm run dev
-endif
 
 # Install dependencies
 deps:

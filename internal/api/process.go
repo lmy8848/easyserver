@@ -51,7 +51,7 @@ func (h *ProcessHandler) GetProcess(c *gin.Context) {
 func (h *ProcessHandler) CreateProcess(c *gin.Context) {
 	var req process.CreateProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	p, err := h.pm.Create(c.Request.Context(), &req)
@@ -71,7 +71,7 @@ func (h *ProcessHandler) UpdateProcess(c *gin.Context) {
 	}
 	var req process.UpdateProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	if err := h.pm.Update(c.Request.Context(), id, &req); err != nil {
@@ -173,7 +173,7 @@ func (h *ProcessHandler) GetProcessStats(c *gin.Context) {
 func (h *ProcessHandler) BatchStart(c *gin.Context) {
 	var req process.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	started, failed, err := h.pm.BatchStart(c.Request.Context(), req.IDs)
@@ -188,7 +188,7 @@ func (h *ProcessHandler) BatchStart(c *gin.Context) {
 func (h *ProcessHandler) BatchStop(c *gin.Context) {
 	var req process.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	stopped, failed, err := h.pm.BatchStop(c.Request.Context(), req.IDs)
@@ -203,7 +203,7 @@ func (h *ProcessHandler) BatchStop(c *gin.Context) {
 func (h *ProcessHandler) BatchRestart(c *gin.Context) {
 	var req process.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	restarted, failed, err := h.pm.BatchRestart(c.Request.Context(), req.IDs)
@@ -249,7 +249,7 @@ func (h *ProcessHandler) GetGroup(c *gin.Context) {
 func (h *ProcessHandler) CreateGroup(c *gin.Context) {
 	var req process.CreateProcessGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	g, err := h.pm.CreateGroup(c.Request.Context(), &req)
@@ -269,7 +269,7 @@ func (h *ProcessHandler) UpdateGroup(c *gin.Context) {
 	}
 	var req process.UpdateProcessGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	if err := h.pm.UpdateGroup(c.Request.Context(), id, &req); err != nil {
@@ -307,7 +307,7 @@ func (h *ProcessHandler) ExportProcesses(c *gin.Context) {
 func (h *ProcessHandler) ImportProcesses(c *gin.Context) {
 	var processes []process.Process
 	if err := c.ShouldBindJSON(&processes); err != nil {
-		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
 	count, err := h.pm.Import(c.Request.Context(), processes)

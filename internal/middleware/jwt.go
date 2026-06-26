@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"fmt"
-		"strings"
+	"strings"
 	"time"
 
 	"easyserver/internal/apperror"
@@ -80,14 +80,14 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 
 		// Check session validator (single session per user)
 		if sessionValidator != nil {
-		valid, err := sessionValidator(tokenString)
-		if err != nil {
-			c.Error(apperror.ErrInternal.WithMessage("session validation error"))
-			c.Abort()
-			return
-		}
-		if !valid {
-			c.Error(apperror.ErrUnauthorized.WithMessage("session expired, please login again"))
+			valid, err := sessionValidator(tokenString)
+			if err != nil {
+				c.Error(apperror.ErrInternal.WithMessage("session validation error"))
+				c.Abort()
+				return
+			}
+			if !valid {
+				c.Error(apperror.ErrUnauthorized.WithMessage("session expired, please login again"))
 				c.Abort()
 				return
 			}

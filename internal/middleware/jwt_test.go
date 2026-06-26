@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
-		"testing"
+	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"

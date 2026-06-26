@@ -44,7 +44,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&config); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	}
 
 	if err := h.sshService.SaveConfig(sshConfig); err != nil {
-		c.Error(ErrInternal.WithMessage("保存配置失败: "+err.Error()))
+		c.Error(ErrInternal.WithMessage("保存配置失败: " + err.Error()))
 		return
 	}
 
@@ -131,7 +131,7 @@ func (h *SSHHandler) TestConfig(c *gin.Context) {
 // ReloadSSH reloads the SSH service
 func (h *SSHHandler) ReloadSSH(c *gin.Context) {
 	if err := h.sshService.ReloadSSH(c.Request.Context()); err != nil {
-		c.Error(ErrInternal.WithMessage("重载 SSH 失败: "+err.Error()))
+		c.Error(ErrInternal.WithMessage("重载 SSH 失败: " + err.Error()))
 		return
 	}
 	Success(c, gin.H{"message": "SSH 服务已重载"})
@@ -167,7 +167,7 @@ func (h *SSHHandler) KillSession(c *gin.Context) {
 	}
 
 	if err := h.sshService.KillSession(c.Request.Context(), pid); err != nil {
-		c.Error(ErrInternal.WithMessage("终止会话失败: "+err.Error()))
+		c.Error(ErrInternal.WithMessage("终止会话失败: " + err.Error()))
 		return
 	}
 	Success(c, gin.H{"message": "会话已终止"})

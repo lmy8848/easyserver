@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"net"
-		"strings"
+	"strings"
 	"sync"
 
 	"easyserver/internal/config"
