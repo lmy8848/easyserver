@@ -16,6 +16,7 @@ import (
 	"crypto/x509"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SSH 超时常量
@@ -45,13 +46,27 @@ func NewSSHClient(srv *Server, authData string) (*SSHClient, error) {
 		return nil, fmt.Errorf("ssh: auth error: %w", err)
 	}
 
-	// TODO: Replace InsecureIgnoreHostKey with known-hosts verification for production use.
-	// Current implementation is vulnerable to MITM attacks.
-	log.Printf("ssh: WARNING - host key verification disabled for %s:%d (MITM risk)", srv.Host, srv.Port)
+	// Setup known hosts callback for host key verification
+	homeDir, _ := os.UserHomeDir()
+	knownHostsPath := filepath.Join(homeDir, ".ssh", "known_hosts")
+
+	// Create known_hosts callback, fallback to InsecureIgnoreHostKey if file doesn't exist
+	var hostKeyCallback ssh.HostKeyCallback
+	if _, err := os.Stat(knownHostsPath); err == nil {
+		hostKeyCallback, err = knownhosts.New(knownHostsPath)
+		if err != nil {
+			log.Printf("ssh: WARNING - failed to parse known_hosts, falling back to insecure: %v", err)
+			hostKeyCallback = ssh.InsecureIgnoreHostKey()
+		}
+	} else {
+		log.Printf("ssh: WARNING - known_hosts not found at %s, host key verification disabled", knownHostsPath)
+		hostKeyCallback = ssh.InsecureIgnoreHostKey()
+	}
+
 	config := &ssh.ClientConfig{
 		User:            srv.Username,
 		Auth:            []ssh.AuthMethod{authMethod},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         SSHConnectTimeout,
 	}
 

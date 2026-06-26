@@ -126,19 +126,22 @@ func (b *SQLBuilder) BuildListTables() string {
 }
 
 // BuildDescribeTable generates a query to describe table structure.
+// Table name must be validated before calling this function.
 func (b *SQLBuilder) BuildDescribeTable(table string) string {
 	switch b.dbType {
 	case DBTypeMySQL:
-		return fmt.Sprintf("DESCRIBE `%s`;", table)
+		return fmt.Sprintf("DESCRIBE %s;", b.QuoteIdentifier(table))
 	case DBTypePostgreSQL:
+		// Use QuoteIdentifier for safe table name quoting
+		quotedTable := b.QuoteIdentifier(table)
 		return fmt.Sprintf(`SELECT column_name, data_type, is_nullable, column_default,
 			CASE WHEN column_name IN (
 				SELECT a.attname FROM pg_index i
 				JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-				WHERE i.indrelid = '%s'::regclass AND i.indisprimary
+				WHERE i.indrelid = %s::regclass AND i.indisprimary
 			) THEN 'YES' ELSE 'NO' END as is_primary
 			FROM information_schema.columns
-			WHERE table_name = '%s' ORDER BY ordinal_position;`, table, table)
+			WHERE table_name = $1 ORDER BY ordinal_position;`, quotedTable)
 	}
 	return ""
 }
@@ -196,15 +199,73 @@ func (b *SQLBuilder) BuildDropUser(username, host string) string {
 	return ""
 }
 
+// ValidMySQLPrivileges is the whitelist of valid MySQL privileges
+var ValidMySQLPrivileges = map[string]bool{
+	"ALL": true, "ALL PRIVILEGES": true,
+	"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true,
+	"CREATE": true, "DROP": true, "RELOAD": true, "SHUTDOWN": true,
+	"PROCESS": true, "FILE": true, "REFERENCES": true, "INDEX": true,
+	"ALTER": true, "SHOW DATABASES": true, "SUPER": true,
+	"CREATE TEMPORARY TABLES": true, "LOCK TABLES": true,
+	"EXECUTE": true, "REPLICATION SLAVE": true, "REPLICATION CLIENT": true,
+	"CREATE VIEW": true, "SHOW VIEW": true, "CREATE ROUTINE": true,
+	"ALTER ROUTINE": true, "CREATE USER": true, "EVENT": true,
+	"TRIGGER": true, "CREATE TABLESPACE": true,
+}
+
+// ValidPostgreSQLPrivileges is the whitelist of valid PostgreSQL privileges
+var ValidPostgreSQLPrivileges = map[string]bool{
+	"ALL": true, "ALL PRIVILEGES": true,
+	"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true,
+	"TRUNCATE": true, "REFERENCES": true, "TRIGGER": true,
+	"CREATE": true, "CONNECT": true, "TEMPORARY": true, "TEMP": true,
+	"EXECUTE": true, "USAGE": true,
+}
+
+// ValidatePrivileges validates that privileges string only contains valid privilege names.
+// Returns empty string if invalid privileges are found.
+func ValidatePrivileges(dbType DBType, privileges string) string {
+	validMap := ValidMySQLPrivileges
+	if dbType == DBTypePostgreSQL {
+		validMap = ValidPostgreSQLPrivileges
+	}
+
+	// Split by comma and validate each privilege
+	parts := strings.Split(privileges, ",")
+	var valid []string
+	for _, p := range parts {
+		p = strings.TrimSpace(strings.ToUpper(p))
+		if p == "" {
+			continue
+		}
+		if !validMap[p] {
+			return "" // Invalid privilege found
+		}
+		valid = append(valid, p)
+	}
+
+	if len(valid) == 0 {
+		return ""
+	}
+	return strings.Join(valid, ", ")
+}
+
 // BuildGrant generates a GRANT statement.
+// Privileges must be validated before calling this function.
 func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) string {
+	// Validate privileges
+	validatedPrivs := ValidatePrivileges(b.dbType, privileges)
+	if validatedPrivs == "" {
+		return "" // Invalid privileges
+	}
+
 	switch b.dbType {
 	case DBTypeMySQL:
-		return fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			privileges, database, b.EscapeString(username), b.EscapeString(host))
+		return fmt.Sprintf("GRANT %s ON %s.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
+			validatedPrivs, b.QuoteIdentifier(database), b.EscapeString(username), b.EscapeString(host))
 	case DBTypePostgreSQL:
-		return fmt.Sprintf(`GRANT %s ON DATABASE "%s" TO "%s";`,
-			privileges, database, strings.ReplaceAll(username, `"`, `""`))
+		return fmt.Sprintf(`GRANT %s ON DATABASE %s TO %s;`,
+			validatedPrivs, b.QuoteIdentifier(database), b.QuoteIdentifier(username))
 	}
 	return ""
 }
