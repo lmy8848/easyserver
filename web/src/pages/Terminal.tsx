@@ -381,7 +381,7 @@ export default function TerminalPage() {
         {tab.label}
         <CloseOutlined
           style={{ fontSize: 10 }}
-          onClick={(e) => {
+          onClick={(e: React.MouseEvent) => {
             e.stopPropagation();
             closeTab(tab.key);
           }}
