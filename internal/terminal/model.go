@@ -38,6 +38,7 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	executor executor.CommandExecutor
+	done     chan struct{} // Channel to signal shutdown
 }
 
 // NewManager creates a new terminal Manager.
@@ -45,6 +46,7 @@ func NewManager(exec executor.CommandExecutor) *Manager {
 	return &Manager{
 		sessions: make(map[string]*Session),
 		executor: exec,
+		done:     make(chan struct{}),
 	}
 }
 
@@ -82,33 +84,41 @@ func (m *Manager) StartIdleTimeout(timeout time.Duration) {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			now := time.Now()
-
-			m.mu.RLock()
-			var toClose []string
-			for id, session := range m.sessions {
-				if !session.IsClosed() {
-					session.mu.Lock()
-					idle := now.Sub(session.LastActivity)
-					session.mu.Unlock()
-					if idle >= timeout {
-						toClose = append(toClose, id)
+		for {
+			select {
+			case <-m.done:
+				return
+			case now := <-ticker.C:
+				m.mu.RLock()
+				var toClose []string
+				for id, session := range m.sessions {
+					if !session.IsClosed() {
+						session.mu.Lock()
+						idle := now.Sub(session.LastActivity)
+						session.mu.Unlock()
+						if idle >= timeout {
+							toClose = append(toClose, id)
+						}
 					}
 				}
-			}
-			m.mu.RUnlock()
+				m.mu.RUnlock()
 
-			if len(toClose) > 0 {
-				m.mu.Lock()
-				for _, id := range toClose {
-					if session, exists := m.sessions[id]; exists {
-						session.Close()
-						delete(m.sessions, id)
+				if len(toClose) > 0 {
+					m.mu.Lock()
+					for _, id := range toClose {
+						if session, exists := m.sessions[id]; exists {
+							session.Close()
+							delete(m.sessions, id)
+						}
 					}
+					m.mu.Unlock()
 				}
-				m.mu.Unlock()
 			}
 		}
 	}()
+}
+
+// StopIdleTimeout stops the idle timeout checker.
+func (m *Manager) StopIdleTimeout() {
+	close(m.done)
 }

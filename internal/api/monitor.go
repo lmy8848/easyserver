@@ -80,19 +80,11 @@ func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string,
 func (h *MonitorHandler) HandleStats(c *gin.Context) {
 	snapshot, err := h.monitorService.GetCurrentStats(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "ok",
-			"data":    nil,
-		})
+		Success(c, nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "ok",
-		"data":    snapshot,
-	})
+	Success(c, snapshot)
 }
 
 func (h *MonitorHandler) HandleHistory(c *gin.Context) {
@@ -103,28 +95,19 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 
 	start, err := time.Parse(time.RFC3339, startStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    40000,
-			"message": "无效的开始时间",
-		})
+		c.Error(ErrBadRequest.WithMessage("无效的开始时间"))
 		return
 	}
 
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    40000,
-			"message": "无效的结束时间",
-		})
+		c.Error(ErrBadRequest.WithMessage("无效的结束时间"))
 		return
 	}
 
 	// Validate range
 	if start.After(end) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    40000,
-			"message": "开始时间必须早于结束时间",
-		})
+		c.Error(ErrBadRequest.WithMessage("开始时间必须早于结束时间"))
 		return
 	}
 
@@ -136,10 +119,7 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 
 	points, err := h.monitorService.GetHistory(c.Request.Context(), start, end)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    50000,
-			"message": "查询历史数据失败",
-		})
+		c.Error(ErrInternal.WithMessage("查询历史数据失败"))
 		return
 	}
 
@@ -148,12 +128,8 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 		snapshots[i] = p.ToSnapshot()
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "ok",
-		"data": gin.H{
-			"points": snapshots,
-		},
+	Success(c, gin.H{
+		"points": snapshots,
 	})
 }
 

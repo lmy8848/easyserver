@@ -18,13 +18,13 @@ func NewRuntimeVersionHandler(versionService *runtimeenv.VersionService) *Runtim
 func (h *RuntimeVersionHandler) List(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "运行时名称不能为空")
+		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
 		return
 	}
 
 	versions, err := h.versionService.ListWithInstalledStatus(c.Request.Context(), name)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -37,7 +37,7 @@ func (h *RuntimeVersionHandler) List(c *gin.Context) {
 func (h *RuntimeVersionHandler) Fetch(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "运行时名称不能为空")
+		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
 		return
 	}
 
@@ -46,20 +46,20 @@ func (h *RuntimeVersionHandler) Fetch(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[name] {
-		BadRequest(c, "不支持的运行时: "+name)
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: "+name))
 		return
 	}
 
 	cached, err := h.versionService.FetchAndCache(c.Request.Context(), name)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
 	// Return updated list with installed status
 	versions, err := h.versionService.ListWithInstalledStatus(c.Request.Context(), name)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -76,13 +76,13 @@ func (h *RuntimeVersionHandler) ResolveAlias(c *gin.Context) {
 	alias := c.Param("alias")
 
 	if name == "" || alias == "" {
-		BadRequest(c, "运行时名称和别名不能为空")
+		c.Error(ErrBadRequest.WithMessage("运行时名称和别名不能为空"))
 		return
 	}
 
 	resolved, err := h.versionService.ResolveAlias(c.Request.Context(), name, alias)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -96,7 +96,7 @@ func (h *RuntimeVersionHandler) ResolveAlias(c *gin.Context) {
 func (h *RuntimeVersionHandler) GetAliasSuggestions(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "运行时名称不能为空")
+		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
 		return
 	}
 

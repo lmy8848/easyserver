@@ -32,7 +32,7 @@ func NewFirewallHandler(firewallService *firewall.Service, panelPort int) *Firew
 func (h *FirewallHandler) GetStatus(c *gin.Context) {
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, status)
@@ -41,7 +41,7 @@ func (h *FirewallHandler) GetStatus(c *gin.Context) {
 // EnableFirewall enables the firewall
 func (h *FirewallHandler) EnableFirewall(c *gin.Context) {
 	if err := h.firewallService.EnableFirewall(c.Request.Context()); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "防火墙已启用"})
@@ -54,12 +54,12 @@ func (h *FirewallHandler) DisableFirewall(c *gin.Context) {
 		Confirm bool `json:"confirm"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
-		BadRequest(c, "请确认禁用防火墙，设置 {\"confirm\": true}")
+		c.Error(ErrBadRequest.WithMessage("请确认禁用防火墙，设置 {\"confirm\": true}"))
 		return
 	}
 
 	if err := h.firewallService.DisableFirewall(c.Request.Context()); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "防火墙已禁用"})
@@ -69,26 +69,26 @@ func (h *FirewallHandler) DisableFirewall(c *gin.Context) {
 func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) {
 	var req firewall.SetDefaultPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate chain
 	chain := strings.ToUpper(req.Chain)
 	if chain != "INPUT" && chain != "OUTPUT" {
-		BadRequest(c, "无效的链，必须是 INPUT 或 OUTPUT")
+		c.Error(ErrBadRequest.WithMessage("无效的链，必须是 INPUT 或 OUTPUT"))
 		return
 	}
 
 	// Validate policy
 	policy := strings.ToUpper(req.Policy)
 	if policy != "ACCEPT" && policy != "DROP" {
-		BadRequest(c, "无效的策略，必须是 ACCEPT 或 DROP")
+		c.Error(ErrBadRequest.WithMessage("无效的策略，必须是 ACCEPT 或 DROP"))
 		return
 	}
 
 	if err := h.firewallService.SetDefaultPolicy(c.Request.Context(), chain, policy); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 

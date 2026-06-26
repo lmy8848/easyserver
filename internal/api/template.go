@@ -2,8 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
-	"os"
+		"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -67,19 +66,19 @@ func getDefaultTemplates() map[string]interface{} {
 func (h *TemplateHandler) GetTemplateCategories(c *gin.Context) {
 	data, err := os.ReadFile(h.templatePath)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []string{}})
+		Success(c, []string{})
 		return
 	}
 
 	var templates map[string]interface{}
 	if err := json.Unmarshal(data, &templates); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []string{}})
+		Success(c, []string{})
 		return
 	}
 
 	categories, ok := templates["categories"].([]interface{})
 	if !ok {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "data": []string{}})
+		Success(c, []string{})
 		return
 	}
 

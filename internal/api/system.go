@@ -45,7 +45,7 @@ func (h *SystemHandler) GetSSHLogins(c *gin.Context) {
 		// Fallback to parsing /var/log/auth.log
 		logins, err = getAuthLogins(limit)
 		if err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 	}
@@ -243,20 +243,20 @@ func (h *SystemHandler) GetSystemSSHConfig(c *gin.Context) {
 func (h *SystemHandler) CheckPort(c *gin.Context) {
 	portStr := c.Query("port")
 	if portStr == "" {
-		BadRequest(c, "端口不能为空")
+		c.Error(ErrBadRequest.WithMessage("端口不能为空"))
 		return
 	}
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
-		BadRequest(c, "无效的端口号 (1-65535)")
+		c.Error(ErrBadRequest.WithMessage("无效的端口号 (1-65535)"))
 		return
 	}
 
-	// Try to listen on the port
+	// Try to listen on the port (recover from potential panics)
 	addr := fmt.Sprintf(":%d", port)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
+	listener, listenErr := safeListen(addr)
+	if listenErr != nil {
 		// Port is in use - try to find what's using it
 		processInfo := h.getPortProcess(c.Request.Context(), port)
 		Success(c, gin.H{
@@ -267,7 +267,9 @@ func (h *SystemHandler) CheckPort(c *gin.Context) {
 		})
 		return
 	}
-	listener.Close()
+	if listener != nil {
+		listener.Close()
+	}
 
 	Success(c, gin.H{
 		"available": true,
@@ -276,22 +278,38 @@ func (h *SystemHandler) CheckPort(c *gin.Context) {
 	})
 }
 
+// safeListen wraps net.Listen with panic recovery
+func safeListen(addr string) (net.Listener, error) {
+	var listener net.Listener
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("listen panic: %v", r)
+			}
+		}()
+		listener, err = net.Listen("tcp", addr)
+	}()
+	return listener, err
+}
+
 // getPortProcess finds the process using a given port
 func (h *SystemHandler) getPortProcess(ctx context.Context, port int) string {
+	defer func() {
+		if r := recover(); r != nil {
+			// Silently recover from any parsing panics
+		}
+	}()
+
 	// Try ss first
 	out, _, err := h.executor.RunCombined(ctx, "ss", "-tlnp", fmt.Sprintf("sport = :%d", port))
-	if err == nil {
+	if err == nil && strings.TrimSpace(out) != "" {
 		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for _, line := range lines[1:] { // skip header
-			if strings.Contains(line, fmt.Sprintf(":%d", port)) {
-				// Extract process info
-				if idx := strings.Index(line, "users:((\""); idx != -1 {
-					end := strings.Index(line[idx:], "\"")
-					if end > 0 {
-						return line[idx+9 : idx+end]
-					}
+		if len(lines) > 1 {
+			for _, line := range lines[1:] { // skip header
+				if strings.Contains(line, fmt.Sprintf(":%d", port)) {
+					return strings.TrimSpace(line)
 				}
-				return strings.TrimSpace(line)
 			}
 		}
 	}
@@ -313,7 +331,7 @@ func (h *SystemHandler) getPortProcess(ctx context.Context, port int) string {
 func (h *SystemHandler) CheckPorts(c *gin.Context) {
 	portsStr := c.Query("ports") // comma-separated: "80,443,3306"
 	if portsStr == "" {
-		BadRequest(c, "端口列表不能为空")
+		c.Error(ErrBadRequest.WithMessage("端口列表不能为空"))
 		return
 	}
 

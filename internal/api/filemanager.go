@@ -5,28 +5,20 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
-
-	"easyserver/internal/audit"
+	
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-// isPathError checks if the error is a path validation error (should return 403)
-func isPathError(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "path traversal") ||
-		strings.Contains(msg, "absolute paths are not allowed") ||
-		strings.Contains(msg, "cannot resolve path")
-}
+
 
 type FileManagerHandler struct {
 	fileManager  *service.FileManager
-	auditService *audit.Service
+	auditService *service.AuditService
 }
 
-func NewFileManagerHandler(fm *service.FileManager, auditService *audit.Service) *FileManagerHandler {
+func NewFileManagerHandler(fm *service.FileManager, auditService *service.AuditService) *FileManagerHandler {
 	return &FileManagerHandler{
 		fileManager:  fm,
 		auditService: auditService,
@@ -63,7 +55,7 @@ func (h *FileManagerHandler) List(c *gin.Context) {
 	if path == "" {
 		files, err := h.fileManager.ListRoot()
 		if err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		Success(c, gin.H{
@@ -76,11 +68,7 @@ func (h *FileManagerHandler) List(c *gin.Context) {
 
 	files, err := h.fileManager.List(path)
 	if err != nil {
-		if isPathError(err) {
-			Forbidden(c, err.Error())
-		} else {
-			InternalError(c, err.Error())
-		}
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -103,12 +91,12 @@ func (h *FileManagerHandler) Mkdir(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Mkdir(req.Path); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -125,7 +113,7 @@ func (h *FileManagerHandler) Mkdir(c *gin.Context) {
 func (h *FileManagerHandler) Upload(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		BadRequest(c, "no file provided")
+		c.Error(ErrBadRequest.WithMessage("no file provided"))
 		return
 	}
 	defer file.Close()
@@ -138,7 +126,7 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 	// Use FileManager.Upload for secure file upload
 	size, err := h.fileManager.Upload(file, path)
 	if err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -159,25 +147,25 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 func (h *FileManagerHandler) Download(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		BadRequest(c, "path is required")
+		c.Error(ErrBadRequest.WithMessage("path is required"))
 		return
 	}
 
 	validPath, err := h.fileManager.ValidatePath(path)
 	if err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Check if file exists
 	info, err := os.Stat(validPath)
 	if err != nil {
-		NotFound(c, "file not found")
+		c.Error(ErrNotFound.WithMessage("file not found"))
 		return
 	}
 
 	if info.IsDir() {
-		BadRequest(c, "cannot download a directory")
+		c.Error(ErrBadRequest.WithMessage("cannot download a directory"))
 		return
 	}
 
@@ -198,12 +186,12 @@ func (h *FileManagerHandler) Rename(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Rename(req.OldPath, req.NewPath); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -220,14 +208,14 @@ func (h *FileManagerHandler) Rename(c *gin.Context) {
 func (h *FileManagerHandler) Delete(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		BadRequest(c, "path is required")
+		c.Error(ErrBadRequest.WithMessage("path is required"))
 		return
 	}
 
 	recursive := c.Query("recursive") == "true"
 
 	if err := h.fileManager.Delete(path, recursive); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -248,12 +236,12 @@ func (h *FileManagerHandler) Move(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Move(req.Paths, req.Dest); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -274,12 +262,12 @@ func (h *FileManagerHandler) Copy(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Copy(req.Source, req.Dest); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -296,13 +284,13 @@ func (h *FileManagerHandler) Copy(c *gin.Context) {
 func (h *FileManagerHandler) GetContent(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		BadRequest(c, "path is required")
+		c.Error(ErrBadRequest.WithMessage("path is required"))
 		return
 	}
 
 	content, err := h.fileManager.ReadContent(path)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -317,12 +305,12 @@ func (h *FileManagerHandler) SaveContent(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.WriteContent(req.Path, req.Content); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -343,7 +331,7 @@ func (h *FileManagerHandler) Search(c *gin.Context) {
 	}
 	pattern := c.Query("q")
 	if pattern == "" {
-		BadRequest(c, "search query is required")
+		c.Error(ErrBadRequest.WithMessage("search query is required"))
 		return
 	}
 
@@ -351,7 +339,7 @@ func (h *FileManagerHandler) Search(c *gin.Context) {
 
 	results, err := h.fileManager.Search(rootPath, pattern, maxResults)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -366,7 +354,7 @@ func (h *FileManagerHandler) SearchContent(c *gin.Context) {
 	}
 	text := c.Query("q")
 	if text == "" {
-		BadRequest(c, "search query is required")
+		c.Error(ErrBadRequest.WithMessage("search query is required"))
 		return
 	}
 
@@ -374,7 +362,7 @@ func (h *FileManagerHandler) SearchContent(c *gin.Context) {
 
 	results, err := h.fileManager.SearchContent(rootPath, text, maxResults)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -389,12 +377,12 @@ func (h *FileManagerHandler) Compress(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Compress(req.Sources, req.Dest); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -415,12 +403,12 @@ func (h *FileManagerHandler) Extract(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Extract(req.Source, req.Dest); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -441,19 +429,19 @@ func (h *FileManagerHandler) Chmod(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Parse mode string
 	mode, err := strconv.ParseUint(req.Mode, 8, 32)
 	if err != nil {
-		BadRequest(c, "invalid mode format")
+		c.Error(ErrBadRequest.WithMessage("invalid mode format"))
 		return
 	}
 
 	if err := h.fileManager.Chmod(req.Path, os.FileMode(mode)); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -475,12 +463,12 @@ func (h *FileManagerHandler) Chown(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.fileManager.Chown(req.Path, req.UID, req.GID); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -497,21 +485,17 @@ func (h *FileManagerHandler) Chown(c *gin.Context) {
 func (h *FileManagerHandler) GetDetails(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		BadRequest(c, "path is required")
+		c.Error(ErrBadRequest.WithMessage("path is required"))
 		return
 	}
 
 	details, err := h.fileManager.GetFileDetails(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			NotFound(c, "文件不存在")
+			c.Error(ErrNotFound.WithMessage("文件不存在"))
 			return
 		}
-		if isPathError(err) {
-			Forbidden(c, err.Error())
-		} else {
-			InternalError(c, err.Error())
-		}
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -522,13 +506,13 @@ func (h *FileManagerHandler) GetDetails(c *gin.Context) {
 func (h *FileManagerHandler) GetMimeType(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		BadRequest(c, "path is required")
+		c.Error(ErrBadRequest.WithMessage("path is required"))
 		return
 	}
 
 	mimeType, err := h.fileManager.GetMimeType(path)
 	if err != nil {
-		Forbidden(c, err.Error())
+		c.Error(ErrForbidden.Wrap(err))
 		return
 	}
 

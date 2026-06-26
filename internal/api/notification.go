@@ -27,7 +27,7 @@ func (h *NotificationHandler) List(c *gin.Context) {
 
 	notifications, err := h.ns.List(unreadOnly, limit)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, notifications)
@@ -37,7 +37,7 @@ func (h *NotificationHandler) List(c *gin.Context) {
 func (h *NotificationHandler) CountUnread(c *gin.Context) {
 	count, err := h.ns.CountUnread()
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"count": count})
@@ -47,11 +47,11 @@ func (h *NotificationHandler) CountUnread(c *gin.Context) {
 func (h *NotificationHandler) Create(c *gin.Context) {
 	var req model.CreateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求参数")
+		c.Error(ErrBadRequest.WithMessage("无效的请求参数"))
 		return
 	}
 	if err := h.ns.Create(req); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "通知已创建"})
@@ -62,11 +62,11 @@ func (h *NotificationHandler) MarkAsRead(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的通知 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的通知 ID"))
 		return
 	}
 	if err := h.ns.MarkAsRead(id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "已标记为已读"})
@@ -75,7 +75,7 @@ func (h *NotificationHandler) MarkAsRead(c *gin.Context) {
 // MarkAllAsRead marks all as read
 func (h *NotificationHandler) MarkAllAsRead(c *gin.Context) {
 	if err := h.ns.MarkAllAsRead(); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "全部已标记为已读"})
@@ -86,11 +86,11 @@ func (h *NotificationHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的通知 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的通知 ID"))
 		return
 	}
 	if err := h.ns.Delete(id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "已删除"})

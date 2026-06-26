@@ -72,33 +72,33 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// User info already set by WSAuthMiddleware
 	userIDIface, ok := c.Get("user_id")
 	if !ok {
-		Unauthorized(c, "用户ID未找到")
+		c.Error(ErrUnauthorized.WithMessage("用户ID未找到"))
 		return
 	}
 	userID, ok := userIDIface.(int64)
 	if !ok {
-		InternalError(c, "用户ID类型无效")
+		c.Error(ErrInternal.WithMessage("用户ID类型无效"))
 		return
 	}
 	usernameIface, ok := c.Get("username")
 	if !ok {
-		Unauthorized(c, "用户名未找到")
+		c.Error(ErrUnauthorized.WithMessage("用户名未找到"))
 		return
 	}
 	username, ok := usernameIface.(string)
 	if !ok {
-		InternalError(c, "用户名类型无效")
+		c.Error(ErrInternal.WithMessage("用户名类型无效"))
 		return
 	}
 
 	// Get and validate session ID from URL
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		BadRequest(c, "会话ID不能为空")
+		c.Error(ErrBadRequest.WithMessage("会话ID不能为空"))
 		return
 	}
 	if !sessionIDRegex.MatchString(sessionID) {
-		BadRequest(c, "会话ID格式无效")
+		c.Error(ErrBadRequest.WithMessage("会话ID格式无效"))
 		return
 	}
 
@@ -108,7 +108,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		// Try to get existing session
 		session, err = h.terminalManager.GetSession(sessionID)
 		if err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 	}

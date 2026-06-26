@@ -305,7 +305,8 @@ func (m *FileManager) Copy(src, dst string) error {
 		return fmt.Errorf("copying directories is not supported")
 	}
 
-	dstFile, err := os.Create(validDst)
+	// Use O_NOFOLLOW to prevent symlink attacks (TOCTOU)
+	dstFile, err := os.OpenFile(validDst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
 	if err != nil {
 		return fmt.Errorf("create dest %s: %w", dst, err)
 	}

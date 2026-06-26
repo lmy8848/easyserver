@@ -1,10 +1,10 @@
 package middleware
 
 import (
-	"net/http"
-	"sync"
+		"sync"
 	"time"
 
+	"easyserver/internal/apperror"
 	"github.com/gin-gonic/gin"
 )
 
@@ -139,10 +139,7 @@ func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
 		ip := c.ClientIP()
 
 		if !limiter.isAllowed(ip) {
-			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code":    42900,
-				"message": "rate limit exceeded",
-			})
+			c.Error(apperror.ErrRateLimit.WithMessage("rate limit exceeded"))
 			c.Abort()
 			return
 		}

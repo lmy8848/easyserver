@@ -229,6 +229,7 @@ func (r *Router) Setup() *gin.Engine {
 
 	// Global middleware
 	e.Use(gin.Logger(), gin.Recovery(),
+		ErrorHandler(),
 		middleware.SecurityMiddleware(),
 		middleware.CORSMiddleware(r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode),
 		middleware.RateLimitMiddleware(r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),

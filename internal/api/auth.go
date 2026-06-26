@@ -43,7 +43,7 @@ type ChangePasswordRequest struct {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -58,14 +58,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "LOGIN_FAILED",
 				err.Error(), ip, userAgent)
 		}
-		Unauthorized(c, err.Error())
+		c.Error(ErrUnauthorized.Wrap(err))
 		return
 	}
 
 	// Check if TOTP is enabled for this user
 	totpEnabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), user.ID)
 	if err != nil {
-		InternalError(c, "检查 TOTP 状态失败")
+		c.Error(ErrInternal.WithMessage("检查 TOTP 状态失败"))
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if totpEnabled {
 		tempToken, err := middleware.GenerateTOTPTempToken(h.jwtSecret, user.ID)
 		if err != nil {
-			InternalError(c, "生成临时令牌失败")
+			c.Error(ErrInternal.WithMessage("生成临时令牌失败"))
 			return
 		}
 
@@ -87,7 +87,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// If TOTP is not enabled, proceed with normal login
 	token, err := middleware.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
-		InternalError(c, "生成令牌失败")
+		c.Error(ErrInternal.WithMessage("生成令牌失败"))
 		return
 	}
 
@@ -148,14 +148,14 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) GetProfile(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 	if userID == 0 {
-		Unauthorized(c, "未登录")
+		c.Error(ErrUnauthorized.WithMessage("未登录"))
 		return
 	}
 
 	// Get user from database
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "获取用户信息失败")
+		c.Error(ErrInternal.WithMessage("获取用户信息失败"))
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 					err.Error(), c.ClientIP(), c.Request.UserAgent())
 			}
 		}
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -227,21 +227,21 @@ type TOTPDisableRequest struct {
 func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	var req TOTPVerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate temp token
 	userID, err := middleware.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
 	if err != nil {
-		Unauthorized(c, "临时令牌无效或已过期")
+		c.Error(ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
 		return
 	}
 
 	// Get user's TOTP secret
 	secret, err := h.authService.GetTOTPSecret(c.Request.Context(), userID)
 	if err != nil {
-		Unauthorized(c, "该用户未启用 TOTP")
+		c.Error(ErrUnauthorized.WithMessage("该用户未启用 TOTP"))
 		return
 	}
 
@@ -255,21 +255,21 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 					"Invalid TOTP code", c.ClientIP(), c.Request.UserAgent())
 			}
 		}
-		Unauthorized(c, "TOTP 验证码无效")
+		c.Error(ErrUnauthorized.WithMessage("TOTP 验证码无效"))
 		return
 	}
 
 	// Get user info
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "获取用户信息失败")
+		c.Error(ErrInternal.WithMessage("获取用户信息失败"))
 		return
 	}
 
 	// Generate full token
 	token, err := middleware.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
-		InternalError(c, "生成令牌失败")
+		c.Error(ErrInternal.WithMessage("生成令牌失败"))
 		return
 	}
 
@@ -299,21 +299,21 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	var req BackupCodeVerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate temp token
 	userID, err := middleware.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
 	if err != nil {
-		Unauthorized(c, "临时令牌无效或已过期")
+		c.Error(ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
 		return
 	}
 
 	// Verify backup code
 	valid, err := h.authService.VerifyBackupCode(c.Request.Context(), userID, req.BackupCode)
 	if err != nil {
-		InternalError(c, "验证备用码失败")
+		c.Error(ErrInternal.WithMessage("验证备用码失败"))
 		return
 	}
 	if !valid {
@@ -325,21 +325,21 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 					"Invalid backup code", c.ClientIP(), c.Request.UserAgent())
 			}
 		}
-		Unauthorized(c, "备用码无效")
+		c.Error(ErrUnauthorized.WithMessage("备用码无效"))
 		return
 	}
 
 	// Get user info
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "获取用户信息失败")
+		c.Error(ErrInternal.WithMessage("获取用户信息失败"))
 		return
 	}
 
 	// Generate full token
 	token, err := middleware.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
-		InternalError(c, "生成令牌失败")
+		c.Error(ErrInternal.WithMessage("生成令牌失败"))
 		return
 	}
 
@@ -373,11 +373,11 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	// Check if TOTP is already enabled
 	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "检查 TOTP 状态失败")
+		c.Error(ErrInternal.WithMessage("检查 TOTP 状态失败"))
 		return
 	}
 	if enabled {
-		BadRequest(c, "TOTP 已启用")
+		c.Error(ErrBadRequest.WithMessage("TOTP 已启用"))
 		return
 	}
 
@@ -385,14 +385,14 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	unameStr, _ := username.(string)
 	result, err := h.authService.GenerateTOTP(userID, unameStr)
 	if err != nil {
-		InternalError(c, "生成 TOTP 设置失败")
+		c.Error(ErrInternal.WithMessage("生成 TOTP 设置失败"))
 		return
 	}
 
 	// Store the secret temporarily (totp_enabled = 0, secret stored for verification)
 	err = h.authService.StorePendingSecret(c.Request.Context(), userID, result.Secret)
 	if err != nil {
-		InternalError(c, "存储 TOTP 密钥失败")
+		c.Error(ErrInternal.WithMessage("存储 TOTP 密钥失败"))
 		return
 	}
 
@@ -406,7 +406,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 
 	var req TOTPEnableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -414,7 +414,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	secret, err := h.authService.GetPendingSecret(c.Request.Context(), userID)
 	if err != nil {
 		// If no pending secret, need to setup first
-		BadRequest(c, "请先设置 TOTP")
+		c.Error(ErrBadRequest.WithMessage("请先设置 TOTP"))
 		return
 	}
 
@@ -428,7 +428,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 					err.Error(), c.ClientIP(), c.Request.UserAgent())
 			}
 		}
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -452,7 +452,7 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 
 	var req TOTPDisableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -465,7 +465,7 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 					err.Error(), c.ClientIP(), c.Request.UserAgent())
 			}
 		}
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -486,7 +486,7 @@ func (h *AuthHandler) GetTOTPStatus(c *gin.Context) {
 
 	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "检查 TOTP 状态失败")
+		c.Error(ErrInternal.WithMessage("检查 TOTP 状态失败"))
 		return
 	}
 
@@ -501,7 +501,7 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 
 	sessions, err := h.sessionService.GetUserSessions(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "获取会话列表失败")
+		c.Error(ErrInternal.WithMessage("获取会话列表失败"))
 		return
 	}
 
@@ -524,20 +524,20 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		Token string `json:"token" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Prevent kicking yourself
 	if req.Token == currentToken {
-		BadRequest(c, "不能踢出自己的会话，请使用登出功能")
+		c.Error(ErrBadRequest.WithMessage("不能踢出自己的会话，请使用登出功能"))
 		return
 	}
 
 	// Verify the session belongs to the current user
 	sessions, err := h.sessionService.GetUserSessions(c.Request.Context(), userID)
 	if err != nil {
-		InternalError(c, "获取会话列表失败")
+		c.Error(ErrInternal.WithMessage("获取会话列表失败"))
 		return
 	}
 
@@ -549,13 +549,13 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		}
 	}
 	if !found {
-		NotFound(c, "会话不存在")
+		c.Error(ErrNotFound.WithMessage("会话不存在"))
 		return
 	}
 
 	// Remove the session
 	if err := h.sessionService.RemoveSessionByToken(c.Request.Context(), req.Token); err != nil {
-		InternalError(c, "删除会话失败")
+		c.Error(ErrInternal.WithMessage("删除会话失败"))
 		return
 	}
 
@@ -582,7 +582,7 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 
 	// Remove all other sessions
 	if err := h.sessionService.RemoveOtherSessions(c.Request.Context(), userID, currentToken); err != nil {
-		InternalError(c, "删除会话失败")
+		c.Error(ErrInternal.WithMessage("删除会话失败"))
 		return
 	}
 

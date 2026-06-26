@@ -35,8 +35,11 @@ COPY --from=backend /app/easyserver .
 # Create data directory and set ownership
 RUN mkdir -p /app/data && chown -R easyserver:easyserver /app
 
-# Generate a default config.yaml with random secrets at runtime if not provided
-# This ensures the container can start even without a mounted config file
+# Generate a default config.yaml at runtime if not provided
+# IMPORTANT: JWT secret and encryption key must be provided via environment variables
+#   EASYSERVER_JWT_SECRET - at least 32 bytes random secret
+#   EASYSERVER_ENCRYPTION_KEY - at least 32 bytes random key
+# Or mount a config.yaml file with proper secrets
 RUN printf '%s\n' \
   'server:' \
   '  port: 8080' \
@@ -44,7 +47,7 @@ RUN printf '%s\n' \
   '  serve_frontend: true' \
   '  dev_mode: false' \
   'auth:' \
-  '  jwt_secret: "change-me-to-a-random-32byte-secret!!!"' \
+  '  jwt_secret: ""' \
   '  session_timeout: 24h' \
   '  max_login_attempts: 5' \
   '  lockout_duration: 15m' \
@@ -60,7 +63,7 @@ RUN printf '%s\n' \
   '  enabled: true' \
   '  retention_days: 90' \
   'deploy:' \
-  '  encryption_key: "change-me-to-a-random-32-byte-key!!"' \
+  '  encryption_key: ""' \
   'filemanager:' \
   '  base_path: "/app/data"' \
   'notify:' \

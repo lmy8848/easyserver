@@ -398,6 +398,11 @@ func (s *Service) ListGroups(ctx context.Context) ([]ProcessGroup, error) {
 	return s.repo.ListGroups(ctx)
 }
 
+// GetGroup returns a process group by ID
+func (s *Service) GetGroup(ctx context.Context, id int64) (*ProcessGroup, error) {
+	return s.repo.GetGroup(ctx, id)
+}
+
 // CreateGroup creates a new process group
 func (s *Service) CreateGroup(ctx context.Context, req *CreateProcessGroupRequest) (*ProcessGroup, error) {
 	id, err := s.repo.CreateGroup(ctx, req.Name, req.Description)

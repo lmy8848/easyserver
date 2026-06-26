@@ -23,7 +23,7 @@ func NewDeployHandler(db *deploy.Service) *DeployHandler {
 func (h *DeployHandler) ListServers(c *gin.Context) {
 	servers, err := h.deployService.ListServers(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, servers)
@@ -32,13 +32,13 @@ func (h *DeployHandler) ListServers(c *gin.Context) {
 func (h *DeployHandler) GetServer(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		c.Error(ErrBadRequest.WithMessage("invalid server id"))
 		return
 	}
 
 	srv, err := h.deployService.GetServer(c.Request.Context(), id)
 	if err != nil {
-		NotFound(c, err.Error())
+		c.Error(ErrNotFound.Wrap(err))
 		return
 	}
 
@@ -48,38 +48,38 @@ func (h *DeployHandler) GetServer(c *gin.Context) {
 func (h *DeployHandler) CreateServer(c *gin.Context) {
 	var srv model.DeployServer
 	if err := c.ShouldBindJSON(&srv); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Input validation
 	if srv.Name == "" {
-		BadRequest(c, "server name is required")
+		c.Error(ErrBadRequest.WithMessage("server name is required"))
 		return
 	}
 	if srv.Host == "" {
-		BadRequest(c, "host is required")
+		c.Error(ErrBadRequest.WithMessage("host is required"))
 		return
 	}
 	if srv.Port < 1 || srv.Port > 65535 {
-		BadRequest(c, "port must be between 1 and 65535")
+		c.Error(ErrBadRequest.WithMessage("port must be between 1 and 65535"))
 		return
 	}
 	if srv.Username == "" {
-		BadRequest(c, "username is required")
+		c.Error(ErrBadRequest.WithMessage("username is required"))
 		return
 	}
 	if srv.AuthType != "password" && srv.AuthType != "key" {
-		BadRequest(c, "auth_type must be 'password' or 'key'")
+		c.Error(ErrBadRequest.WithMessage("auth_type must be 'password' or 'key'"))
 		return
 	}
 	if srv.AuthData == "" {
-		BadRequest(c, "auth_data is required")
+		c.Error(ErrBadRequest.WithMessage("auth_data is required"))
 		return
 	}
 
 	if err := h.deployService.CreateServer(c.Request.Context(), &srv); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -91,19 +91,19 @@ func (h *DeployHandler) CreateServer(c *gin.Context) {
 func (h *DeployHandler) UpdateServer(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		c.Error(ErrBadRequest.WithMessage("invalid server id"))
 		return
 	}
 
 	var srv model.DeployServer
 	if err := c.ShouldBindJSON(&srv); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 	srv.ID = id
 
 	if err := h.deployService.UpdateServer(c.Request.Context(), &srv); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -115,17 +115,17 @@ func (h *DeployHandler) UpdateServer(c *gin.Context) {
 func (h *DeployHandler) DeleteServer(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		c.Error(ErrBadRequest.WithMessage("invalid server id"))
 		return
 	}
 
 	if err := h.deployService.DeleteServer(c.Request.Context(), id); err != nil {
 		// Sub-resource conflict returns 409
 		if strings.Contains(err.Error(), "tasks") || strings.Contains(err.Error(), "versions") {
-			Conflict(c, err.Error())
+			c.Error(ErrConflict.Wrap(err))
 			return
 		}
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -135,12 +135,12 @@ func (h *DeployHandler) DeleteServer(c *gin.Context) {
 func (h *DeployHandler) TestConnection(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid server id")
+		c.Error(ErrBadRequest.WithMessage("invalid server id"))
 		return
 	}
 
 	if err := h.deployService.TestConnection(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -152,7 +152,7 @@ func (h *DeployHandler) TestConnection(c *gin.Context) {
 func (h *DeployHandler) ListTasks(c *gin.Context) {
 	tasks, err := h.deployService.ListTasks(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, tasks)
@@ -161,13 +161,13 @@ func (h *DeployHandler) ListTasks(c *gin.Context) {
 func (h *DeployHandler) GetTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid task id")
+		c.Error(ErrBadRequest.WithMessage("invalid task id"))
 		return
 	}
 
 	task, err := h.deployService.GetTask(c.Request.Context(), id)
 	if err != nil {
-		NotFound(c, err.Error())
+		c.Error(ErrNotFound.Wrap(err))
 		return
 	}
 
@@ -177,30 +177,30 @@ func (h *DeployHandler) GetTask(c *gin.Context) {
 func (h *DeployHandler) CreateTask(c *gin.Context) {
 	var task model.DeployTask
 	if err := c.ShouldBindJSON(&task); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Input validation
 	if task.Name == "" {
-		BadRequest(c, "task name is required")
+		c.Error(ErrBadRequest.WithMessage("task name is required"))
 		return
 	}
 	if task.Type != "sync" && task.Type != "command" && task.Type != "rollback" {
-		BadRequest(c, "task type must be 'sync', 'command', or 'rollback'")
+		c.Error(ErrBadRequest.WithMessage("task type must be 'sync', 'command', or 'rollback'"))
 		return
 	}
 	if task.ServerID <= 0 {
-		BadRequest(c, "server_id is required")
+		c.Error(ErrBadRequest.WithMessage("server_id is required"))
 		return
 	}
 
 	if err := h.deployService.CreateTask(c.Request.Context(), &task); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
-			NotFound(c, err.Error())
+			c.Error(ErrNotFound.Wrap(err))
 			return
 		}
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -210,12 +210,12 @@ func (h *DeployHandler) CreateTask(c *gin.Context) {
 func (h *DeployHandler) DeleteTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid task id")
+		c.Error(ErrBadRequest.WithMessage("invalid task id"))
 		return
 	}
 
 	if err := h.deployService.DeleteTask(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -225,16 +225,16 @@ func (h *DeployHandler) DeleteTask(c *gin.Context) {
 func (h *DeployHandler) ExecuteTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid task id")
+		c.Error(ErrBadRequest.WithMessage("invalid task id"))
 		return
 	}
 
 	if err := h.deployService.ExecuteTask(c.Request.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "already running") {
-			Conflict(c, err.Error())
+			c.Error(ErrConflict.Wrap(err))
 			return
 		}
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -246,13 +246,13 @@ func (h *DeployHandler) ExecuteTask(c *gin.Context) {
 func (h *DeployHandler) ListVersions(c *gin.Context) {
 	serverID, err := strconv.ParseInt(c.Query("server_id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "server_id is required")
+		c.Error(ErrBadRequest.WithMessage("server_id is required"))
 		return
 	}
 
 	versions, err := h.deployService.ListVersions(c.Request.Context(), serverID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -262,12 +262,12 @@ func (h *DeployHandler) ListVersions(c *gin.Context) {
 func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "invalid version id")
+		c.Error(ErrBadRequest.WithMessage("invalid version id"))
 		return
 	}
 
 	if err := h.deployService.RollbackVersion(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 

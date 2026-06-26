@@ -25,7 +25,7 @@ func NewSystemProcessHandler(sps *systemprocess.Service) *SystemProcessHandler {
 func (h *SystemProcessHandler) GetSystemOverview(c *gin.Context) {
 	overview, err := h.sps.GetOverview()
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, overview)
@@ -41,7 +41,7 @@ func (h *SystemProcessHandler) ListSystemProcesses(c *gin.Context) {
 
 	processes, err := h.sps.ListSystemProcesses(sortBy, order, search, limit)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, processes)
@@ -52,13 +52,13 @@ func (h *SystemProcessHandler) GetSystemProcess(c *gin.Context) {
 	pidStr := c.Param("pid")
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		BadRequest(c, "无效的PID")
+		c.Error(ErrBadRequest.WithMessage("无效的PID"))
 		return
 	}
 
 	proc, err := systemprocess.GetSystemProcess(pid)
 	if err != nil {
-		NotFound(c, fmt.Sprintf("进程 %d 不存在", pid))
+		c.Error(ErrNotFound.WithMessage(fmt.Sprintf("进程 %d 不存在", pid)))
 		return
 	}
 	Success(c, proc)
@@ -68,7 +68,7 @@ func (h *SystemProcessHandler) GetSystemProcess(c *gin.Context) {
 func (h *SystemProcessHandler) ListSystemServices(c *gin.Context) {
 	services, err := h.sps.ListServices()
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, services)
@@ -78,7 +78,7 @@ func (h *SystemProcessHandler) ListSystemServices(c *gin.Context) {
 func (h *SystemProcessHandler) ServiceAction(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "服务名不能为空")
+		c.Error(ErrBadRequest.WithMessage("服务名不能为空"))
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h *SystemProcessHandler) ServiceAction(c *gin.Context) {
 		Force  bool   `json:"force"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求参数")
+		c.Error(ErrBadRequest.WithMessage("无效的请求参数"))
 		return
 	}
 
@@ -108,7 +108,7 @@ func (h *SystemProcessHandler) ServiceAction(c *gin.Context) {
 				return
 			}
 		}
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": fmt.Sprintf("服务 %s %s 成功", name, req.Action)})
@@ -118,7 +118,7 @@ func (h *SystemProcessHandler) ServiceAction(c *gin.Context) {
 func (h *SystemProcessHandler) GetServiceLogs(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "服务名不能为空")
+		c.Error(ErrBadRequest.WithMessage("服务名不能为空"))
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *SystemProcessHandler) GetServiceLogs(c *gin.Context) {
 
 	logs, err := h.sps.GetServiceLogs(name, lines)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"logs": logs, "service": name})
@@ -146,7 +146,7 @@ func (h *SystemProcessHandler) ListProtectedServices(c *gin.Context) {
 func (h *SystemProcessHandler) ListWhitelist(c *gin.Context) {
 	entries, err := h.sps.GetWhitelist()
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, entries)
@@ -158,12 +158,12 @@ func (h *SystemProcessHandler) AddToWhitelist(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "服务名不能为空")
+		c.Error(ErrBadRequest.WithMessage("服务名不能为空"))
 		return
 	}
 
 	if err := h.sps.AddToWhitelist(req.Name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": fmt.Sprintf("已添加 %s 到白名单", req.Name)})
@@ -173,12 +173,12 @@ func (h *SystemProcessHandler) AddToWhitelist(c *gin.Context) {
 func (h *SystemProcessHandler) RemoveFromWhitelist(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "服务名不能为空")
+		c.Error(ErrBadRequest.WithMessage("服务名不能为空"))
 		return
 	}
 
 	if err := h.sps.RemoveFromWhitelist(name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": fmt.Sprintf("已从白名单移除 %s", name)})

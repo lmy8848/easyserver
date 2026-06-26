@@ -32,7 +32,7 @@ func (h *FirewallRuleHandler) isProtectedPort(c *gin.Context, port string) bool 
 func (h *FirewallRuleHandler) ListRules(c *gin.Context) {
 	rules, err := h.firewallService.ListRules(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, rules)
@@ -42,12 +42,12 @@ func (h *FirewallRuleHandler) ListRules(c *gin.Context) {
 func (h *FirewallRuleHandler) GetRule(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 	Success(c, rule)
@@ -58,24 +58,24 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		InternalError(c, "获取防火墙状态失败")
+		c.Error(ErrInternal.WithMessage("获取防火墙状态失败"))
 		return
 	}
 	if !status.Enabled {
-		BadRequest(c, "防火墙已禁用，请先启用防火墙")
+		c.Error(ErrBadRequest.WithMessage("防火墙已禁用，请先启用防火墙"))
 		return
 	}
 
 	var req firewall.CreateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate chain
 	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 	if !validChains[strings.ToUpper(req.Chain)] {
-		BadRequest(c, "无效的链，必须是 INPUT、OUTPUT 或 FORWARD")
+		c.Error(ErrBadRequest.WithMessage("无效的链，必须是 INPUT、OUTPUT 或 FORWARD"))
 		return
 	}
 
@@ -83,7 +83,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	validActions := map[string]bool{"ACCEPT": true, "DROP": true, "REJECT": true}
 	action := strings.ToUpper(req.Action)
 	if !validActions[action] {
-		BadRequest(c, "无效的动作，必须是 ACCEPT、DROP 或 REJECT")
+		c.Error(ErrBadRequest.WithMessage("无效的动作，必须是 ACCEPT、DROP 或 REJECT"))
 		return
 	}
 
@@ -94,20 +94,20 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	}
 	validProtocols := map[string]bool{"tcp": true, "udp": true, "all": true, "icmp": true}
 	if !validProtocols[strings.ToLower(protocol)] {
-		BadRequest(c, "无效的协议，必须是 tcp、udp、all 或 icmp")
+		c.Error(ErrBadRequest.WithMessage("无效的协议，必须是 tcp、udp、all 或 icmp"))
 		return
 	}
 
 	// Validate port format if provided
 	if req.Port != "" {
 		if !isValidPort(req.Port) {
-			BadRequest(c, "无效的端口格式，使用单端口 (80) 或范围 (8000-9000)")
+			c.Error(ErrBadRequest.WithMessage("无效的端口格式，使用单端口 (80) 或范围 (8000-9000)"))
 			return
 		}
 
 		// Check if port is protected (panel port or SSH)
 		if action != "ACCEPT" && h.isProtectedPort(c, req.Port) {
-			BadRequest(c, fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", req.Port))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", req.Port)))
 			return
 		}
 	}
@@ -115,7 +115,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	// Validate source IP/CIDR if provided
 	if req.Source != "" && req.Source != "0.0.0.0/0" && req.Source != "::/0" {
 		if !isValidCIDR(req.Source) {
-			BadRequest(c, "无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)")
+			c.Error(ErrBadRequest.WithMessage("无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)"))
 			return
 		}
 	}
@@ -127,7 +127,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	}
 	validIPVersions := map[string]bool{"ipv4": true, "ipv6": true, "both": true}
 	if !validIPVersions[ipVersion] {
-		BadRequest(c, "无效的 ip_version，必须是 ipv4、ipv6 或 both")
+		c.Error(ErrBadRequest.WithMessage("无效的 ip_version，必须是 ipv4、ipv6 或 both"))
 		return
 	}
 
@@ -143,7 +143,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	}
 
 	if err := h.firewallService.CreateRule(c.Request.Context(), rule); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, rule)
@@ -153,26 +153,26 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 
 	var req firewall.UpdateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if req.Chain != nil {
 		validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 		if !validChains[strings.ToUpper(*req.Chain)] {
-			BadRequest(c, "无效的链")
+			c.Error(ErrBadRequest.WithMessage("无效的链"))
 			return
 		}
 		rule.Chain = strings.ToUpper(*req.Chain)
@@ -180,14 +180,14 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 	if req.Protocol != nil {
 		validProtocols := map[string]bool{"tcp": true, "udp": true, "all": true, "icmp": true}
 		if !validProtocols[strings.ToLower(*req.Protocol)] {
-			BadRequest(c, "无效的协议")
+			c.Error(ErrBadRequest.WithMessage("无效的协议"))
 			return
 		}
 		rule.Protocol = strings.ToLower(*req.Protocol)
 	}
 	if req.Port != nil {
 		if *req.Port != "" && !isValidPort(*req.Port) {
-			BadRequest(c, "无效的端口格式")
+			c.Error(ErrBadRequest.WithMessage("无效的端口格式"))
 			return
 		}
 		rule.Port = *req.Port
@@ -195,14 +195,14 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 	if req.Action != nil {
 		validActions := map[string]bool{"ACCEPT": true, "DROP": true, "REJECT": true}
 		if !validActions[strings.ToUpper(*req.Action)] {
-			BadRequest(c, "无效的动作")
+			c.Error(ErrBadRequest.WithMessage("无效的动作"))
 			return
 		}
 		rule.Action = strings.ToUpper(*req.Action)
 	}
 	if req.Source != nil {
 		if *req.Source != "" && *req.Source != "0.0.0.0/0" && *req.Source != "::/0" && !isValidCIDR(*req.Source) {
-			BadRequest(c, "无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)")
+			c.Error(ErrBadRequest.WithMessage("无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)"))
 			return
 		}
 		rule.Source = *req.Source
@@ -210,7 +210,7 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 	if req.IPVersion != nil {
 		validIPVersions := map[string]bool{"ipv4": true, "ipv6": true, "both": true}
 		if !validIPVersions[*req.IPVersion] {
-			BadRequest(c, "无效的 ip_version，必须是 ipv4、ipv6 或 both")
+			c.Error(ErrBadRequest.WithMessage("无效的 ip_version，必须是 ipv4、ipv6 或 both"))
 			return
 		}
 		rule.IPVersion = *req.IPVersion
@@ -221,12 +221,12 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 
 	// Check if the updated rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		BadRequest(c, fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", rule.Port))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", rule.Port)))
 		return
 	}
 
 	if err := h.firewallService.UpdateRule(c.Request.Context(), rule); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, rule)
@@ -236,16 +236,16 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 	// Check existence
 	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 	if err := h.firewallService.DeleteRule(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "规则已删除"})
@@ -255,36 +255,36 @@ func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) {
 func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		InternalError(c, "获取防火墙状态失败")
+		c.Error(ErrInternal.WithMessage("获取防火墙状态失败"))
 		return
 	}
 	if !status.Enabled {
-		BadRequest(c, "防火墙已禁用，请先启用防火墙")
+		c.Error(ErrBadRequest.WithMessage("防火墙已禁用，请先启用防火墙"))
 		return
 	}
 
 	// Check existence
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 
 	// Check if enabling this rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		BadRequest(c, fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法启用 DROP/REJECT 规则", rule.Port))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法启用 DROP/REJECT 规则", rule.Port)))
 		return
 	}
 
 	if err := h.firewallService.EnableRule(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "规则已启用"})
@@ -294,16 +294,16 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
 func (h *FirewallRuleHandler) DisableRule(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 	// Check existence
 	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 	if err := h.firewallService.DisableRule(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "规则已禁用"})
@@ -313,15 +313,15 @@ func (h *FirewallRuleHandler) DisableRule(c *gin.Context) {
 func (h *FirewallRuleHandler) MoveRuleUp(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 	if err := h.firewallService.MoveRuleUp(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "规则已上移"})
@@ -331,15 +331,15 @@ func (h *FirewallRuleHandler) MoveRuleUp(c *gin.Context) {
 func (h *FirewallRuleHandler) MoveRuleDown(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的规则ID")
+		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
 	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
-		NotFound(c, "规则不存在")
+		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
 	if err := h.firewallService.MoveRuleDown(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "规则已下移"})
@@ -350,17 +350,17 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		InternalError(c, "获取防火墙状态失败")
+		c.Error(ErrInternal.WithMessage("获取防火墙状态失败"))
 		return
 	}
 	if !status.Enabled {
-		BadRequest(c, "防火墙已禁用，请先启用防火墙")
+		c.Error(ErrBadRequest.WithMessage("防火墙已禁用，请先启用防火墙"))
 		return
 	}
 
 	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -397,7 +397,7 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
 func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
 	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -428,7 +428,7 @@ func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
 func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) {
 	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -459,7 +459,7 @@ func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) {
 func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) {
 	rules, err := h.firewallService.GetSystemRules(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, rules)
@@ -469,7 +469,7 @@ func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) {
 func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
 	var rule firewall.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("invalid request: "+err.Error()))
 		return
 	}
 
@@ -477,12 +477,12 @@ func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
 	// Removing an ACCEPT rule for a protected port could lock out the user
 	// if the default policy is DROP.
 	if strings.ToUpper(rule.Action) == "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		BadRequest(c, fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法删除其 ACCEPT 规则", rule.Port))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法删除其 ACCEPT 规则", rule.Port)))
 		return
 	}
 
 	if err := h.firewallService.RemoveSystemRule(c.Request.Context(), &rule); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -511,7 +511,7 @@ type FirewallExportedRule struct {
 func (h *FirewallRuleHandler) ExportRules(c *gin.Context) {
 	rules, err := h.firewallService.ListRules(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -537,31 +537,31 @@ func (h *FirewallRuleHandler) ExportRules(c *gin.Context) {
 	filename := fmt.Sprintf("firewall-rules-%s.json", time.Now().Format("2006-01-02"))
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
 	c.Header("Content-Type", "application/json")
-	c.JSON(200, data)
+	Success(c, data)
 }
 
 // ImportRules imports firewall rules from a JSON file
 func (h *FirewallRuleHandler) ImportRules(c *gin.Context) {
 	var data FirewallExportData
 	if err := c.ShouldBindJSON(&data); err != nil {
-		BadRequest(c, "无效的 JSON: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的 JSON: "+err.Error()))
 		return
 	}
 
 	if data.Version != 1 {
-		BadRequest(c, fmt.Sprintf("不支持的导出版本: %d，期望版本 1", data.Version))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("不支持的导出版本: %d，期望版本 1", data.Version)))
 		return
 	}
 
 	if len(data.Rules) == 0 {
-		BadRequest(c, "没有可导入的规则")
+		c.Error(ErrBadRequest.WithMessage("没有可导入的规则"))
 		return
 	}
 
 	// Limit import size to prevent abuse
 	const maxImportRules = 500
 	if len(data.Rules) > maxImportRules {
-		BadRequest(c, fmt.Sprintf("导入规则数量过多: %d（最大 %d）", len(data.Rules), maxImportRules))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("导入规则数量过多: %d（最大 %d）", len(data.Rules), maxImportRules)))
 		return
 	}
 

@@ -6,8 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"regexp"
+		"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -59,7 +58,7 @@ func (h *ServiceHandler) isProtectedService(name string) bool {
 func (h *ServiceHandler) List(c *gin.Context) {
 	services, err := h.serviceManager.List(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -70,13 +69,13 @@ func (h *ServiceHandler) List(c *gin.Context) {
 func (h *ServiceHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	svc, err := h.serviceManager.Get(c.Request.Context(), name)
 	if err != nil {
-		NotFound(c, err.Error())
+		c.Error(ErrNotFound.Wrap(err))
 		return
 	}
 
@@ -87,12 +86,12 @@ func (h *ServiceHandler) Get(c *gin.Context) {
 func (h *ServiceHandler) Start(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	if err := h.serviceManager.Start(c.Request.Context(), name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -103,18 +102,18 @@ func (h *ServiceHandler) Start(c *gin.Context) {
 func (h *ServiceHandler) Stop(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
-		BadRequest(c, "无法停止面板自身的服务")
+		c.Error(ErrBadRequest.WithMessage("无法停止面板自身的服务"))
 		return
 	}
 
 	if err := h.serviceManager.Stop(c.Request.Context(), name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -125,18 +124,18 @@ func (h *ServiceHandler) Stop(c *gin.Context) {
 func (h *ServiceHandler) Restart(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
-		BadRequest(c, "无法从此处重启面板自身服务，请使用 /api/settings/restart")
+		c.Error(ErrBadRequest.WithMessage("无法从此处重启面板自身服务，请使用 /api/settings/restart"))
 		return
 	}
 
 	if err := h.serviceManager.Restart(c.Request.Context(), name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -147,12 +146,12 @@ func (h *ServiceHandler) Restart(c *gin.Context) {
 func (h *ServiceHandler) Enable(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	if err := h.serviceManager.Enable(c.Request.Context(), name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -163,18 +162,18 @@ func (h *ServiceHandler) Enable(c *gin.Context) {
 func (h *ServiceHandler) Disable(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
-		BadRequest(c, "无法禁用面板自身的服务")
+		c.Error(ErrBadRequest.WithMessage("无法禁用面板自身的服务"))
 		return
 	}
 
 	if err := h.serviceManager.Disable(c.Request.Context(), name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -185,7 +184,7 @@ func (h *ServiceHandler) Disable(c *gin.Context) {
 func (h *ServiceHandler) GetLogs(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		BadRequest(c, "无效的服务名称")
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
@@ -199,7 +198,7 @@ func (h *ServiceHandler) GetLogs(c *gin.Context) {
 
 	logs, err := h.serviceManager.GetLogs(c.Request.Context(), name, tail, since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -211,11 +210,7 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	// User info already set by WSAuthMiddleware
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    40000,
-			"message": "无效的服务名称",
-			"data":    nil,
-		})
+		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 

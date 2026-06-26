@@ -59,7 +59,7 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请提供模板名称")
+		c.Error(ErrBadRequest.WithMessage("请提供模板名称"))
 		return
 	}
 
@@ -72,13 +72,13 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 		}
 	}
 	if tpl == nil {
-		BadRequest(c, fmt.Sprintf("未找到模板: %s", req.Name))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("未找到模板: %s", req.Name)))
 		return
 	}
 
 	// Check if the template would block a protected port
 	if tpl.Action != "ACCEPT" && tpl.Port != "" && h.isProtectedPort(c, tpl.Port) {
-		BadRequest(c, fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", tpl.Port))
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", tpl.Port)))
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 	}
 
 	if err := h.firewallService.CreateRule(c.Request.Context(), rule); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, rule)

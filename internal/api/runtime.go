@@ -22,7 +22,7 @@ func NewRuntimeHandler(runtimeService *runtimeenv.Service) *RuntimeHandler {
 func (h *RuntimeHandler) List(c *gin.Context) {
 	environments, err := h.runtimeService.ListAll(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -35,13 +35,13 @@ func (h *RuntimeHandler) List(c *gin.Context) {
 func (h *RuntimeHandler) ListByName(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "运行时名称不能为空")
+		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
 		return
 	}
 
 	environments, err := h.runtimeService.ListByName(c.Request.Context(), name)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) {
 func (h *RuntimeHandler) Install(c *gin.Context) {
 	var req runtimeenv.RuntimeInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
@@ -63,12 +63,12 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[req.Name] {
-		BadRequest(c, "不支持的运行时: "+req.Name)
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: "+req.Name))
 		return
 	}
 
 	if err := h.runtimeService.Install(c.Request.Context(), req.Name, req.Version); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -81,12 +81,12 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	var req runtimeenv.RuntimeUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -99,12 +99,12 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 	var req runtimeenv.RuntimeSetDefaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
 	if err := h.runtimeService.SetDefault(c.Request.Context(), req.Name, req.Version); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -117,7 +117,7 @@ func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 func (h *RuntimeHandler) Detect(c *gin.Context) {
 	results, err := h.runtimeService.Detect(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -130,7 +130,7 @@ func (h *RuntimeHandler) Detect(c *gin.Context) {
 func (h *RuntimeHandler) ImportDetected(c *gin.Context) {
 	imported, err := h.runtimeService.ImportDetected(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -144,20 +144,20 @@ func (h *RuntimeHandler) ImportDetected(c *gin.Context) {
 func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {
-		BadRequest(c, "ID 不能为空")
+		c.Error(ErrBadRequest.WithMessage("ID 不能为空"))
 		return
 	}
 
 	// Parse id
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	progress, step, logs, errorMessage, err := h.runtimeService.GetProgress(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -173,7 +173,7 @@ func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		BadRequest(c, "运行时名称不能为空")
+		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
 		return
 	}
 
@@ -182,13 +182,13 @@ func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 		"java": true, "node": true, "go": true, "python": true, "php": true,
 	}
 	if !validRuntimes[name] {
-		BadRequest(c, "不支持的运行时: "+name)
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: "+name))
 		return
 	}
 
 	installed, missing, optional, err := h.runtimeService.CheckDependencies(c.Request.Context(), name)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -206,25 +206,25 @@ func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {
-		BadRequest(c, "ID 不能为空")
+		c.Error(ErrBadRequest.WithMessage("ID 不能为空"))
 		return
 	}
 
 	// Parse id
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	// Get the environment info
 	env, err := h.runtimeService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if env == nil {
-		NotFound(c, "运行时环境不存在")
+		c.Error(ErrNotFound.WithMessage("运行时环境不存在"))
 		return
 	}
 
@@ -244,25 +244,25 @@ func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	idStr := c.Param("id")
 	if idStr == "" {
-		BadRequest(c, "ID 不能为空")
+		c.Error(ErrBadRequest.WithMessage("ID 不能为空"))
 		return
 	}
 
 	// Parse id
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	// Get the environment info
 	env, err := h.runtimeService.GetByID(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if env == nil {
-		NotFound(c, "运行时环境不存在")
+		c.Error(ErrNotFound.WithMessage("运行时环境不存在"))
 		return
 	}
 

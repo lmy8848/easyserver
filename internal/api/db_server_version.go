@@ -20,12 +20,12 @@ func NewVersionHandler(dbServerService *dbserver.Service) *VersionHandler {
 func (h *VersionHandler) GetVersionTemplates(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 	server, err := h.dbServerService.Get(c.Request.Context(), id)
 	if err != nil || server == nil {
-		NotFound(c, "数据库服务器不存在")
+		c.Error(ErrNotFound.WithMessage("数据库服务器不存在"))
 		return
 	}
 	templates := dbserver.GetVersionTemplates(server.Name)
@@ -35,12 +35,12 @@ func (h *VersionHandler) GetVersionTemplates(c *gin.Context) {
 func (h *VersionHandler) ListVersions(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 	versions, err := h.dbServerService.ListVersions(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, versions)
@@ -49,17 +49,17 @@ func (h *VersionHandler) ListVersions(c *gin.Context) {
 func (h *VersionHandler) InstallVersion(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 	var req dbserver.CreateDBVersionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 	version, err := h.dbServerService.InstallVersion(c.Request.Context(), id, &req)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, version)
@@ -68,11 +68,11 @@ func (h *VersionHandler) InstallVersion(c *gin.Context) {
 func (h *VersionHandler) UninstallVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的版本ID")
+		c.Error(ErrBadRequest.WithMessage("无效的版本ID"))
 		return
 	}
 	if err := h.dbServerService.UninstallVersion(c.Request.Context(), vid); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "已卸载"})
@@ -81,11 +81,11 @@ func (h *VersionHandler) UninstallVersion(c *gin.Context) {
 func (h *VersionHandler) StartVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的版本ID")
+		c.Error(ErrBadRequest.WithMessage("无效的版本ID"))
 		return
 	}
 	if err := h.dbServerService.StartVersion(c.Request.Context(), vid); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"status": "running"})
@@ -94,11 +94,11 @@ func (h *VersionHandler) StartVersion(c *gin.Context) {
 func (h *VersionHandler) StopVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的版本ID")
+		c.Error(ErrBadRequest.WithMessage("无效的版本ID"))
 		return
 	}
 	if err := h.dbServerService.StopVersion(c.Request.Context(), vid); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"status": "stopped"})
@@ -107,11 +107,11 @@ func (h *VersionHandler) StopVersion(c *gin.Context) {
 func (h *VersionHandler) RestartVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的版本ID")
+		c.Error(ErrBadRequest.WithMessage("无效的版本ID"))
 		return
 	}
 	if err := h.dbServerService.RestartVersion(c.Request.Context(), vid); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"status": "running"})
@@ -120,7 +120,7 @@ func (h *VersionHandler) RestartVersion(c *gin.Context) {
 func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的版本ID")
+		c.Error(ErrBadRequest.WithMessage("无效的版本ID"))
 		return
 	}
 
@@ -128,17 +128,17 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 		Port int `json:"port" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if req.Port < 1 || req.Port > 65535 {
-		BadRequest(c, "端口必须在 1 到 65535 之间")
+		c.Error(ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
 		return
 	}
 
 	if err := h.dbServerService.UpdateVersionPort(c.Request.Context(), vid, req.Port); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -148,13 +148,13 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 func (h *VersionHandler) GetVersionLogs(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的版本ID")
+		c.Error(ErrBadRequest.WithMessage("无效的版本ID"))
 		return
 	}
 	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "200"))
 	logs, err := h.dbServerService.GetVersionServiceLogs(c.Request.Context(), vid, lines)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"logs": logs})

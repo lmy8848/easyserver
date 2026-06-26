@@ -27,7 +27,7 @@ func (h *EnvConfigHandler) ListEnvConfigs(c *gin.Context) {
 
 	configs, err := h.envConfigService.ListEnvConfigs(c.Request.Context(), runtimeID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -41,17 +41,17 @@ func (h *EnvConfigHandler) GetEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if config == nil {
-		NotFound(c, "配置不存在")
+		c.Error(ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
 
@@ -67,7 +67,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		IsGlobal  bool   `json:"is_global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 	}
 
 	if err := h.envConfigService.CreateEnvConfig(c.Request.Context(), config); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
@@ -100,17 +100,17 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 		Value string `json:"value" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
 	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if config == nil {
-		NotFound(c, "配置不存在")
+		c.Error(ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 	config.Value = req.Value
 
 	if err := h.envConfigService.UpdateEnvConfig(c.Request.Context(), config); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -130,12 +130,12 @@ func (h *EnvConfigHandler) DeleteEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	if err := h.envConfigService.DeleteEnvConfig(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -152,7 +152,7 @@ func (h *EnvConfigHandler) ListPathEntries(c *gin.Context) {
 
 	entries, err := h.envConfigService.ListPathEntries(c.Request.Context(), runtimeID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -169,7 +169,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		IsGlobal  bool   `json:"is_global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 	}
 
 	if err := h.envConfigService.CreatePathEntry(c.Request.Context(), entry); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -192,12 +192,12 @@ func (h *EnvConfigHandler) DeletePathEntry(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	if err := h.envConfigService.DeletePathEntry(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -214,7 +214,7 @@ func (h *EnvConfigHandler) GenerateEnvScript(c *gin.Context) {
 
 	script, err := h.envConfigService.GenerateEnvScript(c.Request.Context(), runtimeID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *EnvConfigHandler) ListGlobalConfigs(c *gin.Context) {
 
 	configs, err := h.envConfigService.ListGlobalConfigs(c.Request.Context(), category)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -243,17 +243,17 @@ func (h *EnvConfigHandler) GetGlobalConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if config == nil {
-		NotFound(c, "配置不存在")
+		c.Error(ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
 
@@ -269,7 +269,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
@@ -281,7 +281,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 	}
 
 	if err := h.envConfigService.CreateGlobalConfig(c.Request.Context(), config); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -293,7 +293,7 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
@@ -302,17 +302,17 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
 	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if config == nil {
-		NotFound(c, "配置不存在")
+		c.Error(ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
 
@@ -320,7 +320,7 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 	config.Description = req.Description
 
 	if err := h.envConfigService.UpdateGlobalConfig(c.Request.Context(), config); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -332,12 +332,12 @@ func (h *EnvConfigHandler) DeleteGlobalConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	if err := h.envConfigService.DeleteGlobalConfig(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 

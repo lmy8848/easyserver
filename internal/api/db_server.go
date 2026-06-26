@@ -23,7 +23,7 @@ func (h *DBServerHandler) List(c *gin.Context) {
 	h.dbServerService.RefreshAllStatus(ctx)
 	servers, err := h.dbServerService.List(ctx)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, servers)
@@ -33,17 +33,17 @@ func (h *DBServerHandler) Get(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的 ID")
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 	h.dbServerService.RefreshStatus(ctx, id)
 	server, err := h.dbServerService.Get(ctx, id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if server == nil {
-		NotFound(c, "数据库服务器不存在")
+		c.Error(ErrNotFound.WithMessage("数据库服务器不存在"))
 		return
 	}
 	Success(c, server)

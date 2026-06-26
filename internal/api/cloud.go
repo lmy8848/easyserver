@@ -38,7 +38,7 @@ func (h *CloudHandler) GetInstances(c *gin.Context) {
 
 	instances, err := h.cloudService.GetInstances(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -52,18 +52,18 @@ func (h *CloudHandler) GetInstances(c *gin.Context) {
 func (h *CloudHandler) GetInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		BadRequest(c, "instance id is required")
+		c.Error(ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	instance, err := h.cloudService.GetInstance(c.Request.Context(), instanceID)
 	if err != nil {
-		NotFound(c, err.Error())
+		c.Error(ErrNotFound.Wrap(err))
 		return
 	}
 
@@ -74,17 +74,17 @@ func (h *CloudHandler) GetInstance(c *gin.Context) {
 func (h *CloudHandler) StartInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		BadRequest(c, "instance id is required")
+		c.Error(ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	if err := h.cloudService.StartInstance(c.Request.Context(), instanceID); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -95,23 +95,23 @@ func (h *CloudHandler) StartInstance(c *gin.Context) {
 func (h *CloudHandler) StopInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		BadRequest(c, "instance id is required")
+		c.Error(ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	// Prevent stopping the current instance
 	if h.isCurrentInstance(instanceID) {
-		BadRequest(c, "cannot stop the instance running this panel")
+		c.Error(ErrBadRequest.WithMessage("cannot stop the instance running this panel"))
 		return
 	}
 
 	if err := h.cloudService.StopInstance(c.Request.Context(), instanceID); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -122,23 +122,23 @@ func (h *CloudHandler) StopInstance(c *gin.Context) {
 func (h *CloudHandler) RestartInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		BadRequest(c, "instance id is required")
+		c.Error(ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	// Prevent restarting the current instance (panel will be unavailable during restart)
 	if h.isCurrentInstance(instanceID) {
-		BadRequest(c, "cannot restart the instance running this panel, use /api/settings/restart instead")
+		c.Error(ErrBadRequest.WithMessage("cannot restart the instance running this panel, use /api/settings/restart instead"))
 		return
 	}
 
 	if err := h.cloudService.RestartInstance(c.Request.Context(), instanceID); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *CloudHandler) RestartInstance(c *gin.Context) {
 func (h *CloudHandler) GetFirewallRules(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		BadRequest(c, "instance id is required")
+		c.Error(ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h *CloudHandler) GetFirewallRules(c *gin.Context) {
 
 	rules, err := h.cloudService.GetFirewallRules(c.Request.Context(), instanceID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -171,36 +171,36 @@ func (h *CloudHandler) GetFirewallRules(c *gin.Context) {
 func (h *CloudHandler) AddFirewallRule(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		BadRequest(c, "instance id is required")
+		c.Error(ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	var rule service.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate port format (e.g., "80", "443", "8000-9000", "ALL")
 	if rule.Port == "" {
-		BadRequest(c, "port is required")
+		c.Error(ErrBadRequest.WithMessage("port is required"))
 		return
 	}
 
 	// Prevent blocking panel port on current instance
 	panelPortStr := strconv.Itoa(h.panelPort)
 	if h.isCurrentInstance(instanceID) && rule.Port == panelPortStr && rule.Action != "ACCEPT" {
-		BadRequest(c, "cannot block panel port on the current instance")
+		c.Error(ErrBadRequest.WithMessage("cannot block panel port on the current instance"))
 		return
 	}
 
 	if err := h.cloudService.AddFirewallRule(c.Request.Context(), instanceID, rule); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -213,17 +213,17 @@ func (h *CloudHandler) DeleteFirewallRule(c *gin.Context) {
 	ruleID := c.Param("ruleId")
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	if instanceID == "" {
-		BadRequest(c, "instance ID is required")
+		c.Error(ErrBadRequest.WithMessage("instance ID is required"))
 		return
 	}
 
 	if err := h.cloudService.DeleteFirewallRule(c.Request.Context(), instanceID, ruleID); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -240,13 +240,13 @@ func (h *CloudHandler) GetSnapshots(c *gin.Context) {
 	}
 
 	if instanceID == "" {
-		BadRequest(c, "instance_id query parameter is required")
+		c.Error(ErrBadRequest.WithMessage("instance_id query parameter is required"))
 		return
 	}
 
 	snapshots, err := h.cloudService.GetSnapshots(c.Request.Context(), instanceID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -256,7 +256,7 @@ func (h *CloudHandler) GetSnapshots(c *gin.Context) {
 // CreateSnapshot creates a snapshot
 func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
@@ -266,12 +266,12 @@ func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.cloudService.CreateSnapshot(c.Request.Context(), req.InstanceID, req.Name); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -282,17 +282,17 @@ func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 func (h *CloudHandler) ApplySnapshot(c *gin.Context) {
 	snapshotID := c.Param("id")
 	if snapshotID == "" {
-		BadRequest(c, "snapshot id is required")
+		c.Error(ErrBadRequest.WithMessage("snapshot id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		NotFound(c, "cloud service not enabled")
+		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	if err := h.cloudService.ApplySnapshot(c.Request.Context(), snapshotID); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -327,7 +327,7 @@ func (h *CloudHandler) GetMonitorData(c *gin.Context) {
 
 	data, err := h.cloudService.GetMonitorData(c.Request.Context(), instanceID, metric, start, end)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -348,7 +348,7 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 
 	traffic, err := h.cloudService.GetTraffic(c.Request.Context(), instanceID)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 

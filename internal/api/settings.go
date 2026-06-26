@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
-	"net/url"
+		"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -133,7 +132,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 		InstanceID *string `json:"instance_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -163,7 +162,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 	}
 	if req.Region != nil {
 		if !validRegions[*req.Region] {
-			BadRequest(c, fmt.Sprintf("无效的区域: %s", *req.Region))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的区域: %s", *req.Region)))
 			return
 		}
 		h.cfg.TencentCloud.Region = *req.Region
@@ -174,7 +173,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, fmt.Sprintf("保存配置失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
 	}
 
@@ -191,7 +190,7 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		ServeFrontend *bool   `json:"serve_frontend"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -199,7 +198,7 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 
 	if req.Port != nil {
 		if *req.Port < 1 || *req.Port > 65535 {
-			BadRequest(c, "端口必须在 1 到 65535 之间")
+			c.Error(ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
 			return
 		}
 		// Warn about privileged ports
@@ -213,11 +212,11 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 	if req.Host != nil {
 		host := strings.TrimSpace(*req.Host)
 		if host == "" {
-			BadRequest(c, "主机不能为空")
+			c.Error(ErrBadRequest.WithMessage("主机不能为空"))
 			return
 		}
 		if len(host) > 253 {
-			BadRequest(c, "主机名过长（最多 253 个字符）")
+			c.Error(ErrBadRequest.WithMessage("主机名过长（最多 253 个字符）"))
 			return
 		}
 		// Warn about localhost-only binding
@@ -237,7 +236,7 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, fmt.Sprintf("保存配置失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
 	}
 
@@ -260,19 +259,19 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		RateInterval     *string `json:"rate_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if req.SessionTimeout != nil {
 		d, err := time.ParseDuration(*req.SessionTimeout)
 		if err != nil {
-			BadRequest(c, fmt.Sprintf("无效的 session_timeout: %v", err))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 session_timeout: %v", err)))
 			return
 		}
 		// Minimum 5 minutes to prevent lockout
 		if d < 5*time.Minute {
-			BadRequest(c, "session_timeout 至少为 5 分钟")
+			c.Error(ErrBadRequest.WithMessage("session_timeout 至少为 5 分钟"))
 			return
 		}
 		h.cfg.Auth.SessionTimeout = d
@@ -280,19 +279,19 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	if req.IdleTimeout != nil {
 		d, err := time.ParseDuration(*req.IdleTimeout)
 		if err != nil {
-			BadRequest(c, fmt.Sprintf("无效的 idle_timeout: %v", err))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 idle_timeout: %v", err)))
 			return
 		}
 		// Minimum 1 minute to prevent lockout
 		if d < 1*time.Minute {
-			BadRequest(c, "idle_timeout 至少为 1 分钟")
+			c.Error(ErrBadRequest.WithMessage("idle_timeout 至少为 1 分钟"))
 			return
 		}
 		h.cfg.Auth.IdleTimeout = d
 	}
 	if req.MaxLoginAttempts != nil {
 		if *req.MaxLoginAttempts < 3 || *req.MaxLoginAttempts > 100 {
-			BadRequest(c, "max_login_attempts 必须在 3 到 100 之间")
+			c.Error(ErrBadRequest.WithMessage("max_login_attempts 必须在 3 到 100 之间"))
 			return
 		}
 		h.cfg.Auth.MaxLoginAttempts = *req.MaxLoginAttempts
@@ -300,23 +299,23 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	if req.LockoutDuration != nil {
 		d, err := time.ParseDuration(*req.LockoutDuration)
 		if err != nil {
-			BadRequest(c, fmt.Sprintf("无效的 lockout_duration: %v", err))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 lockout_duration: %v", err)))
 			return
 		}
 		// Minimum 1 minute, maximum 24 hours
 		if d < 1*time.Minute {
-			BadRequest(c, "lockout_duration 至少为 1 分钟")
+			c.Error(ErrBadRequest.WithMessage("lockout_duration 至少为 1 分钟"))
 			return
 		}
 		if d > 24*time.Hour {
-			BadRequest(c, "lockout_duration 不能超过 24 小时")
+			c.Error(ErrBadRequest.WithMessage("lockout_duration 不能超过 24 小时"))
 			return
 		}
 		h.cfg.Auth.LockoutDuration = d
 	}
 	if req.RateLimit != nil {
 		if *req.RateLimit < 10 {
-			BadRequest(c, "rate_limit 至少为 10")
+			c.Error(ErrBadRequest.WithMessage("rate_limit 至少为 10"))
 			return
 		}
 		h.cfg.Auth.RateLimit = *req.RateLimit
@@ -324,11 +323,11 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	if req.RateInterval != nil {
 		d, err := time.ParseDuration(*req.RateInterval)
 		if err != nil {
-			BadRequest(c, fmt.Sprintf("无效的 rate_interval: %v", err))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 rate_interval: %v", err)))
 			return
 		}
 		if d < 1*time.Second {
-			BadRequest(c, "rate_interval 至少为 1 秒")
+			c.Error(ErrBadRequest.WithMessage("rate_interval 至少为 1 秒"))
 			return
 		}
 		h.cfg.Auth.RateInterval = d
@@ -336,7 +335,7 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, fmt.Sprintf("保存配置失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
 	}
 
@@ -352,22 +351,22 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 		CollectInterval  *string `json:"collect_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if req.HistoryRetention != nil {
 		d, err := time.ParseDuration(*req.HistoryRetention)
 		if err != nil {
-			BadRequest(c, fmt.Sprintf("无效的 history_retention: %v", err))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 history_retention: %v", err)))
 			return
 		}
 		if d < 1*time.Minute {
-			BadRequest(c, "history_retention 至少为 1 分钟")
+			c.Error(ErrBadRequest.WithMessage("history_retention 至少为 1 分钟"))
 			return
 		}
 		if d > 8760*time.Hour {
-			BadRequest(c, "history_retention 不能超过 1 年")
+			c.Error(ErrBadRequest.WithMessage("history_retention 不能超过 1 年"))
 			return
 		}
 		h.cfg.Monitor.HistoryRetention = d
@@ -375,15 +374,15 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 	if req.CollectInterval != nil {
 		d, err := time.ParseDuration(*req.CollectInterval)
 		if err != nil {
-			BadRequest(c, fmt.Sprintf("无效的 collect_interval: %v", err))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 collect_interval: %v", err)))
 			return
 		}
 		if d < 1*time.Second {
-			BadRequest(c, "collect_interval 至少为 1 秒")
+			c.Error(ErrBadRequest.WithMessage("collect_interval 至少为 1 秒"))
 			return
 		}
 		if d > 1*time.Hour {
-			BadRequest(c, "collect_interval 不能超过 1 小时")
+			c.Error(ErrBadRequest.WithMessage("collect_interval 不能超过 1 小时"))
 			return
 		}
 		h.cfg.Monitor.CollectInterval = d
@@ -391,7 +390,7 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, fmt.Sprintf("保存配置失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
 	}
 
@@ -406,7 +405,7 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
 		Enabled *bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -416,7 +415,7 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, fmt.Sprintf("保存配置失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
 	}
 
@@ -450,7 +449,7 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
 		WebhookURL *string `json:"webhook_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -461,7 +460,7 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
 		webhookURL := strings.TrimSpace(*req.WebhookURL)
 		if webhookURL != "" {
 			if err := validateWebhookURL(webhookURL); err != nil {
-				BadRequest(c, err.Error())
+				c.Error(ErrBadRequest.Wrap(err))
 				return
 			}
 		}
@@ -470,7 +469,7 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, fmt.Sprintf("保存配置失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
 	}
 
@@ -482,18 +481,18 @@ func (h *SettingsHandler) TestWebhook(c *gin.Context) {
 	h.cfgMu.RLock()
 	defer h.cfgMu.RUnlock()
 	if h.cfg.Notify.WebhookURL == "" {
-		BadRequest(c, "请先配置 Webhook URL")
+		c.Error(ErrBadRequest.WithMessage("请先配置 Webhook URL"))
 		return
 	}
 
 	if err := validateWebhookURL(h.cfg.Notify.WebhookURL); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
 	notifyService := service.NewNotifyService(h.cfg.Notify.WebhookURL, true)
 	if err := notifyService.TestWebhook(); err != nil {
-		Error(c, http.StatusUnprocessableEntity, CodeBadRequest, fmt.Sprintf("测试通知失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("测试通知失败: %v", err)))
 		return
 	}
 
@@ -505,7 +504,7 @@ func (h *SettingsHandler) TestCloudConnection(c *gin.Context) {
 	h.cfgMu.RLock()
 	defer h.cfgMu.RUnlock()
 	if h.cfg.TencentCloud.SecretID == "" || h.cfg.TencentCloud.SecretKey == "" {
-		BadRequest(c, "请先配置 SecretID 和 SecretKey")
+		c.Error(ErrBadRequest.WithMessage("请先配置 SecretID 和 SecretKey"))
 		return
 	}
 
@@ -516,14 +515,14 @@ func (h *SettingsHandler) TestCloudConnection(c *gin.Context) {
 		h.cfg.TencentCloud.InstanceID,
 	)
 	if err != nil {
-		InternalError(c, fmt.Sprintf("创建云客户端失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("创建云客户端失败: %v", err)))
 		return
 	}
 
 	// Try to get instances to verify connection
 	instances, err := cloudService.GetInstances(c.Request.Context())
 	if err != nil {
-		InternalError(c, fmt.Sprintf("连接失败: %v", err))
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("连接失败: %v", err)))
 		return
 	}
 
@@ -553,20 +552,20 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 		Rules []config.AlertRuleConfig `json:"rules"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "无效的请求: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("无效的请求: "+err.Error()))
 		return
 	}
 
 	// Limit number of rules to prevent abuse
 	if len(req.Rules) > 50 {
-		BadRequest(c, "告警规则过多（最多 50 条）")
+		c.Error(ErrBadRequest.WithMessage("告警规则过多（最多 50 条）"))
 		return
 	}
 
 	// Validate rules
 	for _, rule := range req.Rules {
 		if rule.Name == "" {
-			BadRequest(c, "规则名称不能为空")
+			c.Error(ErrBadRequest.WithMessage("规则名称不能为空"))
 			return
 		}
 		validMetrics := map[string]bool{
@@ -574,22 +573,22 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 			"load_1m": true, "load_5m": true, "load_15m": true,
 		}
 		if !validMetrics[rule.Metric] {
-			BadRequest(c, "无效的指标: "+rule.Metric)
+			c.Error(ErrBadRequest.WithMessage("无效的指标: "+rule.Metric))
 			return
 		}
 		if rule.Threshold <= 0 || rule.Threshold > 100 {
-			BadRequest(c, "阈值必须在 0 到 100 之间")
+			c.Error(ErrBadRequest.WithMessage("阈值必须在 0 到 100 之间"))
 			return
 		}
 		if rule.Duration < 0 {
-			BadRequest(c, "持续时间不能为负数")
+			c.Error(ErrBadRequest.WithMessage("持续时间不能为负数"))
 			return
 		}
 	}
 
 	h.cfg.Alerts.Rules = req.Rules
 	if err := h.saveConfig(); err != nil {
-		InternalError(c, "保存配置失败: "+err.Error())
+		c.Error(ErrInternal.WithMessage("保存配置失败: "+err.Error()))
 		return
 	}
 
@@ -626,17 +625,17 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	// Validate TLS configuration before restart
 	if h.cfg.Server.TLS.Enabled {
 		if h.cfg.Server.TLS.CertFile == "" || h.cfg.Server.TLS.KeyFile == "" {
-			BadRequest(c, "TLS 已启用但未配置证书/密钥文件")
+			c.Error(ErrBadRequest.WithMessage("TLS 已启用但未配置证书/密钥文件"))
 			return
 		}
 		// Verify cert file exists
 		if _, err := os.Stat(h.cfg.Server.TLS.CertFile); os.IsNotExist(err) {
-			BadRequest(c, fmt.Sprintf("TLS 证书文件不存在: %s", h.cfg.Server.TLS.CertFile))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("TLS 证书文件不存在: %s", h.cfg.Server.TLS.CertFile)))
 			return
 		}
 		// Verify key file exists
 		if _, err := os.Stat(h.cfg.Server.TLS.KeyFile); os.IsNotExist(err) {
-			BadRequest(c, fmt.Sprintf("TLS 密钥文件不存在: %s", h.cfg.Server.TLS.KeyFile))
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("TLS 密钥文件不存在: %s", h.cfg.Server.TLS.KeyFile)))
 			return
 		}
 	}

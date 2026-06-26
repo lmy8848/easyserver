@@ -1,11 +1,60 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"net/http"
 
+	"easyserver/internal/apperror"
+
 	"github.com/gin-gonic/gin"
 )
+
+// ============================================================
+// 类型别名：从 apperror 包 re-export
+// ============================================================
+
+// AppError is the unified application error type
+type AppError = apperror.AppError
+
+// 预定义错误
+var (
+	ErrBadRequest         = apperror.ErrBadRequest
+	ErrUnauthorized       = apperror.ErrUnauthorized
+	ErrTokenExpired       = apperror.ErrTokenExpired
+	ErrForbidden          = apperror.ErrForbidden
+	ErrPathViolation      = apperror.ErrPathViolation
+	ErrNotFound           = apperror.ErrNotFound
+	ErrConflict           = apperror.ErrConflict
+	ErrRateLimit          = apperror.ErrRateLimit
+	ErrInternal           = apperror.ErrInternal
+	ErrDockerNotInstalled = apperror.ErrDockerNotInstalled
+	ErrServiceNotReady    = apperror.ErrServiceNotReady
+)
+
+// 错误码常量
+const (
+	CodeSuccess       = apperror.CodeSuccess
+	CodeBadRequest    = apperror.CodeBadRequest
+	CodeUnauthorized  = apperror.CodeUnauthorized
+	CodeTokenExpired  = apperror.CodeTokenExpired
+	CodeForbidden     = apperror.CodeForbidden
+	CodeNotFound      = apperror.CodeNotFound
+	CodeConflict      = apperror.CodeConflict
+	CodeRateLimit     = apperror.CodeRateLimit
+	CodeInternalError = apperror.CodeInternalError
+)
+
+// 错误分类和包装函数
+var (
+	IsPathError           = apperror.IsPathError
+	IsDockerNotInstalled  = apperror.IsDockerNotInstalled
+	WrapError             = apperror.WrapError
+)
+
+// ============================================================
+// 响应格式
+// ============================================================
 
 // Response is the standard API response format
 type Response struct {
@@ -14,18 +63,15 @@ type Response struct {
 	Data    interface{} `json:"data"`
 }
 
-// Error codes
-const (
-	CodeSuccess       = 0
-	CodeBadRequest    = 40000
-	CodeUnauthorized  = 40100
-	CodeTokenExpired  = 40101
-	CodeForbidden     = 40300
-	CodeNotFound      = 40400
-	CodeConflict      = 40900
-	CodeRateLimit     = 42900
-	CodeInternalError = 50000
-)
+// PaginatedData is the paginated response data
+type PaginatedData struct {
+	Total int64       `json:"total"`
+	Items interface{} `json:"items"`
+}
+
+// ============================================================
+// 成功响应
+// ============================================================
 
 // Success returns a success response
 func Success(c *gin.Context, data interface{}) {
@@ -36,64 +82,73 @@ func Success(c *gin.Context, data interface{}) {
 	})
 }
 
-// Error returns an error response
-func Error(c *gin.Context, httpStatus int, code int, message string) {
-	c.JSON(httpStatus, Response{
-		Code:    code,
-		Message: message,
-		Data:    nil,
-	})
-}
-
-// BadRequest returns a 400 error
-func BadRequest(c *gin.Context, message string) {
-	Error(c, http.StatusBadRequest, CodeBadRequest, message)
-}
-
-// Unauthorized returns a 401 error
-func Unauthorized(c *gin.Context, message string) {
-	Error(c, http.StatusUnauthorized, CodeUnauthorized, message)
-}
-
-// TokenExpired returns a 401 error with token expired code
-func TokenExpired(c *gin.Context) {
-	Error(c, http.StatusUnauthorized, CodeTokenExpired, "token expired")
-}
-
-// Forbidden returns a 403 error
-func Forbidden(c *gin.Context, message string) {
-	Error(c, http.StatusForbidden, CodeForbidden, message)
-}
-
-// NotFound returns a 404 error
-func NotFound(c *gin.Context, message string) {
-	Error(c, http.StatusNotFound, CodeNotFound, message)
-}
-
-// Conflict returns a 409 error
-func Conflict(c *gin.Context, message string) {
-	Error(c, http.StatusConflict, CodeConflict, message)
-}
-
-// internalServerErrorMsg is the generic message returned to clients on internal errors
-const internalServerErrorMsg = "internal server error"
-
-// InternalError logs the full error server-side and returns a generic message to the client.
-func InternalError(c *gin.Context, message string) {
-	log.Printf("InternalError [%s %s]: %s", c.Request.Method, c.Request.URL.Path, message)
-	Error(c, http.StatusInternalServerError, CodeInternalError, internalServerErrorMsg)
-}
-
-// Paginated returns a paginated response
-type PaginatedData struct {
-	Total int64       `json:"total"`
-	Items interface{} `json:"items"`
-}
-
 // SuccessPaginated returns a paginated success response
 func SuccessPaginated(c *gin.Context, total int64, items interface{}) {
 	Success(c, PaginatedData{
 		Total: total,
 		Items: items,
+	})
+}
+
+// ============================================================
+// ErrorHandler: 全局错误处理中间件
+// ============================================================
+
+// ErrorHandler is a middleware that processes errors added to the gin context
+// via c.Error() and converts them to appropriate HTTP responses.
+func ErrorHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+
+		if !c.Writer.Written() && len(c.Errors) > 0 {
+			err := c.Errors.Last().Err
+			handleError(c, err)
+		}
+	}
+}
+
+// handleError converts an error to the appropriate HTTP response with proper logging
+func handleError(c *gin.Context, err error) {
+	// Extract request context for logging
+	method := c.Request.Method
+	path := c.Request.URL.Path
+	clientIP := c.ClientIP()
+	userID, _ := c.Get("user_id")
+	username, _ := c.Get("username")
+
+	var appErr *apperror.AppError
+	if errors.As(err, &appErr) {
+		// Log based on severity level
+		switch {
+		case appErr.HTTPStatus >= 500:
+			// Server errors: full details for debugging
+			log.Printf("ERROR [%s %s] user=%v(%v) ip=%s: %v",
+				method, path, username, userID, clientIP, appErr)
+		case appErr.HTTPStatus == 401 || appErr.HTTPStatus == 403:
+			// Auth errors: security audit trail
+			log.Printf("WARN  [%s %s] ip=%s: %s",
+				method, path, clientIP, appErr.Message)
+		case appErr.HTTPStatus >= 400:
+			// Client errors: brief log
+			log.Printf("WARN  [%s %s] user=%v ip=%s: %s",
+				method, path, username, clientIP, appErr.Message)
+		}
+
+		c.JSON(appErr.HTTPStatus, Response{
+			Code:    appErr.Code,
+			Message: appErr.Message,
+			Data:    nil,
+		})
+		return
+	}
+
+	// Unknown error: always log full details
+	log.Printf("ERROR [%s %s] user=%v(%v) ip=%s: %v",
+		method, path, username, userID, clientIP, err)
+
+	c.JSON(http.StatusInternalServerError, Response{
+		Code:    CodeInternalError,
+		Message: "internal server error",
+		Data:    nil,
 	})
 }

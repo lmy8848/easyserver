@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"fmt"
-	"net/http"
-	"strings"
+		"strings"
 	"time"
 
+	"easyserver/internal/apperror"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -34,22 +34,14 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    40100,
-				"message": "missing authorization header",
-				"data":    nil,
-			})
+			c.Error(apperror.ErrUnauthorized.WithMessage("missing authorization header"))
 			c.Abort()
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    40100,
-				"message": "invalid authorization format",
-				"data":    nil,
-			})
+			c.Error(apperror.ErrUnauthorized.WithMessage("invalid authorization format"))
 			c.Abort()
 			return
 		}
@@ -64,11 +56,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 		})
 
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    40101,
-				"message": "invalid or expired token",
-				"data":    nil,
-			})
+			c.Error(apperror.ErrTokenExpired.WithMessage("invalid or expired token"))
 			c.Abort()
 			return
 		}
@@ -78,20 +66,12 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 			if validator != nil {
 				invalidated, err := validator(claims.UserID, tokenString, claims.IssuedAt.Time)
 				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"code":    50000,
-						"message": "token validation error",
-						"data":    nil,
-					})
+					c.Error(apperror.ErrInternal.WithMessage("token validation error"))
 					c.Abort()
 					return
 				}
 				if invalidated {
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"code":    40102,
-						"message": "token has been revoked",
-						"data":    nil,
-					})
+					c.Error(apperror.ErrUnauthorized.WithMessage("token has been revoked"))
 					c.Abort()
 					return
 				}
@@ -100,22 +80,14 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 
 		// Check session validator (single session per user)
 		if sessionValidator != nil {
-			valid, err := sessionValidator(tokenString)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"code":    50000,
-					"message": "session validation error",
-					"data":    nil,
-				})
-				c.Abort()
-				return
-			}
-			if !valid {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"code":    40103,
-					"message": "session expired, please login again",
-					"data":    nil,
-				})
+		valid, err := sessionValidator(tokenString)
+		if err != nil {
+			c.Error(apperror.ErrInternal.WithMessage("session validation error"))
+			c.Abort()
+			return
+		}
+		if !valid {
+			c.Error(apperror.ErrUnauthorized.WithMessage("session expired, please login again"))
 				c.Abort()
 				return
 			}

@@ -2,12 +2,12 @@ package middleware
 
 import (
 	"net"
-	"net/http"
-	"strings"
+		"strings"
 	"sync"
 
 	"easyserver/internal/config"
 
+	"easyserver/internal/apperror"
 	"github.com/gin-gonic/gin"
 )
 
@@ -95,11 +95,7 @@ func (wl *IPWhitelist) Update(allowed []string) {
 func IPWhitelistMiddleware(whitelist *IPWhitelist) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !whitelist.IsAllowed(c.ClientIP()) {
-			c.JSON(http.StatusForbidden, gin.H{
-				"code":    40300,
-				"message": "IP not allowed",
-				"data":    nil,
-			})
+			c.Error(apperror.ErrForbidden.WithMessage("IP not allowed"))
 			c.Abort()
 			return
 		}
@@ -150,11 +146,7 @@ func UserIPWhitelistMiddleware(getWhitelist UserIPWhitelistFunc) gin.HandlerFunc
 		}
 
 		if !allowed {
-			c.JSON(http.StatusForbidden, gin.H{
-				"code":    40301,
-				"message": "your IP is not in the user whitelist",
-				"data":    nil,
-			})
+			c.Error(apperror.ErrForbidden.WithMessage("your IP is not in the user whitelist"))
 			c.Abort()
 			return
 		}

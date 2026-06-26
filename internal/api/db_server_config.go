@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"easyserver/internal/database_mgmt"
+	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 // ConfigHandler handles MySQL/PostgreSQL/Redis config management endpoints.
+// These use package-level functions from the service package and have no service struct dependency.
 type ConfigHandler struct{}
 
 func NewConfigHandler() *ConfigHandler {
@@ -21,18 +22,19 @@ func NewConfigHandler() *ConfigHandler {
 // --- MySQL Config ---
 
 func (h *ConfigHandler) GetMySQLConfig(c *gin.Context) {
-	configPath := database_mgmt.FindMySQLConfig()
+	configPath := service.FindMySQLConfig()
 	if configPath == "" {
 		Success(c, gin.H{"found": false, "message": "未找到 MySQL 配置文件"})
 		return
 	}
 
-	config, err := database_mgmt.ParseMySQLConfig(configPath)
+	config, err := service.ParseMySQLConfig(configPath)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
+	// Build response with common params metadata
 	response := gin.H{
 		"found":    true,
 		"config":   config,
@@ -42,7 +44,7 @@ func (h *ConfigHandler) GetMySQLConfig(c *gin.Context) {
 	for _, section := range config.Sections {
 		sections[section.Name] = gin.H{
 			"params": section.Params,
-			"meta":   database_mgmt.GetCommonParams(section.Name),
+			"meta":   service.GetCommonParams(section.Name),
 		}
 	}
 
@@ -57,37 +59,38 @@ func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
 		} `json:"sections"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
-	configPath := database_mgmt.FindMySQLConfig()
+	configPath := service.FindMySQLConfig()
 	if configPath == "" {
-		BadRequest(c, "未找到 MySQL 配置文件")
+		c.Error(ErrBadRequest.WithMessage("未找到 MySQL 配置文件"))
 		return
 	}
 
+	// Handle raw text save from the raw text modal
 	if raw, ok := isRawConfigRequest(req.Sections); ok {
 		if err := saveRawConfig(configPath, raw); err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		Success(c, gin.H{"message": "配置已保存", "path": configPath})
 		return
 	}
 
-	config := &database_mgmt.DBConfig{
+	config := &service.MySQLConfig{
 		FilePath: configPath,
 	}
 	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database_mgmt.ConfigSection{
+		config.Sections = append(config.Sections, service.ConfigSection{
 			Name:   s.Name,
 			Params: s.Params,
 		})
 	}
 
-	if err := database_mgmt.SaveMySQLConfig(config); err != nil {
-		InternalError(c, err.Error())
+	if err := service.SaveMySQLConfig(config); err != nil {
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -96,22 +99,22 @@ func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
 
 func (h *ConfigHandler) GetMySQLCommonParams(c *gin.Context) {
 	section := c.DefaultQuery("section", "mysqld")
-	params := database_mgmt.GetCommonParams(section)
+	params := service.GetCommonParams(section)
 	Success(c, params)
 }
 
 // --- PostgreSQL Config ---
 
 func (h *ConfigHandler) GetPostgreSQLConfig(c *gin.Context) {
-	configPath := database_mgmt.FindPostgreSQLConfig()
+	configPath := service.FindPostgreSQLConfig()
 	if configPath == "" {
 		Success(c, gin.H{"found": false, "message": "未找到 PostgreSQL 配置文件"})
 		return
 	}
 
-	config, err := database_mgmt.ParsePostgreSQLConfig(configPath)
+	config, err := service.ParsePostgreSQLConfig(configPath)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -124,7 +127,7 @@ func (h *ConfigHandler) GetPostgreSQLConfig(c *gin.Context) {
 	for _, section := range config.Sections {
 		sections[section.Name] = gin.H{
 			"params": section.Params,
-			"meta":   database_mgmt.GetPostgreSQLCommonParams(),
+			"meta":   service.GetPostgreSQLCommonParams(),
 		}
 	}
 
@@ -139,37 +142,38 @@ func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
 		} `json:"sections"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
-	configPath := database_mgmt.FindPostgreSQLConfig()
+	configPath := service.FindPostgreSQLConfig()
 	if configPath == "" {
-		BadRequest(c, "未找到 PostgreSQL 配置文件")
+		c.Error(ErrBadRequest.WithMessage("未找到 PostgreSQL 配置文件"))
 		return
 	}
 
+	// Handle raw text save from the raw text modal
 	if raw, ok := isRawConfigRequest(req.Sections); ok {
 		if err := saveRawConfig(configPath, raw); err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		Success(c, gin.H{"message": "配置已保存", "path": configPath})
 		return
 	}
 
-	config := &database_mgmt.DBConfig{
+	config := &service.MySQLConfig{
 		FilePath: configPath,
 	}
 	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database_mgmt.ConfigSection{
+		config.Sections = append(config.Sections, service.ConfigSection{
 			Name:   s.Name,
 			Params: s.Params,
 		})
 	}
 
-	if err := database_mgmt.SavePostgreSQLConfig(config); err != nil {
-		InternalError(c, err.Error())
+	if err := service.SavePostgreSQLConfig(config); err != nil {
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -177,22 +181,22 @@ func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
 }
 
 func (h *ConfigHandler) GetPGCommonParams(c *gin.Context) {
-	params := database_mgmt.GetPostgreSQLCommonParams()
+	params := service.GetPostgreSQLCommonParams()
 	Success(c, params)
 }
 
 // --- Redis Config ---
 
 func (h *ConfigHandler) GetRedisConfig(c *gin.Context) {
-	configPath := database_mgmt.FindRedisConfig()
+	configPath := service.FindRedisConfig()
 	if configPath == "" {
 		Success(c, gin.H{"found": false, "message": "未找到 Redis 配置文件"})
 		return
 	}
 
-	config, err := database_mgmt.ParseRedisConfig(configPath)
+	config, err := service.ParseRedisConfig(configPath)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -205,7 +209,7 @@ func (h *ConfigHandler) GetRedisConfig(c *gin.Context) {
 	for _, section := range config.Sections {
 		sections[section.Name] = gin.H{
 			"params": section.Params,
-			"meta":   database_mgmt.GetRedisCommonParams(),
+			"meta":   service.GetRedisCommonParams(),
 		}
 	}
 
@@ -220,37 +224,38 @@ func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
 		} `json:"sections"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
-	configPath := database_mgmt.FindRedisConfig()
+	configPath := service.FindRedisConfig()
 	if configPath == "" {
-		BadRequest(c, "未找到 Redis 配置文件")
+		c.Error(ErrBadRequest.WithMessage("未找到 Redis 配置文件"))
 		return
 	}
 
+	// Handle raw text save from the raw text modal
 	if raw, ok := isRawConfigRequest(req.Sections); ok {
 		if err := saveRawConfig(configPath, raw); err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		Success(c, gin.H{"message": "配置已保存", "path": configPath})
 		return
 	}
 
-	config := &database_mgmt.DBConfig{
+	config := &service.MySQLConfig{
 		FilePath: configPath,
 	}
 	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database_mgmt.ConfigSection{
+		config.Sections = append(config.Sections, service.ConfigSection{
 			Name:   s.Name,
 			Params: s.Params,
 		})
 	}
 
-	if err := database_mgmt.SaveRedisConfig(config); err != nil {
-		InternalError(c, err.Error())
+	if err := service.SaveRedisConfig(config); err != nil {
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -258,7 +263,7 @@ func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
 }
 
 func (h *ConfigHandler) GetRedisCommonParams(c *gin.Context) {
-	params := database_mgmt.GetRedisCommonParams()
+	params := service.GetRedisCommonParams()
 	Success(c, params)
 }
 

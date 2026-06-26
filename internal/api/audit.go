@@ -80,7 +80,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		}
 		total, logs, err := h.auditRepo.Query(c.Request.Context(), filter)
 		if err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		items := make([]AuditLogItem, 0, len(logs))
@@ -137,7 +137,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	var total int64
 	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
 	if err := h.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -148,7 +148,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer rows.Close()
@@ -165,7 +165,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 	if h.auditRepo != nil {
 		actions, err := h.auditRepo.GetActions(c.Request.Context())
 		if err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		Success(c, actions)
@@ -189,7 +189,7 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 
 	rows, err := h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer rows.Close()
@@ -223,7 +223,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		LIMIT 10
 	`, since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer userRows.Close()
@@ -250,7 +250,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		LIMIT 10
 	`, since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer actionRows.Close()
@@ -276,7 +276,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		ORDER BY day ASC
 	`, since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer dayRows.Close()
@@ -308,7 +308,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		GROUP BY status_group
 	`, since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer statusRows.Close()
@@ -335,7 +335,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		LIMIT 200
 	`, since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer alertRows.Close()
@@ -442,7 +442,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	defer rows.Close()
@@ -489,7 +489,7 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 	if h.auditRepo != nil {
 		rows, err := h.auditRepo.Clean(c.Request.Context(), since)
 		if err != nil {
-			InternalError(c, err.Error())
+			c.Error(WrapError(err))
 			return
 		}
 		Success(c, gin.H{"deleted": rows})
@@ -498,7 +498,7 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 
 	result, err := h.db.Exec("DELETE FROM audit_logs WHERE created_at < ?", since)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 
@@ -509,13 +509,13 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 // VerifyIntegrity verifies the integrity of audit log signatures
 func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
 	if h.auditService == nil {
-		InternalError(c, "audit service not available")
+		c.Error(ErrInternal.WithMessage("audit service not available"))
 		return
 	}
 
 	total, valid, invalid, err := h.auditService.VerifyAllSignatures(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 

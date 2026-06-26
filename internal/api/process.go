@@ -23,7 +23,7 @@ func NewProcessHandler(pm *process.Service) *ProcessHandler {
 func (h *ProcessHandler) ListProcesses(c *gin.Context) {
 	processes, err := h.pm.List(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, processes)
@@ -33,16 +33,16 @@ func (h *ProcessHandler) ListProcesses(c *gin.Context) {
 func (h *ProcessHandler) GetProcess(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	p, err := h.pm.Get(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	if p == nil {
-		NotFound(c, "进程不存在")
+		c.Error(ErrNotFound.WithMessage("进程不存在"))
 		return
 	}
 	Success(c, p)
@@ -52,12 +52,12 @@ func (h *ProcessHandler) GetProcess(c *gin.Context) {
 func (h *ProcessHandler) CreateProcess(c *gin.Context) {
 	var req model.CreateProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	p, err := h.pm.Create(c.Request.Context(), &req)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, p)
@@ -67,16 +67,16 @@ func (h *ProcessHandler) CreateProcess(c *gin.Context) {
 func (h *ProcessHandler) UpdateProcess(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	var req model.UpdateProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	if err := h.pm.Update(c.Request.Context(), id, &req); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "更新成功"})
@@ -86,11 +86,11 @@ func (h *ProcessHandler) UpdateProcess(c *gin.Context) {
 func (h *ProcessHandler) DeleteProcess(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	if err := h.pm.Delete(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "删除成功"})
@@ -100,11 +100,11 @@ func (h *ProcessHandler) DeleteProcess(c *gin.Context) {
 func (h *ProcessHandler) StartProcess(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	if err := h.pm.Start(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "启动成功"})
@@ -114,11 +114,11 @@ func (h *ProcessHandler) StartProcess(c *gin.Context) {
 func (h *ProcessHandler) StopProcess(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	if err := h.pm.Stop(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "停止成功"})
@@ -128,11 +128,11 @@ func (h *ProcessHandler) StopProcess(c *gin.Context) {
 func (h *ProcessHandler) RestartProcess(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	if err := h.pm.Restart(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "重启成功"})
@@ -142,14 +142,14 @@ func (h *ProcessHandler) RestartProcess(c *gin.Context) {
 func (h *ProcessHandler) GetProcessLogs(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	logs, total, err := h.pm.GetLogs(c.Request.Context(), id, limit, offset)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	SuccessPaginated(c, int64(total), logs)
@@ -159,12 +159,12 @@ func (h *ProcessHandler) GetProcessLogs(c *gin.Context) {
 func (h *ProcessHandler) GetProcessStats(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的进程ID")
+		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
 	stats, err := h.pm.GetStats(c.Request.Context(), id)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, stats)
@@ -174,12 +174,12 @@ func (h *ProcessHandler) GetProcessStats(c *gin.Context) {
 func (h *ProcessHandler) BatchStart(c *gin.Context) {
 	var req model.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	started, failed, err := h.pm.BatchStart(c.Request.Context(), req.IDs)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"started": started, "failed": failed})
@@ -189,12 +189,12 @@ func (h *ProcessHandler) BatchStart(c *gin.Context) {
 func (h *ProcessHandler) BatchStop(c *gin.Context) {
 	var req model.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	stopped, failed, err := h.pm.BatchStop(c.Request.Context(), req.IDs)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"stopped": stopped, "failed": failed})
@@ -204,12 +204,12 @@ func (h *ProcessHandler) BatchStop(c *gin.Context) {
 func (h *ProcessHandler) BatchRestart(c *gin.Context) {
 	var req model.BatchProcessIDs
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	restarted, failed, err := h.pm.BatchRestart(c.Request.Context(), req.IDs)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"restarted": restarted, "failed": failed})
@@ -221,22 +221,41 @@ func (h *ProcessHandler) BatchRestart(c *gin.Context) {
 func (h *ProcessHandler) ListGroups(c *gin.Context) {
 	groups, err := h.pm.ListGroups(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, groups)
+}
+
+// GetGroup returns a process group by ID
+func (h *ProcessHandler) GetGroup(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的分组ID"))
+		return
+	}
+	g, err := h.pm.GetGroup(c.Request.Context(), id)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if g == nil {
+		c.Error(ErrNotFound.WithMessage("分组不存在"))
+		return
+	}
+	Success(c, g)
 }
 
 // CreateGroup creates a new process group
 func (h *ProcessHandler) CreateGroup(c *gin.Context) {
 	var req model.CreateProcessGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	g, err := h.pm.CreateGroup(c.Request.Context(), &req)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, g)
@@ -246,16 +265,16 @@ func (h *ProcessHandler) CreateGroup(c *gin.Context) {
 func (h *ProcessHandler) UpdateGroup(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的分组ID")
+		c.Error(ErrBadRequest.WithMessage("无效的分组ID"))
 		return
 	}
 	var req model.UpdateProcessGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	if err := h.pm.UpdateGroup(c.Request.Context(), id, &req); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "更新成功"})
@@ -265,11 +284,11 @@ func (h *ProcessHandler) UpdateGroup(c *gin.Context) {
 func (h *ProcessHandler) DeleteGroup(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		BadRequest(c, "无效的分组ID")
+		c.Error(ErrBadRequest.WithMessage("无效的分组ID"))
 		return
 	}
 	if err := h.pm.DeleteGroup(c.Request.Context(), id); err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"message": "删除成功"})
@@ -279,7 +298,7 @@ func (h *ProcessHandler) DeleteGroup(c *gin.Context) {
 func (h *ProcessHandler) ExportProcesses(c *gin.Context) {
 	processes, err := h.pm.Export(c.Request.Context())
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, processes)
@@ -289,12 +308,12 @@ func (h *ProcessHandler) ExportProcesses(c *gin.Context) {
 func (h *ProcessHandler) ImportProcesses(c *gin.Context) {
 	var processes []model.Process
 	if err := c.ShouldBindJSON(&processes); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		c.Error(ErrBadRequest.WithMessage("参数错误: "+err.Error()))
 		return
 	}
 	count, err := h.pm.Import(c.Request.Context(), processes)
 	if err != nil {
-		InternalError(c, err.Error())
+		c.Error(WrapError(err))
 		return
 	}
 	Success(c, gin.H{"imported": count})
@@ -326,6 +345,7 @@ func registerProcessRoutes(protected *gin.RouterGroup, pm *process.Service) {
 	// Process groups
 	protected.GET("/process-groups", handler.ListGroups)
 	protected.POST("/process-groups", handler.CreateGroup)
+	protected.GET("/process-groups/:id", handler.GetGroup)
 	protected.PUT("/process-groups/:id", handler.UpdateGroup)
 	protected.DELETE("/process-groups/:id", handler.DeleteGroup)
 
