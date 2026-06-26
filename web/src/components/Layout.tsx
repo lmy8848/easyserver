@@ -292,7 +292,7 @@ export default function Layout() {
                       ))
                     )}
                   </div>
-                  <div className="notif-footer" onClick={() => { setShowNotifications(false); navigate('/audit'); }}>
+                  <div className="notif-footer" onClick={() => { setShowNotifications(false); navigate('/notifications'); }}>
                     查看全部
                   </div>
                 </div>

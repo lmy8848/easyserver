@@ -146,8 +146,8 @@ func (s *Service) GetStatus(ctx context.Context) (*FirewallStatus, error) {
 		// Check if nft has rules loaded
 		output, exitCode, err := s.executor.RunCombined(ctx, "nft", "list", "ruleset")
 		if err == nil && exitCode == 0 {
-			// nft is "enabled" if the table exists
-			status.Enabled = strings.Contains(output, "table inet filter")
+			// nft is "enabled" if the table exists (inet filter or ip filter)
+			status.Enabled = strings.Contains(output, "table inet filter") || strings.Contains(output, "table ip filter")
 
 			// Get default policy from chain definition
 			// Example: chain INPUT { type filter hook input priority filter; policy accept; }
@@ -990,7 +990,7 @@ func (s *Service) getNftRules(ctx context.Context) ([]FirewallRule, error) {
 	var rules []FirewallRule
 	lines := strings.Split(out, "\n")
 	currentChain := ""
-	inInetFilter := false // Only parse rules from "inet filter" table
+	inManagedTable := false // Parse rules from "inet filter" and "ip filter" tables
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1002,13 +1002,13 @@ func (s *Service) getNftRules(ctx context.Context) ([]FirewallRule, error) {
 
 		// Track which table we're in
 		if strings.HasPrefix(line, "table ") {
-			// "table inet filter {" means we're entering our managed table
-			inInetFilter = strings.Contains(line, "table inet filter")
+			// "table inet filter {" or "table ip filter {" — both are our managed tables
+			inManagedTable = strings.Contains(line, "table inet filter") || strings.Contains(line, "table ip filter")
 			continue
 		}
 
-		// Skip rules from other tables (like "table ip filter")
-		if !inInetFilter {
+		// Skip rules from other tables (like nat, ip6 filter)
+		if !inManagedTable {
 			// Skip until we find our table or end of file
 			continue
 		}
