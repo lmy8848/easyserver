@@ -111,13 +111,15 @@ func (s *Session) Close() {
 
 	s.closed = true
 
+	// Close PTY first to unblock any pending Read
+	if ptmx, ok := s.PTY.(*os.File); ok {
+		ptmx.Close()
+	}
+
+	// Then kill the process
 	if cmd, ok := s.Cmd.(*exec.Cmd); ok && cmd.Process != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
-	}
-
-	if ptmx, ok := s.PTY.(*os.File); ok {
-		ptmx.Close()
 	}
 
 	close(s.Send)

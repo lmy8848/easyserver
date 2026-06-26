@@ -1,7 +1,7 @@
 package middleware
 
 import (
-		"sync"
+	"sync"
 	"time"
 
 	"easyserver/internal/apperror"
@@ -90,18 +90,6 @@ func (rl *RateLimiter) isAllowed(ip string) bool {
 	return true
 }
 
-// globalRateLimiter is the package-level rate limiter for Stop() access
-var globalRateLimiter *RateLimiter
-
-// StopRateLimiter stops the background cleanup goroutine.
-// Should be called during server shutdown.
-func StopRateLimiter() {
-	if globalRateLimiter != nil {
-		globalRateLimiter.Stop()
-	}
-}
-
-// RateLimitMiddleware limits request rate per IP
 // evictOldest removes the oldest 10% of visitors to free memory
 func (rl *RateLimiter) evictOldest() {
 	type entry struct {
@@ -130,10 +118,24 @@ func (rl *RateLimiter) evictOldest() {
 	}
 }
 
-// rate: max requests per interval, interval: sliding window duration
+// globalRateLimiter is the package-level rate limiter for Stop() access
+var globalRateLimiter *RateLimiter
+var globalRateLimiterOnce sync.Once
+
+// StopRateLimiter stops the background cleanup goroutine.
+// Should be called during server shutdown.
+func StopRateLimiter() {
+	if globalRateLimiter != nil {
+		globalRateLimiter.Stop()
+	}
+}
+
+// RateLimitMiddleware limits request rate per IP
 func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
 	limiter := NewRateLimiter(rate, interval)
-	globalRateLimiter = limiter
+	globalRateLimiterOnce.Do(func() {
+		globalRateLimiter = limiter
+	})
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
