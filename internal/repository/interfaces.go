@@ -11,6 +11,7 @@ import (
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/process"
+	"easyserver/internal/web"
 )
 
 // Auth domain interfaces migrated to internal/auth; kept as aliases.
@@ -72,29 +73,13 @@ type DatabaseMgmtRepository interface {
 	ListVersions(ctx context.Context, dbServerID int64) ([]model.DBVersion, error)
 }
 
-// WebServerRepository defines the interface for web server data access
-type WebServerRepository interface {
-	List(ctx context.Context) ([]model.WebServer, error)
-	Get(ctx context.Context, id int64) (*model.WebServer, error)
-	Create(ctx context.Context, ws *model.WebServer) error
-	Delete(ctx context.Context, id int64) error
-	UpdateStatus(ctx context.Context, id int64, status string) error
-	UpdateStatusAndVersion(ctx context.Context, id int64, status, version string) error
-	CountWebsitesByServerID(ctx context.Context, serverID int64) (int, error)
-}
+// WebServerRepository is now defined in internal/web.ServerRepository.
+// Kept as alias for backward compatibility.
+type WebServerRepository = web.ServerRepository
 
-// WebsiteRepository defines the interface for website data access
-type WebsiteRepository interface {
-	List(ctx context.Context, webServerID int64) ([]model.Website, error)
-	Get(ctx context.Context, webServerID, id int64) (*model.Website, error)
-	Create(ctx context.Context, w *model.Website) (int64, error)
-	Update(ctx context.Context, w *model.Website) error
-	Delete(ctx context.Context, webServerID, id int64) error
-	UpdateStatus(ctx context.Context, webServerID, id int64, status string) error
-	UpdateSSL(ctx context.Context, id int64, certPath, keyPath string) error
-	CountByDomain(ctx context.Context, domain string) (int, error)
-	CountByDomainExcludingID(ctx context.Context, domain string, excludeID int64) (int, error)
-}
+// WebsiteRepository is now defined in internal/web.WebsiteRepository.
+// Kept as alias for backward compatibility.
+type WebsiteRepository = web.WebsiteRepository
 
 // DeployRepository is now defined in easyserver/internal/deploy.Repository.
 // Kept as alias for backward compatibility.

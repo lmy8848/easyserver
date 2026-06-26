@@ -1,4 +1,4 @@
-package service
+package audit
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
-
-	"easyserver/internal/repository/sqlite"
 
 	_ "modernc.org/sqlite"
 )
@@ -40,28 +38,18 @@ func setupAuditTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func newTestAuditService(db *sql.DB) *AuditService {
-	key := []byte("test-signing-key-32-chars-long!!")
-	repo := sqlite.NewAuditRepository(db)
-	return &AuditService{
-		db:            db,
-		auditRepo:     repo,
-		signingKey:    key,
-		retentionDays: 90,
-		writer: &AuditWriter{
-			repo:       repo,
-			ch:         make(chan auditEntry, 100),
-			done:       make(chan struct{}),
-			finished:   make(chan struct{}),
-			signingKey: key,
-		},
-	}
+func newTestAuditService(db *sql.DB) *Service {
+	repo := NewSQLiteRepository(db)
+	svc := NewService(db, repo, 90)
+	return svc
 }
 
 // --- TestSignEntry ---
 
 func TestSignEntry_Deterministic(t *testing.T) {
-	svc := newTestAuditService(nil)
+	db := setupAuditTestDB(t)
+	defer db.Close()
+	svc := newTestAuditService(db)
 	entry := auditEntry{
 		userID:    1,
 		username:  "admin",
@@ -85,7 +73,9 @@ func TestSignEntry_Deterministic(t *testing.T) {
 }
 
 func TestSignEntry_DifferentEntriesProduceDifferentSignatures(t *testing.T) {
-	svc := newTestAuditService(nil)
+	db := setupAuditTestDB(t)
+	defer db.Close()
+	svc := newTestAuditService(db)
 	now := time.Now()
 
 	entry1 := auditEntry{userID: 1, username: "admin", action: "LOGIN", resource: "/auth", detail: "{}", ip: "127.0.0.1", userAgent: "agent", createdAt: now}
@@ -125,7 +115,7 @@ done:
 	}
 
 	entry := batch[0]
-	if entry.userID != 1 {
+		if entry.userID != 1 {
 		t.Errorf("userID = %d, want 1", entry.userID)
 	}
 	if entry.username != "admin" {
