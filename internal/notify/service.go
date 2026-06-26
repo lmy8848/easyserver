@@ -1,4 +1,4 @@
-package service
+package notify
 
 import (
 	"bytes"
@@ -12,27 +12,38 @@ import (
 	"easyserver/internal/auth"
 )
 
-// NotifyService handles sending notifications (webhook, etc.)
-type NotifyService struct {
+// LoginEvent is an alias for auth.LoginEvent.
+type LoginEvent = auth.LoginEvent
+
+// AlertEvent represents a triggered alert for notification.
+type AlertEvent struct {
+	RuleName  string  `json:"rule_name"`
+	Metric    string  `json:"metric"`
+	Value     float64 `json:"value"`
+	Threshold float64 `json:"threshold"`
+	Duration  int     `json:"duration"`
+	Timestamp string  `json:"timestamp"`
+	Message   string  `json:"message"`
+}
+
+// Service handles sending notifications (webhook, etc.)
+type Service struct {
 	webhookURL string
 	enabled    bool
 	httpClient *http.Client
 }
 
-// NewNotifyService creates a new NotifyService
-func NewNotifyService(webhookURL string, enabled bool) *NotifyService {
-	return &NotifyService{
+// NewService creates a new notify Service.
+func NewService(webhookURL string, enabled bool) *Service {
+	return &Service{
 		webhookURL: webhookURL,
 		enabled:    enabled,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// LoginEvent migrated to auth package; kept as alias.
-type LoginEvent = auth.LoginEvent
-
-// TestWebhook sends a test notification synchronously and returns any error
-func (s *NotifyService) TestWebhook() error {
+// TestWebhook sends a test notification synchronously and returns any error.
+func (s *Service) TestWebhook() error {
 	event := LoginEvent{
 		Username:  "test",
 		IP:        "127.0.0.1",
@@ -62,8 +73,8 @@ func (s *NotifyService) TestWebhook() error {
 	return nil
 }
 
-// NotifyLogin sends a login notification via webhook
-func (s *NotifyService) NotifyLogin(event LoginEvent) {
+// NotifyLogin sends a login notification via webhook.
+func (s *Service) NotifyLogin(event LoginEvent) {
 	if !s.enabled || s.webhookURL == "" {
 		return
 	}
@@ -75,8 +86,8 @@ func (s *NotifyService) NotifyLogin(event LoginEvent) {
 	}()
 }
 
-// NotifyAlert sends an alert notification via webhook
-func (s *NotifyService) NotifyAlert(event AlertEvent) {
+// NotifyAlert sends an alert notification via webhook.
+func (s *Service) NotifyAlert(event AlertEvent) {
 	if !s.enabled || s.webhookURL == "" {
 		return
 	}
@@ -88,12 +99,8 @@ func (s *NotifyService) NotifyAlert(event AlertEvent) {
 	}()
 }
 
-// sendWebhook sends the notification to the webhook URL
-func (s *NotifyService) sendWebhook(event LoginEvent) error {
-	// Format message for different webhook types
+func (s *Service) sendWebhook(event LoginEvent) error {
 	msg := s.formatMessage(event)
-
-	// Try to detect webhook type and format accordingly
 	payload := s.buildPayload(msg)
 
 	jsonData, err := json.Marshal(payload)
@@ -114,8 +121,7 @@ func (s *NotifyService) sendWebhook(event LoginEvent) error {
 	return nil
 }
 
-// formatMessage formats the login event into a readable message
-func (s *NotifyService) formatMessage(event LoginEvent) string {
+func (s *Service) formatMessage(event LoginEvent) string {
 	status := "✅ 登录成功"
 	if !event.Success {
 		status = "❌ 登录失败"
@@ -135,12 +141,9 @@ func (s *NotifyService) formatMessage(event LoginEvent) string {
 	)
 }
 
-// buildPayload builds the webhook payload (supports DingTalk, Feishu, WeCom)
-func (s *NotifyService) buildPayload(msg string) map[string]interface{} {
-	// Try to detect webhook type by URL
+func (s *Service) buildPayload(msg string) map[string]interface{} {
 	switch {
 	case strings.Contains(s.webhookURL, "dingtalk.com"):
-		// DingTalk
 		return map[string]interface{}{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
@@ -149,7 +152,6 @@ func (s *NotifyService) buildPayload(msg string) map[string]interface{} {
 			},
 		}
 	case strings.Contains(s.webhookURL, "feishu.cn"):
-		// Feishu
 		return map[string]interface{}{
 			"msg_type": "text",
 			"content": map[string]string{
@@ -157,7 +159,6 @@ func (s *NotifyService) buildPayload(msg string) map[string]interface{} {
 			},
 		}
 	case strings.Contains(s.webhookURL, "qyapi.weixin.qq.com"):
-		// WeCom
 		return map[string]interface{}{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
@@ -165,15 +166,13 @@ func (s *NotifyService) buildPayload(msg string) map[string]interface{} {
 			},
 		}
 	default:
-		// Generic webhook (Slack-compatible)
 		return map[string]interface{}{
 			"text": msg,
 		}
 	}
 }
 
-// sendAlertWebhook sends alert notification to webhook
-func (s *NotifyService) sendAlertWebhook(event AlertEvent) error {
+func (s *Service) sendAlertWebhook(event AlertEvent) error {
 	msg := fmt.Sprintf("**EasyServer 监控告警**\n\n"+
 		"- 规则: %s\n"+
 		"- 指标: %s\n"+

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"easyserver/internal/api"
+	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/config"
@@ -29,6 +30,7 @@ import (
 	"easyserver/internal/model"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	"easyserver/internal/notify"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
 	"easyserver/internal/repository/sqlite"
@@ -248,10 +250,10 @@ func main() {
 	websiteSvc := web.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
 
 	// Initialize notify + alert services (single shared instance)
-	notifyService := service.NewNotifyService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
+	notifyService := notify.NewService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
 	authSvc.SetNotifyService(notifyService)
 
-	alertService := service.NewAlertService(notifyService, notificationSvc)
+	alertService := alert.NewService(notifyService, notificationSvc)
 	var alertRules []model.AlertRule
 	for i, rule := range cfg.Alerts.Rules {
 		alertRules = append(alertRules, model.AlertRule{

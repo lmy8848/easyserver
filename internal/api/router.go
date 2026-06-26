@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/config"
@@ -20,6 +21,7 @@ import (
 	"easyserver/internal/middleware"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	"easyserver/internal/notify"
 	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
 	"easyserver/internal/repository"
@@ -44,7 +46,7 @@ type Router struct {
 	monitorService       *monitor.MonitorService
 	auditService         *audit.Service
 	sessionService       *auth.SessionService
-	alertService         *service.AlertService
+	alertService         *alert.Service
 	processManager       *process.Service
 	systemProcessService *systemprocess.Service
 	notificationService  *notification.Service
@@ -140,8 +142,8 @@ type RouterDeps struct {
 	WebsiteService   *web.WebsiteService
 
 	// Notify + Alert (wired in main.go)
-	NotifyService *service.NotifyService
-	AlertService  *service.AlertService
+	NotifyService *notify.Service
+	AlertService  *alert.Service
 
 	// Terminal manager
 	TerminalManager *terminal.Manager

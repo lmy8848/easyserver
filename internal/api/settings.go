@@ -12,9 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/alert"
 	"easyserver/internal/config"
 	"easyserver/internal/executor"
 	"easyserver/internal/model"
+	"easyserver/internal/notify"
 	"easyserver/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -31,11 +33,11 @@ type SettingsHandler struct {
 	cfg          *config.Config
 	cfgMu        sync.RWMutex
 	configPath   string
-	alertService *service.AlertService
+	alertService *alert.Service
 	executor     executor.CommandExecutor
 }
 
-func NewSettingsHandler(cfg *config.Config, configPath string, alertService *service.AlertService, exec executor.CommandExecutor) *SettingsHandler {
+func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor) *SettingsHandler {
 	return &SettingsHandler{
 		cfg:          cfg,
 		configPath:   configPath,
@@ -490,7 +492,7 @@ func (h *SettingsHandler) TestWebhook(c *gin.Context) {
 		return
 	}
 
-	notifyService := service.NewNotifyService(h.cfg.Notify.WebhookURL, true)
+	notifyService := notify.NewService(h.cfg.Notify.WebhookURL, true)
 	if err := notifyService.TestWebhook(); err != nil {
 		c.Error(ErrInternal.WithMessage(fmt.Sprintf("测试通知失败: %v", err)))
 		return
@@ -673,7 +675,7 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	Success(c, gin.H{"message": "面板正在重启..."})
 }
 
-func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *service.AlertService, exec executor.CommandExecutor) {
+func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor) {
 	handler := NewSettingsHandler(cfg, configPath, alertService, exec)
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)
