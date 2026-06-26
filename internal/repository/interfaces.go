@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
+	"easyserver/internal/auth"
 	"easyserver/internal/cron"
 	"easyserver/internal/deploy"
 	"easyserver/internal/model"
@@ -13,51 +13,12 @@ import (
 	"easyserver/internal/process"
 )
 
-// UserRepository defines the interface for user data access
-type UserRepository interface {
-	GetByID(ctx context.Context, id int64) (*model.User, error)
-	GetByUsername(ctx context.Context, username string) (*model.User, error)
-	Create(ctx context.Context, user *model.User) error
-	Update(ctx context.Context, user *model.User) error
-	Delete(ctx context.Context, id int64) error
-	List(ctx context.Context, offset, limit int) ([]model.User, int64, error)
-	UpdateLoginAttempts(ctx context.Context, id int64, attempts int, lockedUntil *time.Time) error
-	UpdatePassword(ctx context.Context, id int64, passwordHash string) error
-	SetMustChangePass(ctx context.Context, id int64, mustChange bool) error
-	IncrementLoginAttempts(ctx context.Context, id int64) error
-	IncrementLoginAttemptsWithLock(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) error
-	ResetLoginState(ctx context.Context, id int64, ip string) error
-	UpdateLastLoginIP(ctx context.Context, id int64, ip string) error
-	SetAccountExpiry(ctx context.Context, id int64, expiresAt *time.Time) error
-	GetAccountExpiry(ctx context.Context, id int64) (sql.NullTime, error)
-	SetIPWhitelist(ctx context.Context, id int64, whitelist string) error
-	GetIPWhitelist(ctx context.Context, id int64) (string, error)
-}
+// Auth domain interfaces migrated to internal/auth; kept as aliases.
 
-// SessionRepository defines the interface for session data access
-type SessionRepository interface {
-	Create(ctx context.Context, session *model.Session) error
-	GetByToken(ctx context.Context, token string) (*model.Session, error)
-	DeleteByToken(ctx context.Context, token string) error
-	DeleteByUserID(ctx context.Context, userID int64) error
-	DeleteExpired(ctx context.Context) error
-	DeleteInactive(ctx context.Context, inactiveSince time.Time) error
-	DeleteByUserIDExcept(ctx context.Context, userID int64, exceptToken string) error
-	IsValid(ctx context.Context, token string) (bool, error)
-	GetActiveByUserID(ctx context.Context, userID int64) ([]model.Session, error)
-	GetActive(ctx context.Context) ([]model.Session, error)
-	UpdateActivity(ctx context.Context, token string) error
-	Count(ctx context.Context) (int, error)
-}
-
-// TokenBlacklistRepository defines the interface for token blacklist data access
-type TokenBlacklistRepository interface {
-	Add(ctx context.Context, userID int64, token string, expiresAt time.Time) error
-	IsBlacklisted(ctx context.Context, token string) (bool, error)
-	AddUserInvalidation(ctx context.Context, userID int64) error
-	IsUserInvalidated(ctx context.Context, userID int64, issuedAt time.Time) (bool, error)
-	Clean(ctx context.Context) error
-}
+type UserRepository = auth.UserRepo
+type SessionRepository = auth.SessionRepo
+type TokenBlacklistRepository = auth.TokenBlacklistRepo
+type ActivityRepository = auth.ActivityRepo
 
 // SignedAuditEntry represents an audit log entry with HMAC signature,
 // used by AuditWriter.flush and VerifySignature.
@@ -217,12 +178,7 @@ type ServiceWhitelistRepository interface {
 	Delete(ctx context.Context, name string) error
 }
 
-// ActivityRepository defines the interface for user activity log data access
-type ActivityRepository interface {
-	Log(ctx context.Context, entry *model.UserActivity) error
-	GetByUserID(ctx context.Context, userID int64, limit int) ([]model.UserActivity, error)
-	GetAll(ctx context.Context, limit int) ([]model.UserActivity, error)
-}
+// ActivityRepository is now aliased above (auth.ActivityRepo).
 
 
 // ProcessRepository is now defined in easyserver/internal/process.Repository.

@@ -1,4 +1,4 @@
-package service
+package auth
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	"easyserver/internal/repository/sqlite"
 
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
@@ -206,8 +204,8 @@ func createTestUser(t *testing.T, db *sql.DB, username, password string, locked 
 
 func newTestAuthService(db *sql.DB) *AuthService {
 	return &AuthService{
-		userRepo:        sqlite.NewUserRepository(db),
-		tokenRepo:       sqlite.NewTokenBlacklistRepository(db),
+		userRepo:        NewSQLiteUserRepository(db),
+		tokenRepo:       NewSQLiteTokenRepository(db),
 		maxAttempts:     5,
 		lockoutDuration: 5 * time.Minute,
 	}
