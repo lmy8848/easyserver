@@ -392,18 +392,6 @@ func (s *AuthService) ValidatePassword(password string) error {
 		return errors.New("password must be less than 128 characters")
 	}
 
-	// Check for common weak passwords
-	weakPasswords := []string{
-		"password", "12345678", "qwerty123", "admin123",
-		"password123", "letmein123", "welcome123",
-	}
-	lower := strings.ToLower(password)
-	for _, weak := range weakPasswords {
-		if lower == weak {
-			return errors.New("password is too common")
-		}
-	}
-
 	var hasUpper, hasLower, hasDigit bool
 	for _, ch := range password {
 		switch {
@@ -418,6 +406,19 @@ func (s *AuthService) ValidatePassword(password string) error {
 	if !(hasUpper && hasLower && hasDigit) {
 		return errors.New("password must contain upper, lower case and digit")
 	}
+
+	// Check for common weak passwords (after complexity check)
+	weakPasswords := []string{
+		"password", "12345678", "qwerty123", "admin123",
+		"password123", "letmein123", "welcome123",
+	}
+	lower := strings.ToLower(password)
+	for _, weak := range weakPasswords {
+		if lower == weak {
+			return errors.New("password is too common")
+		}
+	}
+
 	return nil
 }
 
