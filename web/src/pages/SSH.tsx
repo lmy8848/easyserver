@@ -306,7 +306,7 @@ export default function SSH() {
                 <Table
                   columns={loginColumns}
                   dataSource={logins}
-                  rowKey={(_, index) => String(index)}
+                  rowKey={(r) => `${r.user}-${r.time}-${r.ip}-${r.port}`}
                   loading={loginsLoading}
                   locale={{ emptyText: '暂无登录记录' }}
                 />

@@ -99,7 +99,7 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
       </Form>
 
       <Alert
-        message="支持的 Webhook 类型"
+        title="支持的 Webhook 类型"
         description={
           <ul style={{ margin: 0, paddingLeft: 20 }}>
             <li>钉钉机器人 - https://oapi.dingtalk.com/robot/send?access_token=xxx</li>

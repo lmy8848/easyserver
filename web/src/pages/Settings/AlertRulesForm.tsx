@@ -93,15 +93,15 @@ export default function AlertRulesForm() {
               onChange={v => updateRule(index, 'threshold', v || 0)}
               min={0}
               max={100}
-              addonAfter="%"
-              style={{ width: 120 }}
+              suffix="%"
+                            style={{ width: 120 }}
             />
             <InputNumber
               placeholder="持续时间"
               value={rule.duration}
               onChange={v => updateRule(index, 'duration', v || 0)}
               min={0}
-              addonAfter="秒"
+              suffix="秒"
               style={{ width: 120 }}
             />
             <Switch

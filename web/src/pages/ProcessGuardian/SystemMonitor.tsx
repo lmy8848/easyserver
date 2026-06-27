@@ -248,7 +248,7 @@ export default function SystemMonitor() {
           <Col span={OVERVIEW_COL_SPAN}>
             <Card size="small">
               <Statistic title="CPU 使用率" value={overview.cpu_usage} precision={1} suffix="%"
-                valueStyle={{ color: overview.cpu_usage > 80 ? '#cf1322' : '#3f8600' }}
+                styles={{ content: { color: overview.cpu_usage > 80 ? '#cf1322' : '#3f8600' } }}
                 prefix={<DashboardOutlined />} />
               <Progress percent={overview.cpu_usage} showInfo={false}
                 status={overview.cpu_usage > 80 ? 'exception' : 'normal'} size="small" />
@@ -258,7 +258,7 @@ export default function SystemMonitor() {
             <Card size="small">
               <Statistic title="内存使用" value={overview.memory_used}
                 suffix={`/ ${overview.memory_total} MB`}
-                valueStyle={{ color: overview.memory_usage > 80 ? '#cf1322' : '#3f8600' }}
+                styles={{ content: { color: overview.memory_usage > 80 ? '#cf1322' : '#3f8600' } }}
                 prefix={<CloudServerOutlined />} />
               <Progress percent={overview.memory_usage} showInfo={false}
                 status={overview.memory_usage > 80 ? 'exception' : 'normal'} size="small" />

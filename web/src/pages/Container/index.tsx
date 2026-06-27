@@ -36,7 +36,7 @@ export default function Container() {
   if (checking) {
     return (
       <div style={{ textAlign: 'center', padding: '100px 0' }}>
-        <Spin size="large" tip="检测 Docker 环境..." />
+        <Spin size="large" description="检测 Docker 环境..." />
       </div>
     );
   }

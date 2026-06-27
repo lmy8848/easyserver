@@ -523,7 +523,7 @@ export default function AuditLog() {
             </Space>
             <Table
               dataSource={sshLogins}
-              rowKey={(record, index) => `${record.username}-${record.time}-${index}`}
+              rowKey={(r) => `${r.username}-${r.time}-${r.action}`}
               loading={sshLoading}
               size="small"
               pagination={{ pageSize: 50 }}

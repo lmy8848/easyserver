@@ -269,7 +269,7 @@ export default function FirewallRules({
               { title: '来源', dataIndex: 'source', key: 'source', render: (source: string) => source || <span style={{ color: '#8c8c8c' }}>所有</span> },
             ]}
             dataSource={systemRules}
-            rowKey={(_, index) => `sys-${index}`}
+            rowKey={(r) => `${r.chain}-${r.protocol}-${r.port}-${r.action}-${r.source}`}
             size="small"
             pagination={false}
           />

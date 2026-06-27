@@ -364,7 +364,7 @@ export default function ProcessGuardian() {
             </Col>
             <Col span={6}>
               <Card size="small">
-                <Statistic title="运行中" value={runningCount} valueStyle={{ color: '#3f8600' }}
+                <Statistic title="运行中" value={runningCount} styles={{ content: { color: '#3f8600' } }}
                   prefix={<CaretRightOutlined />} />
               </Card>
             </Col>
@@ -375,7 +375,7 @@ export default function ProcessGuardian() {
             </Col>
             <Col span={6}>
               <Card size="small">
-                <Statistic title="异常" value={errorCount} valueStyle={{ color: '#cf1322' }}
+                <Statistic title="异常" value={errorCount} styles={{ content: { color: '#cf1322' } }}
                   prefix={<ThunderboltOutlined />} />
               </Card>
             </Col>
@@ -428,7 +428,7 @@ export default function ProcessGuardian() {
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
         width={600}
-        destroyOnClose
+        destroyOnHidden
         style={{ top: MODAL_TOP_OFFSET }}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>

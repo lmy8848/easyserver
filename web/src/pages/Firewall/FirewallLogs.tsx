@@ -60,7 +60,7 @@ export default function FirewallLogs({
     >
       <Table
         dataSource={logs}
-        rowKey={(_, index) => `log-${index}`}
+        rowKey={(r) => `${r.timestamp}-${r.src_ip}-${r.dst_ip}-${r.dst_port}-${r.action}`}
         loading={loading}
         size="small"
         locale={{ emptyText: <Empty description="暂无防火墙日志" /> }}
