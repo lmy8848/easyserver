@@ -76,7 +76,7 @@ func (s *Service) List(ctx context.Context) ([]ProcessWithStatus, error) {
 		return nil, err
 	}
 
-	var result []ProcessWithStatus
+	result := make([]ProcessWithStatus, 0)
 	for _, p := range processes {
 		pws := ProcessWithStatus{Process: p}
 		pws.Status = s.getStatus(ctx, p.ID)

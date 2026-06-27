@@ -256,7 +256,7 @@ func (s *Service) ListSystemProcesses(sortBy, order, search string, limit int) (
 	s.cpuMu.Unlock()
 
 	// Convert to result
-	var processes []SystemProcess
+	processes := make([]SystemProcess, 0)
 	for _, rp := range rawProcs {
 		processes = append(processes, rp.SystemProcess)
 	}
@@ -333,7 +333,7 @@ func (s *Service) ListServices() ([]SystemService, error) {
 		}
 	}
 
-	var services []SystemService
+	services := make([]SystemService, 0)
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

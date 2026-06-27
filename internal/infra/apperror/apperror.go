@@ -164,9 +164,9 @@ var errorRegistry = []errorPattern{
 	// Not found
 	{matches: []string{"not found", "未安装", "不存在", "does not exist"}, target: ErrNotFound},
 	// Already exists / installed / running
-	{matches: []string{"already installed", "已安装", "已存在", "is already running"}, target: ErrConflict},
+	{matches: []string{"already installed", "已安装", "已存在", "is already running", "is not running", "未运行"}, target: ErrConflict},
 	// Bad state / precondition
-	{matches: []string{"is not running", "cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
+	{matches: []string{"cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
 	// UNIQUE constraint violation (SQLite)
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
 	// No data available
