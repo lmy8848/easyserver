@@ -152,7 +152,7 @@ export default function Services() {
     wsRef.current?.close();
     try {
       const res = await serviceApi.getLogs(service.name, 100);
-      setLogs((res.data.data?.lines || []).map(line => ({ time: '', message: line, priority: 'info' })));
+      setLogs(res.data.data?.lines || []);
     } catch (error) {
       console.error('Failed to fetch logs:', error);
       setLogs([]);

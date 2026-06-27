@@ -138,7 +138,7 @@ export const serviceApi = {
     api.post<ApiResponse>(`/services/${name}/disable`),
 
   getLogs: (name: string, tail?: number) =>
-    api.get<ApiResponse<{ lines: string[] }>>(`/services/${name}/logs`, { params: { tail } }),
+    api.get<ApiResponse<{ lines: Array<{ time: string; message: string; priority: string }> }>>(`/services/${name}/logs`, { params: { tail } }),
 };
 
 // File API
