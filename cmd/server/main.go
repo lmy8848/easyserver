@@ -202,7 +202,7 @@ func main() {
 	containerService := container.NewService(cmdExec)
 
 	// Initialize service manager (single shared instance)
-	serviceManager := systemd.NewServiceManager(cmdExec)
+	serviceManager := systemd.NewServiceManager(cmdExec, ".")
 
 	// Initialize cron service (single shared instance)
 	cronRepo := cron.NewSQLiteRepository(db)

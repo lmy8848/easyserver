@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -12,10 +13,76 @@ import (
 	"easyserver/internal/infra/executor"
 )
 
+// serviceInfoEntry represents a service knowledge base entry.
+type serviceInfoEntry struct {
+	Name   string `json:"name"`
+	Category string `json:"category"`
+	Desc   string `json:"desc"`
+}
+
+// serviceKnowledgeBase maps service names to their info.
+var serviceKnowledgeBase map[string]serviceInfoEntry
+var serviceKnowledgeOnce sync.Once
+
+// loadServiceKnowledgeBase loads the service knowledge base from JSON file.
+func loadServiceKnowledgeBase(dataDir string) {
+	serviceKnowledgeOnce.Do(func() {
+		serviceKnowledgeBase = make(map[string]serviceInfoEntry)
+		
+		// Try multiple paths
+		paths := []string{
+			dataDir + "/templates/service-info.json",
+			"templates/service-info.json",
+		}
+		
+		for _, path := range paths {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			
+			if err := json.Unmarshal(data, &serviceKnowledgeBase); err != nil {
+				log.Printf("systemd: failed to parse service-info.json: %v", err)
+				continue
+			}
+			log.Printf("systemd: loaded %d service descriptions", len(serviceKnowledgeBase))
+			return
+		}
+		
+		log.Printf("systemd: service-info.json not found, using default descriptions")
+	})
+}
+
+// enrichServiceInfo enriches service info with knowledge base data.
+func enrichServiceInfo(svc *ServiceInfo) {
+	if entry, ok := serviceKnowledgeBase[svc.Name]; ok {
+		if svc.DisplayName == "" {
+			svc.DisplayName = entry.Name
+		}
+		if svc.Category == "" {
+			svc.Category = entry.Category
+		}
+		// Only override description if systemd description is generic
+		if svc.Description == "" || svc.Description == svc.Name+".service" {
+			svc.Description = entry.Desc
+		}
+	}
+	
+	// Set defaults
+	if svc.DisplayName == "" {
+		svc.DisplayName = svc.Name
+	}
+	if svc.Category == "" {
+		svc.Category = "其他"
+	}
+}
+
 // ServiceInfo represents a systemd service.
 type ServiceInfo struct {
 	Name          string  `json:"name"`
+	DisplayName   string  `json:"display_name"`
 	Description   string  `json:"description"`
+	Category      string  `json:"category"`
 	State         string  `json:"state"`
 	SubState      string  `json:"sub_state"`
 	Enabled       bool    `json:"enabled"`
@@ -45,11 +112,13 @@ type journalEntry struct {
 type ServiceManager struct {
 	mu       sync.RWMutex
 	executor executor.CommandExecutor
+	dataDir  string
 }
 
 // NewServiceManager creates a new ServiceManager.
-func NewServiceManager(exec executor.CommandExecutor) *ServiceManager {
-	return &ServiceManager{executor: exec}
+func NewServiceManager(exec executor.CommandExecutor, dataDir string) *ServiceManager {
+	loadServiceKnowledgeBase(dataDir)
+	return &ServiceManager{executor: exec, dataDir: dataDir}
 }
 
 // List returns all systemd services.
@@ -61,7 +130,7 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 
 	enabledMap := m.getAllEnabledStatus(ctx)
 
-	var services []ServiceInfo
+	services := make([]ServiceInfo, 0)
 	lines := strings.Split(stdout, "\n")
 
 	for _, line := range lines {
@@ -75,15 +144,15 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			continue
 		}
 
+		// 跳过不存在的服务（LOAD 列为 not-found）
+		if fields[1] == "not-found" {
+			continue
+		}
+
 		svc := ServiceInfo{
 			Name:     strings.TrimSuffix(fields[0], ".service"),
 			State:    fields[2],
 			SubState: fields[3],
-		}
-
-		// 跳过不存在的服务（包已删除但 unit 残留）
-		if svc.State == "not-found" {
-			continue
 		}
 
 		if len(fields) > 4 {
@@ -91,6 +160,7 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 		}
 
 		svc.Enabled = enabledMap[svc.Name]
+		enrichServiceInfo(&svc)
 		services = append(services, svc)
 	}
 

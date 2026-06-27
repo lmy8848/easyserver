@@ -92,6 +92,11 @@ export default function ServiceList({
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
+      render: (desc: string, record: Service) => (
+        <Tooltip title={`${record.display_name}（${record.category}）— ${desc}`}>
+          <span>{desc}</span>
+        </Tooltip>
+      ),
     },
     {
       title: '状态',
