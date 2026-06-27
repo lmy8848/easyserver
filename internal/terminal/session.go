@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 
 	"github.com/creack/pty"
 )

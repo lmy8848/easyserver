@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // ServiceInfo represents a systemd service.

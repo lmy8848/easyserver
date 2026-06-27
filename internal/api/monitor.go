@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
 	"easyserver/internal/systemd"
 	"easyserver/internal/terminal"

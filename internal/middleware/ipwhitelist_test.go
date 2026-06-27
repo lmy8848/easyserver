@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"easyserver/internal/config"
+	"easyserver/internal/infra/config"
 	"testing"
 )
 

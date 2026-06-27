@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"easyserver/internal/envconfig"
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 type Service struct {

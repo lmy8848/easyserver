@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // 容器管理常量

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"easyserver/internal/dbserver"
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 
 	"golang.org/x/crypto/bcrypt"
 )

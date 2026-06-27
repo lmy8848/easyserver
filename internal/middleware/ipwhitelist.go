@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	"easyserver/internal/config"
+	"easyserver/internal/infra/config"
 
-	"easyserver/internal/apperror"
+	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 )
 

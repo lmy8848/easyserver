@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"easyserver/internal/apperror"
+	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 )
 

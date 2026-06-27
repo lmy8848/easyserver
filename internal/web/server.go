@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // sanitizePackageName allows only alphanumeric characters, hyphens, dots, and plus signs

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 type Service struct {

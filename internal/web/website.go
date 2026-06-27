@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // WebsiteService manages website deployment and configuration.

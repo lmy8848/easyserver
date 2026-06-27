@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 type Service struct {

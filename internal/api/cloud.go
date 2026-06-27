@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"easyserver/internal/cloud"
-	"easyserver/internal/config"
+	"easyserver/internal/infra/config"
 
 	"github.com/gin-gonic/gin"
 )

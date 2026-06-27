@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"
 )

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // Service manages cron tasks and their execution

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
-	"easyserver/internal/config"
-	"easyserver/internal/database"
+	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/database"
 
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"

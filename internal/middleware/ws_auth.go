@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"easyserver/internal/apperror"
+	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )

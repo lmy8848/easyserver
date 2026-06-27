@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // Session represents a terminal session.

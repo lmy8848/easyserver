@@ -14,8 +14,8 @@ import (
 
 	"easyserver/internal/alert"
 	"easyserver/internal/cloud"
-	"easyserver/internal/config"
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/executor"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"

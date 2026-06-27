@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"easyserver/internal/cron"
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"
 )

@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 
-	"easyserver/internal/apperror"
+	"easyserver/internal/infra/apperror"
 
 	"github.com/gin-gonic/gin"
 )

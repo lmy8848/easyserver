@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 const sshdConfigPath = "/etc/ssh/sshd_config"

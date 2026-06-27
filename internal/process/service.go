@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // --- Constants ---

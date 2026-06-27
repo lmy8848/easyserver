@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
-	"easyserver/internal/executor"
+	"easyserver/internal/infra/executor"
 )
 
 // EventMonitor monitors system-level events (disk, memory, service failures)
