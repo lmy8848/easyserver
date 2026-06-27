@@ -15,9 +15,9 @@ import (
 
 // serviceInfoEntry represents a service knowledge base entry.
 type serviceInfoEntry struct {
-	Name   string `json:"name"`
+	Name     string `json:"name"`
 	Category string `json:"category"`
-	Desc   string `json:"desc"`
+	Desc     string `json:"desc"`
 }
 
 // serviceKnowledgeBase maps service names to their info.
@@ -28,19 +28,19 @@ var serviceKnowledgeOnce sync.Once
 func loadServiceKnowledgeBase(dataDir string) {
 	serviceKnowledgeOnce.Do(func() {
 		serviceKnowledgeBase = make(map[string]serviceInfoEntry)
-		
+
 		// Try multiple paths
 		paths := []string{
 			dataDir + "/templates/service-info.json",
 			"templates/service-info.json",
 		}
-		
+
 		for _, path := range paths {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				continue
 			}
-			
+
 			if err := json.Unmarshal(data, &serviceKnowledgeBase); err != nil {
 				log.Printf("systemd: failed to parse service-info.json: %v", err)
 				continue
@@ -48,7 +48,7 @@ func loadServiceKnowledgeBase(dataDir string) {
 			log.Printf("systemd: loaded %d service descriptions", len(serviceKnowledgeBase))
 			return
 		}
-		
+
 		log.Printf("systemd: service-info.json not found, using default descriptions")
 	})
 }
@@ -67,7 +67,7 @@ func enrichServiceInfo(svc *ServiceInfo) {
 			svc.Description = entry.Desc
 		}
 	}
-	
+
 	// Set defaults
 	if svc.DisplayName == "" {
 		svc.DisplayName = svc.Name
