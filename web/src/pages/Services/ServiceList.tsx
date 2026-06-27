@@ -35,6 +35,7 @@ interface ServiceListProps {
   statusFilter: string;
   currentPage: number;
   pageSize: number;
+  actingService: string | null;
   onRefresh: () => void;
   onAction: (name: string, action: string) => void;
   onBatchAction: (action: string) => void;
@@ -59,6 +60,7 @@ export default function ServiceList({
   statusFilter,
   currentPage,
   pageSize,
+  actingService,
   onRefresh,
   onAction,
   onBatchAction,
@@ -115,8 +117,9 @@ export default function ServiceList({
           <Switch
             size="small"
             checked={enabled}
+            loading={actingService === record.name}
             onChange={(checked) => onToggleEnabled(record, checked)}
-            disabled={!canManageService}
+            disabled={!canManageService || actingService === record.name}
           />
         </Tooltip>
       ),
@@ -144,7 +147,9 @@ export default function ServiceList({
       title: '操作',
       key: 'action',
       width: 260,
-      render: (_: any, record: Service) => (
+      render: (_: any, record: Service) => {
+        const isActing = actingService === record.name;
+        return (
         <Space size="small">
           {canManageService && (
             <>
@@ -153,6 +158,8 @@ export default function ServiceList({
                   type="primary"
                   size="small"
                   icon={<PlayCircleOutlined />}
+                  loading={isActing}
+                  disabled={isActing}
                   onClick={() => onAction(record.name, 'start')}
                 >
                   启动
@@ -163,6 +170,8 @@ export default function ServiceList({
                     danger
                     size="small"
                     icon={<PauseCircleOutlined />}
+                    loading={isActing}
+                    disabled={isActing}
                     onClick={() => onAction(record.name, 'stop')}
                   >
                     停止
@@ -170,6 +179,8 @@ export default function ServiceList({
                   <Button
                     size="small"
                     icon={<ReloadOutlined />}
+                    loading={isActing}
+                    disabled={isActing}
                     onClick={() => onAction(record.name, 'restart')}
                   >
                     重启
@@ -193,7 +204,8 @@ export default function ServiceList({
             />
           </Tooltip>
         </Space>
-      ),
+        );
+      },
     },
   ];
 

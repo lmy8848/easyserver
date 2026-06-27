@@ -32,6 +32,9 @@ export default function Services() {
   // 批量选择
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
+  // 行级操作 loading（互斥：同一行只能有一个操作在进行）
+  const [actingService, setActingService] = useState<string | null>(null);
+
   // 实时日志
   const wsRef = useRef<WebSocket | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -77,6 +80,7 @@ export default function Services() {
   }, [autoRefresh, fetchServices]);
 
   const handleAction = async (name: string, action: string) => {
+    setActingService(name);
     try {
       switch (action) {
         case 'start':
@@ -103,6 +107,8 @@ export default function Services() {
       fetchServices();
     } catch (error: any) {
       message.error(error.message || '操作失败');
+    } finally {
+      setActingService(null);
     }
   };
 
@@ -237,6 +243,7 @@ export default function Services() {
         statusFilter={statusFilter}
         currentPage={currentPage}
         pageSize={pageSize}
+        actingService={actingService}
         onRefresh={fetchServices}
         onAction={handleAction}
         onBatchAction={handleBatchAction}

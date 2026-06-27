@@ -397,10 +397,9 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 
 // isEnabled checks if a service is enabled.
 func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "is-enabled", name+".service")
-	if err != nil || exitCode != 0 {
-		return false
-	}
+	stdout, _, _, _ := m.executor.Run(ctx, "systemctl", "is-enabled", name+".service")
+	// systemctl is-enabled returns exit code 1 for disabled services,
+	// so we check the output string instead of relying on exit code.
 	return strings.TrimSpace(stdout) == "enabled"
 }
 
