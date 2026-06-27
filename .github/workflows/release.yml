@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 需要完整历史用于 git describe
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+          mkdir -p ../internal/api/web/dist
+          cp -r dist/* ../internal/api/web/dist/
+
+      - name: Build linux-amd64
+        run: |
+          VERSION=${{ github.ref_name }}
+          LDFLAGS="-X easyserver/internal/api.Version=${VERSION}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o easyserver-linux-amd64 ./cmd/server
+
+      - name: Build linux-arm64
+        run: |
+          VERSION=${{ github.ref_name }}
+          LDFLAGS="-X easyserver/internal/api.Version=${VERSION}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o easyserver-linux-arm64 ./cmd/server
+
+      - name: Smoke test (amd64)
+        run: |
+          cat > /tmp/easyserver-test.yaml << 'EOF'
+          server:
+            port: 18080
+            host: "127.0.0.1"
+            serve_frontend: false
+          auth:
+            jwt_secret: "ci-smoke-test-jwt-secret-at-least-32-bytes-long!!"
+          data_dir: /tmp/easyserver-data
+          EOF
+          chmod +x easyserver-linux-amd64
+          timeout 5 ./easyserver-linux-amd64 -config /tmp/easyserver-test.yaml &
+          sleep 2
+          if curl -sf http://127.0.0.1:18080/ >/dev/null 2>&1 || ss -tlnp | grep -q 18080; then
+            echo "Smoke test PASSED — binary starts and listens on :18080"
+          else
+            echo "Smoke test FAILED — binary did not start"
+            exit 1
+          fi
+          kill %1 2>/dev/null || true
+
+      - name: Calculate checksums
+        run: sha256sum easyserver-linux-amd64 easyserver-linux-arm64 > checksums-sha256.txt
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            ./easyserver-linux-amd64 \
+            ./easyserver-linux-arm64 \
+            ./checksums-sha256.txt \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

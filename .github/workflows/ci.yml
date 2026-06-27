@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git describe 需要完整历史
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -38,7 +40,9 @@ jobs:
           fi
 
       - name: Build (production, CGO disabled)
-        run: CGO_ENABLED=0 go build -o easyserver ./cmd/server
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          CGO_ENABLED=0 go build -ldflags "-X easyserver/internal/api.Version=${VERSION}" -o easyserver ./cmd/server
 
       - name: Vet
         run: go vet ./...
