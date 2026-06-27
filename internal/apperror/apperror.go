@@ -146,8 +146,8 @@ func IsDockerNotInstalled(err error) bool {
 
 // errorPattern maps error message patterns to AppError types
 type errorPattern struct {
-	matches []string    // substrings to match
-	target  *AppError   // target error type
+	matches []string  // substrings to match
+	target  *AppError // target error type
 }
 
 // errorRegistry is the ordered list of error patterns.
