@@ -157,6 +157,8 @@ var errorRegistry = []errorPattern{
 	{matches: []string{"path traversal", "absolute paths are not allowed", "cannot resolve path"}, target: ErrPathViolation},
 	// Docker not available
 	{matches: []string{"docker info failed", "Cannot connect to the Docker daemon", "docker: command not found", "executable file not found", "docker is not installed", "not accessible"}, target: ErrDockerNotInstalled},
+	// Docker operation failures
+	{matches: []string{"docker pull failed", "docker update failed", "docker start failed", "docker stop failed", "docker restart failed", "docker pause failed", "docker unpause failed", "docker rm failed", "docker rmi failed", "docker exec failed"}, target: ErrBadRequest},
 	// Auth errors
 	{matches: []string{"invalid password", "invalid TOTP code", "invalid credentials"}, target: ErrUnauthorized},
 	// Not found
