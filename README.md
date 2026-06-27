@@ -2,9 +2,9 @@
 
 **一站式 Linux 服务器管理面板** — Go + React 构建，轻量、安全、功能全面。
 
-![EasyServer Dashboard](docs/screenshot.jpg)
+[English](README_EN.md) · [文档网站](https://lmy8848.github.io/easyserver/) · [API 文档](docs/api-reference.md) · [部署指南](docs/linux-deploy.md)
 
-[文档网站](https://lmy8848.github.io/easyserver/) · [API 文档](docs/api-reference.md) · [部署指南](docs/linux-deploy.md)
+![EasyServer Dashboard](docs/screenshot.jpg)
 
 ---
 
@@ -41,16 +41,16 @@ docker run -d \
   lmy8848/easyserver:latest
 ```
 
-访问 `http://your-server:8080`
+访问 `http://your-server:8080`，首次启动自动生成管理员账号（密码显示在控制台）。
 
 ### 二进制部署
 
 ```bash
-# 下载
+# 下载最新版本
 wget https://github.com/lmy8848/easyserver/releases/latest/download/easyserver-linux-amd64
 chmod +x easyserver-linux-amd64
 
-# 配置
+# 生成配置
 cat > config.yaml << 'EOF'
 server:
   port: 8080
@@ -85,10 +85,8 @@ EOF
 | 文档 | 说明 |
 |------|------|
 | [文档网站](https://lmy8848.github.io/easyserver/) | 完整使用文档 |
-| [API 接口文档](docs/api-reference.md) | 337 个接口完整文档 |
+| [API 文档](docs/api-reference.md) | 337 个接口完整文档 |
 | [Linux 部署手册](docs/linux-deploy.md) | 二进制部署 + systemd + Nginx |
-| [数据库设计](docs/database-schema.md) | 数据库表结构 |
-| [变更日志](docs/changelog.md) | 版本更新记录 |
 
 ---
 
@@ -121,9 +119,9 @@ npm run dev
 
 ## 安全建议
 
-1. **必须修改** `jwt_secret` 和 `encryption_key`
-2. **生产环境** 启用 HTTPS
-3. **配置 IP 白名单** 限制访问来源
+1. **必须修改** `jwt_secret` 和 `encryption_key`，使用 `openssl rand -base64 32` 生成
+2. **生产环境** 启用 HTTPS（通过 Nginx 反向代理或直接配置）
+3. **配置 IP 白名单** 限制管理面板访问来源
 4. **定期备份** 数据库和配置文件
 
 ---
