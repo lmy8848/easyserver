@@ -48,7 +48,7 @@ func (s *Service) ListContainers(ctx context.Context, all bool) ([]Container, er
 		return nil, err
 	}
 
-	args := []string{"ps", "--format", "{{json .}}"}
+	args := []string{"ps", "--format", "json"}
 	if all {
 		args = append(args, "-a")
 	}
@@ -58,7 +58,7 @@ func (s *Service) ListContainers(ctx context.Context, all bool) ([]Container, er
 		return nil, fmt.Errorf("docker ps failed: %s", output)
 	}
 
-	var containers []Container
+	containers := make([]Container, 0)
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
@@ -242,12 +242,12 @@ func (s *Service) ListImages(ctx context.Context) ([]Image, error) {
 		return nil, err
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "images", "--format", "{{json .}}")
+	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "images", "--format", "json")
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("docker images failed: %s", output)
 	}
 
-	var images []Image
+	images := make([]Image, 0)
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
@@ -856,12 +856,12 @@ func (s *Service) composeArgs(composeFile string, subcmd ...string) []string {
 
 // ListVolumes returns all Docker volumes.
 func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "volume", "ls", "--format", "{{json .}}")
+	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "volume", "ls", "--format", "json")
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("docker volume ls failed: %s", output)
 	}
 
-	var volumes []Volume
+	volumes := make([]Volume, 0)
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
@@ -925,12 +925,12 @@ type networkDetails struct {
 
 // ListNetworks returns all Docker networks.
 func (s *Service) ListNetworks(ctx context.Context) ([]Network, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "network", "ls", "--format", "{{json .}}")
+	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "network", "ls", "--format", "json")
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("docker network ls failed: %s", output)
 	}
 
-	var networks []Network
+	networks := make([]Network, 0)
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
