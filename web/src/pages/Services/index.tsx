@@ -10,6 +10,7 @@ import ServiceLogs from './ServiceLogs';
 export default function Services() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [logsVisible, setLogsVisible] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -39,24 +40,67 @@ export default function Services() {
   const wsRef = useRef<WebSocket | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
-  // 筛选/搜索变化时重置页码
-  const [prevFilters, setPrevFilters] = useState({ statusFilter, searchText });
-  if (prevFilters.statusFilter !== statusFilter || prevFilters.searchText !== searchText) {
-    setPrevFilters({ statusFilter, searchText });
-    setCurrentPage(1);
-  }
+  // 获取当前页服务的详细信息（PID、内存、开机自启）
+  const fetchPageDetails = useCallback(async (names: string[]) => {
+    if (names.length === 0) return;
+    setDetailsLoading(true);
+    try {
+      const res = await serviceApi.getDetails(names);
+      const details: Service[] = res.data.data || [];
+      setServices(prev => prev.map(s => {
+        const detail = details.find(d => d.name === s.name);
+        return detail ? { ...s, ...detail } : s;
+      }));
+    } catch {
+      // ignore detail fetch errors
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, []);
 
   const fetchServices = useCallback(async () => {
     setLoading(true);
     try {
       const res = await serviceApi.list();
-      setServices(res.data.data || []);
+      const data = res.data.data || [];
+      setServices(data);
     } catch (error) {
       console.error('Failed to fetch services:', error);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // 过滤后的服务列表（用于渲染和计算当前页名称）
+  const filteredServices = services.filter(s => {
+    const matchSearch = !searchText ||
+      s.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      s.description?.toLowerCase().includes(searchText.toLowerCase());
+    const matchStatus = statusFilter === 'all' || s.state === statusFilter;
+    return matchSearch && matchStatus;
+  });
+
+  // 当前页的服务名称和数据
+  const pageStart = (currentPage - 1) * pageSize;
+  const currentPageNames = filteredServices.slice(pageStart, pageStart + pageSize).map(s => s.name);
+  const paginatedServices = filteredServices.slice(pageStart, pageStart + pageSize);
+
+  // 页码/筛选变化时重新获取详情
+  const currentPageNamesRef = useRef<string[]>([]);
+  useEffect(() => {
+    const names = currentPageNames;
+    if (names.length > 0 && JSON.stringify(names) !== JSON.stringify(currentPageNamesRef.current)) {
+      currentPageNamesRef.current = names;
+      fetchPageDetails(names);
+    }
+  }, [currentPageNames, fetchPageDetails]);
+
+  // 列表加载后获取当前页详情
+  useEffect(() => {
+    if (services.length > 0 && currentPageNames.length > 0) {
+      fetchPageDetails(currentPageNames);
+    }
+  }, [services.length]);
 
   useEffect(() => {
     fetchServices();
@@ -212,15 +256,6 @@ export default function Services() {
     wsRef.current?.close();
   };
 
-  // 过滤服务列表
-  const filteredServices = services.filter(s => {
-    const matchSearch = !searchText ||
-      s.name.toLowerCase().includes(searchText.toLowerCase()) ||
-      s.description?.toLowerCase().includes(searchText.toLowerCase());
-    const matchStatus = statusFilter === 'all' || s.state === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
   // 统计
   const stats = {
     total: services.length,
@@ -234,8 +269,9 @@ export default function Services() {
       <ServiceList
         services={services}
         filteredServices={filteredServices}
+        paginatedServices={paginatedServices}
         stats={stats}
-        loading={loading}
+        loading={loading || detailsLoading}
         canManageService={true}
         selectedRowKeys={selectedRowKeys}
         autoRefresh={autoRefresh}
@@ -250,8 +286,14 @@ export default function Services() {
         onToggleEnabled={handleToggleEnabled}
         onShowDetail={showDetail}
         onShowLogs={showLogs}
-        onSearchChange={setSearchText}
-        onStatusFilterChange={setStatusFilter}
+        onSearchChange={(value) => {
+          setSearchText(value);
+          setCurrentPage(1);
+        }}
+        onStatusFilterChange={(value) => {
+          setStatusFilter(value);
+          setCurrentPage(1);
+        }}
         onAutoRefreshChange={setAutoRefresh}
         onSelectedRowKeysChange={setSelectedRowKeys}
         onPageChange={(page, size) => {

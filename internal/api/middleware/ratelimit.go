@@ -141,7 +141,7 @@ func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
 		ip := c.ClientIP()
 
 		if !limiter.isAllowed(ip) {
-			c.Error(apperror.ErrRateLimit.WithMessage("rate limit exceeded"))
+			c.Error(apperror.ErrRateLimit)
 			c.Abort()
 			return
 		}

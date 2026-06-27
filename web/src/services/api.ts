@@ -54,6 +54,12 @@ api.interceptors.response.use(
         }
       }
 
+      if (status === 429) {
+        // Rate limit exceeded
+        const msg = data?.message || '请求过于频繁，请稍后再试';
+        import('antd').then(({ message }) => message.warning(msg));
+      }
+
       return Promise.reject(data);
     }
     return Promise.reject(error);
@@ -118,6 +124,9 @@ export const monitorApi = {
 export const serviceApi = {
   list: () =>
     api.get<ApiResponse<Service[]>>('/services'),
+
+  getDetails: (names: string[]) =>
+    api.post<ApiResponse<Service[]>>('/services/details', { names }),
 
   get: (name: string) =>
     api.get<ApiResponse<Service>>(`/services/${name}`),

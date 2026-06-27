@@ -121,16 +121,14 @@ func NewServiceManager(exec executor.CommandExecutor, dataDir string) *ServiceMa
 	return &ServiceManager{executor: exec, dataDir: dataDir}
 }
 
-// List returns all systemd services.
+// List returns all systemd services with basic info (name, state, description).
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
-	enabledMap := m.getAllEnabledStatus(ctx)
-
-	services := make([]ServiceInfo, 0)
+	var services []ServiceInfo
 	lines := strings.Split(stdout, "\n")
 
 	for _, line := range lines {
@@ -159,9 +157,22 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			svc.Description = strings.Join(fields[4:], " ")
 		}
 
-		svc.Enabled = enabledMap[svc.Name]
 		enrichServiceInfo(&svc)
 		services = append(services, svc)
+	}
+
+	return services, nil
+}
+
+// GetDetails fetches PID, memory, and enabled status for specific services.
+func (m *ServiceManager) GetDetails(ctx context.Context, names []string) ([]ServiceInfo, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	services := make([]ServiceInfo, len(names))
+	for i, name := range names {
+		services[i] = ServiceInfo{Name: name}
 	}
 
 	m.batchGetDetailedInfo(ctx, services)
@@ -169,43 +180,32 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	return services, nil
 }
 
-// getAllEnabledStatus gets enabled status for all services in one call.
-func (m *ServiceManager) getAllEnabledStatus(ctx context.Context) map[string]bool {
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain")
-	if err != nil || exitCode != 0 {
-		return nil
-	}
-
-	result := make(map[string]bool)
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "UNIT") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			name := strings.TrimSuffix(fields[0], ".service")
-			result[name] = fields[1] == "enabled"
-		}
-	}
-	return result
-}
-
-// batchGetDetailedInfo gets PID and memory for multiple services efficiently.
+// batchGetDetailedInfo gets PID, memory, and enabled status for multiple services efficiently.
 func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []ServiceInfo) {
 	if len(services) == 0 {
 		return
 	}
 
+	// Batch into groups to avoid systemd "Unknown object" errors with too many units
+	const batchSize = 50
+	for start := 0; start < len(services); start += batchSize {
+		end := start + batchSize
+		if end > len(services) {
+			end = len(services)
+		}
+		m.batchGetDetailedInfoChunk(ctx, services[start:end])
+	}
+}
+
+func (m *ServiceManager) batchGetDetailedInfoChunk(ctx context.Context, services []ServiceInfo) {
 	args := []string{"show"}
 	for _, svc := range services {
 		args = append(args, svc.Name+".service")
 	}
-	args = append(args, "--property=Id,MainPID,MemoryCurrent,ActiveState")
+	args = append(args, "--property=Id,MainPID,MemoryCurrent,ActiveState,UnitFileState,Description,SubState")
 
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", args...)
-	if err != nil || exitCode != 0 {
+	stdout, _, _, _ := m.executor.Run(ctx, "systemctl", args...)
+	if stdout == "" {
 		return
 	}
 
@@ -217,17 +217,7 @@ func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []Se
 		line = strings.TrimSpace(line)
 		if line == "" {
 			if currentName != "" {
-				for i := range services {
-					if services[i].Name+".service" == currentName || services[i].Name == currentName {
-						if v, ok := props["MainPID"]; ok {
-							fmt.Sscanf(v, "%d", &services[i].PID)
-						}
-						if v, ok := props["MemoryCurrent"]; ok {
-							fmt.Sscanf(v, "%d", &services[i].MemoryBytes)
-						}
-						break
-					}
-				}
+				m.applyServiceProps(services, currentName, props)
 			}
 			currentName = ""
 			props = make(map[string]string)
@@ -244,16 +234,32 @@ func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []Se
 	}
 
 	if currentName != "" {
-		for i := range services {
-			if services[i].Name+".service" == currentName || services[i].Name == currentName {
-				if v, ok := props["MainPID"]; ok {
-					fmt.Sscanf(v, "%d", &services[i].PID)
-				}
-				if v, ok := props["MemoryCurrent"]; ok {
-					fmt.Sscanf(v, "%d", &services[i].MemoryBytes)
-				}
-				break
+		m.applyServiceProps(services, currentName, props)
+	}
+}
+
+func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, props map[string]string) {
+	for i := range services {
+		if services[i].Name+".service" == id || services[i].Name == id {
+			if v, ok := props["MainPID"]; ok {
+				fmt.Sscanf(v, "%d", &services[i].PID)
 			}
+			if v, ok := props["MemoryCurrent"]; ok {
+				fmt.Sscanf(v, "%d", &services[i].MemoryBytes)
+			}
+			if v, ok := props["UnitFileState"]; ok {
+				services[i].Enabled = v == "enabled"
+			}
+			if v, ok := props["ActiveState"]; ok {
+				services[i].State = v
+			}
+			if v, ok := props["SubState"]; ok {
+				services[i].SubState = v
+			}
+			if v, ok := props["Description"]; ok {
+				services[i].Description = v
+			}
+			break
 		}
 	}
 }
@@ -261,7 +267,7 @@ func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []Se
 // Get returns info for a specific service.
 func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, error) {
 	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "show", name+".service",
-		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description")
+		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description,UnitFileState")
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("failed to get service info: %w", err)
 	}
@@ -291,10 +297,10 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 			fmt.Sscanf(value, "%d", &svc.MemoryBytes)
 		case "Description":
 			svc.Description = value
+		case "UnitFileState":
+			svc.Enabled = value == "enabled"
 		}
 	}
-
-	svc.Enabled = m.isEnabled(ctx, name)
 
 	return svc, nil
 }

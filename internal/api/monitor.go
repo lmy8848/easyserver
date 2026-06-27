@@ -225,6 +225,7 @@ func registerMonitorRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
 	handler := NewServiceHandler(serviceManager, exec, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
+	protected.POST("/services/details", handler.GetDetails)
 	protected.GET("/services/:name", handler.Get)
 	protected.GET("/services/:name/logs", handler.GetLogs)
 	protected.POST("/services/:name/start", handler.Start)

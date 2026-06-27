@@ -26,6 +26,7 @@ interface Stats {
 interface ServiceListProps {
   services: Service[];
   filteredServices: Service[];
+  paginatedServices: Service[];
   stats: Stats;
   loading: boolean;
   canManageService: boolean;
@@ -51,6 +52,7 @@ interface ServiceListProps {
 
 export default function ServiceList({
   filteredServices,
+  paginatedServices,
   stats,
   loading,
   canManageService,
@@ -304,7 +306,7 @@ export default function ServiceList({
 
         <Table
           columns={columns}
-          dataSource={filteredServices}
+          dataSource={paginatedServices}
           rowKey="name"
           loading={loading}
           rowSelection={{
@@ -314,7 +316,7 @@ export default function ServiceList({
           pagination={{
             current: currentPage,
             pageSize: pageSize,
-            defaultPageSize: 50,
+            total: filteredServices.length,
             showTotal: (total) => `共 ${total} 个服务`,
             showSizeChanger: { showSearch: false },
             pageSizeOptions: ['20', '50', '100'],

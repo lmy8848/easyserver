@@ -8,6 +8,7 @@ import (
 	"log"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 	gorillaWs "github.com/gorilla/websocket"
 )
 
-var serviceNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var serviceNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_@.:%\\-]+$`)
 
 func validateServiceName(name string) bool {
 	return serviceNameRegex.MatchString(name)
@@ -63,6 +64,33 @@ func (h *ServiceHandler) List(c *gin.Context) {
 	}
 
 	Success(c, services)
+}
+
+// GetDetails returns detailed info (PID, memory, enabled) for specific services
+func (h *ServiceHandler) GetDetails(c *gin.Context) {
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Names) == 0 {
+		c.Error(ErrBadRequest.WithMessage("缺少服务名称参数"))
+		return
+	}
+
+	for _, name := range req.Names {
+		name = strings.TrimSpace(name)
+		if name == "" || !validateServiceName(name) {
+			c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+			return
+		}
+	}
+
+	details, err := h.serviceManager.GetDetails(c.Request.Context(), req.Names)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+
+	Success(c, details)
 }
 
 // Get returns a specific service
