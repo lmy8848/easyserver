@@ -12,3 +12,8 @@ import (
 func ServeWeb(e *gin.Engine) {
 	// In dev mode, frontend is served separately
 }
+
+// InitCSPNonce is a no-op in dev mode (Vite dev server handles CSP)
+func InitCSPNonce() string {
+	return ""
+}

@@ -1,26 +1,13 @@
 package middleware
 
 import (
-	"crypto/rand"
-	"encoding/base64"
-
 	"github.com/gin-gonic/gin"
 )
 
-// generateNonce generates a random nonce for CSP
-func generateNonce() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return base64.StdEncoding.EncodeToString(b)
-}
-
-// SecurityMiddleware adds security headers
-func SecurityMiddleware() gin.HandlerFunc {
+// SecurityMiddleware adds security headers with a pre-generated CSP nonce.
+// The nonce must be injected into <script> tags at build/startup time.
+func SecurityMiddleware(nonce string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Generate nonce for this request
-		nonce := generateNonce()
-		c.Set("csp_nonce", nonce)
-
 		// Prevent clickjacking
 		c.Header("X-Frame-Options", "DENY")
 
@@ -31,9 +18,9 @@ func SecurityMiddleware() gin.HandlerFunc {
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		// Content Security Policy
-		// - script-src uses nonce for security
+		// - script-src uses nonce to allow only our scripts
 		// - style-src uses unsafe-inline because Ant Design CSS-in-JS requires inline styles
-		//   (nonce + unsafe-inline: per CSP spec, nonce takes precedence and unsafe-inline is fallback)
+		// - The nonce is injected into <script> tags at startup via InitCSPNonce()
 		c.Header("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src 'self' 'nonce-"+nonce+"'; "+

@@ -34,6 +34,8 @@ func (s *Session) UpdateActivity() {
 }
 
 // Manager manages terminal sessions.
+const MaxTerminalSessions = 10
+
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session

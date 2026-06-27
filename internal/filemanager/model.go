@@ -237,6 +237,16 @@ func (m *Manager) Delete(path string, recursive bool) error {
 		return err
 	}
 
+	// Prevent deleting the base path itself
+	if validPath == m.basePath {
+		return fmt.Errorf("cannot delete the root data directory")
+	}
+
+	// Prevent deleting parent of base path
+	if strings.HasPrefix(m.basePath, validPath+string(os.PathSeparator)) {
+		return fmt.Errorf("cannot delete a parent of the data directory")
+	}
+
 	if recursive {
 		if err := os.RemoveAll(validPath); err != nil {
 			return fmt.Errorf("remove %s: %w", path, err)

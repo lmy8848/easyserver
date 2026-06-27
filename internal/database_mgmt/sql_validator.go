@@ -196,13 +196,15 @@ func validateSingleStatement(sql string) *ValidationResult {
 
 	prefixBlocked := []string{
 		"DROP DATABASE", "DROP SCHEMA",
-		"DROP TABLE",
+		"DROP TABLE", "DROP INDEX",
 		"TRUNCATE",
 		"GRANT",
 		"REVOKE",
-		"ALTER USER", "ALTER SYSTEM",
+		"ALTER USER", "ALTER SYSTEM", "ALTER TABLE",
 		"CREATE USER", "DROP USER",
+		"CREATE DATABASE", "CREATE SCHEMA",
 		"LOAD DATA", "LOAD FILE", "INTO OUTFILE", "INTO DUMPFILE",
+		"SET PASSWORD", "ALTER DATABASE",
 	}
 	for _, b := range prefixBlocked {
 		if strings.HasPrefix(upper, b) {
@@ -232,6 +234,26 @@ func validateSingleStatement(sql string) *ValidationResult {
 
 	if strings.Contains(upper, "INTO OUTFILE") || strings.Contains(upper, "INTO DUMPFILE") {
 		return &ValidationResult{Valid: false, Message: "writing to filesystem is not allowed"}
+	}
+
+	// Block system catalog access
+	if strings.Contains(upper, "INFORMATION_SCHEMA") {
+		return &ValidationResult{Valid: false, Message: "accessing INFORMATION_SCHEMA is not allowed"}
+	}
+
+	// Block MySQL system database
+	if strings.Contains(upper, "MYSQL.") && !strings.HasPrefix(upper, "SELECT") {
+		return &ValidationResult{Valid: false, Message: "modifying mysql system database is not allowed"}
+	}
+
+	// Block PostgreSQL system catalogs
+	if strings.Contains(upper, "PG_") || strings.Contains(upper, "PGCATALOG") {
+		return &ValidationResult{Valid: false, Message: "accessing system catalogs is not allowed"}
+	}
+
+	// Block comment-based bypass attempts
+	if strings.Contains(sql, "/*") || strings.Contains(sql, "*/") {
+		return &ValidationResult{Valid: false, Message: "block comments are not allowed"}
 	}
 
 	return nil

@@ -230,10 +230,13 @@ func (r *Router) Setup() *gin.Engine {
 		return r.sessionService.IsSessionValid(context.Background(), token)
 	}
 
+	// Initialize CSP nonce: injects nonce into <script> tags of embedded index.html
+	cspNonce := InitCSPNonce()
+
 	// Global middleware
 	e.Use(gin.Logger(), gin.Recovery(),
 		ErrorHandler(),
-		middleware.SecurityMiddleware(),
+		middleware.SecurityMiddleware(cspNonce),
 		middleware.CORSMiddleware(r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode),
 		middleware.RateLimitMiddleware(r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
 		middleware.IPWhitelistMiddleware(ipWhitelist),

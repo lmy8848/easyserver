@@ -29,6 +29,10 @@ func (m *Manager) CreateSession(id string) (*Session, error) {
 		return nil, fmt.Errorf("session %s already exists", id)
 	}
 
+	if len(m.sessions) >= MaxTerminalSessions {
+		return nil, fmt.Errorf("maximum terminal sessions (%d) reached", MaxTerminalSessions)
+	}
+
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash"

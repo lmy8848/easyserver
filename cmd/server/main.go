@@ -63,6 +63,12 @@ func main() {
 		log.Println("WARNING: JWT secret is too short (< 32 bytes). Using in development mode only!")
 	}
 
+	// Check for empty JWT secret (always reject, even in dev mode)
+	if cfg.Auth.JWTSecret == "" {
+		log.Println("ERROR: JWT secret cannot be empty. Please set a strong secret.")
+		os.Exit(1)
+	}
+
 	// Check for default or well-known JWT secrets
 	defaultSecrets := []string{
 		"easyserver-secret-key-change-me",
@@ -126,6 +132,11 @@ func main() {
 			log.Println("WARNING: Using default deploy encryption key in development mode. Change it for production!")
 			break
 		}
+	}
+
+	// Check for empty deploy encryption key
+	if cfg.Deploy.EncryptionKey == "" {
+		log.Println("WARNING: deploy.encryption_key is empty. SSH credentials will not be encrypted!")
 	}
 
 	// Initialize database
