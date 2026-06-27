@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"easyserver/internal/audit"
 	"easyserver/internal/filemanager"
@@ -39,13 +40,6 @@ func (h *FileManagerHandler) getUserInfo(c *gin.Context) (int64, string) {
 	return uid, uname
 }
 
-// GetBasePath returns the base path of the file manager
-func (h *FileManagerHandler) GetBasePath(c *gin.Context) {
-	Success(c, gin.H{
-		"base_path": h.fileManager.BasePath(),
-	})
-}
-
 // List returns files in a directory
 func (h *FileManagerHandler) List(c *gin.Context) {
 	path := c.Query("path")
@@ -58,8 +52,8 @@ func (h *FileManagerHandler) List(c *gin.Context) {
 			return
 		}
 		Success(c, gin.H{
-			"path":    h.fileManager.BasePath(),
-			"parent":  h.fileManager.BasePath(),
+			"path":    "/",
+			"parent":  "/",
 			"entries": files,
 		})
 		return
@@ -71,8 +65,8 @@ func (h *FileManagerHandler) List(c *gin.Context) {
 		return
 	}
 
-	parent := h.fileManager.BasePath()
-	if path != h.fileManager.BasePath() {
+	parent := "/"
+	if path != "/" {
 		parent = filepath.Dir(path)
 	}
 
@@ -174,7 +168,17 @@ func (h *FileManagerHandler) Download(c *gin.Context) {
 		h.auditService.LogFileOperation(c.Request.Context(), uid, uname, "DOWNLOAD", path, c.ClientIP(), c.Request.UserAgent())
 	}
 
-	c.File(validPath)
+	// O_NOFOLLOW: TOCTOU defense between ValidatePath and serve.
+	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+	defer f.Close()
+
+	c.DataFromReader(200, info.Size(), "application/octet-stream", f, map[string]string{
+		"Content-Disposition": fmt.Sprintf("attachment; filename=%q", filepath.Base(validPath)),
+	})
 }
 
 // Rename renames a file
@@ -326,7 +330,7 @@ func (h *FileManagerHandler) SaveContent(c *gin.Context) {
 func (h *FileManagerHandler) Search(c *gin.Context) {
 	rootPath := c.Query("path")
 	if rootPath == "" {
-		rootPath = h.fileManager.BasePath()
+		rootPath = "/"
 	}
 	pattern := c.Query("q")
 	if pattern == "" {
@@ -349,7 +353,7 @@ func (h *FileManagerHandler) Search(c *gin.Context) {
 func (h *FileManagerHandler) SearchContent(c *gin.Context) {
 	rootPath := c.Query("path")
 	if rootPath == "" {
-		rootPath = h.fileManager.BasePath()
+		rootPath = "/"
 	}
 	text := c.Query("q")
 	if text == "" {

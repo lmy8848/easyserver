@@ -11,7 +11,6 @@ import (
 func registerFileRoutes(protected *gin.RouterGroup, fileManager *filemanager.Manager, auditService *audit.Service) {
 	handler := NewFileManagerHandler(fileManager, auditService)
 	protected.GET("/files", handler.List)
-	protected.GET("/files/base-path", handler.GetBasePath)
 	protected.GET("/files/download", handler.Download)
 	protected.GET("/files/content", handler.GetContent)
 	protected.GET("/files/search", handler.Search)

@@ -152,11 +152,8 @@ export const serviceApi = {
 
 // File API
 export const fileApi = {
-  getBasePath: () =>
-    api.get<ApiResponse<{ base_path: string }>>('/files/base-path'),
-
   list: (path: string) =>
-    api.get<ApiResponse<{ entries: FileEntry[] }>>('/files', { params: { path } }),
+    api.get<ApiResponse<{ path: string; parent: string; entries: FileEntry[] }>>('/files', { params: { path } }),
 
   mkdir: (path: string) =>
     api.post<ApiResponse>('/files/mkdir', { path }),

@@ -80,7 +80,7 @@ func TestValidatePath_TraversalAttempts(t *testing.T) {
 	}
 }
 
-func TestValidatePath_AbsolutePathRejected(t *testing.T) {
+func TestValidatePath_AbsolutePathMapped(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "filemanager-test")
 	if err != nil {
 		t.Fatal(err)
@@ -92,14 +92,32 @@ func TestValidatePath_AbsolutePathRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = fm.ValidatePath("/etc/passwd")
-	if err == nil {
-		t.Error("expected error for absolute path")
+	// Create directories inside the sandbox so EvalSymlinks parent directory resolving succeeds
+	err = os.MkdirAll(filepath.Join(tmpDir, "etc"), 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.MkdirAll(filepath.Join(tmpDir, "tmp"), 0755)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	_, err = fm.ValidatePath("/tmp/test.txt")
-	if err == nil {
-		t.Error("expected error for absolute path")
+	path, err := fm.ValidatePath("/etc/passwd")
+	if err != nil {
+		t.Errorf("unexpected error for absolute path: %v", err)
+	}
+	expected := filepath.Join(tmpDir, "etc/passwd")
+	if path != expected {
+		t.Errorf("expected %q, got %q", expected, path)
+	}
+
+	path, err = fm.ValidatePath("/tmp/test.txt")
+	if err != nil {
+		t.Errorf("unexpected error for absolute path: %v", err)
+	}
+	expectedTmp := filepath.Join(tmpDir, "tmp/test.txt")
+	if path != expectedTmp {
+		t.Errorf("expected %q, got %q", expectedTmp, path)
 	}
 }
 
@@ -149,5 +167,77 @@ func TestFileManagerCopy(t *testing.T) {
 	}
 	if string(content) != "hello" {
 		t.Errorf("Expected 'hello', got '%s'", string(content))
+	}
+}
+
+func TestIsSubPath(t *testing.T) {
+	tests := []struct {
+		parent string
+		child  string
+		want   bool
+	}{
+		{"/a/b", "/a/b", true},
+		{"/a/b", "/a/b/c", true},
+		{"/a/b", "/a/b/c/d", true},
+		{"/a/b", "/a/bc", false},  // Prefix bypass attempt
+		{"/a/b", "/a/b-c", false}, // Prefix bypass attempt
+		{"/a/b", "/a/d", false},
+		{"/a/b", "/a", false},
+	}
+
+	for _, tt := range tests {
+		got := isSubPath(tt.parent, tt.child)
+		if got != tt.want {
+			t.Errorf("isSubPath(%q, %q) = %v; want %v", tt.parent, tt.child, got, tt.want)
+		}
+	}
+}
+
+func TestToRelativePath(t *testing.T) {
+	fm, err := NewManager("/a/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		abs  string
+		want string
+	}{
+		{"/a/b", "/"},
+		{"/a/b/c", "/c"},
+		{"/a/b/c/d", "/c/d"},
+		{"/a/b-c", "/a/b-c"}, // Should not be truncated
+		{"/a/bc", "/a/bc"},   // Should not be truncated
+		{"/other", "/other"}, // Outside base path
+	}
+
+	for _, tt := range tests {
+		got := fm.toRelativePath(tt.abs)
+		if got != tt.want {
+			t.Errorf("toRelativePath(%q) = %q; want %q", tt.abs, got, tt.want)
+		}
+	}
+}
+
+func TestValidatePath_MultilevelNotExist(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "filemanager-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	fm, err := NewManager(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a/b/c does not exist. It should be parsed as valid.
+	path, err := fm.ValidatePath("a/b/c")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	expected := filepath.Join(tmpDir, "a/b/c")
+	if path != expected {
+		t.Errorf("expected %q, got %q", expected, path)
 	}
 }

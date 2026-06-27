@@ -66,19 +66,9 @@ export default function FileManager() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   useEffect(() => {
-    const initPath = async () => {
-      try {
-        const res = await fileApi.getBasePath();
-        const path = res.data.data?.base_path || '/';
-        setBasePath(path);
-        setCurrentPath(path);
-      } catch (error) {
-        console.error('Failed to get base path:', error);
-        setBasePath('/');
-        setCurrentPath('/');
-      }
-    };
-    initPath();
+    // 直接使用 "/" 作为根目录，不请求服务器
+    setBasePath('/');
+    setCurrentPath('/');
   }, []);
 
   // Convert absolute path to relative path (strip basePath prefix)

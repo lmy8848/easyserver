@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -40,6 +41,9 @@ type SearchResult struct {
 // Manager manages file operations within a sandboxed base path.
 type Manager struct {
 	basePath string
+	// ponytail: global lock on structural mutations.
+	// FS panel is low-QPS; per-path locks if throughput ever matters.
+	mu sync.Mutex
 }
 
 // BasePath returns the base path of the file manager.
@@ -61,6 +65,14 @@ func NewManager(basePath string) (*Manager, error) {
 		return nil, fmt.Errorf("invalid base_path: %w", err)
 	}
 
+	// Resolve symlinks for the base path itself so subpath checking is correct
+	resolvedBase, err := filepath.EvalSymlinks(absBase)
+	if err == nil {
+		absBase = resolvedBase
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("resolve base_path symlinks: %w", err)
+	}
+
 	return &Manager{
 		basePath: absBase,
 	}, nil
@@ -68,39 +80,72 @@ func NewManager(basePath string) (*Manager, error) {
 
 // ValidatePath checks if path is safe (no path traversal, no symlink escape).
 func (m *Manager) ValidatePath(path string) (string, error) {
+	if strings.Contains(path, "\x00") {
+		return "", fmt.Errorf("invalid path: contains null byte")
+	}
 	cleanPath := filepath.Clean(path)
+	absBase := m.basePath
+	var absPath string
 
 	if filepath.IsAbs(cleanPath) {
-		return "", fmt.Errorf("absolute paths are not allowed, use relative paths")
+		// Convert absolute path to sandbox path
+		// e.g., basePath="/home/user", input="/etc/passwd" -> "/home/user/etc/passwd"
+		absPath = filepath.Join(absBase, cleanPath)
+	} else {
+		absPath = filepath.Join(absBase, cleanPath)
 	}
 
-	absBase := m.basePath
-	absPath := filepath.Join(absBase, cleanPath)
-
-	resolvedPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			parent := filepath.Dir(absPath)
-			resolvedParent, err := filepath.EvalSymlinks(parent)
+	// Resolve symlinks by climbing up to the first existing parent directory.
+	checkPath := absPath
+	var resolvedPath string
+	for {
+		resolved, err := filepath.EvalSymlinks(checkPath)
+		if err == nil {
+			// Found the closest existing path.
+			rel, err := filepath.Rel(checkPath, absPath)
 			if err != nil {
-				return "", fmt.Errorf("cannot resolve path: %w", err)
+				return "", fmt.Errorf("calculate relative path: %w", err)
 			}
-			resolvedPath = filepath.Join(resolvedParent, filepath.Base(absPath))
-		} else {
+			resolvedPath = filepath.Join(resolved, rel)
+			break
+		}
+		if !os.IsNotExist(err) {
 			return "", fmt.Errorf("cannot resolve path: %w", err)
 		}
+
+		parent := filepath.Dir(checkPath)
+		if parent == checkPath {
+			// Reached system root directory and it still doesn't exist
+			resolvedPath = filepath.Clean(absPath)
+			break
+		}
+		checkPath = parent
 	}
 
-	basePrefix := absBase
-	if !strings.HasSuffix(basePrefix, string(filepath.Separator)) {
-		basePrefix += string(filepath.Separator)
-	}
-
-	if resolvedPath != absBase && !strings.HasPrefix(resolvedPath, basePrefix) {
+	if !isSubPath(absBase, resolvedPath) {
 		return "", fmt.Errorf("path traversal detected: path escapes base directory")
 	}
 
 	return resolvedPath, nil
+}
+
+// validateRealPath checks that an already-resolved filesystem path stays in basePath.
+// Use this for internal callers (e.g. filepath.Walk callbacks) that already hold a
+// real absolute path. Do NOT route Walk paths through ValidatePath — that one treats
+// absolute input as user-facing sandbox-relative and would double-Join the basePath,
+// silently turning the symlink-escape check into dead code.
+func (m *Manager) validateRealPath(realPath string) error {
+	if strings.Contains(realPath, "\x00") {
+		return fmt.Errorf("invalid path: contains null byte")
+	}
+	resolved, err := filepath.EvalSymlinks(realPath)
+	if err != nil {
+		return fmt.Errorf("resolve symlinks: %w", err)
+	}
+	if !isSubPath(m.basePath, resolved) {
+		return fmt.Errorf("path traversal detected: path escapes base directory")
+	}
+	return nil
 }
 
 // ListRoot returns files in the base directory.
@@ -115,6 +160,22 @@ func (m *Manager) List(path string) ([]FileEntry, error) {
 		return nil, err
 	}
 	return m.listDir(validPath)
+}
+
+// toRelativePath converts an absolute path to a relative path (relative to basePath)
+func (m *Manager) toRelativePath(absolutePath string) string {
+	if absolutePath == m.basePath {
+		return "/"
+	}
+	baseSep := m.basePath
+	if !strings.HasSuffix(baseSep, string(filepath.Separator)) {
+		baseSep += string(filepath.Separator)
+	}
+	if strings.HasPrefix(absolutePath, baseSep) {
+		rel := absolutePath[len(baseSep):]
+		return "/" + filepath.ToSlash(rel)
+	}
+	return absolutePath
 }
 
 func (m *Manager) listDir(dirPath string) ([]FileEntry, error) {
@@ -134,8 +195,8 @@ func (m *Manager) listDir(dirPath string) ([]FileEntry, error) {
 		fullPath := filepath.Join(dirPath, entry.Name())
 		files = append(files, FileEntry{
 			Name:       entry.Name(),
-			Path:       fullPath,
-			IsDir:      entry.IsDir(),
+			Path:       m.toRelativePath(fullPath),
+			IsDir:      info.IsDir(),
 			SizeBytes:  info.Size(),
 			Mode:       info.Mode().String(),
 			ModifiedAt: info.ModTime().Format("2006-01-02T15:04:05Z"),
@@ -148,6 +209,9 @@ func (m *Manager) listDir(dirPath string) ([]FileEntry, error) {
 
 // Mkdir creates a directory.
 func (m *Manager) Mkdir(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
@@ -181,13 +245,20 @@ func (m *Manager) ReadContent(path string) (*FileContent, error) {
 		return nil, fmt.Errorf("file too large (%d bytes), max %d bytes", info.Size(), maxReadFileSize)
 	}
 
-	data, err := os.ReadFile(validPath)
+	// O_NOFOLLOW: refuse to read through a symlink — closes TOCTOU between
+	// ValidatePath's EvalSymlinks and the actual read.
+	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	data, err := io.ReadAll(f)
+	f.Close()
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	return &FileContent{
-		Path:     validPath,
+		Path:     path,
 		Content:  string(data),
 		Encoding: "utf-8",
 	}, nil
@@ -195,19 +266,31 @@ func (m *Manager) ReadContent(path string) (*FileContent, error) {
 
 // WriteContent writes content to a file.
 func (m *Manager) WriteContent(path, content string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
 	}
 
-	if err := os.WriteFile(validPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	f, err := os.OpenFile(validPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0644)
+	if err != nil {
+		return fmt.Errorf("write open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write([]byte(content)); err != nil {
+		return fmt.Errorf("write content %s: %w", path, err)
 	}
 	return nil
 }
 
 // Upload writes content from a reader to a file.
 func (m *Manager) Upload(src io.Reader, path string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return 0, err
@@ -232,6 +315,9 @@ func (m *Manager) Upload(src io.Reader, path string) (int64, error) {
 
 // Delete deletes a file or directory.
 func (m *Manager) Delete(path string, recursive bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return err
@@ -262,6 +348,9 @@ func (m *Manager) Delete(path string, recursive bool) error {
 
 // Rename renames/moves a file.
 func (m *Manager) Rename(oldPath, newPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validOld, err := m.ValidatePath(oldPath)
 	if err != nil {
 		return err
@@ -280,6 +369,9 @@ func (m *Manager) Rename(oldPath, newPath string) error {
 
 // Copy copies a file.
 func (m *Manager) Copy(src, dst string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validSrc, err := m.ValidatePath(src)
 	if err != nil {
 		return err
@@ -294,7 +386,7 @@ func (m *Manager) Copy(src, dst string) error {
 		return fmt.Errorf("source and destination are the same")
 	}
 
-	srcFile, err := os.Open(validSrc)
+	srcFile, err := os.OpenFile(validSrc, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return fmt.Errorf("open source %s: %w", src, err)
 	}
@@ -324,6 +416,9 @@ func (m *Manager) Copy(src, dst string) error {
 
 // Move moves files to a destination directory.
 func (m *Manager) Move(paths []string, dest string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	validDest, err := m.ValidatePath(dest)
 	if err != nil {
 		return err
@@ -352,4 +447,18 @@ func (m *Manager) Move(paths []string, dest string) error {
 	}
 
 	return nil
+}
+
+// isSubPath checks if childPath is under parentPath (or is equal to it).
+// Both parentPath and childPath should be cleaned before calling if needed.
+func isSubPath(parentPath, childPath string) bool {
+	cleanParent := filepath.Clean(parentPath)
+	cleanChild := filepath.Clean(childPath)
+	if cleanParent == cleanChild {
+		return true
+	}
+	if !strings.HasSuffix(cleanParent, string(filepath.Separator)) {
+		cleanParent += string(filepath.Separator)
+	}
+	return strings.HasPrefix(cleanChild, cleanParent)
 }

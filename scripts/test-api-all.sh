@@ -420,7 +420,6 @@ test_all_get_endpoints() {
         "Services|/api/services"
         # Files
         "Files|/api/files?path=/tmp"
-        "Files|/api/files/base-path"
         "Files|/api/files/details?path=/etc/hostname"
         "Files|/api/files/mime-type?path=/etc/hostname"
         # Audit
