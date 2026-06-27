@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"easyserver/internal/infra/apperror"
 )
 
 // Service provides environment variable and global config management
@@ -38,7 +40,7 @@ func (s *Service) CreateEnvConfig(ctx context.Context, c *EnvConfig) error {
 		ctx = context.Background()
 	}
 	if !isValidEnvName(c.Name) {
-		return fmt.Errorf("invalid environment variable name: %s", c.Name)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的环境变量名：%s", c.Name))
 	}
 	return s.repo.CreateEnvConfig(ctx, c)
 }
@@ -49,7 +51,7 @@ func (s *Service) UpdateEnvConfig(ctx context.Context, c *EnvConfig) error {
 		ctx = context.Background()
 	}
 	if !isValidEnvName(c.Name) {
-		return fmt.Errorf("invalid environment variable name: %s", c.Name)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的环境变量名：%s", c.Name))
 	}
 	return s.repo.UpdateEnvConfig(ctx, c)
 }
@@ -76,7 +78,7 @@ func (s *Service) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 		ctx = context.Background()
 	}
 	if !isValidPath(e.Path) {
-		return fmt.Errorf("invalid path: %s", e.Path)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的路径：%s", e.Path))
 	}
 	return s.repo.CreatePathEntry(ctx, e)
 }

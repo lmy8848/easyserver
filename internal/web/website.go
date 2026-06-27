@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 )
 
@@ -56,16 +57,16 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	// Check web server is installed
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
-		return nil, fmt.Errorf("web server not found")
+		return nil, apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.Status == "not_installed" {
-		return nil, fmt.Errorf("cannot add website: %s is not installed", ws.DisplayName)
+		return nil, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无法添加网站：%s 未安装", ws.DisplayName))
 	}
 
 	// Check domain uniqueness
 	count, _ := s.repo.CountByDomain(ctx, req.Domain)
 	if count > 0 {
-		return nil, fmt.Errorf("domain %s already exists", req.Domain)
+		return nil, apperror.ErrConflict.WithMessage(fmt.Sprintf("域名 %s 已存在", req.Domain))
 	}
 
 	port := req.Port
@@ -167,7 +168,7 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 		return err
 	}
 	if w == nil {
-		return fmt.Errorf("website not found")
+		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
 	oldDomain := w.Domain
@@ -179,7 +180,7 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 		// Check new domain uniqueness
 		count, _ := s.repo.CountByDomainExcludingID(ctx, *req.Domain, id)
 		if count > 0 {
-			return fmt.Errorf("domain %s already exists", *req.Domain)
+			return apperror.ErrConflict.WithMessage(fmt.Sprintf("域名 %s 已存在", *req.Domain))
 		}
 		w.Domain = *req.Domain
 	}
@@ -244,7 +245,7 @@ func (s *WebsiteService) Delete(ctx context.Context, webServerID, id int64) erro
 		return err
 	}
 	if w == nil {
-		return fmt.Errorf("website not found")
+		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
 	s.removeConfigForServer(webServerID, w.Domain)
@@ -261,19 +262,19 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 		return err
 	}
 	if w == nil {
-		return fmt.Errorf("website not found")
+		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
 	// Check web server is running
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.Status == "not_installed" {
-		return fmt.Errorf("cannot enable website: %s is not installed", ws.DisplayName)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无法启用网站：%s 未安装", ws.DisplayName))
 	}
 	if ws.Status == "stopped" {
-		return fmt.Errorf("cannot enable website: %s is stopped, start it first", ws.DisplayName)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无法启用网站：%s 已停止，请先启动", ws.DisplayName))
 	}
 
 	// Write config
@@ -306,7 +307,7 @@ func (s *WebsiteService) Disable(ctx context.Context, webServerID, id int64) err
 		return err
 	}
 	if w == nil {
-		return fmt.Errorf("website not found")
+		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
@@ -329,7 +330,7 @@ func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, log
 		return "", err
 	}
 	if w == nil {
-		return "", fmt.Errorf("website not found")
+		return "", apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
 	logPath := w.AccessLog
@@ -360,17 +361,17 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 		return err
 	}
 	if w == nil {
-		return fmt.Errorf("website not found")
+		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
 	// Check web server is running
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil || ws.Status != "running" {
-		return fmt.Errorf("cannot apply SSL: web server is not running")
+		return apperror.ErrBadRequest.WithMessage("无法申请 SSL：Web 服务器未运行")
 	}
 
 	if _, err := s.executor.LookPath("certbot"); err != nil {
-		return fmt.Errorf("certbot is not installed. Install with: apt install certbot python3-certbot-nginx")
+		return apperror.ErrBadRequest.WithMessage("certbot 未安装，请运行: apt install certbot python3-certbot-nginx")
 	}
 
 	args := []string{"--nginx", "-d", w.Domain, "--non-interactive", "--agree-tos"}
@@ -395,34 +396,34 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 // validateDomain validates that a domain name is safe to use in file paths
 func validateDomain(domain string) error {
 	if domain == "" {
-		return fmt.Errorf("domain is required")
+		return apperror.ErrBadRequest.WithMessage("域名不能为空")
 	}
 	// Only allow alphanumeric, hyphens, dots
 	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)
 	if !domainRegex.MatchString(domain) {
-		return fmt.Errorf("invalid domain name: %s", domain)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的域名：%s", domain))
 	}
 	if len(domain) > 253 {
-		return fmt.Errorf("domain name too long: %d chars", len(domain))
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("域名过长：%d 字符", len(domain)))
 	}
 	return nil
 }
 
 func validateRootPath(p string) error {
 	if p == "" {
-		return fmt.Errorf("root_path is required")
+		return apperror.ErrBadRequest.WithMessage("根路径不能为空")
 	}
 	if !strings.HasPrefix(p, "/") {
-		return fmt.Errorf("root_path must be an absolute path (start with /)")
+		return apperror.ErrBadRequest.WithMessage("根路径必须是绝对路径（以 / 开头）")
 	}
 	if strings.Contains(p, "..") {
-		return fmt.Errorf("root_path must not contain '..'")
+		return apperror.ErrBadRequest.WithMessage("根路径不能包含 '..'")
 	}
 	// Reject shell metacharacters that could enable injection
 	shellMeta := []string{";", "|", "&", "$", "`", "(", ")", "{", "}", "\n", "\r", "\x00"}
 	for _, m := range shellMeta {
 		if strings.Contains(p, m) {
-			return fmt.Errorf("root_path contains invalid character: %q", m)
+			return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("根路径包含无效字符：%q", m))
 		}
 	}
 	return nil
@@ -431,7 +432,7 @@ func validateRootPath(p string) error {
 func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) error {
 	ws, err := s.webServerRepo.Get(context.Background(), webServerID)
 	if err != nil || ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	// Only generate config for Nginx currently

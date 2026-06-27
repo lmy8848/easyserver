@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 )
 
@@ -83,12 +84,12 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	count, _ := s.repo.CountWebsitesByServerID(ctx, id)
 	if count > 0 {
-		return fmt.Errorf("cannot delete: %d websites are using this server", count)
+		return apperror.ErrConflict.WithMessage(fmt.Sprintf("无法删除：%d 个网站正在使用此服务器", count))
 	}
 
 	return s.repo.Delete(ctx, id)
@@ -106,17 +107,17 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	// Always use the predefined install command, never trust the database value
 	predef := FindPredefinedWebServer(ws.Name)
 	if predef == nil {
-		return fmt.Errorf("unknown server type '%s'", ws.Name)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("未知的服务器类型 '%s'", ws.Name))
 	}
 	installCmd := predef.InstallCmd
 	if installCmd == "" {
-		return fmt.Errorf("no install command configured for server type '%s'", ws.Name)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("服务器类型 '%s' 未配置安装命令", ws.Name))
 	}
 
 	s.executor.RunCombined(ctx, "apt-get", "update", "-y")
@@ -146,12 +147,12 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	count, _ := s.repo.CountWebsitesByServerID(ctx, id)
 	if count > 0 {
-		return fmt.Errorf("cannot uninstall: %d websites are using this server", count)
+		return apperror.ErrConflict.WithMessage(fmt.Sprintf("无法卸载：%d 个网站正在使用此服务器", count))
 	}
 
 	if ws.ServiceName != "" {
@@ -168,7 +169,7 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 		// Sanitize ws.Name to prevent shell injection - only allow alphanumeric, hyphens, dots
 		safeName := sanitizePackageName(ws.Name)
 		if safeName == "" {
-			return fmt.Errorf("invalid server name: %s", ws.Name)
+			return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的服务器名称：%s", ws.Name))
 		}
 		uninstallCmd = fmt.Sprintf("apt-get remove -y %s", safeName)
 	}
@@ -192,10 +193,10 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ServiceName == "" {
-		return fmt.Errorf("no service name configured")
+		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
 	out, _, err := s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
@@ -216,10 +217,10 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ServiceName == "" {
-		return fmt.Errorf("no service name configured")
+		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
 	out, _, err := s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
@@ -240,10 +241,10 @@ func (s *Service) Restart(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ServiceName == "" {
-		return fmt.Errorf("no service name configured")
+		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
 	out, _, err := s.executor.RunCombined(ctx, "systemctl", "restart", ws.ServiceName)
@@ -264,12 +265,12 @@ func (s *Service) Reload(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	// Test config first
 	if ok, _ := s.TestConfig(ctx, id); !ok {
-		return fmt.Errorf("config test failed, reload aborted")
+		return apperror.ErrBadRequest.WithMessage("配置测试失败，已中止重载")
 	}
 
 	if ws.ServiceName != "" {
@@ -322,10 +323,10 @@ func (s *Service) TestConfig(ctx context.Context, id int64) (bool, string) {
 // This prevents path traversal or manipulation of ConfigFile stored in the database.
 func validateConfigPath(path string) error {
 	if path == "" {
-		return fmt.Errorf("config path is empty")
+		return apperror.ErrBadRequest.WithMessage("配置文件路径为空")
 	}
 	if strings.Contains(path, "..") {
-		return fmt.Errorf("config path must not contain '..'")
+		return apperror.ErrBadRequest.WithMessage("配置路径不能包含 '..'")
 	}
 	// Clean the path to resolve any . or extra slashes
 	cleaned := filepath.Clean(path)
@@ -343,7 +344,7 @@ func validateConfigPath(path string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("config path %q is not within an allowed config directory", path)
+	return apperror.ErrPathViolation.WithMessage(fmt.Sprintf("配置路径 %q 不在允许的目录中", path))
 }
 
 // GetConfig reads the main config file content
@@ -356,13 +357,13 @@ func (s *Service) GetConfig(ctx context.Context, id int64) (string, error) {
 		return "", err
 	}
 	if ws == nil {
-		return "", fmt.Errorf("web server not found")
+		return "", apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ConfigFile == "" {
-		return "", fmt.Errorf("no config file path configured")
+		return "", apperror.ErrBadRequest.WithMessage("未配置配置文件路径")
 	}
 	if err := validateConfigPath(ws.ConfigFile); err != nil {
-		return "", fmt.Errorf("invalid config path: %w", err)
+		return "", err
 	}
 
 	data, err := os.ReadFile(ws.ConfigFile)
@@ -382,13 +383,13 @@ func (s *Service) SaveConfig(ctx context.Context, id int64, content string) erro
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ConfigFile == "" {
-		return fmt.Errorf("no config file path configured")
+		return apperror.ErrBadRequest.WithMessage("未配置配置文件路径")
 	}
 	if err := validateConfigPath(ws.ConfigFile); err != nil {
-		return fmt.Errorf("invalid config path: %w", err)
+		return err
 	}
 
 	// Backup current config
@@ -410,10 +411,10 @@ func (s *Service) GetServiceLogs(ctx context.Context, id int64, lines int) (stri
 		return "", err
 	}
 	if ws == nil {
-		return "", fmt.Errorf("web server not found")
+		return "", apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ServiceName == "" {
-		return "", fmt.Errorf("no service name configured")
+		return "", apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 	if lines <= 0 {
 		lines = 100
@@ -436,10 +437,10 @@ func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) erro
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ServiceName == "" {
-		return fmt.Errorf("no service name configured")
+		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
 	action := "disable"
@@ -464,7 +465,7 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 		return err
 	}
 	if ws == nil {
-		return fmt.Errorf("web server not found")
+		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	installed := false
@@ -541,7 +542,7 @@ func (s *Service) GetConnections(ctx context.Context, id int64) (int, error) {
 		return 0, err
 	}
 	if ws == nil {
-		return 0, fmt.Errorf("web server not found")
+		return 0, apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 
 	// Count connections from ss
@@ -565,7 +566,7 @@ func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memByt
 		return 0, 0, "", e
 	}
 	if ws == nil {
-		return 0, 0, "", fmt.Errorf("web server not found")
+		return 0, 0, "", apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
 	if ws.ServiceName == "" {
 		return 0, 0, "", nil

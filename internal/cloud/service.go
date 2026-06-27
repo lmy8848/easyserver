@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"easyserver/internal/infra/apperror"
+
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 	lighthouse "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse/v20200324"
@@ -150,7 +152,7 @@ func (s *Service) GetInstance(ctx context.Context, instanceID string) (*Instance
 	}
 
 	if len(response.Response.InstanceSet) == 0 {
-		return nil, fmt.Errorf("instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("实例不存在")
 	}
 
 	inst := response.Response.InstanceSet[0]
@@ -306,12 +308,12 @@ func (s *Service) DeleteFirewallRule(ctx context.Context, instanceID string, rul
 
 	rules := describeResp.Response.FirewallRuleSet
 	if len(rules) == 0 {
-		return fmt.Errorf("no firewall rules found for instance %s", instanceID)
+		return apperror.ErrNotFound.WithMessage(fmt.Sprintf("实例 %s 没有防火墙规则", instanceID))
 	}
 
 	idx, err := strconv.Atoi(ruleID)
 	if err != nil || idx < 0 || idx >= len(rules) {
-		return fmt.Errorf("invalid firewall rule ID %q: must be 0-%d", ruleID, len(rules)-1)
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的防火墙规则 ID %q：范围为 0-%d", ruleID, len(rules)-1))
 	}
 
 	targetRule := rules[idx]
@@ -406,7 +408,7 @@ func (s *Service) ApplySnapshot(ctx context.Context, snapshotID string) error {
 	}
 
 	if len(describeResp.Response.SnapshotSet) == 0 {
-		return fmt.Errorf("snapshot %s not found", snapshotID)
+		return apperror.ErrNotFound.WithMessage(fmt.Sprintf("快照 %s 不存在", snapshotID))
 	}
 
 	request := lighthouse.NewApplyInstanceSnapshotRequest()
@@ -454,7 +456,7 @@ func (s *Service) GetMonitorData(ctx context.Context, instanceID, metric string,
 
 	mc, ok := metricConfig[metric]
 	if !ok {
-		return nil, fmt.Errorf("unsupported metric: %s (supported: CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT)", metric)
+		return nil, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("不支持的监控指标：%s（支持：CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT）", metric))
 	}
 
 	cpf := profile.NewClientProfile()
