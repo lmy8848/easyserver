@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"easyserver/internal/auth"
 	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -13,7 +14,7 @@ import (
 // It supports token from:
 // 1. Sec-WebSocket-Protocol header (preferred)
 // 2. URL query parameter "token" (fallback, deprecated)
-func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validators ...TokenValidator) gin.HandlerFunc {
+func WSAuthMiddleware(secret string, sessionValidator auth.SessionValidator, validators ...auth.TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenString string
 
@@ -38,7 +39,7 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validato
 		}
 
 		// Parse and validate JWT
-		claims := &JWTClaims{}
+		claims := &auth.JWTClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -89,35 +90,5 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validato
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
 		c.Next()
-	}
-}
-
-// RequireWSRole creates a middleware that checks if the WebSocket connection
-// has one of the required roles
-func RequireWSRole(roles ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		if !exists {
-			c.Error(apperror.ErrUnauthorized.WithMessage("role not found"))
-			c.Abort()
-			return
-		}
-
-		roleStr, ok := role.(string)
-		if !ok {
-			c.Error(apperror.ErrUnauthorized.WithMessage("invalid role format"))
-			c.Abort()
-			return
-		}
-
-		for _, allowedRole := range roles {
-			if roleStr == allowedRole {
-				c.Next()
-				return
-			}
-		}
-
-		c.Error(apperror.ErrUnauthorized.WithMessage("insufficient permissions"))
-		c.Abort()
 	}
 }

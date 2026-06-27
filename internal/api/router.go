@@ -7,20 +7,20 @@ import (
 	"time"
 
 	"easyserver/internal/alert"
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/cloud"
-	"easyserver/internal/infra/config"
 	"easyserver/internal/container"
 	"easyserver/internal/cron"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
-	"easyserver/internal/middleware"
+	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
@@ -254,7 +254,7 @@ func (r *Router) Setup() *gin.Engine {
 	protected := api.Group("")
 	protected.Use(
 		middleware.JWTMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
-		middleware.RequireSingleAdmin(),
+		middleware.RequireRole("admin"),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
 			return r.authService.GetIPWhitelist(context.Background(), userID)
 		}),

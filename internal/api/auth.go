@@ -4,9 +4,9 @@ import (
 	"log"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
-	"easyserver/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -70,7 +70,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// If TOTP is enabled, return a temporary token for TOTP verification
 	if totpEnabled {
-		tempToken, err := middleware.GenerateTOTPTempToken(h.jwtSecret, user.ID)
+		tempToken, err := auth.GenerateTOTPTempToken(h.jwtSecret, user.ID)
 		if err != nil {
 			c.Error(ErrInternal.WithMessage("生成临时令牌失败"))
 			return
@@ -84,7 +84,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// If TOTP is not enabled, proceed with normal login
-	token, err := middleware.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
 		c.Error(ErrInternal.WithMessage("生成令牌失败"))
 		return
@@ -233,7 +233,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	}
 
 	// Validate temp token
-	userID, err := middleware.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
+	userID, err := auth.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
 	if err != nil {
 		c.Error(ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
 		return
@@ -268,7 +268,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	}
 
 	// Generate full token
-	token, err := middleware.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
 		c.Error(ErrInternal.WithMessage("生成令牌失败"))
 		return
@@ -307,7 +307,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	}
 
 	// Validate temp token
-	userID, err := middleware.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
+	userID, err := auth.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
 	if err != nil {
 		c.Error(ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
 		return
@@ -340,7 +340,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	}
 
 	// Generate full token
-	token, err := middleware.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
 		c.Error(ErrInternal.WithMessage("生成令牌失败"))
 		return

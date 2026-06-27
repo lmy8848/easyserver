@@ -1,12 +1,9 @@
-package middleware
+package auth
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	"easyserver/internal/infra/apperror"
-	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -29,76 +26,6 @@ type TokenValidator func(userID int64, tokenString string, issuedAt time.Time) (
 
 // SessionValidator is a function type for session validation
 type SessionValidator func(token string) (bool, error)
-
-func JWTMiddleware(secret string, sessionValidator SessionValidator, validators ...TokenValidator) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.Error(apperror.ErrUnauthorized.WithMessage("missing authorization header"))
-			c.Abort()
-			return
-		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.Error(apperror.ErrUnauthorized.WithMessage("invalid authorization format"))
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
-		claims := &JWTClaims{}
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(secret), nil
-		})
-
-		if err != nil || !token.Valid {
-			c.Error(apperror.ErrTokenExpired.WithMessage("invalid or expired token"))
-			c.Abort()
-			return
-		}
-
-		// Check token validators (e.g., blacklist)
-		for _, validator := range validators {
-			if validator != nil {
-				invalidated, err := validator(claims.UserID, tokenString, claims.IssuedAt.Time)
-				if err != nil {
-					c.Error(apperror.ErrInternal.WithMessage("token validation error"))
-					c.Abort()
-					return
-				}
-				if invalidated {
-					c.Error(apperror.ErrUnauthorized.WithMessage("token has been revoked"))
-					c.Abort()
-					return
-				}
-			}
-		}
-
-		// Check session validator (single session per user)
-		if sessionValidator != nil {
-			valid, err := sessionValidator(tokenString)
-			if err != nil {
-				c.Error(apperror.ErrInternal.WithMessage("session validation error"))
-				c.Abort()
-				return
-			}
-			if !valid {
-				c.Error(apperror.ErrUnauthorized.WithMessage("session expired, please login again"))
-				c.Abort()
-				return
-			}
-		}
-
-		c.Set("user_id", claims.UserID)
-		c.Set("username", claims.Username)
-		c.Set("role", claims.Role)
-		c.Next()
-	}
-}
 
 func GenerateToken(secret string, userID int64, username, role string, sessionTimeout time.Duration) (string, error) {
 	if sessionTimeout <= 0 {
@@ -124,7 +51,7 @@ func GenerateTOTPTempToken(secret string, userID int64) (string, error) {
 		UserID:  userID,
 		Purpose: "totp_pending",
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)), // 5 minute expiry
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
