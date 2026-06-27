@@ -100,9 +100,9 @@ export default function ServiceList({
       width: 150,
       render: (state: string, record: Service) => (
         <Space>
-          <Tag color={state === 'active' ? 'success' : state === 'failed' ? 'error' : 'default'}>
-            {state}
-          </Tag>
+          <Tag color={state === 'not-found' ? 'error' : state === 'active' ? 'success' : state === 'failed' ? 'error' : 'default'}>
+                      {state === 'not-found' ? '不可用' : state}
+                    </Tag>
           <span style={{ color: '#666', fontSize: 12 }}>{record.sub_state}</span>
         </Space>
       ),
@@ -119,7 +119,7 @@ export default function ServiceList({
             checked={enabled}
             loading={actingService === record.name}
             onChange={(checked) => onToggleEnabled(record, checked)}
-            disabled={!canManageService || actingService === record.name}
+            disabled={!canManageService || actingService === record.name || record.state === 'not-found'}
           />
         </Tooltip>
       ),
@@ -159,8 +159,8 @@ export default function ServiceList({
                   size="small"
                   icon={<PlayCircleOutlined />}
                   loading={isActing}
-                  disabled={isActing}
-                  onClick={() => onAction(record.name, 'start')}
+                  disabled={isActing || record.state === 'not-found'}
+                                    onClick={() => onAction(record.name, 'start')}
                 >
                   启动
                 </Button>
