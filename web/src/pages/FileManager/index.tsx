@@ -82,6 +82,42 @@ export default function FileManager() {
     return absolutePath;
   };
 
+  // 清理路径中的 . 和 ..
+  const cleanPath = (path: string): string => {
+    const parts = path.split('/');
+    const stack: string[] = [];
+    for (const part of parts) {
+      if (part === '' || part === '.') {
+        continue;
+      }
+      if (part === '..') {
+        if (stack.length > 0) {
+          stack.pop();
+        }
+      } else {
+        stack.push(part);
+      }
+    }
+    return '/' + stack.join('/');
+  };
+
+  const handleNavigate = async (path: string) => {
+    const cleanedPath = cleanPath(path);
+    if (!isValidPath(cleanedPath)) {
+      message.error('路径不合法');
+      return;
+    }
+    try {
+      const relativePath = toRelativePath(cleanedPath);
+      const res = await fileApi.list(relativePath);
+      setFiles(res.data.data?.entries || []);
+      setCurrentPath(cleanedPath);
+    } catch (error) {
+      console.error('Failed to navigate:', error);
+      message.error('无法访问该路径');
+    }
+  };
+
   const fetchFiles = async (path: string) => {
     if (!isValidPath(path)) {
       message.error('路径不合法');
@@ -396,23 +432,16 @@ export default function FileManager() {
     return sortOrder === 'asc' ? cmp : -cmp;
   });
 
-  // Calculate path parts relative to base path
-  const relativePath = basePath && currentPath.startsWith(basePath)
-    ? currentPath.slice(basePath.length).replace(/^\//, '')
-    : currentPath.replace(/^\//, '');
-  const pathParts = relativePath.split('/').filter(Boolean);
-
   return (
     <div>
       <FileManagerHeader
         basePath={basePath}
         currentPath={currentPath}
-        pathParts={pathParts}
         canManageFiles={true}
         selectedKeys={selectedKeys}
         sortField={sortField}
         sortOrder={sortOrder}
-        onNavigate={setCurrentPath}
+        onNavigate={handleNavigate}
         onSearch={() => setSearchVisible(true)}
         onMkdir={() => setMkdirVisible(true)}
         onUpload={handleUpload}

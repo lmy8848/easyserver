@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
-  Card, Breadcrumb, Button, Space, Upload, Dropdown,
+  Card, Breadcrumb, Button, Space, Upload, Dropdown, Input,
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, UploadOutlined,
@@ -10,7 +10,6 @@ import {
 interface FileManagerHeaderProps {
   basePath: string;
   currentPath: string;
-  pathParts: string[];
   canManageFiles: boolean;
   selectedKeys: string[];
   sortField: string;
@@ -28,7 +27,7 @@ interface FileManagerHeaderProps {
 
 export default function FileManagerHeader({
   basePath,
-  pathParts,
+  currentPath,
   canManageFiles,
   selectedKeys,
   onNavigate,
@@ -41,21 +40,99 @@ export default function FileManagerHeader({
   onRefresh,
   children,
 }: FileManagerHeaderProps) {
+  const [editing, setEditing] = useState(false);
+  const [inputPath, setInputPath] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 计算显示路径（以 basePath 为根）
+  const displayPath = basePath && currentPath.startsWith(basePath)
+    ? '/' + currentPath.slice(basePath.length).replace(/^\//, '')
+    : currentPath;
+  const pathParts = displayPath === '/' ? [] : displayPath.split('/').filter(Boolean);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const handleBreadcrumbClick = () => {
+    // 显示相对于 basePath 的路径
+    setInputPath(displayPath);
+    setEditing(true);
+  };
+
+  const handlePathSubmit = () => {
+    const trimmed = inputPath.trim();
+    if (!trimmed) {
+      setEditing(false);
+      return;
+    }
+
+    // 将显示路径转换为实际路径
+    let realPath: string;
+    if (trimmed === '/') {
+      realPath = basePath;
+    } else {
+      realPath = basePath + trimmed;
+    }
+
+    if (realPath !== currentPath) {
+      onNavigate(realPath);
+    }
+    setEditing(false);
+  };
+
+  const handleNavigate = (path: string) => {
+    setEditing(false);
+    onNavigate(path);
+  };
+
   return (
     <Card
       title={
-        <Space>
-          <Button icon={<HomeOutlined />} onClick={() => onNavigate(basePath)} />
-          <Breadcrumb
-            items={[
-              { title: '根目录', onClick: () => onNavigate(basePath) },
-              ...pathParts.map((part, index) => ({
-                title: part,
-                onClick: () => onNavigate(basePath + '/' + pathParts.slice(0, index + 1).join('/')),
-              })),
-            ]}
-          />
-        </Space>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 16 }}>
+          <Button icon={<HomeOutlined />} onClick={() => handleNavigate(basePath)} />
+          <div
+            style={{
+              flex: 1,
+              minWidth: 300,
+              cursor: 'text',
+              padding: editing ? 0 : '4px 8px',
+              borderRadius: 4,
+              background: editing ? 'transparent' : 'rgba(0,0,0,0.04)',
+              border: editing ? 'none' : '1px solid transparent',
+            }}
+            onClick={() => !editing && handleBreadcrumbClick()}
+          >
+            {editing ? (
+              <Input
+                ref={inputRef as any}
+                value={inputPath}
+                onChange={e => setInputPath(e.target.value)}
+                onPressEnter={handlePathSubmit}
+                onBlur={handlePathSubmit}
+                style={{ width: '100%' }}
+                placeholder="输入路径，回车跳转"
+              />
+            ) : (
+              <Breadcrumb
+                items={[
+                  { title: '根目录', onClick: (e) => { e.stopPropagation(); handleNavigate(basePath); } },
+                  ...pathParts.map((part, index) => ({
+                    title: part,
+                    onClick: (e: any) => {
+                      e.stopPropagation();
+                      const newPath = basePath + '/' + pathParts.slice(0, index + 1).join('/');
+                      handleNavigate(newPath);
+                    },
+                  })),
+                ]}
+              />
+            )}
+          </div>
+        </div>
       }
       extra={
         <Space wrap>
