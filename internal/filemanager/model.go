@@ -56,8 +56,14 @@ func NewManager(basePath string) (*Manager, error) {
 	if basePath == "" {
 		return nil, fmt.Errorf("filemanager base_path is required")
 	}
-	if basePath == "/" {
-		return nil, fmt.Errorf("filemanager base_path cannot be '/' for security reasons")
+
+	// Expand ~ to home directory
+	if basePath == "~" || strings.HasPrefix(basePath, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("get home directory: %w", err)
+		}
+		basePath = home + basePath[1:]
 	}
 
 	absBase, err := filepath.Abs(basePath)

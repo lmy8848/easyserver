@@ -113,9 +113,6 @@ func main() {
 	if cfg.FileManager.BasePath == "" {
 		log.Fatalf("FATAL: filemanager.base_path is required")
 	}
-	if cfg.FileManager.BasePath == "/" {
-		log.Fatalf("FATAL: filemanager.base_path cannot be '/' for security reasons")
-	}
 
 	// Check for default deploy encryption key
 	defaultDeployKeys := []string{
@@ -283,6 +280,9 @@ func main() {
 	terminalManager.StartIdleTimeout(cfg.Auth.IdleTimeout)
 
 	// Initialize file manager (single shared instance)
+	if cfg.FileManager.BasePath == "/" {
+		log.Println("WARNING: FileManager BasePath is set to the system root '/'. This allows administrative access to all files.")
+	}
 	fileManager, err := filemanager.NewManager(cfg.FileManager.BasePath)
 	if err != nil {
 		log.Fatalf("Failed to init file manager: %v", err)

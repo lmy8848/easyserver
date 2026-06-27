@@ -127,9 +127,20 @@ func TestNewFileManager_InvalidPaths(t *testing.T) {
 		t.Error("expected error for empty base path")
 	}
 
+	// Root base path is now allowed for server management
 	_, err = NewManager("/")
-	if err == nil {
-		t.Error("expected error for root base path")
+	if err != nil {
+		t.Errorf("unexpected error for root base path: %v", err)
+	}
+
+	// ~ should expand to home directory
+	fm, err := NewManager("~")
+	if err != nil {
+		t.Errorf("unexpected error for ~ base path: %v", err)
+	}
+	home, _ := os.UserHomeDir()
+	if fm.BasePath() != home {
+		t.Errorf("expected %s, got %s", home, fm.BasePath())
 	}
 }
 
