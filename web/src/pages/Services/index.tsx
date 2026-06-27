@@ -2,16 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { message } from 'antd';
 import { serviceApi } from '../../services/api';
 import type { Service } from '../../types';
-import { useAuthStore } from '../../store/useAuthStore';
-import { hasPermission, PERMISSIONS } from '../../utils/permissions';
 import type { LogEntry } from './types';
 import ServiceList from './ServiceList';
 import ServiceDetail from './ServiceDetail';
 import ServiceLogs from './ServiceLogs';
 
 export default function Services() {
-  const { user } = useAuthStore();
-  const canManageService = hasPermission(user?.role, PERMISSIONS.SERVICE_MANAGE);
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
@@ -234,7 +230,7 @@ export default function Services() {
         filteredServices={filteredServices}
         stats={stats}
         loading={loading}
-        canManageService={canManageService}
+        canManageService={true}
         selectedRowKeys={selectedRowKeys}
         autoRefresh={autoRefresh}
         searchText={searchText}

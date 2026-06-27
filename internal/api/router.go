@@ -254,7 +254,6 @@ func (r *Router) Setup() *gin.Engine {
 	protected := api.Group("")
 	protected.Use(
 		middleware.JWTMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
-		middleware.RequireRole("admin"),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
 			return r.authService.GetIPWhitelist(context.Background(), userID)
 		}),

@@ -14,7 +14,7 @@ export interface PaginatedData<T> {
 export interface User {
   id: number;
   username: string;
-  role: 'admin' | 'operator' | 'viewer';
+  role: string;
   must_change_pass?: boolean;
   last_login_at?: string;
   created_at?: string;

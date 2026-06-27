@@ -7,7 +7,7 @@ import type {
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
   ManagedProcess, ProcessWithStatus, ProcessLog, ProcessGroup, ProcessStats, PaginatedData,
   SystemProcess, SystemOverview, SystemService, ServiceWhitelistEntry,
-  Notification, UserActivity, SSHLogin, SSHConfig, FileSearchResult,
+  Notification, SSHLogin, SSHConfig, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
 } from '../types';
 
@@ -46,10 +46,12 @@ api.interceptors.response.use(
       const { status, data } = error.response;
 
       if (status === 401) {
-        // Token expired or invalid
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
+        // Token expired or invalid - don't redirect if already on login page
+        if (!window.location.pathname.startsWith('/login')) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          window.location.href = '/login';
+        }
       }
 
       return Promise.reject(data);
@@ -204,42 +206,6 @@ export const fileApi = {
 
   chown: (path: string, uid: number, gid: number) =>
     api.put<ApiResponse>('/files/chown', { path, uid, gid }),
-};
-
-// User API
-export const userApi = {
-  list: (role?: string) =>
-    api.get<ApiResponse<User[]>>('/users', { params: { role } }),
-
-  create: (username: string, password: string, role: string) =>
-    api.post<ApiResponse>('/users', { username, password, role }),
-
-  update: (id: number, data: { role?: string; is_locked?: boolean }) =>
-    api.put<ApiResponse>(`/users/${id}`, data),
-
-  delete: (id: number) =>
-    api.delete<ApiResponse>(`/users/${id}`),
-
-  unlock: (id: number) =>
-    api.post<ApiResponse>(`/users/${id}/unlock`),
-
-  resetPassword: (id: number, password: string) =>
-    api.post<ApiResponse>(`/users/${id}/reset-password`, { password }),
-
-  getActivities: (id: number, limit?: number) =>
-    api.get<ApiResponse<UserActivity[]>>(`/users/${id}/activities`, { params: { limit } }),
-
-  getAllActivities: (limit?: number) =>
-    api.get<ApiResponse<UserActivity[]>>('/users/activities', { params: { limit } }),
-
-  setExpiry: (id: number, expiresAt: string | null) =>
-    api.put<ApiResponse>(`/users/${id}/expiry`, { expires_at: expiresAt }),
-
-  setIPWhitelist: (id: number, ipWhitelist: string) =>
-    api.put<ApiResponse>(`/users/${id}/ip-whitelist`, { ip_whitelist: ipWhitelist }),
-
-  getSessions: () =>
-    api.get<ApiResponse<Array<{ user_id: number; username: string; role: string; ip: string; user_agent: string; login_at: string; expires_at: string }>>>('/users/sessions'),
 };
 
 // Cloud API

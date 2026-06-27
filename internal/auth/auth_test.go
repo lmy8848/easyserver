@@ -241,8 +241,8 @@ func TestLogin_InvalidPassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong password")
 	}
-	if err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
+	if err.Error() != "用户名或密码错误" {
+		t.Errorf("error = %q, want %q", err.Error(), "用户名或密码错误")
 	}
 }
 
@@ -255,8 +255,8 @@ func TestLogin_UserNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent user")
 	}
-	if err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
+	if err.Error() != "用户名或密码错误" {
+		t.Errorf("error = %q, want %q", err.Error(), "用户名或密码错误")
 	}
 }
 
@@ -270,8 +270,8 @@ func TestLogin_AccountLocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for locked account")
 	}
-	if err.Error() != "invalid credentials" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid credentials")
+	if err.Error() != "账号已被锁定" {
+		t.Errorf("error = %q, want %q", err.Error(), "账号已被锁定")
 	}
 }
 
