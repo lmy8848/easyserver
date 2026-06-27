@@ -58,6 +58,8 @@ jobs:
             serve_frontend: false
           auth:
             jwt_secret: "ci-smoke-test-jwt-secret-at-least-32-bytes-long!!"
+          filemanager:
+            base_path: "/tmp/easyserver-data"
           data_dir: /tmp/easyserver-data
           EOF
           chmod +x easyserver-linux-amd64
