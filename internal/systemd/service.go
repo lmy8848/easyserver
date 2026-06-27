@@ -81,6 +81,11 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			SubState: fields[3],
 		}
 
+		// 跳过不存在的服务（包已删除但 unit 残留）
+		if svc.State == "not-found" {
+			continue
+		}
+
 		if len(fields) > 4 {
 			svc.Description = strings.Join(fields[4:], " ")
 		}
