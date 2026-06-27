@@ -2,16 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { message } from 'antd';
 import { serviceApi } from '../../services/api';
 import type { Service } from '../../types';
-import { useAuthStore } from '../../store/useAuthStore';
-import { hasPermission, PERMISSIONS } from '../../utils/permissions';
 import type { LogEntry } from './types';
 import ServiceList from './ServiceList';
 import ServiceDetail from './ServiceDetail';
 import ServiceLogs from './ServiceLogs';
 
 export default function Services() {
-  const { user } = useAuthStore();
-  const canManageService = hasPermission(user?.role, PERMISSIONS.SERVICE_MANAGE);
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
@@ -35,6 +31,9 @@ export default function Services() {
 
   // 批量选择
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+
+  // 行级操作 loading（互斥：同一行只能有一个操作在进行）
+  const [actingService, setActingService] = useState<string | null>(null);
 
   // 实时日志
   const wsRef = useRef<WebSocket | null>(null);
@@ -81,6 +80,7 @@ export default function Services() {
   }, [autoRefresh, fetchServices]);
 
   const handleAction = async (name: string, action: string) => {
+    setActingService(name);
     try {
       switch (action) {
         case 'start':
@@ -107,6 +107,8 @@ export default function Services() {
       fetchServices();
     } catch (error: any) {
       message.error(error.message || '操作失败');
+    } finally {
+      setActingService(null);
     }
   };
 
@@ -156,7 +158,7 @@ export default function Services() {
     wsRef.current?.close();
     try {
       const res = await serviceApi.getLogs(service.name, 100);
-      setLogs((res.data.data?.lines || []).map(line => ({ time: '', message: line, priority: 'info' })));
+      setLogs(res.data.data?.lines || []);
     } catch (error) {
       console.error('Failed to fetch logs:', error);
       setLogs([]);
@@ -234,13 +236,14 @@ export default function Services() {
         filteredServices={filteredServices}
         stats={stats}
         loading={loading}
-        canManageService={canManageService}
+        canManageService={true}
         selectedRowKeys={selectedRowKeys}
         autoRefresh={autoRefresh}
         searchText={searchText}
         statusFilter={statusFilter}
         currentPage={currentPage}
         pageSize={pageSize}
+        actingService={actingService}
         onRefresh={fetchServices}
         onAction={handleAction}
         onBatchAction={handleBatchAction}

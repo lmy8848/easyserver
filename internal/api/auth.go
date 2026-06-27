@@ -57,7 +57,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "LOGIN_FAILED",
 				err.Error(), ip, userAgent)
 		}
-		c.Error(ErrUnauthorized.Wrap(err))
+		c.Error(ErrUnauthorized.WithMessage(err.Error()))
 		return
 	}
 
@@ -181,7 +181,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 					err.Error(), c.ClientIP(), c.Request.UserAgent())
 			}
 		}
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(ErrBadRequest.WithMessage(err.Error()))
 		return
 	}
 

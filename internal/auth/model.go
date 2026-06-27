@@ -7,11 +7,7 @@ import (
 
 type Role string
 
-const (
-	RoleAdmin    Role = "admin"
-	RoleOperator Role = "operator"
-	RoleViewer   Role = "viewer"
-)
+const RoleAdmin Role = "admin"
 
 type User struct {
 	ID              int64        `json:"id" db:"id"`

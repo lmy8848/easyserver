@@ -70,6 +70,7 @@ export default function ChangePassword() {
               { required: true, message: '请输入新密码' },
               { min: 8, message: '密码至少8个字符' },
             ]}
+            extra="密码需包含大写字母、小写字母和数字，至少8位"
           >
             <Input.Password
               prefix={<LockOutlined />}

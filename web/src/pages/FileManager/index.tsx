@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react';
 import { Modal, message } from 'antd';
 import { fileApi } from '../../services/api';
 import type { FileEntry } from '../../types';
-import { useAuthStore } from '../../store/useAuthStore';
-import { hasPermission, PERMISSIONS } from '../../utils/permissions';
 import { isValidPath } from './types';
 import FileManagerHeader from './FileManagerHeader';
 import FileManagerTable from './FileManagerTable';
@@ -14,8 +12,6 @@ import {
 } from './FileManagerModals';
 
 export default function FileManager() {
-  const { user } = useAuthStore();
-  const canManageFiles = hasPermission(user?.role, PERMISSIONS.FILE_MANAGE);
   const [basePath, setBasePath] = useState<string>('');
   const [currentPath, setCurrentPath] = useState<string>('');
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -422,7 +418,7 @@ export default function FileManager() {
         basePath={basePath}
         currentPath={currentPath}
         pathParts={pathParts}
-        canManageFiles={canManageFiles}
+        canManageFiles={true}
         selectedKeys={selectedKeys}
         sortField={sortField}
         sortOrder={sortOrder}
@@ -439,7 +435,7 @@ export default function FileManager() {
           files={sortedFiles}
           loading={loading}
           selectedKeys={selectedKeys}
-          canManageFiles={canManageFiles}
+          canManageFiles={true}
           onClick={handleClick}
           onEdit={openFile}
           onRename={showRename}

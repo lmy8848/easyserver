@@ -190,21 +190,21 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Us
 
 	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
-		return nil, errors.New("invalid credentials")
+		return nil, errors.New("用户名或密码错误")
 	}
 
 	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
 		if err := s.userRepo.IncrementLoginAttempts(ctx, user.ID); err != nil {
 			log.Printf("auth: failed to increment login attempts: %v", err)
 		}
-		return nil, errors.New("invalid credentials")
+		return nil, errors.New("账号已被锁定")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		if err := s.userRepo.IncrementLoginAttemptsWithLock(ctx, user.ID, s.maxAttempts, int(s.lockoutDuration.Seconds())); err != nil {
 			log.Printf("auth: failed to update login attempts: %v", err)
 		}
-		return nil, errors.New("invalid credentials")
+		return nil, errors.New("用户名或密码错误")
 	}
 
 	s.userRepo.ResetLoginState(ctx, user.ID, "")

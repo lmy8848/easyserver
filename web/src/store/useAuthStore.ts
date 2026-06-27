@@ -8,9 +8,7 @@ function isValidUser(obj: unknown): obj is User {
   const u = obj as Record<string, unknown>;
   return (
     typeof u['id'] === 'number' &&
-    typeof u['username'] === 'string' &&
-    typeof u['role'] === 'string' &&
-    ['admin', 'operator', 'viewer'].includes(u['role'] as string)
+    typeof u['username'] === 'string'
   );
 }
 

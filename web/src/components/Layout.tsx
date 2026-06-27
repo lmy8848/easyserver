@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasPermission, PERMISSIONS, ROLE_LABELS } from '../utils/permissions';
 import { notificationApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
@@ -11,39 +10,39 @@ const MENU_GROUPS = [
   {
     label: '监控',
     items: [
-      { key: '/', icon: 'dashboard', label: '系统概览', permission: PERMISSIONS.MONITOR_VIEW },
-      { key: '/processes', icon: 'cluster', label: '进程守护', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/', icon: 'dashboard', label: '系统概览' },
+      { key: '/processes', icon: 'cluster', label: '进程守护' },
     ],
   },
   {
     label: '管理',
     items: [
-      { key: '/services', icon: 'settings', label: '服务管理', permission: PERMISSIONS.SERVICE_VIEW },
-      { key: '/terminal', icon: 'terminal', label: '终端访问', permission: PERMISSIONS.TERMINAL_ACCESS },
-      { key: '/files', icon: 'folder', label: '文件管理', permission: PERMISSIONS.FILE_VIEW },
-      { key: '/deploy', icon: 'rocket', label: '部署同步', permission: PERMISSIONS.DEPLOY_MANAGE },
-      { key: '/runtime', icon: 'api', label: '运行环境', permission: PERMISSIONS.DEPLOY_MANAGE },
-      { key: '/env-config', icon: 'control', label: '环境配置', permission: PERMISSIONS.DEPLOY_MANAGE },
+      { key: '/services', icon: 'settings', label: '服务管理' },
+      { key: '/terminal', icon: 'terminal', label: '终端访问' },
+      { key: '/files', icon: 'folder', label: '文件管理' },
+      { key: '/deploy', icon: 'rocket', label: '部署同步' },
+      { key: '/runtime', icon: 'api', label: '运行环境' },
+      { key: '/env-config', icon: 'control', label: '环境配置' },
     ],
   },
   {
     label: '业务',
     items: [
-      { key: '/websites', icon: 'global', label: '网站管理', permission: PERMISSIONS.WEBSITE_MANAGE },
-      { key: '/databases', icon: 'database', label: '数据库管理', permission: PERMISSIONS.DB_MANAGE },
-      { key: '/cron', icon: 'clock', label: '计划任务', permission: PERMISSIONS.DB_MANAGE },
-      { key: '/scripts', icon: 'code', label: '脚本库', permission: PERMISSIONS.DB_MANAGE },
-      { key: '/firewall', icon: 'shield', label: '防火墙', permission: PERMISSIONS.DB_MANAGE },
-      { key: '/ssh', icon: 'key', label: 'SSH 管理', permission: PERMISSIONS.DB_MANAGE },
-      { key: '/containers', icon: 'cloud', label: '容器管理', permission: PERMISSIONS.DB_MANAGE },
+      { key: '/websites', icon: 'global', label: '网站管理' },
+      { key: '/databases', icon: 'database', label: '数据库管理' },
+      { key: '/cron', icon: 'clock', label: '计划任务' },
+      { key: '/scripts', icon: 'code', label: '脚本库' },
+      { key: '/firewall', icon: 'shield', label: '防火墙' },
+      { key: '/ssh', icon: 'key', label: 'SSH 管理' },
+      { key: '/containers', icon: 'cloud', label: '容器管理' },
     ],
   },
   {
     label: '系统',
     items: [
-      { key: '/cloud', icon: 'cloud', label: '腾讯云', permission: PERMISSIONS.CLOUD_VIEW },
-      { key: '/audit', icon: 'file-text', label: '操作日志', permission: PERMISSIONS.AUDIT_VIEW },
-      { key: '/settings', icon: 'tool', label: '面板设置', permission: PERMISSIONS.USER_MANAGE },
+      { key: '/cloud', icon: 'cloud', label: '腾讯云' },
+      { key: '/audit', icon: 'file-text', label: '操作日志' },
+      { key: '/settings', icon: 'tool', label: '面板设置' },
       { key: '/security', icon: 'shield', label: '安全设置' },
     ],
   },
@@ -204,11 +203,6 @@ export default function Layout() {
     } catch { /* silent */ }
   };
 
-  const visibleGroups = MENU_GROUPS.map(group => ({
-    ...group,
-    items: group.items.filter(item => !item.permission || hasPermission(user?.role, item.permission)),
-  })).filter(group => group.items.length > 0);
-
   const currentTitle = PAGE_TITLES[location.pathname] || '未知页面';
 
   return (
@@ -220,7 +214,7 @@ export default function Layout() {
           {!collapsed && <span className="logo-text">EasyServer</span>}
         </div>
         <nav className="sidebar-nav">
-          {visibleGroups.map(group => (
+          {MENU_GROUPS.map(group => (
             <div key={group.label} className="nav-group">
               {!collapsed && <div className="nav-group-label">{group.label}</div>}
               {group.items.map(item => (
@@ -304,7 +298,7 @@ export default function Layout() {
             {/* User Menu */}
             <div className="user-menu-wrapper" ref={userMenuRef}>
               <div className="user-info" onClick={() => { setShowUserMenu(!showUserMenu); setShowNotifications(false); }}>
-                <span className="user-role">{ROLE_LABELS[user?.role || ''] || '未知角色'}</span>
+                <span className="user-role">管理员</span>
                 <div className="user-avatar">{user?.username?.[0]?.toUpperCase() || 'A'}</div>
               </div>
               {showUserMenu && (
@@ -313,7 +307,7 @@ export default function Layout() {
                     <div className="user-avatar-lg">{user?.username?.[0]?.toUpperCase() || 'A'}</div>
                     <div>
                       <div className="user-dropdown-name">{user?.username || '用户'}</div>
-                      <div className="user-dropdown-role">{ROLE_LABELS[user?.role || ''] || '未知角色'}</div>
+                      <div className="user-dropdown-role">管理员</div>
                     </div>
                   </div>
                   <div className="user-dropdown-divider" />
