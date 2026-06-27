@@ -54,6 +54,13 @@ func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]DBVersi
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ds, err := s.Get(ctx, dbServerID)
+	if err != nil {
+		return nil, fmt.Errorf("get server: %w", err)
+	}
+	if ds == nil {
+		return nil, fmt.Errorf("database server not found")
+	}
 	return s.repo.ListVersions(ctx, dbServerID)
 }
 

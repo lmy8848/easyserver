@@ -162,7 +162,7 @@ var errorRegistry = []errorPattern{
 	// Auth errors
 	{matches: []string{"invalid password", "invalid TOTP code", "invalid credentials"}, target: ErrUnauthorized},
 	// Not found
-	{matches: []string{"not found", "未安装", "不存在", "does not exist"}, target: ErrNotFound},
+	{matches: []string{"not found", "未安装", "不存在", "does not exist", "No such container"}, target: ErrNotFound},
 	// Already exists / installed / running
 	{matches: []string{"already installed", "已安装", "已存在", "is already running", "is not running", "未运行"}, target: ErrConflict},
 	// Bad state / precondition

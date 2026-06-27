@@ -271,6 +271,11 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 	s.mu.RUnlock()
 
 	if !exists {
+		// Check if process exists in DB
+		p, _ := s.Get(ctx, id)
+		if p == nil {
+			return fmt.Errorf("process %d not found", id)
+		}
 		return fmt.Errorf("process %d is not running", id)
 	}
 

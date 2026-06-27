@@ -65,6 +65,10 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: 需要 5 个字段 (分 时 日 月 周)"))
 		return
 	}
+	if err := validateCronFieldRanges(parts); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
+		return
+	}
 
 	// Validate: either command or script_id must be provided
 	if req.Command == "" && req.ScriptID == 0 {
@@ -159,6 +163,10 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		parts := strings.Fields(*req.Schedule)
 		if len(parts) != 5 {
 			c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: 需要 5 个字段"))
+			return
+		}
+		if err := validateCronFieldRanges(parts); err != nil {
+			c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
 			return
 		}
 		task.Schedule = *req.Schedule
@@ -718,6 +726,33 @@ func calculateNextRuns(schedule string, count int) ([]string, error) {
 	}
 
 	return results, nil
+}
+
+// validateCronFieldRanges validates that each cron field is within valid ranges
+func validateCronFieldRanges(parts []string) error {
+	ranges := []struct {
+		min, max int
+		name     string
+	}{
+		{0, 59, "分钟"},
+		{0, 23, "小时"},
+		{1, 31, "日"},
+		{1, 12, "月"},
+		{0, 7, "星期"},
+	}
+	for i, part := range parts {
+		if part == "*" || strings.Contains(part, "/") || strings.Contains(part, "-") || strings.Contains(part, ",") {
+			continue // complex expressions validated by parseCronField
+		}
+		val, err := strconv.Atoi(part)
+		if err != nil {
+			return fmt.Errorf("%s字段值无效: %s", ranges[i].name, part)
+		}
+		if val < ranges[i].min || val > ranges[i].max {
+			return fmt.Errorf("%s字段值 %d 超出范围 [%d, %d]", ranges[i].name, val, ranges[i].min, ranges[i].max)
+		}
+	}
+	return nil
 }
 
 // parseCronField parses a single cron field and returns the set of valid values

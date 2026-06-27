@@ -67,6 +67,13 @@ func (s *Service) ListDatabases(ctx context.Context, dbServerID int64) ([]Databa
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	server, err := s.repo.GetServer(ctx, dbServerID)
+	if err != nil {
+		return nil, fmt.Errorf("get server: %w", err)
+	}
+	if server == nil {
+		return nil, fmt.Errorf("database server not found")
+	}
 	return s.repo.ListDatabases(ctx, dbServerID)
 }
 
@@ -211,6 +218,13 @@ func (s *Service) DeleteDatabase(ctx context.Context, dbServerID, id int64) erro
 func (s *Service) ListDBUsers(ctx context.Context, dbServerID int64) ([]DBUser, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	server, err := s.repo.GetServer(ctx, dbServerID)
+	if err != nil {
+		return nil, fmt.Errorf("get server: %w", err)
+	}
+	if server == nil {
+		return nil, fmt.Errorf("database server not found")
 	}
 	return s.repo.ListDBUsers(ctx, dbServerID)
 }

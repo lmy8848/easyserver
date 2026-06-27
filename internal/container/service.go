@@ -98,8 +98,11 @@ func (s *Service) GetContainer(ctx context.Context, id string) (*Container, erro
 }
 
 func (s *Service) containerAction(ctx context.Context, action, id string) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, "docker", action, id)
+	output, exitCode, err := s.executor.RunCombined(ctx, "docker", action, id)
 	if err != nil || exitCode != 0 {
+		if output != "" {
+			return fmt.Errorf("docker %s failed: %s", action, output)
+		}
 		return fmt.Errorf("docker %s failed: %v", action, err)
 	}
 	return nil
