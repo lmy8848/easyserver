@@ -100,7 +100,10 @@ func (s *MonitorService) readMemory(p *MonitorPoint) {
 	p.MemTotal = mem["MemTotal"]
 	p.MemAvailable = mem["MemAvailable"]
 	if p.MemTotal > 0 {
-		p.MemUsed = p.MemTotal - mem["MemFree"] - mem["Buffers"] - mem["Cached"]
+		// 同样的 uint64 回绕风险：极端情况下 buffers/cached 报告异常会让减法回绕，
+		// 写库时被 database/sql 以"高位为 1"拒收。
+		used := mem["MemFree"] + mem["Buffers"] + mem["Cached"]
+		p.MemUsed = deltaU64(p.MemTotal, used)
 		p.MemPercent = math.Round(float64(p.MemUsed)/float64(p.MemTotal)*100*100) / 100
 	}
 }
@@ -160,16 +163,25 @@ func (s *MonitorService) readNetwork(p *MonitorPoint) {
 	}
 
 	if s.prevSent > 0 {
-		p.NetBytesSent = totalSent - s.prevSent
-		p.NetBytesRecv = totalRecv - s.prevRecv
-		p.NetPktsSent = totalPktsSent - s.prevPktsSent
-		p.NetPktsRecv = totalPktsRecv - s.prevPktsRecv
+		// 计数器可能因网卡重置/移除而回退；uint64 直减会回绕成天文数字（高位为 1），
+		// database/sql 拒绝带高位的 uint64。当前值小于上次值时按 0 处理。
+		p.NetBytesSent = deltaU64(totalSent, s.prevSent)
+		p.NetBytesRecv = deltaU64(totalRecv, s.prevRecv)
+		p.NetPktsSent = deltaU64(totalPktsSent, s.prevPktsSent)
+		p.NetPktsRecv = deltaU64(totalPktsRecv, s.prevPktsRecv)
 	}
 
 	s.prevSent = totalSent
 	s.prevRecv = totalRecv
 	s.prevPktsSent = totalPktsSent
 	s.prevPktsRecv = totalPktsRecv
+}
+
+func deltaU64(cur, prev uint64) uint64 {
+	if cur < prev {
+		return 0
+	}
+	return cur - prev
 }
 
 func (s *MonitorService) readSystemInfo() *SystemInfo {
