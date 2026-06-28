@@ -25,8 +25,10 @@ export default function Cloud() {
     } catch (error: unknown) {
       console.error('Failed to fetch instances:', error);
       // 404 = 腾讯云未配置，显示友好提示
-      const axiosErr = error as { response?: { status?: number } };
-      if (axiosErr.response?.status === 404) {
+      const axiosErr = error as { response?: { status?: number }; message?: string };
+      const is404 = axiosErr.response?.status === 404 ||
+        (typeof axiosErr.message === 'string' && axiosErr.message.includes('404'));
+      if (is404) {
         setError('腾讯云服务未配置，请在「面板设置 > 腾讯云」中配置 SecretId/SecretKey');
       } else {
         setError((error instanceof Error ? error.message : '获取实例列表失败'));
