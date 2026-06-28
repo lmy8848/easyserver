@@ -36,10 +36,6 @@ type RuntimeSetDefaultRequest struct {
 }
 
 // RuntimeDetectResult represents detected runtime environments on the system
-type RuntimeDetectResult struct {
-	Name     string   `json:"name"`     // java, node, php, python, go
-	Versions []string `json:"versions"` // List of installed versions
-}
 
 // RuntimeMirror represents a mirror source configuration
 type RuntimeMirror struct {

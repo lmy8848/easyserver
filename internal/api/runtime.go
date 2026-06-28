@@ -158,33 +158,6 @@ func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 	})
 }
 
-// Detect detects installed runtime environments on the system
-func (h *RuntimeHandler) Detect(c *gin.Context) {
-	results, err := h.runtimeService.Detect(c.Request.Context())
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-
-	Success(c, gin.H{
-		"detected": results,
-	})
-}
-
-// ImportDetected imports detected runtime environments into the database
-func (h *RuntimeHandler) ImportDetected(c *gin.Context) {
-	imported, err := h.runtimeService.ImportDetected(c.Request.Context())
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-
-	Success(c, gin.H{
-		"message":  "导入成功",
-		"imported": imported,
-	})
-}
-
 // GetProgress returns the installation progress for a runtime environment
 func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	idStr := c.Param("id")
@@ -394,8 +367,6 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.POST("/runtime/install", runtimeHandler.Install)
 	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
 	protected.POST("/runtime/set-default", runtimeHandler.SetDefault)
-	protected.GET("/runtime/detect", runtimeHandler.Detect)
-	protected.POST("/runtime/import-detected", runtimeHandler.ImportDetected)
 	protected.GET("/runtime/progress/:id", runtimeHandler.GetProgress)
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)

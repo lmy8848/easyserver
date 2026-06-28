@@ -148,7 +148,7 @@ func setupMiseEnv() error {
 		return err
 	}
 
-	content := fmt.Sprintf("export PATH=\"%s:$PATH\"\n", shimsDir)
+	content := fmt.Sprintf("export MISE_DATA_DIR=\"%s\"\nexport PATH=\"%s:$PATH\"\n", miseDataDir, shimsDir)
 
 	b, err := os.ReadFile(miseProfilePath)
 	if err == nil && string(b) == content {

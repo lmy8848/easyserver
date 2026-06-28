@@ -11,11 +11,6 @@ export interface RuntimeEnvironment {
   installed_at: string;
 }
 
-export interface DetectedRuntime {
-  name: string;
-  versions: string[];
-}
-
 export interface VersionInfo {
   version: string;
   installed: boolean;

@@ -4,12 +4,10 @@ import { PlusOutlined, SyncOutlined, GlobalOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
-import DetectPanel from './DetectPanel';
 import PackageManager from './PackageManager';
 import MirrorPanel from './MirrorPanel';
 import type {
   RuntimeEnvironment,
-  DetectedRuntime,
   VersionInfo,
   PackageInfo,
   PackageSearchResult,
@@ -38,10 +36,6 @@ export default function Runtime() {
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [availableVersions, setAvailableVersions] = useState<VersionInfo[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
-
-  // --- Detect modal state ---
-  const [detectVisible, setDetectVisible] = useState(false);
-  const [detectedRuntimes, setDetectedRuntimes] = useState<DetectedRuntime[]>([]);
 
   // --- Logs modal state ---
   const [logsVisible, setLogsVisible] = useState(false);
@@ -276,30 +270,6 @@ export default function Runtime() {
     fetchVersions(value);
   };
 
-  // ==================== Detect modal actions ====================
-
-  const handleDetect = async () => {
-    try {
-      const res = await api.get('/runtime/detect');
-      setDetectedRuntimes(res.data.data?.detected || []);
-      setDetectVisible(true);
-    } catch (error: any) {
-      message.error(error.message || '检测失败');
-    }
-  };
-
-  const handleImportDetected = async () => {
-    try {
-      const res = await api.post('/runtime/import-detected');
-      const imported = res.data.data?.imported || 0;
-      message.success(`成功导入 ${imported} 个环境`);
-      setDetectVisible(false);
-      fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '导入失败');
-    }
-  };
-
   // ==================== Logs modal actions ====================
 
   const handleViewLogs = async (id: number) => {
@@ -488,9 +458,6 @@ export default function Runtime() {
             <Button icon={<GlobalOutlined />} onClick={() => setMirrorVisible(true)}>
               镜像源配置
             </Button>
-            <Button icon={<SyncOutlined />} onClick={handleDetect}>
-              检测环境
-            </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setInstallVisible(true)}>
               安装环境
             </Button>
@@ -533,14 +500,6 @@ export default function Runtime() {
         installing={installing}
         onRuntimeChange={handleRuntimeChange}
         onRefreshVersions={fetchVersions}
-      />
-
-      {/* Detect environment modal */}
-      <DetectPanel
-        visible={detectVisible}
-        detectedRuntimes={detectedRuntimes}
-        onClose={() => setDetectVisible(false)}
-        onImport={handleImportDetected}
       />
 
       {/* Install logs modal */}
