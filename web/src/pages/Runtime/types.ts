@@ -33,6 +33,7 @@ export interface PackageInfo {
 }
 
 export interface LogsData {
+  id: number;
   name: string;
   version: string;
   status: string;

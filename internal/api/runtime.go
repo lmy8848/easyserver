@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 
 	"easyserver/internal/envconfig"
 	"easyserver/internal/packagemanager"
@@ -100,6 +101,10 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	}
 
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
+		if strings.Contains(err.Error(), "cannot uninstall default version") {
+			c.Error(ErrBadRequest.WithMessage("无法卸载默认版本，请先将其他版本设为默认"))
+			return
+		}
 		c.Error(WrapError(err))
 		return
 	}

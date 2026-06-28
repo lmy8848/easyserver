@@ -228,6 +228,15 @@ func (r *sqliteRepo) UpdateStatusToFailed(ctx context.Context, id int64, errorMe
 	return err
 }
 
+// UpdateStatusToUninstallFailed marks a runtime environment as failed during uninstall
+func (r *sqliteRepo) UpdateStatusToUninstallFailed(ctx context.Context, id int64, errorMessage string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE runtime_environments SET status = 'uninstall_failed', error_message = ?, progress = 0, progress_step = 'uninstall_failed' WHERE id = ?",
+		errorMessage, id,
+	)
+	return err
+}
+
 // UpdateStatusToInstalled marks a runtime environment as installed with its path
 func (r *sqliteRepo) UpdateStatusToInstalled(ctx context.Context, id int64, path string) error {
 	_, err := r.db.ExecContext(ctx,

@@ -29,6 +29,7 @@ type Repository interface {
 	UpdateProgress(ctx context.Context, id int64, progress int, step, logs string) error
 	UpdateStatus(ctx context.Context, id int64, status string) error
 	UpdateStatusToFailed(ctx context.Context, id int64, errorMessage string) error
+	UpdateStatusToUninstallFailed(ctx context.Context, id int64, errorMessage string) error
 	UpdateStatusToInstalled(ctx context.Context, id int64, path string) error
 
 	// Default management

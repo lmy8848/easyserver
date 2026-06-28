@@ -15,7 +15,7 @@ interface RuntimeListProps {
   logsLoading: boolean;
   cleanupLoading: boolean;
   onSetDefault: (name: string, version: string) => void;
-  onUninstall: (name: string, version: string) => void;
+  onDeleteRecord: (name: string, version: string) => void;
   onRetry: (name: string, version: string) => void;
   onViewLogs: (id: number) => void;
   onViewCleanup: (id: number) => void;
@@ -36,6 +36,13 @@ function getStatusTag(status: string, record: RuntimeEnvironment) {
           {record.progress_step && <span style={{ fontSize: 12, color: '#999' }}>{record.progress_step}</span>}
         </Space>
       );
+    case 'uninstalling':
+      return (
+        <Space direction="vertical" size={0}>
+          <Tag color="orange" icon={<SyncOutlined spin />}>卸载中</Tag>
+          {record.progress_step && <span style={{ fontSize: 12, color: '#999' }}>{record.progress_step}</span>}
+        </Space>
+      );
     case 'failed':
       return (
         <Space direction="vertical" size={0}>
@@ -43,6 +50,10 @@ function getStatusTag(status: string, record: RuntimeEnvironment) {
           {record.error_message && <span style={{ fontSize: 12, color: '#ff4d4f' }}>{record.error_message}</span>}
         </Space>
       );
+    case 'uninstall_failed':
+      // 不内联 error_message —— "卸载失败 (exit -1)，详见日志" 在表格里只是噪音，
+      // 用户想看真实原因点击 查看日志 即可。
+      return <Tag color="red">卸载失败</Tag>;
     default:
       return <Tag>{status}</Tag>;
   }
@@ -54,7 +65,7 @@ export default function RuntimeList({
   logsLoading,
   cleanupLoading,
   onSetDefault,
-  onUninstall,
+  onDeleteRecord,
   onRetry,
   onViewLogs,
   onViewCleanup,
@@ -140,7 +151,7 @@ export default function RuntimeList({
               </Button>
             </>
           )}
-          {record.status === 'installing' && (
+          {(record.status === 'installing' || record.status === 'uninstalling') && (
             <Button
               type="link"
               size="small"
@@ -149,6 +160,26 @@ export default function RuntimeList({
             >
               查看日志
             </Button>
+          )}
+          {record.status === 'uninstall_failed' && (
+            <>
+              <Button
+                type="link"
+                size="small"
+                onClick={() => onViewLogs(record.id)}
+                loading={logsLoading}
+              >
+                查看日志
+              </Button>
+              <Popconfirm
+                title="确定要删除此记录吗？"
+                onConfirm={() => onDeleteRecord(record.name, record.version)}
+              >
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </>
           )}
           {record.status === 'failed' && (
             <>
@@ -170,7 +201,7 @@ export default function RuntimeList({
               </Button>
               <Popconfirm
                 title="确定要删除此记录吗？"
-                onConfirm={() => onUninstall(record.name, record.version)}
+                onConfirm={() => onDeleteRecord(record.name, record.version)}
               >
                 <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                   删除

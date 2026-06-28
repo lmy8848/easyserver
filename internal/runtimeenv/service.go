@@ -1,12 +1,19 @@
 package runtimeenv
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
 
 	"easyserver/internal/envconfig"
 	"easyserver/internal/infra/executor"
@@ -183,16 +190,23 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version st
 	}
 
 	if err != nil {
-		errMsg := fmt.Sprintf("安装失败: %v", err)
+		// error_message is shown next to the logs panel; keep it short and point
+		// the user at the logs for detail (the install output is already there).
 		log.Printf("runtime: failed to install %s %s: %v", name, version, err)
-		s.repo.UpdateStatusToFailed(ctx, id, errMsg)
+		s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
 		return
 	}
 
-	// Update progress: configuring
-	s.updateProgress(ctx, id, 90, "configuring", "正在配置环境...")
+	// Show a brief configuring beat (appended, so install output is preserved).
+	s.appendProgress(ctx, id, 90, "configuring", "正在配置环境...")
 
-	// Update status
+	// Append the final log line BEFORE flipping status to 'installed'. Append (not
+	// overwrite) so the install command's full output is preserved in the log view.
+	// Order matters: if we wrote status first, the frontend polling could see
+	// status=installed (and stop) before the final log line lands.
+	s.appendProgress(ctx, id, 100, "done", "安装完成")
+
+	// Update status (sets progress=100, step='done' redundantly, leaves logs alone)
 	s.repo.UpdateStatusToInstalled(ctx, id, path)
 
 	// If this is the first version of this runtime, set as default
@@ -204,6 +218,143 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version st
 	log.Printf("runtime: installed %s %s at %s", name, version, path)
 }
 
+// runStreaming runs a command and streams its output to the database.
+// Prior logs in the row are captured up-front and prepended to every write, so
+// multi-stage installers (e.g. apt → yum fallback, nvm install → node install)
+// don't lose earlier command output. Assumes a single writer per id (one install
+// goroutine), which the Install entry point guarantees.
+func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step, initialMsg, name string, args ...string) (string, int, error) {
+	var prefix string
+	if _, _, cur, _, err := s.repo.GetProgress(ctx, id); err != nil {
+		log.Printf("runtime: runStreaming failed to read prior logs for id=%d: %v", id, err)
+	} else if cur != "" {
+		// Bound prefix growth: keep the tail (UTF-8 aware) when it gets too long,
+		// matching outputBuf's truncation policy so total DB logs stay roughly ≤ 1MB.
+		if len(cur) > 500000 {
+			targetStart := len(cur) - 400000
+			idx := strings.IndexByte(cur[targetStart:], '\n')
+			if idx >= 0 {
+				idx++ // skip past the newline so the tail doesn't start with a blank line
+			} else {
+				// no newline found — advance to the next valid UTF-8 boundary
+				idx = 0
+				for idx < len(cur)-targetStart && !utf8.RuneStart(cur[targetStart+idx]) {
+					idx++
+				}
+			}
+			cur = "..." + cur[targetStart+idx:]
+		}
+		prefix = cur + "\n"
+	}
+
+	s.updateProgress(ctx, id, progress, step, prefix+initialMsg)
+
+	cmd := s.executor.Command(ctx, executor.StartOptions{}, name, args...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", -1, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", -1, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", -1, err
+	}
+
+	var outputBuf bytes.Buffer
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var changed bool
+
+	writeFn := func(r io.Reader) {
+		defer wg.Done()
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := r.Read(buf)
+			if n > 0 {
+				mu.Lock()
+				outputBuf.Write(buf[:n])
+				changed = true
+				// truncate buffer to avoid OOM, leave roughly 100KB headroom
+				if outputBuf.Len() > 500000 {
+					b := outputBuf.Bytes()
+					targetStart := len(b) - 400000
+					// Find the first newline after targetStart to avoid breaking UTF-8 chars
+					idx := bytes.IndexByte(b[targetStart:], '\n')
+					if idx == -1 {
+						idx = 0 // if no newline, find first valid UTF-8 boundary
+						for idx < len(b)-targetStart && !utf8.RuneStart(b[targetStart+idx]) {
+							idx++
+						}
+					}
+
+					prefix := []byte("...")
+					remain := b[targetStart+idx:]
+					remainLen := len(remain)
+
+					// Use copy to avoid allocation
+					copy(b[len(prefix):], remain)
+					copy(b[:len(prefix)], prefix)
+					outputBuf.Truncate(len(prefix) + remainLen)
+				}
+				mu.Unlock()
+			}
+			if err != nil {
+				break
+			}
+		}
+	}
+
+	wg.Add(2)
+	go writeFn(stdout)
+	go writeFn(stderr)
+
+	errChan := make(chan error, 1)
+	go func() {
+		wg.Wait()
+		errChan <- cmd.Wait()
+	}()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			mu.Lock()
+			hasChanged := changed
+			changed = false
+			var currentLog string
+			if hasChanged {
+				currentLog = outputBuf.String()
+			}
+			mu.Unlock()
+			if hasChanged && currentLog != "" {
+				s.updateProgress(ctx, id, progress, step, prefix+initialMsg+"\n"+currentLog)
+			}
+		case err := <-errChan:
+			mu.Lock()
+			finalOutput := outputBuf.String()
+			mu.Unlock()
+			if finalOutput != "" {
+				s.updateProgress(ctx, id, progress, step, prefix+initialMsg+"\n"+finalOutput)
+			}
+			exitCode := 0
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					exitCode = exitErr.ExitCode()
+				} else {
+					exitCode = -1
+				}
+			}
+			return finalOutput, exitCode, err
+		}
+	}
+}
+
 // updateProgress updates the installation progress
 func (s *Service) updateProgress(ctx context.Context, id int64, progress int, step, logs string) {
 	// Sanitize logs to remove sensitive information
@@ -211,22 +362,49 @@ func (s *Service) updateProgress(ctx context.Context, id int64, progress int, st
 	s.repo.UpdateProgress(ctx, id, progress, step, sanitizedLogs)
 }
 
+// appendProgress updates progress/step and appends a line to the existing logs
+// instead of overwriting them, so the install command's full output is preserved.
+// Caller must guarantee no concurrent writer on the same id (runStreaming has returned).
+func (s *Service) appendProgress(ctx context.Context, id int64, progress int, step, line string) {
+	_, _, cur, _, err := s.repo.GetProgress(ctx, id)
+	if err != nil {
+		// Reading logs failed — don't blow away whatever is there. The status update
+		// that follows will still mark the runtime as installed; the user just won't
+		// see the final "安装完成" line.
+		log.Printf("runtime: appendProgress failed to read current logs for id=%d: %v", id, err)
+		return
+	}
+	if cur == "" {
+		s.updateProgress(ctx, id, progress, step, line)
+		return
+	}
+	s.updateProgress(ctx, id, progress, step, cur+"\n"+line)
+}
+
+// sensitivePatterns matches lines that look like actual secrets, not just any word match
+var sensitivePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)password\s*[:=]\s*\S`),
+	regexp.MustCompile(`(?i)secret\s*[:=]\s*\S`),
+	regexp.MustCompile(`(?i)api[_-]?key\s*[:=]\s*\S`),
+	regexp.MustCompile(`(?i)access[_-]?token\s*[:=]\s*\S`),
+	regexp.MustCompile(`(?i)credential\s*[:=]\s*\S`),
+}
+
 // sanitizeLogs removes sensitive information from logs
 func sanitizeLogs(logs string) string {
-	// Remove potential password/key patterns
 	lines := strings.Split(logs, "\n")
 	var sanitized []string
 	for _, line := range lines {
-		// Skip lines that might contain sensitive data
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "password") ||
-			strings.Contains(lower, "secret") ||
-			strings.Contains(lower, "token") ||
-			strings.Contains(lower, "key") ||
-			strings.Contains(lower, "credential") {
-			continue
+		isSensitive := false
+		for _, pat := range sensitivePatterns {
+			if pat.MatchString(line) {
+				isSensitive = true
+				break
+			}
 		}
-		sanitized = append(sanitized, line)
+		if !isSensitive {
+			sanitized = append(sanitized, line)
+		}
 	}
 	return strings.Join(sanitized, "\n")
 }
@@ -264,21 +442,17 @@ func (s *Service) installJava(ctx context.Context, id int64, version string) (st
 		return "", fmt.Errorf("invalid version format: %s", version)
 	}
 
-	// Update progress: compiling
-	s.updateProgress(ctx, id, 30, "compiling", "正在安装 JDK...")
-
 	// Try apt first
-	output, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", fmt.Sprintf("openjdk-%s-jdk", version))
+	output, _, err := s.runStreaming(ctx, id, 30, "compiling", "正在安装 JDK (apt-get)...", "apt-get", "install", "-y", fmt.Sprintf("openjdk-%s-jdk", version))
 	if err == nil {
-		s.updateProgress(ctx, id, 70, "configuring", "JDK 安装完成，正在配置...")
+		s.appendProgress(ctx, id, 70, "configuring", "JDK 安装完成，正在配置...")
 		return fmt.Sprintf("/usr/lib/jvm/java-%s-openjdk-amd64", version), nil
 	}
 
-	// Try yum
-	s.updateProgress(ctx, id, 50, "compiling", "尝试使用 yum 安装...")
-	output, _, err = s.executor.RunCombined(ctx, "yum", "install", "-y", fmt.Sprintf("java-%s-openjdk-devel", version))
+	// Try yum (prior apt output is preserved by runStreaming's prefix capture)
+	output, _, err = s.runStreaming(ctx, id, 50, "compiling", "apt-get 安装失败，尝试使用 yum 安装 JDK...", "yum", "install", "-y", fmt.Sprintf("java-%s-openjdk-devel", version))
 	if err == nil {
-		s.updateProgress(ctx, id, 70, "configuring", "JDK 安装完成，正在配置...")
+		s.appendProgress(ctx, id, 70, "configuring", "JDK 安装完成，正在配置...")
 		return fmt.Sprintf("/usr/lib/jvm/java-%s-openjdk", version), nil
 	}
 
@@ -293,7 +467,7 @@ func (s *Service) installNode(ctx context.Context, id int64, version string) (st
 	}
 
 	// Update progress
-	s.updateProgress(ctx, id, 20, "compiling", "检查 nvm 安装状态...")
+	s.appendProgress(ctx, id, 20, "compiling", "检查 nvm 安装状态...")
 
 	// Check if nvm is installed
 	homeDir := os.Getenv("HOME")
@@ -306,20 +480,18 @@ func (s *Service) installNode(ctx context.Context, id int64, version string) (st
 		// Install nvm first
 		// SECURITY WARNING: Piping curl to bash is inherently risky (MITM, compromised CDN).
 		// For production, consider downloading the script first, verifying its checksum, then executing.
-		s.updateProgress(ctx, id, 30, "compiling", "正在安装 nvm...")
-		_, _, nvmErr := s.executor.RunCombined(ctx, "bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
+		output, _, nvmErr := s.runStreaming(ctx, id, 30, "compiling", "正在安装 nvm...", "bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
 		if nvmErr != nil {
-			return "", fmt.Errorf("failed to install nvm: %v", nvmErr)
+			return "", fmt.Errorf("failed to install nvm: %v\n%s", nvmErr, output)
 		}
 	}
 
 	// Install Node.js version (escape path to prevent injection)
-	s.updateProgress(ctx, id, 50, "compiling", fmt.Sprintf("正在安装 Node.js %s...", version))
 	safeNvmDir := shellEscape(nvmDir)
 	safeVersion := shellEscape(version)
-	output, _, err := s.executor.RunCombined(ctx, "bash", "-c", fmt.Sprintf("source %s/nvm.sh && nvm install %s", safeNvmDir, safeVersion))
+	output, _, err := s.runStreaming(ctx, id, 50, "compiling", fmt.Sprintf("正在安装 Node.js %s...", version), "bash", "-c", fmt.Sprintf("source %s/nvm.sh && nvm install %s", safeNvmDir, safeVersion))
 	if err != nil {
-		return "", fmt.Errorf("failed to install Node.js %s: %s", version, output)
+		return "", fmt.Errorf("failed to install Node.js %s: %s\n%s", version, err, output)
 	}
 
 	return fmt.Sprintf("%s/versions/node/v%s", nvmDir, version), nil
@@ -333,7 +505,7 @@ func (s *Service) installGo(ctx context.Context, id int64, version string) (stri
 	}
 
 	// Update progress
-	s.updateProgress(ctx, id, 30, "downloading", fmt.Sprintf("正在下载 Go %s...", version))
+	s.appendProgress(ctx, id, 30, "downloading", fmt.Sprintf("正在下载 Go %s...", version))
 
 	// Create installation directory under /opt
 	installDir := "/opt/go"
@@ -343,12 +515,11 @@ func (s *Service) installGo(ctx context.Context, id int64, version string) (stri
 
 	// Download and install Go
 	url := fmt.Sprintf("https://go.dev/dl/go%s.linux-amd64.tar.gz", version)
-	s.updateProgress(ctx, id, 50, "compiling", "正在解压安装...")
-	output, _, err := s.executor.RunCombined(ctx, "bash", "-c", fmt.Sprintf(
+	output, _, err := s.runStreaming(ctx, id, 50, "compiling", "正在解压安装 Go...", "bash", "-c", fmt.Sprintf(
 		"curl -L %s | tar -C %s -xzf -", url, installDir,
 	))
 	if err != nil {
-		return "", fmt.Errorf("failed to install Go %s: %s", version, output)
+		return "", fmt.Errorf("failed to install Go %s: %v\n%s", version, err, output)
 	}
 
 	return fmt.Sprintf("%s/go", installDir), nil
@@ -361,17 +532,14 @@ func (s *Service) installPython(ctx context.Context, id int64, version string) (
 		return "", fmt.Errorf("invalid version format: %s", version)
 	}
 
-	// Update progress
-	s.updateProgress(ctx, id, 30, "compiling", "正在安装 Python...")
-
 	// Try apt first
-	output, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", fmt.Sprintf("python%s", version))
+	output, _, err := s.runStreaming(ctx, id, 30, "compiling", "正在安装 Python (apt-get)...", "apt-get", "install", "-y", fmt.Sprintf("python%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/python%s", version), nil
 	}
 
-	// Try yum
-	output, _, err = s.executor.RunCombined(ctx, "yum", "install", "-y", fmt.Sprintf("python%s", version))
+	// Try yum (prior apt output is preserved by runStreaming's prefix capture)
+	output, _, err = s.runStreaming(ctx, id, 50, "compiling", "apt-get 安装失败，尝试使用 yum 安装 Python...", "yum", "install", "-y", fmt.Sprintf("python%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/python%s", version), nil
 	}
@@ -386,18 +554,14 @@ func (s *Service) installPHP(ctx context.Context, id int64, version string) (str
 		return "", fmt.Errorf("invalid version format: %s", version)
 	}
 
-	// Update progress
-	s.updateProgress(ctx, id, 30, "compiling", "正在安装 PHP...")
-
 	// Try apt first
-	output, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", fmt.Sprintf("php%s", version))
+	output, _, err := s.runStreaming(ctx, id, 30, "compiling", "正在安装 PHP (apt-get)...", "apt-get", "install", "-y", fmt.Sprintf("php%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/php%s", version), nil
 	}
 
-	// Try yum
-	s.updateProgress(ctx, id, 50, "compiling", "尝试使用 yum 安装...")
-	output, _, err = s.executor.RunCombined(ctx, "yum", "install", "-y", fmt.Sprintf("php%s", version))
+	// Try yum (prior apt output is preserved by runStreaming's prefix capture)
+	output, _, err = s.runStreaming(ctx, id, 50, "compiling", "apt-get 安装失败，尝试使用 yum 安装 PHP...", "yum", "install", "-y", fmt.Sprintf("php%s", version))
 	if err == nil {
 		return fmt.Sprintf("/usr/bin/php%s", version), nil
 	}
@@ -420,8 +584,17 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	}
 
 	// Don't allow uninstalling default version (but allow uninstalling failed installations)
-	if env.IsDefault && env.Status != "failed" {
+	if env.IsDefault && env.Status != "failed" && env.Status != "uninstall_failed" {
 		return fmt.Errorf("cannot uninstall default version, please set another version as default first")
+	}
+
+	// Failed installs never completed — nothing to apt-remove. Same for uninstall_failed:
+	// trying apt-remove again would just fail the same way. Just drop the row,
+	// otherwise the user's "删除" on a failed record runs a bogus uninstall pipeline
+	// that fails for the same reason the install did.
+	if env.Status == "failed" || env.Status == "uninstall_failed" {
+		s.cleanupRelatedData(ctx, env.ID)
+		return s.repo.Delete(ctx, env.ID)
 	}
 
 	// Mark as uninstalling
@@ -435,9 +608,14 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	// Uninstall in background, delete DB row only on success
 	go func() {
 		bgCtx := context.Background()
-		s.uninstallRuntime(bgCtx, env)
-		// Delete from database
-		s.repo.Delete(bgCtx, env.ID)
+		uninstallErr := s.uninstallRuntime(bgCtx, env)
+		if uninstallErr != nil {
+			log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, uninstallErr)
+			s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
+		} else {
+			// Delete from database on success
+			s.repo.Delete(bgCtx, env.ID)
+		}
 	}()
 
 	return nil
@@ -463,43 +641,51 @@ func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
 }
 
 // uninstallRuntime performs the actual uninstallation
-func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) {
+func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) error {
+	// Clear inherited install logs so the uninstall dialog starts clean — otherwise
+	// runStreaming's prefix capture would prepend the entire install history to every
+	// uninstall log write.
+	s.updateProgress(ctx, env.ID, 0, "uninstalling", "")
+	var exitCode int
 	var err error
 
 	switch env.Name {
 	case "java":
-		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", fmt.Sprintf("openjdk-%s-jdk", env.Version))
-		// Clean up Java-specific residuals
+		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 JDK %s...", env.Version), "apt-get", "remove", "-y", fmt.Sprintf("openjdk-%s-jdk", env.Version))
+		if err != nil || exitCode != 0 {
+			// Try yum fallback
+			_, exitCode, err = s.runStreaming(ctx, env.ID, 50, "uninstalling", fmt.Sprintf("尝试使用 yum 卸载 JDK %s...", env.Version), "yum", "remove", "-y", fmt.Sprintf("java-%s-openjdk-devel", env.Version))
+		}
 		s.cleanupJavaResiduals(env.Version)
 	case "node":
 		// Validate path before deletion - must be under user's home directory
 		if !isValidUninstallPath(env.Path) {
-			log.Printf("runtime: refusing to delete path outside home directory: %s", env.Path)
-			return
+			return fmt.Errorf("拒绝删除家目录以外的路径: %s", env.Path)
 		}
-		_, _, err = s.executor.RunCombined(ctx, "rm", "-rf", env.Path)
-		// Clean up Node.js-specific residuals
+		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在删除 Node.js %s 目录...", env.Version), "rm", "-rf", env.Path)
 		s.cleanupNodeResiduals(env.Version)
 	case "go":
-		// Go is installed via apt or official binary, use apt to remove
-		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", "golang-go")
-		// Clean up Go-specific residuals
+		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", "正在卸载 Go...", "apt-get", "remove", "-y", "golang-go")
 		s.cleanupGoResiduals()
 	case "python":
-		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", fmt.Sprintf("python%s", env.Version))
-		// Clean up Python-specific residuals
+		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 Python %s...", env.Version), "apt-get", "remove", "-y", fmt.Sprintf("python%s", env.Version))
 		s.cleanupPythonResiduals(env.Version)
 	case "php":
-		_, _, err = s.executor.RunCombined(ctx, "apt-get", "remove", "-y", fmt.Sprintf("php%s", env.Version))
-		// Clean up PHP-specific residuals
+		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 PHP %s...", env.Version), "apt-get", "remove", "-y", fmt.Sprintf("php%s", env.Version))
 		s.cleanupPHPResiduals(env.Version)
+	default:
+		return fmt.Errorf("不支持的运行环境: %s", env.Name)
 	}
 
 	if err != nil {
-		log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, err)
-	} else {
-		log.Printf("runtime: uninstalled %s %s", env.Name, env.Version)
+		// Keep error_message short — the logs panel already shows the full command
+		// output. Avoids the awkward dangling ": " when output is empty (e.g. yum
+		// binary missing → cmd.Start fails before any stdout).
+		return fmt.Errorf("卸载失败 (exit %d)，详见日志", exitCode)
 	}
+
+	log.Printf("runtime: uninstalled %s %s", env.Name, env.Version)
+	return nil
 }
 
 // cleanupJavaResiduals cleans up Java-specific residual files

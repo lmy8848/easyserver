@@ -42,6 +42,65 @@ export default function Runtime() {
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsData, setLogsData] = useState<LogsData | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const logsContainerRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll log <pre> to bottom when new content arrives, but only if the user
+  // is already near the bottom — otherwise we'd yank them away from what they're reading.
+  useEffect(() => {
+    const el = logsContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    if (nearBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [logsData?.logs]);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const pollLogs = async () => {
+      if (!active || !logsVisible || !logsData?.id) return;
+      try {
+        const res = await api.get(`/runtime/logs/${logsData.id}`);
+        if (!active) return;
+        const data = res.data.data;
+        setLogsData(data);
+        if (data?.status === 'installing' || data?.status === 'uninstalling') {
+          timer = setTimeout(pollLogs, 2000);
+        }
+      } catch (e: unknown) {
+        if (!active) return;
+        const code = (e as { code?: number })?.code;
+        // Backend returns code=40400 when the row is gone. Either uninstall succeeded
+        // and the record was deleted, or it was wiped out of band. Either way, stop polling.
+        if (code === 40400) {
+          if (logsData?.status === 'uninstalling') {
+            setLogsData(prev => prev && ({
+              ...prev,
+              status: 'uninstalled',
+              progress: 100,
+              progress_step: 'done',
+              logs: (prev.logs ? prev.logs + '\n' : '') + '卸载完成',
+            }));
+          }
+          return;
+        }
+        // Other errors: keep polling silently (pre-existing behavior)
+        timer = setTimeout(pollLogs, 2000);
+      }
+    };
+
+    if (logsVisible && logsData?.id && (logsData?.status === 'installing' || logsData?.status === 'uninstalling')) {
+      timer = setTimeout(pollLogs, 2000);
+    }
+
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logsVisible, logsData?.id, logsData?.status]);
 
   // --- Cleanup modal state ---
   const [cleanupVisible, setCleanupVisible] = useState(false);
@@ -75,10 +134,10 @@ export default function Runtime() {
     fetchEnvironments();
   }, []);
 
-  const installingEnvs = environments.filter(e => e.status === 'installing');
+  const inProgressEnvs = environments.filter(e => e.status === 'installing' || e.status === 'uninstalling');
 
   useEffect(() => {
-    if (installingEnvs.length === 0) {
+    if (inProgressEnvs.length === 0) {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
@@ -96,7 +155,7 @@ export default function Runtime() {
         pollIntervalRef.current = null;
       }
     };
-  }, [installingEnvs.length]);
+  }, [inProgressEnvs.length]);
 
   // ==================== Runtime list actions ====================
 
@@ -110,13 +169,13 @@ export default function Runtime() {
     }
   };
 
-  const handleUninstall = async (name: string, version: string) => {
+  const handleDeleteRecord = async (name: string, version: string) => {
     try {
       await api.post('/runtime/uninstall', { name, version });
-      message.success('卸载成功');
+      message.success('删除成功');
       fetchEnvironments();
     } catch (error: any) {
-      message.error(error.message || '卸载失败');
+      message.error(error.message || '删除失败');
     }
   };
 
@@ -209,18 +268,20 @@ export default function Runtime() {
     }
   };
 
-  const handleAliasClick = async (alias: string) => {
-    if (!selectedRuntime) return;
+  const handleAliasClick = async (alias: string): Promise<string | undefined> => {
+    if (!selectedRuntime) return undefined;
 
     try {
       const res = await api.get(`/runtime-versions/${selectedRuntime}/resolve/${alias}`);
       const resolved = res.data.data?.resolved;
       if (resolved) {
         message.success(`别名 "${alias}" 解析为版本 ${resolved}`);
+        return resolved;
       }
     } catch (error: any) {
       message.error(error.message || '别名解析失败');
     }
+    return undefined;
   };
 
   // ==================== Detect modal actions ====================
@@ -256,7 +317,14 @@ export default function Runtime() {
       setLogsData(res.data.data);
       setLogsVisible(true);
     } catch (error: any) {
-      message.error(error.message || '获取日志失败');
+      // Row may have been deleted between the click and the fetch (e.g. uninstall
+      // completed). Sync the list so the row disappears and tell the user.
+      if (error?.code === 40400) {
+        fetchEnvironments();
+        message.info('该记录已被移除');
+      } else {
+        message.error(error.message || '获取日志失败');
+      }
     } finally {
       setLogsLoading(false);
     }
@@ -434,7 +502,7 @@ export default function Runtime() {
           logsLoading={logsLoading}
           cleanupLoading={cleanupLoading}
           onSetDefault={handleSetDefault}
-          onUninstall={handleUninstall}
+          onDeleteRecord={handleDeleteRecord}
           onRetry={handleRetry}
           onViewLogs={handleViewLogs}
           onViewCleanup={handleViewCleanup}
@@ -474,7 +542,16 @@ export default function Runtime() {
 
       {/* Install logs modal */}
       <Modal
-        title="安装日志"
+        title={
+          // Identify the operation: explicit status first, then fall back to log content
+          // (status='failed' alone can't tell install-fail from uninstall-fail).
+          (logsData?.status === 'uninstalling'
+            || logsData?.status === 'uninstalled'
+            || logsData?.status === 'uninstall_failed'
+            || logsData?.logs?.includes('正在卸载'))
+            ? '卸载日志'
+            : '安装日志'
+        }
         open={logsVisible}
         onCancel={() => {
           setLogsVisible(false);
@@ -496,30 +573,51 @@ export default function Runtime() {
               <Space>
                 <span><strong>运行环境:</strong> {logsData.name}</span>
                 <span><strong>版本:</strong> {logsData.version}</span>
-                <Tag color={logsData.status === 'installed' ? 'green' : logsData.status === 'failed' ? 'red' : 'blue'}>
-                  {logsData.status === 'installed' ? '已安装' : logsData.status === 'failed' ? '安装失败' : '安装中'}
-                </Tag>
+                {(() => {
+                  const m: Record<string, { color: string; label: string }> = {
+                    installed: { color: 'green', label: '已安装' },
+                    installing: { color: 'blue', label: '安装中' },
+                    failed: { color: 'red', label: '安装失败' },
+                    uninstalling: { color: 'orange', label: '卸载中' },
+                    uninstalled: { color: 'default', label: '已卸载' },
+                    uninstall_failed: { color: 'red', label: '卸载失败' },
+                  };
+                  const { color, label } = m[logsData.status] ?? { color: 'default', label: logsData.status };
+                  return <Tag color={color}>{label}</Tag>;
+                })()}
               </Space>
             </div>
             {logsData.progress > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <strong>进度:</strong>
-                <Progress percent={logsData.progress} status={logsData.status === 'failed' ? 'exception' : 'active'} />
+                <Progress
+                  percent={logsData.progress}
+                  status={
+                    logsData.status === 'failed' || logsData.status === 'uninstall_failed'
+                      ? 'exception'
+                      : logsData.status === 'installed' || logsData.status === 'uninstalled'
+                        ? 'success'
+                        : 'active'
+                  }
+                />
                 {logsData.progress_step && <span style={{ color: '#999' }}>{logsData.progress_step}</span>}
               </div>
             )}
             {logsData.logs && (
               <div style={{ marginBottom: 16 }}>
                 <strong>日志:</strong>
-                <pre style={{
-                  background: '#f5f5f5',
-                  padding: 16,
-                  borderRadius: 4,
-                  maxHeight: 300,
-                  overflow: 'auto',
-                  fontSize: 12,
-                  fontFamily: 'Consolas, Monaco, monospace',
-                }}>
+                <pre
+                  ref={logsContainerRef}
+                  style={{
+                    background: '#f5f5f5',
+                    padding: 16,
+                    borderRadius: 4,
+                    maxHeight: 300,
+                    overflow: 'auto',
+                    fontSize: 12,
+                    fontFamily: 'Consolas, Monaco, monospace',
+                  }}
+                >
                   {logsData.logs}
                 </pre>
               </div>
