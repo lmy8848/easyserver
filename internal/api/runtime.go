@@ -321,6 +321,66 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	})
 }
 
+// ListMirrors
+func (h *RuntimeHandler) ListMirrors(c *gin.Context) {
+	mirrors, err := h.runtimeService.ListMirrors(c.Request.Context())
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	Success(c, gin.H{"mirrors": mirrors})
+}
+
+// UpdateMirror
+func (h *RuntimeHandler) UpdateMirror(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	var req runtimeenv.RuntimeMirrorUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的请求"))
+		return
+	}
+
+	if err := h.runtimeService.UpdateMirror(c.Request.Context(), &req, id); err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	Success(c, gin.H{"message": "修改成功"})
+}
+
+// CreateMirror
+func (h *RuntimeHandler) CreateMirror(c *gin.Context) {
+	var req runtimeenv.RuntimeMirrorCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+	id, err := h.runtimeService.CreateMirror(c.Request.Context(), &req)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	Success(c, gin.H{"id": id, "message": "创建成功"})
+}
+
+// DeleteMirror
+func (h *RuntimeHandler) DeleteMirror(c *gin.Context) {
+	idStr := c.Param("id")
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	if err := h.runtimeService.DeleteMirror(c.Request.Context(), id); err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	Success(c, gin.H{"message": "删除成功"})
+}
 func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeenv.VersionService, packageService *packagemanager.Service) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
@@ -336,6 +396,10 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
 	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
+	protected.GET("/runtime/mirrors", runtimeHandler.ListMirrors)
+	protected.PUT("/runtime/mirrors/:id", runtimeHandler.UpdateMirror)
+	protected.POST("/runtime/mirrors", runtimeHandler.CreateMirror)
+	protected.DELETE("/runtime/mirrors/:id", runtimeHandler.DeleteMirror)
 
 	// Runtime version management
 	runtimeVersionHandler := NewRuntimeVersionHandler(runtimeVersionService)
@@ -354,6 +418,7 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
 	protected.POST("/packages/update", packageHandler.UpdatePackage)
 }
+
 // GetCatalog returns the catalog of supported runtimes
 func (h *RuntimeHandler) GetCatalog(c *gin.Context) {
 	Success(c, gin.H{

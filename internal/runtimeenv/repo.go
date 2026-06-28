@@ -49,4 +49,14 @@ type Repository interface {
 	InitRuntimeVersionsTable(ctx context.Context) error
 	ListRuntimeVersions(ctx context.Context, name string) ([]RuntimeVersion, error)
 	UpsertRuntimeVersion(ctx context.Context, name, version string, lts bool, stable bool) error
+
+	// Mirrors
+	CountMirrors(ctx context.Context) (int, error)
+	SeedMirrors(ctx context.Context, mirrors []RuntimeMirror) error
+	ListMirrors(ctx context.Context) ([]RuntimeMirror, error)
+	GetMirror(ctx context.Context, id int64) (*RuntimeMirror, error)
+	UpdateMirror(ctx context.Context, id int64, envValue string, enabled int) error
+	CreateMirror(ctx context.Context, mirror *RuntimeMirror) (int64, error)
+	DisableOtherMirrors(ctx context.Context, envKey string, excludeID int64) error
+	DeleteMirror(ctx context.Context, id int64) error
 }

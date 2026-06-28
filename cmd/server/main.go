@@ -247,6 +247,10 @@ func main() {
 	// Initialize runtime services (single shared instance)
 	runtimeRepo := runtimeenv.NewSQLiteRepository(db)
 	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec)
+	if err := runtimeService.InitMirrors(context.Background()); err != nil {
+		log.Printf("ERROR: Failed to seed mirrors: %v", err)
+	}
+
 	runtimeVersionService := runtimeenv.NewVersionService(runtimeRepo)
 	packageRepo := packagemanager.NewSQLiteRepository(db)
 	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)

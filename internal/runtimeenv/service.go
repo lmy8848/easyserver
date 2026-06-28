@@ -31,6 +31,39 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 	}
 }
 
+// InitMirrors initializes the default mirrors if the table is empty
+func (s *Service) InitMirrors(ctx context.Context) error {
+	count, err := s.repo.CountMirrors(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	mirrors := []RuntimeMirror{
+		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node/", Enabled: 1, Source: "seed"},
+		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist/", Enabled: 0, Source: "seed"},
+		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", Enabled: 0, Source: "seed"},
+		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang/", Enabled: 1, Source: "seed"},
+		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl/", Enabled: 0, Source: "seed"},
+		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang/", Enabled: 0, Source: "seed"},
+	}
+
+	err = s.repo.SeedMirrors(ctx, mirrors)
+	if err != nil {
+		return err
+	}
+
+	// Generate config after seeding
+	if err := s.GenerateMiseConfig(ctx); err != nil {
+		log.Printf("runtime: failed to generate config after seeding mirrors: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // ListAll returns all installed runtime environments
 func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 	if ctx == nil {
@@ -1020,4 +1053,98 @@ func contains(slice []string, item string) bool {
 // shellEscape escapes a string for safe use in shell commands.
 func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// ListMirrors returns all mirrors
+func (s *Service) ListMirrors(ctx context.Context) ([]RuntimeMirror, error) {
+	return s.repo.ListMirrors(ctx)
+}
+
+// UpdateMirror updates a mirror
+func (s *Service) UpdateMirror(ctx context.Context, req *RuntimeMirrorUpdateRequest, id int64) error {
+	m, err := s.repo.GetMirror(ctx, id)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return fmt.Errorf("mirror not found")
+	}
+
+	newEnvValue := m.EnvValue
+	if req.EnvValue != nil {
+		if m.Source == "seed" && *req.EnvValue != m.EnvValue {
+			return fmt.Errorf("cannot modify seed mirror URL")
+		}
+		newEnvValue = *req.EnvValue
+	}
+	newEnabled := m.Enabled
+	if req.Enabled != nil {
+		newEnabled = *req.Enabled
+	}
+
+	// If enabling, disable others with same EnvKey
+	if newEnabled == 1 {
+		err := s.repo.DisableOtherMirrors(ctx, m.EnvKey, id)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = s.repo.UpdateMirror(ctx, id, newEnvValue, newEnabled)
+	if err != nil {
+		return err
+	}
+
+	return s.GenerateMiseConfig(ctx)
+}
+
+// CreateMirror creates a user mirror
+func (s *Service) CreateMirror(ctx context.Context, req *RuntimeMirrorCreateRequest) (int64, error) {
+	enabled := 1
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	m := &RuntimeMirror{
+		Lang:     req.Lang,
+		EnvKey:   req.EnvKey,
+		EnvValue: req.EnvValue,
+		Enabled:  enabled,
+		Source:   "user",
+	}
+	id, err := s.repo.CreateMirror(ctx, m)
+	if err != nil {
+		return 0, err
+	}
+
+	// If enabling, disable others
+	if enabled == 1 {
+		err := s.repo.DisableOtherMirrors(ctx, m.EnvKey, id)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	s.GenerateMiseConfig(ctx)
+	return id, nil
+}
+
+// DeleteMirror deletes a mirror
+func (s *Service) DeleteMirror(ctx context.Context, id int64) error {
+	m, err := s.repo.GetMirror(ctx, id)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return fmt.Errorf("mirror not found")
+	}
+	if m.Source == "seed" {
+		return fmt.Errorf("cannot delete seed mirror")
+	}
+
+	err = s.repo.DeleteMirror(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	return s.GenerateMiseConfig(ctx)
 }

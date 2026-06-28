@@ -48,6 +48,8 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 	}
 	sort.Strings(upFiles)
 
+	isFreshInstall := len(applied) == 0
+
 	// Run pending migrations
 	for _, name := range upFiles {
 		version := extractVersion(name)
@@ -55,8 +57,15 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 			continue
 		}
 
+		var hook func(*sql.Tx) error
+		if version == 6 && !isFreshInstall {
+			hook = func(tx *sql.Tx) error {
+				return performHardCutoverBackup(tx, db, migrationsDir)
+			}
+		}
+
 		log.Printf("migrate: running migration %s", name)
-		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name); err != nil {
+		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name, hook); err != nil {
 			return fmt.Errorf("run migration %s: %w", name, err)
 		}
 		log.Printf("migrate: applied %s", name)
@@ -106,7 +115,7 @@ func stripLeadingComments(stmt string) string {
 }
 
 // runMigration executes a single migration file
-func runMigration(db *sql.DB, path string, version int, name string) error {
+func runMigration(db *sql.DB, path string, version int, name string, preTxHook func(*sql.Tx) error) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -120,6 +129,12 @@ func runMigration(db *sql.DB, path string, version int, name string) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	if preTxHook != nil {
+		if err := preTxHook(tx); err != nil {
+			return err
+		}
+	}
 
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
