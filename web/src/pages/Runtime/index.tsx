@@ -15,7 +15,6 @@ import type {
   PackageSearchResult,
   LogsData,
   CleanupData,
-  Dependencies,
   CatalogEntry,
 } from './types';
 
@@ -35,12 +34,10 @@ export default function Runtime() {
 
   // --- Install modal state ---
   const [installVisible, setInstallVisible] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [availableVersions, setAvailableVersions] = useState<VersionInfo[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
-  const [aliasSuggestions, setAliasSuggestions] = useState<string[]>([]);
-  const [dependencies, setDependencies] = useState<Dependencies | null>(null);
-  const [depsLoading, setDepsLoading] = useState(false);
 
   // --- Detect modal state ---
   const [detectVisible, setDetectVisible] = useState(false);
@@ -231,39 +228,43 @@ export default function Runtime() {
   // ==================== Install modal actions ====================
 
   const handleInstall = async (values: { name: string; version: string }) => {
+    setInstalling(true);
     try {
       await api.post('/runtime/install', values);
       message.success('安装已开始，请稍候...');
       setInstallVisible(false);
       setSelectedRuntime('');
       setAvailableVersions([]);
-      setAliasSuggestions([]);
-      setDependencies(null);
       fetchEnvironments();
     } catch (error: any) {
       message.error(error.message || '安装失败');
+    } finally {
+      setInstalling(false);
     }
   };
 
-  const fetchVersions = async (runtimeName: string, forceRefresh = false) => {
+  // fetchVersions now hits a single endpoint that calls `mise ls-remote` directly.
+  // We mark installed/is_default by joining against the local environments list
+  // — startsWith catches the case where remote lists "20" but local has "20.11.0".
+  const fetchVersions = async (runtimeName: string) => {
     setVersionsLoading(true);
     try {
-      let versions: VersionInfo[] = [];
-
-      if (!forceRefresh) {
-        const cacheRes = await api.get(`/runtime-versions/${runtimeName}`);
-        versions = cacheRes.data.data?.versions || [];
-      }
-
-      if (!versions || versions.length === 0 || forceRefresh) {
-        const fetchRes = await api.post(`/runtime-versions/${runtimeName}/fetch`);
-        versions = fetchRes.data.data?.versions || [];
-      }
-
+      const res = await api.get(`/runtime/${runtimeName}/remote-versions`);
+      const raw: string[] = res.data.data?.versions || [];
+      const localForLang = environments.filter(e => e.name === runtimeName);
+      const versions: VersionInfo[] = raw.map(v => {
+        const match = localForLang.find(e => e.version === v || e.version.startsWith(v + '.'));
+        return {
+          version: v,
+          installed: !!match,
+          is_default: !!match?.is_default,
+        };
+      });
       setAvailableVersions(versions);
     } catch (error: any) {
       console.error('Failed to fetch versions:', error);
       setAvailableVersions([]);
+      message.error(error?.message || '获取版本列表失败');
     } finally {
       setVersionsLoading(false);
     }
@@ -272,54 +273,7 @@ export default function Runtime() {
   const handleRuntimeChange = (value: string) => {
     setSelectedRuntime(value);
     setAvailableVersions([]);
-    setAliasSuggestions([]);
-    setDependencies(null);
     fetchVersions(value);
-    checkDependencies(value);
-    fetchAliasSuggestions(value);
-  };
-
-  const checkDependencies = async (runtimeName: string) => {
-    setDepsLoading(true);
-    try {
-      const res = await api.get(`/runtime/check-deps/${runtimeName}`);
-      setDependencies({
-        installed: res.data.data?.installed || [],
-        missing: res.data.data?.missing || [],
-        optional: res.data.data?.optional || [],
-      });
-    } catch (error: any) {
-      console.error('Failed to check dependencies:', error);
-      setDependencies(null);
-    } finally {
-      setDepsLoading(false);
-    }
-  };
-
-  const fetchAliasSuggestions = async (runtimeName: string) => {
-    try {
-      const res = await api.get(`/runtime-versions/${runtimeName}/suggestions`);
-      setAliasSuggestions(res.data.data?.suggestions || []);
-    } catch (error: any) {
-      console.error('Failed to fetch alias suggestions:', error);
-      setAliasSuggestions([]);
-    }
-  };
-
-  const handleAliasClick = async (alias: string): Promise<string | undefined> => {
-    if (!selectedRuntime) return undefined;
-
-    try {
-      const res = await api.get(`/runtime-versions/${selectedRuntime}/resolve/${alias}`);
-      const resolved = res.data.data?.resolved;
-      if (resolved) {
-        message.success(`别名 "${alias}" 解析为版本 ${resolved}`);
-        return resolved;
-      }
-    } catch (error: any) {
-      message.error(error.message || '别名解析失败');
-    }
-    return undefined;
   };
 
   // ==================== Detect modal actions ====================
@@ -570,20 +524,15 @@ export default function Runtime() {
           setInstallVisible(false);
           setSelectedRuntime('');
           setAvailableVersions([]);
-          setAliasSuggestions([]);
-          setDependencies(null);
         }}
         selectedRuntime={selectedRuntime}
         versionsLoading={versionsLoading}
         availableVersions={availableVersions}
-        aliasSuggestions={aliasSuggestions}
-        dependencies={dependencies}
-        depsLoading={depsLoading}
         catalog={catalog}
         onInstall={handleInstall}
+        installing={installing}
         onRuntimeChange={handleRuntimeChange}
         onRefreshVersions={fetchVersions}
-        onAliasClick={handleAliasClick}
       />
 
       {/* Detect environment modal */}

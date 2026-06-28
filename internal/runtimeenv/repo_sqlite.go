@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"easyserver/internal/envconfig"
 )
@@ -184,9 +183,9 @@ func (r *sqliteRepo) HasDefault(ctx context.Context, name string) (bool, error) 
 }
 
 // Create inserts a new runtime environment and returns its ID
-func (r *sqliteRepo) Create(ctx context.Context, lang, version, exact, status string) (int64, error) {
+func (r *sqliteRepo) Create(ctx context.Context, lang, major, exact, status string) (int64, error) {
 	result, err := r.db.ExecContext(ctx,
-		"INSERT INTO runtime_version (lang, version, exact, status) VALUES (?, ?, ?, ?)", lang, version, exact, status,
+		"INSERT INTO runtime_version (lang, major, exact, status) VALUES (?, ?, ?, ?)", lang, major, exact, status,
 	)
 	if err != nil {
 		return 0, err
@@ -384,66 +383,6 @@ func (r *sqliteRepo) ListPathEntriesByRuntimeID(ctx context.Context, runtimeID i
 	}
 
 	return entries, nil
-}
-
-// InitRuntimeVersionsTable creates the runtime_versions table and index (deprecated, handled by migrations)
-func (r *sqliteRepo) InitRuntimeVersionsTable(ctx context.Context) error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS runtime_versions (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			version TEXT NOT NULL,
-			lts INTEGER DEFAULT 0,
-			stable INTEGER DEFAULT 1,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(name, version)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_runtime_versions_name ON runtime_versions(name)`,
-	}
-	for _, q := range queries {
-		if _, err := r.db.ExecContext(ctx, q); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ListRuntimeVersions returns all cached versions for a runtime name
-func (r *sqliteRepo) ListRuntimeVersions(ctx context.Context, name string) ([]RuntimeVersion, error) {
-	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, version, lts, stable, updated_at FROM runtime_versions WHERE name = ? ORDER BY version DESC",
-		name,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var versions []RuntimeVersion
-	for rows.Next() {
-		var v RuntimeVersion
-		var lts, stable int
-		err := rows.Scan(&v.ID, &v.Name, &v.Version, &lts, &stable, &v.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		v.LTS = lts != 0
-		v.Stable = stable != 0
-		versions = append(versions, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-	return versions, nil
-}
-
-// UpsertRuntimeVersion inserts or replaces a cached runtime version
-func (r *sqliteRepo) UpsertRuntimeVersion(ctx context.Context, name, version string, lts, stable bool) error {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO runtime_versions (name, version, lts, stable, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		name, version, lts, stable, time.Now(),
-	)
-	return err
 }
 
 // CountMirrors returns the total number of mirrors

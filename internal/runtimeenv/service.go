@@ -105,78 +105,6 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, e
 	return s.repo.GetByID(ctx, id)
 }
 
-// DependencyGroup represents a group of dependencies where at least one is required
-type DependencyGroup struct {
-	Name     string   // Display name
-	Commands []string // At least one of these must be available
-	Required bool     // If true, at least one must be available
-}
-
-// CheckDependencies checks if all required dependencies are installed
-func (s *Service) CheckDependencies(ctx context.Context, name string) ([]string, []string, []string, error) {
-	groups := getDependencyGroups(name)
-
-	var installed []string
-	var missing []string
-	var optional []string
-
-	for _, group := range groups {
-		found := false
-		for _, cmd := range group.Commands {
-			if s.isCommandAvailable(cmd) {
-				installed = append(installed, cmd)
-				found = true
-				break
-			}
-		}
-		if !found {
-			if group.Required {
-				missing = append(missing, group.Name)
-			} else {
-				optional = append(optional, group.Name)
-			}
-		}
-	}
-
-	return installed, missing, optional, nil
-}
-
-// getDependencyGroups returns the dependency groups for a runtime
-func getDependencyGroups(name string) []DependencyGroup {
-	switch name {
-	case "java":
-		return []DependencyGroup{
-			{Name: "包管理器 (apt-get 或 yum)", Commands: []string{"apt-get", "yum"}, Required: true},
-		}
-	case "node":
-		return []DependencyGroup{
-			{Name: "curl", Commands: []string{"curl"}, Required: true},
-			{Name: "bash", Commands: []string{"bash"}, Required: true},
-		}
-	case "go":
-		return []DependencyGroup{
-			{Name: "curl", Commands: []string{"curl"}, Required: true},
-			{Name: "tar", Commands: []string{"tar"}, Required: true},
-		}
-	case "python":
-		return []DependencyGroup{
-			{Name: "包管理器 (apt-get 或 yum)", Commands: []string{"apt-get", "yum"}, Required: true},
-		}
-	case "php":
-		return []DependencyGroup{
-			{Name: "包管理器 (apt-get 或 yum)", Commands: []string{"apt-get", "yum"}, Required: true},
-		}
-	default:
-		return []DependencyGroup{}
-	}
-}
-
-// isCommandAvailable checks if a command is available in PATH
-func (s *Service) isCommandAvailable(name string) bool {
-	_, err := s.executor.LookPath(name)
-	return err == nil
-}
-
 // Install installs a runtime environment
 func (s *Service) Install(ctx context.Context, name, version string) error {
 	if ctx == nil {
@@ -198,10 +126,14 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 	}
 
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "latest", fmt.Sprintf("%s@%s", miseTool, version))
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise")
-	out, err := cmd.CombinedOutput()
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
+	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("failed to resolve exact version for %s@%s: %v, output: %s", name, version, err, string(out))
+		var stderr string
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = string(exitErr.Stderr)
+		}
+		return fmt.Errorf("failed to resolve exact version for %s@%s: %v, stderr: %s", name, version, err, stderr)
 	}
 	outLines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	exactVersion := strings.TrimSpace(outLines[len(outLines)-1])
@@ -243,7 +175,6 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 // installRuntime performs the actual installation
 func (s *Service) installRuntime(ctx context.Context, id int64, name, version, exactVersion, miseTool string) {
 	defer s.installLocks.Delete(name + "@" + exactVersion)
-	s.updateProgress(ctx, id, 10, "downloading", fmt.Sprintf("正在下载 %s %s...", name, exactVersion))
 
 	target := fmt.Sprintf("%s@%s", miseTool, exactVersion)
 	output, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), "/usr/local/bin/mise", "install", "-y", target)
@@ -301,6 +232,7 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 	s.updateProgress(ctx, id, progress, step, prefix+initialMsg)
 
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, name, args...)
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -461,18 +393,19 @@ func sanitizeLogs(logs string) string {
 }
 
 // isValidVersion validates version string to prevent command injection
-// Only allows numbers, dots, and hyphens (e.g., 17.0.19, 20.10.0, 1.21.5-beta)
+// Only allows numbers, letters, dots, hyphens, plus, and underscores (e.g., 17.0.19, 20.10.0, 1.21.5-beta, 21.0.1+12-LTS, temurin-21.0.1)
 func isValidVersion(version string) bool {
 	if len(version) == 0 || len(version) > 50 {
 		return false
 	}
 	for _, c := range version {
-		if !((c >= '0' && c <= '9') || c == '.' || c == '-') {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '-' || c == '+' || c == '_') {
 			return false
 		}
 	}
-	// Must start with a digit
-	if version[0] < '0' || version[0] > '9' {
+	// Must start with a digit or a letter
+	first := version[0]
+	if !((first >= '0' && first <= '9') || (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')) {
 		return false
 	}
 	return true
@@ -638,10 +571,14 @@ func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string,
 	}
 
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "ls-remote", miseTool)
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise")
-	out, err := cmd.CombinedOutput()
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch remote versions: %v, output: %s", err, string(out))
+		var stderr string
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = string(exitErr.Stderr)
+		}
+		return nil, fmt.Errorf("failed to fetch remote versions: %v, stderr: %s", err, stderr)
 	}
 
 	lines := strings.Split(string(out), "\n")

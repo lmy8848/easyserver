@@ -251,7 +251,6 @@ func main() {
 		log.Printf("ERROR: Failed to seed mirrors: %v", err)
 	}
 
-	runtimeVersionService := runtimeenv.NewVersionService(runtimeRepo)
 	packageRepo := packagemanager.NewSQLiteRepository(db)
 	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)
 
@@ -349,7 +348,6 @@ func main() {
 
 		// Runtime services
 		RuntimeService:        runtimeService,
-		RuntimeVersionService: runtimeVersionService,
 		PackageManagerService: packageManagerService,
 
 		// SSH service

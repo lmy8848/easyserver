@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal, Form, Select, Input, Button, Space, Tag, message } from 'antd';
-import { SyncOutlined, LoadingOutlined } from '@ant-design/icons';
-import type { VersionInfo, Dependencies, CatalogEntry } from './types';
+import { SyncOutlined } from '@ant-design/icons';
+import type { VersionInfo, CatalogEntry } from './types';
 
 interface VersionListProps {
   visible: boolean;
@@ -9,14 +9,18 @@ interface VersionListProps {
   selectedRuntime: string;
   versionsLoading: boolean;
   availableVersions: VersionInfo[];
-  aliasSuggestions: string[];
-  dependencies: Dependencies | null;
-  depsLoading: boolean;
   catalog: CatalogEntry[];
+  installing: boolean;
   onInstall: (values: { name: string; version: string }) => void;
   onRuntimeChange: (value: string) => void;
-  onRefreshVersions: (runtimeName: string, forceRefresh?: boolean) => void;
-  onAliasClick: (alias: string) => Promise<string | void> | void;
+  onRefreshVersions: (runtimeName: string) => void;
+}
+
+// pickLatestForMajor returns the newest sub-version under `major`.
+// availableVersions comes from /runtime/:name/remote-versions sorted newest-first,
+// so the first prefix match wins. major like "20" / "3.12" / "1.24".
+function pickLatestForMajor(versions: VersionInfo[], major: string): VersionInfo | undefined {
+  return versions.find(v => v.version === major || v.version.startsWith(major + '.'));
 }
 
 export default function VersionList({
@@ -25,55 +29,50 @@ export default function VersionList({
   selectedRuntime,
   versionsLoading,
   availableVersions,
-  aliasSuggestions,
-  dependencies,
-  depsLoading,
   catalog,
+  installing,
   onInstall,
   onRuntimeChange,
   onRefreshVersions,
-  onAliasClick,
 }: VersionListProps) {
   const [form] = Form.useForm();
-  const [aliasLoading, setAliasLoading] = useState<string | null>(null);
+  const [majorLoading, setMajorLoading] = useState<string | null>(null);
 
   const handleClose = () => {
     onClose();
     form.resetFields();
   };
 
-  const handleAliasClickWrapper = async (alias: string) => {
-    if (aliasLoading) return;
-    setAliasLoading(alias);
-    const currentRuntime = form.getFieldValue('name');
+  const handleMajorClick = (major: string) => {
+    if (majorLoading) return;
+    setMajorLoading(major);
     try {
-      const resolved = await onAliasClick(alias);
-      if (form.getFieldValue('name') !== currentRuntime) return;
-      if (resolved) {
-        const targetVersion = availableVersions.find(v => v.version === resolved);
-        if (targetVersion?.installed) {
-          message.warning(`版本 ${resolved} 已安装`);
+      let versionToSet = major;
+      // 只有在加载完毕且有数据时，才进行严格的匹配和已装检测
+      if (!versionsLoading && availableVersions.length > 0) {
+        const target = pickLatestForMajor(availableVersions, major);
+        if (!target) {
+          message.warning(`未找到 ${major} 的可用版本，请刷新版本列表`);
           return;
         }
-        form.setFields([
-          {
-            name: 'version',
-            value: resolved,
-            errors: [],
-          }
-        ]);
-        form.validateFields(['version']).catch(() => {});
+        if (target.installed) {
+          message.warning(`版本 ${target.version} 已安装`);
+          return;
+        }
+        versionToSet = target.version;
       }
-    } catch (error) {
-      message.error('获取版本失败');
+
+      form.setFields([{ name: 'version', value: versionToSet, errors: [] }]);
+      form.validateFields(['version']).catch(() => {});
     } finally {
-      setAliasLoading(null);
+      setMajorLoading(null);
     }
   };
 
+  const currentMajors = catalog.find(c => c.lang === selectedRuntime)?.majors || [];
+
   const renderExtra = () => {
     if (!selectedRuntime) return null;
-    if (versionsLoading) return null;
 
     return (
       <div style={{ marginTop: 8 }}>
@@ -81,27 +80,41 @@ export default function VersionList({
           type="link"
           size="small"
           icon={<SyncOutlined />}
-          onClick={() => onRefreshVersions(selectedRuntime, true)}
+          onClick={() => onRefreshVersions(selectedRuntime)}
           loading={versionsLoading}
           style={{ padding: '0', marginBottom: 8 }}
         >
-          {availableVersions.length > 0 ? '刷新版本列表' : '从网络获取版本列表'}
+          刷新版本列表
         </Button>
-        {aliasSuggestions.length > 0 && (
+        {currentMajors.length > 0 && (
           <div>
-            <span style={{ fontSize: 12, color: '#999' }}>快速选择: </span>
+            <span style={{ fontSize: 12, color: '#999' }}>快速选择主版本（自动取最新子版本）: </span>
             <Space size={4} wrap>
-              {aliasSuggestions.map(alias => (
-                <Tag
-                  key={alias}
-                  color="blue"
-                  style={{ cursor: aliasLoading ? 'not-allowed' : 'pointer', opacity: aliasLoading && aliasLoading !== alias ? 0.5 : 1 }}
-                  icon={aliasLoading === alias ? <LoadingOutlined /> : null}
-                  onClick={() => handleAliasClickWrapper(alias)}
-                >
-                  {alias}
-                </Tag>
-              ))}
+              {currentMajors.map(major => {
+                let enabled = true;
+                let installed = false;
+                
+                // 如果远程版本已加载完，才做精确校验和置灰
+                if (!versionsLoading && availableVersions.length > 0) {
+                  const hit = pickLatestForMajor(availableVersions, major);
+                  enabled = !!hit && !hit.installed;
+                  installed = !!hit?.installed;
+                }
+
+                return (
+                  <Tag
+                    key={major}
+                    color={enabled ? 'blue' : 'default'}
+                    style={{
+                      cursor: enabled ? 'pointer' : 'not-allowed',
+                      opacity: enabled ? 1 : 0.45,
+                    }}
+                    onClick={() => enabled && handleMajorClick(major)}
+                  >
+                    {major}{installed ? '（已装）' : ''}
+                  </Tag>
+                );
+              })}
             </Space>
           </div>
         )}
@@ -115,6 +128,7 @@ export default function VersionList({
       open={visible}
       onCancel={handleClose}
       footer={null}
+      destroyOnHidden
     >
       <Form form={form} onFinish={onInstall} layout="vertical">
         <Form.Item
@@ -161,7 +175,6 @@ export default function VersionList({
                     <span>{v.version}</span>
                     {v.installed && <Tag color="green" style={{ fontSize: 10 }}>已安装</Tag>}
                     {v.is_default && <Tag color="blue" style={{ fontSize: 10 }}>默认</Tag>}
-                    {v.lts && <Tag color="orange" style={{ fontSize: 10 }}>LTS</Tag>}
                   </Space>
                 ),
                 value: v.version,
@@ -169,67 +182,19 @@ export default function VersionList({
               }))}
             />
           ) : selectedRuntime ? (
-            <Input placeholder="输入版本号或别名，例如：17、lts、latest" />
+            <Input placeholder="输入具体版本号，例如 20.11.0" />
           ) : (
             <Input placeholder="请先选择运行环境" disabled />
           )}
         </Form.Item>
-
-        {/* 依赖检测结果 */}
-        {selectedRuntime && (
-          <Form.Item label="依赖检测">
-            {depsLoading ? (
-              <Space>
-                <SyncOutlined spin />
-                <span>正在检测依赖...</span>
-              </Space>
-            ) : dependencies ? (
-              <div>
-                {dependencies.missing.length === 0 ? (
-                  <Tag color="green">所有必需依赖已满足</Tag>
-                ) : (
-                  <div>
-                    <Tag color="red">缺少必需依赖</Tag>
-                    <div style={{ marginTop: 8 }}>
-                      <span style={{ color: '#ff4d4f' }}>缺失: </span>
-                      {dependencies.missing.map(dep => (
-                        <Tag key={dep} color="red" style={{ marginBottom: 4 }}>{dep}</Tag>
-                      ))}
-                    </div>
-                    <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
-                      请先安装缺失的依赖后再安装运行环境
-                    </div>
-                  </div>
-                )}
-                {dependencies.installed.length > 0 && (
-                  <div style={{ marginTop: 4 }}>
-                    <span style={{ color: '#52c41a' }}>已安装: </span>
-                    {dependencies.installed.map(dep => (
-                      <Tag key={dep} color="green" style={{ marginBottom: 4 }}>{dep}</Tag>
-                    ))}
-                  </div>
-                )}
-                {dependencies.optional && dependencies.optional.length > 0 && (
-                  <div style={{ marginTop: 4 }}>
-                    <span style={{ color: '#faad14' }}>可选: </span>
-                    {dependencies.optional.map(dep => (
-                      <Tag key={dep} color="warning" style={{ marginBottom: 4 }}>{dep}</Tag>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <span style={{ color: '#999' }}>选择运行环境后自动检测</span>
-            )}
-          </Form.Item>
-        )}
 
         <Form.Item>
           <Button
             type="primary"
             htmlType="submit"
             block
-            disabled={depsLoading || versionsLoading || !!aliasLoading || (dependencies ? dependencies.missing.length > 0 : false)}
+            disabled={versionsLoading || !!majorLoading}
+            loading={installing}
           >
             开始安装
           </Button>

@@ -215,36 +215,6 @@ func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	})
 }
 
-// CheckDependencies checks if all required dependencies are installed
-func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
-	name := c.Param("name")
-	if name == "" {
-		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
-		return
-	}
-
-	// Validate runtime name
-	if !runtimeenv.IsSupported(name) {
-		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
-		return
-	}
-
-	installed, missing, optional, err := h.runtimeService.CheckDependencies(c.Request.Context(), name)
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-
-	allInstalled := len(missing) == 0
-
-	Success(c, gin.H{
-		"all_installed": allInstalled,
-		"installed":     installed,
-		"missing":       missing,
-		"optional":      optional,
-	})
-}
-
 // GetLogs returns the installation logs for a runtime environment
 func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 	idStr := c.Param("id")
@@ -412,10 +382,10 @@ func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
 		return
 	}
 
-	Success(c, versions)
+	Success(c, gin.H{"versions": versions})
 }
 
-func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeenv.VersionService, packageService *packagemanager.Service) {
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, packageService *packagemanager.Service) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)
@@ -427,7 +397,6 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.GET("/runtime/detect", runtimeHandler.Detect)
 	protected.POST("/runtime/import-detected", runtimeHandler.ImportDetected)
 	protected.GET("/runtime/progress/:id", runtimeHandler.GetProgress)
-	protected.GET("/runtime/check-deps/:name", runtimeHandler.CheckDependencies)
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
 	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
@@ -435,13 +404,6 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.PUT("/runtime/mirrors/:id", runtimeHandler.UpdateMirror)
 	protected.POST("/runtime/mirrors", runtimeHandler.CreateMirror)
 	protected.DELETE("/runtime/mirrors/:id", runtimeHandler.DeleteMirror)
-
-	// Runtime version management
-	runtimeVersionHandler := NewRuntimeVersionHandler(runtimeVersionService)
-	protected.GET("/runtime-versions/:name", runtimeVersionHandler.List)
-	protected.POST("/runtime-versions/:name/fetch", runtimeVersionHandler.Fetch)
-	protected.GET("/runtime-versions/:name/resolve/:alias", runtimeVersionHandler.ResolveAlias)
-	protected.GET("/runtime-versions/:name/suggestions", runtimeVersionHandler.GetAliasSuggestions)
 
 	// Package management
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)

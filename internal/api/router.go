@@ -73,7 +73,6 @@ type Router struct {
 
 	// Runtime services
 	runtimeService        *runtimeenv.Service
-	runtimeVersionService *runtimeenv.VersionService
 	packageManagerService *packagemanager.Service
 
 	// SSH service
@@ -131,7 +130,6 @@ type RouterDeps struct {
 
 	// Runtime services
 	RuntimeService        *runtimeenv.Service
-	RuntimeVersionService *runtimeenv.VersionService
 	PackageManagerService *packagemanager.Service
 
 	// SSH service
@@ -193,7 +191,6 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 
 		// Runtime services
 		runtimeService:        deps.RuntimeService,
-		runtimeVersionService: deps.RuntimeVersionService,
 		packageManagerService: deps.PackageManagerService,
 
 		// SSH service
@@ -278,7 +275,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerSystemRoutes(protected, r.executor)
 	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	registerDeployRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
-	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.runtimeVersionService, r.packageManagerService)
+	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
 	registerEnvRoutes(protected, r.envConfigService)
 	registerWebServerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService)
 	registerDatabaseRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)

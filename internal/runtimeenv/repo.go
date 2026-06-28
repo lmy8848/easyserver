@@ -47,11 +47,6 @@ type Repository interface {
 	ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error)
 	ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error)
 
-	// Runtime version cache
-	InitRuntimeVersionsTable(ctx context.Context) error
-	ListRuntimeVersions(ctx context.Context, name string) ([]RuntimeVersion, error)
-	UpsertRuntimeVersion(ctx context.Context, name, version string, lts bool, stable bool) error
-
 	// Mirrors
 	CountMirrors(ctx context.Context) (int, error)
 	SeedMirrors(ctx context.Context, mirrors []RuntimeMirror) error

@@ -18,8 +18,6 @@ export interface DetectedRuntime {
 
 export interface VersionInfo {
   version: string;
-  lts: boolean;
-  stable: boolean;
   installed: boolean;
   is_default: boolean;
 }
@@ -54,12 +52,6 @@ export interface CleanupData {
   };
   env_configs: Array<{ id: number; name: string; value: string }>;
   path_entries: Array<{ id: number; path: string }>;
-}
-
-export interface Dependencies {
-  installed: string[];
-  missing: string[];
-  optional: string[];
 }
 
 export interface PackageSearchResult {

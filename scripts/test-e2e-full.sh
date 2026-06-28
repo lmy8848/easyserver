@@ -258,23 +258,7 @@ phase_runtime() {
     resp=$(http_request "GET" "/api/runtime/detect")
     assert_ok "运行时" "Runtime" "检测系统运行时" "$resp"
 
-    # 3. 获取可用版本列表
-    resp=$(http_request "GET" "/api/runtime-versions/node")
-    assert_ok "运行时" "Runtime" "获取 Node.js 可用版本" "$resp"
-
-    # 4. 解析版本别名
-    resp=$(http_request "GET" "/api/runtime-versions/node/resolve/lts")
-    assert_ok "运行时" "Runtime" "解析 lts 别名" "$resp"
-
-    # 5. 获取别名建议
-    resp=$(http_request "GET" "/api/runtime-versions/node/suggestions")
-    assert_ok "运行时" "Runtime" "获取别名建议" "$resp"
-
-    # 6. 检查依赖
-    resp=$(http_request "GET" "/api/runtime/check-deps/node")
-    assert_ok "运行时" "Runtime" "检查 node 依赖" "$resp"
-
-    # 7. 安装 Node.js（已安装返回409也算成功）
+    # 3. 安装 Node.js（已安装返回409也算成功）
     log_info "安装 Node.js..."
     resp=$(http_request "POST" "/api/runtime/install" '{"name":"node","version":"20"}')
     body=$(parse_body "$resp")
