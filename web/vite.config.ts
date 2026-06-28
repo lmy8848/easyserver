@@ -19,6 +19,19 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: apiTarget,
           changeOrigin: true,
+          proxyTimeout: 600000,
+          timeout: 600000,
+          configure: (proxy) => {
+            proxy.on('error', (err, _req, res) => {
+              console.error('[proxy] /api error:', err.message);
+              if ('statusCode' in res) {
+                const r = res as import('http').ServerResponse;
+                r.setHeader('Content-Type', 'application/json; charset=utf-8');
+                r.statusCode = 502;
+                r.end(JSON.stringify({ code: 502, message: '代理连接失败，请检查后端服务' }));
+              }
+            });
+          },
         },
         '/ws': {
           target: wsTarget,

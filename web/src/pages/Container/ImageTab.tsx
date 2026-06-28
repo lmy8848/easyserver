@@ -9,17 +9,31 @@ import api from '../../services/api';
 import type { Image, ImageCategory } from './types';
 import { formatBytes } from './types';
 
+const adaptImageData = (raw: Record<string, unknown>): Image => {
+  return {
+    ...raw,
+    id: String(raw.id || raw.ID || ''),
+    repository: String(raw.repository || raw.Repository || ''),
+    tag: String(raw.tag || raw.Tag || ''),
+    size: raw.size !== undefined ? Number(raw.size) : (raw.Size ? raw.Size : 0), // backend Size is a string e.g. "133MB"
+    created_at: String(raw.created_at || raw.CreatedAt || ''),
+  } as any;
+};
+
 export default function ImageTab() {
   const [images, setImages] = useState<Image[]>([]);
   const [loading, setLoading] = useState(true);
   const [pullVisible, setPullVisible] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [pullForm] = Form.useForm();
   const [templates, setTemplates] = useState<ImageCategory[]>([]);
 
   const loadImages = async () => {
     try {
       const res = await api.get('/images');
-      setImages(res.data?.data?.images || []);
+      const raw = res.data?.data?.images || [];
+      const mapped = raw.map((c: Record<string, unknown>) => adaptImageData(c));
+      setImages(mapped);
     } catch {
       message.error('加载镜像列表失败');
     } finally {
@@ -39,8 +53,14 @@ export default function ImageTab() {
   useEffect(() => { loadImages(); loadTemplates(); }, []);
 
   const handlePull = async () => {
+    let values;
     try {
-      const values = await pullForm.validateFields();
+      values = await pullForm.validateFields();
+    } catch {
+      return; // 校验失败由表单自身提示，无需 loading
+    }
+    setPulling(true);
+    try {
       await api.post('/images/pull', values);
       message.success('镜像拉取成功');
       setPullVisible(false);
@@ -49,6 +69,8 @@ export default function ImageTab() {
       loadImages();
     } catch {
       message.error('拉取失败');
+    } finally {
+      setPulling(false);
     }
   };
 
@@ -70,7 +92,7 @@ export default function ImageTab() {
       title: '大小',
       dataIndex: 'size',
       key: 'size',
-      render: (size: number) => size ? formatBytes(size) : '-',
+      render: (size: any) => typeof size === 'string' ? size : (size ? formatBytes(size) : '-'),
     },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at' },
     {
@@ -97,7 +119,19 @@ export default function ImageTab() {
         <Table columns={columns} dataSource={images} rowKey="id" loading={loading} locale={{ emptyText: '暂无镜像' }} />
       </Card>
 
-      <Modal title="拉取镜像" open={pullVisible} onOk={handlePull} onCancel={() => setPullVisible(false)} width={600}>
+      <Modal
+        title="拉取镜像"
+        open={pullVisible}
+        onOk={handlePull}
+        onCancel={() => setPullVisible(false)}
+        confirmLoading={pulling}
+        cancelButtonProps={{ disabled: pulling }}
+        maskClosable={!pulling}
+        closable={!pulling}
+        keyboard={!pulling}
+        width={600}
+        destroyOnClose
+      >
         <Form form={pullForm} layout="vertical">
           <Form.Item name="image" label="镜像名称" rules={[{ required: true }]}>
             <Input placeholder="nginx:latest" />

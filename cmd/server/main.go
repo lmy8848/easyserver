@@ -370,8 +370,8 @@ func main() {
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second, // long-running routes (container/runtime) override via middleware.WriteTimeout
 		IdleTimeout:  60 * time.Second,
 	}
 
