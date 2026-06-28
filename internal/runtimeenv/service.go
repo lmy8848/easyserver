@@ -202,11 +202,21 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 func (s *Service) installRuntime(ctx context.Context, id int64, name, version, exactVersion, miseTool string) {
 	defer s.installLocks.Delete(name + "@" + exactVersion)
 
+	// PHP / Python 是源码编译，必须先把 autoconf / libxml2-dev 等系统级
+	// 编译依赖装上，否则 mise install 会卡在 buildconf 阶段并报错。
+	// node / go / java 走预编译二进制，ensureBuildDeps 对它们是 no-op。
+	if err := s.ensureBuildDeps(ctx, id, name); err != nil {
+		log.Printf("runtime: failed to ensure build deps for %s: %v", name, err)
+		s.appendProgress(ctx, id, 25, "deps-failed", fmt.Sprintf("✗ 安装编译依赖失败：%v", err))
+		s.repo.UpdateStatusToFailed(ctx, id, "编译依赖安装失败，详见日志")
+		return
+	}
+
 	target := fmt.Sprintf("%s@%s", miseTool, exactVersion)
-	output, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), "/usr/local/bin/mise", "install", "-y", target)
+	_, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), "/usr/local/bin/mise", "install", "-y", target)
 
 	if err != nil || exitCode != 0 {
-		log.Printf("runtime: failed to install %s %s: %v, output: %s", name, exactVersion, err, output)
+		log.Printf("runtime: failed to install %s %s: %v", name, exactVersion, err)
 		s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
 		return
 	}
@@ -258,7 +268,13 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 	s.updateProgress(ctx, id, progress, step, prefix+initialMsg)
 
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, name, args...)
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
+	// DEBIAN_FRONTEND=noninteractive 防止 ensureBuildDeps 里的 apt-get install
+	// 撞上 tzdata 这类会忽略 -y 的交互式 postinst 直接挂住。对 mise/npm 无副作用。
+	cmd.Env = append(os.Environ(),
+		"MISE_DATA_DIR=/var/lib/easyserver/mise",
+		"MISE_YES=1",
+		"DEBIAN_FRONTEND=noninteractive",
+	)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

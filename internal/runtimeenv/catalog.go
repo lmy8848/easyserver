@@ -43,9 +43,14 @@ var catalog = []Runtime{
 		MirrorEnvs: []string{},
 	},
 	{
-		Lang:       "php",
-		Display:    "PHP",
-		MiseTool:   "vfox:mise-plugins/vfox-php",
+		Lang:    "php",
+		Display: "PHP",
+		// `mise registry php` 给出两条后端：asdf:mise-plugins/asdf-php 与
+		// vfox:mise-plugins/vfox-php，按顺序匹配。直接用短名 "php" 让 mise
+		// 走 registry——asdf-php 通过 git clone + tags 拿版本（稳定），而
+		// vfox-php 的 Available hook 走 GitHub API，被限流/受网络影响时
+		// 直接返回空，表现为前端版本下拉为空。
+		MiseTool:   "php",
 		Majors:     []string{"8.1", "8.2", "8.3", "8.4", "8.5"},
 		MirrorEnvs: []string{},
 	},
