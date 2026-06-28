@@ -22,9 +22,9 @@ export default function Cloud() {
     try {
       const res = await cloudApi.getInstances();
       setInstances(res.data.data?.instances || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch instances:', error);
-      setError(error.message || '获取实例列表失败');
+      setError((error instanceof Error ? error.message : '获取实例列表失败'));
     } finally {
       setLoading(false);
     }
@@ -38,9 +38,9 @@ export default function Cloud() {
     try {
       const res = await cloudApi.getFirewall(instanceId);
       setFirewallRules(res.data.data?.rules || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch firewall rules:', error);
-      message.error(error.message || '获取防火墙规则失败');
+      message.error((error instanceof Error ? error.message : '获取防火墙规则失败'));
     }
   };
 
@@ -48,9 +48,9 @@ export default function Cloud() {
     try {
       const res = await cloudApi.getSnapshots();
       setSnapshots(res.data.data?.snapshots || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch snapshots:', error);
-      message.error(error.message || '获取快照列表失败');
+      message.error((error instanceof Error ? error.message : '获取快照列表失败'));
     }
   };
 
@@ -77,8 +77,8 @@ export default function Cloud() {
       }
       setLoading(true);
       fetchInstances();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     }
   };
 

@@ -275,7 +275,7 @@ export default function DatabasePage() {
       message.success('版本安装成功');
       setInstallVersionVisible(false);
       await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
-    } catch (error: any) { if (error.message) message.error(error.message); }
+    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
   const handleStartVersion = async (v: DBVersion) => {
@@ -286,7 +286,7 @@ export default function DatabasePage() {
       await dbServerApi.startVersion(v.id);
       message.success('已启动');
       await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
-    } catch (error: any) { message.error(error.message || '启动失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '启动失败')); }
     finally { setOperating(''); }
   };
 
@@ -298,7 +298,7 @@ export default function DatabasePage() {
       await dbServerApi.stopVersion(v.id);
       message.success('已停止');
       await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
-    } catch (error: any) { message.error(error.message || '停止失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '停止失败')); }
     finally { setOperating(''); }
   };
 
@@ -310,7 +310,7 @@ export default function DatabasePage() {
       await dbServerApi.restartVersion(v.id);
       message.success('已重启');
       await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
-    } catch (error: any) { message.error(error.message || '重启失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '重启失败')); }
     finally { setOperating(''); }
   };
 
@@ -322,7 +322,7 @@ export default function DatabasePage() {
       await dbServerApi.uninstallVersion(v.id);
       message.success('已卸载');
       await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
-    } catch (error: any) { message.error(error.message || '卸载失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
     finally { setOperating(''); }
   };
 
@@ -337,7 +337,7 @@ export default function DatabasePage() {
       message.success('数据库创建成功');
       setDbModalVisible(false);
       fetchDatabases(server.id);
-    } catch (error: any) { if (error.message) message.error(error.message); }
+    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
   const handleDeleteDB = async (dbId: number) => {
@@ -347,7 +347,7 @@ export default function DatabasePage() {
       await dbServerApi.deleteDatabase(server.id, dbId);
       message.success('数据库已删除');
       fetchDatabases(server.id);
-    } catch (error: any) { message.error(error.message || '删除失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   // ===== User CRUD =====
@@ -360,7 +360,7 @@ export default function DatabasePage() {
       message.success('用户创建成功');
       setUserModalVisible(false);
       fetchUsers(server.id);
-    } catch (error: any) { if (error.message) message.error(error.message); }
+    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
   const handleDeleteUser = async (userId: number) => {
@@ -370,7 +370,7 @@ export default function DatabasePage() {
       await dbServerApi.deleteUser(server.id, userId);
       message.success('用户已删除');
       fetchUsers(server.id);
-    } catch (error: any) { message.error(error.message || '删除失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   const handleGrant = async () => {
@@ -387,7 +387,7 @@ export default function DatabasePage() {
       message.success('授权成功');
       setGrantVisible(false);
       fetchUsers(server.id);
-    } catch (error: any) { if (error.message) message.error(error.message); }
+    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
   // ===== Config handlers =====
@@ -399,7 +399,7 @@ export default function DatabasePage() {
       else if (selectedServer.name === 'redis') await dbServerApi.saveRedisConfig(dbConfig.config.sections);
       message.success('配置已保存（已自动备份原文件）');
       fetchDBConfig();
-    } catch (error: any) { message.error(error.message || '保存失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '保存失败')); }
   };
 
   const updateDBParam = (section: string, key: string, value: string) => {
@@ -421,7 +421,7 @@ export default function DatabasePage() {
     try {
       const res = await dbServerApi.getVersionLogs(v.id, 200);
       setLogContent(res.data?.data?.logs || '(empty)');
-    } catch (error: any) { setLogContent('Failed: ' + error.message); }
+    } catch (error: unknown) { setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setLogLoading(false); }
   };
 
@@ -453,7 +453,7 @@ export default function DatabasePage() {
         const template = DEFAULT_CONFIG_TEMPLATES[dbType] || DEFAULT_CONFIG_TEMPLATES['mysql'];
         setConfigContent(`# ${selectedServer?.display_name} 默认配置模板\n# 保存后将创建配置文件\n\n${template}`);
       }
-    } catch (error: any) { setConfigContent('# Error: ' + error.message); }
+    } catch (error: unknown) { setConfigContent('# Error: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setConfigLoading(false); }
   };
 
@@ -486,7 +486,7 @@ export default function DatabasePage() {
       if (selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
         fetchTableData(selectedDatabase.id, selectedTable);
       }
-    } catch (error: any) { setSqlResult({ success: false, error: error.message }); }
+    } catch (error: unknown) { setSqlResult({ success: false, error: (error instanceof Error ? error.message : String(error)) }); }
     finally { setSqlLoading(false); }
   };
 
@@ -497,7 +497,7 @@ export default function DatabasePage() {
       await dbServerApi.createBackup(selectedDatabase.id);
       message.success('备份已开始，请稍候...');
       setTimeout(() => fetchBackups(selectedDatabase.id), 2000);
-    } catch (error: any) { message.error(error.message || '备份失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '备份失败')); }
     finally { setBackupCreating(false); }
   };
 
@@ -512,7 +512,7 @@ export default function DatabasePage() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (error: any) { message.error(error.message || '下载失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '下载失败')); }
   };
 
   const handleRestoreBackup = async (backupId: number) => {
@@ -520,7 +520,7 @@ export default function DatabasePage() {
       await dbServerApi.restoreBackup(backupId);
       message.success('恢复成功');
       if (selectedDatabase) fetchTables(selectedDatabase.id);
-    } catch (error: any) { message.error(error.message || '恢复失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
   };
 
   const handleDeleteBackup = async (backupId: number) => {
@@ -528,7 +528,7 @@ export default function DatabasePage() {
       await dbServerApi.deleteBackup(backupId);
       message.success('备份已删除');
       if (selectedDatabase) fetchBackups(selectedDatabase.id);
-    } catch (error: any) { message.error(error.message || '删除失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   const handleCreateTable = async () => {
@@ -541,7 +541,7 @@ export default function DatabasePage() {
       setCreateTableVisible(false);
       createForm.resetFields();
       fetchTables(selectedDatabase.id);
-    } catch (error: any) { if (error.message) message.error(error.message); }
+    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setCreateTableLoading(false); }
   };
 
@@ -552,7 +552,7 @@ export default function DatabasePage() {
       message.success('表已删除');
       if (selectedTable === tableName) { setSelectedTable(''); setTableData(null); }
       fetchTables(selectedDatabase.id);
-    } catch (error: any) { message.error(error.message || '删除表失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除表失败')); }
   };
 
   const openInsertModal = () => {
@@ -587,7 +587,7 @@ export default function DatabasePage() {
       }
       setRecordModalVisible(false);
       fetchTableData(selectedDatabase.id, selectedTable, tablePage);
-    } catch (error: any) { if (error.message) message.error(error.message); }
+    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setRecordSaving(false); }
   };
 
@@ -601,7 +601,7 @@ export default function DatabasePage() {
         message.success('删除成功');
         fetchTableData(selectedDatabase.id, selectedTable, tablePage);
       } else { message.error(res.data?.data?.error || '删除失败'); }
-    } catch (error: any) { message.error(error.message || '删除失败'); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   // ===== Status helpers (shared) =====

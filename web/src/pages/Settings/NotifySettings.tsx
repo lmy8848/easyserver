@@ -30,9 +30,9 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
       await settingsApi.updateNotify(values);
       message.success('通知配置已保存');
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     } finally {
       setSaving(false);
@@ -48,8 +48,8 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
       }
       await settingsApi.testWebhook();
       message.success('测试消息已发送，请检查 Webhook');
-    } catch (error: any) {
-      message.error(error.message || '测试失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '测试失败'));
     }
   };
 

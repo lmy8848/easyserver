@@ -105,8 +105,8 @@ export default function Runtime() {
       await api.post('/runtime/set-default', { name, version });
       message.success('默认版本已设置');
       fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '设置失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '设置失败'));
     }
   };
 
@@ -115,8 +115,8 @@ export default function Runtime() {
       await api.post('/runtime/uninstall', { name, version });
       message.success('卸载成功');
       fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '卸载失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '卸载失败'));
     }
   };
 
@@ -126,8 +126,8 @@ export default function Runtime() {
       await api.post('/runtime/install', { name, version });
       message.success('重新安装已开始...');
       fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '重试失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '重试失败'));
     }
   };
 
@@ -143,8 +143,8 @@ export default function Runtime() {
       setAliasSuggestions([]);
       setDependencies(null);
       fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '安装失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '安装失败'));
     }
   };
 
@@ -164,7 +164,7 @@ export default function Runtime() {
       }
 
       setAvailableVersions(versions);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch versions:', error);
       setAvailableVersions([]);
     } finally {
@@ -191,7 +191,7 @@ export default function Runtime() {
         missing: res.data.data?.missing || [],
         optional: res.data.data?.optional || [],
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to check dependencies:', error);
       setDependencies(null);
     } finally {
@@ -203,7 +203,7 @@ export default function Runtime() {
     try {
       const res = await api.get(`/runtime-versions/${runtimeName}/suggestions`);
       setAliasSuggestions(res.data.data?.suggestions || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch alias suggestions:', error);
       setAliasSuggestions([]);
     }
@@ -218,8 +218,8 @@ export default function Runtime() {
       if (resolved) {
         message.success(`别名 "${alias}" 解析为版本 ${resolved}`);
       }
-    } catch (error: any) {
-      message.error(error.message || '别名解析失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '别名解析失败'));
     }
   };
 
@@ -230,8 +230,8 @@ export default function Runtime() {
       const res = await api.get('/runtime/detect');
       setDetectedRuntimes(res.data.data?.detected || []);
       setDetectVisible(true);
-    } catch (error: any) {
-      message.error(error.message || '检测失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '检测失败'));
     }
   };
 
@@ -242,8 +242,8 @@ export default function Runtime() {
       message.success(`成功导入 ${imported} 个环境`);
       setDetectVisible(false);
       fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '导入失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '导入失败'));
     }
   };
 
@@ -255,8 +255,8 @@ export default function Runtime() {
       const res = await api.get(`/runtime/logs/${id}`);
       setLogsData(res.data.data);
       setLogsVisible(true);
-    } catch (error: any) {
-      message.error(error.message || '获取日志失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
@@ -270,8 +270,8 @@ export default function Runtime() {
       const res = await api.get(`/runtime/cleanup/${id}`);
       setCleanupData(res.data.data);
       setCleanupVisible(true);
-    } catch (error: any) {
-      message.error(error.message || '获取清理信息失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取清理信息失败'));
     } finally {
       setCleanupLoading(false);
     }
@@ -284,8 +284,8 @@ export default function Runtime() {
       setCleanupVisible(false);
       setCleanupData(null);
       fetchEnvironments();
-    } catch (error: any) {
-      message.error(error.message || '卸载失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '卸载失败'));
     }
   };
 
@@ -318,8 +318,8 @@ export default function Runtime() {
       const packages = res.data.data?.packages || [];
       setPackageData(packages);
       message.success(`扫描完成，发现 ${packages.length} 个包`);
-    } catch (error: any) {
-      message.error(error.message || '扫描失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '扫描失败'));
     } finally {
       setPackageLoading(false);
     }
@@ -337,8 +337,8 @@ export default function Runtime() {
       });
       message.success(`正在安装 ${values.name}...`);
       setTimeout(() => fetchPackages(selectedRuntimeForPackage.id), 3000);
-    } catch (error: any) {
-      message.error(error.message || '安装失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '安装失败'));
     }
   };
 
@@ -352,8 +352,8 @@ export default function Runtime() {
       });
       message.success(`${name} 卸载成功`);
       fetchPackages(selectedRuntimeForPackage.id);
-    } catch (error: any) {
-      message.error(error.message || '卸载失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '卸载失败'));
     }
   };
 
@@ -367,8 +367,8 @@ export default function Runtime() {
       });
       message.success(`${name} 更新成功`);
       fetchPackages(selectedRuntimeForPackage.id);
-    } catch (error: any) {
-      message.error(error.message || '更新失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '更新失败'));
     }
   };
 
@@ -381,7 +381,7 @@ export default function Runtime() {
     try {
       const res = await api.get(`/packages/search?runtime_id=${selectedRuntimeForPackage.id}&q=${query}`);
       setPackageSearchResults(res.data.data?.packages || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Search failed:', error);
       setPackageSearchResults([]);
     }
@@ -397,7 +397,7 @@ export default function Runtime() {
     try {
       const res = await api.get(`/packages/versions/${packageName}?runtime_id=${selectedRuntimeForPackage.id}`);
       setPackageVersions(res.data.data?.versions || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Get versions failed:', error);
       setPackageVersions([]);
     } finally {

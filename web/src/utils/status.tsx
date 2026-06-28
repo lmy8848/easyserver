@@ -30,6 +30,17 @@ export function getServiceStatusColor(status: string): string {
 }
 
 /**
+ * Get hex color string for service status (for inline styles).
+ */
+export function getStatusColor(status: string): string {
+  const colorName = getServiceStatusColor(status);
+  const colorMap: Record<string, string> = {
+    success: '#52c41a', error: '#ff4d4f', warning: '#faad14', default: '#999',
+  };
+  return colorMap[colorName] || '#999';
+}
+
+/**
  * Get Ant Design tag color for HTTP status codes.
  * Used by AuditLog.
  */

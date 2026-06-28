@@ -29,9 +29,9 @@ export default function AuditSettings({ settings, onRefresh }: AuditSettingsProp
       await settingsApi.updateAudit(values);
       message.success('审计配置已保存');
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     } finally {
       setSaving(false);

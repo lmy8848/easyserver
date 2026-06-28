@@ -114,9 +114,9 @@ export default function Deploy() {
       setServerModalVisible(false);
       setLoading(true);
       fetchServers();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -127,8 +127,8 @@ export default function Deploy() {
       message.success('服务器已删除');
       setLoading(true);
       fetchServers();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -138,8 +138,8 @@ export default function Deploy() {
       message.success('连接成功');
       setLoading(true);
       fetchServers();
-    } catch (error: any) {
-      message.error(error.message || '连接失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '连接失败'));
     }
   };
 
@@ -155,9 +155,9 @@ export default function Deploy() {
       message.success('任务已创建');
       setTaskModalVisible(false);
       fetchTasks();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -167,8 +167,8 @@ export default function Deploy() {
       await api.post(`/deploy/tasks/${id}/exec`);
       message.success('任务已开始执行');
       fetchTasks();
-    } catch (error: any) {
-      message.error(error.message || '执行失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '执行失败'));
     }
   };
 
@@ -177,8 +177,8 @@ export default function Deploy() {
       await api.delete(`/deploy/tasks/${id}`);
       message.success('任务已删除');
       fetchTasks();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -186,8 +186,8 @@ export default function Deploy() {
     try {
       await api.post(`/deploy/versions/${id}/rollback`);
       message.success('回滚已开始');
-    } catch (error: any) {
-      message.error(error.message || '回滚失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '回滚失败'));
     }
   };
 

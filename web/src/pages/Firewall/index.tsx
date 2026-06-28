@@ -44,8 +44,8 @@ export default function FirewallPage() {
     try {
       const res = await firewallApi.getStatus();
       setStatus(res.data?.data || null);
-    } catch (error: any) {
-      message.error(error.message || '获取状态失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取状态失败'));
     } finally {
       setStatusLoading(false);
     }
@@ -60,8 +60,8 @@ export default function FirewallPage() {
       ]);
       setRules(dbRes.data?.data || []);
       setSystemRules(sysRes.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取规则失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取规则失败'));
     } finally {
       setLoading(false);
     }
@@ -85,8 +85,8 @@ export default function FirewallPage() {
     try {
       const res = await firewallApi.getLogs(logLines);
       setLogs(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取日志失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
@@ -134,8 +134,8 @@ export default function FirewallPage() {
             await firewallApi.disable();
             message.success('防火墙已禁用');
             fetchStatus();
-          } catch (error: any) {
-            message.error(error.message || '操作失败');
+          } catch (error: unknown) {
+            message.error((error instanceof Error ? error.message : '操作失败'));
           } finally {
             setOperating('');
           }
@@ -147,8 +147,8 @@ export default function FirewallPage() {
         await firewallApi.enable();
         message.success('防火墙已启用');
         fetchStatus();
-      } catch (error: any) {
-        message.error(error.message || '操作失败');
+      } catch (error: unknown) {
+        message.error((error instanceof Error ? error.message : '操作失败'));
       } finally {
         setOperating('');
       }
@@ -188,9 +188,9 @@ export default function FirewallPage() {
       }
       setModalVisible(false);
       fetchRules();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -200,8 +200,8 @@ export default function FirewallPage() {
       await firewallApi.deleteRule(id);
       message.success('规则已删除');
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -216,8 +216,8 @@ export default function FirewallPage() {
         message.success('规则已启用');
       }
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     } finally {
       setOperating('');
     }
@@ -228,8 +228,8 @@ export default function FirewallPage() {
     try {
       await firewallApi.moveRuleUp(id);
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '上移失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '上移失败'));
     } finally {
       setOperating('');
     }
@@ -240,8 +240,8 @@ export default function FirewallPage() {
     try {
       await firewallApi.moveRuleDown(id);
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '下移失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '下移失败'));
     } finally {
       setOperating('');
     }
@@ -252,8 +252,8 @@ export default function FirewallPage() {
     try {
       const res = await firewallApi.getTemplates();
       setTemplates(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取模板失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取模板失败'));
     } finally {
       setTemplatesLoading(false);
     }
@@ -284,8 +284,8 @@ export default function FirewallPage() {
           setTemplateModalVisible(false);
           fetchRules();
           fetchStatus();
-        } catch (error: any) {
-          message.error(error.message || '应用模板失败');
+        } catch (error: unknown) {
+          message.error((error instanceof Error ? error.message : '应用模板失败'));
         }
       },
     });
@@ -306,8 +306,8 @@ export default function FirewallPage() {
       }
       setSelectedRowKeys([]);
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '批量启用失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '批量启用失败'));
     } finally {
       setBulkOperating(false);
     }
@@ -328,8 +328,8 @@ export default function FirewallPage() {
       }
       setSelectedRowKeys([]);
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '批量禁用失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '批量禁用失败'));
     } finally {
       setBulkOperating(false);
     }
@@ -350,8 +350,8 @@ export default function FirewallPage() {
       }
       setSelectedRowKeys([]);
       fetchRules();
-    } catch (error: any) {
-      message.error(error.message || '批量删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '批量删除失败'));
     } finally {
       setBulkOperating(false);
     }
@@ -372,8 +372,8 @@ export default function FirewallPage() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
       message.success('规则已导出');
-    } catch (error: any) {
-      message.error(error.message || '导出失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '导出失败'));
     } finally {
       setExporting(false);
     }
@@ -423,8 +423,8 @@ export default function FirewallPage() {
       setImportFileName('');
       fetchRules();
       fetchStatus();
-    } catch (error: any) {
-      message.error(error.message || '导入失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '导入失败'));
     } finally {
       setImporting(false);
     }
@@ -463,8 +463,8 @@ export default function FirewallPage() {
       await firewallApi.setDefaultPolicy({ chain, policy });
       message.success(`默认策略已修改: ${chain} -> ${policy}`);
       fetchStatus();
-    } catch (error: any) {
-      message.error(error.message || '修改默认策略失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '修改默认策略失败'));
     } finally {
       setPolicyChanging('');
     }

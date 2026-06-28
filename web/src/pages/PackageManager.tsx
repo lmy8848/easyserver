@@ -70,8 +70,8 @@ export default function PackageManager() {
       const scannedPackages = res.data.data?.packages || [];
       setPackages(scannedPackages);
       message.success(`扫描完成，发现 ${scannedPackages.length} 个包`);
-    } catch (error: any) {
-      message.error(error.message || '扫描失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '扫描失败'));
     } finally {
       setScanLoading(false);
     }
@@ -102,8 +102,8 @@ export default function PackageManager() {
       form.resetFields();
       // Refresh after a delay
       setTimeout(() => fetchPackages(selectedRuntime), 3000);
-    } catch (error: any) {
-      message.error(error.message || '安装失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '安装失败'));
     }
   };
 
@@ -117,8 +117,8 @@ export default function PackageManager() {
       });
       message.success(`${name} 卸载成功`);
       fetchPackages(selectedRuntime);
-    } catch (error: any) {
-      message.error(error.message || '卸载失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '卸载失败'));
     }
   };
 
@@ -132,8 +132,8 @@ export default function PackageManager() {
       });
       message.success(`${name} 更新成功`);
       fetchPackages(selectedRuntime);
-    } catch (error: any) {
-      message.error(error.message || '更新失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '更新失败'));
     }
   };
 

@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { notificationApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
+import { COLORS } from '../utils/theme';
 import './Layout.css';
 
 const MENU_GROUPS = [
@@ -80,6 +81,7 @@ const ICONS: Record<string, string> = {
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const path = ICONS[name];
   if (!path) return null;
+  // Hardcoded SVG paths from ICONS constant (not user input) — safe for dangerouslySetInnerHTML
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: path }} />
   );
@@ -108,9 +110,9 @@ const PAGE_TITLES: Record<string, string> = {
 };
 
 const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {
-  info: '#6366f1',
-  warning: '#f59e0b',
-  error: '#ef4444',
+  info: COLORS.PRIMARY,
+  warning: COLORS.WARNING,
+  error: COLORS.ERROR,
 };
 
 export default function Layout() {
@@ -137,7 +139,9 @@ export default function Layout() {
       ]);
       setNotifications(listRes.data?.data || []);
       setUnreadCount(countRes.data?.data?.count || 0);
-    } catch { /* silent */ }
+    } catch (err: unknown) {
+      console.debug('Failed to fetch notifications:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -192,7 +196,10 @@ export default function Layout() {
       await notificationApi.markAllAsRead();
       setUnreadCount(0);
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-    } catch { /* silent */ }
+    } catch (err: unknown) {
+      console.error('Failed to mark all as read:', err);
+      message.error('标记已读失败');
+    }
   };
 
   const handleMarkRead = async (id: number) => {
@@ -200,7 +207,10 @@ export default function Layout() {
       await notificationApi.markAsRead(id);
       setUnreadCount(prev => Math.max(0, prev - 1));
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    } catch { /* silent */ }
+    } catch (err: unknown) {
+      console.error('Failed to mark as read:', err);
+      message.error('标记已读失败');
+    }
   };
 
   const currentTitle = PAGE_TITLES[location.pathname] || '未知页面';

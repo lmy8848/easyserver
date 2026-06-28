@@ -88,8 +88,8 @@ export default function ContainerTab() {
       setCreateVisible(false);
       createForm.resetFields();
       await loadContainers();
-    } catch (err: any) {
-      const errMsg = err.response?.data?.message || err.message || '创建失败';
+    } catch (err: unknown) {
+      const errMsg = err.response?.data?.message || (err instanceof Error ? err.message : '创建失败');
       message.error(`创建失败: ${errMsg}`);
     } finally {
       setCreateLoading(false);

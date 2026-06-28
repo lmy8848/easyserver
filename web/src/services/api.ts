@@ -116,8 +116,8 @@ export const monitorApi = {
   getStats: () =>
     api.get<ApiResponse<MonitorSnapshot>>('/monitor/stats'),
 
-  getHistory: (start?: string, end?: string) =>
-    api.get<ApiResponse<{ points: HistoryPoint[] }>>('/monitor/history', { params: { start, end } }),
+  getHistory: (start?: string, end?: string, signal?: AbortSignal) =>
+    api.get<ApiResponse<{ points: HistoryPoint[] }>>('/monitor/history', { params: { start, end }, signal }),
 };
 
 // Service API

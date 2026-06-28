@@ -148,7 +148,7 @@ export default function SystemMonitor() {
       await systemProcessApi.serviceAction(name, action, force);
       message.success(`${action} ${name} 成功`);
       fetchServices();
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error.data?.protected) {
         setProtectedConfirm({
           visible: true,
@@ -175,8 +175,8 @@ export default function SystemMonitor() {
     try {
       const res = await systemProcessApi.getServiceLogs(name, SERVICE_LOG_LINES);
       setLogsContent(res.data?.data?.logs || '暂无日志');
-    } catch (error: any) {
-      setLogsContent(`获取日志失败: ${error.message || '未知错误'}`);
+    } catch (error: unknown) {
+      setLogsContent(`获取日志失败: ${(error instanceof Error ? error.message : '未知错误')}`);
     }
     setLogsLoading(false);
   };
@@ -186,8 +186,8 @@ export default function SystemMonitor() {
       await systemProcessApi.addToWhitelist(name);
       message.success(`已添加 ${name} 到白名单`);
       fetchServices();
-    } catch (error: any) {
-      message.error(error.message || '添加失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '添加失败'));
     }
   };
 
@@ -196,8 +196,8 @@ export default function SystemMonitor() {
       await systemProcessApi.removeFromWhitelist(name);
       message.success(`已移除 ${name}`);
       fetchServices();
-    } catch (error: any) {
-      message.error(error.message || '移除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '移除失败'));
     }
   };
 

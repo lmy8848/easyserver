@@ -84,8 +84,8 @@ export default function CronTasks({
     try {
       const res = await cronApi.getNextRuns(schedule.trim());
       setNextRuns(res.data?.data?.next_runs || []);
-    } catch (error: any) {
-      message.error(error.message || '解析 Cron 表达式失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '解析 Cron 表达式失败'));
       setNextRuns([]);
     } finally {
       setPreviewLoading(false);
@@ -132,9 +132,9 @@ export default function CronTasks({
       }
       setModalVisible(false);
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };

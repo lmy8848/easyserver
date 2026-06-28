@@ -75,7 +75,7 @@ export default function DockerInstallWizard({ onInstalled }: { onInstalled: () =
       } else {
         setError('安装完成但验证失败，请手动检查 Docker 状态');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg = err?.response?.data?.message || err?.message || '未知错误';
       setError(`安装失败：${msg}`);
     } finally {

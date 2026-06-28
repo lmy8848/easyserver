@@ -63,8 +63,8 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
         try {
           const res = await webServerApi.getConfig(selectedServer.id);
           setConfigContent(res.data.data?.content || '');
-        } catch (error: any) {
-          setConfigContent('# Failed to load: ' + (error.message || 'unknown'));
+        } catch (error: unknown) {
+          setConfigContent('# Failed to load: ' + ((error instanceof Error ? error.message : 'unknown')));
         } finally {
           setConfigLoading(false);
         }
@@ -75,8 +75,8 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
         try {
           const res = await webServerApi.getServiceLogs(selectedServer.id, 200);
           setSvcLogContent(res.data.data?.logs || '(empty)');
-        } catch (error: any) {
-          setSvcLogContent('Failed: ' + (error.message || 'unknown'));
+        } catch (error: unknown) {
+          setSvcLogContent('Failed: ' + ((error instanceof Error ? error.message : 'unknown')));
         } finally {
           setSvcLogLoading(false);
         }
@@ -112,8 +112,8 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
       try {
         await webServerApi.saveConfig(selectedServer.id, configContent);
         message.success('配置已保存（已自动备份原文件）');
-      } catch (error: any) {
-        message.error(error.message || '保存失败');
+      } catch (error: unknown) {
+        message.error((error instanceof Error ? error.message : '保存失败'));
       }
     };
 

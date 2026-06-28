@@ -22,9 +22,9 @@ export default function CloudSnapshots({ snapshots, selectedInstance, onRefresh 
       setModalVisible(false);
       form.resetFields();
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -71,8 +71,8 @@ export default function CloudSnapshots({ snapshots, selectedInstance, onRefresh 
             try {
               await cloudApi.applySnapshot(record.snapshot_id);
               message.success('快照回滚中');
-            } catch (error: any) {
-              message.error(error.message || '回滚失败');
+            } catch (error: unknown) {
+              message.error((error instanceof Error ? error.message : '回滚失败'));
             }
           }}
         >

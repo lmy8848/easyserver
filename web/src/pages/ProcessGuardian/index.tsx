@@ -54,8 +54,8 @@ export default function ProcessGuardian() {
     try {
       const res = await processApi.list();
       setProcesses(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取进程列表失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取进程列表失败'));
     } finally {
       setLoading(false);
     }
@@ -115,9 +115,9 @@ export default function ProcessGuardian() {
       }
       setModalVisible(false);
       fetchProcesses();
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error.errorFields) return; // form validation error
-      message.error(error.message || '操作失败');
+      message.error((error instanceof Error ? error.message : '操作失败'));
     }
   };
 
@@ -126,8 +126,8 @@ export default function ProcessGuardian() {
       await processApi.delete(id);
       message.success('已删除');
       fetchProcesses();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -138,8 +138,8 @@ export default function ProcessGuardian() {
       await processApi[action](id);
       message.success(`${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
       fetchProcesses();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     } finally {
       setOperating('');
     }
@@ -157,8 +157,8 @@ export default function ProcessGuardian() {
       message.success(`批量${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}完成`);
       setSelectedRowKeys([]);
       fetchProcesses();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     }
   };
 
@@ -189,8 +189,8 @@ export default function ProcessGuardian() {
       a.click();
       URL.revokeObjectURL(url);
       message.success('导出成功');
-    } catch (error: any) {
-      message.error(error.message || '导出失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '导出失败'));
     }
   };
 
@@ -207,8 +207,8 @@ export default function ProcessGuardian() {
         await processApi.import(processes);
         message.success('导入成功');
         fetchProcesses();
-      } catch (error: any) {
-        message.error(error.message || '导入失败');
+      } catch (error: unknown) {
+        message.error((error instanceof Error ? error.message : '导入失败'));
       }
     };
     input.click();
