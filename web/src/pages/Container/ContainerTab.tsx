@@ -89,7 +89,8 @@ export default function ContainerTab() {
       createForm.resetFields();
       await loadContainers();
     } catch (err: unknown) {
-      const errMsg = err.response?.data?.message || (err instanceof Error ? err.message : '创建失败');
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      const errMsg = axiosErr.response?.data?.message || (err instanceof Error ? err.message : '创建失败');
       message.error(`创建失败: ${errMsg}`);
     } finally {
       setCreateLoading(false);

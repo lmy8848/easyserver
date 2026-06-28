@@ -5,6 +5,7 @@ import { notificationApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
+import { message } from 'antd';
 import './Layout.css';
 
 const MENU_GROUPS = [

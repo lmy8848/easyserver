@@ -149,16 +149,17 @@ export default function SystemMonitor() {
       message.success(`${action} ${name} 成功`);
       fetchServices();
     } catch (error: unknown) {
-      if (error.data?.protected) {
+      const axiosErr = error as { response?: { data?: { protected?: boolean; service?: string; reason?: string } }; message?: string };
+      if (axiosErr.response?.data?.protected) {
         setProtectedConfirm({
           visible: true,
-          name: error.data.service || name,
+          name: axiosErr.response.data.service || name,
           action,
-          reason: error.data.reason || '受保护的服务',
+          reason: axiosErr.response.data.reason || '受保护的服务',
         });
         return;
       }
-      message.error(error.message || `${action} 失败`);
+      message.error(axiosErr.message || `${action} 失败`);
     }
   };
 

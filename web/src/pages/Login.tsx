@@ -27,7 +27,7 @@ export default function Login() {
    * must_change_pass is stored on the user object from the server,
    * not in a separate localStorage key (prevents client tampering).
    */
-  const handleLoginSuccess = (data: { token: string; user: { id: number; username: string; role?: string }; must_change_pass?: boolean }) => {
+  const handleLoginSuccess = (data: { token: string; user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
     useAuthStore.setState({
       user: { ...data.user, must_change_pass: data.must_change_pass },
       token: data.token,

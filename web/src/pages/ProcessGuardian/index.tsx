@@ -116,7 +116,8 @@ export default function ProcessGuardian() {
       setModalVisible(false);
       fetchProcesses();
     } catch (error: unknown) {
-      if (error.errorFields) return; // form validation error
+      const formErr = error as { errorFields?: unknown };
+      if (formErr.errorFields) return; // form validation error
       message.error((error instanceof Error ? error.message : '操作失败'));
     }
   };
