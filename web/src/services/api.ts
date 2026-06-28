@@ -60,7 +60,8 @@ api.interceptors.response.use(
         import('antd').then(({ message }) => message.warning(msg));
       }
 
-      return Promise.reject(data);
+      // Pass through original error so catch blocks can inspect error.response?.status
+      return Promise.reject(error);
     }
     return Promise.reject(error);
   }
