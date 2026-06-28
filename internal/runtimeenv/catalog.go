@@ -64,6 +64,9 @@ func IsSupported(lang string) bool {
 }
 
 // GetCatalog returns a deep copy of the full catalog of runtimes.
+// We append onto []string{} (not nil) so empty slices serialize to JSON [],
+// not null — the frontend reads `c.mirror_envs.length` and would crash on
+// null otherwise.
 func GetCatalog() []Runtime {
 	c := make([]Runtime, len(catalog))
 	for i, r := range catalog {
@@ -71,8 +74,8 @@ func GetCatalog() []Runtime {
 			Lang:       r.Lang,
 			Display:    r.Display,
 			MiseTool:   r.MiseTool,
-			Majors:     append([]string(nil), r.Majors...),
-			MirrorEnvs: append([]string(nil), r.MirrorEnvs...),
+			Majors:     append([]string{}, r.Majors...),
+			MirrorEnvs: append([]string{}, r.MirrorEnvs...),
 		}
 	}
 	return c

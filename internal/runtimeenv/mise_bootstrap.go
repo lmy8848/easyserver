@@ -51,13 +51,24 @@ func checkMiseVersion() error {
 	}
 	verStr := strings.TrimSpace(string(out))
 
-	// 'mise --version' typically outputs 'mise 2024.11.1 ...'
-	t := " " + strings.TrimPrefix(targetMiseVersion, "v") + " "
-	f := " " + strings.TrimPrefix(fallbackMiseVersion, "v") + " "
-	if strings.Contains(verStr+" ", t) || strings.Contains(verStr+" ", f) {
-		return nil
+	// mise --version output evolved over releases. Modern builds emit
+	// "2026.6.13 linux-x64 (...)" with no leading "mise " — the old
+	// " <ver> " space-padded substring check missed those because the
+	// version sits at byte 0. Tokenize and compare exact fields instead.
+	//
+	// If the installed mise isn't on our pinned list we still accept it —
+	// the user put it there; redownloading every boot is hostile. Pinning
+	// only exists to keep the auto-download SHA verifiable.
+	target := strings.TrimPrefix(targetMiseVersion, "v")
+	fallback := strings.TrimPrefix(fallbackMiseVersion, "v")
+	for _, f := range strings.Fields(verStr) {
+		if f == target || f == fallback {
+			return nil
+		}
 	}
-	return fmt.Errorf("version mismatch: expected %s or %s, got %s", targetMiseVersion, fallbackMiseVersion, verStr)
+	log.Printf("mise: existing binary at %s reports %q (expected %s or %s); using it as-is",
+		miseBinPath, verStr, target, fallback)
+	return nil
 }
 
 func downloadMise(version, expectedSha256 string) error {
@@ -70,7 +81,11 @@ func downloadMise(version, expectedSha256 string) error {
 	for _, dlUrl := range urls {
 		log.Printf("Downloading mise from %s", dlUrl)
 
-		tmpFile, err := os.CreateTemp("", "mise-download-*.tmp")
+		// Create tmp file in the SAME directory as the final target so the
+		// atomic rename below stays within one filesystem. Defaulting to
+		// /tmp blows up with "invalid cross-device link" on hosts where
+		// /tmp is tmpfs and /usr/local/bin is on the root fs.
+		tmpFile, err := os.CreateTemp(filepath.Dir(miseBinPath), "mise-download-*.tmp")
 		if err != nil {
 			return err
 		}
