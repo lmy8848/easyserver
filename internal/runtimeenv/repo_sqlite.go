@@ -239,7 +239,7 @@ func (r *sqliteRepo) UpdateStatusToUninstallFailed(ctx context.Context, id int64
 // UpdateStatusToInstalled marks a runtime environment as installed with its path
 func (r *sqliteRepo) UpdateStatusToInstalled(ctx context.Context, id int64, path string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_version SET status = 'ready', progress = 100, progress_step = 'done' WHERE id = ?",
+		"UPDATE runtime_version SET status = 'installed', progress = 100, progress_step = 'done' WHERE id = ?",
 		id,
 	)
 	return err
@@ -258,7 +258,9 @@ func (r *sqliteRepo) ResetDefaults(ctx context.Context, name string) error {
 func (r *sqliteRepo) SetDefaultByID(ctx context.Context, id int64) error {
 	var lang string
 	err := r.db.QueryRowContext(ctx, "SELECT lang FROM runtime_version WHERE id = ?", id).Scan(&lang)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	_, err = r.db.ExecContext(ctx, "INSERT OR REPLACE INTO global_default (lang, runtime_version_id) VALUES (?, ?)", lang, id)
 	return err
 }
@@ -267,9 +269,33 @@ func (r *sqliteRepo) SetDefaultByID(ctx context.Context, id int64) error {
 func (r *sqliteRepo) SetDefaultByNameAndVersion(ctx context.Context, name, version string) error {
 	var id int64
 	err := r.db.QueryRowContext(ctx, "SELECT id FROM runtime_version WHERE lang = ? AND exact = ?", name, version).Scan(&id)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	_, err = r.db.ExecContext(ctx, "INSERT OR REPLACE INTO global_default (lang, runtime_version_id) VALUES (?, ?)", name, id)
 	return err
+}
+
+// ListDefaults returns every (lang, exact) pair currently set as global default.
+// Used by GenerateMiseConfig to render the [tools] section of /etc/mise/config.toml.
+func (r *sqliteRepo) ListDefaults(ctx context.Context) ([]GlobalDefaultEntry, error) {
+	rows, err := r.db.QueryContext(ctx,
+		"SELECT v.lang, v.exact FROM global_default g JOIN runtime_version v ON g.runtime_version_id = v.id ORDER BY v.lang",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []GlobalDefaultEntry
+	for rows.Next() {
+		var e GlobalDefaultEntry
+		if err := rows.Scan(&e.Lang, &e.Exact); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // CleanupEnvConfigs deletes environment configs associated with a runtime
@@ -284,6 +310,18 @@ func (r *sqliteRepo) CleanupEnvConfigs(ctx context.Context, runtimeID int64) (in
 // CleanupPathEntries deletes PATH entries associated with a runtime
 func (r *sqliteRepo) CleanupPathEntries(ctx context.Context, runtimeID int64) (int64, error) {
 	result, err := r.db.ExecContext(ctx, "DELETE FROM path_entries WHERE runtime_id = ?", runtimeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// CleanupGlobalDefaultsByRuntimeID removes any global_default row that pins to
+// a specific runtime_version row. Required before deleting that runtime_version
+// because of the FK constraint, and ensures /etc/mise/config.toml stays in
+// sync after Uninstall regenerates it.
+func (r *sqliteRepo) CleanupGlobalDefaultsByRuntimeID(ctx context.Context, runtimeID int64) (int64, error) {
+	result, err := r.db.ExecContext(ctx, "DELETE FROM global_default WHERE runtime_version_id = ?", runtimeID)
 	if err != nil {
 		return 0, err
 	}
@@ -513,7 +551,7 @@ func (r *sqliteRepo) GetConflictingReferences(ctx context.Context, runtimeID int
 			}
 		}
 	}
-	
+
 	rows, err = r.db.QueryContext(ctx, "SELECT name FROM cron_tasks WHERE runtime_version_id = ?", runtimeID)
 	if err == nil {
 		defer rows.Close()

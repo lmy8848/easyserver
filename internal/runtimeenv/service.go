@@ -24,6 +24,12 @@ type Service struct {
 	installLocks sync.Map
 }
 
+// envKeyPattern is the POSIX-ish env-var name whitelist used by CreateMirror
+// to keep user-supplied keys from injecting newlines or '[' into the generated
+// /etc/mise/config.toml. Matches: leading letter/underscore, then any letter,
+// digit, or underscore. See applyDefault / buildMiseConfigContent.
+var envKeyPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
 func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 	return &Service{
 		repo:     repo,
@@ -42,27 +48,25 @@ func (s *Service) InitMirrors(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if count > 0 {
-		return nil
+	if count == 0 {
+		mirrors := []RuntimeMirror{
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node/", Enabled: 1, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist/", Enabled: 0, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", Enabled: 0, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang/", Enabled: 1, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl/", Enabled: 0, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang/", Enabled: 0, Source: "seed"},
+		}
+		if err := s.repo.SeedMirrors(ctx, mirrors); err != nil {
+			return err
+		}
 	}
 
-	mirrors := []RuntimeMirror{
-		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node/", Enabled: 1, Source: "seed"},
-		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist/", Enabled: 0, Source: "seed"},
-		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", Enabled: 0, Source: "seed"},
-		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang/", Enabled: 1, Source: "seed"},
-		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl/", Enabled: 0, Source: "seed"},
-		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang/", Enabled: 0, Source: "seed"},
-	}
-
-	err = s.repo.SeedMirrors(ctx, mirrors)
-	if err != nil {
-		return err
-	}
-
-	// Generate config after seeding
+	// Unconditional regeneration: covers servers upgraded from pre-Issue-07
+	// where global_default rows already exist but /etc/mise/config.toml has
+	// no [tools] section. Idempotent on subsequent boots.
 	if err := s.GenerateMiseConfig(ctx); err != nil {
-		log.Printf("runtime: failed to generate config after seeding mirrors: %v", err)
+		log.Printf("runtime: failed to generate mise config on boot: %v", err)
 		return err
 	}
 
@@ -209,7 +213,7 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 	if _, loaded := s.installLocks.LoadOrStore(lockKey, true); loaded {
 		return fmt.Errorf("installation of %s is already in progress", lockKey)
 	}
-	
+
 	var id int64
 	defer func() {
 		// Only remove lock if we fail BEFORE starting background routine.
@@ -243,7 +247,7 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version, e
 
 	target := fmt.Sprintf("%s@%s", miseTool, exactVersion)
 	output, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), "/usr/local/bin/mise", "install", "-y", target)
-	
+
 	if err != nil || exitCode != 0 {
 		log.Printf("runtime: failed to install %s %s: %v, output: %s", name, exactVersion, err, output)
 		s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
@@ -255,7 +259,12 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version, e
 
 	hasDefault, _ := s.repo.HasDefault(ctx, name)
 	if !hasDefault {
-		s.repo.SetDefaultByID(ctx, id)
+		// First version installed for this lang → auto-promote to default. Must
+		// go through applyDefault so /etc/mise/config.toml is regenerated; see
+		// Issue 07.
+		if err := s.applyDefault(ctx, name, exactVersion); err != nil {
+			log.Printf("runtime: auto-default after install of %s@%s failed: %v", name, exactVersion, err)
+		}
 	}
 	log.Printf("runtime: installed %s %s", name, exactVersion)
 }
@@ -477,16 +486,6 @@ func (s *Service) GetProgress(ctx context.Context, id int64) (int, string, strin
 	return s.repo.GetProgress(ctx, id)
 }
 
-
-
-
-
-
-
-
-
-
-
 // Uninstall uninstalls a runtime environment
 func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	if ctx == nil {
@@ -512,14 +511,22 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	if err != nil {
 		return fmt.Errorf("failed to check conflicts: %w", err)
 	}
-	
+
 	if len(conflicts) > 0 {
 		return fmt.Errorf("conflict: %s", strings.Join(conflicts, ", "))
 	}
 
 	if env.Status == "failed" {
 		s.cleanupRelatedData(ctx, env.ID)
-		return s.repo.Delete(ctx, env.ID)
+		if err := s.repo.Delete(ctx, env.ID); err != nil {
+			return err
+		}
+		// Removing a failed default (possible — line 502 lets failed slip past
+		// the IsDefault block) leaves a stale [tools] entry; regenerate.
+		if err := s.GenerateMiseConfig(ctx); err != nil {
+			log.Printf("runtime: failed to regen mise config after uninstall of failed %s@%s: %v", name, version, err)
+		}
+		return nil
 	}
 
 	if err := s.repo.UpdateStatus(ctx, env.ID, "uninstalling"); err != nil {
@@ -534,15 +541,32 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 		if uninstallErr != nil {
 			log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, uninstallErr)
 			s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
+			// cleanupRelatedData (called synchronously before this goroutine)
+			// already dropped any global_default row pinning this version. The
+			// runtime_version row sticks around in uninstall_failed status, but
+			// the mise config must reflect the new DB state so SSH users no
+			// longer resolve to a binary mise is about to remove.
+			if err := s.GenerateMiseConfig(bgCtx); err != nil {
+				log.Printf("runtime: failed to regen mise config after failed uninstall of %s@%s: %v", env.Name, env.Version, err)
+			}
 		} else {
 			s.repo.Delete(bgCtx, env.ID)
+			// Mirror the mise config to the new DB state — the just-removed
+			// runtime may have been the global default for its lang.
+			if err := s.GenerateMiseConfig(bgCtx); err != nil {
+				log.Printf("runtime: failed to regen mise config after uninstall of %s@%s: %v", env.Name, env.Version, err)
+			}
 		}
 	}()
 
 	return nil
 }
 
-// cleanupRelatedData cleans up environment variables and PATH entries
+// cleanupRelatedData cleans up env vars, PATH entries, AND any global_default
+// row pinning this runtime_version. The global_default cleanup is required so
+// Delete(runtime_version) won't trip the FK constraint; the caller is expected
+// to GenerateMiseConfig afterwards so the on-disk [tools] section reflects the
+// removal (see Uninstall / uninstallRuntime).
 func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
 	// Delete environment variables
 	rows, err := s.repo.CleanupEnvConfigs(ctx, runtimeID)
@@ -559,12 +583,22 @@ func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
 	} else if rows > 0 {
 		log.Printf("runtime: cleaned up %d PATH entries", rows)
 	}
+
+	// Drop any global_default row pinning this runtime so the upcoming Delete
+	// won't violate the FK and the next GenerateMiseConfig drops the stale
+	// [tools] entry.
+	rows, err = s.repo.CleanupGlobalDefaultsByRuntimeID(ctx, runtimeID)
+	if err != nil {
+		log.Printf("runtime: failed to cleanup global_default: %v", err)
+	} else if rows > 0 {
+		log.Printf("runtime: cleared %d global_default row(s) for runtime %d", rows, runtimeID)
+	}
 }
 
 // uninstallRuntime performs the actual uninstallation
 func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) error {
 	s.updateProgress(ctx, env.ID, 0, "uninstalling", "")
-	
+
 	var miseTool string
 	for _, r := range GetCatalog() {
 		if r.Lang == env.Name {
@@ -578,7 +612,7 @@ func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment)
 
 	target := fmt.Sprintf("%s@%s", miseTool, env.Version)
 	_, exitCode, err := s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", target), "/usr/local/bin/mise", "uninstall", "-y", target)
-	
+
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("卸载失败 (exit %d)，详见日志", exitCode)
 	}
@@ -618,24 +652,14 @@ func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string,
 			versions = append(versions, line)
 		}
 	}
-	
+
 	// Reverse to put newest first
 	for i, j := 0, len(versions)-1; i < j; i, j = i+1, j-1 {
 		versions[i], versions[j] = versions[j], versions[i]
 	}
-	
+
 	return versions, nil
 }
-
-
-
-
-
-
-
-
-
-
 
 // GetEnvConfigsByRuntimeID returns environment configs for a runtime
 func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {
@@ -700,14 +724,33 @@ func (s *Service) SetDefault(ctx context.Context, name, version string) error {
 	if env == nil {
 		return fmt.Errorf("%s %s not found", name, version)
 	}
+	// Refuse to promote a not-ready version to default: writing such a row to
+	// /etc/mise/config.toml [tools] would point SSH users at a binary that
+	// isn't on disk, making the whole runtime unusable for them.
+	if env.Status != "installed" {
+		return fmt.Errorf("cannot set %s %s as default: status is %q (must be installed)", name, version, env.Status)
+	}
 
-	// Reset all versions of this runtime to non-default
+	return s.applyDefault(ctx, name, version)
+}
+
+// applyDefault marks (name, version) as the global default for that lang AND
+// regenerates /etc/mise/config.toml so SSH users / `mise current` immediately
+// see the change. Both effects are required for the API to be truthful — see
+// Issue 07. Three call sites (SetDefault, installRuntime, ImportDetected) all
+// route through here; do NOT bypass to the repo helpers directly.
+func (s *Service) applyDefault(ctx context.Context, name, version string) error {
 	if err := s.repo.ResetDefaults(ctx, name); err != nil {
 		return err
 	}
-
-	// Set this version as default
-	return s.repo.SetDefaultByNameAndVersion(ctx, name, version)
+	if err := s.repo.SetDefaultByNameAndVersion(ctx, name, version); err != nil {
+		return err
+	}
+	if err := s.GenerateMiseConfig(ctx); err != nil {
+		log.Printf("runtime: failed to regenerate mise config after default %s=%s: %v", name, version, err)
+		return fmt.Errorf("default set in DB but mise config regeneration failed: %w", err)
+	}
+	return nil
 }
 
 // Detect detects installed runtime environments on the system
@@ -777,10 +820,14 @@ func (s *Service) ImportDetected(ctx context.Context) (int, error) {
 				continue
 			}
 
-			// If this is the first version of this runtime, set as default
+			// If this is the first version of this runtime, set as default.
+			// Route through applyDefault so the mise config file is also
+			// regenerated; see Issue 07.
 			hasDefault, _ := s.repo.HasDefault(ctx, runtime.Name)
 			if !hasDefault {
-				s.repo.SetDefaultByNameAndVersion(ctx, runtime.Name, version)
+				if err := s.applyDefault(ctx, runtime.Name, version); err != nil {
+					log.Printf("runtime: auto-default after import of %s@%s failed: %v", runtime.Name, version, err)
+				}
 			}
 
 			imported++
@@ -958,6 +1005,15 @@ func (s *Service) UpdateMirror(ctx context.Context, req *RuntimeMirrorUpdateRequ
 
 // CreateMirror creates a user mirror
 func (s *Service) CreateMirror(ctx context.Context, req *RuntimeMirrorCreateRequest) (int64, error) {
+	// env_key flows verbatim into /etc/mise/config.toml. A value containing a
+	// newline or '[' would let an admin inject a fake [tools] section and
+	// thereby pin SSH users to an attacker-chosen version. POSIX env-var
+	// naming rules are stricter than what TOML needs, but they're a clear
+	// and well-known whitelist.
+	if !envKeyPattern.MatchString(req.EnvKey) {
+		return 0, fmt.Errorf("invalid env_key %q: must match %s", req.EnvKey, envKeyPattern.String())
+	}
+
 	enabled := 1
 	if req.Enabled != nil {
 		enabled = *req.Enabled

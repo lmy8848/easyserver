@@ -77,3 +77,16 @@ func GetCatalog() []Runtime {
 	}
 	return c
 }
+
+// MiseToolFor returns the mise tool identifier for a given language.
+// e.g. "node" → "node", "java" → "vfox:version-fox/vfox-java".
+// The second return value is false when the lang is not in the catalog.
+func MiseToolFor(lang string) (string, bool) {
+	lang = strings.ToLower(lang)
+	for _, r := range catalog {
+		if r.Lang == lang {
+			return r.MiseTool, true
+		}
+	}
+	return "", false
+}

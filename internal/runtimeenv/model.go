@@ -77,3 +77,10 @@ type RuntimeMirrorUpdateRequest struct {
 	EnvValue *string `json:"env_value"`
 	Enabled  *int    `json:"enabled"`
 }
+
+// GlobalDefaultEntry is one row of the global_default table joined with runtime_version,
+// used by the mise config generator to render the [tools] section.
+type GlobalDefaultEntry struct {
+	Lang  string // node / python / go / java / php
+	Exact string // exact version e.g. 20.11.0
+}

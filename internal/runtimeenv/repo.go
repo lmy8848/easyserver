@@ -36,10 +36,12 @@ type Repository interface {
 	ResetDefaults(ctx context.Context, name string) error
 	SetDefaultByID(ctx context.Context, id int64) error
 	SetDefaultByNameAndVersion(ctx context.Context, name, version string) error
+	ListDefaults(ctx context.Context) ([]GlobalDefaultEntry, error)
 
 	// Cleanup related data
 	CleanupEnvConfigs(ctx context.Context, runtimeID int64) (int64, error)
 	CleanupPathEntries(ctx context.Context, runtimeID int64) (int64, error)
+	CleanupGlobalDefaultsByRuntimeID(ctx context.Context, runtimeID int64) (int64, error)
 
 	// Related resource queries
 	ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error)
