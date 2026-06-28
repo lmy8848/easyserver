@@ -2,26 +2,28 @@ package api
 
 import (
 	"fmt"
+	"strings"
 
-	"easyserver/internal/packagemanager"
 	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
 )
 
 type PackageManagerHandler struct {
-	packageService *packagemanager.Service
+	packageService *runtimeenv.PackageService
 	runtimeService *runtimeenv.Service
 }
 
-func NewPackageManagerHandler(packageService *packagemanager.Service, runtimeService *runtimeenv.Service) *PackageManagerHandler {
+func NewPackageManagerHandler(packageService *runtimeenv.PackageService, runtimeService *runtimeenv.Service) *PackageManagerHandler {
 	return &PackageManagerHandler{
 		packageService: packageService,
 		runtimeService: runtimeService,
 	}
 }
 
-// ListPackages returns all packages for a runtime
+// ListPackages returns all packages for a runtime by scanning the system
+// package manager directly. There is no DB cache, so each call reflects the
+// current state of the runtime's package manager.
 func (h *PackageManagerHandler) ListPackages(c *gin.Context) {
 	runtimeIDStr := c.Query("runtime_id")
 	var runtimeID int64
@@ -30,27 +32,6 @@ func (h *PackageManagerHandler) ListPackages(c *gin.Context) {
 		return
 	}
 
-	packages, err := h.packageService.ListPackages(c.Request.Context(), runtimeID)
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-
-	Success(c, gin.H{
-		"packages": packages,
-	})
-}
-
-// ScanPackages scans installed packages for a runtime
-func (h *PackageManagerHandler) ScanPackages(c *gin.Context) {
-	runtimeIDStr := c.Param("id")
-	var runtimeID int64
-	if _, err := fmt.Sscanf(runtimeIDStr, "%d", &runtimeID); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的运行时 ID"))
-		return
-	}
-
-	// Get runtime info
 	runtime, err := h.runtimeService.GetByID(c.Request.Context(), runtimeID)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -61,7 +42,7 @@ func (h *PackageManagerHandler) ScanPackages(c *gin.Context) {
 		return
 	}
 
-	packages, err := h.packageService.ScanPackages(c.Request.Context(), runtimeID, runtime.Name, runtime.Path)
+	packages, err := h.packageService.ListPackages(c.Request.Context(), runtimeID, runtime.Name, runtime.Path)
 	if err != nil {
 		c.Error(WrapError(err))
 		return
@@ -74,7 +55,7 @@ func (h *PackageManagerHandler) ScanPackages(c *gin.Context) {
 
 // InstallPackage installs a package
 func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
-	var req packagemanager.PackageInstallRequest
+	var req runtimeenv.PackageInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
@@ -103,7 +84,7 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 
 // UninstallPackage uninstalls a package
 func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
-	var req packagemanager.PackageUninstallRequest
+	var req runtimeenv.PackageUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
@@ -132,7 +113,7 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 
 // UpdatePackage updates a package
 func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
-	var req packagemanager.PackageUpdateRequest
+	var req runtimeenv.PackageUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
@@ -200,7 +181,7 @@ func (h *PackageManagerHandler) SearchPackages(c *gin.Context) {
 // GetPackageVersions returns available versions for a package
 func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) {
 	runtimeIDStr := c.Query("runtime_id")
-	packageName := c.Param("name")
+	packageName := strings.TrimPrefix(c.Param("name"), "/")
 
 	if runtimeIDStr == "" {
 		c.Error(ErrBadRequest.WithMessage("runtime_id 不能为空"))

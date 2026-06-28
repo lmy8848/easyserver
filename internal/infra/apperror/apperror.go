@@ -171,6 +171,8 @@ var errorRegistry = []errorPattern{
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
 	// No data available
 	{matches: []string{"no versions available", "无可用版本"}, target: ErrBadRequest},
+	// Package manager: package or version not found in registry (npm / pnpm)
+	{matches: []string{"npm error code E404", "ERR_PNPM_FETCH_404", "ERR_PNPM_NO_MATCHING_VERSION", "is not in the npm registry", "No matching version found"}, target: ErrBadRequest},
 }
 
 // WrapError automatically wraps an error into the appropriate AppError

@@ -1,4 +1,4 @@
-import { Modal, Table, Button, Space, Tag, Form, Input, Select, Popconfirm } from 'antd';
+import { Modal, Table, Button, Space, Tag, Form, Input, Select, Popconfirm, Spin } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -14,17 +14,18 @@ interface PackageManagerProps {
   selectedRuntime: RuntimeEnvironment | null;
   packageData: PackageInfo[];
   packageLoading: boolean;
+  packageInstalling: boolean;
   packageSearchResults: PackageSearchResult[];
+  packageSearchLoading: boolean;
   packageVersions: string[];
   packageVersionsLoading: boolean;
   onClose: () => void;
-  onScanPackages: () => void;
   onRefreshPackages: () => void;
-  onInstallPackage: (values: { name: string; version: string }) => void;
+  onInstallPackage: (values: { name: string; version: string; manager?: string }) => void;
   onSearchPackages: (query: string) => void;
   onSelectPackage: (packageName: string) => void;
-  onUpdatePackage: (name: string) => void;
-  onUninstallPackage: (name: string) => void;
+  onUpdatePackage: (pkg: PackageInfo) => void;
+  onUninstallPackage: (pkg: PackageInfo) => void;
 }
 
 export default function PackageManager({
@@ -32,11 +33,12 @@ export default function PackageManager({
   selectedRuntime,
   packageData,
   packageLoading,
+  packageInstalling,
   packageSearchResults,
+  packageSearchLoading,
   packageVersions,
   packageVersionsLoading,
   onClose,
-  onScanPackages,
   onRefreshPackages,
   onInstallPackage,
   onSearchPackages,
@@ -79,15 +81,9 @@ export default function PackageManager({
           <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
             <Space>
               <Button
-                icon={<SearchOutlined />}
-                onClick={onScanPackages}
-                loading={packageLoading}
-              >
-                扫描已安装的包
-              </Button>
-              <Button
                 icon={<ReloadOutlined />}
                 onClick={onRefreshPackages}
+                loading={packageLoading}
               >
                 刷新
               </Button>
@@ -96,17 +92,28 @@ export default function PackageManager({
 
           <div style={{ marginBottom: 16, padding: 16, background: '#f5f5f5', borderRadius: 4 }}>
             <div style={{ marginBottom: 8, fontWeight: 'bold' }}>安装新包</div>
-            <Form form={packageForm} onFinish={onInstallPackage} layout="inline">
+            <Form form={packageForm} onFinish={onInstallPackage} layout="inline" initialValues={{ manager: 'npm' }}>
+              {selectedRuntime?.name === 'node' && (
+                <Form.Item name="manager">
+                  <Select size="small" style={{ width: 80 }}>
+                    <Select.Option value="npm">npm</Select.Option>
+                    <Select.Option value="pnpm">pnpm</Select.Option>
+                  </Select>
+                </Form.Item>
+              )}
               <div style={{ position: 'relative' }}>
                 <Form.Item name="name" rules={[{ required: true, message: '请输入包名' }]}>
-                  <Input
+                  <Input.Search
                     placeholder="输入包名搜索..."
                     size="small"
-                    style={{ width: 200 }}
+                    style={{ width: 240 }}
+                    enterButton={<SearchOutlined />}
                     onChange={(e) => onSearchPackages(e.target.value)}
+                    onSearch={(value) => onSearchPackages(value)}
+                    onPressEnter={(e) => e.preventDefault()}
                   />
                 </Form.Item>
-                {packageSearchResults.length > 0 && (
+                {(packageSearchLoading || packageSearchResults.length > 0) && (
                   <div style={{
                     position: 'absolute',
                     top: '100%',
@@ -119,24 +126,30 @@ export default function PackageManager({
                     overflow: 'auto',
                     zIndex: 1000,
                   }}>
-                    {packageSearchResults.map((pkg, index) => (
-                      <div
-                        key={index}
-                        style={{
-                          padding: '8px 12px',
-                          cursor: 'pointer',
-                          borderBottom: '1px solid #f0f0f0',
-                        }}
-                        onClick={() => handleSelectPackage(pkg.name)}
-                      >
-                        <div style={{ fontWeight: 'bold' }}>{pkg.name}</div>
-                        <div style={{ fontSize: 12, color: '#999' }}>{pkg.description}</div>
+                    {packageSearchLoading ? (
+                      <div style={{ padding: 12, textAlign: 'center', color: '#999' }}>
+                        <Spin size="small" /> <span style={{ marginLeft: 8 }}>搜索中...</span>
                       </div>
-                    ))}
+                    ) : (
+                      packageSearchResults.map((pkg, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            padding: '8px 12px',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #f0f0f0',
+                          }}
+                          onClick={() => handleSelectPackage(pkg.name)}
+                        >
+                          <div style={{ fontWeight: 'bold' }}>{pkg.name}</div>
+                          <div style={{ fontSize: 12, color: '#999' }}>{pkg.description}</div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 )}
               </div>
-              <Form.Item name="version">
+              <Form.Item name="version" rules={[{ required: true, message: '请选择版本' }]}>
                 <Select
                   placeholder="选择版本"
                   size="small"
@@ -144,14 +157,25 @@ export default function PackageManager({
                   loading={packageVersionsLoading}
                   allowClear
                   showSearch
+                  onDropdownVisibleChange={(open) => {
+                    if (open) {
+                      const currentName = packageForm.getFieldValue('name');
+                      if (currentName) {
+                        onSelectPackage(currentName);
+                      }
+                    }
+                  }}
                 >
-                  {packageVersions.map((v, index) => (
-                    <Select.Option key={index} value={v}>{v}</Select.Option>
+                  {packageVersions.length > 0 && (
+                    <Select.Option key="latest" value="latest">latest</Select.Option>
+                  )}
+                  {packageVersions.map((v) => (
+                    <Select.Option key={v} value={v}>{v}</Select.Option>
                   ))}
                 </Select>
               </Form.Item>
               <Form.Item>
-                <Button type="primary" htmlType="submit" size="small" icon={<PlusOutlined />}>
+                <Button type="primary" htmlType="submit" size="small" icon={<PlusOutlined />} loading={packageInstalling}>
                   安装
                 </Button>
               </Form.Item>
@@ -160,12 +184,12 @@ export default function PackageManager({
 
           {packageData.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
-              暂无已安装的包，点击"扫描"按钮检测
+              暂无已安装的包，点击"刷新"获取最新列表
             </div>
           ) : (
             <Table
               dataSource={packageData}
-              rowKey="id"
+              rowKey={(r) => `${r.source}:${r.name}`}
               loading={packageLoading}
               pagination={{ pageSize: 10 }}
               size="small"
@@ -194,13 +218,13 @@ export default function PackageManager({
                         type="link"
                         size="small"
                         icon={<SyncOutlined />}
-                        onClick={() => onUpdatePackage(record.name)}
+                        onClick={() => onUpdatePackage(record)}
                       >
                         更新
                       </Button>
                       <Popconfirm
                         title={`确定要卸载 ${record.name} 吗？`}
-                        onConfirm={() => onUninstallPackage(record.name)}
+                        onConfirm={() => onUninstallPackage(record)}
                       >
                         <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                           卸载

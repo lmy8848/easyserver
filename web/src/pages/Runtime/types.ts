@@ -18,7 +18,6 @@ export interface VersionInfo {
 }
 
 export interface PackageInfo {
-  id: number;
   name: string;
   version: string;
   scope: string;

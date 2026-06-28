@@ -24,7 +24,6 @@ import (
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
-	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
@@ -73,7 +72,7 @@ type Router struct {
 
 	// Runtime services
 	runtimeService        *runtimeenv.Service
-	packageManagerService *packagemanager.Service
+	packageManagerService *runtimeenv.PackageService
 
 	// SSH service
 	sshConfigService *ssh.Service
@@ -130,7 +129,7 @@ type RouterDeps struct {
 
 	// Runtime services
 	RuntimeService        *runtimeenv.Service
-	PackageManagerService *packagemanager.Service
+	PackageManagerService *runtimeenv.PackageService
 
 	// SSH service
 	SSHConfigService *ssh.Service

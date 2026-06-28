@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Card, Button, Space, Modal, Tag, Progress, message } from 'antd';
-import { PlusOutlined, SyncOutlined, GlobalOutlined } from '@ant-design/icons';
+import { PlusOutlined, GlobalOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
@@ -111,7 +111,9 @@ export default function Runtime() {
   const [selectedRuntimeForPackage, setSelectedRuntimeForPackage] = useState<RuntimeEnvironment | null>(null);
   const [packageData, setPackageData] = useState<PackageInfo[]>([]);
   const [packageLoading, setPackageLoading] = useState(false);
+  const [packageInstalling, setPackageInstalling] = useState(false);
   const [packageSearchResults, setPackageSearchResults] = useState<PackageSearchResult[]>([]);
+  const [packageSearchLoading, setPackageSearchLoading] = useState(false);
   const [packageVersions, setPackageVersions] = useState<string[]>([]);
   const [packageVersionsLoading, setPackageVersionsLoading] = useState(false);
 
@@ -345,63 +347,53 @@ export default function Runtime() {
     }
   };
 
-  const handleScanPackages = async () => {
+  const handleInstallPackage = async (values: { name: string; version: string; manager?: string }) => {
     if (!selectedRuntimeForPackage) return;
 
-    setPackageLoading(true);
-    try {
-      const res = await api.get(`/packages/scan/${selectedRuntimeForPackage.id}`);
-      const packages = res.data.data?.packages || [];
-      setPackageData(packages);
-      message.success(`扫描完成，发现 ${packages.length} 个包`);
-    } catch (error: any) {
-      message.error(error.message || '扫描失败');
-    } finally {
-      setPackageLoading(false);
-    }
-  };
-
-  const handleInstallPackage = async (values: { name: string; version: string }) => {
-    if (!selectedRuntimeForPackage) return;
-
+    setPackageInstalling(true);
     try {
       await api.post('/packages/install', {
         runtime_id: selectedRuntimeForPackage.id,
         name: values.name,
         version: values.version || '',
         scope: 'global',
+        manager: values.manager || 'npm',
       });
-      message.success(`正在安装 ${values.name}...`);
-      setTimeout(() => fetchPackages(selectedRuntimeForPackage.id), 3000);
+      message.success(`${values.name} 安装成功`);
+      await fetchPackages(selectedRuntimeForPackage.id);
     } catch (error: any) {
       message.error(error.message || '安装失败');
+    } finally {
+      setPackageInstalling(false);
     }
   };
 
-  const handleUninstallPackage = async (name: string) => {
+  const handleUninstallPackage = async (pkg: PackageInfo) => {
     if (!selectedRuntimeForPackage) return;
 
     try {
       await api.post('/packages/uninstall', {
         runtime_id: selectedRuntimeForPackage.id,
-        name: name,
+        name: pkg.name,
+        manager: pkg.source || 'npm',
       });
-      message.success(`${name} 卸载成功`);
+      message.success(`${pkg.name} 卸载成功`);
       fetchPackages(selectedRuntimeForPackage.id);
     } catch (error: any) {
       message.error(error.message || '卸载失败');
     }
   };
 
-  const handleUpdatePackage = async (name: string) => {
+  const handleUpdatePackage = async (pkg: PackageInfo) => {
     if (!selectedRuntimeForPackage) return;
 
     try {
       await api.post('/packages/update', {
         runtime_id: selectedRuntimeForPackage.id,
-        name: name,
+        name: pkg.name,
+        manager: pkg.source || 'npm',
       });
-      message.success(`${name} 更新成功`);
+      message.success(`${pkg.name} 更新成功`);
       fetchPackages(selectedRuntimeForPackage.id);
     } catch (error: any) {
       message.error(error.message || '更新失败');
@@ -411,15 +403,19 @@ export default function Runtime() {
   const handleSearchPackages = async (query: string) => {
     if (!selectedRuntimeForPackage || !query || query.length < 2) {
       setPackageSearchResults([]);
+      setPackageSearchLoading(false);
       return;
     }
 
+    setPackageSearchLoading(true);
     try {
       const res = await api.get(`/packages/search?runtime_id=${selectedRuntimeForPackage.id}&q=${query}`);
       setPackageSearchResults(res.data.data?.packages || []);
     } catch (error: any) {
       console.error('Search failed:', error);
       setPackageSearchResults([]);
+    } finally {
+      setPackageSearchLoading(false);
     }
   };
 
@@ -685,7 +681,9 @@ export default function Runtime() {
         selectedRuntime={selectedRuntimeForPackage}
         packageData={packageData}
         packageLoading={packageLoading}
+        packageInstalling={packageInstalling}
         packageSearchResults={packageSearchResults}
+        packageSearchLoading={packageSearchLoading}
         packageVersions={packageVersions}
         packageVersionsLoading={packageVersionsLoading}
         onClose={() => {
@@ -695,7 +693,6 @@ export default function Runtime() {
           setPackageSearchResults([]);
           setPackageVersions([]);
         }}
-        onScanPackages={handleScanPackages}
         onRefreshPackages={() => {
           if (selectedRuntimeForPackage) fetchPackages(selectedRuntimeForPackage.id);
         }}

@@ -32,7 +32,6 @@ import (
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
-	"easyserver/internal/packagemanager"
 	"easyserver/internal/process"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
@@ -251,8 +250,7 @@ func main() {
 		log.Printf("ERROR: Failed to seed mirrors: %v", err)
 	}
 
-	packageRepo := packagemanager.NewSQLiteRepository(db)
-	packageManagerService := packagemanager.NewService(packageRepo, cmdExec)
+	packageManagerService := runtimeenv.NewPackageService(cmdExec)
 
 	// Initialize SSH service (single shared instance)
 	sshConfigService := ssh.NewService(cmdExec)
