@@ -14,6 +14,7 @@ import {
 import type { ProcessWithStatus, ProcessLog, ProcessGroup } from '../../types';
 import { processApi } from '../../services/api';
 import SystemMonitor from './SystemMonitor';
+import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -99,6 +100,7 @@ export default function ProcessGuardian() {
       auto_start: p.auto_start,
       log_file: p.log_file,
       group_id: p.group_id || undefined,
+      runtime_version_id: p.runtime_version_id || undefined,
     });
     setModalVisible(true);
   };
@@ -437,6 +439,14 @@ export default function ProcessGuardian() {
           </Form.Item>
           <Form.Item name="command" label="启动命令" rules={[{ required: true, message: '请输入启动命令' }]}>
             <Input placeholder="例如: node /app/server.js" />
+          </Form.Item>
+          <Form.Item
+            name="runtime_version_id"
+            label="运行时版本"
+            rules={[{ required: true, message: '请选择已安装的运行时版本' }]}
+            extra="启动命令会自动通过 mise exec <lang>@<exact> 包裹"
+          >
+            <RuntimeVersionSelect />
           </Form.Item>
           <Form.Item name="args" label="参数">
             <Input placeholder="命令行参数" />

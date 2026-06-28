@@ -295,6 +295,9 @@ export interface CronTask {
   max_retry: number;
   env_vars: string;
   work_dir: string;
+  runtime_version_id: number;
+  runtime_lang: string;
+  runtime_exact: string;
   created_at: string;
   updated_at: string;
 }
@@ -389,6 +392,9 @@ export interface ManagedProcess {
   auto_start: boolean;
   log_file: string;
   group_id: number;
+  runtime_version_id: number;
+  runtime_lang: string;
+  runtime_exact: string;
   created_at: string;
   updated_at: string;
 }

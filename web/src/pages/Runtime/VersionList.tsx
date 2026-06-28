@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal, Form, Select, Input, Button, Space, Tag, message } from 'antd';
 import { SyncOutlined, LoadingOutlined } from '@ant-design/icons';
-import type { VersionInfo, Dependencies } from './types';
+import type { VersionInfo, Dependencies, CatalogEntry } from './types';
 
 interface VersionListProps {
   visible: boolean;
@@ -12,6 +12,7 @@ interface VersionListProps {
   aliasSuggestions: string[];
   dependencies: Dependencies | null;
   depsLoading: boolean;
+  catalog: CatalogEntry[];
   onInstall: (values: { name: string; version: string }) => void;
   onRuntimeChange: (value: string) => void;
   onRefreshVersions: (runtimeName: string, forceRefresh?: boolean) => void;
@@ -27,6 +28,7 @@ export default function VersionList({
   aliasSuggestions,
   dependencies,
   depsLoading,
+  catalog,
   onInstall,
   onRuntimeChange,
   onRefreshVersions,
@@ -124,11 +126,9 @@ export default function VersionList({
             form.setFieldsValue({ version: undefined });
             onRuntimeChange(val);
           }}>
-            <Select.Option value="java">Java</Select.Option>
-            <Select.Option value="node">Node.js</Select.Option>
-            <Select.Option value="go">Go</Select.Option>
-            <Select.Option value="python">Python</Select.Option>
-            <Select.Option value="php">PHP</Select.Option>
+            {catalog.map(c => (
+              <Select.Option key={c.lang} value={c.lang}>{c.display}</Select.Option>
+            ))}
           </Select>
         </Form.Item>
         <Form.Item

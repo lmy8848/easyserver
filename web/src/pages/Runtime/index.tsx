@@ -6,6 +6,7 @@ import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
 import DetectPanel from './DetectPanel';
 import PackageManager from './PackageManager';
+import MirrorPanel from './MirrorPanel';
 import type {
   RuntimeEnvironment,
   DetectedRuntime,
@@ -15,12 +16,16 @@ import type {
   LogsData,
   CleanupData,
   Dependencies,
+  CatalogEntry,
 } from './types';
 
 export default function Runtime() {
   // --- Runtime list state ---
   const [environments, setEnvironments] = useState<RuntimeEnvironment[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // --- Catalog (drives the install dialog's language dropdown; loaded once) ---
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
 
   // --- Polling ---
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -118,6 +123,27 @@ export default function Runtime() {
 
   // ==================== Lifecycle ====================
 
+  // showApiError pops a Modal with the backend message AND any `details` array
+  // (e.g. 409 conflict's "Process: api-server" list) — message.error swallows
+  // details and auto-dismisses, which AC4 says is not enough.
+  const showApiError = (err: unknown, fallback: string) => {
+    const e = err as { message?: string; details?: unknown };
+    const details = Array.isArray(e?.details) ? (e!.details as string[]) : null;
+    if (details && details.length > 0) {
+      Modal.error({
+        title: e?.message || fallback,
+        content: (
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            {details.map((d, i) => <li key={i}>{d}</li>)}
+          </ul>
+        ),
+        width: 480,
+      });
+      return;
+    }
+    message.error(e?.message || fallback);
+  };
+
   const fetchEnvironments = async () => {
     setLoading(true);
     try {
@@ -132,6 +158,15 @@ export default function Runtime() {
 
   useEffect(() => {
     fetchEnvironments();
+    api.get('/runtime/catalog')
+      .then(res => setCatalog(res.data.data?.catalog || []))
+      .catch(() => {
+        setCatalog([]);
+        // Without a visible failure the install dialog renders an empty
+        // language dropdown and the mirror panel shows "no mirrors" —
+        // both look like the backend is fine. Surface the failure.
+        message.error('加载运行环境目录失败，请刷新页面或检查后端服务');
+      });
   }, []);
 
   const inProgressEnvs = environments.filter(e => e.status === 'installing' || e.status === 'uninstalling');
@@ -175,7 +210,7 @@ export default function Runtime() {
       message.success('删除成功');
       fetchEnvironments();
     } catch (error: any) {
-      message.error(error.message || '删除失败');
+      showApiError(error, '删除失败');
     }
   };
 
@@ -186,7 +221,7 @@ export default function Runtime() {
       message.success('重新安装已开始...');
       fetchEnvironments();
     } catch (error: any) {
-      message.error(error.message || '重试失败');
+      showApiError(error, '重试失败');
     }
   };
 
@@ -353,7 +388,13 @@ export default function Runtime() {
       setCleanupData(null);
       fetchEnvironments();
     } catch (error: any) {
-      message.error(error.message || '卸载失败');
+      // Close the cleanup confirmation BEFORE popping the error modal —
+      // otherwise the error modal stacks on top and the user can't dismiss
+      // either cleanly.
+      setCleanupVisible(false);
+      setCleanupData(null);
+      fetchEnvironments();
+      showApiError(error, '卸载失败');
     }
   };
 
@@ -510,6 +551,8 @@ export default function Runtime() {
         />
       </Card>
 
+      <MirrorPanel catalog={catalog} />
+
       {/* Install environment modal */}
       <VersionList
         visible={installVisible}
@@ -526,6 +569,7 @@ export default function Runtime() {
         aliasSuggestions={aliasSuggestions}
         dependencies={dependencies}
         depsLoading={depsLoading}
+        catalog={catalog}
         onInstall={handleInstall}
         onRuntimeChange={handleRuntimeChange}
         onRefreshVersions={fetchVersions}

@@ -3,11 +3,11 @@ package runtimeenv
 import "strings"
 
 type Runtime struct {
-	Lang       string   // "node"
-	Display    string   // "Node.js"
-	MiseTool   string   // mise 插件名
-	Majors     []string // UI 可选的主版本列表
-	MirrorEnvs []string // 该语言会用到的 env key（供镜像表 seed 使用）
+	Lang       string   `json:"lang"`        // "node"
+	Display    string   `json:"display"`     // "Node.js"
+	MiseTool   string   `json:"mise_tool"`   // mise 插件名
+	Majors     []string `json:"majors"`      // UI 可选的主版本列表
+	MirrorEnvs []string `json:"mirror_envs"` // 该语言会用到的 env key（供镜像表 seed 使用）
 }
 
 var catalog = []Runtime{

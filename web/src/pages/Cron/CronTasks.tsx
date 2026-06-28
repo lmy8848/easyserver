@@ -12,6 +12,7 @@ import {
 import type { CronTask, Script } from '../../types';
 import { cronApi } from '../../services/api';
 import { STYLES, type Preset } from './types';
+import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
 interface CronTasksProps {
   tasks: CronTask[];
@@ -111,6 +112,7 @@ export default function CronTasks({
       max_retry: task.max_retry || 0,
       env_vars: task.env_vars || '',
       work_dir: task.work_dir || '',
+      runtime_version_id: task.runtime_version_id || undefined,
     });
     handleScheduleChange(task.schedule);
     setModalVisible(true);
@@ -293,6 +295,7 @@ export default function CronTasks({
         okText={editingTask ? '保存' : '创建'}
         cancelText="取消"
         style={STYLES.modal}
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item label="常用预设">
@@ -363,6 +366,14 @@ export default function CronTasks({
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item
+            name="runtime_version_id"
+            label="运行时版本"
+            rules={[{ required: true, message: '请选择已安装的运行时版本' }]}
+            extra="任务会通过 mise exec <lang>@<exact> -- sh -c <cmd> 执行"
+          >
+            <RuntimeVersionSelect />
+          </Form.Item>
           <Collapse
             ghost
             items={[{

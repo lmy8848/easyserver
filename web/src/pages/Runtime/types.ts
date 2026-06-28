@@ -67,6 +67,24 @@ export interface PackageSearchResult {
   description: string;
 }
 
+export interface CatalogEntry {
+  lang: string;
+  display: string;
+  mise_tool: string;
+  majors: string[];
+  mirror_envs: string[];
+}
+
+export interface RuntimeMirror {
+  id: number;
+  lang: string;
+  env_key: string;
+  env_value: string;
+  enabled: number;
+  source: string;
+  updated_at: string;
+}
+
 export const RUNTIME_ICON_MAP: Record<string, string> = {
   java: '☕',
   node: '🟢',
