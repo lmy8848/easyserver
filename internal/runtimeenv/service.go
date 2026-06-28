@@ -149,20 +149,22 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 		return fmt.Errorf("unsupported runtime: %s", name)
 	}
 
+	// `mise latest <tool>@<prefix>` 把"前缀版本"解析成精确版本（如 Node 选
+	// 主版本 20 → 20.11.0）。但对 vfox 插件（PHP / Java）该命令对完整版本
+	// 经常返回空 stdout（vfox 自己实现的 latest 行为不统一），导致这里把
+	// 用户已选好的完整版本当成解析失败。
+	//
+	// 兜底：mise latest 失败或输出为空时，直接采用前端传入的 version。如果
+	// 它确实不是合法 mise 版本，后续 `mise install` 会有明确报错。
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "latest", fmt.Sprintf("%s@%s", miseTool, version))
 	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
-	out, err := cmd.Output()
-	if err != nil {
-		var stderr string
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr = string(exitErr.Stderr)
-		}
-		return fmt.Errorf("failed to resolve exact version for %s@%s: %v, stderr: %s", name, version, err, stderr)
+	out, _ := cmd.Output()
+	var exactVersion string
+	if outLines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(outLines) > 0 {
+		exactVersion = strings.TrimSpace(outLines[len(outLines)-1])
 	}
-	outLines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	exactVersion := strings.TrimSpace(outLines[len(outLines)-1])
 	if exactVersion == "" {
-		return fmt.Errorf("resolved empty exact version for %s@%s", name, version)
+		exactVersion = version
 	}
 
 	lockKey := name + "@" + exactVersion
