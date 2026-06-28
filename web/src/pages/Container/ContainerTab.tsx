@@ -6,47 +6,12 @@ import {
 import {
   PlayCircleOutlined, PauseCircleOutlined, StopOutlined,
   ReloadOutlined, DeleteOutlined, PlusOutlined,
-  CodeOutlined, InfoCircleOutlined, SettingOutlined, LineChartOutlined,
+  CodeOutlined, InfoCircleOutlined, LineChartOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { Container, ContainerStats, ImageCategory } from './types';
 import { formatBytes, getStatusColor } from './types';
 
-const adaptContainerData = (raw: Record<string, unknown>): Container => {
-  let ports = Array.isArray(raw.ports) ? raw.ports : [];
-  if (ports.length === 0 && typeof raw.Ports === 'string') {
-    ports = raw.Ports.split(',').map((p: string) => {
-      const s = p.trim();
-      if (!s) return null;
-      const match = s.match(/(?:(.*?):)?(\d+)->(\d+)\/(.+)/);
-      if (match) {
-        const ip = match[1] ? `${match[1]}:` : '';
-        return { host_port: `${ip}${match[2]}`, container_port: match[3], protocol: match[4] };
-      }
-      return { host_port: s, container_port: '', protocol: '' };
-    }).filter(Boolean);
-  }
-
-  const rawNames = raw.name || raw.Names;
-  let parsedName = '';
-  if (Array.isArray(rawNames) && rawNames.length > 0) {
-    parsedName = String(rawNames[0]).replace(/^\//, '');
-  } else if (typeof rawNames === 'string') {
-    parsedName = rawNames.replace(/^\//, '');
-  }
-
-  return {
-    id: String(raw.id || raw.ID || ''),
-    name: parsedName,
-    image: String(raw.image || raw.Image || ''),
-    status: String(raw.status || raw.Status || ''),
-    state: String(raw.state || raw.State || ''),
-    ports,
-    created_at: String(raw.created_at || raw.CreatedAt || ''),
-    cpu_usage: Number(raw.cpu_usage) || 0,
-    mem_usage: Number(raw.mem_usage) || 0,
-  };
-};
 export default function ContainerTab() {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,9 +30,7 @@ export default function ContainerTab() {
   const loadContainers = async () => {
     try {
       const res = await api.get('/containers?all=true');
-      const raw = res.data?.data?.containers || [];
-      const mapped = raw.map((c: Record<string, unknown>) => adaptContainerData(c));
-      setContainers(mapped);
+      setContainers(res.data?.data?.containers || []);
     } catch {
       message.error('加载容器列表失败');
     } finally {

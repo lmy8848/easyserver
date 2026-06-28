@@ -7,18 +7,6 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { Image, ImageCategory } from './types';
-import { formatBytes } from './types';
-
-const adaptImageData = (raw: Record<string, unknown>): Image => {
-  return {
-    ...raw,
-    id: String(raw.id || raw.ID || ''),
-    repository: String(raw.repository || raw.Repository || ''),
-    tag: String(raw.tag || raw.Tag || ''),
-    size: raw.size !== undefined ? Number(raw.size) : (raw.Size ? raw.Size : 0), // backend Size is a string e.g. "133MB"
-    created_at: String(raw.created_at || raw.CreatedAt || ''),
-  } as any;
-};
 
 export default function ImageTab() {
   const [images, setImages] = useState<Image[]>([]);
@@ -31,9 +19,7 @@ export default function ImageTab() {
   const loadImages = async () => {
     try {
       const res = await api.get('/images');
-      const raw = res.data?.data?.images || [];
-      const mapped = raw.map((c: Record<string, unknown>) => adaptImageData(c));
-      setImages(mapped);
+      setImages(res.data?.data?.images || []);
     } catch {
       message.error('加载镜像列表失败');
     } finally {
@@ -88,12 +74,7 @@ export default function ImageTab() {
   const columns = [
     { title: '仓库', dataIndex: 'repository', key: 'repository' },
     { title: '标签', dataIndex: 'tag', key: 'tag' },
-    {
-      title: '大小',
-      dataIndex: 'size',
-      key: 'size',
-      render: (size: any) => typeof size === 'string' ? size : (size ? formatBytes(size) : '-'),
-    },
+    { title: '大小', dataIndex: 'size', key: 'size', render: (size: string) => size || '-' },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at' },
     {
       title: '操作',

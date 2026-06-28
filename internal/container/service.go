@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,11 @@ const (
 	MaxLogTail       = 10000            // 最大日志行数
 )
 
+// portMappingRE parses a single `docker ps` port token:
+//
+//	[ip:]hostPort->containerPort/protocol
+var portMappingRE = regexp.MustCompile(`^(?:(.*?):)?(\d+)->(\d+)/(.+)$`)
+
 // Service manages Docker containers, images, compose, volumes, and networks.
 type Service struct {
 	executor executor.CommandExecutor
@@ -29,6 +35,95 @@ type Service struct {
 // NewService creates a new container Service.
 func NewService(exec executor.CommandExecutor) *Service {
 	return &Service{executor: exec}
+}
+
+// dockerPSRow mirrors the uppercase-keyed JSON emitted by `docker ps --format json`,
+// used as an unmarshal-only shim. toContainer() maps it onto the public lowercase Container.
+type dockerPSRow struct {
+	ID         string `json:"ID"`
+	Names      string `json:"Names"`
+	Image      string `json:"Image"`
+	Status     string `json:"Status"`
+	State      string `json:"State"`
+	Ports      string `json:"Ports"`
+	CreatedAt  string `json:"CreatedAt"`
+	Command    string `json:"Command"`
+	Labels     string `json:"Labels"`
+	Mounts     string `json:"Mounts"`
+	Networks   string `json:"Networks"`
+	Size       string `json:"Size"`
+	RunningFor string `json:"RunningFor"`
+}
+
+func (d dockerPSRow) toContainer() Container {
+	return Container{
+		ID:         d.ID,
+		Name:       strings.TrimPrefix(d.Names, "/"),
+		Image:      d.Image,
+		Status:     d.Status,
+		State:      d.State,
+		Ports:      parsePortsString(d.Ports),
+		CreatedAt:  d.CreatedAt,
+		Command:    d.Command,
+		Labels:     d.Labels,
+		Mounts:     d.Mounts,
+		Networks:   d.Networks,
+		Size:       d.Size,
+		RunningFor: d.RunningFor,
+	}
+}
+
+// parsePortsString turns the comma-separated `docker ps` Ports string
+// (e.g. "0.0.0.0:8080->80/tcp, :::8080->80/tcp") into structured PortMappings.
+// Falls back to a host-only entry for tokens that don't match the expected shape.
+func parsePortsString(s string) []PortMapping {
+	if s = strings.TrimSpace(s); s == "" {
+		return []PortMapping{}
+	}
+	out := make([]PortMapping, 0)
+	for _, tok := range strings.Split(s, ",") {
+		t := strings.TrimSpace(tok)
+		if t == "" {
+			continue
+		}
+		// match optional "ip:" prefix, then "hostPort->containerPort/protocol"
+		m := portMappingRE.FindStringSubmatch(t)
+		if m != nil {
+			ip := ""
+			if m[1] != "" {
+				ip = m[1] + ":"
+			}
+			out = append(out, PortMapping{
+				HostPort:      ip + m[2],
+				ContainerPort: m[3],
+				Protocol:      m[4],
+			})
+			continue
+		}
+		out = append(out, PortMapping{HostPort: t})
+	}
+	return out
+}
+
+// dockerImageRow mirrors the uppercase-keyed JSON emitted by `docker images --format json`.
+type dockerImageRow struct {
+	ID         string            `json:"ID"`
+	Repository string            `json:"Repository"`
+	Tag        string            `json:"Tag"`
+	Size       string            `json:"Size"`
+	CreatedAt  string            `json:"CreatedAt"`
+	Labels     map[string]string `json:"Labels"`
+}
+
+func (d dockerImageRow) toImage() Image {
+	return Image{
+		ID:         d.ID,
+		Repository: d.Repository,
+		Tag:        d.Tag,
+		Size:       d.Size,
+		CreatedAt:  d.CreatedAt,
+		Labels:     d.Labels,
+	}
 }
 
 // --- Container operations ---
@@ -63,12 +158,12 @@ func (s *Service) ListContainers(ctx context.Context, all bool) ([]Container, er
 		if line = strings.TrimSpace(line); line == "" {
 			continue
 		}
-		var c Container
-		if err := json.Unmarshal([]byte(line), &c); err != nil {
+		var d dockerPSRow
+		if err := json.Unmarshal([]byte(line), &d); err != nil {
 			log.Printf("container: parse container json error: %v, line: %s", err, line[:min(100, len(line))])
 			continue
 		}
-		containers = append(containers, c)
+		containers = append(containers, d.toContainer())
 	}
 
 	return containers, nil
@@ -81,20 +176,26 @@ func (s *Service) GetContainer(ctx context.Context, id string) (*Container, erro
 		return nil, fmt.Errorf("docker inspect failed: %s", output)
 	}
 
-	var containers []Container
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &containers); err != nil {
-		var c Container
-		if err2 := json.Unmarshal([]byte(strings.TrimSpace(output)), &c); err2 != nil {
+	// docker inspect emits a different schema than docker ps. Parsing it fully
+	// here is out of scope; we just preserve the previous best-effort behavior
+	// against the ps-shaped shim, which mostly populates ID/Image fields.
+	trimmed := strings.TrimSpace(output)
+	var rows []dockerPSRow
+	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
+		var d dockerPSRow
+		if err2 := json.Unmarshal([]byte(trimmed), &d); err2 != nil {
 			return nil, fmt.Errorf("parse container: %w", err2)
 		}
+		c := d.toContainer()
 		return &c, nil
 	}
 
-	if len(containers) == 0 {
+	if len(rows) == 0 {
 		return nil, fmt.Errorf("container not found: %s", id)
 	}
 
-	return &containers[0], nil
+	c := rows[0].toContainer()
+	return &c, nil
 }
 
 func (s *Service) containerAction(ctx context.Context, action, id string) error {
@@ -255,12 +356,12 @@ func (s *Service) ListImages(ctx context.Context) ([]Image, error) {
 		if line = strings.TrimSpace(line); line == "" {
 			continue
 		}
-		var img Image
-		if err := json.Unmarshal([]byte(line), &img); err != nil {
+		var d dockerImageRow
+		if err := json.Unmarshal([]byte(line), &d); err != nil {
 			log.Printf("container: parse image json error: %v, line: %s", err, line[:min(100, len(line))])
 			continue
 		}
-		images = append(images, img)
+		images = append(images, d.toImage())
 	}
 
 	return images, nil

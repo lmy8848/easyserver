@@ -1,20 +1,22 @@
 package container
 
-// Container represents a Docker container (from docker ps --format json).
+// Container represents a Docker container exposed over the API.
+// Docker CLI outputs uppercase keys; service.go unmarshals into a private
+// shim and maps into this lowercase shape before returning.
 type Container struct {
-	ID         string `json:"ID"`
-	Name       string `json:"Names"`
-	Image      string `json:"Image"`
-	Status     string `json:"Status"`
-	State      string `json:"State"`
-	Ports      string `json:"Ports"`
-	CreatedAt  string `json:"CreatedAt"`
-	Command    string `json:"Command"`
-	Labels     string `json:"Labels"`
-	Mounts     string `json:"Mounts"`
-	Networks   string `json:"Networks"`
-	Size       string `json:"Size"`
-	RunningFor string `json:"RunningFor"`
+	ID         string        `json:"id"`
+	Name       string        `json:"name"`
+	Image      string        `json:"image"`
+	Status     string        `json:"status"`
+	State      string        `json:"state"`
+	Ports      []PortMapping `json:"ports"`
+	CreatedAt  string        `json:"created_at"`
+	Command    string        `json:"command"`
+	Labels     string        `json:"labels"`
+	Mounts     string        `json:"mounts"`
+	Networks   string        `json:"networks"`
+	Size       string        `json:"size"`
+	RunningFor string        `json:"running_for"`
 }
 
 // PortMapping represents a port mapping.
@@ -32,14 +34,14 @@ type Mount struct {
 	Type        string `json:"type"`
 }
 
-// Image represents a Docker image.
+// Image represents a Docker image exposed over the API. See Container note.
 type Image struct {
-	ID         string            `json:"ID"`
-	Repository string            `json:"Repository"`
-	Tag        string            `json:"Tag"`
-	Size       string            `json:"Size"`
-	CreatedAt  string            `json:"CreatedAt"`
-	Labels     map[string]string `json:"Labels"`
+	ID         string            `json:"id"`
+	Repository string            `json:"repository"`
+	Tag        string            `json:"tag"`
+	Size       string            `json:"size"`
+	CreatedAt  string            `json:"created_at"`
+	Labels     map[string]string `json:"labels"`
 }
 
 // CreateRequest represents a request to create a container.

@@ -30,15 +30,13 @@ export interface Container {
   state: string;
   ports: Array<{ host_port: string; container_port: string; protocol: string }>;
   created_at: string;
-  cpu_usage: number;
-  mem_usage: number;
 }
 
 export interface Image {
   id: string;
   repository: string;
   tag: string;
-  size: number;
+  size: string; // 后端直传 docker images 的字符串（如 "133MB"），不再前端转换
   created_at: string;
 }
 
