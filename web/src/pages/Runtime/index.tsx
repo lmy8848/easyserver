@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Card, Button, Space, Modal, Tag, Progress, message } from 'antd';
-import { PlusOutlined, SyncOutlined } from '@ant-design/icons';
+import { PlusOutlined, SyncOutlined, GlobalOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
@@ -26,6 +26,9 @@ export default function Runtime() {
 
   // --- Catalog (drives the install dialog's language dropdown; loaded once) ---
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+
+  // --- Mirror config modal ---
+  const [mirrorVisible, setMirrorVisible] = useState(false);
 
   // --- Polling ---
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -528,6 +531,9 @@ export default function Runtime() {
         title="运行环境管理"
         extra={
           <Space>
+            <Button icon={<GlobalOutlined />} onClick={() => setMirrorVisible(true)}>
+              镜像源配置
+            </Button>
             <Button icon={<SyncOutlined />} onClick={handleDetect}>
               检测环境
             </Button>
@@ -551,7 +557,11 @@ export default function Runtime() {
         />
       </Card>
 
-      <MirrorPanel catalog={catalog} />
+      <MirrorPanel
+        visible={mirrorVisible}
+        onClose={() => setMirrorVisible(false)}
+        catalog={catalog}
+      />
 
       {/* Install environment modal */}
       <VersionList
