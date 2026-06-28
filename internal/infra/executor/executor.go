@@ -5,9 +5,20 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
+
+func init() {
+	path := os.Getenv("PATH")
+	if !strings.Contains(path, "/var/lib/easyserver/mise/shims") {
+		os.Setenv("PATH", "/var/lib/easyserver/mise/shims:"+path)
+	}
+	if os.Getenv("MISE_DATA_DIR") == "" {
+		os.Setenv("MISE_DATA_DIR", "/var/lib/easyserver/mise")
+	}
+}
 
 // CommandExecutor defines the interface for executing system commands.
 type CommandExecutor interface {
