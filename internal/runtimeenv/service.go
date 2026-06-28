@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -20,8 +19,9 @@ import (
 )
 
 type Service struct {
-	repo     Repository
-	executor executor.CommandExecutor
+	repo         Repository
+	executor     executor.CommandExecutor
+	installLocks sync.Map
 }
 
 func NewService(repo Repository, exec executor.CommandExecutor) *Service {
@@ -33,6 +33,11 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 
 // InitMirrors initializes the default mirrors if the table is empty
 func (s *Service) InitMirrors(ctx context.Context) error {
+	// Boot-time state healing (AC3)
+	if err := s.repo.HealState(ctx); err != nil {
+		log.Printf("runtime: failed to heal state: %v", err)
+	}
+
 	count, err := s.repo.CountMirrors(ctx)
 	if err != nil {
 		return err
@@ -173,82 +178,86 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Validate version to prevent command injection
 	if !isValidVersion(version) {
 		return fmt.Errorf("invalid version format: %s", version)
 	}
 
-	// Check if already installed
-	exists, err := s.repo.ExistsByNameAndVersion(ctx, name, version)
+	var miseTool string
+	for _, r := range GetCatalog() {
+		if r.Lang == name {
+			miseTool = r.MiseTool
+			break
+		}
+	}
+	if miseTool == "" {
+		return fmt.Errorf("unsupported runtime: %s", name)
+	}
+
+	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "latest", fmt.Sprintf("%s@%s", miseTool, version))
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to resolve exact version for %s@%s: %v, output: %s", name, version, err, string(out))
+	}
+	outLines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	exactVersion := strings.TrimSpace(outLines[len(outLines)-1])
+	if exactVersion == "" {
+		return fmt.Errorf("resolved empty exact version for %s@%s", name, version)
+	}
+
+	lockKey := name + "@" + exactVersion
+	if _, loaded := s.installLocks.LoadOrStore(lockKey, true); loaded {
+		return fmt.Errorf("installation of %s is already in progress", lockKey)
+	}
+	
+	var id int64
+	defer func() {
+		// Only remove lock if we fail BEFORE starting background routine.
+		// Background routine handles its own cleanup.
+		if id == 0 {
+			s.installLocks.Delete(lockKey)
+		}
+	}()
+
+	exists, err := s.repo.ExistsByNameAndVersion(ctx, name, exactVersion)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return fmt.Errorf("%s %s is already installed", name, version)
+		return fmt.Errorf("%s %s is already installed", name, exactVersion)
 	}
 
-	// Insert with installing status
-	id, err := s.repo.Create(ctx, name, version, "", "installing")
+	id, err = s.repo.Create(ctx, name, version, exactVersion, "installing")
 	if err != nil {
 		return err
 	}
 
-	// Install in background
-	go s.installRuntime(context.Background(), id, name, version)
-
+	go s.installRuntime(context.Background(), id, name, version, exactVersion, miseTool)
 	return nil
 }
 
 // installRuntime performs the actual installation
-func (s *Service) installRuntime(ctx context.Context, id int64, name, version string) {
-	var err error
-	var path string
+func (s *Service) installRuntime(ctx context.Context, id int64, name, version, exactVersion, miseTool string) {
+	defer s.installLocks.Delete(name + "@" + exactVersion)
+	s.updateProgress(ctx, id, 10, "downloading", fmt.Sprintf("正在下载 %s %s...", name, exactVersion))
 
-	// Update progress: downloading
-	s.updateProgress(ctx, id, 10, "downloading", fmt.Sprintf("正在下载 %s %s...", name, version))
-
-	switch name {
-	case "java":
-		path, err = s.installJava(ctx, id, version)
-	case "node":
-		path, err = s.installNode(ctx, id, version)
-	case "go":
-		path, err = s.installGo(ctx, id, version)
-	case "python":
-		path, err = s.installPython(ctx, id, version)
-	case "php":
-		path, err = s.installPHP(ctx, id, version)
-	default:
-		err = fmt.Errorf("unsupported runtime: %s", name)
-	}
-
-	if err != nil {
-		// error_message is shown next to the logs panel; keep it short and point
-		// the user at the logs for detail (the install output is already there).
-		log.Printf("runtime: failed to install %s %s: %v", name, version, err)
+	target := fmt.Sprintf("%s@%s", miseTool, exactVersion)
+	output, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), "/usr/local/bin/mise", "install", "-y", target)
+	
+	if err != nil || exitCode != 0 {
+		log.Printf("runtime: failed to install %s %s: %v, output: %s", name, exactVersion, err, output)
 		s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
 		return
 	}
 
-	// Show a brief configuring beat (appended, so install output is preserved).
-	s.appendProgress(ctx, id, 90, "configuring", "正在配置环境...")
-
-	// Append the final log line BEFORE flipping status to 'installed'. Append (not
-	// overwrite) so the install command's full output is preserved in the log view.
-	// Order matters: if we wrote status first, the frontend polling could see
-	// status=installed (and stop) before the final log line lands.
 	s.appendProgress(ctx, id, 100, "done", "安装完成")
+	s.repo.UpdateStatusToInstalled(ctx, id, "")
 
-	// Update status (sets progress=100, step='done' redundantly, leaves logs alone)
-	s.repo.UpdateStatusToInstalled(ctx, id, path)
-
-	// If this is the first version of this runtime, set as default
 	hasDefault, _ := s.repo.HasDefault(ctx, name)
 	if !hasDefault {
 		s.repo.SetDefaultByID(ctx, id)
 	}
-
-	log.Printf("runtime: installed %s %s at %s", name, version, path)
+	log.Printf("runtime: installed %s %s", name, exactVersion)
 }
 
 // runStreaming runs a command and streams its output to the database.
@@ -468,146 +477,21 @@ func (s *Service) GetProgress(ctx context.Context, id int64) (int, string, strin
 	return s.repo.GetProgress(ctx, id)
 }
 
-// installJava installs Java using apt or sdkman
-func (s *Service) installJava(ctx context.Context, id int64, version string) (string, error) {
-	// Validate version to prevent command injection
-	if !isValidVersion(version) {
-		return "", fmt.Errorf("invalid version format: %s", version)
-	}
 
-	// Try apt first
-	output, _, err := s.runStreaming(ctx, id, 30, "compiling", "正在安装 JDK (apt-get)...", "apt-get", "install", "-y", fmt.Sprintf("openjdk-%s-jdk", version))
-	if err == nil {
-		s.appendProgress(ctx, id, 70, "configuring", "JDK 安装完成，正在配置...")
-		return fmt.Sprintf("/usr/lib/jvm/java-%s-openjdk-amd64", version), nil
-	}
 
-	// Try yum (prior apt output is preserved by runStreaming's prefix capture)
-	output, _, err = s.runStreaming(ctx, id, 50, "compiling", "apt-get 安装失败，尝试使用 yum 安装 JDK...", "yum", "install", "-y", fmt.Sprintf("java-%s-openjdk-devel", version))
-	if err == nil {
-		s.appendProgress(ctx, id, 70, "configuring", "JDK 安装完成，正在配置...")
-		return fmt.Sprintf("/usr/lib/jvm/java-%s-openjdk", version), nil
-	}
 
-	return "", fmt.Errorf("failed to install Java %s: %s", version, output)
-}
 
-// installNode installs Node.js using nvm
-func (s *Service) installNode(ctx context.Context, id int64, version string) (string, error) {
-	// Validate version to prevent command injection
-	if !isValidVersion(version) {
-		return "", fmt.Errorf("invalid version format: %s", version)
-	}
 
-	// Update progress
-	s.appendProgress(ctx, id, 20, "compiling", "检查 nvm 安装状态...")
 
-	// Check if nvm is installed
-	homeDir := os.Getenv("HOME")
-	if homeDir == "" {
-		homeDir = "/root"
-	}
-	nvmDir := filepath.Join(homeDir, ".nvm")
 
-	if _, err := s.executor.LookPath("nvm"); err != nil {
-		// Install nvm first
-		// SECURITY WARNING: Piping curl to bash is inherently risky (MITM, compromised CDN).
-		// For production, consider downloading the script first, verifying its checksum, then executing.
-		output, _, nvmErr := s.runStreaming(ctx, id, 30, "compiling", "正在安装 nvm...", "bash", "-c", "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash")
-		if nvmErr != nil {
-			return "", fmt.Errorf("failed to install nvm: %v\n%s", nvmErr, output)
-		}
-	}
 
-	// Install Node.js version (escape path to prevent injection)
-	safeNvmDir := shellEscape(nvmDir)
-	safeVersion := shellEscape(version)
-	output, _, err := s.runStreaming(ctx, id, 50, "compiling", fmt.Sprintf("正在安装 Node.js %s...", version), "bash", "-c", fmt.Sprintf("source %s/nvm.sh && nvm install %s", safeNvmDir, safeVersion))
-	if err != nil {
-		return "", fmt.Errorf("failed to install Node.js %s: %s\n%s", version, err, output)
-	}
 
-	return fmt.Sprintf("%s/versions/node/v%s", nvmDir, version), nil
-}
-
-// installGo installs Go from official binary
-func (s *Service) installGo(ctx context.Context, id int64, version string) (string, error) {
-	// Validate version to prevent command injection
-	if !isValidVersion(version) {
-		return "", fmt.Errorf("invalid version format: %s", version)
-	}
-
-	// Update progress
-	s.appendProgress(ctx, id, 30, "downloading", fmt.Sprintf("正在下载 Go %s...", version))
-
-	// Create installation directory under /opt
-	installDir := "/opt/go"
-	if err := os.MkdirAll(installDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create install directory: %v", err)
-	}
-
-	// Download and install Go
-	url := fmt.Sprintf("https://go.dev/dl/go%s.linux-amd64.tar.gz", version)
-	output, _, err := s.runStreaming(ctx, id, 50, "compiling", "正在解压安装 Go...", "bash", "-c", fmt.Sprintf(
-		"curl -L %s | tar -C %s -xzf -", url, installDir,
-	))
-	if err != nil {
-		return "", fmt.Errorf("failed to install Go %s: %v\n%s", version, err, output)
-	}
-
-	return fmt.Sprintf("%s/go", installDir), nil
-}
-
-// installPython installs Python using apt or pyenv
-func (s *Service) installPython(ctx context.Context, id int64, version string) (string, error) {
-	// Validate version to prevent command injection
-	if !isValidVersion(version) {
-		return "", fmt.Errorf("invalid version format: %s", version)
-	}
-
-	// Try apt first
-	output, _, err := s.runStreaming(ctx, id, 30, "compiling", "正在安装 Python (apt-get)...", "apt-get", "install", "-y", fmt.Sprintf("python%s", version))
-	if err == nil {
-		return fmt.Sprintf("/usr/bin/python%s", version), nil
-	}
-
-	// Try yum (prior apt output is preserved by runStreaming's prefix capture)
-	output, _, err = s.runStreaming(ctx, id, 50, "compiling", "apt-get 安装失败，尝试使用 yum 安装 Python...", "yum", "install", "-y", fmt.Sprintf("python%s", version))
-	if err == nil {
-		return fmt.Sprintf("/usr/bin/python%s", version), nil
-	}
-
-	return "", fmt.Errorf("failed to install Python %s: %s", version, output)
-}
-
-// installPHP installs PHP using apt or yum
-func (s *Service) installPHP(ctx context.Context, id int64, version string) (string, error) {
-	// Validate version to prevent command injection
-	if !isValidVersion(version) {
-		return "", fmt.Errorf("invalid version format: %s", version)
-	}
-
-	// Try apt first
-	output, _, err := s.runStreaming(ctx, id, 30, "compiling", "正在安装 PHP (apt-get)...", "apt-get", "install", "-y", fmt.Sprintf("php%s", version))
-	if err == nil {
-		return fmt.Sprintf("/usr/bin/php%s", version), nil
-	}
-
-	// Try yum (prior apt output is preserved by runStreaming's prefix capture)
-	output, _, err = s.runStreaming(ctx, id, 50, "compiling", "apt-get 安装失败，尝试使用 yum 安装 PHP...", "yum", "install", "-y", fmt.Sprintf("php%s", version))
-	if err == nil {
-		return fmt.Sprintf("/usr/bin/php%s", version), nil
-	}
-
-	return "", fmt.Errorf("failed to install PHP %s: %s", version, output)
-}
 
 // Uninstall uninstalls a runtime environment
 func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Get the environment info
 	env, err := s.repo.GetByNameAndVersion(ctx, name, version)
 	if err != nil {
 		return err
@@ -616,29 +500,34 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 		return fmt.Errorf("%s %s not found", name, version)
 	}
 
-	// Don't allow uninstalling default version (but allow uninstalling failed installations)
+	if env.Status == "installing" || env.Status == "uninstalling" {
+		return fmt.Errorf("operation in progress: currently %s", env.Status)
+	}
+
 	if env.IsDefault && env.Status != "failed" && env.Status != "uninstall_failed" {
 		return fmt.Errorf("cannot uninstall default version, please set another version as default first")
 	}
 
-	// Failed installs never completed — nothing to apt-remove. Same for uninstall_failed:
-	// trying apt-remove again would just fail the same way. Just drop the row,
-	// otherwise the user's "删除" on a failed record runs a bogus uninstall pipeline
-	// that fails for the same reason the install did.
-	if env.Status == "failed" || env.Status == "uninstall_failed" {
+	conflicts, err := s.repo.GetConflictingReferences(ctx, env.ID)
+	if err != nil {
+		return fmt.Errorf("failed to check conflicts: %w", err)
+	}
+	
+	if len(conflicts) > 0 {
+		return fmt.Errorf("conflict: %s", strings.Join(conflicts, ", "))
+	}
+
+	if env.Status == "failed" {
 		s.cleanupRelatedData(ctx, env.ID)
 		return s.repo.Delete(ctx, env.ID)
 	}
 
-	// Mark as uninstalling
 	if err := s.repo.UpdateStatus(ctx, env.ID, "uninstalling"); err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
-	// Clean up related data before uninstalling
 	s.cleanupRelatedData(ctx, env.ID)
 
-	// Uninstall in background, delete DB row only on success
 	go func() {
 		bgCtx := context.Background()
 		uninstallErr := s.uninstallRuntime(bgCtx, env)
@@ -646,7 +535,6 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 			log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, uninstallErr)
 			s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
 		} else {
-			// Delete from database on success
 			s.repo.Delete(bgCtx, env.ID)
 		}
 	}()
@@ -675,45 +563,23 @@ func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
 
 // uninstallRuntime performs the actual uninstallation
 func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) error {
-	// Clear inherited install logs so the uninstall dialog starts clean — otherwise
-	// runStreaming's prefix capture would prepend the entire install history to every
-	// uninstall log write.
 	s.updateProgress(ctx, env.ID, 0, "uninstalling", "")
-	var exitCode int
-	var err error
-
-	switch env.Name {
-	case "java":
-		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 JDK %s...", env.Version), "apt-get", "remove", "-y", fmt.Sprintf("openjdk-%s-jdk", env.Version))
-		if err != nil || exitCode != 0 {
-			// Try yum fallback
-			_, exitCode, err = s.runStreaming(ctx, env.ID, 50, "uninstalling", fmt.Sprintf("尝试使用 yum 卸载 JDK %s...", env.Version), "yum", "remove", "-y", fmt.Sprintf("java-%s-openjdk-devel", env.Version))
+	
+	var miseTool string
+	for _, r := range GetCatalog() {
+		if r.Lang == env.Name {
+			miseTool = r.MiseTool
+			break
 		}
-		s.cleanupJavaResiduals(env.Version)
-	case "node":
-		// Validate path before deletion - must be under user's home directory
-		if !isValidUninstallPath(env.Path) {
-			return fmt.Errorf("拒绝删除家目录以外的路径: %s", env.Path)
-		}
-		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在删除 Node.js %s 目录...", env.Version), "rm", "-rf", env.Path)
-		s.cleanupNodeResiduals(env.Version)
-	case "go":
-		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", "正在卸载 Go...", "apt-get", "remove", "-y", "golang-go")
-		s.cleanupGoResiduals()
-	case "python":
-		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 Python %s...", env.Version), "apt-get", "remove", "-y", fmt.Sprintf("python%s", env.Version))
-		s.cleanupPythonResiduals(env.Version)
-	case "php":
-		_, exitCode, err = s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 PHP %s...", env.Version), "apt-get", "remove", "-y", fmt.Sprintf("php%s", env.Version))
-		s.cleanupPHPResiduals(env.Version)
-	default:
-		return fmt.Errorf("不支持的运行环境: %s", env.Name)
+	}
+	if miseTool == "" {
+		return fmt.Errorf("unsupported runtime: %s", env.Name)
 	}
 
-	if err != nil {
-		// Keep error_message short — the logs panel already shows the full command
-		// output. Avoids the awkward dangling ": " when output is empty (e.g. yum
-		// binary missing → cmd.Start fails before any stdout).
+	target := fmt.Sprintf("%s@%s", miseTool, env.Version)
+	_, exitCode, err := s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", target), "/usr/local/bin/mise", "uninstall", "-y", target)
+	
+	if err != nil || exitCode != 0 {
 		return fmt.Errorf("卸载失败 (exit %d)，详见日志", exitCode)
 	}
 
@@ -721,63 +587,55 @@ func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment)
 	return nil
 }
 
-// cleanupJavaResiduals cleans up Java-specific residual files
-func (s *Service) cleanupJavaResiduals(version string) {
-	// Clean up Maven local repository cache (optional, user may want to keep)
-	log.Printf("runtime: Java %s residuals cleaned", version)
-}
-
-// cleanupNodeResiduals cleans up Node.js-specific residual files
-func (s *Service) cleanupNodeResiduals(version string) {
-	// Clean up npm cache for this version
-	homeDir := os.Getenv("HOME")
-	if homeDir != "" {
-		npmCache := fmt.Sprintf("%s/.npm/_cacache", homeDir)
-		if _, err := os.Stat(npmCache); err == nil {
-			log.Printf("runtime: npm cache exists at %s", npmCache)
+// GetRemoteVersions dynamically fetches available versions using mise ls-remote
+func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var miseTool string
+	for _, r := range GetCatalog() {
+		if r.Lang == lang {
+			miseTool = r.MiseTool
+			break
 		}
 	}
-	log.Printf("runtime: Node.js %s residuals cleaned", version)
-}
+	if miseTool == "" {
+		return nil, fmt.Errorf("unsupported runtime: %s", lang)
+	}
 
-// cleanupGoResiduals cleans up Go-specific residual files
-func (s *Service) cleanupGoResiduals() {
-	// Clean up Go module cache
-	homeDir := os.Getenv("HOME")
-	if homeDir != "" {
-		goModCache := fmt.Sprintf("%s/go/pkg/mod", homeDir)
-		if _, err := os.Stat(goModCache); err == nil {
-			log.Printf("runtime: Go module cache exists at %s", goModCache)
+	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "ls-remote", miseTool)
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch remote versions: %v, output: %s", err, string(out))
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var versions []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && isValidVersion(line) {
+			versions = append(versions, line)
 		}
 	}
-	log.Printf("runtime: Go residuals cleaned")
+	
+	// Reverse to put newest first
+	for i, j := 0, len(versions)-1; i < j; i, j = i+1, j-1 {
+		versions[i], versions[j] = versions[j], versions[i]
+	}
+	
+	return versions, nil
 }
 
-// cleanupPythonResiduals cleans up Python-specific residual files
-func (s *Service) cleanupPythonResiduals(version string) {
-	// Clean up pip cache
-	homeDir := os.Getenv("HOME")
-	if homeDir != "" {
-		pipCache := fmt.Sprintf("%s/.cache/pip", homeDir)
-		if _, err := os.Stat(pipCache); err == nil {
-			log.Printf("runtime: pip cache exists at %s", pipCache)
-		}
-	}
-	log.Printf("runtime: Python %s residuals cleaned", version)
-}
 
-// cleanupPHPResiduals cleans up PHP-specific residual files
-func (s *Service) cleanupPHPResiduals(version string) {
-	// Clean up Composer cache
-	homeDir := os.Getenv("HOME")
-	if homeDir != "" {
-		composerCache := fmt.Sprintf("%s/.composer/cache", homeDir)
-		if _, err := os.Stat(composerCache); err == nil {
-			log.Printf("runtime: Composer cache exists at %s", composerCache)
-		}
-	}
-	log.Printf("runtime: PHP %s residuals cleaned", version)
-}
+
+
+
+
+
+
+
+
 
 // GetEnvConfigsByRuntimeID returns environment configs for a runtime
 func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {

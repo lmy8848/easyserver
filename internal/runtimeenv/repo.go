@@ -22,7 +22,7 @@ type Repository interface {
 	HasDefault(ctx context.Context, name string) (bool, error)
 
 	// Create/Delete
-	Create(ctx context.Context, name, version, path, status string) (int64, error)
+	Create(ctx context.Context, lang, version, exact, status string) (int64, error)
 	Delete(ctx context.Context, id int64) error
 
 	// Status & progress updates
@@ -59,4 +59,6 @@ type Repository interface {
 	CreateMirror(ctx context.Context, mirror *RuntimeMirror) (int64, error)
 	DisableOtherMirrors(ctx context.Context, envKey string, excludeID int64) error
 	DeleteMirror(ctx context.Context, id int64) error
+	GetConflictingReferences(ctx context.Context, runtimeID int64) ([]string, error)
+	HealState(ctx context.Context) error
 }

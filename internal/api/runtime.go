@@ -114,6 +114,17 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 			c.Error(ErrBadRequest.WithMessage("无法卸载默认版本，请先将其他版本设为默认"))
 			return
 		}
+		if strings.Contains(err.Error(), "conflict:") {
+			conflictsStr := strings.TrimPrefix(err.Error(), "conflict: ")
+			conflicts := strings.Split(conflictsStr, ", ")
+			// Use http.StatusConflict (409) manually via c.JSON because ErrorWrapper might be generic
+			c.JSON(409, gin.H{
+				"code":    409,
+				"message": "资源被占用，无法卸载",
+				"details": conflicts,
+			})
+			return
+		}
 		c.Error(WrapError(err))
 		return
 	}
@@ -381,11 +392,34 @@ func (h *RuntimeHandler) DeleteMirror(c *gin.Context) {
 	}
 	Success(c, gin.H{"message": "删除成功"})
 }
+// GetRemoteVersions gets available remote versions
+func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
+		return
+	}
+	
+	if !runtimeenv.IsSupported(name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
+		return
+	}
+
+	versions, err := h.runtimeService.GetRemoteVersions(c.Request.Context(), name)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+
+	Success(c, versions)
+}
+
 func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, runtimeVersionService *runtimeenv.VersionService, packageService *packagemanager.Service) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)
 	protected.GET("/runtime/:name", runtimeHandler.ListByName)
+	protected.GET("/runtime/:name/remote-versions", runtimeHandler.GetRemoteVersions)
 	protected.POST("/runtime/install", runtimeHandler.Install)
 	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
 	protected.POST("/runtime/set-default", runtimeHandler.SetDefault)

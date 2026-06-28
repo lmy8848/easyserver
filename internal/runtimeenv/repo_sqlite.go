@@ -22,7 +22,7 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 // ListAll returns all runtime environments ordered by name and version
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments ORDER BY name, version",
+		"SELECT v.id, v.lang as name, v.exact as version, '' as path, CASE WHEN g.runtime_version_id IS NOT NULL THEN 1 ELSE 0 END as is_default, v.status, v.progress, v.progress_step, v.logs, v.error_message, v.installed_at FROM runtime_version v LEFT JOIN global_default g ON v.id = g.runtime_version_id ORDER BY v.lang, v.exact",
 	)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (r *sqliteRepo) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) 
 // ListByName returns all versions of a specific runtime environment
 func (r *sqliteRepo) ListByName(ctx context.Context, name string) ([]RuntimeEnvironment, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments WHERE name = ? ORDER BY version",
+		"SELECT v.id, v.lang as name, v.exact as version, '' as path, CASE WHEN g.runtime_version_id IS NOT NULL THEN 1 ELSE 0 END as is_default, v.status, v.progress, v.progress_step, v.logs, v.error_message, v.installed_at FROM runtime_version v LEFT JOIN global_default g ON v.id = g.runtime_version_id WHERE v.lang = ? ORDER BY v.exact",
 		name,
 	)
 	if err != nil {
@@ -81,7 +81,7 @@ func (r *sqliteRepo) GetDefault(ctx context.Context, name string) (*RuntimeEnvir
 	env := &RuntimeEnvironment{}
 	var isDefault int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, name, version, path, is_default, status, installed_at FROM runtime_environments WHERE name = ? AND is_default = 1",
+		"SELECT v.id, v.lang as name, v.exact as version, '' as path, 1 as is_default, v.status, v.installed_at FROM runtime_version v INNER JOIN global_default g ON v.id = g.runtime_version_id WHERE v.lang = ?",
 		name,
 	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.InstalledAt)
 	if err == sql.ErrNoRows {
@@ -99,7 +99,7 @@ func (r *sqliteRepo) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment
 	env := &RuntimeEnvironment{}
 	var isDefault int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, name, version, path, is_default, status, progress, progress_step, logs, error_message, installed_at FROM runtime_environments WHERE id = ?",
+		"SELECT v.id, v.lang as name, v.exact as version, '' as path, CASE WHEN g.runtime_version_id IS NOT NULL THEN 1 ELSE 0 END as is_default, v.status, v.progress, v.progress_step, v.logs, v.error_message, v.installed_at FROM runtime_version v LEFT JOIN global_default g ON v.id = g.runtime_version_id WHERE v.id = ?",
 		id,
 	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.Progress, &env.ProgressStep, &env.Logs, &env.ErrorMessage, &env.InstalledAt)
 	if err == sql.ErrNoRows {
@@ -117,7 +117,7 @@ func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version stri
 	env := &RuntimeEnvironment{}
 	var isDefault int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, name, version, path, is_default, status, installed_at FROM runtime_environments WHERE name = ? AND version = ?",
+		"SELECT v.id, v.lang as name, v.exact as version, '' as path, CASE WHEN g.runtime_version_id IS NOT NULL THEN 1 ELSE 0 END as is_default, v.status, v.installed_at FROM runtime_version v LEFT JOIN global_default g ON v.id = g.runtime_version_id WHERE v.lang = ? AND v.exact = ?",
 		name, version,
 	).Scan(&env.ID, &env.Name, &env.Version, &env.Path, &isDefault, &env.Status, &env.InstalledAt)
 	if err == sql.ErrNoRows {
@@ -135,7 +135,7 @@ func (r *sqliteRepo) GetProgress(ctx context.Context, id int64) (int, string, st
 	var progress int
 	var step, logs, errorMessage string
 	err := r.db.QueryRowContext(ctx,
-		"SELECT progress, progress_step, logs, error_message FROM runtime_environments WHERE id = ?",
+		"SELECT progress, progress_step, logs, error_message FROM runtime_version WHERE id = ?",
 		id,
 	).Scan(&progress, &step, &logs, &errorMessage)
 	if err != nil {
@@ -148,7 +148,7 @@ func (r *sqliteRepo) GetProgress(ctx context.Context, id int64) (int, string, st
 func (r *sqliteRepo) ExistsByNameAndVersion(ctx context.Context, name, version string) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND version = ?",
+		"SELECT COUNT(*) FROM runtime_version WHERE lang = ? AND exact = ?",
 		name, version,
 	).Scan(&count)
 	if err != nil {
@@ -161,7 +161,7 @@ func (r *sqliteRepo) ExistsByNameAndVersion(ctx context.Context, name, version s
 func (r *sqliteRepo) ExistsSimilarVersion(ctx context.Context, name, majorVersion string) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND (version = ? OR version LIKE ?)",
+		"SELECT COUNT(*) FROM runtime_version WHERE lang = ? AND (exact = ? OR exact LIKE ?)",
 		name, majorVersion, majorVersion+".%",
 	).Scan(&count)
 	if err != nil {
@@ -174,7 +174,7 @@ func (r *sqliteRepo) ExistsSimilarVersion(ctx context.Context, name, majorVersio
 func (r *sqliteRepo) HasDefault(ctx context.Context, name string) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM runtime_environments WHERE name = ? AND is_default = 1",
+		"SELECT COUNT(*) FROM global_default WHERE lang = ?",
 		name,
 	).Scan(&count)
 	if err != nil {
@@ -184,10 +184,9 @@ func (r *sqliteRepo) HasDefault(ctx context.Context, name string) (bool, error) 
 }
 
 // Create inserts a new runtime environment and returns its ID
-func (r *sqliteRepo) Create(ctx context.Context, name, version, path, status string) (int64, error) {
+func (r *sqliteRepo) Create(ctx context.Context, lang, version, exact, status string) (int64, error) {
 	result, err := r.db.ExecContext(ctx,
-		"INSERT INTO runtime_environments (name, version, path, status) VALUES (?, ?, ?, ?)",
-		name, version, path, status,
+		"INSERT INTO runtime_version (lang, version, exact, status) VALUES (?, ?, ?, ?)", lang, version, exact, status,
 	)
 	if err != nil {
 		return 0, err
@@ -197,14 +196,14 @@ func (r *sqliteRepo) Create(ctx context.Context, name, version, path, status str
 
 // Delete removes a runtime environment by ID
 func (r *sqliteRepo) Delete(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM runtime_environments WHERE id = ?", id)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM runtime_version WHERE id = ?", id)
 	return err
 }
 
 // UpdateProgress updates the installation progress fields
 func (r *sqliteRepo) UpdateProgress(ctx context.Context, id int64, progress int, step, logs string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET progress = ?, progress_step = ?, logs = ? WHERE id = ?",
+		"UPDATE runtime_version SET progress = ?, progress_step = ?, logs = ? WHERE id = ?",
 		progress, step, logs, id,
 	)
 	return err
@@ -213,7 +212,7 @@ func (r *sqliteRepo) UpdateProgress(ctx context.Context, id int64, progress int,
 // UpdateStatus updates the status of a runtime environment
 func (r *sqliteRepo) UpdateStatus(ctx context.Context, id int64, status string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET status = ? WHERE id = ?",
+		"UPDATE runtime_version SET status = ? WHERE id = ?",
 		status, id,
 	)
 	return err
@@ -222,7 +221,7 @@ func (r *sqliteRepo) UpdateStatus(ctx context.Context, id int64, status string) 
 // UpdateStatusToFailed marks a runtime environment as failed with an error message
 func (r *sqliteRepo) UpdateStatusToFailed(ctx context.Context, id int64, errorMessage string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET status = 'failed', error_message = ?, progress = 0, progress_step = 'failed' WHERE id = ?",
+		"UPDATE runtime_version SET status = 'failed', error_message = ?, progress = 0, progress_step = 'failed' WHERE id = ?",
 		errorMessage, id,
 	)
 	return err
@@ -231,7 +230,7 @@ func (r *sqliteRepo) UpdateStatusToFailed(ctx context.Context, id int64, errorMe
 // UpdateStatusToUninstallFailed marks a runtime environment as failed during uninstall
 func (r *sqliteRepo) UpdateStatusToUninstallFailed(ctx context.Context, id int64, errorMessage string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET status = 'uninstall_failed', error_message = ?, progress = 0, progress_step = 'uninstall_failed' WHERE id = ?",
+		"UPDATE runtime_version SET status = 'uninstall_failed', error_message = ?, progress = 0, progress_step = 'uninstall_failed' WHERE id = ?",
 		errorMessage, id,
 	)
 	return err
@@ -240,8 +239,8 @@ func (r *sqliteRepo) UpdateStatusToUninstallFailed(ctx context.Context, id int64
 // UpdateStatusToInstalled marks a runtime environment as installed with its path
 func (r *sqliteRepo) UpdateStatusToInstalled(ctx context.Context, id int64, path string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET status = 'installed', path = ?, progress = 100, progress_step = 'done' WHERE id = ?",
-		path, id,
+		"UPDATE runtime_version SET status = 'ready', progress = 100, progress_step = 'done' WHERE id = ?",
+		id,
 	)
 	return err
 }
@@ -249,7 +248,7 @@ func (r *sqliteRepo) UpdateStatusToInstalled(ctx context.Context, id int64, path
 // ResetDefaults clears the default flag for all versions of a runtime
 func (r *sqliteRepo) ResetDefaults(ctx context.Context, name string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET is_default = 0 WHERE name = ?",
+		"DELETE FROM global_default WHERE lang = ?",
 		name,
 	)
 	return err
@@ -257,19 +256,19 @@ func (r *sqliteRepo) ResetDefaults(ctx context.Context, name string) error {
 
 // SetDefaultByID sets a specific runtime environment as the default by ID
 func (r *sqliteRepo) SetDefaultByID(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET is_default = 1 WHERE id = ?",
-		id,
-	)
+	var lang string
+	err := r.db.QueryRowContext(ctx, "SELECT lang FROM runtime_version WHERE id = ?", id).Scan(&lang)
+	if err != nil { return err }
+	_, err = r.db.ExecContext(ctx, "INSERT OR REPLACE INTO global_default (lang, runtime_version_id) VALUES (?, ?)", lang, id)
 	return err
 }
 
 // SetDefaultByNameAndVersion sets a specific version as the default
 func (r *sqliteRepo) SetDefaultByNameAndVersion(ctx context.Context, name, version string) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE runtime_environments SET is_default = 1 WHERE name = ? AND version = ?",
-		name, version,
-	)
+	var id int64
+	err := r.db.QueryRowContext(ctx, "SELECT id FROM runtime_version WHERE lang = ? AND exact = ?", name, version).Scan(&id)
+	if err != nil { return err }
+	_, err = r.db.ExecContext(ctx, "INSERT OR REPLACE INTO global_default (lang, runtime_version_id) VALUES (?, ?)", name, id)
 	return err
 }
 
@@ -499,5 +498,40 @@ func (r *sqliteRepo) DeleteMirror(ctx context.Context, id int64) error {
 // DisableOtherMirrors disables all other mirrors with the same env key
 func (r *sqliteRepo) DisableOtherMirrors(ctx context.Context, envKey string, excludeID int64) error {
 	_, err := r.db.ExecContext(ctx, "UPDATE runtime_mirror SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE env_key = ? AND id != ?", envKey, excludeID)
+	return err
+}
+
+func (r *sqliteRepo) GetConflictingReferences(ctx context.Context, runtimeID int64) ([]string, error) {
+	var conflicts []string
+	rows, err := r.db.QueryContext(ctx, "SELECT name FROM processes WHERE runtime_version_id = ?", runtimeID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var pname string
+			if err := rows.Scan(&pname); err == nil {
+				conflicts = append(conflicts, "Process: "+pname)
+			}
+		}
+	}
+	
+	rows, err = r.db.QueryContext(ctx, "SELECT name FROM cron_tasks WHERE runtime_version_id = ?", runtimeID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var cname string
+			if err := rows.Scan(&cname); err == nil {
+				conflicts = append(conflicts, "Cron: "+cname)
+			}
+		}
+	}
+	return conflicts, nil
+}
+
+func (r *sqliteRepo) HealState(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE runtime_version SET status = 'failed', progress = 0, progress_step = 'failed', error_message = 'Interrupted by server restart' WHERE status = 'installing'")
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, "UPDATE runtime_version SET status = 'uninstall_failed', progress = 0, progress_step = 'uninstall_failed', error_message = 'Interrupted by server restart' WHERE status = 'uninstalling'")
 	return err
 }
