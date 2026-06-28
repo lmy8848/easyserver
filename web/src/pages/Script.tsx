@@ -178,7 +178,7 @@ export default function ScriptPage() {
       title: '操作',
       key: 'actions',
       width: 150,
-      render: (_: any, record: Script) => (
+      render: (_: unknown, record: Script) => (
         <Space>
           <Tooltip title="复制内容">
             <Button

@@ -97,7 +97,7 @@ export default function TableExplorer({
                       })),
                       {
                         title: '操作', key: 'action', width: 140,
-                        render: (_: any, record: any) => (
+                        render: (_: unknown, record: any) => (
                           <Space size="small">
                             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onOpenEditModal(record)}>编辑</Button>
                             <Popconfirm title="确定删除此记录？" onConfirm={() => onDeleteRecord(record)}>
@@ -180,7 +180,7 @@ export default function TableExplorer({
                         )},
                       { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
                       { title: '操作', key: 'action', width: 200,
-                        render: (_: any, record: any) => (
+                        render: (_: unknown, record: any) => (
                           <Space size="small">
                             {record.status === 'completed' && (
                               <>

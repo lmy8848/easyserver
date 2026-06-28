@@ -71,7 +71,7 @@ export default function CloudFirewall({ firewallRules, selectedInstance, onRefre
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: CloudFirewallRule) => (
+      render: (_: unknown, record: CloudFirewallRule) => (
         <Button
           type="link"
           size="small"

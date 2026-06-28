@@ -1,5 +1,7 @@
 import { Tag } from 'antd';
 
+/* eslint-disable react-refresh/only-export-components */
+
 /**
  * Get color for percentage-based metrics (CPU, memory, disk).
  * Used by Dashboard.
@@ -32,7 +34,6 @@ export function getServiceStatusColor(status: string): string {
 /**
  * Get hex color string for service status (for inline styles).
  */
-// eslint-disable-next-line react-refresh/only-export-components
 export function getStatusColor(status: string): string {
   const colorName = getServiceStatusColor(status);
   const colorMap: Record<string, string> = {

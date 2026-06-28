@@ -130,7 +130,7 @@ export default function FirewallRules({
       title: '操作',
       key: 'actions',
       width: 180,
-      render: (_: any, record: FirewallRule, index: number) => (
+      render: (_: unknown, record: FirewallRule, index: number) => (
         <Space>
           <Tooltip title="上移">
             <Button

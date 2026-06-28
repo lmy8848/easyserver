@@ -101,7 +101,7 @@ export default function Dashboard() {
     title: { text: 'CPU 使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: any) => {
+      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: number}>) => {
         const time = sanitizeTooltipText(params[0]?.axisValue || '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
@@ -137,7 +137,7 @@ export default function Dashboard() {
     title: { text: '内存使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: any) => {
+      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: number}>) => {
         const time = sanitizeTooltipText(params[0]?.axisValue || '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
@@ -174,7 +174,7 @@ export default function Dashboard() {
     title: { text: '网络流量', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: any) => {
+      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: number}>) => {
         const time = sanitizeTooltipText(params[0]?.axisValue || '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
@@ -410,7 +410,7 @@ export default function Dashboard() {
                   title: '容量',
                   key: 'size',
                   width: 140,
-                  render: (_: any, r: any) => `${formatBytes(r.used_bytes)} / ${formatBytes(r.total_bytes)}`,
+                  render: (_: unknown, r: { used_bytes: number; total_bytes: number }) => `${formatBytes(r.used_bytes)} / ${formatBytes(r.total_bytes)}`,
                 },
               ]}
             />

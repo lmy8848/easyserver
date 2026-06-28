@@ -194,7 +194,7 @@ export default function Deploy() {
   const serverColumns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
     { title: '名称', dataIndex: 'name', key: 'name' },
-    { title: '地址', key: 'address', render: (_: any, r: DeployServer) => `${r.host}:${r.port}` },
+    { title: '地址', key: 'address', render: (_: unknown, r: DeployServer) => `${r.host}:${r.port}` },
     { title: '用户名', dataIndex: 'username', key: 'username' },
     {
       title: '状态',
@@ -209,7 +209,7 @@ export default function Deploy() {
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: DeployServer) => (
+      render: (_: unknown, record: DeployServer) => (
         <Space>
           <Button size="small" icon={<ApiOutlined />} onClick={() => handleTestConnection(record.id)}>
             测试
@@ -257,7 +257,7 @@ export default function Deploy() {
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: DeployTask) => (
+      render: (_: unknown, record: DeployTask) => (
         <Space>
           <Button
             size="small"
@@ -286,7 +286,7 @@ export default function Deploy() {
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: DeployVersion) => (
+      render: (_: unknown, record: DeployVersion) => (
         <Button size="small" icon={<SyncOutlined />} onClick={() => handleRollback(record.id)}>
           回滚
         </Button>

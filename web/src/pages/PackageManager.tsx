@@ -185,7 +185,7 @@ export default function PackageManager() {
       title: '操作',
       key: 'action',
       width: 150,
-      render: (_: any, record: Package) => (
+      render: (_: unknown, record: Package) => (
         <Space>
           <Button
             type="link"

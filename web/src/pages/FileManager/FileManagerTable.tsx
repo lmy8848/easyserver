@@ -118,7 +118,7 @@ export default function FileManagerTable({
       title: '名称',
       key: 'name',
       sorter: true,
-      render: (_: any, record: FileEntry) => (
+      render: (_: unknown, record: FileEntry) => (
         <Space style={{ cursor: 'pointer' }} onClick={() => onClick(record)}>
           {record.is_dir ? (
             <FolderOutlined style={{ color: '#faad14' }} />
@@ -161,7 +161,7 @@ export default function FileManagerTable({
       title: '操作',
       key: 'action',
       width: 80,
-      render: (_: any, record: FileEntry) => (
+      render: (_: unknown, record: FileEntry) => (
         <Dropdown menu={getActionMenu(record)} trigger={['click']}>
           <Button type="link" size="small">操作</Button>
         </Dropdown>

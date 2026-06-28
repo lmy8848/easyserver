@@ -48,14 +48,14 @@ export default function CloudInstances({ instances, loading, selectedInstance, o
     {
       title: '配置',
       key: 'config',
-      render: (_: any, record: CloudInstance) => (
+      render: (_: unknown, record: CloudInstance) => (
         `${record.cpu}核 / ${record.memory_gb}GB / ${record.disk_gb}GB`
       ),
     },
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: CloudInstance) => (
+      render: (_: unknown, record: CloudInstance) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Button
             type={selectedInstance === record.instance_id ? 'primary' : 'default'}

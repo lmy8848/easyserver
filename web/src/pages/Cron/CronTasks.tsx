@@ -186,7 +186,7 @@ export default function CronTasks({
       title: '超时/重试',
       key: 'config',
       width: 120,
-      render: (_: any, record: CronTask) => (
+      render: (_: unknown, record: CronTask) => (
         <Space size={4}>
           {record.timeout > 0 && <Tag>{record.timeout}s</Tag>}
           {record.max_retry > 0 && <Tag color="orange">重试{record.max_retry}</Tag>}
@@ -219,7 +219,7 @@ export default function CronTasks({
       title: '操作',
       key: 'actions',
       width: 200,
-      render: (_: any, record: CronTask) => (
+      render: (_: unknown, record: CronTask) => (
         <Space>
           <Tooltip title="立即执行">
             <Button

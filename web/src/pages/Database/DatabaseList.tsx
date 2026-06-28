@@ -44,7 +44,7 @@ export default function DatabaseList({
     { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, responsive: ['md'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
     {
       title: '操作', key: 'action', width: 200,
-      render: (_: any, record: DBType) => (
+      render: (_: unknown, record: DBType) => (
         <Space size="small">
           <Button type="link" size="small" icon={<TableOutlined />} onClick={() => onEnterDatabase(record)}>管理</Button>
           <Popconfirm title="确定删除此数据库？" onConfirm={() => onDeleteDB(record.id)}>
@@ -62,7 +62,7 @@ export default function DatabaseList({
     { title: '权限', dataIndex: 'privileges', key: 'privileges', ellipsis: true, responsive: ['md'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
     {
       title: '操作', key: 'action', width: 180,
-      render: (_: any, record: DBUser) => (
+      render: (_: unknown, record: DBUser) => (
         <Space size="small">
           <Button type="link" size="small" icon={<KeyOutlined />}
             onClick={() => onOpenGrant(record)}>授权</Button>

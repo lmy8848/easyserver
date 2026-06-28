@@ -367,7 +367,7 @@ export default function SecuritySettings() {
             { title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 180,
               render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
             { title: '操作', key: 'action', width: 100,
-              render: (_: any, record: Session) => (
+              render: (_: unknown, record: Session) => (
                 record.token ? (
                   <Popconfirm
                     title="确定要踢出此设备？"

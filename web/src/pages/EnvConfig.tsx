@@ -192,7 +192,7 @@ export default function EnvConfig() {
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_: any, record: EnvConfig) => (
+      render: (_: unknown, record: EnvConfig) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditEnv(record)}>编辑</Button>
           <Popconfirm title="确定要删除吗？" onConfirm={() => handleDeleteEnv(record.id)}>
@@ -210,7 +210,7 @@ export default function EnvConfig() {
       title: '操作',
       key: 'action',
       width: 80,
-      render: (_: any, record: PathEntry) => (
+      render: (_: unknown, record: PathEntry) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Popconfirm title="确定要删除吗？" onConfirm={() => handleDeletePath(record.id)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
@@ -229,7 +229,7 @@ export default function EnvConfig() {
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_: any, record: GlobalConfig) => (
+      render: (_: unknown, record: GlobalConfig) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditGlobal(record)}>编辑</Button>
           <Popconfirm title="确定要删除吗？" onConfirm={() => handleDeleteGlobal(record.id)}>

@@ -63,7 +63,7 @@ export default function CloudSnapshots({ snapshots, selectedInstance, onRefresh 
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: Snapshot) => (
+      render: (_: unknown, record: Snapshot) => (
         <Button
           type="link"
           size="small"

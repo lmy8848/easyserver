@@ -345,7 +345,7 @@ export default function AuditLog() {
       title: '方法',
       key: 'method',
       width: 80,
-      render: (_: any, record: AuditLogItem) => {
+      render: (_: unknown, record: AuditLogItem) => {
         const detail = parseDetail(record.detail);
         if (detail.method === '-') return '-';
         return <Tag color={getMethodColor(detail.method)}>{detail.method}</Tag>;
@@ -355,7 +355,7 @@ export default function AuditLog() {
       title: '路径',
       key: 'path',
       ellipsis: true,
-      render: (_: any, record: AuditLogItem) => {
+      render: (_: unknown, record: AuditLogItem) => {
         const detail = parseDetail(record.detail);
         return <Tooltip title={detail.path}><span style={{ fontSize: 12 }}>{detail.path}</span></Tooltip>;
       },
@@ -364,7 +364,7 @@ export default function AuditLog() {
       title: '状态',
       key: 'status',
       width: 80,
-      render: (_: any, record: AuditLogItem) => {
+      render: (_: unknown, record: AuditLogItem) => {
         const status = parseDetail(record.detail).status;
         const code = parseInt(status);
         const isAlert = code >= 400;
@@ -379,7 +379,7 @@ export default function AuditLog() {
       title: '耗时',
       key: 'duration',
       width: 80,
-      render: (_: any, record: AuditLogItem) => <span style={{ fontSize: 12 }}>{parseDetail(record.detail).duration}</span>,
+      render: (_: unknown, record: AuditLogItem) => <span style={{ fontSize: 12 }}>{parseDetail(record.detail).duration}</span>,
     },
     {
       title: 'IP',
@@ -391,7 +391,7 @@ export default function AuditLog() {
       title: '详情',
       key: 'action',
       width: 60,
-      render: (_: any, record: AuditLogItem) => (
+      render: (_: unknown, record: AuditLogItem) => (
         <Tooltip title="查看详情">
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => showDetail(record)} />
         </Tooltip>
