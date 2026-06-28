@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Modal, Form, Select, Input, Button, Space, Tag, message } from 'antd';
 import { SyncOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { VersionInfo, Dependencies } from './types';

@@ -136,6 +136,11 @@ func main() {
 		log.Println("WARNING: deploy.encryption_key is empty. SSH credentials will not be encrypted!")
 	}
 
+	// Initialize mise runtime manager
+	if err := runtimeenv.BootstrapMise(); err != nil {
+		log.Printf("ERROR: Failed to bootstrap mise runtime manager: %v", err)
+	}
+
 	// Initialize database
 	db, err := database.Init(cfg.Database.Path)
 	if err != nil {

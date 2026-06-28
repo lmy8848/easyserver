@@ -99,7 +99,7 @@ export default function Runtime() {
       active = false;
       if (timer) clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [logsVisible, logsData?.id, logsData?.status]);
 
   // --- Cleanup modal state ---
