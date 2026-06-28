@@ -32,6 +32,7 @@ export function getServiceStatusColor(status: string): string {
 /**
  * Get hex color string for service status (for inline styles).
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getStatusColor(status: string): string {
   const colorName = getServiceStatusColor(status);
   const colorMap: Record<string, string> = {
