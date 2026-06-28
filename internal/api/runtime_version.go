@@ -22,6 +22,12 @@ func (h *RuntimeVersionHandler) List(c *gin.Context) {
 		return
 	}
 
+	// Validate runtime name
+	if !runtimeenv.IsSupported(name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
+		return
+	}
+
 	versions, err := h.versionService.ListWithInstalledStatus(c.Request.Context(), name)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -42,10 +48,7 @@ func (h *RuntimeVersionHandler) Fetch(c *gin.Context) {
 	}
 
 	// Validate runtime name
-	validRuntimes := map[string]bool{
-		"java": true, "node": true, "go": true, "python": true, "php": true,
-	}
-	if !validRuntimes[name] {
+	if !runtimeenv.IsSupported(name) {
 		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
 		return
 	}
@@ -80,6 +83,12 @@ func (h *RuntimeVersionHandler) ResolveAlias(c *gin.Context) {
 		return
 	}
 
+	// Validate runtime name
+	if !runtimeenv.IsSupported(name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
+		return
+	}
+
 	resolved, err := h.versionService.ResolveAlias(c.Request.Context(), name, alias)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -97,6 +106,12 @@ func (h *RuntimeVersionHandler) GetAliasSuggestions(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
 		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
+		return
+	}
+
+	// Validate runtime name
+	if !runtimeenv.IsSupported(name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
 		return
 	}
 

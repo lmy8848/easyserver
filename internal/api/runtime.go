@@ -54,6 +54,12 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) {
 		return
 	}
 
+	// Validate runtime name
+	if !runtimeenv.IsSupported(name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
+		return
+	}
+
 	environments, err := h.runtimeService.ListByName(c.Request.Context(), name)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -74,10 +80,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 	}
 
 	// Validate runtime name
-	validRuntimes := map[string]bool{
-		"java": true, "node": true, "go": true, "python": true, "php": true,
-	}
-	if !validRuntimes[req.Name] {
+	if !runtimeenv.IsSupported(req.Name) {
 		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
 		return
 	}
@@ -100,6 +103,12 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 		return
 	}
 
+	// Validate runtime name
+	if !runtimeenv.IsSupported(req.Name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
+		return
+	}
+
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
 		if strings.Contains(err.Error(), "cannot uninstall default version") {
 			c.Error(ErrBadRequest.WithMessage("无法卸载默认版本，请先将其他版本设为默认"))
@@ -119,6 +128,12 @@ func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 	var req runtimeenv.RuntimeSetDefaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+
+	// Validate runtime name
+	if !runtimeenv.IsSupported(req.Name) {
+		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
 		return
 	}
 
@@ -198,10 +213,7 @@ func (h *RuntimeHandler) CheckDependencies(c *gin.Context) {
 	}
 
 	// Validate runtime name
-	validRuntimes := map[string]bool{
-		"java": true, "node": true, "go": true, "python": true, "php": true,
-	}
-	if !validRuntimes[name] {
+	if !runtimeenv.IsSupported(name) {
 		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
 		return
 	}
@@ -323,6 +335,7 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.GET("/runtime/check-deps/:name", runtimeHandler.CheckDependencies)
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
+	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
 
 	// Runtime version management
 	runtimeVersionHandler := NewRuntimeVersionHandler(runtimeVersionService)
@@ -340,4 +353,10 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.POST("/packages/install", packageHandler.InstallPackage)
 	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
 	protected.POST("/packages/update", packageHandler.UpdatePackage)
+}
+// GetCatalog returns the catalog of supported runtimes
+func (h *RuntimeHandler) GetCatalog(c *gin.Context) {
+	Success(c, gin.H{
+		"catalog": runtimeenv.GetCatalog(),
+	})
 }
