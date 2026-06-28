@@ -78,7 +78,14 @@ func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.ListAll(ctx)
+	envs, err := s.repo.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range envs {
+		envs[i].Path = miseInstallPath(envs[i].Name, envs[i].Version)
+	}
+	return envs, nil
 }
 
 // ListByName returns all versions of a specific runtime environment
@@ -86,7 +93,14 @@ func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnviron
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.ListByName(ctx, name)
+	envs, err := s.repo.ListByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	for i := range envs {
+		envs[i].Path = miseInstallPath(envs[i].Name, envs[i].Version)
+	}
+	return envs, nil
 }
 
 // GetDefault returns the default version of a runtime environment
@@ -94,7 +108,12 @@ func (s *Service) GetDefault(ctx context.Context, name string) (*RuntimeEnvironm
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.GetDefault(ctx, name)
+	env, err := s.repo.GetDefault(ctx, name)
+	if err != nil || env == nil {
+		return env, err
+	}
+	env.Path = miseInstallPath(env.Name, env.Version)
+	return env, nil
 }
 
 // GetByID returns a runtime environment by ID
@@ -102,7 +121,12 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.GetByID(ctx, id)
+	env, err := s.repo.GetByID(ctx, id)
+	if err != nil || env == nil {
+		return env, err
+	}
+	env.Path = miseInstallPath(env.Name, env.Version)
+	return env, nil
 }
 
 // Install installs a runtime environment
@@ -436,9 +460,9 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 		return fmt.Errorf("operation in progress: currently %s", env.Status)
 	}
 
-	if env.IsDefault && env.Status != "failed" && env.Status != "uninstall_failed" {
-		return fmt.Errorf("cannot uninstall default version, please set another version as default first")
-	}
+	// 默认版本也允许卸载：cleanupRelatedData 会先清掉 global_default 行
+	// （否则 Delete 会触发 FK 冲突），随后 GenerateMiseConfig 会把 [tools]
+	// 里对应条目移除。该 lang 卸载后变为"无默认"，由用户重新指定。
 
 	conflicts, err := s.repo.GetConflictingReferences(ctx, env.ID)
 	if err != nil {

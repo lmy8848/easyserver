@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"easyserver/internal/envconfig"
-	"easyserver/internal/packagemanager"
 	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
@@ -110,10 +109,6 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	}
 
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
-		if strings.Contains(err.Error(), "cannot uninstall default version") {
-			c.Error(ErrBadRequest.WithMessage("无法卸载默认版本，请先将其他版本设为默认"))
-			return
-		}
 		if strings.Contains(err.Error(), "conflict:") {
 			conflictsStr := strings.TrimPrefix(err.Error(), "conflict: ")
 			conflicts := strings.Split(conflictsStr, ", ")
@@ -358,7 +353,7 @@ func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
 	Success(c, gin.H{"versions": versions})
 }
 
-func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, packageService *packagemanager.Service) {
+func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, packageService *runtimeenv.PackageService) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)
@@ -379,9 +374,8 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	// Package management
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)
 	protected.GET("/packages", packageHandler.ListPackages)
-	protected.GET("/packages/scan/:id", packageHandler.ScanPackages)
 	protected.GET("/packages/search", packageHandler.SearchPackages)
-	protected.GET("/packages/versions/:name", packageHandler.GetPackageVersions)
+	protected.GET("/packages/versions/*name", packageHandler.GetPackageVersions)
 	protected.POST("/packages/install", packageHandler.InstallPackage)
 	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
 	protected.POST("/packages/update", packageHandler.UpdatePackage)

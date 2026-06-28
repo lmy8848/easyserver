@@ -149,11 +149,11 @@ export default function PackageManager({
                   </div>
                 )}
               </div>
-              <Form.Item name="version" rules={[{ required: true, message: '请选择版本' }]}>
+              <Form.Item name="version">
                 <Select
-                  placeholder="选择版本"
+                  placeholder="选择版本（默认最新）"
                   size="small"
-                  style={{ width: 150 }}
+                  style={{ width: 170 }}
                   loading={packageVersionsLoading}
                   allowClear
                   showSearch

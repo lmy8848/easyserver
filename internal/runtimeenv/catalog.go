@@ -1,6 +1,9 @@
 package runtimeenv
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 type Runtime struct {
 	Lang       string   `json:"lang"`        // "node"
@@ -92,4 +95,27 @@ func MiseToolFor(lang string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// miseToolDirName normalizes a mise tool key into the filesystem name mise
+// uses under installs/.  mise replaces ':' and '/' with '-' (see
+// .mise-installs.toml: e.g. "vfox:version-fox/vfox-java" →
+// "vfox-version-fox-vfox-java"). Core plugins like "node"/"go" pass through.
+func miseToolDirName(miseTool string) string {
+	return strings.NewReplacer(":", "-", "/", "-").Replace(miseTool)
+}
+
+// miseInstallPath returns the on-disk install dir mise will use for
+// (lang, version), or "" when lang isn't in the catalog or version is blank.
+// Pure function — does not stat the path, so it returns the *intended*
+// location even when status != installed.
+func miseInstallPath(lang, version string) string {
+	if version == "" {
+		return ""
+	}
+	tool, ok := MiseToolFor(lang)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(miseDataDir, "installs", miseToolDirName(tool), version)
 }

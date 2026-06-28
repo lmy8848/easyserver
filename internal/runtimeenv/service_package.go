@@ -68,16 +68,35 @@ func pnpmEnv() []string {
 	}
 }
 
-// describeCmdErr 选择最有信息量的错误描述：output 非空用 output（含 stderr），
+// describeCmdErr 返回给上游 error 用：包管理器出错时只截取输出末尾 10 行，
+// 并把完整输出 log 到服务端便于调试。output 非空时用 output（含 stderr），
 // 否则用 err.Error()（如 "executable file not found in $PATH"）。
-func describeCmdErr(err error, output string) string {
+//
+// logTag 用于标识来源（如 "pip install" / "npm install"），方便日志检索。
+//
+// 上百行的 pip/npm 错误若整段塞进 error 会被 handler 当成 500 消息原样
+// 回前端，既噪音又泄露环境信息。
+func describeCmdErr(err error, output, logTag string) string {
 	if strings.TrimSpace(output) != "" {
-		return output
+		log.Printf("package: %s full output:\n%s", logTag, output)
+		return tailLines(output, 10)
 	}
 	if err != nil {
 		return err.Error()
 	}
 	return ""
+}
+
+// tailLines 返回 s 末尾最多 n 行非空行，用 "\n" 拼接。
+func tailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // miseReshim 让 mise 重新生成 shims。
@@ -257,8 +276,13 @@ func (s *PackageService) getNpmPackageVersions(ctx context.Context, packageName 
 }
 
 // pip package search
+//
+// PyPI 已于 2021 年关闭 `pip search` 接口；继续返回错误会让前端的实时搜索
+// 下拉框 500，而非简单的"无建议"。这里改为返回空列表，与 maven/composer
+// 等"不支持搜索"的语言行为一致——用户直接输入完整包名即可，pip 工作流
+// 本来也是先知道名字再 install。
 func (s *PackageService) searchPipPackages(ctx context.Context, query string) ([]PackageInfo, error) {
-	return []PackageInfo{}, fmt.Errorf("pip search not supported, use pip install <package>")
+	return []PackageInfo{}, nil
 }
 
 // pip package versions
@@ -421,7 +445,7 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 
 	output, err := s.runManagerCmd(ctx, manager, args...)
 	if err != nil {
-		return fmt.Errorf("%s install failed: %s", manager, describeCmdErr(err, output))
+		return fmt.Errorf("%s install failed: %s", manager, describeCmdErr(err, output, manager+" install "+req.Name))
 	}
 
 	log.Printf("package: installed via %s %s", manager, strings.Join(args, " "))
@@ -445,7 +469,7 @@ func (s *PackageService) uninstallNpmPackage(ctx context.Context, req *PackageUn
 
 	output, err := s.runManagerCmd(ctx, manager, args...)
 	if err != nil {
-		return fmt.Errorf("%s uninstall failed: %s", manager, describeCmdErr(err, output))
+		return fmt.Errorf("%s uninstall failed: %s", manager, describeCmdErr(err, output, manager+" uninstall "+req.Name))
 	}
 
 	log.Printf("package: uninstalled %s via %s", req.Name, manager)
@@ -463,7 +487,7 @@ func (s *PackageService) updateNpmPackage(ctx context.Context, req *PackageUpdat
 
 	output, err := s.runManagerCmd(ctx, manager, args...)
 	if err != nil {
-		return fmt.Errorf("%s update failed: %s", manager, describeCmdErr(err, output))
+		return fmt.Errorf("%s update failed: %s", manager, describeCmdErr(err, output, manager+" update "+req.Name))
 	}
 
 	log.Printf("package: updated %s via %s", req.Name, manager)
@@ -510,7 +534,7 @@ func (s *PackageService) installPipPackage(ctx context.Context, req *PackageInst
 
 	output, err := s.runManagerCmd(ctx, "pip", args...)
 	if err != nil {
-		return fmt.Errorf("pip install failed: %s", describeCmdErr(err, output))
+		return fmt.Errorf("pip install failed: %s", describeCmdErr(err, output, "pip install "+req.Name))
 	}
 
 	log.Printf("package: installed %s via pip", req.Name)
@@ -520,7 +544,7 @@ func (s *PackageService) installPipPackage(ctx context.Context, req *PackageInst
 func (s *PackageService) uninstallPipPackage(ctx context.Context, req *PackageUninstallRequest, runtimePath string) error {
 	output, err := s.runManagerCmd(ctx, "pip", "uninstall", "-y", req.Name)
 	if err != nil {
-		return fmt.Errorf("pip uninstall failed: %s", describeCmdErr(err, output))
+		return fmt.Errorf("pip uninstall failed: %s", describeCmdErr(err, output, "pip uninstall "+req.Name))
 	}
 
 	log.Printf("package: uninstalled %s via pip", req.Name)
@@ -530,7 +554,7 @@ func (s *PackageService) uninstallPipPackage(ctx context.Context, req *PackageUn
 func (s *PackageService) updatePipPackage(ctx context.Context, req *PackageUpdateRequest, runtimePath string) error {
 	output, err := s.runManagerCmd(ctx, "pip", "install", "--upgrade", req.Name)
 	if err != nil {
-		return fmt.Errorf("pip update failed: %s", describeCmdErr(err, output))
+		return fmt.Errorf("pip update failed: %s", describeCmdErr(err, output, "pip update "+req.Name))
 	}
 
 	log.Printf("package: updated %s via pip", req.Name)
