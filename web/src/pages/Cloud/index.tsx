@@ -24,7 +24,13 @@ export default function Cloud() {
       setInstances(res.data.data?.instances || []);
     } catch (error: unknown) {
       console.error('Failed to fetch instances:', error);
-      setError((error instanceof Error ? error.message : '获取实例列表失败'));
+      // 404 = 腾讯云未配置，显示友好提示
+      const axiosErr = error as { response?: { status?: number } };
+      if (axiosErr.response?.status === 404) {
+        setError('腾讯云服务未配置，请在「面板设置 > 腾讯云」中配置 SecretId/SecretKey');
+      } else {
+        setError((error instanceof Error ? error.message : '获取实例列表失败'));
+      }
     } finally {
       setLoading(false);
     }
@@ -86,9 +92,9 @@ export default function Cloud() {
     <div>
       {error && (
         <Alert
-          message="错误"
+          message={error.includes('未配置') ? '提示' : '错误'}
           description={error}
-          type="error"
+          type={error.includes('未配置') ? 'info' : 'error'}
           closable
           onClose={() => setError(null)}
           style={{ marginBottom: 16 }}
