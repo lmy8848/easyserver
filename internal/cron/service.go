@@ -9,7 +9,32 @@ import (
 	"time"
 
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/runtimeenv"
 )
+
+// wrapWithMiseExec composes one shell-parseable line of the form:
+//
+//	MISE_DATA_DIR=/var/lib/easyserver/mise /usr/local/bin/mise exec <miseTool>@<exact> -- <userCmd>
+//
+// Used to build /etc/cron.d/easyserver entries. The trailing <userCmd> is
+// interpreted by /bin/sh (cron invokes it that way), so users can still chain
+// with `&&` etc. at the shell level — mise exec runs the immediate next
+// process under the pinned runtime. Returns an error if lang isn't in the
+// catalog so the caller can skip that task instead of writing a broken line.
+//
+// cron(8) reads `%` in the command field as newline-to-stdin (see `man 5
+// crontab`), which silently truncates commands like `date +%Y%m%d`. We escape
+// every `%` to `\%` here because this helper is *only* used for the on-disk
+// crontab; RunNow takes a different code path and shouldn't escape.
+func wrapWithMiseExec(lang, exact, userCmd string) (string, error) {
+	miseTool, ok := runtimeenv.MiseToolFor(lang)
+	if !ok {
+		return "", fmt.Errorf("unsupported runtime lang %q", lang)
+	}
+	escaped := strings.ReplaceAll(userCmd, "%", `\%`)
+	return fmt.Sprintf("MISE_DATA_DIR=/var/lib/easyserver/mise /usr/local/bin/mise exec %s@%s -- %s",
+		miseTool, exact, escaped), nil
+}
 
 // Service manages cron tasks and their execution
 type Service struct {
@@ -32,13 +57,39 @@ func (s *Service) Get(ctx context.Context, id int64) (*CronTask, error) {
 	return s.repo.GetTask(ctx, id)
 }
 
-// Create creates a new cron task
+// Create creates a new cron task. Refuses to bind to a runtime_version that
+// isn't 'installed' — otherwise the task would only fail later at exec time
+// with an opaque mise error.
 func (s *Service) Create(ctx context.Context, task *CronTask) error {
+	status, err := s.repo.GetRuntimeVersionStatus(ctx, task.RuntimeVersionID)
+	if err != nil {
+		return fmt.Errorf("validate runtime_version: %w", err)
+	}
+	if status != "installed" {
+		return fmt.Errorf("runtime_version %d is not installed (status=%s)", task.RuntimeVersionID, status)
+	}
 	return s.repo.CreateTask(ctx, task)
 }
 
 // Update updates an existing cron task
 func (s *Service) Update(ctx context.Context, task *CronTask) error {
+	// Only validate when the binding changes — matching process.Service.Update.
+	// Editing schedule/desc on a task whose runtime briefly went installing
+	// (e.g. admin force-reinstalls) shouldn't fail; the old binding stays
+	// in place and the FK already guarantees it points at a real row.
+	old, err := s.repo.GetTask(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("load existing task: %w", err)
+	}
+	if old != nil && old.RuntimeVersionID != task.RuntimeVersionID {
+		status, err := s.repo.GetRuntimeVersionStatus(ctx, task.RuntimeVersionID)
+		if err != nil {
+			return fmt.Errorf("validate runtime_version: %w", err)
+		}
+		if status != "installed" {
+			return fmt.Errorf("runtime_version %d is not installed (status=%s)", task.RuntimeVersionID, status)
+		}
+	}
 	return s.repo.UpdateTask(ctx, task)
 }
 
@@ -157,8 +208,30 @@ func (s *Service) executeTask(task *CronTask) {
 		if task.EnvVars != "" {
 			opts.Env = parseEnvVars(task.EnvVars)
 		}
+		opts.Env = append(opts.Env, "MISE_DATA_DIR=/var/lib/easyserver/mise")
 
-		outputStr, _, runErr := s.executor.RunWithOptions(runCtx, opts, "sh", "-c", command)
+		// Wrap the (possibly multi-line shell) command in `mise exec -- sh -c`
+		// so anything the user wrote — pipes, &&, scripts — resolves binaries
+		// via the runtime version pinned in the DB. See ADR-0002 §4 / Issue 06.
+		miseTool, ok := runtimeenv.MiseToolFor(task.RuntimeLang)
+		if !ok {
+			if cancel != nil {
+				cancel()
+			}
+			output = []byte(fmt.Sprintf("unsupported runtime lang: %s", task.RuntimeLang))
+			runErr = fmt.Errorf("unsupported runtime lang %q", task.RuntimeLang)
+			break
+		}
+		outputStr := ""
+		// Note: use plain `=` here. The original code used `:=` which silently
+		// shadowed the outer `runErr`, so executor failures never reached the
+		// status='failed' branch below and every retry-exhausted task got
+		// logged as success. Reuse the outer `runErr` so retries and the final
+		// status check see the same error.
+		outputStr, _, runErr = s.executor.RunWithOptions(runCtx, opts,
+			"/usr/local/bin/mise", "exec",
+			miseTool+"@"+task.RuntimeExact, "--",
+			"sh", "-c", command)
 		output = []byte(outputStr)
 		if cancel != nil {
 			cancel()
@@ -259,8 +332,13 @@ func (s *Service) SyncToSystemCrontab(ctx context.Context) error {
 	var lines []string
 	lines = append(lines, "# EasyServer managed cron tasks - DO NOT EDIT MANUALLY")
 	for _, t := range tasks {
+		wrapped, err := wrapWithMiseExec(t.RuntimeLang, t.RuntimeExact, t.Command)
+		if err != nil {
+			log.Printf("cron: skip task %d (%s): %v", t.ID, t.Name, err)
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("%s root %s # easycron:%d:%s",
-			t.Schedule, t.Command, t.ID, t.Name))
+			t.Schedule, wrapped, t.ID, t.Name))
 	}
 
 	content := strings.Join(lines, "\n") + "\n"

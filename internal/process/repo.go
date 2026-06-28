@@ -12,6 +12,10 @@ type Repository interface {
 	DeleteProcess(ctx context.Context, id int64) error
 	GetAutoStartIDs(ctx context.Context) ([]int64, error)
 
+	// Runtime version validation — Service.Create refuses to bind processes
+	// to a runtime_version row that isn't 'installed'.
+	GetRuntimeVersionStatus(ctx context.Context, runtimeVersionID int64) (string, error)
+
 	// Process status
 	UpsertStatus(ctx context.Context, processID int64, status string, pid int, exitCode int, lastError string) error
 	GetStatus(ctx context.Context, processID int64) (*ProcessStatus, error)

@@ -11,6 +11,10 @@ type Repository interface {
 	UpdateTask(ctx context.Context, task *CronTask) error
 	DeleteTask(ctx context.Context, id int64) error
 
+	// Runtime version validation — Service.Create refuses to bind cron tasks
+	// to a runtime_version row that isn't 'installed', mirroring process.
+	GetRuntimeVersionStatus(ctx context.Context, runtimeVersionID int64) (string, error)
+
 	// Task status management
 	ListEnabledTasks(ctx context.Context) ([]CronTask, error)
 	EnableTask(ctx context.Context, id int64) error

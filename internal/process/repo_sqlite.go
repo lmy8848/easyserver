@@ -23,12 +23,19 @@ func boolToInt(b bool) int {
 	return 0
 }
 
+// selectProcessColumns is the SELECT projection shared by ListProcesses and
+// GetProcessByID. INNER JOINs runtime_version so RuntimeLang / RuntimeExact
+// arrive populated — Service.Start needs them to build the `mise exec` shim.
+const selectProcessColumns = `SELECT p.id, p.name, p.command, p.args, p.dir, p.env, p.auto_restart, p.max_restarts,
+		p.restart_delay, p.stop_timeout, p.startup_timeout, p.auto_start, p.log_file, p.group_id,
+		p.runtime_version_id, rv.lang, rv.exact,
+		p.created_at, p.updated_at
+	FROM processes p
+	INNER JOIN runtime_version rv ON p.runtime_version_id = rv.id`
+
 // ListProcesses returns all process configurations
 func (r *sqliteRepo) ListProcesses(ctx context.Context) ([]Process, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id, created_at, updated_at
-		 FROM processes ORDER BY id`)
+	rows, err := r.db.QueryContext(ctx, selectProcessColumns+" ORDER BY p.id")
 	if err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
@@ -49,15 +56,13 @@ func (r *sqliteRepo) ListProcesses(ctx context.Context) ([]Process, error) {
 func (r *sqliteRepo) GetProcessByID(ctx context.Context, id int64) (*Process, error) {
 	var p Process
 	var autoRestart, autoStart int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id, created_at, updated_at
-		 FROM processes WHERE id = ?`, id,
-	).Scan(
+	err := r.db.QueryRowContext(ctx, selectProcessColumns+" WHERE p.id = ?", id).Scan(
 		&p.ID, &p.Name, &p.Command, &p.Args, &p.Dir, &p.Env,
 		&autoRestart, &p.MaxRestarts, &p.RestartDelay,
 		&p.StopTimeout, &p.StartupTimeout, &autoStart,
-		&p.LogFile, &p.GroupID, &p.CreatedAt, &p.UpdatedAt,
+		&p.LogFile, &p.GroupID,
+		&p.RuntimeVersionID, &p.RuntimeLang, &p.RuntimeExact,
+		&p.CreatedAt, &p.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -80,12 +85,12 @@ func (r *sqliteRepo) CreateProcess(ctx context.Context, p *Process) (int64, erro
 
 	result, err := tx.ExecContext(ctx,
 		`INSERT INTO processes (name, command, args, dir, env, auto_restart, max_restarts,
-		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 restart_delay, stop_timeout, startup_timeout, auto_start, log_file, group_id, runtime_version_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.Name, p.Command, p.Args, p.Dir, p.Env,
 		boolToInt(p.AutoRestart), p.MaxRestarts, p.RestartDelay,
 		p.StopTimeout, p.StartupTimeout,
-		boolToInt(p.AutoStart), p.LogFile, p.GroupID,
+		boolToInt(p.AutoStart), p.LogFile, p.GroupID, p.RuntimeVersionID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("create process: %w", err)
@@ -170,6 +175,11 @@ func (r *sqliteRepo) UpdateProcess(ctx context.Context, id int64, req *UpdatePro
 			return err
 		}
 	}
+	if req.RuntimeVersionID != nil {
+		if _, err := r.db.ExecContext(ctx, "UPDATE processes SET runtime_version_id = ?, updated_at = datetime('now') WHERE id = ?", *req.RuntimeVersionID, id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -199,6 +209,22 @@ func (r *sqliteRepo) GetAutoStartIDs(ctx context.Context) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// GetRuntimeVersionStatus reads the status of a runtime_version row. Used at
+// Process create-time so we can refuse to bind to an installing/failed runtime
+// (which would only blow up later at Start with an opaque mise error).
+func (r *sqliteRepo) GetRuntimeVersionStatus(ctx context.Context, runtimeVersionID int64) (string, error) {
+	var status string
+	err := r.db.QueryRowContext(ctx,
+		"SELECT status FROM runtime_version WHERE id = ?", runtimeVersionID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("runtime_version %d not found", runtimeVersionID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return status, nil
 }
 
 // UpsertStatus creates or updates the runtime status of a process
@@ -354,7 +380,7 @@ func (r *sqliteRepo) DeleteGroup(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 
-// scanProcess scans a process row from a *sql.Rows
+// scanProcess scans a process row (joined with runtime_version) from *sql.Rows
 func scanProcess(rows *sql.Rows) (Process, error) {
 	var p Process
 	var autoRestart, autoStart int
@@ -362,7 +388,9 @@ func scanProcess(rows *sql.Rows) (Process, error) {
 		&p.ID, &p.Name, &p.Command, &p.Args, &p.Dir, &p.Env,
 		&autoRestart, &p.MaxRestarts, &p.RestartDelay,
 		&p.StopTimeout, &p.StartupTimeout, &autoStart,
-		&p.LogFile, &p.GroupID, &p.CreatedAt, &p.UpdatedAt,
+		&p.LogFile, &p.GroupID,
+		&p.RuntimeVersionID, &p.RuntimeLang, &p.RuntimeExact,
+		&p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
 		return Process{}, fmt.Errorf("scan process: %w", err)
 	}

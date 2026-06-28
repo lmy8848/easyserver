@@ -16,74 +16,35 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-func (r *sqliteRepo) ListTasks(ctx context.Context) ([]CronTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, command, schedule, description,
-		 enabled, status, last_run, last_result, next_run,
-		 script_id, timeout, max_retry, env_vars, work_dir,
-		 created_at, updated_at
-		 FROM cron_tasks ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// selectCronTaskColumns is the canonical projection for cron_tasks, joined
+// with runtime_version so RuntimeLang / RuntimeExact arrive populated. Used
+// by ListTasks / GetTask / ListEnabledTasks — keep them in sync via this one
+// constant + scanCronTask helper, not three near-duplicate blocks.
+const selectCronTaskColumns = `SELECT t.id, t.name, t.command, t.schedule, t.description,
+	t.enabled, t.status, t.last_run, t.last_result, t.next_run,
+	t.script_id, t.timeout, t.max_retry, t.env_vars, t.work_dir,
+	t.runtime_version_id, rv.lang, rv.exact,
+	t.created_at, t.updated_at
+	FROM cron_tasks t
+	INNER JOIN runtime_version rv ON t.runtime_version_id = rv.id`
 
-	var tasks []CronTask
-	for rows.Next() {
-		var t CronTask
-		var enabled int
-		var lastRun, lastResult, nextRun, envVars, workDir sql.NullString
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Command, &t.Schedule, &t.Description,
-			&enabled, &t.Status, &lastRun, &lastResult, &nextRun,
-			&t.ScriptID, &t.Timeout, &t.MaxRetry, &envVars, &workDir,
-			&t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan cron task: %w", err)
-		}
-		t.Enabled = enabled != 0
-		if lastRun.Valid {
-			t.LastRun = lastRun.String
-		}
-		if lastResult.Valid {
-			t.LastResult = lastResult.String
-		}
-		if nextRun.Valid {
-			t.NextRun = nextRun.String
-		}
-		if envVars.Valid {
-			t.EnvVars = envVars.String
-		}
-		if workDir.Valid {
-			t.WorkDir = workDir.String
-		}
-		tasks = append(tasks, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cron tasks: %w", err)
-	}
-	return tasks, nil
+// rowScanner is satisfied by both *sql.Row and *sql.Rows.
+type rowScanner interface {
+	Scan(dest ...interface{}) error
 }
 
-func (r *sqliteRepo) GetTask(ctx context.Context, id int64) (*CronTask, error) {
+func scanCronTask(s rowScanner) (CronTask, error) {
 	var t CronTask
 	var enabled int
 	var lastRun, lastResult, nextRun, envVars, workDir sql.NullString
-
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, command, schedule, description,
-		 enabled, status, last_run, last_result, next_run,
-		 script_id, timeout, max_retry, env_vars, work_dir,
-		 created_at, updated_at
-		 FROM cron_tasks WHERE id = ?`, id,
-	).Scan(
+	if err := s.Scan(
 		&t.ID, &t.Name, &t.Command, &t.Schedule, &t.Description,
 		&enabled, &t.Status, &lastRun, &lastResult, &nextRun,
 		&t.ScriptID, &t.Timeout, &t.MaxRetry, &envVars, &workDir,
+		&t.RuntimeVersionID, &t.RuntimeLang, &t.RuntimeExact,
 		&t.CreatedAt, &t.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
+	); err != nil {
+		return t, err
 	}
 	t.Enabled = enabled != 0
 	if lastRun.Valid {
@@ -101,6 +62,36 @@ func (r *sqliteRepo) GetTask(ctx context.Context, id int64) (*CronTask, error) {
 	if workDir.Valid {
 		t.WorkDir = workDir.String
 	}
+	return t, nil
+}
+
+func (r *sqliteRepo) ListTasks(ctx context.Context) ([]CronTask, error) {
+	rows, err := r.db.QueryContext(ctx, selectCronTaskColumns+" ORDER BY t.id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []CronTask
+	for rows.Next() {
+		t, err := scanCronTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan cron task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cron tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+func (r *sqliteRepo) GetTask(ctx context.Context, id int64) (*CronTask, error) {
+	row := r.db.QueryRowContext(ctx, selectCronTaskColumns+" WHERE t.id = ?", id)
+	t, err := scanCronTask(row)
+	if err != nil {
+		return nil, err
+	}
 	return &t, nil
 }
 
@@ -111,10 +102,10 @@ func (r *sqliteRepo) CreateTask(ctx context.Context, task *CronTask) error {
 	}
 	result, err := r.db.ExecContext(ctx,
 		`INSERT INTO cron_tasks (name, command, schedule, description, enabled,
-		 script_id, timeout, max_retry, env_vars, work_dir)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 script_id, timeout, max_retry, env_vars, work_dir, runtime_version_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.Name, task.Command, task.Schedule, task.Description, enabled,
-		task.ScriptID, task.Timeout, task.MaxRetry, task.EnvVars, task.WorkDir,
+		task.ScriptID, task.Timeout, task.MaxRetry, task.EnvVars, task.WorkDir, task.RuntimeVersionID,
 	)
 	if err != nil {
 		return err
@@ -129,10 +120,10 @@ func (r *sqliteRepo) CreateTask(ctx context.Context, task *CronTask) error {
 func (r *sqliteRepo) UpdateTask(ctx context.Context, task *CronTask) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE cron_tasks SET name=?, command=?, schedule=?, description=?,
-		 script_id=?, timeout=?, max_retry=?, env_vars=?, work_dir=?,
+		 script_id=?, timeout=?, max_retry=?, env_vars=?, work_dir=?, runtime_version_id=?,
 		 updated_at=datetime('now') WHERE id=?`,
 		task.Name, task.Command, task.Schedule, task.Description,
-		task.ScriptID, task.Timeout, task.MaxRetry, task.EnvVars, task.WorkDir, task.ID,
+		task.ScriptID, task.Timeout, task.MaxRetry, task.EnvVars, task.WorkDir, task.RuntimeVersionID, task.ID,
 	)
 	return err
 }
@@ -153,13 +144,24 @@ func (r *sqliteRepo) DeleteTask(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 
+// GetRuntimeVersionStatus reads the status of a runtime_version row. Used at
+// task create-time so we can refuse to bind to an installing/failed runtime
+// (which would only blow up later at exec with an opaque mise error).
+func (r *sqliteRepo) GetRuntimeVersionStatus(ctx context.Context, runtimeVersionID int64) (string, error) {
+	var status string
+	err := r.db.QueryRowContext(ctx,
+		"SELECT status FROM runtime_version WHERE id = ?", runtimeVersionID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("runtime_version %d not found", runtimeVersionID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
 func (r *sqliteRepo) ListEnabledTasks(ctx context.Context) ([]CronTask, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, command, schedule, description,
-		 enabled, status, last_run, last_result, next_run,
-		 script_id, timeout, max_retry, env_vars, work_dir,
-		 created_at, updated_at
-		 FROM cron_tasks WHERE enabled = 1 ORDER BY id`)
+	rows, err := r.db.QueryContext(ctx, selectCronTaskColumns+" WHERE t.enabled = 1 ORDER BY t.id")
 	if err != nil {
 		return nil, err
 	}
@@ -167,32 +169,9 @@ func (r *sqliteRepo) ListEnabledTasks(ctx context.Context) ([]CronTask, error) {
 
 	var tasks []CronTask
 	for rows.Next() {
-		var t CronTask
-		var enabled int
-		var lastRun, lastResult, nextRun, envVars, workDir sql.NullString
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Command, &t.Schedule, &t.Description,
-			&enabled, &t.Status, &lastRun, &lastResult, &nextRun,
-			&t.ScriptID, &t.Timeout, &t.MaxRetry, &envVars, &workDir,
-			&t.CreatedAt, &t.UpdatedAt,
-		); err != nil {
+		t, err := scanCronTask(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan cron task: %w", err)
-		}
-		t.Enabled = enabled != 0
-		if lastRun.Valid {
-			t.LastRun = lastRun.String
-		}
-		if lastResult.Valid {
-			t.LastResult = lastResult.String
-		}
-		if nextRun.Valid {
-			t.NextRun = nextRun.String
-		}
-		if envVars.Valid {
-			t.EnvVars = envVars.String
-		}
-		if workDir.Valid {
-			t.WorkDir = workDir.String
 		}
 		tasks = append(tasks, t)
 	}

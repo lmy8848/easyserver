@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/runtimeenv"
 )
 
 // --- Constants ---
@@ -105,6 +106,18 @@ func (s *Service) Get(ctx context.Context, id int64) (*ProcessWithStatus, error)
 
 // Create adds a new process configuration
 func (s *Service) Create(ctx context.Context, req *CreateProcessRequest) (*Process, error) {
+	// Refuse to bind a process to a runtime that's not actually usable.
+	// Without this, the FK lets you save anything that exists in the
+	// runtime_version table, and the failure only surfaces at Start with an
+	// opaque mise error. Mirrors the status check on SetDefault (Issue 07).
+	status, err := s.repo.GetRuntimeVersionStatus(ctx, req.RuntimeVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("validate runtime_version: %w", err)
+	}
+	if status != "installed" {
+		return nil, fmt.Errorf("runtime_version %d is %q, only 'installed' runtimes can be bound", req.RuntimeVersionID, status)
+	}
+
 	autoRestart := true
 	if req.AutoRestart != nil {
 		autoRestart = *req.AutoRestart
@@ -131,19 +144,20 @@ func (s *Service) Create(ctx context.Context, req *CreateProcessRequest) (*Proce
 	}
 
 	p := &Process{
-		Name:           req.Name,
-		Command:        req.Command,
-		Args:           req.Args,
-		Dir:            req.Dir,
-		Env:            req.Env,
-		AutoRestart:    autoRestart,
-		MaxRestarts:    maxRestarts,
-		RestartDelay:   restartDelay,
-		StopTimeout:    stopTimeout,
-		StartupTimeout: startupTimeout,
-		AutoStart:      autoStart,
-		LogFile:        req.LogFile,
-		GroupID:        req.GroupID,
+		Name:             req.Name,
+		Command:          req.Command,
+		Args:             req.Args,
+		Dir:              req.Dir,
+		Env:              req.Env,
+		AutoRestart:      autoRestart,
+		MaxRestarts:      maxRestarts,
+		RestartDelay:     restartDelay,
+		StopTimeout:      stopTimeout,
+		StartupTimeout:   startupTimeout,
+		AutoStart:        autoStart,
+		LogFile:          req.LogFile,
+		GroupID:          req.GroupID,
+		RuntimeVersionID: req.RuntimeVersionID,
 	}
 
 	id, err := s.repo.CreateProcess(ctx, p)
@@ -163,6 +177,23 @@ func (s *Service) Update(ctx context.Context, id int64, req *UpdateProcessReques
 
 	if running && req.Command != nil {
 		return fmt.Errorf("cannot change command while process is running, stop it first")
+	}
+	if running && req.RuntimeVersionID != nil {
+		// Runtime change only takes effect on next Start; refuse mid-flight to
+		// avoid the subtle UX where the user thinks they switched node 18 → 20
+		// but the running process keeps using 18 until restart.
+		return fmt.Errorf("cannot change runtime_version_id while process is running, stop it first")
+	}
+
+	// Symmetry with Create: refuse to bind to a non-installed runtime.
+	if req.RuntimeVersionID != nil {
+		status, err := s.repo.GetRuntimeVersionStatus(ctx, *req.RuntimeVersionID)
+		if err != nil {
+			return fmt.Errorf("validate runtime_version: %w", err)
+		}
+		if status != "installed" {
+			return fmt.Errorf("runtime_version %d is not installed (status=%s)", *req.RuntimeVersionID, status)
+		}
 	}
 
 	return s.repo.UpdateProcess(ctx, id, req)
@@ -223,8 +254,21 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		}
 	}
 
+	// Wrap the user command in `mise exec <lang>@<exact> --` so the child
+	// process resolves binaries via the runtime version pinned in the DB,
+	// regardless of system PATH or what mise's global default is. See
+	// ADR-0002 §4 and Issue 06.
+	miseTool, ok := runtimeenv.MiseToolFor(p.RuntimeLang)
+	if !ok {
+		s.updateStatus(ctx, id, "failed", 0, 0, "unsupported runtime: "+p.RuntimeLang)
+		return fmt.Errorf("unsupported runtime lang %q for process %d", p.RuntimeLang, id)
+	}
+	execCmd := "/usr/local/bin/mise"
+	execArgs := append([]string{"exec", miseTool + "@" + p.RuntimeExact, "--", p.Command}, args...)
+	opts.Env = append(opts.Env, "MISE_DATA_DIR=/var/lib/easyserver/mise")
+
 	// Start process
-	proc, err := s.executor.Start(ctx, opts, p.Command, args...)
+	proc, err := s.executor.Start(ctx, opts, execCmd, execArgs...)
 	if err != nil {
 		s.updateStatus(ctx, id, "failed", 0, 0, err.Error())
 		return fmt.Errorf("failed to start process: %w", err)
@@ -439,17 +483,18 @@ func (s *Service) Import(ctx context.Context, processes []Process) (int, error) 
 	count := 0
 	for _, p := range processes {
 		req := &CreateProcessRequest{
-			Name:         p.Name,
-			Command:      p.Command,
-			Args:         p.Args,
-			Dir:          p.Dir,
-			Env:          p.Env,
-			AutoRestart:  &p.AutoRestart,
-			MaxRestarts:  p.MaxRestarts,
-			RestartDelay: p.RestartDelay,
-			AutoStart:    &p.AutoStart,
-			LogFile:      p.LogFile,
-			GroupID:      p.GroupID,
+			Name:             p.Name,
+			Command:          p.Command,
+			Args:             p.Args,
+			Dir:              p.Dir,
+			Env:              p.Env,
+			AutoRestart:      &p.AutoRestart,
+			MaxRestarts:      p.MaxRestarts,
+			RestartDelay:     p.RestartDelay,
+			AutoStart:        &p.AutoStart,
+			LogFile:          p.LogFile,
+			GroupID:          p.GroupID,
+			RuntimeVersionID: p.RuntimeVersionID,
 		}
 		if _, err := s.Create(ctx, req); err != nil {
 			log.Printf("process: import %s failed: %v", p.Name, err)

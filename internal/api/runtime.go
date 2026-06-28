@@ -392,6 +392,7 @@ func (h *RuntimeHandler) DeleteMirror(c *gin.Context) {
 	}
 	Success(c, gin.H{"message": "删除成功"})
 }
+
 // GetRemoteVersions gets available remote versions
 func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
 	name := c.Param("name")
@@ -399,7 +400,7 @@ func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("运行时名称不能为空"))
 		return
 	}
-	
+
 	if !runtimeenv.IsSupported(name) {
 		c.Error(ErrBadRequest.WithMessage("不支持的运行时: " + name))
 		return

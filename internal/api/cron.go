@@ -70,6 +70,14 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
+	// Reject control chars in fields that get rendered verbatim into the
+	// /etc/cron.d/easyserver line — a stray '\n' would silently inject an
+	// extra cron entry that the UI cannot see or remove.
+	if strings.ContainsAny(req.Name, "\r\n") || strings.ContainsAny(req.Command, "\r\n") {
+		c.Error(ErrBadRequest.WithMessage("名称和命令不允许包含换行符"))
+		return
+	}
+
 	// Validate: either command or script_id must be provided
 	if req.Command == "" && req.ScriptID == 0 {
 		c.Error(ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
@@ -100,17 +108,18 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	}
 
 	task := &cron.CronTask{
-		Name:        req.Name,
-		Command:     req.Command,
-		Schedule:    req.Schedule,
-		Description: req.Description,
-		Enabled:     true,
-		Status:      "idle",
-		ScriptID:    req.ScriptID,
-		Timeout:     req.Timeout,
-		MaxRetry:    req.MaxRetry,
-		EnvVars:     req.EnvVars,
-		WorkDir:     req.WorkDir,
+		Name:             req.Name,
+		Command:          req.Command,
+		Schedule:         req.Schedule,
+		Description:      req.Description,
+		Enabled:          true,
+		Status:           "idle",
+		ScriptID:         req.ScriptID,
+		Timeout:          req.Timeout,
+		MaxRetry:         req.MaxRetry,
+		EnvVars:          req.EnvVars,
+		WorkDir:          req.WorkDir,
+		RuntimeVersionID: req.RuntimeVersionID,
 	}
 
 	if err := h.cronService.Create(c.Request.Context(), task); err != nil {
@@ -142,6 +151,10 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 
 	// Apply partial updates
 	if req.Name != nil {
+		if strings.ContainsAny(*req.Name, "\r\n") {
+			c.Error(ErrBadRequest.WithMessage("名称不允许包含换行符"))
+			return
+		}
 		// Check name uniqueness (exclude current task)
 		existing, listErr := h.cronService.List(c.Request.Context())
 		if listErr != nil {
@@ -157,6 +170,10 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		task.Name = *req.Name
 	}
 	if req.Command != nil {
+		if strings.ContainsAny(*req.Command, "\r\n") {
+			c.Error(ErrBadRequest.WithMessage("命令不允许包含换行符"))
+			return
+		}
 		task.Command = *req.Command
 	}
 	if req.Schedule != nil {
@@ -196,6 +213,9 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 	}
 	if req.WorkDir != nil {
 		task.WorkDir = *req.WorkDir
+	}
+	if req.RuntimeVersionID != nil {
+		task.RuntimeVersionID = *req.RuntimeVersionID
 	}
 
 	// Validate command/script_id relationship

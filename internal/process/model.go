@@ -2,22 +2,25 @@ package process
 
 // Process represents a managed process configuration
 type Process struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	Command        string `json:"command"`
-	Args           string `json:"args"`
-	Dir            string `json:"dir"`
-	Env            string `json:"env"` // JSON string of env vars
-	AutoRestart    bool   `json:"auto_restart"`
-	MaxRestarts    int    `json:"max_restarts"`
-	RestartDelay   int    `json:"restart_delay"`   // seconds (base delay for backoff)
-	StopTimeout    int    `json:"stop_timeout"`    // seconds, SIGTERM wait before SIGKILL (default 10)
-	StartupTimeout int    `json:"startup_timeout"` // seconds, max time for "starting" state (default 30)
-	AutoStart      bool   `json:"auto_start"`
-	LogFile        string `json:"log_file"`
-	GroupID        int64  `json:"group_id"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Command          string `json:"command"`
+	Args             string `json:"args"`
+	Dir              string `json:"dir"`
+	Env              string `json:"env"` // JSON string of env vars
+	AutoRestart      bool   `json:"auto_restart"`
+	MaxRestarts      int    `json:"max_restarts"`
+	RestartDelay     int    `json:"restart_delay"`   // seconds (base delay for backoff)
+	StopTimeout      int    `json:"stop_timeout"`    // seconds, SIGTERM wait before SIGKILL (default 10)
+	StartupTimeout   int    `json:"startup_timeout"` // seconds, max time for "starting" state (default 30)
+	AutoStart        bool   `json:"auto_start"`
+	LogFile          string `json:"log_file"`
+	GroupID          int64  `json:"group_id"`
+	RuntimeVersionID int64  `json:"runtime_version_id"` // FK → runtime_version.id; NOT NULL since Issue 02
+	RuntimeLang      string `json:"runtime_lang"`       // joined: runtime_version.lang (read-only)
+	RuntimeExact     string `json:"runtime_exact"`      // joined: runtime_version.exact (read-only)
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 // ProcessStatus represents the runtime status of a managed process
@@ -64,36 +67,38 @@ type ProcessWithStatus struct {
 
 // CreateProcessRequest is the request body for creating a process
 type CreateProcessRequest struct {
-	Name           string `json:"name" binding:"required"`
-	Command        string `json:"command" binding:"required"`
-	Args           string `json:"args"`
-	Dir            string `json:"dir"`
-	Env            string `json:"env"`
-	AutoRestart    *bool  `json:"auto_restart"`
-	MaxRestarts    int    `json:"max_restarts"`
-	RestartDelay   int    `json:"restart_delay"`
-	StopTimeout    int    `json:"stop_timeout"`
-	StartupTimeout int    `json:"startup_timeout"`
-	AutoStart      *bool  `json:"auto_start"`
-	LogFile        string `json:"log_file"`
-	GroupID        int64  `json:"group_id"`
+	Name             string `json:"name" binding:"required"`
+	Command          string `json:"command" binding:"required"`
+	Args             string `json:"args"`
+	Dir              string `json:"dir"`
+	Env              string `json:"env"`
+	AutoRestart      *bool  `json:"auto_restart"`
+	MaxRestarts      int    `json:"max_restarts"`
+	RestartDelay     int    `json:"restart_delay"`
+	StopTimeout      int    `json:"stop_timeout"`
+	StartupTimeout   int    `json:"startup_timeout"`
+	AutoStart        *bool  `json:"auto_start"`
+	LogFile          string `json:"log_file"`
+	GroupID          int64  `json:"group_id"`
+	RuntimeVersionID int64  `json:"runtime_version_id" binding:"required,min=1"`
 }
 
 // UpdateProcessRequest is the request body for updating a process
 type UpdateProcessRequest struct {
-	Name           *string `json:"name"`
-	Command        *string `json:"command"`
-	Args           *string `json:"args"`
-	Dir            *string `json:"dir"`
-	Env            *string `json:"env"`
-	AutoRestart    *bool   `json:"auto_restart"`
-	MaxRestarts    *int    `json:"max_restarts"`
-	RestartDelay   *int    `json:"restart_delay"`
-	StopTimeout    *int    `json:"stop_timeout"`
-	StartupTimeout *int    `json:"startup_timeout"`
-	AutoStart      *bool   `json:"auto_start"`
-	LogFile        *string `json:"log_file"`
-	GroupID        *int64  `json:"group_id"`
+	Name             *string `json:"name"`
+	Command          *string `json:"command"`
+	Args             *string `json:"args"`
+	Dir              *string `json:"dir"`
+	Env              *string `json:"env"`
+	AutoRestart      *bool   `json:"auto_restart"`
+	MaxRestarts      *int    `json:"max_restarts"`
+	RestartDelay     *int    `json:"restart_delay"`
+	StopTimeout      *int    `json:"stop_timeout"`
+	StartupTimeout   *int    `json:"startup_timeout"`
+	AutoStart        *bool   `json:"auto_start"`
+	LogFile          *string `json:"log_file"`
+	GroupID          *int64  `json:"group_id"`
+	RuntimeVersionID *int64  `json:"runtime_version_id"`
 }
 
 // CreateProcessGroupRequest is the request body for creating a process group
