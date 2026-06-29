@@ -137,7 +137,7 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 	}
 	if total == 0 {
 		password := generateRandomPassword(16)
-		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hash, err := hashPassword(password)
 		if err != nil {
 			return err
 		}
@@ -200,7 +200,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Us
 		return nil, errors.New("账号已被锁定")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	if !verifyPassword(password, user.PasswordHash) {
 		if err := s.userRepo.IncrementLoginAttemptsWithLock(ctx, user.ID, s.maxAttempts, int(s.lockoutDuration.Seconds())); err != nil {
 			log.Printf("auth: failed to update login attempts: %v", err)
 		}
@@ -287,7 +287,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 		return errors.New("account is locked")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+	if !verifyPassword(oldPassword, user.PasswordHash) {
 		return errors.New("invalid old password")
 	}
 
@@ -295,7 +295,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 		return err
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	newHash, err := hashPassword(newPassword)
 	if err != nil {
 		return err
 	}
@@ -305,6 +305,18 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 
 func (s *AuthService) GetUserByID(ctx context.Context, id int64) (*User, error) {
 	return s.userRepo.GetByID(ctx, id)
+}
+
+func (s *AuthService) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	return s.userRepo.GetByUsername(ctx, username)
+}
+
+func (s *AuthService) UnlockUser(ctx context.Context, userID int64) error {
+	return s.userRepo.ResetLoginState(ctx, userID, "")
+}
+
+func (s *AuthService) ForceDisableTOTP(ctx context.Context, userID int64) error {
+	return s.totpRepo.DisableTOTP(ctx, userID)
 }
 
 func hashToken(token string) string {
@@ -350,7 +362,9 @@ func (s *AuthService) InvalidateAllUserTokens(ctx context.Context, userID int64)
 func (s *AuthService) IsUserTokenInvalidated(ctx context.Context, userID int64, issuedAt time.Time) (bool, error) {
 	if v, ok := s.cache.invalidations.Load(userID); ok {
 		if t, ok := v.(time.Time); ok {
-			return issuedAt.Before(t), nil
+			if issuedAt.Before(t) {
+				return true, nil
+			}
 		}
 	}
 	invalidated, err := s.tokenRepo.IsUserInvalidated(ctx, userID, issuedAt)
@@ -373,7 +387,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, userID int64, newPasswo
 		return err
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	newHash, err := hashPassword(newPassword)
 	if err != nil {
 		return err
 	}
@@ -716,7 +730,12 @@ func generateRandomCode(length int) (string, error) {
 }
 
 func hashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	passwordBytes := []byte(password)
+	if len(passwordBytes) > 72 {
+		hash := sha256.Sum256(passwordBytes)
+		passwordBytes = []byte(hex.EncodeToString(hash[:]))
+	}
+	hash, err := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
@@ -724,6 +743,11 @@ func hashPassword(password string) (string, error) {
 }
 
 func verifyPassword(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	passwordBytes := []byte(password)
+	if len(passwordBytes) > 72 {
+		h := sha256.Sum256(passwordBytes)
+		passwordBytes = []byte(hex.EncodeToString(h[:]))
+	}
+	err := bcrypt.CompareHashAndPassword([]byte(hash), passwordBytes)
 	return err == nil
 }
