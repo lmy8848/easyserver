@@ -225,8 +225,7 @@ func wire(cfg *config.Config) (*appServices, error) {
 	s.onCleanup(func() { processMgr.Shutdown() })
 
 	// System process service
-	serviceWhitelistRepo := systemprocess.NewSQLiteRepository(db)
-	s.SystemProcessService = systemprocess.NewService(cmdExec, serviceWhitelistRepo, auditSvc)
+	s.SystemProcessService = systemprocess.NewService()
 
 	// Notification
 	notificationRepo := notification.NewSQLiteRepository(db)
