@@ -2,7 +2,6 @@ package systemprocess
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -10,19 +9,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"easyserver/internal/infra/executor"
 )
 
 const (
-	procDir                = "/proc"
-	memInfoFile            = "/proc/meminfo"
-	loadAvgFile            = "/proc/loadavg"
-	uptimeFile             = "/proc/uptime"
-	statFile               = "/proc/stat"
-	defaultProcLimit       = 100
-	defaultServiceLogLines = 100
-	maxServiceLogLines     = 500
+	procDir          = "/proc"
+	statFile         = "/proc/stat"
+	defaultProcLimit = 100
 )
 
 // cpuSample stores a single CPU measurement for a process
@@ -32,140 +24,24 @@ type cpuSample struct {
 	sampleAt time.Time
 }
 
-// cpuStat stores a snapshot of /proc/stat cpu line
-type cpuStat struct {
-	user    int64
-	nice    int64
-	system  int64
-	idle    int64
-	iowait  int64
-	irq     int64
-	softirq int64
-	steal   int64
-	at      time.Time
-}
-
-// AuditLogger defines the interface for audit logging of service operations.
-type AuditLogger interface {
-	LogServiceOperation(ctx context.Context, userID int64, username, action, serviceName, ip, userAgent string)
-}
-
-// Service provides system process monitoring and systemd management.
+// Service provides system process monitoring.
 type Service struct {
-	executor      executor.CommandExecutor
-	whitelistRepo Repository
-	auditLogger   AuditLogger
-
-	cache     *SystemOverview
-	cacheMu   sync.RWMutex
-	cacheTime time.Time
-	cacheTTL  time.Duration
-
 	cpuSamples map[int]*cpuSample // pid -> last sample
 	cpuMu      sync.RWMutex
-	prevCPU    *cpuStat // previous system-wide CPU snapshot
 
 	// Process list cache
 	procCache     []SystemProcess
 	procCacheMu   sync.RWMutex
 	procCacheTime time.Time
 	procCacheTTL  time.Duration
-
-	// Service list cache
-	svcCache     []SystemService
-	svcCacheMu   sync.RWMutex
-	svcCacheTime time.Time
-	svcCacheTTL  time.Duration
 }
 
 // NewService creates a new systemprocess.Service.
-func NewService(executor executor.CommandExecutor, whitelistRepo Repository, auditLogger AuditLogger) *Service {
-	s := &Service{
-		executor:      executor,
-		whitelistRepo: whitelistRepo,
-		auditLogger:   auditLogger,
-		cacheTTL:      5 * time.Second,
-		procCacheTTL:  5 * time.Second,
-		svcCacheTTL:   10 * time.Second,
-		cpuSamples:    make(map[int]*cpuSample),
+func NewService() *Service {
+	return &Service{
+		procCacheTTL: 5 * time.Second,
+		cpuSamples:   make(map[int]*cpuSample),
 	}
-	// Ensure whitelist table exists
-	s.whitelistRepo.Init(context.Background())
-	return s
-}
-
-// GetOverview returns system-wide resource statistics with caching.
-func (s *Service) GetOverview() (*SystemOverview, error) {
-	s.cacheMu.RLock()
-	if s.cache != nil && time.Since(s.cacheTime) < s.cacheTTL {
-		defer s.cacheMu.RUnlock()
-		return s.cache, nil
-	}
-	s.cacheMu.RUnlock()
-
-	overview := &SystemOverview{}
-
-	// CPU usage
-	cpuUsage, err := s.getCPUUsage()
-	if err == nil {
-		overview.CPUUsage = cpuUsage
-	}
-
-	// Memory info
-	memTotal, memUsed, memPercent, swapTotal, swapUsed, err := getMemoryInfo()
-	if err == nil {
-		overview.MemoryTotal = memTotal
-		overview.MemoryUsed = memUsed
-		overview.MemoryUsage = memPercent
-		overview.SwapTotal = swapTotal
-		overview.SwapUsed = swapUsed
-	}
-
-	// Load average
-	loadAvg, err := getLoadAverage()
-	if err == nil {
-		overview.LoadAvg = loadAvg
-	}
-
-	// Uptime
-	uptime, err := getUptime()
-	if err == nil {
-		overview.Uptime = uptime
-	}
-
-	// Top processes
-	procs, err := s.ListSystemProcesses("memory", "desc", "", 0)
-	if err == nil {
-		overview.TotalProcs = len(procs)
-		for _, p := range procs {
-			if p.State == "R" {
-				overview.RunningProcs++
-			}
-		}
-		// Top 5 by CPU
-		sort.Slice(procs, func(i, j int) bool { return procs[i].CPUPercent > procs[j].CPUPercent })
-		limit := 5
-		if len(procs) < limit {
-			limit = len(procs)
-		}
-		overview.TopCPU = make([]SystemProcess, limit)
-		copy(overview.TopCPU, procs[:limit])
-
-		// Top 5 by memory
-		sort.Slice(procs, func(i, j int) bool { return procs[i].MemoryMB > procs[j].MemoryMB })
-		if len(procs) < limit {
-			limit = len(procs)
-		}
-		overview.TopMem = make([]SystemProcess, limit)
-		copy(overview.TopMem, procs[:limit])
-	}
-
-	s.cacheMu.Lock()
-	s.cache = overview
-	s.cacheTime = time.Now()
-	s.cacheMu.Unlock()
-
-	return overview, nil
 }
 
 // procWithCPU holds process data plus raw CPU ticks for delta calculation.
@@ -287,212 +163,6 @@ func GetSystemProcess(pid int) (*SystemProcess, error) {
 		return nil, err
 	}
 	return &proc, nil
-}
-
-// ListServices returns systemd services (filtered by whitelist if entries exist).
-func (s *Service) ListServices() ([]SystemService, error) {
-	// Check cache
-	s.svcCacheMu.RLock()
-	if s.svcCache != nil && time.Since(s.svcCacheTime) < s.svcCacheTTL {
-		cached := make([]SystemService, len(s.svcCache))
-		copy(cached, s.svcCache)
-		s.svcCacheMu.RUnlock()
-		return cached, nil
-	}
-	s.svcCacheMu.RUnlock()
-
-	// Get whitelist
-	whitelist, _ := s.GetWhitelist()
-
-	// Use systemctl list-units with format to get PID directly (avoids per-service calls)
-	out, _, err := s.executor.RunCombined(nil, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend",
-		"--property=name,load,active,sub,description,main-pid")
-	if err != nil {
-		// Fallback to basic list
-		out, _, err = s.executor.RunCombined(nil, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--no-legend")
-		if err != nil {
-			return nil, fmt.Errorf("systemctl list-units: %w", err)
-		}
-	}
-
-	// Batch get enabled status via list-unit-files
-	enabledMap := make(map[string]bool)
-	enabledOut, _, err := s.executor.RunCombined(nil, "systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain", "--no-legend")
-	if err == nil {
-		enabledScanner := bufio.NewScanner(strings.NewReader(enabledOut))
-		for enabledScanner.Scan() {
-			line := strings.TrimSpace(enabledScanner.Text())
-			if line == "" {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				unitName := strings.TrimSuffix(fields[0], ".service")
-				enabledMap[unitName] = fields[1] == "enabled"
-			}
-		}
-	}
-
-	services := make([]SystemService, 0)
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-
-		name := strings.TrimSuffix(fields[0], ".service")
-		svc := SystemService{
-			Name:        name,
-			LoadState:   fields[1],
-			ActiveState: fields[2],
-			SubState:    fields[3],
-		}
-		if len(fields) > 4 {
-			svc.Description = strings.Join(fields[4:], " ")
-		}
-
-		// Get enabled status from batch result
-		svc.Enabled = enabledMap[name]
-
-		// Filter by whitelist if it has entries
-		if len(whitelist) > 0 {
-			found := false
-			for _, w := range whitelist {
-				if w.Name == name || w.Name == fields[0] {
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
-		}
-
-		services = append(services, svc)
-	}
-
-	// Update cache
-	s.svcCacheMu.Lock()
-	s.svcCache = services
-	s.svcCacheTime = time.Now()
-	s.svcCacheMu.Unlock()
-
-	return services, nil
-}
-
-// protectedServices are services that cannot be stopped/restarted without force flag.
-var protectedServices = map[string]string{
-	"easyserver":     "EasyServer 面板进程",
-	"ssh":            "SSH 远程访问服务",
-	"sshd":           "SSH 远程访问服务",
-	"networking":     "网络服务",
-	"network":        "网络服务",
-	"systemd-logind": "登录管理服务",
-}
-
-// ServiceAction performs an action on a systemd service.
-func (s *Service) ServiceAction(serviceName, action string, force bool) error {
-	// Validate action
-	validActions := map[string]bool{
-		"start": true, "stop": true, "restart": true,
-		"enable": true, "disable": true,
-	}
-	if !validActions[action] {
-		return fmt.Errorf("invalid action: %s", action)
-	}
-
-	// Check protected services for stop/restart without force
-	if (action == "stop" || action == "restart" || action == "disable") && !force {
-		if reason, ok := protectedServices[serviceName]; ok {
-			return fmt.Errorf("protected_service:%s:%s", serviceName, reason)
-		}
-	}
-
-	// Check whitelist (if it has entries)
-	whitelist, _ := s.GetWhitelist()
-	if len(whitelist) > 0 {
-		allowed := false
-		for _, w := range whitelist {
-			if w.Name == serviceName {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return fmt.Errorf("service %s not in whitelist", serviceName)
-		}
-	}
-
-	output, _, err := s.executor.RunCombined(nil, "systemctl", action, serviceName)
-	if err != nil {
-		return fmt.Errorf("systemctl %s %s: %s", action, serviceName, output)
-	}
-
-	// Audit log
-	s.auditLog(serviceName, action)
-
-	return nil
-}
-
-// GetWhitelist returns all whitelisted services.
-func (s *Service) GetWhitelist() ([]ServiceWhitelistEntry, error) {
-	return s.whitelistRepo.List(context.Background())
-}
-
-// AddToWhitelist adds a service to the whitelist.
-func (s *Service) AddToWhitelist(name string) error {
-	return s.whitelistRepo.Add(context.Background(), name)
-}
-
-// RemoveFromWhitelist removes a service from the whitelist.
-func (s *Service) RemoveFromWhitelist(name string) error {
-	return s.whitelistRepo.Delete(context.Background(), name)
-}
-
-// GetServiceLogs returns recent logs for a systemd service using journalctl.
-func (s *Service) GetServiceLogs(serviceName string, lines int) (string, error) {
-	if lines <= 0 || lines > maxServiceLogLines {
-		lines = defaultServiceLogLines
-	}
-
-	output, _, err := s.executor.RunCombined(nil, "journalctl",
-		"-u", serviceName,
-		"-n", strconv.Itoa(lines),
-		"--no-pager",
-		"--output=short-iso",
-	)
-	if err != nil {
-		// journalctl returns exit code 1 when no entries found
-		if len(output) > 0 {
-			return output, nil
-		}
-		return "", fmt.Errorf("journalctl failed: %w", err)
-	}
-
-	return output, nil
-}
-
-// IsProtectedService checks if a service is in the protected list.
-func IsProtectedService(serviceName string) (string, bool) {
-	reason, ok := protectedServices[serviceName]
-	return reason, ok
-}
-
-// ProtectedServices returns the map of protected services.
-func ProtectedServices() map[string]string {
-	return protectedServices
-}
-
-func (s *Service) auditLog(serviceName, action string) {
-	if s.auditLogger == nil {
-		return
-	}
-	s.auditLogger.LogServiceOperation(context.Background(), 0, "system", action, serviceName, "127.0.0.1", "EasyServer")
 }
 
 // --- /proc parsing helpers ---
@@ -617,120 +287,6 @@ func getBootTime() int64 {
 		}
 	}
 	return 0
-}
-
-// getCPUUsage reads /proc/stat and calculates instantaneous CPU usage using delta with previous sample.
-func (s *Service) getCPUUsage() (float64, error) {
-	f, err := os.Open(statFile)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	if !scanner.Scan() {
-		return 0, fmt.Errorf("empty /proc/stat")
-	}
-
-	fields := strings.Fields(scanner.Text())
-	if len(fields) < 9 || fields[0] != "cpu" {
-		return 0, fmt.Errorf("invalid /proc/stat format")
-	}
-
-	now := time.Now()
-	cur := &cpuStat{
-		at: now,
-	}
-	cur.user, _ = strconv.ParseInt(fields[1], 10, 64)
-	cur.nice, _ = strconv.ParseInt(fields[2], 10, 64)
-	cur.system, _ = strconv.ParseInt(fields[3], 10, 64)
-	cur.idle, _ = strconv.ParseInt(fields[4], 10, 64)
-	cur.iowait, _ = strconv.ParseInt(fields[5], 10, 64)
-	cur.irq, _ = strconv.ParseInt(fields[6], 10, 64)
-	cur.softirq, _ = strconv.ParseInt(fields[7], 10, 64)
-	cur.steal, _ = strconv.ParseInt(fields[8], 10, 64)
-
-	// If we have a previous sample, calculate delta
-	if s.prevCPU != nil {
-		deltaTotal := (cur.user + cur.nice + cur.system + cur.idle + cur.iowait + cur.irq + cur.softirq + cur.steal) -
-			(s.prevCPU.user + s.prevCPU.nice + s.prevCPU.system + s.prevCPU.idle + s.prevCPU.iowait + s.prevCPU.irq + s.prevCPU.softirq + s.prevCPU.steal)
-		deltaBusy := (cur.user + cur.nice + cur.system + cur.irq + cur.softirq + cur.steal) -
-			(s.prevCPU.user + s.prevCPU.nice + s.prevCPU.system + s.prevCPU.irq + s.prevCPU.softirq + s.prevCPU.steal)
-
-		s.prevCPU = cur
-
-		if deltaTotal > 0 {
-			return float64(deltaBusy) / float64(deltaTotal) * 100, nil
-		}
-	}
-
-	// First sample, save and return 0
-	s.prevCPU = cur
-	return 0, nil
-}
-
-func getMemoryInfo() (total, used int64, percent float64, swapTotal, swapUsed int64, err error) {
-	f, err := os.Open(memInfoFile)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	mem := make(map[string]int64)
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		parts := strings.Fields(scanner.Text())
-		if len(parts) >= 2 {
-			key := strings.TrimSuffix(parts[0], ":")
-			val, _ := strconv.ParseInt(parts[1], 10, 64)
-			mem[key] = val // in kB
-		}
-	}
-
-	total = mem["MemTotal"] / 1024 // to MB
-	available := mem["MemAvailable"]
-	if available == 0 {
-		available = mem["MemFree"] + mem["Buffers"] + mem["Cached"]
-	}
-	used = (mem["MemTotal"] - available) / 1024
-	if mem["MemTotal"] > 0 {
-		percent = float64(mem["MemTotal"]-available) / float64(mem["MemTotal"]) * 100
-	}
-	swapTotal = mem["SwapTotal"] / 1024
-	swapUsed = (mem["SwapTotal"] - mem["SwapFree"]) / 1024
-	return
-}
-
-func getLoadAverage() ([3]float64, error) {
-	data, err := os.ReadFile(loadAvgFile)
-	if err != nil {
-		return [3]float64{}, err
-	}
-	fields := strings.Fields(string(data))
-	if len(fields) >= 3 {
-		var load [3]float64
-		load[0], _ = strconv.ParseFloat(fields[0], 64)
-		load[1], _ = strconv.ParseFloat(fields[1], 64)
-		load[2], _ = strconv.ParseFloat(fields[2], 64)
-		return load, nil
-	}
-	return [3]float64{}, fmt.Errorf("invalid loadavg format")
-}
-
-func getUptime() (int64, error) {
-	data, err := os.ReadFile(uptimeFile)
-	if err != nil {
-		return 0, err
-	}
-	fields := strings.Fields(string(data))
-	if len(fields) >= 1 {
-		uptime, err := strconv.ParseFloat(fields[0], 64)
-		if err != nil {
-			return 0, err
-		}
-		return int64(uptime), nil
-	}
-	return 0, fmt.Errorf("invalid uptime format")
 }
 
 func sortProcesses(procs []SystemProcess, sortBy, order string) {

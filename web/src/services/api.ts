@@ -6,7 +6,7 @@ import type {
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
   ManagedProcess, ProcessWithStatus, ProcessLog, ProcessGroup, ProcessStats, PaginatedData,
-  SystemProcess, SystemOverview, SystemService, ServiceWhitelistEntry,
+  SystemProcess,
   Notification, SSHLogin, SSHConfig, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
 } from '../types';
@@ -788,35 +788,11 @@ export const processApi = {
 
 // System Process API
 export const systemProcessApi = {
-  getOverview: () =>
-    api.get<ApiResponse<SystemOverview>>('/system/overview'),
-
   listProcesses: (params?: { sort_by?: string; order?: string; search?: string; limit?: number }) =>
     api.get<ApiResponse<SystemProcess[]>>('/system/processes', { params }),
 
   getProcess: (pid: number) =>
     api.get<ApiResponse<SystemProcess>>(`/system/processes/${pid}`),
-
-  listServices: () =>
-    api.get<ApiResponse<SystemService[]>>('/system/services'),
-
-  serviceAction: (name: string, action: string, force = false) =>
-    api.post<ApiResponse>(`/system/services/${name}/action`, { action, force }),
-
-  getServiceLogs: (name: string, lines = 100) =>
-    api.get<ApiResponse<{ logs: string; service: string }>>(`/system/services/${name}/logs`, { params: { lines } }),
-
-  listProtected: () =>
-    api.get<ApiResponse<Array<{ name: string; reason: string }>>>('/system/services/protected'),
-
-  listWhitelist: () =>
-    api.get<ApiResponse<ServiceWhitelistEntry[]>>('/system/services/whitelist'),
-
-  addToWhitelist: (name: string) =>
-    api.post<ApiResponse>('/system/services/whitelist', { name }),
-
-  removeFromWhitelist: (name: string) =>
-    api.delete<ApiResponse>(`/system/services/whitelist/${name}`),
 };
 
 // Notification API
