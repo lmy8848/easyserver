@@ -245,3 +245,75 @@ func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) {
 		"versions": versions,
 	})
 }
+
+// GetRegistry gets the package manager registry
+func (h *PackageManagerHandler) GetRegistry(c *gin.Context) {
+	runtimeIDStr := c.Query("runtime_id")
+	manager := c.Query("manager")
+
+	if runtimeIDStr == "" {
+		c.Error(ErrBadRequest.WithMessage("runtime_id 不能为空"))
+		return
+	}
+
+	var runtimeID int64
+	if _, err := fmt.Sscanf(runtimeIDStr, "%d", &runtimeID); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 runtime_id"))
+		return
+	}
+
+	// Get runtime info
+	runtime, err := h.runtimeService.GetByID(c.Request.Context(), runtimeID)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if runtime == nil {
+		c.Error(ErrNotFound.WithMessage("运行时不存在"))
+		return
+	}
+
+	registry, err := h.packageService.GetRegistry(c.Request.Context(), runtime.Name, manager)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+
+	Success(c, gin.H{
+		"registry": registry,
+	})
+}
+
+// SetRegistry sets the package manager registry
+func (h *PackageManagerHandler) SetRegistry(c *gin.Context) {
+	var req struct {
+		RuntimeID int64  `json:"runtime_id"`
+		Manager   string `json:"manager"`
+		Registry  string `json:"registry"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+
+	// Get runtime info
+	runtime, err := h.runtimeService.GetByID(c.Request.Context(), req.RuntimeID)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if runtime == nil {
+		c.Error(ErrNotFound.WithMessage("运行时不存在"))
+		return
+	}
+
+	if err := h.packageService.SetRegistry(c.Request.Context(), runtime.Name, req.Manager, req.Registry); err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+
+	Success(c, gin.H{
+		"message": "配置保存成功",
+	})
+}

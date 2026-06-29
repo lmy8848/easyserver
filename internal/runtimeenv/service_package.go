@@ -194,6 +194,75 @@ func (s *PackageService) GetPackageVersions(ctx context.Context, runtimeName, pa
 	}
 }
 
+// GetRegistry returns the current registry URL for a package manager
+func (s *PackageService) GetRegistry(ctx context.Context, runtimeName, manager string) (string, error) {
+	switch runtimeName {
+	case "node":
+		if manager == "" {
+			manager = "npm"
+		}
+		if manager != "npm" && manager != "pnpm" {
+			return "", fmt.Errorf("invalid package manager: %s", manager)
+		}
+		output, err := s.runManagerCmd(ctx, manager, "config", "get", "registry")
+		if err != nil {
+			return "", fmt.Errorf("%s config get registry failed: %v", manager, err)
+		}
+		return strings.TrimSpace(output), nil
+	case "python":
+		output, err := s.runManagerCmd(ctx, "pip", "config", "get", "global.index-url")
+		if err != nil {
+			// pip config get returns error if not set
+			return "", nil
+		}
+		return strings.TrimSpace(output), nil
+	default:
+		return "", fmt.Errorf("registry configuration not supported for %s", runtimeName)
+	}
+}
+
+// SetRegistry sets the registry URL for a package manager
+func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, manager, registry string) error {
+	switch runtimeName {
+	case "node":
+		if manager == "" {
+			manager = "npm"
+		}
+		if manager != "npm" && manager != "pnpm" {
+			return fmt.Errorf("invalid package manager: %s", manager)
+		}
+		var output string
+		var err error
+		if registry == "" {
+			output, err = s.runManagerCmd(ctx, manager, "config", "delete", "registry")
+		} else {
+			output, err = s.runManagerCmd(ctx, manager, "config", "set", "registry", registry)
+		}
+		if err != nil {
+			return fmt.Errorf("%s config set registry failed: %s", manager, describeCmdErr(err, output, manager+" config set registry"))
+		}
+		return nil
+	case "python":
+		var output string
+		var err error
+		if registry == "" {
+			output, err = s.runManagerCmd(ctx, "pip", "config", "unset", "global.index-url")
+		} else {
+			output, err = s.runManagerCmd(ctx, "pip", "config", "set", "global.index-url", registry)
+		}
+		if err != nil {
+			// Ignore unset errors if it was not set
+			if registry == "" && strings.Contains(err.Error(), "exit code 1") {
+				return nil
+			}
+			return fmt.Errorf("pip config set failed: %s", describeCmdErr(err, output, "pip config set global.index-url"))
+		}
+		return nil
+	default:
+		return fmt.Errorf("registry configuration not supported for %s", runtimeName)
+	}
+}
+
 // npm package search
 func (s *PackageService) searchNpmPackages(ctx context.Context, query string) ([]PackageInfo, error) {
 	output, _, _, err := s.executor.Run(ctx, "npm", "search", query, "--json")
@@ -398,6 +467,9 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 	if manager == "" {
 		manager = "npm"
 	}
+	if manager != "npm" && manager != "pnpm" {
+		return fmt.Errorf("invalid package manager: %s", manager)
+	}
 
 	args := []string{}
 	switch manager {
@@ -451,6 +523,9 @@ func (s *PackageService) uninstallNpmPackage(ctx context.Context, req *PackageUn
 	if manager == "" {
 		manager = "npm"
 	}
+	if manager != "npm" && manager != "pnpm" {
+		return fmt.Errorf("invalid package manager: %s", manager)
+	}
 
 	args := []string{}
 	switch manager {
@@ -474,6 +549,9 @@ func (s *PackageService) updateNpmPackage(ctx context.Context, req *PackageUpdat
 	manager := req.Manager
 	if manager == "" {
 		manager = "npm"
+	}
+	if manager != "npm" && manager != "pnpm" {
+		return fmt.Errorf("invalid package manager: %s", manager)
 	}
 
 	// npm 与 pnpm 都用 `update -g <name>`

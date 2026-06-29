@@ -5,6 +5,7 @@ import api from '../../services/api';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
 import PackageManager from './PackageManager';
+import PackageRegistryModal from './PackageRegistryModal';
 import MirrorPanel from './MirrorPanel';
 import type {
   RuntimeEnvironment,
@@ -116,6 +117,10 @@ export default function Runtime() {
   const [packageSearchLoading, setPackageSearchLoading] = useState(false);
   const [packageVersions, setPackageVersions] = useState<string[]>([]);
   const [packageVersionsLoading, setPackageVersionsLoading] = useState(false);
+  const [updatingPackageName, setUpdatingPackageName] = useState<string | null>(null);
+
+  // --- Registry modal state ---
+  const [registryVisible, setRegistryVisible] = useState(false);
 
   // ==================== Lifecycle ====================
 
@@ -387,7 +392,7 @@ export default function Runtime() {
         manager: pkg.source || 'npm',
       });
       message.success(`${pkg.name} 卸载成功`);
-      fetchPackages(selectedRuntimeForPackage.id);
+      await fetchPackages(selectedRuntimeForPackage.id);
     } catch (error: any) {
       message.error(error.message || '卸载失败');
     }
@@ -395,7 +400,7 @@ export default function Runtime() {
 
   const handleUpdatePackage = async (pkg: PackageInfo) => {
     if (!selectedRuntimeForPackage) return;
-
+    setUpdatingPackageName(pkg.name);
     try {
       await api.post('/packages/update', {
         runtime_id: selectedRuntimeForPackage.id,
@@ -403,10 +408,17 @@ export default function Runtime() {
         manager: pkg.source || 'npm',
       });
       message.success(`${pkg.name} 更新成功`);
-      fetchPackages(selectedRuntimeForPackage.id);
+      await fetchPackages(selectedRuntimeForPackage.id);
     } catch (error: any) {
       message.error(error.message || '更新失败');
+    } finally {
+      setUpdatingPackageName(null);
     }
+  };
+
+  const handleConfigRegistry = async () => {
+    if (!selectedRuntimeForPackage) return;
+    setRegistryVisible(true);
   };
 
   const handleSearchPackages = async (query: string) => {
@@ -684,6 +696,13 @@ export default function Runtime() {
         )}
       </Modal>
 
+      {/* Package manager registry modal */}
+      <PackageRegistryModal
+        visible={registryVisible}
+        runtime={selectedRuntimeForPackage}
+        onClose={() => setRegistryVisible(false)}
+      />
+
       {/* Package manager modal */}
       <PackageManager
         catalog={catalog}
@@ -696,6 +715,7 @@ export default function Runtime() {
         packageSearchLoading={packageSearchLoading}
         packageVersions={packageVersions}
         packageVersionsLoading={packageVersionsLoading}
+        updatingPackageName={updatingPackageName}
         onClose={() => {
           setPackageVisible(false);
           setSelectedRuntimeForPackage(null);
@@ -703,9 +723,10 @@ export default function Runtime() {
           setPackageSearchResults([]);
           setPackageVersions([]);
         }}
-        onRefreshPackages={() => {
-          if (selectedRuntimeForPackage) fetchPackages(selectedRuntimeForPackage.id);
+        onRefreshPackages={async () => {
+          if (selectedRuntimeForPackage) await fetchPackages(selectedRuntimeForPackage.id);
         }}
+        onConfigRegistry={handleConfigRegistry}
         onInstallPackage={handleInstallPackage}
         onSearchPackages={handleSearchPackages}
         onSelectPackage={handleSelectPackage}

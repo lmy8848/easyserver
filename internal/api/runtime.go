@@ -379,6 +379,8 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.POST("/packages/install", packageHandler.InstallPackage)
 	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
 	protected.POST("/packages/update", packageHandler.UpdatePackage)
+	protected.GET("/packages/registry", packageHandler.GetRegistry)
+	protected.POST("/packages/registry", packageHandler.SetRegistry)
 }
 
 // GetCatalog returns the catalog of supported runtimes

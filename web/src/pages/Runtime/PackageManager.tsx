@@ -6,6 +6,7 @@ import {
   ReloadOutlined,
   AppstoreOutlined,
   SearchOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import type { PackageInfo, PackageSearchResult, RuntimeEnvironment, CatalogEntry } from './types';
 
@@ -20,8 +21,10 @@ interface PackageManagerProps {
   packageSearchLoading: boolean;
   packageVersions: string[];
   packageVersionsLoading: boolean;
+  updatingPackageName: string | null;
   onClose: () => void;
   onRefreshPackages: () => void;
+  onConfigRegistry: () => void;
   onInstallPackage: (values: { name: string; version: string; manager?: string }) => void;
   onSearchPackages: (query: string) => void;
   onSelectPackage: (packageName: string) => void;
@@ -40,8 +43,10 @@ export default function PackageManager({
   packageSearchLoading,
   packageVersions,
   packageVersionsLoading,
+  updatingPackageName,
   onClose,
   onRefreshPackages,
+  onConfigRegistry,
   onInstallPackage,
   onSearchPackages,
   onSelectPackage,
@@ -94,6 +99,14 @@ export default function PackageManager({
               >
                 刷新
               </Button>
+              {['node', 'python'].includes(selectedRuntime?.name || '') && (
+                <Button
+                  icon={<SettingOutlined />}
+                  onClick={onConfigRegistry}
+                >
+                  配置镜像
+                </Button>
+              )}
             </Space>
           </div>
 
@@ -225,6 +238,7 @@ export default function PackageManager({
                         type="link"
                         size="small"
                         icon={<SyncOutlined />}
+                        loading={updatingPackageName === record.name}
                         onClick={() => onUpdatePackage(record)}
                       >
                         更新
