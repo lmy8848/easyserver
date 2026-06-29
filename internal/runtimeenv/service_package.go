@@ -123,8 +123,6 @@ func (s *PackageService) ListPackages(ctx context.Context, runtimeID int64, runt
 		return s.scanNodePackages(ctx, runtimeID, runtimePath)
 	case "python":
 		return s.scanPipPackages(ctx, runtimeID, runtimePath)
-	case "java":
-		return s.scanMavenPackages(ctx, runtimeID, runtimePath)
 	case "php":
 		return s.scanComposerPackages(ctx, runtimeID, runtimePath)
 	default:
@@ -139,8 +137,6 @@ func (s *PackageService) InstallPackage(ctx context.Context, req *PackageInstall
 		return s.installNpmPackage(ctx, req, runtimePath)
 	case "python":
 		return s.installPipPackage(ctx, req, runtimePath)
-	case "java":
-		return s.installMavenPackage(ctx, req, runtimePath)
 	case "php":
 		return s.installComposerPackage(ctx, req, runtimePath)
 	default:
@@ -155,8 +151,6 @@ func (s *PackageService) UninstallPackage(ctx context.Context, req *PackageUnins
 		return s.uninstallNpmPackage(ctx, req, runtimePath)
 	case "python":
 		return s.uninstallPipPackage(ctx, req, runtimePath)
-	case "java":
-		return s.uninstallMavenPackage(ctx, req, runtimePath)
 	case "php":
 		return s.uninstallComposerPackage(ctx, req, runtimePath)
 	default:
@@ -559,19 +553,6 @@ func (s *PackageService) updatePipPackage(ctx context.Context, req *PackageUpdat
 
 	log.Printf("package: updated %s via pip", req.Name)
 	return nil
-}
-
-// maven package management (placeholder)
-func (s *PackageService) scanMavenPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]Package, error) {
-	return []Package{}, nil
-}
-
-func (s *PackageService) installMavenPackage(ctx context.Context, req *PackageInstallRequest, runtimePath string) error {
-	return fmt.Errorf("maven package installation not yet supported")
-}
-
-func (s *PackageService) uninstallMavenPackage(ctx context.Context, req *PackageUninstallRequest, runtimePath string) error {
-	return fmt.Errorf("maven package uninstallation not yet supported")
 }
 
 // composer package management (placeholder)

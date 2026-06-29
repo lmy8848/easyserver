@@ -336,6 +336,15 @@ export default function Runtime() {
   };
 
   const fetchPackages = async (runtimeId: number) => {
+    const runtime = environments.find(r => r.id === runtimeId);
+    if (!runtime) return;
+    
+    const isSupported = catalog.find(c => c.lang === runtime.name)?.supports_global_pkgs;
+    if (!isSupported) {
+      setPackageData([]);
+      return;
+    }
+
     setPackageLoading(true);
     try {
       const res = await api.get(`/packages?runtime_id=${runtimeId}`);
@@ -677,6 +686,7 @@ export default function Runtime() {
 
       {/* Package manager modal */}
       <PackageManager
+        catalog={catalog}
         visible={packageVisible}
         selectedRuntime={selectedRuntimeForPackage}
         packageData={packageData}

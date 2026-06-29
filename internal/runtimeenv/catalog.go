@@ -9,8 +9,9 @@ type Runtime struct {
 	Lang       string   `json:"lang"`        // "node"
 	Display    string   `json:"display"`     // "Node.js"
 	MiseTool   string   `json:"mise_tool"`   // mise 插件名
-	Majors     []string `json:"majors"`      // UI 可选的主版本列表
-	MirrorEnvs []string `json:"mirror_envs"` // 该语言会用到的 env key（供镜像表 seed 使用）
+	Majors             []string `json:"majors"`      // UI 可选的主版本列表
+	MirrorEnvs         []string `json:"mirror_envs"` // 该语言会用到的 env key（供镜像表 seed 使用）
+	SupportsGlobalPkgs bool     `json:"supports_global_pkgs"`
 }
 
 var catalog = []Runtime{
@@ -18,29 +19,33 @@ var catalog = []Runtime{
 		Lang:       "node",
 		Display:    "Node.js",
 		MiseTool:   "node",
-		Majors:     []string{"16", "18", "20", "22", "24"},
-		MirrorEnvs: []string{"MISE_NODE_MIRROR_URL"},
+		Majors:             []string{"16", "18", "20", "22", "24"},
+		MirrorEnvs:         []string{"MISE_NODE_MIRROR_URL"},
+		SupportsGlobalPkgs: true,
 	},
 	{
 		Lang:       "python",
 		Display:    "Python",
 		MiseTool:   "python",
-		Majors:     []string{"3.10", "3.11", "3.12", "3.13", "3.14"},
-		MirrorEnvs: []string{},
+		Majors:             []string{"3.10", "3.11", "3.12", "3.13", "3.14"},
+		MirrorEnvs:         []string{},
+		SupportsGlobalPkgs: true,
 	},
 	{
 		Lang:       "go",
 		Display:    "Go",
 		MiseTool:   "go",
-		Majors:     []string{"1.22", "1.23", "1.24", "1.25", "1.26"},
-		MirrorEnvs: []string{"MISE_GO_DOWNLOAD_MIRROR"},
+		Majors:             []string{"1.22", "1.23", "1.24", "1.25", "1.26"},
+		MirrorEnvs:         []string{"MISE_GO_DOWNLOAD_MIRROR"},
+		SupportsGlobalPkgs: false,
 	},
 	{
 		Lang:       "java",
 		Display:    "Java",
 		MiseTool:   "vfox:version-fox/vfox-java",
-		Majors:     []string{"8", "11", "17", "21", "25"},
-		MirrorEnvs: []string{},
+		Majors:             []string{"8", "11", "17", "21", "25"},
+		MirrorEnvs:         []string{},
+		SupportsGlobalPkgs: false,
 	},
 	{
 		Lang:    "php",
@@ -50,9 +55,10 @@ var catalog = []Runtime{
 		// 走 registry——asdf-php 通过 git clone + tags 拿版本（稳定），而
 		// vfox-php 的 Available hook 走 GitHub API，被限流/受网络影响时
 		// 直接返回空，表现为前端版本下拉为空。
-		MiseTool:   "php",
-		Majors:     []string{"8.1", "8.2", "8.3", "8.4", "8.5"},
-		MirrorEnvs: []string{},
+		MiseTool:           "php",
+		Majors:             []string{"8.1", "8.2", "8.3", "8.4", "8.5"},
+		MirrorEnvs:         []string{},
+		SupportsGlobalPkgs: true,
 	},
 }
 
@@ -79,11 +85,12 @@ func GetCatalog() []Runtime {
 	c := make([]Runtime, len(catalog))
 	for i, r := range catalog {
 		c[i] = Runtime{
-			Lang:       r.Lang,
-			Display:    r.Display,
-			MiseTool:   r.MiseTool,
-			Majors:     append([]string{}, r.Majors...),
-			MirrorEnvs: append([]string{}, r.MirrorEnvs...),
+			Lang:               r.Lang,
+			Display:            r.Display,
+			MiseTool:           r.MiseTool,
+			Majors:             append([]string{}, r.Majors...),
+			MirrorEnvs:         append([]string{}, r.MirrorEnvs...),
+			SupportsGlobalPkgs: r.SupportsGlobalPkgs,
 		}
 	}
 	return c
@@ -123,4 +130,15 @@ func miseInstallPath(lang, version string) string {
 		return ""
 	}
 	return filepath.Join(miseDataDir, "installs", miseToolDirName(tool), version)
+}
+
+// SupportsGlobalPkgsFor returns true if the specified language supports global package management via the panel.
+func SupportsGlobalPkgsFor(lang string) bool {
+	lang = strings.ToLower(lang)
+	for _, r := range catalog {
+		if r.Lang == lang {
+			return r.SupportsGlobalPkgs
+		}
+	}
+	return false
 }

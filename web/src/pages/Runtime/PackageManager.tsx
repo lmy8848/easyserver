@@ -1,4 +1,4 @@
-import { Modal, Table, Button, Space, Tag, Form, Input, Select, Popconfirm, Spin } from 'antd';
+import { Modal, Table, Button, Space, Tag, Form, Input, Select, Popconfirm, Spin, Empty } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -7,9 +7,10 @@ import {
   AppstoreOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import type { PackageInfo, PackageSearchResult, RuntimeEnvironment } from './types';
+import type { PackageInfo, PackageSearchResult, RuntimeEnvironment, CatalogEntry } from './types';
 
 interface PackageManagerProps {
+  catalog: CatalogEntry[];
   visible: boolean;
   selectedRuntime: RuntimeEnvironment | null;
   packageData: PackageInfo[];
@@ -29,6 +30,7 @@ interface PackageManagerProps {
 }
 
 export default function PackageManager({
+  catalog,
   visible,
   selectedRuntime,
   packageData,
@@ -77,6 +79,11 @@ export default function PackageManager({
       width={800}
     >
       {selectedRuntime && (
+        !catalog.find(c => c.lang === selectedRuntime.name)?.supports_global_pkgs ? (
+          <div style={{ padding: '40px 0' }}>
+            <Empty description={`当前运行环境 (${selectedRuntime.name}) 暂不支持面板全局包管理`} />
+          </div>
+        ) : (
         <div>
           <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
             <Space>
@@ -237,6 +244,7 @@ export default function PackageManager({
             />
           )}
         </div>
+        )
       )}
     </Modal>
   );

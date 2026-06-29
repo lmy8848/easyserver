@@ -58,6 +58,7 @@ export interface CatalogEntry {
   display: string;
   mise_tool: string;
   majors: string[];
+  supports_global_pkgs: boolean;
   mirror_envs: string[];
 }
 

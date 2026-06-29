@@ -42,6 +42,11 @@ func (h *PackageManagerHandler) ListPackages(c *gin.Context) {
 		return
 	}
 
+	if !runtimeenv.SupportsGlobalPkgsFor(runtime.Name) {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", runtime.Name)))
+		return
+	}
+
 	packages, err := h.packageService.ListPackages(c.Request.Context(), runtimeID, runtime.Name, runtime.Path)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -69,6 +74,11 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 	}
 	if runtime == nil {
 		c.Error(ErrNotFound.WithMessage("运行时不存在"))
+		return
+	}
+
+	if !runtimeenv.SupportsGlobalPkgsFor(runtime.Name) {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", runtime.Name)))
 		return
 	}
 
@@ -101,6 +111,11 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 		return
 	}
 
+	if !runtimeenv.SupportsGlobalPkgsFor(runtime.Name) {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", runtime.Name)))
+		return
+	}
+
 	if err := h.packageService.UninstallPackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -127,6 +142,11 @@ func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
 	}
 	if runtime == nil {
 		c.Error(ErrNotFound.WithMessage("运行时不存在"))
+		return
+	}
+
+	if !runtimeenv.SupportsGlobalPkgsFor(runtime.Name) {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", runtime.Name)))
 		return
 	}
 
@@ -167,6 +187,11 @@ func (h *PackageManagerHandler) SearchPackages(c *gin.Context) {
 		return
 	}
 
+	if !runtimeenv.SupportsGlobalPkgsFor(runtime.Name) {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", runtime.Name)))
+		return
+	}
+
 	packages, err := h.packageService.SearchPackages(c.Request.Context(), runtime.Name, query)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -202,6 +227,11 @@ func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) {
 	}
 	if runtime == nil {
 		c.Error(ErrNotFound.WithMessage("运行时不存在"))
+		return
+	}
+
+	if !runtimeenv.SupportsGlobalPkgsFor(runtime.Name) {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", runtime.Name)))
 		return
 	}
 
