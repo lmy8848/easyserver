@@ -44,6 +44,7 @@ web/dist/
 web/.vite/
 web/.env.development
 web/.env.production
+web/package-lock.json
 
 # Build artifacts
 dist/
@@ -78,3 +79,4 @@ docs/*
 !web/README.md
 !deploy/README.md
 !CHANGELOG.md
+mise-v2026.6.14-linux-x64
