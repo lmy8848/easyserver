@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,7 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的数据库ID"))
 		return
 	}
+	middleware.AuditSummary(c, "创建数据库备份 #"+strconv.FormatInt(did, 10))
 
 	// Get database info
 	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
@@ -115,6 +117,7 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("请确认恢复，设置 {\"confirm\": true}"))
 		return
 	}
+	middleware.AuditSummary(c, "恢复数据库备份 #"+strconv.FormatInt(bid, 10))
 
 	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
 	if err != nil {
@@ -143,6 +146,7 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的备份ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除数据库备份 #"+strconv.FormatInt(bid, 10))
 
 	if err := h.dbMgmtService.DeleteBackup(c.Request.Context(), bid); err != nil {
 		c.Error(WrapError(err))

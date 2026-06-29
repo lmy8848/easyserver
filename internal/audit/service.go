@@ -2,15 +2,9 @@ package audit
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log"
-	"strings"
 	"time"
 )
 
@@ -27,20 +21,18 @@ type auditEntry struct {
 }
 
 type auditWriter struct {
-	repo       Repository
-	ch         chan auditEntry
-	done       chan struct{}
-	finished   chan struct{}
-	signingKey []byte
+	repo     Repository
+	ch       chan auditEntry
+	done     chan struct{}
+	finished chan struct{}
 }
 
-func newAuditWriter(repo Repository, signingKey []byte) *auditWriter {
+func newAuditWriter(repo Repository) *auditWriter {
 	w := &auditWriter{
-		repo:       repo,
-		ch:         make(chan auditEntry, 1000),
-		done:       make(chan struct{}),
-		finished:   make(chan struct{}),
-		signingKey: signingKey,
+		repo:     repo,
+		ch:       make(chan auditEntry, 1000),
+		done:     make(chan struct{}),
+		finished: make(chan struct{}),
 	}
 	go w.run()
 	return w
@@ -84,9 +76,9 @@ func (w *auditWriter) run() {
 }
 
 func (w *auditWriter) flush(batch []auditEntry) {
-	entries := make([]SignedAuditEntry, len(batch))
+	entries := make([]AuditLog, len(batch))
 	for i, e := range batch {
-		entries[i] = SignedAuditEntry{
+		entries[i] = AuditLog{
 			UserID:    e.userID,
 			Username:  e.username,
 			Action:    e.action,
@@ -96,26 +88,11 @@ func (w *auditWriter) flush(batch []auditEntry) {
 			UserAgent: e.userAgent,
 			Type:      e.logType,
 			CreatedAt: e.createdAt,
-			Signature: w.signEntry(e),
 		}
 	}
-	if err := w.repo.AppendSignedBatch(context.Background(), entries); err != nil {
+	if err := w.repo.AppendBatch(context.Background(), entries); err != nil {
 		log.Printf("audit: failed to flush batch: %v", err)
 	}
-}
-
-func (w *auditWriter) signEntry(e auditEntry) string {
-	// type (e.logType) is excluded from the HMAC payload: including it would
-	// invalidate signatures for all pre-migration records. type is instead guarded
-	// by VerifySignature, which rejects entries whose type disagrees with their
-	// (signed) action — HTTP method ⇒ request, anything else ⇒ operation. An
-	// attacker with DB write access flipping only type fails that consistency check.
-	// Full type integrity would need versioned signatures (v2|type|...).
-	data := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s|%s",
-		e.userID, e.username, e.action, e.resource, e.detail, e.ip, e.userAgent, e.createdAt.Format(time.RFC3339Nano))
-	mac := hmac.New(sha256.New, w.signingKey)
-	mac.Write([]byte(data))
-	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (w *auditWriter) close() {
@@ -123,55 +100,28 @@ func (w *auditWriter) close() {
 	<-w.finished
 }
 
-// Service provides audit logging with HMAC-signed entries.
+// Service provides audit logging.
 type Service struct {
 	db            *sql.DB
 	auditRepo     Repository
 	writer        *auditWriter
-	signingKey    []byte
 	retentionDays int
 }
 
-// NewService creates a new audit Service. db is used for HMAC signing key persistence.
+// NewService creates a new audit Service. db is reserved for future use.
 func NewService(db *sql.DB, auditRepo Repository, retentionDays int) *Service {
 	if retentionDays <= 0 {
 		retentionDays = 90
 	}
 
-	key := loadOrCreateSigningKey(db)
-
 	s := &Service{
 		db:            db,
 		auditRepo:     auditRepo,
-		writer:        newAuditWriter(auditRepo, key),
-		signingKey:    key,
+		writer:        newAuditWriter(auditRepo),
 		retentionDays: retentionDays,
 	}
 	go s.cleanupLoop()
 	return s
-}
-
-func loadOrCreateSigningKey(db *sql.DB) []byte {
-	db.Exec(`CREATE TABLE IF NOT EXISTS system_settings (
-		key TEXT PRIMARY KEY,
-		value TEXT NOT NULL,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`)
-
-	var hexKey string
-	err := db.QueryRow("SELECT value FROM system_settings WHERE key = 'audit_signing_key'").Scan(&hexKey)
-	if err == nil && hexKey != "" {
-		if key, err := hex.DecodeString(hexKey); err == nil && len(key) == 32 {
-			return key
-		}
-	}
-
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		key = []byte("easyserver-audit-signing-key-default")
-	}
-	db.Exec("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('audit_signing_key', ?)", hex.EncodeToString(key))
-	return key
 }
 
 func (s *Service) Close() {
@@ -205,6 +155,14 @@ func (s *Service) cleanupOldRecords() {
 	}
 }
 
+func (s *Service) enqueue(entry auditEntry) {
+	select {
+	case s.writer.ch <- entry:
+	default:
+		log.Printf("audit: channel full, dropping entry")
+	}
+}
+
 // LogOperation logs a server-level operation.
 func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
 	if ctx == nil {
@@ -218,190 +176,45 @@ func (s *Service) LogOperation(ctx context.Context, userID int64, username, acti
 		detailData[k] = v
 	}
 	detailJSON, _ := json.Marshal(detailData)
-	entry := auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
+	s.enqueue(auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"})
 }
 
 // LogRequest logs an HTTP request, written by the global audit middleware.
+// detail is expected to be a complete JSON string (flat layer with status/method/...);
+// it is stored verbatim so Stats/alerts can extract fields at the top level.
 func (s *Service) LogRequest(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := time.Now()
-	detailJSON, _ := json.Marshal(map[string]interface{}{
-		"detail":    detail,
-		"timestamp": now.Format(time.RFC3339),
-	})
-	entry := auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "request"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
+	s.enqueue(auditEntry{userID, username, action, resource, detail, ip, userAgent, now, "request"})
 }
 
-// LogTerminalCommand logs a command executed in the terminal.
-func (s *Service) LogTerminalCommand(ctx context.Context, userID int64, username, sessionID, command, ip string) {
+// LogSecurityEvent logs a security event. The action column is the coarse verb
+// ("认证"); the human-readable summary is carried in detail.summary.
+// Operation logs do not record IP/user-agent (request-log concern).
+func (s *Service) LogSecurityEvent(ctx context.Context, username, summary string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := time.Now()
 	detailJSON, _ := json.Marshal(map[string]interface{}{
-		"session_id": sessionID,
-		"command":    command,
-		"timestamp":  now.Format(time.RFC3339),
-	})
-	entry := auditEntry{userID, username, "TERMINAL", "/terminal/" + sessionID, string(detailJSON), ip, "WebTerminal", now, "operation"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
-}
-
-// LogFileOperation logs a file operation.
-func (s *Service) LogFileOperation(ctx context.Context, userID int64, username, action, filePath string, extra map[string]interface{}, ip, userAgent string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	now := time.Now()
-	detailData := map[string]interface{}{
-		"file_path": filePath,
-		"action":    action,
+		"summary":   summary,
 		"timestamp": now.Format(time.RFC3339),
-	}
-	for k, v := range extra {
-		detailData[k] = v
-	}
-	detailJSON, _ := json.Marshal(detailData)
-	entry := auditEntry{userID, username, "FILE_" + action, filePath, string(detailJSON), ip, userAgent, now, "operation"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
+	})
+	s.enqueue(auditEntry{0, username, "认证", "/auth", string(detailJSON), "", "", now, "operation"})
 }
 
-// LogSecurityEvent logs a security event.
-func (s *Service) LogSecurityEvent(ctx context.Context, username, action, detail, ip, userAgent string) {
+// LogSystemEvent logs a system event. The action column is the coarse verb
+// ("其他"); the human-readable summary is carried in detail.summary.
+func (s *Service) LogSystemEvent(ctx context.Context, summary string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := time.Now()
 	detailJSON, _ := json.Marshal(map[string]interface{}{
-		"detail":    detail,
+		"summary":   summary,
 		"timestamp": now.Format(time.RFC3339),
 	})
-	entry := auditEntry{0, username, "SECURITY_" + action, "/auth", string(detailJSON), ip, userAgent, now, "operation"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
-}
-
-// LogSystemEvent logs a system event.
-func (s *Service) LogSystemEvent(ctx context.Context, action, detail string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	now := time.Now()
-	detailJSON, _ := json.Marshal(map[string]interface{}{
-		"detail":    detail,
-		"timestamp": now.Format(time.RFC3339),
-	})
-	entry := auditEntry{0, "system", "SYSTEM_" + action, "/system", string(detailJSON), "127.0.0.1", "EasyServer", now, "operation"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
-}
-
-// LogServiceOperation logs a service operation.
-func (s *Service) LogServiceOperation(ctx context.Context, userID int64, username, action, serviceName string, extra map[string]interface{}, ip, userAgent string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	now := time.Now()
-	detailData := map[string]interface{}{
-		"service":   serviceName,
-		"action":    action,
-		"timestamp": now.Format(time.RFC3339),
-	}
-	for k, v := range extra {
-		detailData[k] = v
-	}
-	detailJSON, _ := json.Marshal(detailData)
-	entry := auditEntry{userID, username, "SERVICE_" + strings.ToUpper(action), "/service/" + serviceName, string(detailJSON), ip, userAgent, now, "operation"}
-	select {
-	case s.writer.ch <- entry:
-	default:
-		log.Printf("audit: channel full, dropping entry")
-	}
-}
-
-// VerifySignature verifies the integrity of an audit log entry.
-func (s *Service) VerifySignature(ctx context.Context, id int64) (bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	entry, err := s.auditRepo.GetSignedEntry(ctx, id)
-	if err != nil {
-		return false, err
-	}
-
-	data := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s|%s",
-		entry.UserID, entry.Username, entry.Action, entry.Resource, entry.Detail, entry.IP, entry.UserAgent, entry.CreatedAt.Format(time.RFC3339Nano))
-	mac := hmac.New(sha256.New, s.signingKey)
-	mac.Write([]byte(data))
-	expected := hex.EncodeToString(mac.Sum(nil))
-
-	if !hmac.Equal([]byte(entry.Signature), []byte(expected)) {
-		return false, nil
-	}
-	// type is not in the HMAC payload; reject if it disagrees with the (signed)
-	// action to detect type tampering.
-	if isRequestAction(entry.Action) != (entry.Type == "request") {
-		return false, nil
-	}
-	return true, nil
-}
-
-// isRequestAction reports whether action is an HTTP method, i.e. a request-log action.
-func isRequestAction(action string) bool {
-	switch action {
-	case "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS":
-		return true
-	}
-	return false
-}
-
-// VerifyAllSignatures verifies integrity of all audit log entries.
-func (s *Service) VerifyAllSignatures(ctx context.Context) (total, valid, invalid int, err error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ids, err := s.auditRepo.ListIDsForVerification(ctx, 1000)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	for _, id := range ids {
-		total++
-		ok, err := s.VerifySignature(ctx, id)
-		if err != nil {
-			continue
-		}
-		if ok {
-			valid++
-		} else {
-			invalid++
-		}
-	}
-	return total, valid, invalid, nil
+	s.enqueue(auditEntry{0, "system", "其他", "/system", string(detailJSON), "", "", now, "operation"})
 }

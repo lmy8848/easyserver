@@ -48,6 +48,7 @@ interface ParsedDetail {
   status: string;
   duration: string;
   summary: string;
+  success?: boolean;
   body?: any;
   params?: Record<string, string>;
   query?: Record<string, string>;
@@ -65,7 +66,6 @@ export default function AuditLog() {
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [actions, setActions] = useState<string[]>([]);
   const [stats, setStats] = useState<AuditStats | null>(null);
   const [statsDays, setStatsDays] = useState(7);
   const [activeTab, setActiveTab] = useState<string>('operation');
@@ -99,7 +99,8 @@ export default function AuditLog() {
         path: inner.path || obj.path || '-',
         status: String(inner.status || obj.status || '-'),
         duration: inner.duration_ms ? `${inner.duration_ms}ms` : obj.duration_ms ? `${obj.duration_ms}ms` : '-',
-        summary: inner.command || inner.detail || inner.file_path || obj.command || obj.detail || obj.file_path || '-',
+        summary: inner.summary || inner.command || inner.file_path || obj.summary || obj.command || obj.file_path || '-',
+        success: inner.success ?? obj.success,
         body: inner.body || obj.body,
         params: inner.params || obj.params,
         query: inner.query || obj.query,
@@ -108,15 +109,6 @@ export default function AuditLog() {
       return { method: '-', path: detail, status: '-', duration: '-', summary: detail };
     }
   };
-
-  const fetchActions = useCallback(async () => {
-    try {
-      const res = await auditApi.getActions(activeTab === 'operation' || activeTab === 'request' ? activeTab : undefined);
-      setActions(res.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch actions:', error);
-    }
-  }, [activeTab]);
 
   const fetchLogs = useCallback(async () => {
     if (activeTab !== 'operation' && activeTab !== 'request') return;
@@ -163,9 +155,8 @@ export default function AuditLog() {
   };
 
   useEffect(() => {
-    fetchActions();
     fetchStats(); // 初始加载统计数据，显示异常告警角标
-  }, [fetchStats, fetchActions]);
+  }, [fetchStats]);
 
   useEffect(() => {
     fetchLogs();
@@ -225,145 +216,27 @@ export default function AuditLog() {
     setDetailVisible(true);
   };
 
-  const getActionColor = (action: string) => {
-    const act = action.toUpperCase();
-    
-    // Explicit overrides
-    if (act === 'SECURITY_LOGIN_SUCCESS' || act === 'AUTH_LOGIN') return 'green';
-    if (act === 'SECURITY_LOGIN_FAILED') return 'red';
-    if (act === 'TERMINAL_OPEN' || act === 'TERMINAL_CLOSE') return 'purple';
-
-    // Substring matching
-    if (act.includes('DELETE') || act.includes('DROP') || act.includes('STOP') || act.includes('KICK') || act.includes('UNINSTALL') || act.includes('DISABLE') || act.includes('DOWN') || act.includes('LOGOUT') || act.includes('CLEAN') || act.includes('FAILED')) {
-      return 'red';
-    }
-    if (act.includes('UPDATE') || act.includes('MODIFY') || act.includes('EDIT') || act.includes('RENAME') || act.includes('RESTART') || act.includes('SET') || act.includes('CHMOD') || act.includes('CHOWN') || act.includes('SAVE') || act.includes('RELOAD') || act.includes('PAUSE') || act.includes('RESTORE') || act.includes('CHANGE') || act.includes('CONFIG') || act.includes('MOVE') || act.includes('MARK')) {
-      return 'orange';
-    }
-    if (act.includes('CREATE') || act.includes('ADD') || act.includes('NEW') || act.includes('INSERT') || act.includes('START') || act.includes('INSTALL') || act.includes('ENABLE') || act.includes('UPLOAD') || act.includes('COPY') || act.includes('PULL') || act.includes('MKDIR') || act.includes('GRANT') || act.includes('UP') || act.includes('EXECUTE') || act.includes('EXEC') || act.includes('RUN') || act.includes('APPLY') || act.includes('IMPORT') || act.includes('DOWNLOAD') || act.includes('COMPRESS') || act.includes('EXTRACT')) {
-      return 'green';
-    }
-    
-    return 'blue';
+  // 6 类动词颜色（中间件自动推导的 operation 日志 action）
+  const verbColors: Record<string, string> = {
+    '创建': 'blue', '删除': 'red', '修改': 'orange',
+    '执行': 'purple', '认证': 'cyan', '其他': 'default',
   };
 
-  const getMethodColor = (method: string) => {
-    const colors: Record<string, string> = {
-      POST: 'blue', PUT: 'orange', DELETE: 'red', GET: 'green',
-    };
-    return colors[method] || 'default';
+  // HTTP method 颜色（request 日志 action 列存 method）
+  const methodColors: Record<string, string> = {
+    POST: 'blue', PUT: 'orange', DELETE: 'red', GET: 'green', PATCH: 'orange',
   };
+
+  const getActionColor = (action: string) => verbColors[action] || methodColors[action] || 'default';
+
+  const getActionLabel = (action: string) => action;
+
+  const getMethodColor = (method: string) => methodColors[method] || 'default';
 
   const getResourceText = (record: AuditLogItem) => {
-    if (record.type !== 'operation') {
-      return record.resource;
-    }
-    const action = record.action || '';
-    const parsed = parseDetail(record.detail);
-    const body = parsed.body || {};
-    const params = parsed.params || {};
-    const query = parsed.query || {};
-
-    if (action === 'FILE_DELETE') {
-      if (body.paths && Array.isArray(body.paths)) return `文件: ${body.paths.join(', ')}`;
-    }
-    if (action.startsWith('FILE_') && action !== 'FILE_DELETE') {
-      const path = body.path || query['path'] || body.old_path || body.target;
-      if (path) return `路径: ${path}`;
-    }
-    if (action.startsWith('PROCESS_GROUP_')) {
-      if (params['id']) return `守护进程组 (ID: ${params['id']})`;
-    } else if (action.startsWith('PROCESS_')) {
-      if (params['id']) return `守护进程 (ID: ${params['id']})`;
-    }
-    if (action.startsWith('CONTAINER_')) {
-      if (params['id']) return `容器 (ID: ${params['id']})`;
-    }
-    if (action.startsWith('DATABASE_') && action.includes('VERSION')) {
-      if (params['vid']) return `数据库版本 (ID: ${params['vid']})`;
-    }
-    if (action.startsWith('DATABASE_') && action.includes('RECORD')) {
-      if (params['did']) return `数据记录 (库 ID: ${params['did']})`;
-    }
-    if (action.startsWith('DATABASE_') && (action.includes('USER') || action.includes('PRIVILEGES') || action.includes('TABLE') || action.includes('BACKUP') || action.includes('SQL'))) {
-      if (params['id']) return `数据库服务器 (ID: ${params['id']})`;
-      if (params['did']) return `数据库 (ID: ${params['did']})`;
-    }
-    if (action.startsWith('DEPLOY_') && action.includes('SERVER')) {
-      if (params['id']) return `发布服务器 (ID: ${params['id']})`;
-    }
-    if (action.startsWith('DEPLOY_') && action.includes('TASK')) {
-      if (params['id']) return `发布任务 (ID: ${params['id']})`;
-    }
-    if (action.startsWith('ENV_') || action.startsWith('RUNTIME_')) {
-      if (params['id']) return `环境配置 (ID: ${params['id']})`;
-    }
+    // operation 日志的 resource 列存类别（中间件按路由推导）；request 日志存 path。
+    // 具体 resource 名在摘要列展示。
     return record.resource;
-  };
-
-  const getActionLabel = (action: string) => {
-    const labels: Record<string, string> = {
-      TERMINAL_OPEN: '打开终端', TERMINAL_CLOSE: '关闭终端',
-      FILE_MKDIR: '创建目录', FILE_UPLOAD: '上传文件', FILE_DOWNLOAD: '下载文件',
-      FILE_RENAME: '重命名文件', FILE_DELETE: '删除文件', FILE_MOVE: '移动文件', FILE_COPY: '复制文件', FILE_EDIT: '编辑文件',
-      FILE_CHMOD: '修改权限', FILE_CHOWN: '修改所有者', FILE_COMPRESS: '压缩文件', FILE_EXTRACT: '解压文件',
-      SECURITY_LOGIN_SUCCESS: '登录成功', SECURITY_LOGIN_FAILED: '登录失败',
-      SECURITY_LOGOUT: '退出登录', SECURITY_PASSWORD_CHANGED: '修改密码',
-      SECURITY_PASSWORD_CHANGE_FAILED: '修改密码失败', SECURITY_TOTP_ENABLED: '开启两步验证', SECURITY_TOTP_DISABLED: '关闭两步验证',
-      SECURITY_SESSION_KICKED: '踢出下线', SECURITY_ALL_OTHER_SESSIONS_KICKED: '下线其他设备',
-      SYSTEM_SERVER_START: '面板启动', SYSTEM_SERVER_STOP: '面板停止',
-      SYSTEM_SERVICE_FAILED: '服务异常', SYSTEM_DISK_WARNING: '磁盘警告',
-      SERVICE_START: '启动服务', SERVICE_STOP: '停止服务', SERVICE_RESTART: '重启服务',
-      SERVICE_ENABLE: '启用服务', SERVICE_DISABLE: '禁用服务',
-      RUNTIME_INSTALL: '安装运行环境', RUNTIME_UNINSTALL: '卸载运行环境', RUNTIME_SET_DEFAULT: '设置默认运行环境',
-      CRON_TASKS_CREATE: '创建计划任务', CRON_TASKS_UPDATE: '更新计划任务', CRON_TASKS_DELETE: '删除计划任务',
-      CRON_TASKS_ENABLE: '启用计划任务', CRON_TASKS_DISABLE: '禁用计划任务', CRON_TASKS_RUN: '运行计划任务',
-      CRON_SCRIPTS_CREATE: '创建计划任务脚本', CRON_SCRIPTS_UPDATE: '更新计划任务脚本', CRON_SCRIPTS_DELETE: '删除计划任务脚本',
-      CRON_DOCS_CREATE: '创建计划任务文档', CRON_DOCS_UPDATE: '更新计划任务文档', CRON_DOCS_DELETE: '删除计划任务文档',
-      DOCKER_INSTALL: '安装Docker', DOCKER_START: '启动Docker', DOCKER_STOP: '停止Docker', DOCKER_RESTART: '重启Docker',
-      CONTAINERS_CREATE: '创建容器', CONTAINERS_START: '启动容器', CONTAINERS_STOP: '停止容器', CONTAINERS_RESTART: '重启容器', CONTAINERS_DELETE: '删除容器',
-      IMAGES_PULL: '拉取镜像', IMAGES_DELETE: '删除镜像',
-      COMPOSE_UP: '启动Compose', COMPOSE_DOWN: '停止Compose', COMPOSE_RESTART: '重启Compose',
-      VOLUMES_CREATE: '创建数据卷', VOLUMES_DELETE: '删除数据卷', NETWORKS_CREATE: '创建网络', NETWORKS_DELETE: '删除网络',
-      CLOUD_INSTANCES_START: '启动云主机', CLOUD_INSTANCES_STOP: '停止云主机', CLOUD_INSTANCES_RESTART: '重启云主机',
-      CLOUD_FIREWALL_ADD: '添加云防火墙规则', CLOUD_FIREWALL_DELETE: '删除云防火墙规则', CLOUD_SNAPSHOTS_CREATE: '创建云快照', CLOUD_SNAPSHOTS_APPLY: '恢复云快照',
-      WEBSERVERS_CREATE: '创建Web服务', WEBSERVERS_DELETE: '删除Web服务', WEBSERVERS_INSTALL: '安装Web服务', WEBSERVERS_UNINSTALL: '卸载Web服务', WEBSERVERS_START: '启动Web服务', WEBSERVERS_STOP: '停止Web服务', WEBSERVERS_RESTART: '重启Web服务', WEBSERVERS_UPDATE_CONFIG: '更新Web服务配置',
-      WEBSITES_CREATE: '创建网站', WEBSITES_UPDATE: '更新网站', WEBSITES_DELETE: '删除网站', WEBSITES_ENABLE: '启用网站', WEBSITES_DISABLE: '禁用网站', WEBSITES_APPLY_SSL: '申请网站SSL',
-      DBSERVERS_INSTALL: '安装数据库', DBSERVERS_UNINSTALL: '卸载数据库', DATABASES_CREATE: '创建数据库', DATABASES_DELETE: '删除数据库',
-      FIREWALL_ENABLE: '启用防火墙', FIREWALL_DISABLE: '禁用防火墙', FIREWALL_SET_DEFAULT_POLICY: '设置防火墙默认策略',
-      FIREWALL_RULES_CREATE: '创建防火墙规则', FIREWALL_RULES_IMPORT: '导入防火墙规则', FIREWALL_RULES_BULK_ENABLE: '批量启用防火墙规则', FIREWALL_RULES_BULK_DISABLE: '批量禁用防火墙规则', FIREWALL_RULES_BULK_DELETE: '批量删除防火墙规则', FIREWALL_RULES_UPDATE: '更新防火墙规则', FIREWALL_RULES_DELETE: '删除防火墙规则', FIREWALL_RULES_ENABLE: '启用防火墙规则', FIREWALL_RULES_DISABLE: '禁用防火墙规则', FIREWALL_RULES_MOVE_UP: '上移防火墙规则', FIREWALL_RULES_MOVE_DOWN: '下移防火墙规则',
-      FIREWALL_TEMPLATES_APPLY: '应用防火墙模板',
-      AUTH_LOGOUT: '登出账号', AUTH_CHANGE_PASSWORD: '修改密码', AUTH_TOTP_ENABLE: '启用二次验证', AUTH_TOTP_DISABLE: '禁用二次验证',
-      DATABASE_START_VERSION: '启动数据库版本', DATABASE_STOP_VERSION: '停止数据库版本', DATABASE_RESTART_VERSION: '重启数据库版本', DATABASE_UPDATE_PORT: '修改数据库端口',
-      DATABASE_CREATE_USER: '创建数据库用户', DATABASE_DELETE_USER: '删除数据库用户', DATABASE_GRANT_PRIVILEGES: '授权数据库用户',
-      DATABASE_EXECUTE_SQL: '执行 SQL', DATABASE_INSERT_RECORD: '插入数据记录', DATABASE_UPDATE_RECORD: '更新数据记录', DATABASE_DELETE_RECORD: '删除数据记录',
-      DATABASE_CREATE_TABLE: '创建数据表', DATABASE_DROP_TABLE: '删除数据表',
-      DATABASE_CREATE_BACKUP: '创建数据库备份', DATABASE_RESTORE_BACKUP: '恢复数据库备份', DATABASE_DELETE_BACKUP: '删除数据库备份',
-      DATABASE_SAVE_MYSQL_CONFIG: '保存 MySQL 配置', DATABASE_SAVE_POSTGRES_CONFIG: '保存 PostgreSQL 配置', DATABASE_SAVE_REDIS_CONFIG: '保存 Redis 配置',
-      AUTH_LOGIN: '登录系统', AUTH_VERIFY_TOTP: '验证 TOTP', AUTH_VERIFY_BACKUP: '验证备用码', AUTH_SETUP_TOTP: '设置 TOTP', AUTH_KICK_SESSION: '踢出会话', AUTH_KICK_ALL_SESSIONS: '踢出所有其他设备',
-      PROCESS_CREATE: '创建守护进程', PROCESS_UPDATE: '更新守护进程', PROCESS_DELETE: '删除守护进程',
-      PROCESS_START: '启动守护进程', PROCESS_STOP: '停止守护进程', PROCESS_RESTART: '重启守护进程',
-      PROCESS_BATCH_START: '批量启动守护进程', PROCESS_BATCH_STOP: '批量停止守护进程', PROCESS_BATCH_RESTART: '批量重启守护进程',
-      PROCESS_GROUP_CREATE: '创建守护进程组', PROCESS_GROUP_UPDATE: '更新守护进程组', PROCESS_GROUP_DELETE: '删除守护进程组', PROCESS_IMPORT: '导入守护进程',
-      ENV_CREATE_CONFIG: '创建环境变量', ENV_UPDATE_CONFIG: '更新环境变量', ENV_DELETE_CONFIG: '删除环境变量',
-      ENV_CREATE_PATH: '创建 PATH', ENV_DELETE_PATH: '删除 PATH',
-      ENV_CREATE_GLOBAL: '创建全局变量', ENV_UPDATE_GLOBAL: '更新全局变量', ENV_DELETE_GLOBAL: '删除全局变量',
-      DEPLOY_CREATE_SERVER: '创建发布服务器', DEPLOY_UPDATE_SERVER: '更新发布服务器', DEPLOY_DELETE_SERVER: '删除发布服务器', DEPLOY_TEST_SERVER: '测试发布服务器',
-      DEPLOY_CREATE_TASK: '创建发布任务', DEPLOY_DELETE_TASK: '删除发布任务', DEPLOY_EXECUTE_TASK: '执行发布任务', DEPLOY_ROLLBACK_VERSION: '发布版本回滚',
-      CONTAINER_CONFIGURE_MIRROR: '配置 Docker 镜像源', CONTAINER_PAUSE: '暂停容器', CONTAINER_UNPAUSE: '恢复容器',
-      CONTAINER_EXEC: '进入容器终端', CONTAINER_COPY_TO: '复制文件到容器', CONTAINER_COPY_FROM: '从容器复制文件',
-      CONTAINER_RENAME: '重命名容器', CONTAINER_UPDATE: '更新容器', COMPOSE_SAVE_CONFIG: '保存 Compose 配置',
-      SSH_SAVE_CONFIG: '保存 SSH 配置', SSH_TEST_CONFIG: '测试 SSH 配置', SSH_RELOAD: '重载 SSH', SSH_KILL_SESSION: '断开 SSH 会话',
-      RUNTIME_UPDATE_MIRROR: '更新运行环境镜像源', RUNTIME_CREATE_MIRROR: '创建运行环境镜像源', RUNTIME_DELETE_MIRROR: '删除运行环境镜像源',
-      PACKAGE_INSTALL: '安装环境包', PACKAGE_UNINSTALL: '卸载环境包', PACKAGE_UPDATE: '更新环境包', PACKAGE_SET_REGISTRY: '设置环境包镜像源',
-      FIREWALL_DELETE_SYSTEM_RULE: '删除内置防火墙规则',
-      SETTINGS_UPDATE_SERVER: '更新面板设置', SETTINGS_UPDATE_AUTH: '更新安全设置', SETTINGS_UPDATE_MONITOR: '更新监控设置', SETTINGS_UPDATE_AUDIT: '更新审计设置',
-      SETTINGS_UPDATE_NOTIFY: '更新通知设置', SETTINGS_TEST_WEBHOOK: '测试 Webhook', ALERTS_UPDATE_RULES: '更新告警规则',
-      SETTINGS_UPDATE_CLOUD: '更新云账号设置', SETTINGS_TEST_CLOUD: '测试云账号', PANEL_RESTART: '重启面板',
-      NOTIFICATION_MARK_READ: '标记通知已读', NOTIFICATION_MARK_ALL_READ: '标记所有通知已读', NOTIFICATION_DELETE: '删除通知',
-      AUDIT_CLEAN: '清空审计日志', FILE_SAVE_CONTENT: '保存文件内容',
-    };
-    return labels[action] || action;
   };
 
   const getStatusColor = (status: string) => {
@@ -529,16 +402,18 @@ export default function AuditLog() {
       title: '摘要',
       key: 'summary',
       ellipsis: true,
-      render: (_: unknown, record: AuditLogItem) => parseDetail(record.detail).summary,
+      render: (_: unknown, record: AuditLogItem) => {
+        const d = parseDetail(record.detail);
+        return d.summary && d.summary !== '-' ? d.summary : '-';
+      },
     };
-    // operation 日志只展示资源和摘要列；request 日志展示方法/路径/状态/耗时
+    // operation 日志只展示资源和摘要列；request 日志展示方法/路径/状态/耗时/IP
     const showRequestCols = activeTab === 'request';
     const showResourceCol = activeTab === 'operation';
     return [
       timeCol, userCol, actionCol,
       ...(showResourceCol ? [resourceCol, summaryCol] : []),
-      ...(showRequestCols ? [methodCol, pathCol, statusCol, durationCol] : []),
-      ipCol,
+      ...(showRequestCols ? [methodCol, pathCol, statusCol, durationCol, ipCol] : []),
       detailCol,
     ];
   }, [activeTab]);
@@ -578,7 +453,14 @@ export default function AuditLog() {
           <>
             <Space wrap style={{ marginBottom: 16 }}>
               <Input placeholder="用户名" value={username} onChange={e => setUsername(e.target.value)} style={{ width: 120 }} allowClear />
-              <Select placeholder={activeTab === 'request' ? '请求方法' : '操作类型'} value={actionFilter || undefined} onChange={v => setActionFilter(v || '')} style={{ width: 120 }} allowClear options={actions?.map(a => ({ label: a, value: a })) || []} />
+              <Select
+                placeholder={activeTab === 'request' ? '请求方法' : '操作类型'}
+                value={actionFilter || undefined}
+                onChange={v => setActionFilter(v || '')}
+                style={{ width: 120 }}
+                allowClear
+                options={(activeTab === 'request' ? ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] : ['创建', '删除', '修改', '执行', '认证', '其他']).map(a => ({ label: a, value: a }))}
+              />
               <Input placeholder={activeTab === 'request' ? '请求路径' : '操作资源'} value={resource} onChange={e => setResource(e.target.value)} style={{ width: 180 }} allowClear />
               {activeTab === 'request' && <Input placeholder="IP 地址" value={ipFilter} onChange={e => setIpFilter(e.target.value)} style={{ width: 140 }} allowClear />}
               <RangePicker value={dateRange as any} onChange={(dates) => setDateRange(dates as any)} placeholder={['开始日期', '结束日期']} />

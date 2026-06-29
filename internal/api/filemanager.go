@@ -7,21 +7,19 @@ import (
 	"strconv"
 	"syscall"
 
-	"easyserver/internal/audit"
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/filemanager"
 
 	"github.com/gin-gonic/gin"
 )
 
 type FileManagerHandler struct {
-	fileManager  *filemanager.Manager
-	auditService *audit.Service
+	fileManager *filemanager.Manager
 }
 
-func NewFileManagerHandler(fm *filemanager.Manager, auditService *audit.Service) *FileManagerHandler {
+func NewFileManagerHandler(fm *filemanager.Manager) *FileManagerHandler {
 	return &FileManagerHandler{
-		fileManager:  fm,
-		auditService: auditService,
+		fileManager: fm,
 	}
 }
 
@@ -75,6 +73,7 @@ func (h *FileManagerHandler) Mkdir(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建目录 "+req.Path)
 	if err := h.fileManager.Mkdir(req.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -97,6 +96,7 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 		path = "/" + header.Filename
 	}
 
+	middleware.AuditSummary(c, "上传文件 "+header.Filename+" 到 "+path)
 	// Use FileManager.Upload for secure file upload
 	size, err := h.fileManager.Upload(file, path)
 	if err != nil {
@@ -162,6 +162,7 @@ func (h *FileManagerHandler) Rename(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "重命名 "+req.OldPath+" 为 "+req.NewPath)
 	if err := h.fileManager.Rename(req.OldPath, req.NewPath); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -180,6 +181,7 @@ func (h *FileManagerHandler) Delete(c *gin.Context) {
 
 	recursive := c.Query("recursive") == "true"
 
+	middleware.AuditSummary(c, "删除文件 "+path)
 	if err := h.fileManager.Delete(path, recursive); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -200,6 +202,7 @@ func (h *FileManagerHandler) Move(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "移动文件到 "+req.Dest)
 	if err := h.fileManager.Move(req.Paths, req.Dest); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -220,6 +223,7 @@ func (h *FileManagerHandler) Copy(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "复制文件 "+req.Source+" 到 "+req.Dest)
 	if err := h.fileManager.Copy(req.Source, req.Dest); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -257,6 +261,7 @@ func (h *FileManagerHandler) SaveContent(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "保存文件内容 "+req.Path)
 	if err := h.fileManager.WriteContent(req.Path, req.Content); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -323,6 +328,7 @@ func (h *FileManagerHandler) Compress(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "压缩文件到 "+req.Dest)
 	if err := h.fileManager.Compress(req.Sources, req.Dest); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -343,6 +349,7 @@ func (h *FileManagerHandler) Extract(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "解压文件 "+req.Source+" 到 "+req.Dest)
 	if err := h.fileManager.Extract(req.Source, req.Dest); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -370,6 +377,7 @@ func (h *FileManagerHandler) Chmod(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "修改文件权限 "+req.Path+" "+req.Mode)
 	if err := h.fileManager.Chmod(req.Path, os.FileMode(mode)); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -391,6 +399,7 @@ func (h *FileManagerHandler) Chown(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "修改文件所有者 "+req.Path)
 	if err := h.fileManager.Chown(req.Path, req.UID, req.GID); err != nil {
 		c.Error(WrapError(err))
 		return

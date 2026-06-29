@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,7 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "应用防火墙模板 "+req.Name)
 	// Find the template
 	var tpl *FirewallRuleTemplate
 	for i := range firewallRuleTemplates {

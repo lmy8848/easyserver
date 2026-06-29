@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
@@ -82,6 +83,7 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "安装包 "+req.Name)
 	if err := h.packageService.InstallPackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -116,6 +118,7 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "卸载包 "+req.Name)
 	if err := h.packageService.UninstallPackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -150,6 +153,7 @@ func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新包 "+req.Name)
 	if err := h.packageService.UpdatePackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -308,6 +312,7 @@ func (h *PackageManagerHandler) SetRegistry(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "配置包管理器镜像源 "+req.Manager)
 	if err := h.packageService.SetRegistry(c.Request.Context(), runtime.Name, req.Manager, req.Registry); err != nil {
 		c.Error(WrapError(err))
 		return

@@ -133,7 +133,7 @@ func resetPasswordCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *
 	}
 	authSvc.InvalidateAllUserTokens(ctx, user.ID)
 
-	auditSvc.LogSystemEvent(ctx, "CLI_RESET_PASSWORD", fmt.Sprintf("Password reset for %s via CLI", user.Username))
+	auditSvc.LogSystemEvent(ctx, "CLI 重置用户密码："+user.Username)
 	authSvc.LogUserActivity(ctx, user.ID, user.Username, "CLI_RESET_PASSWORD", "127.0.0.1", "CLI")
 
 	fmt.Printf("✓ Password reset for %q. Must change on next login.\n", user.Username)
@@ -147,7 +147,7 @@ func unlockCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *audit.S
 		log.Fatalf("unlock: %v", err)
 	}
 
-	auditSvc.LogSystemEvent(ctx, "CLI_UNLOCK_USER", fmt.Sprintf("User %s unlocked via CLI", user.Username))
+	auditSvc.LogSystemEvent(ctx, "CLI 解锁用户："+user.Username)
 	authSvc.LogUserActivity(ctx, user.ID, user.Username, "CLI_UNLOCK_USER", "127.0.0.1", "CLI")
 
 	fmt.Printf("✓ Account %q unlocked.\n", user.Username)
@@ -178,7 +178,7 @@ func resetTOTPCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *audi
 	}
 	authSvc.InvalidateAllUserTokens(ctx, user.ID)
 
-	auditSvc.LogSystemEvent(ctx, "CLI_RESET_TOTP", fmt.Sprintf("TOTP disabled for %s via CLI", user.Username))
+	auditSvc.LogSystemEvent(ctx, "CLI 关闭用户二次验证："+user.Username)
 	authSvc.LogUserActivity(ctx, user.ID, user.Username, "CLI_RESET_TOTP", "127.0.0.1", "CLI")
 
 	fmt.Printf("✓ TOTP disabled for %q. Login with password, then re-enable 2FA in settings.\n", user.Username)

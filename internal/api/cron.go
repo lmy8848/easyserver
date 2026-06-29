@@ -60,6 +60,7 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建定时任务 "+req.Name)
 	// Validate cron expression (5 fields: minute hour day month weekday)
 	parts := strings.Fields(req.Schedule)
 	if len(parts) != 5 {
@@ -150,6 +151,7 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新定时任务 "+strconv.FormatInt(id, 10))
 	// Apply partial updates
 	if req.Name != nil {
 		if strings.ContainsAny(*req.Name, "\r\n") {
@@ -239,6 +241,7 @@ func (h *CronHandler) DeleteTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除定时任务 "+strconv.FormatInt(id, 10))
 	// Check existence
 	if _, err := h.cronService.Get(c.Request.Context(), id); err != nil {
 		c.Error(ErrNotFound.WithMessage("任务不存在"))
@@ -258,6 +261,7 @@ func (h *CronHandler) EnableTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
+	middleware.AuditSummary(c, "启用定时任务 "+strconv.FormatInt(id, 10))
 	// Check existence
 	if _, err := h.cronService.Get(c.Request.Context(), id); err != nil {
 		c.Error(ErrNotFound.WithMessage("任务不存在"))
@@ -277,6 +281,7 @@ func (h *CronHandler) DisableTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
+	middleware.AuditSummary(c, "禁用定时任务 "+strconv.FormatInt(id, 10))
 	// Check existence
 	if _, err := h.cronService.Get(c.Request.Context(), id); err != nil {
 		c.Error(ErrNotFound.WithMessage("任务不存在"))
@@ -296,6 +301,7 @@ func (h *CronHandler) RunTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
+	middleware.AuditSummary(c, "立即执行定时任务 "+strconv.FormatInt(id, 10))
 	if err := h.cronService.RunNow(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -359,6 +365,7 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建脚本 "+req.Name)
 	// Validate and set default language
 	language := req.Language
 	if language == "" {
@@ -463,6 +470,7 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新脚本 "+strconv.FormatInt(id, 10))
 	if req.Name != nil {
 		// Check name uniqueness (exclude current script)
 		existingScripts, listErr := h.cronService.ListScripts(c.Request.Context())
@@ -514,6 +522,7 @@ func (h *CronHandler) DeleteScript(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的脚本ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除脚本 "+strconv.FormatInt(id, 10))
 	// Check existence
 	if _, err := h.cronService.GetScript(c.Request.Context(), id); err != nil {
 		c.Error(ErrNotFound.WithMessage("脚本不存在"))
@@ -897,6 +906,8 @@ func (h *CronHandler) CreateDoc(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+
+	middleware.AuditSummary(c, "创建定时任务文档 "+req.Title)
 	doc := &cron.CronDoc{
 		Title:     req.Title,
 		Content:   req.Content,
@@ -930,6 +941,8 @@ func (h *CronHandler) UpdateDoc(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+
+	middleware.AuditSummary(c, "更新定时任务文档 "+strconv.FormatInt(id, 10))
 	if req.Title != nil {
 		doc.Title = *req.Title
 	}
@@ -953,6 +966,7 @@ func (h *CronHandler) DeleteDoc(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的文档ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除定时任务文档 "+strconv.FormatInt(id, 10))
 	if err := h.cronService.DeleteDoc(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -971,22 +985,22 @@ func registerCronRoutes(protected *gin.RouterGroup, cronService *cron.Service, e
 	protected.GET("/cron/describe", handler.DescribeSchedule)
 	protected.GET("/cron/next-runs", handler.GetNextRuns)
 	protected.GET("/cron/tasks", handler.ListTasks)
-	protected.POST("/cron/tasks", middleware.SetAction("CRON_TASKS_CREATE"), handler.CreateTask)
+	protected.POST("/cron/tasks", handler.CreateTask)
 	protected.GET("/cron/tasks/:id", handler.GetTask)
-	protected.PUT("/cron/tasks/:id", middleware.SetAction("CRON_TASKS_UPDATE"), handler.UpdateTask)
-	protected.DELETE("/cron/tasks/:id", middleware.SetAction("CRON_TASKS_DELETE"), handler.DeleteTask)
-	protected.POST("/cron/tasks/:id/enable", middleware.SetAction("CRON_TASKS_ENABLE"), handler.EnableTask)
-	protected.POST("/cron/tasks/:id/disable", middleware.SetAction("CRON_TASKS_DISABLE"), handler.DisableTask)
-	protected.POST("/cron/tasks/:id/run", middleware.SetAction("CRON_TASKS_RUN"), handler.RunTask)
+	protected.PUT("/cron/tasks/:id", handler.UpdateTask)
+	protected.DELETE("/cron/tasks/:id", handler.DeleteTask)
+	protected.POST("/cron/tasks/:id/enable", handler.EnableTask)
+	protected.POST("/cron/tasks/:id/disable", handler.DisableTask)
+	protected.POST("/cron/tasks/:id/run", handler.RunTask)
 	protected.GET("/cron/tasks/:id/logs", handler.GetTaskLogs)
 	protected.GET("/cron/scripts", handler.ListScripts)
-	protected.POST("/cron/scripts", middleware.SetAction("CRON_SCRIPTS_CREATE"), handler.CreateScript)
+	protected.POST("/cron/scripts", handler.CreateScript)
 	protected.GET("/cron/scripts/:id", handler.GetScript)
-	protected.PUT("/cron/scripts/:id", middleware.SetAction("CRON_SCRIPTS_UPDATE"), handler.UpdateScript)
-	protected.DELETE("/cron/scripts/:id", middleware.SetAction("CRON_SCRIPTS_DELETE"), handler.DeleteScript)
+	protected.PUT("/cron/scripts/:id", handler.UpdateScript)
+	protected.DELETE("/cron/scripts/:id", handler.DeleteScript)
 	protected.GET("/cron/docs", handler.ListDocs)
-	protected.POST("/cron/docs", middleware.SetAction("CRON_DOCS_CREATE"), handler.CreateDoc)
+	protected.POST("/cron/docs", handler.CreateDoc)
 	protected.GET("/cron/docs/:id", handler.GetDoc)
-	protected.PUT("/cron/docs/:id", middleware.SetAction("CRON_DOCS_UPDATE"), handler.UpdateDoc)
-	protected.DELETE("/cron/docs/:id", middleware.SetAction("CRON_DOCS_DELETE"), handler.DeleteDoc)
+	protected.PUT("/cron/docs/:id", handler.UpdateDoc)
+	protected.DELETE("/cron/docs/:id", handler.DeleteDoc)
 }

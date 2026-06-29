@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// SignedAuditEntry represents an audit log entry with HMAC signature.
-type SignedAuditEntry struct {
+// AuditLog is a single audit log entry persisted by the writer.
+type AuditLog struct {
 	ID        int64
 	UserID    int64
 	Username  string
@@ -17,7 +17,6 @@ type SignedAuditEntry struct {
 	UserAgent string
 	Type      string
 	CreatedAt time.Time
-	Signature string
 }
 
 // Repository defines the interface for audit log data access.
@@ -27,9 +26,7 @@ type Repository interface {
 	GetActions(ctx context.Context, logType string) ([]string, error)
 	Clean(ctx context.Context, before time.Time) (int64, error)
 
-	AppendSignedBatch(ctx context.Context, entries []SignedAuditEntry) error
-	GetSignedEntry(ctx context.Context, id int64) (*SignedAuditEntry, error)
-	ListIDsForVerification(ctx context.Context, limit int) ([]int64, error)
+	AppendBatch(ctx context.Context, entries []AuditLog) error
 }
 
 // AuditFilter defines the filter criteria for audit log queries.

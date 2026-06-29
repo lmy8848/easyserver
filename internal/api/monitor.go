@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
@@ -229,11 +228,11 @@ func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 	protected.POST("/services/details", handler.GetDetails)
 	protected.GET("/services/:name", handler.Get)
 	protected.GET("/services/:name/logs", handler.GetLogs)
-	protected.POST("/services/:name/start", middleware.SetAction("SERVICE_START"), handler.Start)
-	protected.POST("/services/:name/stop", middleware.SetAction("SERVICE_STOP"), handler.Stop)
-	protected.POST("/services/:name/restart", middleware.SetAction("SERVICE_RESTART"), handler.Restart)
-	protected.POST("/services/:name/enable", middleware.SetAction("SERVICE_ENABLE"), handler.Enable)
-	protected.POST("/services/:name/disable", middleware.SetAction("SERVICE_DISABLE"), handler.Disable)
+	protected.POST("/services/:name/start", handler.Start)
+	protected.POST("/services/:name/stop", handler.Stop)
+	protected.POST("/services/:name/restart", handler.Restart)
+	protected.POST("/services/:name/enable", handler.Enable)
+	protected.POST("/services/:name/disable", handler.Disable)
 	wsGroup.GET("/services/:name/logs", handler.HandleLogsWebSocket)
 }
 

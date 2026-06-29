@@ -85,6 +85,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "安装运行环境 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.Install(c.Request.Context(), req.Name, req.Version); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -109,6 +110,7 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "卸载运行环境 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
 		if strings.Contains(err.Error(), "conflict:") {
 			conflictsStr := strings.TrimPrefix(err.Error(), "conflict: ")
@@ -144,6 +146,7 @@ func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "设置默认运行环境 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.SetDefault(c.Request.Context(), req.Name, req.Version); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -295,6 +298,7 @@ func (h *RuntimeHandler) UpdateMirror(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新运行环境镜像源 "+idStr)
 	if err := h.runtimeService.UpdateMirror(c.Request.Context(), &req, id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -309,6 +313,7 @@ func (h *RuntimeHandler) CreateMirror(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "创建运行环境镜像源 "+req.Lang+" "+req.EnvKey)
 	id, err := h.runtimeService.CreateMirror(c.Request.Context(), &req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -325,6 +330,7 @@ func (h *RuntimeHandler) DeleteMirror(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除运行环境镜像源 "+idStr)
 	if err := h.runtimeService.DeleteMirror(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -360,28 +366,28 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.GET("/runtime", runtimeHandler.List)
 	protected.GET("/runtime/:name", runtimeHandler.ListByName)
 	protected.GET("/runtime/:name/remote-versions", runtimeHandler.GetRemoteVersions)
-	protected.POST("/runtime/install", middleware.SetAction("RUNTIME_INSTALL"), runtimeHandler.Install)
-	protected.POST("/runtime/uninstall", middleware.SetAction("RUNTIME_UNINSTALL"), runtimeHandler.Uninstall)
-	protected.POST("/runtime/set-default", middleware.SetAction("RUNTIME_SET_DEFAULT"), runtimeHandler.SetDefault)
+	protected.POST("/runtime/install", runtimeHandler.Install)
+	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
+	protected.POST("/runtime/set-default", runtimeHandler.SetDefault)
 	protected.GET("/runtime/progress/:id", runtimeHandler.GetProgress)
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
 	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
 	protected.GET("/runtime/mirrors", runtimeHandler.ListMirrors)
-	protected.PUT("/runtime/mirrors/:id", middleware.SetAction("RUNTIME_UPDATE_MIRROR"), runtimeHandler.UpdateMirror)
-	protected.POST("/runtime/mirrors", middleware.SetAction("RUNTIME_CREATE_MIRROR"), runtimeHandler.CreateMirror)
-	protected.DELETE("/runtime/mirrors/:id", middleware.SetAction("RUNTIME_DELETE_MIRROR"), runtimeHandler.DeleteMirror)
+	protected.PUT("/runtime/mirrors/:id", runtimeHandler.UpdateMirror)
+	protected.POST("/runtime/mirrors", runtimeHandler.CreateMirror)
+	protected.DELETE("/runtime/mirrors/:id", runtimeHandler.DeleteMirror)
 
 	// Package management
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)
 	protected.GET("/packages", packageHandler.ListPackages)
 	protected.GET("/packages/search", packageHandler.SearchPackages)
 	protected.GET("/packages/versions/*name", packageHandler.GetPackageVersions)
-	protected.POST("/packages/install", middleware.SetAction("PACKAGE_INSTALL"), packageHandler.InstallPackage)
-	protected.POST("/packages/uninstall", middleware.SetAction("PACKAGE_UNINSTALL"), packageHandler.UninstallPackage)
-	protected.POST("/packages/update", middleware.SetAction("PACKAGE_UPDATE"), packageHandler.UpdatePackage)
+	protected.POST("/packages/install", packageHandler.InstallPackage)
+	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
+	protected.POST("/packages/update", packageHandler.UpdatePackage)
 	protected.GET("/packages/registry", packageHandler.GetRegistry)
-	protected.POST("/packages/registry", middleware.SetAction("PACKAGE_SET_REGISTRY"), packageHandler.SetRegistry)
+	protected.POST("/packages/registry", packageHandler.SetRegistry)
 }
 
 // GetCatalog returns the catalog of supported runtimes

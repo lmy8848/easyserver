@@ -1,10 +1,10 @@
 package api
 
 import (
-	"easyserver/internal/api/middleware"
 	"strconv"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/ssh"
 	"github.com/gin-gonic/gin"
 )
@@ -48,6 +48,8 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "保存 SSH 配置")
 
 	// Validate port
 	if config.Port < 1 || config.Port > 65535 {
@@ -121,6 +123,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 
 // TestConfig tests the SSH configuration
 func (h *SSHHandler) TestConfig(c *gin.Context) {
+	middleware.AuditSummary(c, "测试 SSH 配置")
 	output, err := h.sshService.TestConfig(c.Request.Context())
 	if err != nil {
 		c.Error(ErrBadRequest.WithMessage(output))
@@ -131,6 +134,7 @@ func (h *SSHHandler) TestConfig(c *gin.Context) {
 
 // ReloadSSH reloads the SSH service
 func (h *SSHHandler) ReloadSSH(c *gin.Context) {
+	middleware.AuditSummary(c, "重载 SSH 服务")
 	if err := h.sshService.ReloadSSH(c.Request.Context()); err != nil {
 		c.Error(ErrInternal.WithMessage("重载 SSH 失败: " + err.Error()))
 		return
@@ -156,6 +160,8 @@ func (h *SSHHandler) KillSession(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 PID"))
 		return
 	}
+
+	middleware.AuditSummary(c, "终止 SSH 会话 "+strconv.Itoa(pid))
 
 	// Validate PID bounds
 	if pid <= 1 {
@@ -195,13 +201,13 @@ func registerSSHRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 
 	// SSH Config
 	protected.GET("/ssh/config", handler.GetConfig)
-	protected.PUT("/ssh/config", middleware.SetAction("SSH_SAVE_CONFIG"), handler.SaveConfig)
-	protected.POST("/ssh/config/test", middleware.SetAction("SSH_TEST_CONFIG"), handler.TestConfig)
-	protected.POST("/ssh/config/reload", middleware.SetAction("SSH_RELOAD"), handler.ReloadSSH)
+	protected.PUT("/ssh/config", handler.SaveConfig)
+	protected.POST("/ssh/config/test", handler.TestConfig)
+	protected.POST("/ssh/config/reload", handler.ReloadSSH)
 
 	// SSH Sessions
 	protected.GET("/ssh/sessions", handler.GetSessions)
-	protected.POST("/ssh/sessions/:pid/kill", middleware.SetAction("SSH_KILL_SESSION"), handler.KillSession)
+	protected.POST("/ssh/sessions/:pid/kill", handler.KillSession)
 
 	// SSH Login History
 	protected.GET("/ssh/logins", handler.GetLoginHistory)

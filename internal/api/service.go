@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"
@@ -121,6 +122,7 @@ func (h *ServiceHandler) Start(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "启动系统服务 "+name)
 	if err := h.serviceManager.Start(c.Request.Context(), name); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -136,6 +138,8 @@ func (h *ServiceHandler) Stop(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
+
+	middleware.AuditSummary(c, "停止系统服务 "+name)
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
@@ -159,6 +163,8 @@ func (h *ServiceHandler) Restart(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "重启系统服务 "+name)
+
 	// Check if service is protected
 	if h.isProtectedService(name) {
 		c.Error(ErrBadRequest.WithMessage("无法从此处重启面板自身服务，请使用 /api/settings/restart"))
@@ -180,6 +186,7 @@ func (h *ServiceHandler) Enable(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "启用系统服务 "+name)
 	if err := h.serviceManager.Enable(c.Request.Context(), name); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -194,6 +201,8 @@ func (h *ServiceHandler) Disable(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
+
+	middleware.AuditSummary(c, "禁用系统服务 "+name)
 
 	// Check if service is protected
 	if h.isProtectedService(name) {

@@ -1,10 +1,10 @@
 package api
 
 import (
-	"easyserver/internal/api/middleware"
 	"strconv"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/deploy"
 
 	"github.com/gin-gonic/gin"
@@ -78,6 +78,7 @@ func (h *DeployHandler) CreateServer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建部署服务器 "+srv.Name)
 	if err := h.deployService.CreateServer(c.Request.Context(), &srv); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -102,6 +103,7 @@ func (h *DeployHandler) UpdateServer(c *gin.Context) {
 	}
 	srv.ID = id
 
+	middleware.AuditSummary(c, "更新部署服务器 "+c.Param("id"))
 	if err := h.deployService.UpdateServer(c.Request.Context(), &srv); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -119,6 +121,7 @@ func (h *DeployHandler) DeleteServer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "删除部署服务器 "+c.Param("id"))
 	if err := h.deployService.DeleteServer(c.Request.Context(), id); err != nil {
 		// Sub-resource conflict returns 409
 		if strings.Contains(err.Error(), "tasks") || strings.Contains(err.Error(), "versions") {
@@ -139,6 +142,7 @@ func (h *DeployHandler) TestConnection(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "测试部署服务器连接 "+c.Param("id"))
 	if err := h.deployService.TestConnection(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -195,6 +199,7 @@ func (h *DeployHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建部署任务 "+task.Name)
 	if err := h.deployService.CreateTask(c.Request.Context(), &task); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			c.Error(ErrNotFound.Wrap(err))
@@ -214,6 +219,7 @@ func (h *DeployHandler) DeleteTask(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "删除部署任务 "+c.Param("id"))
 	if err := h.deployService.DeleteTask(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -229,6 +235,7 @@ func (h *DeployHandler) ExecuteTask(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "执行部署任务 "+c.Param("id"))
 	if err := h.deployService.ExecuteTask(c.Request.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "already running") {
 			c.Error(ErrConflict.Wrap(err))
@@ -266,6 +273,7 @@ func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "回滚部署版本 "+c.Param("id"))
 	if err := h.deployService.RollbackVersion(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -277,16 +285,16 @@ func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 func registerDeployRoutes(protected *gin.RouterGroup, deployService *deploy.Service) {
 	handler := NewDeployHandler(deployService)
 	protected.GET("/deploy/servers", handler.ListServers)
-	protected.POST("/deploy/servers", middleware.SetAction("DEPLOY_CREATE_SERVER"), handler.CreateServer)
+	protected.POST("/deploy/servers", handler.CreateServer)
 	protected.GET("/deploy/servers/:id", handler.GetServer)
-	protected.PUT("/deploy/servers/:id", middleware.SetAction("DEPLOY_UPDATE_SERVER"), handler.UpdateServer)
-	protected.DELETE("/deploy/servers/:id", middleware.SetAction("DEPLOY_DELETE_SERVER"), handler.DeleteServer)
-	protected.POST("/deploy/servers/:id/test", middleware.SetAction("DEPLOY_TEST_SERVER"), handler.TestConnection)
+	protected.PUT("/deploy/servers/:id", handler.UpdateServer)
+	protected.DELETE("/deploy/servers/:id", handler.DeleteServer)
+	protected.POST("/deploy/servers/:id/test", handler.TestConnection)
 	protected.GET("/deploy/tasks", handler.ListTasks)
-	protected.POST("/deploy/tasks", middleware.SetAction("DEPLOY_CREATE_TASK"), handler.CreateTask)
+	protected.POST("/deploy/tasks", handler.CreateTask)
 	protected.GET("/deploy/tasks/:id", handler.GetTask)
-	protected.DELETE("/deploy/tasks/:id", middleware.SetAction("DEPLOY_DELETE_TASK"), handler.DeleteTask)
-	protected.POST("/deploy/tasks/:id/exec", middleware.SetAction("DEPLOY_EXECUTE_TASK"), handler.ExecuteTask)
+	protected.DELETE("/deploy/tasks/:id", handler.DeleteTask)
+	protected.POST("/deploy/tasks/:id/exec", handler.ExecuteTask)
 	protected.GET("/deploy/versions", handler.ListVersions)
-	protected.POST("/deploy/versions/:id/rollback", middleware.SetAction("DEPLOY_ROLLBACK_VERSION"), handler.RollbackVersion)
+	protected.POST("/deploy/versions/:id/rollback", handler.RollbackVersion)
 }

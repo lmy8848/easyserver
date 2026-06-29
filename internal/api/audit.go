@@ -2,13 +2,13 @@ package api
 
 import (
 	"database/sql"
-	"easyserver/internal/api/middleware"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 
 	"github.com/gin-gonic/gin"
@@ -308,7 +308,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 
-	// 按状态码统计
+	// 按状态码统计（仅 request 日志含 status 字段）
 	statusRows, err := h.db.Query(`
 		SELECT
 			CASE
@@ -319,7 +319,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			END as status_group,
 			COUNT(*) as cnt
 		FROM audit_logs
-		WHERE created_at >= ?
+		WHERE created_at >= ? AND type = 'request'
 		GROUP BY status_group
 	`, since)
 	if err != nil {
@@ -340,11 +340,12 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 
-	// 异常告警：失败操作（4xx/5xx）
+	// 异常告警：失败操作（4xx/5xx，仅 request 日志含 status）
 	alertRows, err := h.db.Query(`
 		SELECT id, username, action, resource, detail, ip, created_at
 		FROM audit_logs
 		WHERE created_at >= ?
+		  AND type = 'request'
 		  AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 400
 		ORDER BY id DESC
 		LIMIT 200
@@ -505,6 +506,7 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 		days = 90
 	}
 
+	middleware.AuditSummary(c, "清理 "+strconv.Itoa(days)+" 天前的审计日志")
 	since := time.Now().AddDate(0, 0, -days)
 
 	if h.auditRepo != nil {
@@ -527,26 +529,6 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 	Success(c, gin.H{"deleted": rows})
 }
 
-// VerifyIntegrity verifies the integrity of audit log signatures
-func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
-	if h.auditService == nil {
-		c.Error(ErrInternal.WithMessage("audit service not available"))
-		return
-	}
-
-	total, valid, invalid, err := h.auditService.VerifyAllSignatures(c.Request.Context())
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-
-	Success(c, gin.H{
-		"total":   total,
-		"valid":   valid,
-		"invalid": invalid,
-	})
-}
-
 func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) {
 	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
 	protected.GET("/audit-logs", handler.List)
@@ -554,6 +536,5 @@ func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *a
 	protected.GET("/audit-logs/stats", handler.Stats)
 	protected.GET("/audit-logs/clean-policy", handler.GetCleanPolicy)
 	protected.GET("/audit-logs/export", handler.Export)
-	protected.DELETE("/audit-logs/clean", middleware.SetAction("AUDIT_CLEAN"), handler.Clean)
-	protected.GET("/audit-logs/verify", handler.VerifyIntegrity)
+	protected.DELETE("/audit-logs/clean", handler.Clean)
 }

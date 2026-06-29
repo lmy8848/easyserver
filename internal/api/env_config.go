@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/envconfig"
 
 	"github.com/gin-gonic/gin"
@@ -69,6 +71,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "创建环境变量 "+req.Name)
 
 	config := &envconfig.EnvConfig{
 		Name:      req.Name,
@@ -102,6 +105,7 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "更新环境变量 "+req.Name)
 
 	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
@@ -132,6 +136,7 @@ func (h *EnvConfigHandler) DeleteEnvConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除环境变量 #"+strconv.FormatInt(id, 10))
 
 	if err := h.envConfigService.DeleteEnvConfig(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -171,6 +176,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "添加 PATH 条目 "+req.Path)
 
 	entry := &envconfig.PathEntry{
 		Path:      req.Path,
@@ -194,6 +200,7 @@ func (h *EnvConfigHandler) DeletePathEntry(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除 PATH 条目 #"+strconv.FormatInt(id, 10))
 
 	if err := h.envConfigService.DeletePathEntry(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -271,6 +278,7 @@ func (h *EnvConfigHandler) CreateGlobalConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "创建全局配置 "+req.Key)
 
 	config := &envconfig.GlobalConfig{
 		Category:    req.Category,
@@ -304,6 +312,7 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "更新全局配置 #"+strconv.FormatInt(id, 10))
 
 	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
 	if err != nil {
@@ -334,6 +343,7 @@ func (h *EnvConfigHandler) DeleteGlobalConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除全局配置 #"+strconv.FormatInt(id, 10))
 
 	if err := h.envConfigService.DeleteGlobalConfig(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))

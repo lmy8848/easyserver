@@ -29,6 +29,18 @@ func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditServic
 	}
 }
 
+// auditSecurity logs a security event for the authenticated user. Auth routes
+// are mounted outside the AuditMiddleware group, so sensitive operations
+// (logout/totp/password) record themselves. summary is a human-readable Chinese description.
+func (h *AuthHandler) auditSecurity(c *gin.Context, summary string) {
+	if h.auditService == nil {
+		return
+	}
+	uname, _ := c.Get("username")
+	unameStr, _ := uname.(string)
+	h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, summary)
+}
+
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
@@ -52,11 +64,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Use LoginWithInfo to log activity
 	user, err := h.authService.LoginWithInfo(c.Request.Context(), req.Username, req.Password, ip, userAgent)
 	if err != nil {
-		// Also log to audit log
-		if h.auditService != nil {
-			h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "LOGIN_FAILED",
-				err.Error(), ip, userAgent)
-		}
 		c.Error(ErrUnauthorized.WithMessage(err.Error()))
 		return
 	}
@@ -103,8 +110,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Also log to audit log
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "LOGIN_SUCCESS",
-			"User logged in successfully", ip, userAgent)
+		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功")
 	}
 
 	Success(c, gin.H{
@@ -134,6 +140,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		}
 	}
 
+	h.auditSecurity(c, "退出登录")
 	Success(c, nil)
 }
 
@@ -174,6 +181,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		log.Printf("auth: failed to invalidate tokens after password change for user %d: %v", userID, err)
 	}
 
+	h.auditSecurity(c, "修改密码")
 	Success(c, nil)
 }
 
@@ -223,14 +231,6 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 
 	// Verify TOTP code
 	if !h.authService.VerifyTOTP(secret, req.Code) {
-		// Log failed TOTP verification
-		if h.auditService != nil {
-			user, _ := h.authService.GetUserByID(c.Request.Context(), userID)
-			if user != nil {
-				h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "TOTP_VERIFICATION_FAILED",
-					"Invalid TOTP code", c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrUnauthorized.WithMessage("TOTP 验证码无效"))
 		return
 	}
@@ -262,8 +262,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 
 	// Log successful login
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "LOGIN_SUCCESS_2FA",
-			"User logged in with 2FA", ip, userAgent)
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功")
 	}
 
 	Success(c, gin.H{
@@ -296,13 +295,6 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	}
 	if !valid {
 		// Log failed backup code verification
-		if h.auditService != nil {
-			user, _ := h.authService.GetUserByID(c.Request.Context(), userID)
-			if user != nil {
-				h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "BACKUP_CODE_VERIFICATION_FAILED",
-					"Invalid backup code", c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrUnauthorized.WithMessage("备用码无效"))
 		return
 	}
@@ -334,8 +326,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 
 	// Log successful login with backup code
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "LOGIN_SUCCESS_BACKUP_CODE",
-			"User logged in with backup code", ip, userAgent)
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功")
 	}
 
 	Success(c, gin.H{
@@ -403,6 +394,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 		return
 	}
 
+	h.auditSecurity(c, "开启二次验证")
 	Success(c, gin.H{
 		"backup_codes": backupCodes,
 	})
@@ -424,6 +416,7 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 		return
 	}
 
+	h.auditSecurity(c, "关闭二次验证")
 	Success(c, nil)
 }
 
@@ -510,8 +503,7 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 	if h.auditService != nil {
 		if uname, ok := c.Get("username"); ok {
 			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "SESSION_KICKED",
-					"Kicked session", c.ClientIP(), c.Request.UserAgent())
+				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "踢出会话")
 			}
 		}
 	}
@@ -537,8 +529,7 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 	if h.auditService != nil {
 		if uname, ok := c.Get("username"); ok {
 			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "ALL_OTHER_SESSIONS_KICKED",
-					"Kicked all other sessions", c.ClientIP(), c.Request.UserAgent())
+				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "下线其他设备")
 			}
 		}
 	}
@@ -560,25 +551,25 @@ func registerAuthRoutes(
 	auth := api.Group("/auth")
 	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout)
 	{
-		auth.POST("/login", middleware.SetAction("AUTH_LOGIN"), authHandler.Login)
-		auth.POST("/verify-totp", middleware.SetAction("AUTH_VERIFY_TOTP"), authHandler.VerifyTOTP)
-		auth.POST("/verify-backup", middleware.SetAction("AUTH_VERIFY_BACKUP"), authHandler.VerifyBackupCode)
+		auth.POST("/login", authHandler.Login)
+		auth.POST("/verify-totp", authHandler.VerifyTOTP)
+		auth.POST("/verify-backup", authHandler.VerifyBackupCode)
 	}
 
 	// Protected auth routes
 	authProtected := api.Group("/auth")
 	authProtected.Use(middleware.JWTMiddleware(jwtSecret, sessionValidator, tokenValidator))
 	{
-		authProtected.POST("/logout", middleware.SetAction("AUTH_LOGOUT"), authHandler.Logout)
+		authProtected.POST("/logout", authHandler.Logout)
 		authProtected.GET("/me", authHandler.GetProfile)
-		authProtected.POST("/change-password", middleware.SetAction("AUTH_CHANGE_PASSWORD"), authHandler.ChangePassword)
-		authProtected.POST("/totp/setup", middleware.SetAction("AUTH_SETUP_TOTP"), authHandler.SetupTOTP)
-		authProtected.POST("/totp/enable", middleware.SetAction("AUTH_TOTP_ENABLE"), authHandler.EnableTOTP)
-		authProtected.POST("/totp/disable", middleware.SetAction("AUTH_TOTP_DISABLE"), authHandler.DisableTOTP)
+		authProtected.POST("/change-password", authHandler.ChangePassword)
+		authProtected.POST("/totp/setup", authHandler.SetupTOTP)
+		authProtected.POST("/totp/enable", authHandler.EnableTOTP)
+		authProtected.POST("/totp/disable", authHandler.DisableTOTP)
 		authProtected.GET("/totp/status", authHandler.GetTOTPStatus)
 		// Session management
 		authProtected.GET("/sessions", authHandler.GetSessions)
-		authProtected.POST("/sessions/kick", middleware.SetAction("AUTH_KICK_SESSION"), authHandler.KickSession)
-		authProtected.POST("/sessions/kick-all", middleware.SetAction("AUTH_KICK_ALL_SESSIONS"), authHandler.KickAllOtherSessions)
+		authProtected.POST("/sessions/kick", authHandler.KickSession)
+		authProtected.POST("/sessions/kick-all", authHandler.KickAllOtherSessions)
 	}
 }

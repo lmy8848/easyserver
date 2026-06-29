@@ -3,6 +3,7 @@ package api
 import (
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
 	"github.com/gin-gonic/gin"
 )
@@ -41,6 +42,7 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "创建数据库用户 "+req.Username)
 	user, err := h.dbMgmtService.CreateDBUser(c.Request.Context(), sid, &req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -60,6 +62,7 @@ func (h *UserHandler) DeleteDBUser(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的用户ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除数据库用户 "+strconv.FormatInt(uid, 10))
 	if err := h.dbMgmtService.DeleteDBUser(c.Request.Context(), sid, uid); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -83,6 +86,7 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "授权数据库用户 "+strconv.FormatInt(uid, 10))
 	if err := h.dbMgmtService.GrantPrivileges(c.Request.Context(), sid, uid, &req); err != nil {
 		c.Error(WrapError(err))
 		return

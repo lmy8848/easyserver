@@ -138,8 +138,8 @@ func createTables(db *sql.DB) error {
 			detail TEXT,
 			ip TEXT,
 			user_agent TEXT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			signature TEXT DEFAULT ''
+			type TEXT NOT NULL DEFAULT 'operation',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS deploy_servers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,7 +219,6 @@ func migrateDatabase(db *sql.DB) error {
 		{"totp_secret", "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT ''", "users"},
 		{"totp_enabled", "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0", "users"},
 		{"totp_backup_codes", "ALTER TABLE users ADD COLUMN totp_backup_codes TEXT DEFAULT '[]'", "users"},
-		{"signature", "ALTER TABLE audit_logs ADD COLUMN signature TEXT DEFAULT ''", "audit_logs"},
 	}
 
 	for _, m := range migrations {

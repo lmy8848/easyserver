@@ -121,7 +121,7 @@ func (r *sqliteRepo) GetActions(ctx context.Context, logType string) ([]string, 
 	return actions, rows.Err()
 }
 
-func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAuditEntry) error {
+func (r *sqliteRepo) AppendBatch(ctx context.Context, entries []AuditLog) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -129,50 +129,20 @@ func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAudi
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type, created_at, signature)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, e := range entries {
-		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.Type, e.CreatedAt, e.Signature); err != nil {
+		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.Type, e.CreatedAt); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit()
-}
-
-func (r *sqliteRepo) GetSignedEntry(ctx context.Context, id int64) (*SignedAuditEntry, error) {
-	var e SignedAuditEntry
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at, signature
-		 FROM audit_logs WHERE id = ?`, id,
-	).Scan(&e.ID, &e.UserID, &e.Username, &e.Action, &e.Resource, &e.Detail, &e.IP, &e.UserAgent, &e.Type, &e.CreatedAt, &e.Signature)
-	if err != nil {
-		return nil, err
-	}
-	return &e, nil
-}
-
-func (r *sqliteRepo) ListIDsForVerification(ctx context.Context, limit int) ([]int64, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id FROM audit_logs ORDER BY id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 func (r *sqliteRepo) Clean(ctx context.Context, before time.Time) (int64, error) {
