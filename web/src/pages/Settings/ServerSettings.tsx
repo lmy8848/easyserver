@@ -149,8 +149,6 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
       <Card title="系统信息" style={{ marginTop: 16 }}>
         <Descriptions bordered column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item label="系统版本">{systemInfo?.version || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Go 版本">{systemInfo?.go_version || '-'}</Descriptions.Item>
-          <Descriptions.Item label="平台">{systemInfo?.platform || '-'}</Descriptions.Item>
           <Descriptions.Item label="TLS/HTTPS">
             {settings?.server.tls_enabled
               ? <Tag color="success">已启用</Tag>

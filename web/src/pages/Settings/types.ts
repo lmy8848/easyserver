@@ -38,8 +38,6 @@ export interface Settings {
 
 export interface SystemInfo {
   version: string;
-  go_version: string;
-  platform: string;
 }
 
 export interface AlertRule {
