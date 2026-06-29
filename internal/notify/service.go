@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"easyserver/internal/auth"
+	"easyserver/internal/infra"
 )
 
 // LoginEvent is an alias for auth.LoginEvent.
@@ -79,11 +80,11 @@ func (s *Service) NotifyLogin(event LoginEvent) {
 		return
 	}
 
-	go func() {
+	infra.Go(func() {
 		if err := s.sendWebhook(event); err != nil {
 			log.Printf("notify: failed to send login notification: %v", err)
 		}
-	}()
+	})
 }
 
 // NotifyAlert sends an alert notification via webhook.
@@ -92,11 +93,11 @@ func (s *Service) NotifyAlert(event AlertEvent) {
 		return
 	}
 
-	go func() {
+	infra.Go(func() {
 		if err := s.sendAlertWebhook(event); err != nil {
 			log.Printf("notify: failed to send alert notification: %v", err)
 		}
-	}()
+	})
 }
 
 func (s *Service) sendWebhook(event LoginEvent) error {

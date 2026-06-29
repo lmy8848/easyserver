@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra"
 )
 
 // Session represents a terminal session.
@@ -82,7 +83,7 @@ func (m *Manager) CloseSession(id string) error {
 
 // StartIdleTimeout starts idle timeout checker.
 func (m *Manager) StartIdleTimeout(timeout time.Duration) {
-	go func() {
+	infra.Go(func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 
@@ -117,7 +118,7 @@ func (m *Manager) StartIdleTimeout(timeout time.Duration) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 // StopIdleTimeout stops the idle timeout checker.

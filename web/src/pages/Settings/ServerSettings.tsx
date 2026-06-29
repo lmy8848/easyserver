@@ -24,6 +24,8 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         host: settings.server.host,
         port: settings.server.port,
         serve_frontend: settings.server.serve_frontend,
+        assets_rate_limit: settings.server.assets_rate_limit,
+        assets_rate_interval: settings.server.assets_rate_interval,
       });
     }
   }, [settings, form]);
@@ -82,6 +84,8 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
             host: '0.0.0.0',
             port: 8080,
             serve_frontend: false,
+            assets_rate_limit: 5000,
+            assets_rate_interval: '1m',
           }}
         >
           <Form.Item
@@ -107,6 +111,22 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
             valuePropName="checked"
           >
             <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="assets_rate_limit"
+            label="静态资源速率限制"
+            extra="每个时间窗口内静态资源（JS、CSS 等）允许的最大请求数"
+          >
+            <InputNumber min={100} max={100000} style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item
+            name="assets_rate_interval"
+            label="静态资源限流时间窗口"
+            extra="静态资源速率限制的时间窗口，如 1m、5m"
+          >
+            <Input placeholder="1m" />
           </Form.Item>
 
           <Form.Item>

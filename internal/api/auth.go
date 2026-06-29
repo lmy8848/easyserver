@@ -613,9 +613,12 @@ func registerAuthRoutes(
 	sessionValidator func(string) (bool, error),
 	tokenValidator func(int64, string, time.Time) (bool, error),
 	sessionTimeout time.Duration,
+	loginRateLimit int,
+	loginRateInterval time.Duration,
 ) {
-	// Public auth routes
+	// Public auth routes (no JWT required) — Tier 3: strict login limiter
 	auth := api.Group("/auth")
+	auth.Use(middleware.RateLimitMiddleware("login", loginRateLimit, loginRateInterval))
 	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout)
 	{
 		auth.POST("/login", authHandler.Login)

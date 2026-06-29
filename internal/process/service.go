@@ -13,6 +13,7 @@ import (
 
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/runtimeenv"
+	"easyserver/internal/infra"
 )
 
 // --- Constants ---
@@ -513,9 +514,9 @@ func (s *Service) stopProcess(mp *managedProcess, stopTimeout int) {
 		// SIGTERM first for graceful shutdown
 		mp.proc.Signal(syscall.SIGTERM)
 		done := make(chan error, 1)
-		go func() {
+		infra.Go(func() {
 			done <- mp.proc.Wait()
-		}()
+		})
 		// Wait configured timeout, then SIGKILL
 		if stopTimeout <= 0 {
 			stopTimeout = defaultStopTimeoutSec

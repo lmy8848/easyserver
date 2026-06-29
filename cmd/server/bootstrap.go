@@ -21,6 +21,7 @@ import (
 	"easyserver/internal/envconfig"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/firewall"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
 	"easyserver/internal/infra/executor"
@@ -41,10 +42,10 @@ import (
 func validateConfig(cfg *config.Config, devMode bool) {
 	// JWT secret — empty always rejected
 	if cfg.Auth.JWTSecret == "" {
-		log.Fatalln("ERROR: JWT secret cannot be empty. Please set a strong secret.")
+		log.Fatalln("ERROR: JWT secret is empty. Set a strong secret via EASYSERVER_JWT_SECRET env var (32+ chars) or auth.jwt_secret in config.yaml.")
 	}
 	rejectOrWarn(devMode, len(cfg.Auth.JWTSecret) < 32,
-		"JWT secret must be at least 32 bytes.")
+		"JWT secret must be at least 32 bytes. Use: EASYSERVER_JWT_SECRET=$(openssl rand -base64 32)")
 
 	knownWeakJWT := []string{
 		"easyserver-secret-key-change-me",
@@ -66,6 +67,22 @@ func validateConfig(cfg *config.Config, devMode bool) {
 			"JWT secret has no entropy (all same character).")
 	}
 
+	// Rate limit guards
+	rejectOrWarn(devMode, cfg.Auth.RateLimit < 10 || cfg.Auth.RateLimit > 100000,
+		"auth.rate_limit must be between 10 and 100000")
+	rejectOrWarn(devMode, cfg.Auth.RateInterval < time.Second || cfg.Auth.RateInterval > time.Hour,
+		"auth.rate_interval must be between 1s and 1h")
+
+	rejectOrWarn(devMode, cfg.Auth.LoginRateLimit < 1 || cfg.Auth.LoginRateLimit > 100,
+		"auth.login_rate_limit must be between 1 and 100")
+	rejectOrWarn(devMode, cfg.Auth.LoginRateInterval < time.Second || cfg.Auth.LoginRateInterval > time.Hour,
+		"auth.login_rate_interval must be between 1s and 1h")
+
+	rejectOrWarn(devMode, cfg.Server.AssetsRateLimit < 100 || cfg.Server.AssetsRateLimit > 100000,
+		"server.assets_rate_limit must be between 100 and 100000")
+	rejectOrWarn(devMode, cfg.Server.AssetsRateInterval < time.Second || cfg.Server.AssetsRateInterval > time.Hour,
+		"server.assets_rate_interval must be between 1s and 1h")
+
 	// File manager
 	if cfg.FileManager.BasePath == "" {
 		log.Fatalln("FATAL: filemanager.base_path is required")
@@ -75,6 +92,10 @@ func validateConfig(cfg *config.Config, devMode bool) {
 	}
 
 	// Deploy encryption key
+	if cfg.Deploy.EncryptionKey == "" {
+		rejectOrWarn(devMode, true,
+			"deploy.encryption_key is required. Set via EASYSERVER_ENCRYPTION_KEY env var (32+ chars) or deploy.encryption_key in config.yaml.")
+	}
 	knownWeakDeployKeys := []string{
 		"change-me-to-a-random-32-byte-key!!",
 		"change-me-to-a-random-32-byte-key",
@@ -82,12 +103,9 @@ func validateConfig(cfg *config.Config, devMode bool) {
 	for _, weak := range knownWeakDeployKeys {
 		if cfg.Deploy.EncryptionKey == weak {
 			rejectOrWarn(devMode, true,
-				"deploy.encryption_key is set to a default value.")
+				"deploy.encryption_key is set to a well-known default value.")
 			break
 		}
-	}
-	if cfg.Deploy.EncryptionKey == "" {
-		log.Println("WARNING: deploy.encryption_key is empty. SSH credentials will not be encrypted!")
 	}
 }
 
@@ -168,10 +186,10 @@ func wire(cfg *config.Config) (*appServices, error) {
 	var monitorWg sync.WaitGroup
 	monitorSvc := monitor.NewMonitorService(monitorRepo, cfg.Monitor.CollectInterval, cfg.Monitor.HistoryRetention)
 	monitorWg.Add(1)
-	go func() {
+	infra.Go(func() {
 		defer monitorWg.Done()
 		monitorSvc.Start()
-	}()
+	})
 	s.MonitorService = monitorSvc
 	s.onCleanup(func() {
 		monitorSvc.Stop()
@@ -198,7 +216,7 @@ func wire(cfg *config.Config) (*appServices, error) {
 	sessionSvc := auth.NewSessionService(sessionRepo)
 	s.SessionService = sessionSvc
 	sessionDone := make(chan struct{})
-	go func() {
+	infra.Go(func() {
 		ticker := time.NewTicker(cfg.Auth.SessionCleanupInterval)
 		defer ticker.Stop()
 		for {
@@ -211,7 +229,7 @@ func wire(cfg *config.Config) (*appServices, error) {
 				return
 			}
 		}
-	}()
+	})
 	s.onCleanup(func() { close(sessionDone) })
 
 	// Package-level rate limiters

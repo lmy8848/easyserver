@@ -46,13 +46,17 @@ RUN printf '%s\n' \
   '  host: 0.0.0.0' \
   '  serve_frontend: true' \
   '  dev_mode: false' \
+  '  assets_rate_limit: 5000' \
+  '  assets_rate_interval: 1m' \
   'auth:' \
   '  jwt_secret: ""' \
   '  session_timeout: 24h' \
   '  max_login_attempts: 5' \
   '  lockout_duration: 15m' \
-  '  rate_limit: 100' \
+  '  rate_limit: 1000' \
   '  rate_interval: 1m' \
+  '  login_rate_limit: 10' \
+  '  login_rate_interval: 1m' \
   '  session_cleanup_interval: 5m' \
   'monitor:' \
   '  history_retention: 24h' \

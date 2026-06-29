@@ -5,7 +5,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 	"time"
 
 	"crypto/x509"
+
+	"easyserver/internal/infra"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -46,21 +47,14 @@ func NewSSHClient(srv *Server, authData string) (*SSHClient, error) {
 		return nil, fmt.Errorf("ssh: auth error: %w", err)
 	}
 
-	// Setup known hosts callback for host key verification
+	// Setup known hosts callback for host key verification.
+	// Production: require known_hosts; dev mode: warn but still require.
 	homeDir, _ := os.UserHomeDir()
 	knownHostsPath := filepath.Join(homeDir, ".ssh", "known_hosts")
 
-	// Create known_hosts callback, fallback to InsecureIgnoreHostKey if file doesn't exist
-	var hostKeyCallback ssh.HostKeyCallback
-	if _, err := os.Stat(knownHostsPath); err == nil {
-		hostKeyCallback, err = knownhosts.New(knownHostsPath)
-		if err != nil {
-			log.Printf("ssh: WARNING - failed to parse known_hosts, falling back to insecure: %v", err)
-			hostKeyCallback = ssh.InsecureIgnoreHostKey()
-		}
-	} else {
-		log.Printf("ssh: WARNING - known_hosts not found at %s, host key verification disabled", knownHostsPath)
-		hostKeyCallback = ssh.InsecureIgnoreHostKey()
+	hostKeyCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("ssh: host key verification unavailable — %s not found or unreadable: %w", knownHostsPath, err)
 	}
 
 	config := &ssh.ClientConfig{
@@ -114,9 +108,9 @@ func (c *SSHClient) RunCommand(cmd string, timeout time.Duration) (stdout, stder
 
 	// Use a channel to detect when the command finishes.
 	done := make(chan error, 1)
-	go func() {
+	infra.Go(func() {
 		done <- session.Run(wrappedCmd)
-	}()
+	})
 
 	select {
 	case <-time.After(timeout):

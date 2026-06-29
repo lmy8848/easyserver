@@ -23,6 +23,8 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
         lockout_duration: settings.auth.lockout_duration,
         rate_limit: settings.auth.rate_limit,
         rate_interval: settings.auth.rate_interval,
+        login_rate_limit: settings.auth.login_rate_limit,
+        login_rate_interval: settings.auth.login_rate_interval,
       });
     }
   }, [settings, form]);
@@ -55,6 +57,8 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           lockout_duration: '15m',
           rate_limit: 1000,
           rate_interval: '1m',
+          login_rate_limit: 10,
+          login_rate_interval: '1m',
         }}
       >
         <Form.Item
@@ -101,6 +105,22 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           name="rate_interval"
           label="速率限制时间窗口"
           extra="速率限制的时间窗口，如 1m、5m"
+        >
+          <Input placeholder="1m" />
+        </Form.Item>
+
+        <Form.Item
+          name="login_rate_limit"
+          label="登录速率限制"
+          extra="每个时间窗口内登录接口允许的最大请求数"
+        >
+          <InputNumber min={1} max={100} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Form.Item
+          name="login_rate_interval"
+          label="登录限流时间窗口"
+          extra="登录速率限制的时间窗口，如 1m、5m"
         >
           <Input placeholder="1m" />
         </Form.Item>

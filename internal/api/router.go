@@ -229,25 +229,28 @@ func (r *Router) Setup() *gin.Engine {
 	// Initialize CSP nonce: injects nonce into <script> tags of embedded index.html
 	cspNonce := InitCSPNonce()
 
-	// Global middleware
+	// Global middleware (no rate limiter — tiered limiters are applied per group below)
 	e.Use(gin.Logger(), gin.Recovery(),
 		ErrorHandler(),
 		middleware.SecurityMiddleware(cspNonce),
 		middleware.CORSMiddleware(r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode),
-		middleware.RateLimitMiddleware(r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
 		middleware.IPWhitelistMiddleware(ipWhitelist),
 	)
 
-	// Health check
+	// Health check (no rate limit)
 	e.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// API routes
+	// API routes — Tier 2: general API limiter
 	api := e.Group("/api")
+	api.Use(
+		middleware.MaxBodySizeMiddleware(middleware.DefaultMaxBodySize),
+		middleware.RateLimitMiddleware("api", r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
+	)
 
 	// Auth routes (public + protected)
-	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout)
+	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval)
 
 	// Protected routes (JWT + SingleAdmin + Audit + Session Heartbeat)
 	protected := api.Group("")
@@ -258,6 +261,7 @@ func (r *Router) Setup() *gin.Engine {
 		}),
 		middleware.SessionHeartbeatMiddleware(r.sessionService, r.cfg.Auth.SessionTimeout),
 		middleware.AuditMiddleware(r.auditService),
+		middleware.CSRFMiddleware(),
 	)
 
 	// WebSocket routes
@@ -287,8 +291,9 @@ func (r *Router) Setup() *gin.Engine {
 	registerSystemProcessRoutes(protected, r.systemProcessService)
 	registerNotificationRoutes(protected, r.notificationService)
 
-	// Serve embedded frontend (production mode)
+	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
 	if r.cfg.Server.ServeFrontend {
+		e.Use(middleware.RateLimitMiddleware("assets", r.cfg.Server.AssetsRateLimit, r.cfg.Server.AssetsRateInterval))
 		ServeWeb(e)
 	}
 

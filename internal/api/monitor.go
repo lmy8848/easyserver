@@ -13,6 +13,7 @@ import (
 	"easyserver/internal/monitor"
 	"easyserver/internal/systemd"
 	"easyserver/internal/terminal"
+	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
@@ -155,7 +156,7 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 	// Write mutex ensures only one goroutine writes to the connection at a time
 	writeMu := &sync.Mutex{}
 
-	go func() {
+	infra.Go(func() {
 		ticker := time.NewTicker(MonitorWSPingInterval)
 		defer ticker.Stop()
 
@@ -185,7 +186,7 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 				writeMu.Unlock()
 			}
 		}
-	}()
+	})
 
 	conn.SetReadLimit(MonitorWSReadLimit)
 	conn.SetPongHandler(func(string) error {

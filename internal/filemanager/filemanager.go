@@ -15,8 +15,16 @@ import (
 
 var errSearchLimit = fmt.Errorf("search result limit reached")
 
+const (
+	// MinUserUID is the minimum UID/GID allowed for chown operations.
+	// System users (0-999) are rejected to prevent privilege escalation.
+	MinUserUID = 1000
+)
+
 // Search searches for files by name pattern.
 func (m *Manager) Search(rootPath, pattern string, maxResults int) ([]SearchResult, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(rootPath)
 	if err != nil {
 		return nil, err
@@ -74,6 +82,8 @@ var binaryExtensions = map[string]bool{
 
 // SearchContent searches for files containing the specified text.
 func (m *Manager) SearchContent(rootPath, text string, maxResults int) ([]SearchResult, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(rootPath)
 	if err != nil {
 		return nil, err
@@ -497,8 +507,16 @@ func (m *Manager) Chmod(path string, mode os.FileMode) error {
 	return os.Chmod(validPath, mode)
 }
 
-// Chown changes file ownership.
+// Chown changes file ownership. Rejects system user IDs (< 1000) to prevent
+// privilege escalation.
 func (m *Manager) Chown(path string, uid, gid int) error {
+	if uid >= 0 && uid < MinUserUID {
+		return fmt.Errorf("chown: uid %d is a system user (minimum: %d)", uid, MinUserUID)
+	}
+	if gid >= 0 && gid < MinUserUID {
+		return fmt.Errorf("chown: gid %d is a system group (minimum: %d)", gid, MinUserUID)
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -512,6 +530,8 @@ func (m *Manager) Chown(path string, uid, gid int) error {
 
 // GetFileDetails returns detailed file information.
 func (m *Manager) GetFileDetails(path string) (map[string]interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -546,6 +566,8 @@ func (m *Manager) GetFileDetails(path string) (map[string]interface{}, error) {
 
 // GetDiskUsage returns disk usage information.
 func (m *Manager) GetDiskUsage(path string) (map[string]interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -618,6 +640,8 @@ var mimeTypes = map[string]string{
 
 // GetMimeType returns the MIME type of a file based on its extension.
 func (m *Manager) GetMimeType(path string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if _, err := m.ValidatePath(path); err != nil {
 		return "", err
 	}

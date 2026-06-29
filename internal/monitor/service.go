@@ -7,6 +7,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"easyserver/internal/infra"
 )
 
 const (
@@ -132,11 +134,11 @@ func (s *MonitorService) Start() {
 	ctx := context.Background()
 
 	// 性能优化：创建时间戳索引（异步执行，不阻塞启动）
-	go func() {
+	infra.Go(func() {
 		if err := s.monitorRepo.EnsureIndexes(ctx); err != nil {
 			log.Printf("monitor: failed to create index: %v", err)
 		}
-	}()
+	})
 
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()

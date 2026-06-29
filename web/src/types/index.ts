@@ -523,8 +523,8 @@ export interface ParamMeta {
 
 // Settings
 export interface AppSettings {
-  server: { port: number; host: string; serve_frontend: boolean; tls_enabled: boolean };
-  auth: { session_timeout: string; idle_timeout: string; max_login_attempts: number; lockout_duration: string; rate_limit: number; rate_interval: string };
+  server: { port: number; host: string; serve_frontend: boolean; tls_enabled: boolean; assets_rate_limit: number; assets_rate_interval: string };
+  auth: { session_timeout: string; idle_timeout: string; max_login_attempts: number; lockout_duration: string; rate_limit: number; rate_interval: string; login_rate_limit: number; login_rate_interval: string };
   monitor: { history_retention: string; collect_interval: string };
   database: { path: string };
   audit: { enabled: boolean; log_path: string };

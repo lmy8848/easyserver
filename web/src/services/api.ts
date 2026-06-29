@@ -16,6 +16,7 @@ const api = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
   },
 });
 
@@ -695,10 +696,10 @@ export const settingsApi = {
   getSystem: () =>
     api.get<ApiResponse<{ version: string }>>('/settings/system'),
 
-  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean }) =>
+  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean; assets_rate_limit?: number; assets_rate_interval?: string }) =>
     api.put<ApiResponse<{ requires_restart: boolean }>>('/settings/server', data),
 
-  updateAuth: (data: { session_timeout?: string; idle_timeout?: string; max_login_attempts?: number; lockout_duration?: string; rate_limit?: number; rate_interval?: string }) =>
+  updateAuth: (data: { session_timeout?: string; idle_timeout?: string; max_login_attempts?: number; lockout_duration?: string; rate_limit?: number; rate_interval?: string; login_rate_limit?: number; login_rate_interval?: string }) =>
     api.put<ApiResponse>('/settings/auth', data),
 
   updateMonitor: (data: { history_retention?: string; collect_interval?: string }) =>

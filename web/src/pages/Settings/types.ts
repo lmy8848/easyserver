@@ -4,6 +4,8 @@ export interface Settings {
     host: string;
     serve_frontend: boolean;
     tls_enabled: boolean;
+    assets_rate_limit: number;
+    assets_rate_interval: string;
   };
   auth: {
     session_timeout: string;
@@ -12,6 +14,8 @@ export interface Settings {
     lockout_duration: string;
     rate_limit: number;
     rate_interval: string;
+    login_rate_limit: number;
+    login_rate_interval: string;
   };
   monitor: {
     history_retention: string;

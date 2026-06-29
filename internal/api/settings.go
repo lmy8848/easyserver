@@ -14,6 +14,7 @@ import (
 	"easyserver/internal/alert"
 	"easyserver/internal/api/middleware"
 	"easyserver/internal/cloud"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/notify"
@@ -89,18 +90,22 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 
 	Success(c, gin.H{
 		"server": gin.H{
-			"port":           h.cfg.Server.Port,
-			"host":           h.cfg.Server.Host,
-			"serve_frontend": h.cfg.Server.ServeFrontend,
-			"tls_enabled":    h.cfg.Server.TLS.Enabled,
+			"port":                 h.cfg.Server.Port,
+			"host":                 h.cfg.Server.Host,
+			"serve_frontend":       h.cfg.Server.ServeFrontend,
+			"tls_enabled":          h.cfg.Server.TLS.Enabled,
+			"assets_rate_limit":    h.cfg.Server.AssetsRateLimit,
+			"assets_rate_interval": h.cfg.Server.AssetsRateInterval.String(),
 		},
 		"auth": gin.H{
-			"session_timeout":    h.cfg.Auth.SessionTimeout.String(),
-			"idle_timeout":       h.cfg.Auth.IdleTimeout.String(),
-			"max_login_attempts": h.cfg.Auth.MaxLoginAttempts,
-			"lockout_duration":   h.cfg.Auth.LockoutDuration.String(),
-			"rate_limit":         h.cfg.Auth.RateLimit,
-			"rate_interval":      h.cfg.Auth.RateInterval.String(),
+			"session_timeout":     h.cfg.Auth.SessionTimeout.String(),
+			"idle_timeout":        h.cfg.Auth.IdleTimeout.String(),
+			"max_login_attempts":  h.cfg.Auth.MaxLoginAttempts,
+			"lockout_duration":    h.cfg.Auth.LockoutDuration.String(),
+			"rate_limit":          h.cfg.Auth.RateLimit,
+			"rate_interval":       h.cfg.Auth.RateInterval.String(),
+			"login_rate_limit":    h.cfg.Auth.LoginRateLimit,
+			"login_rate_interval": h.cfg.Auth.LoginRateInterval.String(),
 		},
 		"monitor": gin.H{
 			"history_retention": h.cfg.Monitor.HistoryRetention.String(),
@@ -191,9 +196,11 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 	h.cfgMu.Lock()
 	defer h.cfgMu.Unlock()
 	var req struct {
-		Port          *int    `json:"port"`
-		Host          *string `json:"host"`
-		ServeFrontend *bool   `json:"serve_frontend"`
+		Port               *int    `json:"port"`
+		Host               *string `json:"host"`
+		ServeFrontend      *bool   `json:"serve_frontend"`
+		AssetsRateLimit    *int    `json:"assets_rate_limit"`
+		AssetsRateInterval *string `json:"assets_rate_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -239,11 +246,37 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		h.cfg.Server.ServeFrontend = *req.ServeFrontend
 		requiresRestart = true
 	}
+	if req.AssetsRateLimit != nil {
+		if *req.AssetsRateLimit < 100 || *req.AssetsRateLimit > 100000 {
+			c.Error(ErrBadRequest.WithMessage("assets_rate_limit 必须在 100 到 100000 之间"))
+			return
+		}
+		h.cfg.Server.AssetsRateLimit = *req.AssetsRateLimit
+	}
+	if req.AssetsRateInterval != nil {
+		d, err := time.ParseDuration(*req.AssetsRateInterval)
+		if err != nil {
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 assets_rate_interval: %v", err)))
+			return
+		}
+		if d < 1*time.Second || d > 1*time.Hour {
+			c.Error(ErrBadRequest.WithMessage("assets_rate_interval 必须在 1s 到 1h 之间"))
+			return
+		}
+		h.cfg.Server.AssetsRateInterval = d
+	}
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
 		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
 		return
+	}
+
+	// Sync assets rate limiter at runtime
+	if req.AssetsRateLimit != nil || req.AssetsRateInterval != nil {
+		if rl := middleware.GetRateLimiter("assets"); rl != nil {
+			rl.UpdateRate(h.cfg.Server.AssetsRateLimit, h.cfg.Server.AssetsRateInterval)
+		}
 	}
 
 	Success(c, gin.H{
@@ -257,12 +290,14 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	h.cfgMu.Lock()
 	defer h.cfgMu.Unlock()
 	var req struct {
-		SessionTimeout   *string `json:"session_timeout"`
-		IdleTimeout      *string `json:"idle_timeout"`
-		MaxLoginAttempts *int    `json:"max_login_attempts"`
-		LockoutDuration  *string `json:"lockout_duration"`
-		RateLimit        *int    `json:"rate_limit"`
-		RateInterval     *string `json:"rate_interval"`
+		SessionTimeout    *string `json:"session_timeout"`
+		IdleTimeout       *string `json:"idle_timeout"`
+		MaxLoginAttempts  *int    `json:"max_login_attempts"`
+		LockoutDuration   *string `json:"lockout_duration"`
+		RateLimit         *int    `json:"rate_limit"`
+		RateInterval      *string `json:"rate_interval"`
+		LoginRateLimit    *int    `json:"login_rate_limit"`
+		LoginRateInterval *string `json:"login_rate_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -339,10 +374,36 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		h.cfg.Auth.RateInterval = d
 	}
 
-	// Sync rate limiter at runtime
+	if req.LoginRateLimit != nil {
+		if *req.LoginRateLimit < 1 || *req.LoginRateLimit > 100 {
+			c.Error(ErrBadRequest.WithMessage("login_rate_limit 必须在 1 到 100 之间"))
+			return
+		}
+		h.cfg.Auth.LoginRateLimit = *req.LoginRateLimit
+	}
+	if req.LoginRateInterval != nil {
+		d, err := time.ParseDuration(*req.LoginRateInterval)
+		if err != nil {
+			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("无效的 login_rate_interval: %v", err)))
+			return
+		}
+		if d < 1*time.Second || d > 1*time.Hour {
+			c.Error(ErrBadRequest.WithMessage("login_rate_interval 必须在 1s 到 1h 之间"))
+			return
+		}
+		h.cfg.Auth.LoginRateInterval = d
+	}
+
+	// Sync API rate limiter at runtime
 	if req.RateLimit != nil || req.RateInterval != nil {
-		if rl := middleware.GetRateLimiter(); rl != nil {
+		if rl := middleware.GetRateLimiter("api"); rl != nil {
 			rl.UpdateRate(h.cfg.Auth.RateLimit, h.cfg.Auth.RateInterval)
+		}
+	}
+	// Sync login rate limiter at runtime
+	if req.LoginRateLimit != nil || req.LoginRateInterval != nil {
+		if rl := middleware.GetRateLimiter("login"); rl != nil {
+			rl.UpdateRate(h.cfg.Auth.LoginRateLimit, h.cfg.Auth.LoginRateInterval)
 		}
 	}
 
@@ -652,7 +713,7 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	}
 
 	// Return success first, then restart
-	go func() {
+	infra.Go(func() {
 		time.Sleep(1 * time.Second)
 		log.Println("settings: restarting panel...")
 
@@ -695,7 +756,7 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 
 		// Exit immediately — child already has the listener FD
 		os.Exit(0)
-	}()
+	})
 	Success(c, gin.H{"message": "面板正在重启..."})
 }
 

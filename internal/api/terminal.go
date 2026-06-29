@@ -12,6 +12,7 @@ import (
 
 	"easyserver/internal/audit"
 	"easyserver/internal/terminal"
+	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
@@ -135,15 +136,15 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// Start writePump goroutine to serialize all WebSocket writes
 	var writePumpWg sync.WaitGroup
 	writePumpWg.Add(1)
-	go func() {
+	infra.Go(func() {
 		defer writePumpWg.Done()
 		h.writePump(conn, wsWrite)
-	}()
+	})
 
 	// Start forwarding goroutine: session.Send (PTY output) -> wsWrite
 	var fwdWg sync.WaitGroup
 	fwdWg.Add(1)
-	go func() {
+	infra.Go(func() {
 		defer fwdWg.Done()
 		for msg := range session.Send {
 			select {
@@ -151,7 +152,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 			default:
 			}
 		}
-	}()
+	})
 
 	// readPump: reads from WebSocket, writes input to PTY
 	h.readPump(c, conn, session, wsWrite, userID, username, sessionID)

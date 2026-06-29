@@ -15,6 +15,7 @@ import (
 
 	"easyserver/internal/api"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra"
 )
 
 func main() {
@@ -85,7 +86,7 @@ func main() {
 	}
 	api.SetListener(ln)
 
-	go func() {
+	infra.Go(func() {
 		var err error
 		if cfg.Server.TLS.Enabled {
 			err = srv.ServeTLS(ln, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
@@ -95,7 +96,7 @@ func main() {
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
-	}()
+	})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

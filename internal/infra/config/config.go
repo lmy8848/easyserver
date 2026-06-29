@@ -27,12 +27,14 @@ type NotifyConfig struct {
 }
 
 type ServerConfig struct {
-	Port           int       `yaml:"port"`
-	Host           string    `yaml:"host"`
-	ServeFrontend  bool      `yaml:"serve_frontend"`
-	AllowedOrigins []string  `yaml:"allowed_origins"`
-	DevMode        bool      `yaml:"dev_mode"`
-	TLS            TLSConfig `yaml:"tls"`
+	Port               int           `yaml:"port"`
+	Host               string        `yaml:"host"`
+	ServeFrontend      bool          `yaml:"serve_frontend"`
+	AllowedOrigins     []string      `yaml:"allowed_origins"`
+	DevMode            bool          `yaml:"dev_mode"`
+	TLS                TLSConfig     `yaml:"tls"`
+	AssetsRateLimit    int           `yaml:"assets_rate_limit"`
+	AssetsRateInterval time.Duration `yaml:"assets_rate_interval"`
 }
 
 type TLSConfig struct {
@@ -49,6 +51,8 @@ type AuthConfig struct {
 	LockoutDuration        time.Duration `yaml:"lockout_duration"`
 	RateLimit              int           `yaml:"rate_limit"`
 	RateInterval           time.Duration `yaml:"rate_interval"`
+	LoginRateLimit         int           `yaml:"login_rate_limit"`
+	LoginRateInterval      time.Duration `yaml:"login_rate_interval"`
 	IPWhitelist            []string      `yaml:"ip_whitelist"`
 	SessionCleanupInterval time.Duration `yaml:"session_cleanup_interval"`
 }
@@ -104,8 +108,10 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		Server: ServerConfig{
-			Port: 8080,
-			Host: "0.0.0.0",
+			Port:               8080,
+			Host:               "0.0.0.0",
+			AssetsRateLimit:    5000,
+			AssetsRateInterval: time.Minute,
 		},
 		Auth: AuthConfig{
 			SessionTimeout:         24 * time.Hour,
@@ -114,6 +120,8 @@ func Load(path string) (*Config, error) {
 			LockoutDuration:        15 * time.Minute,
 			RateLimit:              1000,
 			RateInterval:           time.Minute,
+			LoginRateLimit:         10,
+			LoginRateInterval:      time.Minute,
 			SessionCleanupInterval: 5 * time.Minute,
 		},
 		Monitor: MonitorConfig{

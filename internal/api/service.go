@@ -14,6 +14,7 @@ import (
 
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"
+	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"
@@ -274,7 +275,7 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	msgCh := make(chan []byte, 64)
 	errCh := make(chan error, 1)
 
-	go func() {
+	infra.Go(func() {
 		for scanner.Scan() {
 			line := scanner.Text()
 
@@ -335,7 +336,7 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 			}
 		}
 		errCh <- scanner.Err()
-	}()
+	})
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -344,7 +345,7 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	defer close(done)
 
 	// Start read goroutine to detect client disconnect
-	go func() {
+	infra.Go(func() {
 		conn.SetReadLimit(512)
 		conn.SetPongHandler(func(string) error {
 			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -356,7 +357,7 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 				return
 			}
 		}
-	}()
+	})
 
 	for {
 		select {

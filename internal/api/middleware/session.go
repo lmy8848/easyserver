@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"easyserver/internal/auth"
+	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,7 +33,7 @@ func newSessionHeartbeatLimiter(beatInterval, cleanupInterval time.Duration) *se
 		done:        make(chan struct{}),
 	}
 	// Clean up expired tokens periodically
-	go func() {
+	infra.Go(func() {
 		ticker := time.NewTicker(cleanupInterval)
 		defer ticker.Stop()
 		for {
@@ -43,7 +44,7 @@ func newSessionHeartbeatLimiter(beatInterval, cleanupInterval time.Duration) *se
 				return
 			}
 		}
-	}()
+	})
 	return l
 }
 
@@ -141,23 +142,25 @@ func SessionHeartbeatMiddleware(sessionService *auth.SessionService, sessionTime
 						// Session doesn't exist, create one with a bounded timeout
 						// to prevent goroutine leak on persistent DB failures.
 						if limiter.shouldCreate(token) {
-							go func() {
-								ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-								defer cancel()
-								ip := c.ClientIP()
-								userAgent := c.Request.UserAgent()
-								expiresAt := time.Now().Add(sessionTimeout)
-								sessionService.CreateSession(
-									ctx,
-									token,
-									uid,
-									uname,
-									roleStr,
-									ip,
-									userAgent,
-									expiresAt,
-								)
-							}()
+							infra.Go(func() {
+									ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+									defer cancel()
+									ip := c.ClientIP()
+									userAgent := c.Request.UserAgent()
+									expiresAt := time.Now().Add(sessionTimeout)
+									if err := sessionService.CreateSession(
+										ctx,
+										token,
+										uid,
+										uname,
+										roleStr,
+										ip,
+										userAgent,
+										expiresAt,
+									); err != nil {
+										log.Printf("session heartbeat: failed to create session for uid=%d: %v", uid, err)
+									}
+								})
 						}
 					}
 				}

@@ -43,7 +43,7 @@ type Manager struct {
 	basePath string
 	// ponytail: global lock on structural mutations.
 	// FS panel is low-QPS; per-path locks if throughput ever matters.
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 // BasePath returns the base path of the file manager.
@@ -156,11 +156,15 @@ func (m *Manager) validateRealPath(realPath string) error {
 
 // ListRoot returns files in the base directory.
 func (m *Manager) ListRoot() ([]FileEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.listDir(m.basePath)
 }
 
 // List returns files in a directory.
 func (m *Manager) List(path string) ([]FileEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err
@@ -233,6 +237,8 @@ const maxReadFileSize = 10 * 1024 * 1024
 
 // ReadContent reads file content. Rejects files larger than 10MB.
 func (m *Manager) ReadContent(path string) (*FileContent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
 		return nil, err

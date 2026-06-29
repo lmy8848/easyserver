@@ -16,6 +16,7 @@ import (
 
 	"easyserver/internal/envconfig"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra"
 )
 
 type Service struct {
@@ -338,10 +339,10 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 	go writeFn(stderr)
 
 	errChan := make(chan error, 1)
-	go func() {
+	infra.Go(func() {
 		wg.Wait()
 		errChan <- cmd.Wait()
-	}()
+	})
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -510,7 +511,7 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 
 	s.cleanupRelatedData(ctx, env.ID)
 
-	go func() {
+	infra.Go(func() {
 		bgCtx := context.Background()
 		uninstallErr := s.uninstallRuntime(bgCtx, env)
 		if uninstallErr != nil {
@@ -532,7 +533,7 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 				log.Printf("runtime: failed to regen mise config after uninstall of %s@%s: %v", env.Name, env.Version, err)
 			}
 		}
-	}()
+	})
 
 	return nil
 }

@@ -15,6 +15,7 @@ import (
 
 	"easyserver/internal/dbserver"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -473,10 +474,10 @@ func (s *Service) CreateBackup(ctx context.Context, dbServerID, dbVersionID, dat
 	backup.ID = id
 
 	backupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	go func() {
+	infra.Go(func() {
 		defer cancel()
 		s.executeBackup(backupCtx, backup, dbType)
-	}()
+	})
 
 	return backup, nil
 }

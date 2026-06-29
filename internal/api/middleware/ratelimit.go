@@ -123,25 +123,29 @@ func (rl *RateLimiter) evictOldest() {
 	}
 }
 
-var globalRateLimiter atomic.Value
+var rateLimiters sync.Map
 
 func StopRateLimiter() {
-	if v := globalRateLimiter.Load(); v != nil {
+	rateLimiters.Range(func(_, v interface{}) bool {
 		v.(*RateLimiter).Stop()
-	}
+		return true
+	})
 }
 
-// GetRateLimiter returns the global rate limiter for runtime updates.
-func GetRateLimiter() *RateLimiter {
-	if v := globalRateLimiter.Load(); v != nil {
+// GetRateLimiter returns a named rate limiter for runtime updates.
+func GetRateLimiter(name string) *RateLimiter {
+	if v, ok := rateLimiters.Load(name); ok {
 		return v.(*RateLimiter)
 	}
 	return nil
 }
 
-func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
+// RateLimitMiddleware creates a named rate limiter and returns a Gin handler.
+// Use different names for different tiers (e.g. "api", "login", "assets") so
+// each tier gets its own independent limiter.
+func RateLimitMiddleware(name string, rate int, interval time.Duration) gin.HandlerFunc {
 	limiter := NewRateLimiter(rate, interval)
-	globalRateLimiter.Store(limiter)
+	rateLimiters.Store(name, limiter)
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
