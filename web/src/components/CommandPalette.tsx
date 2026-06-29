@@ -49,24 +49,24 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     return acc;
   }, {});
 
-  const [prevOpen, setPrevOpen] = useState(open);
-  if (open && !prevOpen) {
-    setQuery('');
+  // Reset state when palette opens
+  useEffect(() => {
+    if (open) {
+      setQuery('');
+      setSelectedIndex(0);
+    }
+  }, [open]);
+
+  // Reset selection when query changes
+  useEffect(() => {
     setSelectedIndex(0);
-  }
-  if (prevOpen !== open) setPrevOpen(open);
+  }, [query]);
 
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
-
-  const [prevQuery, setPrevQuery] = useState(query);
-  if (prevQuery !== query) {
-    setPrevQuery(query);
-    setSelectedIndex(0);
-  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {

@@ -6,9 +6,9 @@ import (
 )
 
 type Runtime struct {
-	Lang       string   `json:"lang"`        // "node"
-	Display    string   `json:"display"`     // "Node.js"
-	MiseTool   string   `json:"mise_tool"`   // mise 插件名
+	Lang               string   `json:"lang"`        // "node"
+	Display            string   `json:"display"`     // "Node.js"
+	MiseTool           string   `json:"mise_tool"`   // mise 插件名
 	Majors             []string `json:"majors"`      // UI 可选的主版本列表
 	MirrorEnvs         []string `json:"mirror_envs"` // 该语言会用到的 env key（供镜像表 seed 使用）
 	SupportsGlobalPkgs bool     `json:"supports_global_pkgs"`
@@ -16,33 +16,33 @@ type Runtime struct {
 
 var catalog = []Runtime{
 	{
-		Lang:       "node",
-		Display:    "Node.js",
-		MiseTool:   "node",
+		Lang:               "node",
+		Display:            "Node.js",
+		MiseTool:           "node",
 		Majors:             []string{"16", "18", "20", "22", "24"},
 		MirrorEnvs:         []string{"MISE_NODE_MIRROR_URL"},
 		SupportsGlobalPkgs: true,
 	},
 	{
-		Lang:       "python",
-		Display:    "Python",
-		MiseTool:   "python",
+		Lang:               "python",
+		Display:            "Python",
+		MiseTool:           "python",
 		Majors:             []string{"3.10", "3.11", "3.12", "3.13", "3.14"},
 		MirrorEnvs:         []string{},
 		SupportsGlobalPkgs: true,
 	},
 	{
-		Lang:       "go",
-		Display:    "Go",
-		MiseTool:   "go",
+		Lang:               "go",
+		Display:            "Go",
+		MiseTool:           "go",
 		Majors:             []string{"1.22", "1.23", "1.24", "1.25", "1.26"},
 		MirrorEnvs:         []string{"MISE_GO_DOWNLOAD_MIRROR"},
 		SupportsGlobalPkgs: false,
 	},
 	{
-		Lang:       "java",
-		Display:    "Java",
-		MiseTool:   "vfox:version-fox/vfox-java",
+		Lang:               "java",
+		Display:            "Java",
+		MiseTool:           "vfox:version-fox/vfox-java",
 		Majors:             []string{"8", "11", "17", "21", "25"},
 		MirrorEnvs:         []string{},
 		SupportsGlobalPkgs: false,

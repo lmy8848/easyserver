@@ -4,6 +4,7 @@ import { LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../services/api';
 import { useAuthStore } from '../store/useAuthStore';
+import { COLORS } from '../utils/theme';
 
 const { Title } = Typography;
 
@@ -26,8 +27,8 @@ export default function ChangePassword() {
       localStorage.removeItem('must_change_pass');
       logout();
       navigate('/login', { replace: true });
-    } catch (error: any) {
-      message.error(error.message || '密码修改失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '密码修改失败'));
     } finally {
       setLoading(false);
     }
@@ -39,12 +40,12 @@ export default function ChangePassword() {
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: COLORS.LOGIN_BG,
     }}>
       <Card style={{ width: 400, boxShadow: '0 8px 32px rgba(0,0,0,0.1)' }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Title level={2} style={{ margin: 0 }}>修改密码</Title>
-          <p style={{ color: '#666' }}>首次登录请修改默认密码</p>
+          <p style={{ color: COLORS.TEXT_SECONDARY }}>首次登录请修改默认密码</p>
         </div>
 
         <Form

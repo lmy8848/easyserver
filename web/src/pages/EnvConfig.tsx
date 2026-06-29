@@ -86,8 +86,8 @@ export default function EnvConfig() {
       setEnvModalVisible(false);
       envForm.resetFields();
       fetchEnvConfigs();
-    } catch (error: any) {
-      message.error(error.message || '创建失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '创建失败'));
     }
   };
 
@@ -100,8 +100,8 @@ export default function EnvConfig() {
       setEditingEnv(null);
       envForm.resetFields();
       fetchEnvConfigs();
-    } catch (error: any) {
-      message.error(error.message || '更新失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '更新失败'));
     }
   };
 
@@ -110,8 +110,8 @@ export default function EnvConfig() {
       await api.delete(`/env-config/${id}`);
       message.success('环境变量删除成功');
       fetchEnvConfigs();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -122,8 +122,8 @@ export default function EnvConfig() {
       setPathModalVisible(false);
       pathForm.resetFields();
       fetchPathEntries();
-    } catch (error: any) {
-      message.error(error.message || '创建失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '创建失败'));
     }
   };
 
@@ -132,8 +132,8 @@ export default function EnvConfig() {
       await api.delete(`/env-config/path/${id}`);
       message.success('PATH 条目删除成功');
       fetchPathEntries();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -144,8 +144,8 @@ export default function EnvConfig() {
       setGlobalModalVisible(false);
       globalForm.resetFields();
       fetchGlobalConfigs(selectedCategory);
-    } catch (error: any) {
-      message.error(error.message || '创建失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '创建失败'));
     }
   };
 
@@ -158,8 +158,8 @@ export default function EnvConfig() {
       setEditingGlobal(null);
       globalForm.resetFields();
       fetchGlobalConfigs(selectedCategory);
-    } catch (error: any) {
-      message.error(error.message || '更新失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '更新失败'));
     }
   };
 
@@ -168,8 +168,8 @@ export default function EnvConfig() {
       await api.delete(`/global-config/${id}`);
       message.success('全局配置删除成功');
       fetchGlobalConfigs(selectedCategory);
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -192,7 +192,7 @@ export default function EnvConfig() {
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_: any, record: EnvConfig) => (
+      render: (_: unknown, record: EnvConfig) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditEnv(record)}>编辑</Button>
           <Popconfirm title="确定要删除吗？" onConfirm={() => handleDeleteEnv(record.id)}>
@@ -210,7 +210,7 @@ export default function EnvConfig() {
       title: '操作',
       key: 'action',
       width: 80,
-      render: (_: any, record: PathEntry) => (
+      render: (_: unknown, record: PathEntry) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Popconfirm title="确定要删除吗？" onConfirm={() => handleDeletePath(record.id)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
@@ -229,7 +229,7 @@ export default function EnvConfig() {
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_: any, record: GlobalConfig) => (
+      render: (_: unknown, record: GlobalConfig) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditGlobal(record)}>编辑</Button>
           <Popconfirm title="确定要删除吗？" onConfirm={() => handleDeleteGlobal(record.id)}>

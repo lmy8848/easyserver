@@ -112,7 +112,7 @@ func Load(path string) (*Config, error) {
 			IdleTimeout:            30 * time.Minute,
 			MaxLoginAttempts:       5,
 			LockoutDuration:        15 * time.Minute,
-			RateLimit:              100,
+			RateLimit:              1000,
 			RateInterval:           time.Minute,
 			SessionCleanupInterval: 5 * time.Minute,
 		},

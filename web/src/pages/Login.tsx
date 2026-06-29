@@ -4,10 +4,9 @@ import { UserOutlined, LockOutlined, SafetyOutlined, KeyOutlined } from '@ant-de
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../services/api';
+import { COLORS } from '../utils/theme';
 
 const { Title, Text } = Typography;
-
-const LOGIN_BACKGROUND = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
@@ -28,15 +27,14 @@ export default function Login() {
    * must_change_pass is stored on the user object from the server,
    * not in a separate localStorage key (prevents client tampering).
    */
-  const handleLoginSuccess = (data: { token: string; user: any; must_change_pass?: boolean }) => {
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
-
+  const handleLoginSuccess = (data: { token: string; user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
     useAuthStore.setState({
       user: { ...data.user, must_change_pass: data.must_change_pass },
       token: data.token,
       isAuthenticated: true,
     });
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data.user));
 
     message.success('登录成功');
 
@@ -60,8 +58,8 @@ export default function Login() {
       } else {
         handleLoginSuccess(data);
       }
-    } catch (error: any) {
-      message.error(error.message || '登录失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '登录失败'));
     } finally {
       setLoading(false);
     }
@@ -72,8 +70,8 @@ export default function Login() {
     try {
       const response = await authApi.verifyTOTP(tempToken, values.code);
       handleLoginSuccess(response.data.data);
-    } catch (error: any) {
-      message.error(error.message || '验证码错误');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '验证码错误'));
     } finally {
       setLoading(false);
     }
@@ -84,8 +82,8 @@ export default function Login() {
     try {
       const response = await authApi.verifyBackupCode(tempToken, values.backup_code);
       handleLoginSuccess(response.data.data);
-    } catch (error: any) {
-      message.error(error.message || '备份码错误');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '备份码错误'));
     } finally {
       setLoading(false);
     }
@@ -95,7 +93,7 @@ export default function Login() {
     <>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <Title level={2} style={{ margin: 0 }}>EasyServer</Title>
-        <p style={{ color: '#666' }}>Linux 服务器管理面板</p>
+        <p style={{ color: COLORS.TEXT_SECONDARY }}>Linux 服务器管理面板</p>
       </div>
 
       <Form
@@ -136,7 +134,7 @@ export default function Login() {
   const renderTOTPForm = () => (
     <>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <SafetyOutlined style={{ fontSize: 48, color: '#1890ff' }} />
+        <SafetyOutlined style={{ fontSize: 48, color: COLORS.PRIMARY }} />
         <Title level={3} style={{ marginTop: 16 }}>双因素验证</Title>
         <Text type="secondary">请输入验证器应用中的验证码</Text>
       </div>
@@ -188,7 +186,7 @@ export default function Login() {
   const renderBackupCodeForm = () => (
     <>
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <KeyOutlined style={{ fontSize: 48, color: '#1890ff' }} />
+        <KeyOutlined style={{ fontSize: 48, color: COLORS.PRIMARY }} />
         <Title level={3} style={{ marginTop: 16 }}>备份码验证</Title>
         <Text type="secondary">请输入您的备份码</Text>
       </div>
@@ -238,7 +236,7 @@ export default function Login() {
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '100vh',
-      background: LOGIN_BACKGROUND,
+      background: COLORS.LOGIN_BG,
     }}>
       <Card style={{ width: 400, boxShadow: '0 8px 32px rgba(0,0,0,0.1)' }}>
         {step === 'login' && renderLoginForm()}

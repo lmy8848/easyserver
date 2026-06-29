@@ -149,8 +149,8 @@ export default function Services() {
           break;
       }
       fetchServices();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     } finally {
       setActingService(null);
     }
@@ -177,8 +177,8 @@ export default function Services() {
       message.success(`已批量${actionNames[action]} ${selectedRowKeys.length} 个服务`);
       setSelectedRowKeys([]);
       fetchServices();
-    } catch (error: any) {
-      message.error(error.message || '批量操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '批量操作失败'));
     }
   };
 

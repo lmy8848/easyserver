@@ -18,7 +18,7 @@ export default function CloudTraffic({ selectedInstance }: Props) {
     try {
       const res = await cloudApi.getTraffic();
       setTrafficInfo(res.data?.data || null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch traffic:', error);
       setTrafficInfo(null);
     } finally {

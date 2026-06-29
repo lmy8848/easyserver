@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"easyserver/internal/alert"
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/cloud"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
@@ -332,6 +333,13 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 			return
 		}
 		h.cfg.Auth.RateInterval = d
+	}
+
+	// Sync rate limiter at runtime
+	if req.RateLimit != nil || req.RateInterval != nil {
+		if rl := middleware.GetRateLimiter(); rl != nil {
+			rl.UpdateRate(h.cfg.Auth.RateLimit, h.cfg.Auth.RateInterval)
+		}
 	}
 
 	// Save to config file

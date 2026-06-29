@@ -47,8 +47,8 @@ export default function SecuritySettings() {
     try {
       const response = await authApi.getSessions();
       setSessions(response.data.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取会话列表失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取会话列表失败'));
     } finally {
       setSessionsLoading(false);
     }
@@ -64,8 +64,8 @@ export default function SecuritySettings() {
       await authApi.kickSession(token);
       message.success('已踢出该会话');
       fetchSessions();
-    } catch (error: any) {
-      message.error(error.message || '踢出会话失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '踢出会话失败'));
     }
   };
 
@@ -74,8 +74,8 @@ export default function SecuritySettings() {
       await authApi.kickAllOtherSessions();
       message.success('已踢出所有其他会话');
       fetchSessions();
-    } catch (error: any) {
-      message.error(error.message || '踢出会话失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '踢出会话失败'));
     }
   };
 
@@ -86,8 +86,8 @@ export default function SecuritySettings() {
       setSetupData(response.data.data);
       setShowSetupModal(true);
       setSetupStep('qr');
-    } catch (error: any) {
-      message.error(error.message || 'Failed to setup TOTP');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : 'TOTP 设置失败'));
     } finally {
       setLoading(false);
     }
@@ -106,8 +106,8 @@ export default function SecuritySettings() {
       setSetupStep('backup');
       setTotpEnabled(true);
       message.success('2FA 已启用');
-    } catch (error: any) {
-      message.error(error.message || '验证码错误');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '验证码错误'));
     } finally {
       setLoading(false);
     }
@@ -126,8 +126,8 @@ export default function SecuritySettings() {
       setShowDisableModal(false);
       setDisablePassword('');
       message.success('2FA 已禁用');
-    } catch (error: any) {
-      message.error(error.message || '密码错误');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '密码错误'));
     } finally {
       setLoading(false);
     }
@@ -367,7 +367,7 @@ export default function SecuritySettings() {
             { title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 180,
               render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
             { title: '操作', key: 'action', width: 100,
-              render: (_: any, record: Session) => (
+              render: (_: unknown, record: Session) => (
                 record.token ? (
                   <Popconfirm
                     title="确定要踢出此设备？"

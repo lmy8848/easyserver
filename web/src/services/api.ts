@@ -60,7 +60,8 @@ api.interceptors.response.use(
         import('antd').then(({ message }) => message.warning(msg));
       }
 
-      return Promise.reject(data);
+      // Pass through original error so catch blocks can inspect error.response?.status
+      return Promise.reject(error);
     }
     return Promise.reject(error);
   }
@@ -116,8 +117,8 @@ export const monitorApi = {
   getStats: () =>
     api.get<ApiResponse<MonitorSnapshot>>('/monitor/stats'),
 
-  getHistory: (start?: string, end?: string) =>
-    api.get<ApiResponse<{ points: HistoryPoint[] }>>('/monitor/history', { params: { start, end } }),
+  getHistory: (start?: string, end?: string, signal?: AbortSignal) =>
+    api.get<ApiResponse<{ points: HistoryPoint[] }>>('/monitor/history', { params: { start, end }, signal }),
 };
 
 // Service API

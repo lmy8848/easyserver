@@ -69,7 +69,7 @@ export default function FirewallTemplates({
             title: '操作',
             key: 'op',
             width: 80,
-            render: (_: any, record: FirewallRuleTemplate) => (
+            render: (_: unknown, record: FirewallRuleTemplate) => (
               <Button type="link" size="small" onClick={() => onApply(record)}>
                 应用
               </Button>

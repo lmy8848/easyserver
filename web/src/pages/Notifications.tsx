@@ -59,8 +59,8 @@ export default function Notifications() {
       }
 
       setNotifications(data);
-    } catch (error: any) {
-      message.error(error.message || '获取通知失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取通知失败'));
     } finally {
       setLoading(false);
     }
@@ -76,8 +76,8 @@ export default function Notifications() {
       setNotifications(prev =>
         prev.map(n => n.id === id ? { ...n, is_read: true } : n)
       );
-    } catch (error: any) {
-      message.error(error.message || '标记失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '标记失败'));
     }
   };
 
@@ -86,8 +86,8 @@ export default function Notifications() {
       await notificationApi.markAllAsRead();
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
       message.success('全部已读');
-    } catch (error: any) {
-      message.error(error.message || '标记失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '标记失败'));
     }
   };
 
@@ -96,8 +96,8 @@ export default function Notifications() {
       await notificationApi.delete(id);
       setNotifications(prev => prev.filter(n => n.id !== id));
       message.success('已删除');
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 

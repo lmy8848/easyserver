@@ -40,9 +40,9 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         message.success('服务器配置已保存');
       }
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     } finally {
       setSaving(false);
@@ -64,8 +64,8 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
           setTimeout(() => {
             window.location.reload();
           }, 3000);
-        } catch (error: any) {
-          message.error(error.message || '重启失败');
+        } catch (error: unknown) {
+          message.error((error instanceof Error ? error.message : '重启失败'));
           setRestarting(false);
         }
       },

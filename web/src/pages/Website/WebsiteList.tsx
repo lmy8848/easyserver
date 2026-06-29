@@ -135,8 +135,8 @@ export default function WebsiteList({
       const data = res.data.data;
       setDirBrowserPath(data?.current || path);
       setDirEntries(data?.entries || []);
-    } catch (error: any) {
-      message.error(error.message || '无法浏览目录');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '无法浏览目录'));
     } finally {
       setDirLoading(false);
     }
@@ -194,8 +194,8 @@ export default function WebsiteList({
       setModalVisible(false);
       setSitesLoading(true);
       fetchWebsites();
-    } catch (error: any) {
-      if (error.message) message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -205,8 +205,8 @@ export default function WebsiteList({
       message.success('删除成功');
       setSitesLoading(true);
       fetchWebsites();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -221,8 +221,8 @@ export default function WebsiteList({
       }
       setSitesLoading(true);
       fetchWebsites();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     }
   };
 
@@ -235,8 +235,8 @@ export default function WebsiteList({
     try {
       const res = await websiteApi.getLogs(selectedServer.id, site.id, type, 200);
       setLogContent(res.data.data?.logs || '(empty)');
-    } catch (error: any) {
-      setLogContent('Failed to load logs: ' + (error.message || 'unknown'));
+    } catch (error: unknown) {
+      setLogContent('Failed to load logs: ' + ((error instanceof Error ? error.message : 'unknown')));
     } finally {
       setLogLoading(false);
     }
@@ -258,8 +258,8 @@ export default function WebsiteList({
       message.success('SSL 证书申请成功');
       setSslVisible(false);
       fetchWebsites();
-    } catch (error: any) {
-      message.error(error.message || 'SSL 申请失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : 'SSL 申请失败'));
     }
   };
 

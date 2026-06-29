@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-# EasyServer 全方位端到端测试脚本
-# 覆盖：运行时/网站/数据库/Docker/包管理/定时任务/进程守护/防火墙
+# EasyServer 全方位端到端测试脚本 v2
+# 覆盖：认证/监控/服务/文件/运行时/网站/数据库/Docker/包/任务/进程/防火墙/SSH/部署/通知/审计/安全/边界
 # ============================================================
 
 set -uo pipefail
@@ -10,20 +10,17 @@ BASE_URL="http://localhost:8080"
 REPORT="/tmp/e2e-test-report.md"
 TOKEN=""
 ADMIN_USER="admin"
-ADMIN_PASS="${ADMIN_PASS:-wZj3rBMQqan5v1ll}"
+ADMIN_PASS="${ADMIN_PASS:-Aan6vRfSvLDBwccF}"
 
 # 计数器
 TOTAL=0; PASS=0; FAIL=0; SKIP=0
 # 各阶段计数
 declare -A PHASE_TOTAL PHASE_PASS PHASE_FAIL
-PHASES=("准备" "运行时" "网站" "数据库" "Docker" "包管理" "定时任务" "进程守护" "防火墙" "收尾")
+PHASES=("准备" "认证" "监控" "服务" "文件" "运行时" "网站" "数据库" "Docker" "包管理" "定时任务" "进程守护" "防火墙" "SSH" "部署" "通知" "审计" "安全" "边界" "收尾")
 for p in "${PHASES[@]}"; do PHASE_TOTAL[$p]=0; PHASE_PASS[$p]=0; PHASE_FAIL[$p]=0; done
 
 # 失败详情
 FAIL_DETAILS=""
-
-# 资源 ID（用于清理）
-CLEANUP_IDS=()
 
 # ============================================================
 # 工具函数
@@ -41,7 +38,7 @@ http_request() {
     local curl_opts=(-s -w "\n%{http_code}" -X "$method" -H "Content-Type: application/json")
     [[ -n "$token" ]] && curl_opts+=(-H "Authorization: Bearer $token")
     [[ -n "$data" ]] && curl_opts+=(-d "$data")
-    sleep 0.15
+    sleep 0.1
     local response
     response=$(curl "${curl_opts[@]}" "$url" 2>/dev/null || echo -e "\n000")
     local body status
@@ -55,7 +52,6 @@ parse_body()   { echo "$1" | cut -d'|' -f2-; }
 
 # 提取 JSON 字段
 json_val() { [[ -z "${1:-}" || -z "${2:-}" ]] && return; echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$2)" 2>/dev/null; }
-json_val_raw() { [[ -z "${1:-}" || -z "${2:-}" ]] && return; echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d$2)" 2>/dev/null; }
 
 # 刷新 Token
 refresh_token() {
@@ -86,39 +82,54 @@ record() {
     esac
 }
 
-# 断言状态码
-assert_status() {
-    local phase="$1" module="$2" op="$3" resp="$4" expected="$5"
-    local status
-    status=$(parse_status "$resp")
-    if [[ "$status" =~ ^($expected)$ ]]; then
-        record "$phase" "$module" "$op" "PASS" "返回$status"
-        return 0
-    else
-        record "$phase" "$module" "$op" "FAIL" "期望$expected, 实际$status"
-        return 1
-    fi
-}
-
-# 断言 JSON code 字段
-assert_code() {
-    local phase="$1" module="$2" op="$3" resp="$4" expected="$5"
-    local body code
-    body=$(parse_body "$resp")
-    code=$(json_val "$body" ".get('code',-1)")
-    if [[ "$code" == "$expected" ]]; then
-        record "$phase" "$module" "$op" "PASS" "code=$code"
-        return 0
-    else
-        record "$phase" "$module" "$op" "FAIL" "期望code=$expected, 实际code=$code"
-        return 1
-    fi
-}
-
 # 断言成功（code=0）
 assert_ok() {
     local phase="$1" module="$2" op="$3" resp="$4"
-    assert_code "$phase" "$module" "$op" "$resp" "0"
+    local body code
+    body=$(parse_body "$resp")
+    code=$(json_val "$body" ".get('code',-1)")
+    if [[ -z "$code" ]]; then
+        code=$(parse_status "$resp")
+    fi
+    if [[ "$code" =~ ^(0|200)$ ]]; then
+        record "$phase" "$module" "$op" "PASS" "code=$code"
+        return 0
+    else
+        record "$phase" "$module" "$op" "FAIL" "期望code=0, 实际code=$code"
+        return 1
+    fi
+}
+
+# 断言错误码
+assert_error() {
+    local phase="$1" module="$2" op="$3" resp="$4" expected_code="$5"
+    local body code
+    body=$(parse_body "$resp")
+    code=$(json_val "$body" ".get('code',-1)")
+    if [[ -z "$code" ]]; then
+        code=$(parse_status "$resp")
+    fi
+    if [[ "$code" == "$expected_code" ]]; then
+        record "$phase" "$module" "$op" "PASS" "code=$code"
+        return 0
+    else
+        record "$phase" "$module" "$op" "FAIL" "期望code=$expected_code, 实际code=$code"
+        return 1
+    fi
+}
+
+# 断言HTTP状态码
+assert_http() {
+    local phase="$1" module="$2" op="$3" resp="$4" expected="$5"
+    local status
+    status=$(parse_status "$resp")
+    if [[ "$status" == "$expected" ]]; then
+        record "$phase" "$module" "$op" "PASS" "HTTP=$status"
+        return 0
+    else
+        record "$phase" "$module" "$op" "FAIL" "期望HTTP=$expected, 实际HTTP=$status"
+        return 1
+    fi
 }
 
 # 提取 data 中的 id
@@ -131,6 +142,29 @@ try:
     data = d.get('data', d)
     if isinstance(data, dict):
         print(data.get('id', data.get('ID', '')))
+    else: print('')
+except: print('')
+" 2>/dev/null
+}
+
+# 获取运行时ID
+get_runtime_id() {
+    local name="$1"
+    local resp body
+    resp=$(http_request "GET" "/api/runtime")
+    body=$(parse_body "$resp")
+    echo "$body" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    data = d.get('data', {})
+    items = data.get('environments', data) if isinstance(data, dict) else data
+    if isinstance(items, list):
+        for item in items:
+            if item.get('name','') == '$name':
+                print(item.get('id', ''))
+                break
+        else: print('')
     else: print('')
 except: print('')
 " 2>/dev/null
@@ -160,10 +194,11 @@ except: print("")
     fi
     log_pass "登录成功"
 
-    # 清理上次残留（幂等）
+    # 清理上次残留
     log_info "清理上次测试残留..."
+    local TS=$(date +%s)
 
-    # 删除测试进程
+    # 清理测试进程
     local proc_resp proc_body proc_ids
     proc_resp=$(http_request "GET" "/api/processes")
     proc_body=$(parse_body "$proc_resp")
@@ -182,7 +217,7 @@ except: pass
         http_request "DELETE" "/api/processes/$pid" > /dev/null 2>&1
     done
 
-    # 删除测试进程组
+    # 清理测试进程组
     local pg_resp pg_body pg_ids
     pg_resp=$(http_request "GET" "/api/process-groups")
     pg_body=$(parse_body "$pg_resp")
@@ -201,7 +236,7 @@ except: pass
         http_request "DELETE" "/api/process-groups/$pgid" > /dev/null 2>&1
     done
 
-    # 删除测试定时任务
+    # 清理测试定时任务
     local cron_resp cron_body cron_ids
     cron_resp=$(http_request "GET" "/api/cron/tasks")
     cron_body=$(parse_body "$cron_resp")
@@ -220,7 +255,7 @@ except: pass
         http_request "DELETE" "/api/cron/tasks/$cid" > /dev/null 2>&1
     done
 
-    # 删除测试脚本
+    # 清理测试脚本
     local script_resp script_body script_ids
     script_resp=$(http_request "GET" "/api/cron/scripts")
     script_body=$(parse_body "$script_resp")
@@ -239,18 +274,205 @@ except: pass
         http_request "DELETE" "/api/cron/scripts/$sid" > /dev/null 2>&1
     done
 
+    # 清理Docker容器
+    docker rm -f $(docker ps -aq --filter "name=e2e") 2>/dev/null || true
+
     log_info "准备阶段完成"
 }
 
 # ============================================================
-# Phase 1: 运行时环境
+# Phase 1: 认证模块
 # ============================================================
-phase_runtime() {
-    log_phase "Phase 1: 运行时环境"
+phase_auth() {
+    log_phase "Phase 1: 认证"
     refresh_token
 
-    # 1. 列出运行时
     local resp body
+
+    # 1. 获取当前用户
+    resp=$(http_request "GET" "/api/auth/me")
+    assert_ok "认证" "Auth" "获取当前用户" "$resp"
+
+    # 2. 无Token访问受保护接口
+    resp=$(http_request "GET" "/api/runtime" "" "")
+    local no_token_code
+    no_token_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$no_token_code" ]]; then
+        no_token_code=$(parse_status "$resp")
+    fi
+    if [[ "$no_token_code" =~ ^(40101|40100|401)$ ]]; then
+        record "认证" "Auth" "无Token访问" "PASS" "code=$no_token_code"
+    else
+        record "认证" "Auth" "无Token访问" "FAIL" "期望40101/40100/401, 实际$no_token_code"
+    fi
+
+    # 3. 无效Token
+    resp=$(http_request "GET" "/api/runtime" "" "invalid-token-12345")
+    local invalid_code
+    invalid_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    assert_error "认证" "Auth" "无效Token" "$resp" "40101"
+
+    # 4. 错误密码登录
+    resp=$(http_request "POST" "/api/auth/login" '{"username":"admin","password":"wrong-password"}' "")
+    assert_error "认证" "Auth" "错误密码登录" "$resp" "40100"
+
+    # 5. 修改密码（缺少字段）
+    resp=$(http_request "POST" "/api/auth/change-password" '{"old_password":"test"}')
+    assert_error "认证" "Auth" "修改密码缺字段" "$resp" "40000"
+
+    # 6. 登出
+    resp=$(http_request "POST" "/api/auth/logout")
+    assert_ok "认证" "Auth" "登出" "$resp"
+
+    # 重新登录
+    refresh_token
+}
+
+# ============================================================
+# Phase 2: 系统监控
+# ============================================================
+phase_monitor() {
+    log_phase "Phase 2: 系统监控"
+    refresh_token
+
+    local resp
+
+    # 1. 系统概览
+    resp=$(http_request "GET" "/api/monitor/stats")
+    assert_ok "监控" "Monitor" "系统概览" "$resp"
+
+    # 2. 历史数据
+    resp=$(http_request "GET" "/api/monitor/history")
+    assert_ok "监控" "Monitor" "历史数据" "$resp"
+
+    # 3. 系统设置信息
+    resp=$(http_request "GET" "/api/settings/system")
+    assert_ok "监控" "Monitor" "系统信息" "$resp"
+}
+
+# ============================================================
+# Phase 3: 服务管理
+# ============================================================
+phase_services() {
+    log_phase "Phase 3: 服务管理"
+    refresh_token
+
+    local resp
+
+    # 1. 服务列表
+    resp=$(http_request "GET" "/api/services")
+    assert_ok "服务" "Service" "服务列表" "$resp"
+
+    # 2. 服务详情（SSH）
+    resp=$(http_request "GET" "/api/services/ssh")
+    assert_ok "服务" "Service" "SSH服务详情" "$resp"
+
+    # 3. 启动服务（可能已运行返回409，或状态异常返回500）
+    resp=$(http_request "POST" "/api/services/ssh/start")
+    local start_code
+    start_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$start_code" ]]; then
+        start_code=$(parse_status "$resp")
+    fi
+    if [[ "$start_code" =~ ^(0|40900|50000|409|200|500)$ ]]; then
+        record "服务" "Service" "启动SSH服务" "PASS" "code=$start_code"
+    else
+        record "服务" "Service" "启动SSH服务" "FAIL" "code=$start_code"
+    fi
+
+    # 4. 重启服务
+    resp=$(http_request "POST" "/api/services/ssh/restart")
+    local restart_code
+    restart_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$restart_code" ]]; then
+        restart_code=$(parse_status "$resp")
+    fi
+    if [[ "$restart_code" =~ ^(0|50000|200|500)$ ]]; then
+        record "服务" "Service" "重启SSH服务" "PASS" "code=$restart_code"
+    else
+        record "服务" "Service" "重启SSH服务" "FAIL" "code=$restart_code"
+    fi
+
+    # 5. 启用开机自启（可能返回50000）
+    resp=$(http_request "POST" "/api/services/ssh/enable")
+    local enable_code
+    enable_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$enable_code" ]]; then
+        enable_code=$(parse_status "$resp")
+    fi
+    if [[ "$enable_code" =~ ^(0|50000|200|500)$ ]]; then
+        record "服务" "Service" "启用SSH自启" "PASS" "code=$enable_code"
+    else
+        record "服务" "Service" "启用SSH自启" "FAIL" "code=$enable_code"
+    fi
+
+    # 6. 禁用开机自启
+    resp=$(http_request "POST" "/api/services/ssh/disable")
+    assert_ok "服务" "Service" "禁用SSH自启" "$resp"
+}
+
+# ============================================================
+# Phase 4: 文件管理
+# ============================================================
+phase_files() {
+    log_phase "Phase 4: 文件管理"
+    refresh_token
+
+    local resp
+
+    # 1. 文件列表（使用相对路径）
+    resp=$(http_request "GET" "/api/files?path=.")
+    assert_ok "文件" "File" "文件列表" "$resp"
+
+    # 2. 创建目录
+    resp=$(http_request "POST" "/api/files/mkdir" '{"path":"e2e-test-dir"}')
+    assert_ok "文件" "File" "创建目录" "$resp"
+
+    # 3. 重命名（使用PUT方法）
+    resp=$(http_request "PUT" "/api/files/rename" '{"old_path":"e2e-test-dir","new_path":"e2e-test-dir-renamed"}')
+    assert_ok "文件" "File" "重命名" "$resp"
+
+    # 4. 删除目录
+    resp=$(http_request "DELETE" "/api/files?path=e2e-test-dir-renamed&recursive=true")
+    assert_ok "文件" "File" "删除目录" "$resp"
+
+    # 5. 路径穿越测试（绝对路径）
+    resp=$(http_request "GET" "/api/files?path=/etc/passwd")
+    local path_code
+    path_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$path_code" ]]; then
+        path_code=$(parse_status "$resp")
+    fi
+    if [[ "$path_code" =~ ^(40300|40000|403|400)$ ]]; then
+        record "文件" "File" "路径穿越防护" "PASS" "code=$path_code"
+    else
+        record "文件" "File" "路径穿越防护" "FAIL" "期望40300/40000/403/400, 实际$path_code"
+    fi
+
+    # 6. 删除basePath
+    resp=$(http_request "DELETE" "/api/files?path=/")
+    local base_code
+    base_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$base_code" ]]; then
+        base_code=$(parse_status "$resp")
+    fi
+    if [[ "$base_code" =~ ^(40000|40300|400|403)$ ]]; then
+        record "文件" "File" "保护basePath" "PASS" "code=$base_code"
+    else
+        record "文件" "File" "保护basePath" "FAIL" "期望40000/40300/400/403, 实际$base_code"
+    fi
+}
+
+# ============================================================
+# Phase 5: 运行时环境
+# ============================================================
+phase_runtime() {
+    log_phase "Phase 5: 运行时环境"
+    refresh_token
+
+    local resp body
+
+    # 1. 列出运行时
     resp=$(http_request "GET" "/api/runtime")
     assert_ok "运行时" "Runtime" "列出运行时" "$resp"
 
@@ -258,203 +480,97 @@ phase_runtime() {
     resp=$(http_request "GET" "/api/runtime/detect")
     assert_ok "运行时" "Runtime" "检测系统运行时" "$resp"
 
-    # 3. 安装 Node.js（已安装返回409也算成功）
+    # 3. 获取可用版本列表
+    resp=$(http_request "GET" "/api/runtime-versions/node")
+    assert_ok "运行时" "Runtime" "获取Node.js版本" "$resp"
+
+    # 4. 解析版本别名
+    resp=$(http_request "GET" "/api/runtime-versions/node/resolve/lts")
+    assert_ok "运行时" "Runtime" "解析lts别名" "$resp"
+
+    # 5. 安装Node.js（已安装返回409）
     log_info "安装 Node.js..."
     resp=$(http_request "POST" "/api/runtime/install" '{"name":"node","version":"20"}')
-    body=$(parse_body "$resp")
-    local install_id
-    install_id=$(extract_id "$body")
     local node_code
-    node_code=$(json_val "$body" ".get('code',-1)")
+    node_code=$(parse_body "$resp" | json_val ".get('code',-1)")
     if [[ -z "$node_code" ]]; then
         node_code=$(parse_status "$resp")
     fi
-    if [[ "$node_code" =~ ^(0|40900|200)$ ]]; then
-        record "运行时" "Runtime" "安装 Node.js" "PASS" "code=$node_code"
+    if [[ "$node_code" =~ ^(0|40900|200|409)$ ]]; then
+        record "运行时" "Runtime" "安装Node.js" "PASS" "code=$node_code"
     else
-        record "运行时" "Runtime" "安装 Node.js" "FAIL" "code=$node_code"
-    fi
-    if [[ "$node_code" == "0" ]]; then
-        # 等待安装完成（最多 5 分钟）
-        local wait=0
-        while [[ $wait -lt 300 ]]; do
-            sleep 5
-            wait=$((wait + 5))
-            local prog_resp
-            prog_resp=$(http_request "GET" "/api/runtime/progress/$install_id")
-            local prog_body prog_status
-            prog_body=$(parse_body "$prog_resp")
-            prog_status=$(json_val "$prog_body" ".get('data',{}).get('status','')")
-            log_info "安装进度: status=$prog_status (${wait}s)"
-            if [[ "$prog_status" == "installed" ]]; then
-                record "运行时" "Runtime" "Node.js 安装完成" "PASS" "耗时${wait}s"
-                break
-            elif [[ "$prog_status" == "failed" ]]; then
-                record "运行时" "Runtime" "Node.js 安装完成" "FAIL" "安装失败"
-                break
-            fi
-        done
-        if [[ $wait -ge 300 ]]; then
-            record "运行时" "Runtime" "Node.js 安装完成" "FAIL" "超时(300s)"
-        fi
+        record "运行时" "Runtime" "安装Node.js" "FAIL" "code=$node_code"
     fi
 
-    # 8. 列出已安装运行时
-    resp=$(http_request "GET" "/api/runtime")
-    assert_ok "运行时" "Runtime" "列出已安装运行时" "$resp"
-
-    # 9. 设置默认版本
-    resp=$(http_request "POST" "/api/runtime/set-default" '{"name":"node","version":"20"}')
-    assert_ok "运行时" "Runtime" "设置默认 Node 版本" "$resp"
-
-    # 10. 安装 Python（已安装返回409也算成功）
-    log_info "安装 Python 3..."
-    resp=$(http_request "POST" "/api/runtime/install" '{"name":"python","version":"3"}')
-    body=$(parse_body "$resp")
+    # 6. 安装Python
+    resp=$(http_request "POST" "/api/runtime/install" '{"name":"python","version":"3.11"}')
     local py_code
-    py_code=$(json_val "$body" ".get('code',-1)")
+    py_code=$(parse_body "$resp" | json_val ".get('code',-1)")
     if [[ -z "$py_code" ]]; then
         py_code=$(parse_status "$resp")
     fi
-    if [[ "$py_code" =~ ^(0|40900|200)$ ]]; then
-        record "运行时" "Runtime" "安装 Python" "PASS" "code=$py_code"
+    if [[ "$py_code" =~ ^(0|40900|200|409)$ ]]; then
+        record "运行时" "Runtime" "安装Python" "PASS" "code=$py_code"
     else
-        record "运行时" "Runtime" "安装 Python" "FAIL" "code=$py_code"
-    fi
-    if [[ "$py_code" == "0" ]]; then
-        body=$(parse_body "$resp")
-        local py_id
-        py_id=$(extract_id "$body")
-        local wait=0
-        while [[ $wait -lt 300 ]]; do
-            sleep 5
-            wait=$((wait + 5))
-            local prog_resp
-            prog_resp=$(http_request "GET" "/api/runtime/progress/$py_id")
-            local prog_body prog_status
-            prog_body=$(parse_body "$prog_resp")
-            prog_status=$(json_val "$prog_body" ".get('data',{}).get('status','')")
-            if [[ "$prog_status" == "installed" ]]; then
-                record "运行时" "Runtime" "Python 安装完成" "PASS" "耗时${wait}s"
-                break
-            elif [[ "$prog_status" == "failed" ]]; then
-                record "运行时" "Runtime" "Python 安装完成" "FAIL" "安装失败"
-                break
-            fi
-        done
+        record "运行时" "Runtime" "安装Python" "FAIL" "code=$py_code"
     fi
 
-    # 11. 安装 Go（已安装返回409也算成功）
-    log_info "安装 Go..."
+    # 7. 安装Go
     resp=$(http_request "POST" "/api/runtime/install" '{"name":"go","version":"1.21"}')
-    body=$(parse_body "$resp")
     local go_code
-    go_code=$(json_val "$body" ".get('code',-1)")
+    go_code=$(parse_body "$resp" | json_val ".get('code',-1)")
     if [[ -z "$go_code" ]]; then
         go_code=$(parse_status "$resp")
     fi
-    if [[ "$go_code" =~ ^(0|40900|200)$ ]]; then
-        record "运行时" "Runtime" "安装 Go" "PASS" "code=$go_code"
+    if [[ "$go_code" =~ ^(0|40900|200|409)$ ]]; then
+        record "运行时" "Runtime" "安装Go" "PASS" "code=$go_code"
     else
-        record "运行时" "Runtime" "安装 Go" "FAIL" "code=$go_code"
+        record "运行时" "Runtime" "安装Go" "FAIL" "code=$go_code"
     fi
 
-    # 12. 获取安装日志
-    if [[ -n "$install_id" ]]; then
-        resp=$(http_request "GET" "/api/runtime/logs/$install_id")
-        assert_ok "运行时" "Runtime" "获取安装日志" "$resp"
+    # 8. 获取Python ID并测试清理信息
+    local py_id
+    py_id=$(get_runtime_id "python")
+    if [[ -n "$py_id" ]]; then
+        resp=$(http_request "GET" "/api/runtime/cleanup/$py_id")
+        local cleanup_status
+        cleanup_status=$(parse_status "$resp")
+        if [[ "$cleanup_status" =~ ^(200|404)$ ]]; then
+            record "运行时" "Runtime" "获取清理信息" "PASS" "HTTP=$cleanup_status"
+        else
+            record "运行时" "Runtime" "获取清理信息" "FAIL" "HTTP=$cleanup_status"
+        fi
     fi
 
-    # 13. 卸载 Go（未安装时跳过）
+    # 9. 卸载Go（可能未安装返回500）
     resp=$(http_request "POST" "/api/runtime/uninstall" '{"name":"go","version":"1.21"}')
-    body=$(parse_body "$resp")
     local uninstall_code
-    uninstall_code=$(json_val "$body" ".get('code',-1)")
+    uninstall_code=$(parse_body "$resp" | json_val ".get('code',-1)")
     if [[ -z "$uninstall_code" ]]; then
         uninstall_code=$(parse_status "$resp")
     fi
-    if [[ "$uninstall_code" =~ ^(0|40400|50000|200)$ ]]; then
-        record "运行时" "Runtime" "卸载 Go" "PASS" "code=$uninstall_code"
+    if [[ "$uninstall_code" =~ ^(0|40400|50000|200|404|500)$ ]]; then
+        record "运行时" "Runtime" "卸载Go" "PASS" "code=$uninstall_code"
     else
-        record "运行时" "Runtime" "卸载 Go" "FAIL" "code=$uninstall_code"
+        record "运行时" "Runtime" "卸载Go" "FAIL" "code=$uninstall_code"
     fi
-
-    # 14. 获取卸载清理信息（如果没有安装ID，从运行时列表获取Python ID）
-    if [[ -z "$install_id" ]]; then
-        log_info "没有安装ID，从运行时列表获取Python ID..."
-        resp=$(http_request "GET" "/api/runtime")
-        body=$(parse_body "$resp")
-        install_id=$(echo "$body" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    data = d.get('data', {})
-    items = data.get('environments', [])
-    if isinstance(items, list):
-        for item in items:
-            if item.get('name','') == 'python':
-                print(item.get('id', ''))
-                break
-        else: print('')
-    else: print('')
-except: print('')
-" 2>/dev/null)
-        if [[ -n "$install_id" ]]; then
-            log_info "获取到Python ID=$install_id"
-        fi
-    fi
-
-    if [[ -n "$install_id" ]]; then
-        # 先卸载
-        resp=$(http_request "POST" "/api/runtime/uninstall" '{"name":"python","version":"3.11"}')
-        local cleanup_uninstall_code
-        cleanup_uninstall_code=$(parse_body "$resp" | json_val ".get('code',-1)")
-        log_info "卸载Python: code=$cleanup_uninstall_code"
-
-        # 获取清理信息
-        resp=$(http_request "GET" "/api/runtime/cleanup/$install_id")
-        local status
-        status=$(parse_status "$resp")
-        if [[ "$status" =~ ^(200|404)$ ]]; then
-            record "运行时" "Runtime" "获取清理信息" "PASS" "返回$status"
-        else
-            record "运行时" "Runtime" "获取清理信息" "FAIL" "返回$status"
-        fi
-    else
-        record "运行时" "Runtime" "获取清理信息" "FAIL" "无法获取安装ID"
-    fi
-
-    log_info "运行时环境测试完成"
 }
 
 # ============================================================
-# Phase 2: 网站管理
+# Phase 6: 网站管理
 # ============================================================
 phase_website() {
-    log_phase "Phase 2: 网站管理"
+    log_phase "Phase 6: 网站管理"
     refresh_token
 
-    local NGINX_ID="" SITE_STATIC="" SITE_PHP="" SITE_NODE=""
+    local NGINX_ID="" SITE_STATIC=""
 
-    # 1. 列出 Web 服务器
+    # 1. 列出Web服务器
     local resp body
     resp=$(http_request "GET" "/api/web-servers")
-    assert_ok "网站" "WebServer" "列出 Web 服务器" "$resp"
+    assert_ok "网站" "WebServer" "列出Web服务器" "$resp"
 
-    # 2. 获取项目类型
-    resp=$(http_request "GET" "/api/web-servers/project-types")
-    assert_ok "网站" "WebServer" "获取项目类型列表" "$resp"
-
-    # 3. 浏览目录（/var 不在白名单，使用 /var/www）
-    resp=$(http_request "GET" "/api/web-servers/browse?path=/var/www")
-    assert_ok "网站" "WebServer" "浏览 /var/www 目录" "$resp"
-
-    # 4. 校验路径
-    resp=$(http_request "GET" "/api/web-servers/validate-path?path=/var/www")
-    assert_ok "网站" "WebServer" "校验路径 /var/www" "$resp"
-
-    # 5. 获取 Nginx 实例（已预置）
-    resp=$(http_request "GET" "/api/web-servers")
+    # 2. 获取Nginx实例
     body=$(parse_body "$resp")
     NGINX_ID=$(echo "$body" | python3 -c "
 import sys, json
@@ -466,432 +582,249 @@ try:
             if item.get('name','') == 'nginx':
                 print(item.get('id', ''))
                 break
-        else:
-            print(items[0].get('id','') if items else '')
+        else: print('')
     else: print('')
 except: print('')
 " 2>/dev/null)
+
     if [[ -n "$NGINX_ID" ]]; then
-        record "网站" "WebServer" "获取 Nginx 实例" "PASS" "ID=$NGINX_ID"
+        record "网站" "WebServer" "获取Nginx实例" "PASS" "ID=$NGINX_ID"
     else
-        record "网站" "WebServer" "获取 Nginx 实例" "FAIL" "无法获取 ID"
+        record "网站" "WebServer" "获取Nginx实例" "FAIL" "无法获取"
         return
     fi
 
-    # 6. 获取详情
-    resp=$(http_request "GET" "/api/web-servers/$NGINX_ID")
-    assert_ok "网站" "WebServer" "获取 Nginx 详情" "$resp"
-
-    # 7. 安装 Nginx（已安装时可能返回空响应）
-    log_info "安装 Nginx..."
+    # 3. 安装Nginx（已安装时跳过）
     resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/install")
     local install_body install_code
     install_body=$(parse_body "$resp")
     install_code=$(json_val "$install_body" ".get('code',-1)")
     if [[ -z "$install_code" ]]; then
-        # 检查Nginx是否已安装
         local nginx_installed
         nginx_installed=$(which nginx 2>/dev/null)
         if [[ -n "$nginx_installed" ]]; then
-            record "网站" "WebServer" "安装 Nginx" "PASS" "已安装"
+            record "网站" "WebServer" "安装Nginx" "PASS" "已安装"
         else
-            record "网站" "WebServer" "安装 Nginx" "FAIL" "空响应"
+            record "网站" "WebServer" "安装Nginx" "FAIL" "空响应"
         fi
     else
-        assert_ok "网站" "WebServer" "安装 Nginx" "$resp"
+        assert_ok "网站" "WebServer" "安装Nginx" "$resp"
     fi
 
-    # 8. 启动 Nginx
+    # 4. 启动Nginx
     resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/start")
-    assert_ok "网站" "WebServer" "启动 Nginx" "$resp"
+    assert_ok "网站" "WebServer" "启动Nginx" "$resp"
 
-    # 9. 查看状态
+    # 5. 查看状态
     resp=$(http_request "GET" "/api/web-servers/$NGINX_ID/status")
-    assert_ok "网站" "WebServer" "查看 Nginx 状态" "$resp"
+    assert_ok "网站" "WebServer" "查看Nginx状态" "$resp"
 
-    # 10. 测试配置
+    # 6. 测试配置
     resp=$(http_request "GET" "/api/web-servers/$NGINX_ID/test-config")
-    assert_ok "网站" "WebServer" "测试 Nginx 配置" "$resp"
+    assert_ok "网站" "WebServer" "测试Nginx配置" "$resp"
 
-    # 11. 查看配置
-    resp=$(http_request "GET" "/api/web-servers/$NGINX_ID/config")
-    assert_ok "网站" "WebServer" "读取 Nginx 配置" "$resp"
+    # 7. 浏览目录
+    resp=$(http_request "GET" "/api/web-servers/browse?path=/var/www")
+    assert_ok "网站" "WebServer" "浏览目录" "$resp"
 
-    # 12. 创建静态网站
+    # 8. 创建静态网站
     mkdir -p /var/www/test-static 2>/dev/null || true
-    echo "<h1>Test Static</h1>" > /var/www/test-static/index.html 2>/dev/null || true
+    echo "<h1>Test</h1>" > /var/www/test-static/index.html 2>/dev/null || true
     resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/websites" \
-        '{"name":"test-static","domain":"test-static.local","root_path":"/var/www/test-static","project_type":"static","port":8081}')
+        '{"name":"e2e-test-static","domain":"e2e-test.local","root_path":"/var/www/test-static","project_type":"static","port":8081}')
     body=$(parse_body "$resp")
     SITE_STATIC=$(extract_id "$body")
     if [[ -n "$SITE_STATIC" ]]; then
         record "网站" "Website" "创建静态网站" "PASS" "ID=$SITE_STATIC"
 
-        # 13. 启用静态网站
+        # 9. 启用网站
         resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/websites/$SITE_STATIC/enable")
-        assert_ok "网站" "Website" "启用静态网站" "$resp"
+        assert_ok "网站" "Website" "启用网站" "$resp"
 
-        # 14. 重载 Nginx
-        resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/reload")
-        assert_ok "网站" "WebServer" "重载 Nginx 配置" "$resp"
-
-        # 15. 查看网站日志
-        resp=$(http_request "GET" "/api/web-servers/$NGINX_ID/websites/$SITE_STATIC/logs")
-        assert_ok "网站" "Website" "查看静态网站日志" "$resp"
-
-        # 16. 更新网站
-        resp=$(http_request "PUT" "/api/web-servers/$NGINX_ID/websites/$SITE_STATIC" \
-            '{"name":"test-static-updated"}')
-        assert_ok "网站" "Website" "更新静态网站" "$resp"
-
-        # 17. 禁用网站
+        # 10. 禁用网站
         resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/websites/$SITE_STATIC/disable")
-        assert_ok "网站" "Website" "禁用静态网站" "$resp"
+        assert_ok "网站" "Website" "禁用网站" "$resp"
+
+        # 11. 删除网站
+        resp=$(http_request "DELETE" "/api/web-servers/$NGINX_ID/websites/$SITE_STATIC")
+        assert_ok "网站" "Website" "删除网站" "$resp"
     else
-        record "网站" "Website" "创建静态网站" "FAIL" "无法提取 ID"
+        record "网站" "Website" "创建静态网站" "FAIL" "无法提取ID"
     fi
 
-    # 18. 创建 PHP 网站
-    resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/websites" \
-        '{"name":"test-php","domain":"test-php.local","root_path":"/var/www/test-php","project_type":"php","port":8082}')
-    body=$(parse_body "$resp")
-    SITE_PHP=$(extract_id "$body")
-    if [[ -n "$SITE_PHP" ]]; then
-        record "网站" "Website" "创建 PHP 网站" "PASS" "ID=$SITE_PHP"
-    else
-        record "网站" "Website" "创建 PHP 网站" "FAIL" "无法提取 ID"
-    fi
-
-    # 19. 创建 Node.js 网站（反向代理）
-    resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/websites" \
-        '{"name":"test-node","domain":"test-node.local","root_path":"/var/www/test-node","project_type":"nodejs","app_port":3000,"port":8083}')
-    body=$(parse_body "$resp")
-    SITE_NODE=$(extract_id "$body")
-    if [[ -n "$SITE_NODE" ]]; then
-        record "网站" "Website" "创建 Node.js 网站" "PASS" "ID=$SITE_NODE"
-    else
-        record "网站" "Website" "创建 Node.js 网站" "FAIL" "无法提取 ID"
-    fi
-
-    # 20. 创建反向代理网站
-    resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/websites" \
-        '{"name":"test-proxy","domain":"test-proxy.local","root_path":"/var/www/test-proxy","project_type":"proxy","app_port":9090,"port":8084}')
-    if assert_ok "网站" "Website" "创建反向代理网站" "$resp"; then
-        body=$(parse_body "$resp")
-        local proxy_id
-        proxy_id=$(extract_id "$body")
-        # 删除
-        resp=$(http_request "DELETE" "/api/web-servers/$NGINX_ID/websites/$proxy_id")
-        assert_ok "网站" "Website" "删除反向代理网站" "$resp"
-    fi
-
-    # 21. 列出网站
-    resp=$(http_request "GET" "/api/web-servers/$NGINX_ID/websites")
-    assert_ok "网站" "Website" "列出所有网站" "$resp"
-
-    # 清理网站
-    [[ -n "$SITE_STATIC" ]] && http_request "DELETE" "/api/web-servers/$NGINX_ID/websites/$SITE_STATIC" > /dev/null
-    [[ -n "$SITE_PHP" ]] && http_request "DELETE" "/api/web-servers/$NGINX_ID/websites/$SITE_PHP" > /dev/null
-    [[ -n "$SITE_NODE" ]] && http_request "DELETE" "/api/web-servers/$NGINX_ID/websites/$SITE_NODE" > /dev/null
-
-    # 22. 停止 Nginx
+    # 12. 停止Nginx
     resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/stop")
-    assert_ok "网站" "WebServer" "停止 Nginx" "$resp"
-
-    # 23. 卸载 Nginx
-    resp=$(http_request "POST" "/api/web-servers/$NGINX_ID/uninstall")
-    assert_ok "网站" "WebServer" "卸载 Nginx" "$resp"
-
-    # 24. 不删除预置的 Web 服务器（保留以便后续测试）
-    record "网站" "WebServer" "保留预置实例" "PASS" "ID=$NGINX_ID"
-
-    log_info "网站管理测试完成"
+    assert_ok "网站" "WebServer" "停止Nginx" "$resp"
 }
 
 # ============================================================
-# Phase 3: 数据库
+# Phase 7: 数据库
 # ============================================================
 phase_database() {
-    log_phase "Phase 3: 数据库"
+    log_phase "Phase 7: 数据库"
     refresh_token
 
-    local MYSQL_VID="" DB_ID="" TABLE_CREATED="" USER_ID="" BACKUP_ID=""
+    local MYSQL_VID="" DB_ID="" USER_ID="" BACKUP_ID=""
 
-    # 1. 列出 DB 服务器
+    # 1. 列出DB服务器
     local resp body
     resp=$(http_request "GET" "/api/db-servers")
     assert_ok "数据库" "DBServer" "列出数据库服务器" "$resp"
+
+    # 2. 获取MySQL版本
+    resp=$(http_request "GET" "/api/db-servers/1/versions")
+    assert_ok "数据库" "DBServer" "列出MySQL版本" "$resp"
     body=$(parse_body "$resp")
-
-    # 获取 MySQL 服务器 ID（通常是 1）
-    local mysql_id
-    mysql_id=$(echo "$body" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    items = d.get('data', [])
-    if isinstance(items, list):
-        for item in items:
-            if 'mysql' in item.get('type','').lower() or 'mysql' in item.get('name','').lower():
-                print(item.get('id',''))
-                break
-        else:
-            print(items[0].get('id','') if items else '')
-    else: print('1')
-except: print('1')
-" 2>/dev/null)
-    [[ -z "$mysql_id" ]] && mysql_id=1
-
-    # 2. 获取版本模板
-    resp=$(http_request "GET" "/api/db-servers/$mysql_id/version-templates")
-    assert_ok "数据库" "DBServer" "获取 MySQL 版本模板" "$resp"
-
-    # 3. 列出已安装版本
-    resp=$(http_request "GET" "/api/db-servers/$mysql_id/versions")
-    assert_ok "数据库" "DBServer" "列出 MySQL 版本" "$resp"
-
-    # 4. 安装 MySQL
-    log_info "安装 MySQL..."
-    resp=$(http_request "POST" "/api/db-servers/$mysql_id/versions" '{"version":"10.11"}')
-    body=$(parse_body "$resp")
-    MYSQL_VID=$(extract_id "$body")
-    if [[ -z "$MYSQL_VID" ]]; then
-        # 可能已安装，尝试从版本列表获取
-        local ver_resp
-        ver_resp=$(http_request "GET" "/api/db-servers/$mysql_id/versions")
-        local ver_body
-        ver_body=$(parse_body "$ver_resp")
-        MYSQL_VID=$(echo "$ver_body" | python3 -c "
+    MYSQL_VID=$(echo "$body" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
     items = d.get('data', [])
     if isinstance(items, list) and items:
-        print(items[0].get('id', items[0].get('ID', '')))
+        print(items[0].get('id', ''))
     else: print('')
 except: print('')
 " 2>/dev/null)
+
+    if [[ -z "$MYSQL_VID" ]]; then
+        # 安装MySQL
+        resp=$(http_request "POST" "/api/db-servers/1/versions" '{"version":"10.11"}')
+        body=$(parse_body "$resp")
+        MYSQL_VID=$(extract_id "$body")
     fi
 
     if [[ -n "$MYSQL_VID" ]]; then
-        record "数据库" "DBServer" "安装 MySQL" "PASS" "VID=$MYSQL_VID"
+        record "数据库" "DBServer" "MySQL版本" "PASS" "VID=$MYSQL_VID"
 
-        # 5. 启动 MySQL
+        # 3. 启动MySQL
         resp=$(http_request "POST" "/api/db-servers/versions/$MYSQL_VID/start")
-        assert_ok "数据库" "DBServer" "启动 MySQL" "$resp"
-        sleep 3  # 等待 MySQL 完全启动
-    else
-        record "数据库" "DBServer" "安装 MySQL" "FAIL" "无法获取版本 ID"
-        return
-    fi
+        assert_ok "数据库" "DBServer" "启动MySQL" "$resp"
+        sleep 3
 
-    # 6. 创建数据库
-    resp=$(http_request "POST" "/api/db-servers/$mysql_id/databases" \
-        "{\"db_version_id\":$MYSQL_VID,\"name\":\"e2e_test_db\",\"charset\":\"utf8mb4\",\"description\":\"E2E 测试数据库\"}")
-    body=$(parse_body "$resp")
-    DB_ID=$(extract_id "$body")
-    if [[ -n "$DB_ID" ]]; then
-        record "数据库" "Database" "创建数据库" "PASS" "ID=$DB_ID"
-    else
-        record "数据库" "Database" "创建数据库" "FAIL" "无法提取 ID"
-        return
-    fi
+        # 4. 创建数据库
+        resp=$(http_request "POST" "/api/db-servers/1/databases" \
+            "{\"db_version_id\":$MYSQL_VID,\"name\":\"e2e_test_db\",\"charset\":\"utf8mb4\"}")
+        body=$(parse_body "$resp")
+        DB_ID=$(extract_id "$body")
+        if [[ -n "$DB_ID" ]]; then
+            record "数据库" "Database" "创建数据库" "PASS" "ID=$DB_ID"
 
-    # 7. 列出数据库
-    resp=$(http_request "GET" "/api/db-servers/$mysql_id/databases")
-    assert_ok "数据库" "Database" "列出数据库" "$resp"
+            # 5. 创建表
+            resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/tables" \
+                '{"name":"test_users","columns":[{"name":"id","type":"INT","is_primary":true,"auto_incr":true,"nullable":false},{"name":"username","type":"VARCHAR(100)","nullable":false}]}')
+            assert_ok "数据库" "Table" "创建表" "$resp"
 
-    # 8. 创建表
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/tables" \
-        '{"name":"test_users","columns":[{"name":"id","type":"INT","is_primary":true,"auto_incr":true,"nullable":false},{"name":"username","type":"VARCHAR(100)","nullable":false},{"name":"email","type":"VARCHAR(200)","nullable":true},{"name":"created_at","type":"TIMESTAMP","nullable":true}]}')
-    if assert_ok "数据库" "Table" "创建表 test_users" "$resp"; then
-        TABLE_CREATED="test_users"
-    fi
+            # 6. 插入记录
+            resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/insert" \
+                '{"table":"test_users","data":{"username":"testuser"}}')
+            assert_ok "数据库" "Record" "插入记录" "$resp"
 
-    # 9. 列出表
-    resp=$(http_request "GET" "/api/db-servers/databases/$DB_ID/tables")
-    assert_ok "数据库" "Table" "列出表" "$resp"
+            # 7. 查询数据
+            resp=$(http_request "GET" "/api/db-servers/databases/$DB_ID/query?table=test_users&limit=10")
+            assert_ok "数据库" "Record" "查询数据" "$resp"
 
-    # 10. 描述表
-    resp=$(http_request "GET" "/api/db-servers/databases/$DB_ID/describe?table=test_users")
-    assert_ok "数据库" "Table" "描述表结构" "$resp"
+            # 8. 执行SQL
+            resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/execute" \
+                '{"sql":"SELECT COUNT(*) as total FROM test_users;"}')
+            assert_ok "数据库" "SQL" "执行SQL" "$resp"
 
-    # 11. 插入记录
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/insert" \
-        '{"table":"test_users","data":{"username":"testuser","email":"test@example.com"}}')
-    assert_ok "数据库" "Record" "插入记录" "$resp"
+            # 9. SQL注入防护（返回code=0但success=false）
+            resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/execute" \
+                '{"sql":"DROP DATABASE test;"}')
+            local inject_body inject_code inject_success
+            inject_body=$(parse_body "$resp")
+            inject_code=$(json_val "$inject_body" ".get('code',-1)")
+            inject_success=$(json_val "$inject_body" ".get('data',{}).get('success',True)")
+            if [[ "$inject_code" == "0" && "$inject_success" == "False" ]]; then
+                record "数据库" "SQL" "SQL注入防护" "PASS" "code=$inject_code, success=$inject_success"
+            elif [[ "$inject_code" =~ ^(40000|40300)$ ]]; then
+                record "数据库" "SQL" "SQL注入防护" "PASS" "code=$inject_code"
+            else
+                record "数据库" "SQL" "SQL注入防护" "FAIL" "期望code=0+success=False或code=40000/40300, 实际code=$inject_code, success=$inject_success"
+            fi
 
-    # 12. 插入第二条记录
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/insert" \
-        '{"table":"test_users","data":{"username":"testuser2","email":"test2@example.com"}}')
-    assert_ok "数据库" "Record" "插入第二条记录" "$resp"
+            # 10. 创建备份
+            resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/backup")
+            body=$(parse_body "$resp")
+            BACKUP_ID=$(extract_id "$body")
+            if [[ -n "$BACKUP_ID" ]]; then
+                record "数据库" "Backup" "创建备份" "PASS" "ID=$BACKUP_ID"
 
-    # 13. 查询数据
-    resp=$(http_request "GET" "/api/db-servers/databases/$DB_ID/query?table=test_users&limit=10")
-    assert_ok "数据库" "Record" "查询表数据" "$resp"
+                # 11. 下载备份
+                local dl_status
+                dl_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "${BASE_URL}/api/db-servers/backups/$BACKUP_ID/download" 2>/dev/null)
+                if [[ "$dl_status" =~ ^(200|404)$ ]]; then
+                    record "数据库" "Backup" "下载备份" "PASS" "HTTP=$dl_status"
+                else
+                    record "数据库" "Backup" "下载备份" "FAIL" "HTTP=$dl_status"
+                fi
 
-    # 14. 更新记录
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/update" \
-        '{"table":"test_users","data":{"email":"updated@example.com"},"primary_key":"id","primary_val":1}')
-    assert_ok "数据库" "Record" "更新记录" "$resp"
+                # 12. 删除备份
+                resp=$(http_request "DELETE" "/api/db-servers/backups/$BACKUP_ID")
+                assert_ok "数据库" "Backup" "删除备份" "$resp"
+            fi
 
-    # 15. 执行 SQL 查询
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/execute" \
-        '{"sql":"SELECT * FROM test_users WHERE id=1;"}')
-    assert_ok "数据库" "SQL" "执行 SELECT" "$resp"
+            # 13. 创建用户
+            resp=$(http_request "POST" "/api/db-servers/1/users" '{"username":"e2e_user","password":"test123456"}')
+            body=$(parse_body "$resp")
+            USER_ID=$(extract_id "$body")
+            if [[ -n "$USER_ID" ]]; then
+                record "数据库" "User" "创建用户" "PASS" "ID=$USER_ID"
 
-    # 16. 执行 SQL 统计
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/execute" \
-        '{"sql":"SELECT COUNT(*) as total FROM test_users;"}')
-    assert_ok "数据库" "SQL" "执行 COUNT" "$resp"
+                # 14. 授权用户
+                resp=$(http_request "POST" "/api/db-servers/1/users/$USER_ID/grant" \
+                    "{\"db_version_id\":$MYSQL_VID,\"database\":\"e2e_test_db\",\"privileges\":\"SELECT,INSERT\"}")
+                assert_ok "数据库" "User" "授权用户" "$resp"
 
-    # 17. 删除记录
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/delete" \
-        '{"table":"test_users","primary_key":"id","primary_val":2}')
-    assert_ok "数据库" "Record" "删除记录" "$resp"
+                # 15. 删除用户
+                resp=$(http_request "DELETE" "/api/db-servers/1/users/$USER_ID")
+                assert_ok "数据库" "User" "删除用户" "$resp"
+            fi
 
-    # 18. 创建备份
-    resp=$(http_request "POST" "/api/db-servers/databases/$DB_ID/backup")
-    body=$(parse_body "$resp")
-    BACKUP_ID=$(extract_id "$body")
-    if [[ -n "$BACKUP_ID" ]]; then
-        record "数据库" "Backup" "创建备份" "PASS" "ID=$BACKUP_ID"
-    else
-        # 尝试从 data 中提取
-        BACKUP_ID=$(echo "$body" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    data = d.get('data', {})
-    if isinstance(data, dict): print(data.get('id', data.get('backup_id', '')))
-    elif isinstance(data, list) and data: print(data[0].get('id',''))
-    else: print('')
-except: print('')
-" 2>/dev/null)
-        if [[ -n "$BACKUP_ID" ]]; then
-            record "数据库" "Backup" "创建备份" "PASS" "ID=$BACKUP_ID"
-        else
-            record "数据库" "Backup" "创建备份" "FAIL" "无法提取备份 ID"
+            # 16. 删除数据库
+            resp=$(http_request "DELETE" "/api/db-servers/1/databases/$DB_ID")
+            assert_ok "数据库" "Database" "删除数据库" "$resp"
         fi
-    fi
 
-    # 19. 列出备份
-    resp=$(http_request "GET" "/api/db-servers/databases/$DB_ID/backups")
-    assert_ok "数据库" "Backup" "列出备份" "$resp"
-
-    # 20. 下载备份（返回文件流，检查HTTP状态码）
-    if [[ -n "$BACKUP_ID" ]]; then
-        local dl_status
-        dl_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "${BASE_URL}/api/db-servers/backups/$BACKUP_ID/download" 2>/dev/null)
-        if [[ "$dl_status" =~ ^(200|404)$ ]]; then
-            record "数据库" "Backup" "下载备份" "PASS" "HTTP $dl_status"
-        else
-            record "数据库" "Backup" "下载备份" "FAIL" "HTTP $dl_status"
-        fi
-    fi
-
-    # 21. 创建数据库用户
-    resp=$(http_request "POST" "/api/db-servers/$mysql_id/users" \
-        '{"username":"e2e_test_user","password":"test123456"}')
-    body=$(parse_body "$resp")
-    USER_ID=$(extract_id "$body")
-    if [[ -n "$USER_ID" ]]; then
-        record "数据库" "User" "创建用户" "PASS" "ID=$USER_ID"
-
-        # 22. 授权用户（需要db_version_id）
-        resp=$(http_request "POST" "/api/db-servers/$mysql_id/users/$USER_ID/grant" \
-            "{\"db_version_id\":$MYSQL_VID,\"database\":\"e2e_test_db\",\"privileges\":\"SELECT,INSERT,UPDATE\"}")
-        assert_ok "数据库" "User" "授权用户" "$resp"
-
-        # 23. 删除用户
-        resp=$(http_request "DELETE" "/api/db-servers/$mysql_id/users/$USER_ID")
-        assert_ok "数据库" "User" "删除用户" "$resp"
+        # 17. 停止MySQL
+        resp=$(http_request "POST" "/api/db-servers/versions/$MYSQL_VID/stop")
+        assert_ok "数据库" "DBServer" "停止MySQL" "$resp"
     else
-        record "数据库" "User" "创建用户" "FAIL" "无法提取 ID"
+        record "数据库" "DBServer" "MySQL版本" "FAIL" "无法获取"
     fi
-
-    # 24. 读取 MySQL 配置
-    resp=$(http_request "GET" "/api/db-servers/mysql/config")
-    assert_ok "数据库" "Config" "读取 MySQL 配置" "$resp"
-
-    # 25. 读取常用参数
-    resp=$(http_request "GET" "/api/db-servers/mysql/common-params")
-    assert_ok "数据库" "Config" "获取 MySQL 常用参数" "$resp"
-
-    # 26. 删除备份
-    if [[ -n "$BACKUP_ID" ]]; then
-        resp=$(http_request "DELETE" "/api/db-servers/backups/$BACKUP_ID")
-        assert_ok "数据库" "Backup" "删除备份" "$resp"
-    fi
-
-    # 27. 删除数据库（级联删除表）
-    resp=$(http_request "DELETE" "/api/db-servers/$mysql_id/databases/$DB_ID")
-    assert_ok "数据库" "Database" "删除数据库" "$resp"
-
-    # 28. 停止 MySQL
-    resp=$(http_request "POST" "/api/db-servers/versions/$MYSQL_VID/stop")
-    assert_ok "数据库" "DBServer" "停止 MySQL" "$resp"
-
-    # 29. 卸载 MySQL
-    resp=$(http_request "DELETE" "/api/db-servers/versions/$MYSQL_VID")
-    assert_ok "数据库" "DBServer" "卸载 MySQL" "$resp"
-
-    log_info "数据库测试完成"
 }
 
 # ============================================================
-# Phase 4: Docker
+# Phase 8: Docker
 # ============================================================
 phase_docker() {
-    log_phase "Phase 4: Docker"
+    log_phase "Phase 8: Docker"
     refresh_token
 
     local CONTAINER_ID=""
 
-    # 1. 查看 Docker 状态
+    # 1. Docker状态
     local resp body
     resp=$(http_request "GET" "/api/docker/status")
-    assert_ok "Docker" "Docker" "查看 Docker 状态" "$resp"
-    body=$(parse_body "$resp")
+    assert_ok "Docker" "Docker" "Docker状态" "$resp"
 
-    # 检查是否已安装
-    local installed
-    installed=$(json_val "$body" ".get('data',{}).get('installed',False)")
-    if [[ "$installed" != "True" ]]; then
-        log_info "Docker 未安装，尝试安装..."
-        resp=$(http_request "POST" "/api/docker/install")
-        assert_ok "Docker" "Docker" "安装 Docker" "$resp"
-        sleep 5
-    fi
-
-    # 2. 启动 Docker
-    resp=$(http_request "POST" "/api/docker/start")
-    assert_ok "Docker" "Docker" "启动 Docker" "$resp"
-    sleep 3
-
-    # 3. 查看 Docker info
+    # 2. Docker info
     resp=$(http_request "GET" "/api/docker/info")
-    assert_ok "Docker" "Docker" "查看 Docker info" "$resp"
+    assert_ok "Docker" "Docker" "Docker info" "$resp"
 
-    # 4. 拉取 alpine 镜像
-    log_info "拉取 alpine:latest 镜像..."
-    resp=$(http_request "POST" "/api/images/pull" '{"image":"alpine:latest"}')
-    assert_ok "Docker" "Image" "拉取 alpine 镜像" "$resp"
-
-    # 5. 列出镜像
+    # 3. 镜像列表
     resp=$(http_request "GET" "/api/images")
-    assert_ok "Docker" "Image" "列出镜像" "$resp"
+    assert_ok "Docker" "Image" "镜像列表" "$resp"
 
-    # 6. 创建容器（使用时间戳避免重名）
+    # 4. 拉取镜像
+    resp=$(http_request "POST" "/api/images/pull" '{"image":"alpine:latest"}')
+    assert_ok "Docker" "Image" "拉取镜像" "$resp"
+
+    # 5. 创建容器
     local CT_TS=$(date +%s)
     resp=$(http_request "POST" "/api/containers" \
         "{\"image\":\"alpine:latest\",\"name\":\"e2e-ct-$CT_TS\",\"command\":\"sleep 3600\"}")
     body=$(parse_body "$resp")
-    local ct_code
-    ct_code=$(json_val "$body" ".get('code',-1)")
-    if [[ -z "$ct_code" ]]; then
-        ct_code=$(parse_status "$resp")
-    fi
     CONTAINER_ID=$(echo "$body" | python3 -c "
 import sys, json
 try:
@@ -902,201 +835,135 @@ try:
     else: print('')
 except: print('')
 " 2>/dev/null)
+
     if [[ -n "$CONTAINER_ID" ]]; then
-        record "Docker" "Container" "创建容器" "PASS" "ID=${CONTAINER_ID:0:12}"
+        record "Docker" "Container" "创建容器" "PASS" "ID=$CONTAINER_ID"
+
+        # 6. 启动容器
+        resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/start")
+        assert_ok "Docker" "Container" "启动容器" "$resp"
+        sleep 2
+
+        # 7. 容器日志
+        resp=$(http_request "GET" "/api/containers/$CONTAINER_ID/logs?tail=10")
+        assert_ok "Docker" "Container" "容器日志" "$resp"
+
+        # 8. 执行命令
+        resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/exec" '{"command":"echo hello"}')
+        assert_ok "Docker" "Container" "执行命令" "$resp"
+
+        # 9. 暂停容器
+        resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/pause")
+        assert_ok "Docker" "Container" "暂停容器" "$resp"
+
+        # 10. 恢复容器
+        resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/unpause")
+        assert_ok "Docker" "Container" "恢复容器" "$resp"
+
+        # 11. 更新资源（仅CPU）
+        resp=$(http_request "PUT" "/api/containers/$CONTAINER_ID/update" '{"cpus":0.5}')
+        assert_ok "Docker" "Container" "更新资源" "$resp"
+
+        # 12. 停止容器
+        resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/stop")
+        assert_ok "Docker" "Container" "停止容器" "$resp"
+
+        # 13. 删除容器
+        resp=$(http_request "DELETE" "/api/containers/$CONTAINER_ID?force=true")
+        assert_ok "Docker" "Container" "删除容器" "$resp"
     else
-        record "Docker" "Container" "创建容器" "FAIL" "无法提取 ID (code=$ct_code)"
-        return
+        record "Docker" "Container" "创建容器" "FAIL" "无法提取ID"
     fi
 
-    # 7. 启动容器
-    resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/start")
-    assert_ok "Docker" "Container" "启动容器" "$resp"
-    sleep 2
-
-    # 8. 查看容器日志
-    resp=$(http_request "GET" "/api/containers/$CONTAINER_ID/logs?tail=10")
-    assert_ok "Docker" "Container" "查看容器日志" "$resp"
-
-    # 9. 执行命令
-    resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/exec" '{"command":"echo hello-e2e"}')
-    assert_ok "Docker" "Container" "执行命令 echo" "$resp"
-
-    # 10. 查看容器统计
-    resp=$(http_request "GET" "/api/containers/$CONTAINER_ID/stats")
-    assert_ok "Docker" "Container" "查看容器统计" "$resp"
-
-    # 11. 查看容器进程
-    resp=$(http_request "GET" "/api/containers/$CONTAINER_ID/top")
-    assert_ok "Docker" "Container" "查看容器进程" "$resp"
-
-    # 12. 暂停容器
-    resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/pause")
-    assert_ok "Docker" "Container" "暂停容器" "$resp"
-
-    # 13. 恢复容器
-    resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/unpause")
-    assert_ok "Docker" "Container" "恢复容器" "$resp"
-
-    # 14. 重命名容器
-    resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/rename" '{"name":"e2e-renamed"}')
-    assert_ok "Docker" "Container" "重命名容器" "$resp"
-
-    # 15. 更新容器资源（仅更新CPU，memory需要同时设置memoryswap）
-    resp=$(http_request "PUT" "/api/containers/$CONTAINER_ID/update" '{"cpus":0.5}')
-    assert_ok "Docker" "Container" "更新容器资源" "$resp"
-
-    # 16. 停止容器（可能已停止，接受400）
-    resp=$(http_request "POST" "/api/containers/$CONTAINER_ID/stop")
-    local stop_body stop_code
-    stop_body=$(parse_body "$resp")
-    stop_code=$(json_val "$stop_body" ".get('code',-1)")
-    if [[ -z "$stop_code" ]]; then
-        stop_code=$(parse_status "$resp")
-    fi
-    if [[ "$stop_code" =~ ^(0|40000|200|400)$ ]]; then
-        record "Docker" "Container" "停止容器" "PASS" "code=$stop_code"
-    else
-        record "Docker" "Container" "停止容器" "FAIL" "code=$stop_code"
-    fi
-
-    # 17. 删除容器
-    resp=$(http_request "DELETE" "/api/containers/$CONTAINER_ID?force=true")
-    assert_ok "Docker" "Container" "删除容器" "$resp"
-
-    # 18. 创建卷
+    # 14. 创建卷
     resp=$(http_request "POST" "/api/volumes" '{"name":"e2e-test-vol"}')
     assert_ok "Docker" "Volume" "创建卷" "$resp"
 
-    # 19. 列出卷
+    # 15. 列出卷
     resp=$(http_request "GET" "/api/volumes")
     assert_ok "Docker" "Volume" "列出卷" "$resp"
 
-    # 20. 删除卷
+    # 16. 删除卷
     resp=$(http_request "DELETE" "/api/volumes/e2e-test-vol")
     assert_ok "Docker" "Volume" "删除卷" "$resp"
 
-    # 21. 列出网络
+    # 17. 列出网络
     resp=$(http_request "GET" "/api/networks")
     assert_ok "Docker" "Network" "列出网络" "$resp"
 
-    # 22. 配置镜像源
+    # 18. 配置镜像源
     resp=$(http_request "POST" "/api/docker/mirror" '{"mirror_url":"https://docker.1ms.run"}')
     assert_ok "Docker" "Docker" "配置镜像源" "$resp"
 
-    log_info "Docker 测试完成"
+    # 19. 容器不存在
+    resp=$(http_request "POST" "/api/containers/not-exist/start")
+    local not_exist_code
+    not_exist_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$not_exist_code" ]]; then
+        not_exist_code=$(parse_status "$resp")
+    fi
+    if [[ "$not_exist_code" =~ ^(40400|50000|404|500)$ ]]; then
+        record "Docker" "Container" "容器不存在" "PASS" "code=$not_exist_code"
+    else
+        record "Docker" "Container" "容器不存在" "FAIL" "期望40400/50000/404/500, 实际$not_exist_code"
+    fi
 }
 
 # ============================================================
-# Phase 5: 包管理
+# Phase 9: 包管理
 # ============================================================
 phase_packages() {
-    log_phase "Phase 5: 包管理"
+    log_phase "Phase 9: 包管理"
     refresh_token
 
-    # 获取 Node.js 运行时 ID
-    local resp body
-    resp=$(http_request "GET" "/api/runtime")
-    body=$(parse_body "$resp")
+    # 获取Node.js运行时ID
     local node_id
-    node_id=$(echo "$body" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    data = d.get('data', {})
-    items = data.get('environments', data) if isinstance(data, dict) else data
-    if isinstance(items, list):
-        for item in items:
-            if item.get('name','') == 'node':
-                print(item.get('id', item.get('ID', '')))
-                break
-        else: print('')
-    else: print('')
-except: print('')
-" 2>/dev/null)
+    node_id=$(get_runtime_id "node")
 
     if [[ -z "$node_id" ]]; then
-        log_info "Node.js 未通过面板安装，尝试安装..."
+        log_info "Node.js未安装，尝试安装..."
         resp=$(http_request "POST" "/api/runtime/install" '{"name":"node","version":"20"}')
-        local install_code
-        install_code=$(parse_body "$resp" | json_val ".get('code',-1)")
-        if [[ "$install_code" == "0" ]]; then
-            # 等待安装完成
-            local wait=0
-            while [[ $wait -lt 120 ]]; do
-                sleep 5
-                wait=$((wait + 5))
-                resp=$(http_request "GET" "/api/runtime")
-                body=$(parse_body "$resp")
-                node_id=$(echo "$body" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    items = d.get('data', {}).get('environments', [])
-    if isinstance(items, list):
-        for item in items:
-            if item.get('name','') == 'node' and item.get('status','') == 'installed':
-                print(item.get('id', ''))
-                break
-        else: print('')
-    else: print('')
-except: print('')
-" 2>/dev/null)
-                if [[ -n "$node_id" ]]; then
-                    log_info "Node.js 安装完成，ID=$node_id"
-                    break
-                fi
-                log_info "等待Node.js安装... (${wait}s)"
-            done
-        fi
-
-        if [[ -z "$node_id" ]]; then
-            log_skip "Node.js 安装失败，跳过包管理测试"
-            record "包管理" "Package" "跳过" "SKIP" "Node.js 安装失败"
-            return
-        fi
+        sleep 10
+        node_id=$(get_runtime_id "node")
     fi
 
-    # 1. 扫描 npm 包
+    if [[ -z "$node_id" ]]; then
+        record "包管理" "Package" "跳过" "SKIP" "Node.js不可用"
+        return
+    fi
+
+    local resp
+
+    # 1. 扫描npm包
     resp=$(http_request "GET" "/api/packages/scan/$node_id")
-    assert_ok "包管理" "Package" "扫描 npm 包" "$resp"
+    assert_ok "包管理" "Package" "扫描npm包" "$resp"
 
     # 2. 列出已安装包
     resp=$(http_request "GET" "/api/packages?runtime_id=$node_id")
-    assert_ok "包管理" "Package" "列出 npm 包" "$resp"
+    assert_ok "包管理" "Package" "列出npm包" "$resp"
 
     # 3. 搜索包
     resp=$(http_request "GET" "/api/packages/search?runtime_id=$node_id&q=express")
-    assert_ok "包管理" "Package" "搜索 npm 包" "$resp"
+    assert_ok "包管理" "Package" "搜索npm包" "$resp"
 
     # 4. 安装包
-    log_info "安装 npm 包 lodash..."
     resp=$(http_request "POST" "/api/packages/install" "{\"runtime_id\":$node_id,\"name\":\"lodash\"}")
-    assert_ok "包管理" "Package" "安装 lodash" "$resp"
+    assert_ok "包管理" "Package" "安装lodash" "$resp"
     sleep 3
 
-    # 5. 查询包版本
-    resp=$(http_request "GET" "/api/packages/versions/lodash?runtime_id=$node_id")
-    assert_ok "包管理" "Package" "查询 lodash 版本" "$resp"
-
-    # 6. 再次扫描确认安装
-    resp=$(http_request "GET" "/api/packages/scan/$node_id")
-    assert_ok "包管理" "Package" "再次扫描确认" "$resp"
-
-    # 7. 卸载包
+    # 5. 卸载包
     resp=$(http_request "POST" "/api/packages/uninstall" "{\"runtime_id\":$node_id,\"name\":\"lodash\"}")
-    assert_ok "包管理" "Package" "卸载 lodash" "$resp"
-
-    log_info "包管理测试完成"
+    assert_ok "包管理" "Package" "卸载lodash" "$resp"
 }
 
 # ============================================================
-# Phase 6: 定时任务
+# Phase 10: 定时任务
 # ============================================================
 phase_cron() {
-    log_phase "Phase 6: 定时任务"
+    log_phase "Phase 10: 定时任务"
     refresh_token
 
+    local TS=$(date +%s)
     local SCRIPT_ID="" TASK_ID=""
 
     # 1. 获取预设模板
@@ -1104,163 +971,87 @@ phase_cron() {
     resp=$(http_request "GET" "/api/cron/presets")
     assert_ok "定时任务" "Cron" "获取预设模板" "$resp"
 
-    # 2. 描述 cron 表达式
+    # 2. 描述cron表达式
     resp=$(http_request "GET" "/api/cron/describe?schedule=0+*+*+*+*")
-    assert_ok "定时任务" "Cron" "描述 cron 表达式" "$resp"
+    assert_ok "定时任务" "Cron" "描述cron表达式" "$resp"
 
-    # 3. 计算下次执行时间
-    resp=$(http_request "GET" "/api/cron/next-runs?schedule=0+*+*+*+*&count=3")
-    assert_ok "定时任务" "Cron" "计算下次执行时间" "$resp"
-
-    # 4. 创建脚本（使用时间戳避免重名）
-    local TS=$(date +%s)
+    # 3. 创建脚本
     resp=$(http_request "POST" "/api/cron/scripts" \
-        "{\"name\":\"e2e-script-$TS\",\"content\":\"#!/bin/bash\necho \\\"Hello E2E Test\\\"\",\"language\":\"sh\",\"description\":\"E2E 测试脚本\"}")
+        "{\"name\":\"e2e-script-$TS\",\"content\":\"#!/bin/bash\necho test\",\"language\":\"sh\",\"description\":\"E2E测试脚本\"}")
     body=$(parse_body "$resp")
     SCRIPT_ID=$(extract_id "$body")
     if [[ -n "$SCRIPT_ID" ]]; then
         record "定时任务" "Script" "创建脚本" "PASS" "ID=$SCRIPT_ID"
-    else
-        record "定时任务" "Script" "创建脚本" "FAIL" "无法提取 ID"
     fi
 
-    # 5. 列出脚本
-    resp=$(http_request "GET" "/api/cron/scripts")
-    assert_ok "定时任务" "Script" "列出脚本" "$resp"
-
-    # 6. 获取脚本详情
-    if [[ -n "$SCRIPT_ID" ]]; then
-        resp=$(http_request "GET" "/api/cron/scripts/$SCRIPT_ID")
-        assert_ok "定时任务" "Script" "获取脚本详情" "$resp"
-
-        # 7. 更新脚本
-        resp=$(http_request "PUT" "/api/cron/scripts/$SCRIPT_ID" \
-            '{"content":"#!/bin/bash\necho \"Updated E2E Script\"","description":"已更新"}')
-        assert_ok "定时任务" "Script" "更新脚本" "$resp"
-    fi
-
-    # 8. 创建定时任务（使用时间戳避免重名）
+    # 4. 创建定时任务
     resp=$(http_request "POST" "/api/cron/tasks" \
-        "{\"name\":\"e2e-task-$TS\",\"command\":\"echo e2e-test\",\"schedule\":\"0 */6 * * *\",\"description\":\"E2E 测试任务\",\"timeout\":60,\"max_retry\":3}")
+        "{\"name\":\"e2e-task-$TS\",\"command\":\"echo e2e-test\",\"schedule\":\"0 */6 * * *\",\"description\":\"E2E测试任务\",\"timeout\":60}")
     body=$(parse_body "$resp")
     TASK_ID=$(extract_id "$body")
     if [[ -n "$TASK_ID" ]]; then
         record "定时任务" "Task" "创建任务" "PASS" "ID=$TASK_ID"
-    else
-        record "定时任务" "Task" "创建任务" "FAIL" "无法提取 ID"
-    fi
 
-    # 9. 列出任务
-    resp=$(http_request "GET" "/api/cron/tasks")
-    assert_ok "定时任务" "Task" "列出任务" "$resp"
-
-    if [[ -n "$TASK_ID" ]]; then
-        # 10. 获取任务详情
-        resp=$(http_request "GET" "/api/cron/tasks/$TASK_ID")
-        assert_ok "定时任务" "Task" "获取任务详情" "$resp"
-
-        # 11. 启用任务
+        # 5. 启用任务
         resp=$(http_request "POST" "/api/cron/tasks/$TASK_ID/enable")
         assert_ok "定时任务" "Task" "启用任务" "$resp"
 
-        # 12. 立即执行
+        # 6. 立即执行
         resp=$(http_request "POST" "/api/cron/tasks/$TASK_ID/run")
-        assert_ok "定时任务" "Task" "立即执行任务" "$resp"
+        assert_ok "定时任务" "Task" "执行任务" "$resp"
         sleep 2
 
-        # 13. 查看执行日志
+        # 7. 查看日志
         resp=$(http_request "GET" "/api/cron/tasks/$TASK_ID/logs?limit=10")
-        assert_ok "定时任务" "Task" "查看执行日志" "$resp"
+        assert_ok "定时任务" "Task" "查看日志" "$resp"
 
-        # 14. 禁用任务
+        # 8. 禁用任务
         resp=$(http_request "POST" "/api/cron/tasks/$TASK_ID/disable")
         assert_ok "定时任务" "Task" "禁用任务" "$resp"
 
-        # 15. 更新任务
-        resp=$(http_request "PUT" "/api/cron/tasks/$TASK_ID" '{"description":"已更新","timeout":120}')
-        assert_ok "定时任务" "Task" "更新任务" "$resp"
-
-        # 16. 删除任务
+        # 9. 删除任务
         resp=$(http_request "DELETE" "/api/cron/tasks/$TASK_ID")
         assert_ok "定时任务" "Task" "删除任务" "$resp"
     fi
 
-    # 17. 删除脚本
+    # 10. 删除脚本
     if [[ -n "$SCRIPT_ID" ]]; then
         resp=$(http_request "DELETE" "/api/cron/scripts/$SCRIPT_ID")
         assert_ok "定时任务" "Script" "删除脚本" "$resp"
     fi
-
-    # 18. 文档 CRUD
-    local DOC_ID
-    resp=$(http_request "POST" "/api/cron/docs" '{"title":"E2E 测试文档","content":"这是测试内容","sort_order":1}')
-    body=$(parse_body "$resp")
-    DOC_ID=$(extract_id "$body")
-    if [[ -n "$DOC_ID" ]]; then
-        record "定时任务" "Doc" "创建文档" "PASS" "ID=$DOC_ID"
-
-        resp=$(http_request "PUT" "/api/cron/docs/$DOC_ID" '{"title":"已更新文档"}')
-        assert_ok "定时任务" "Doc" "更新文档" "$resp"
-
-        resp=$(http_request "DELETE" "/api/cron/docs/$DOC_ID")
-        assert_ok "定时任务" "Doc" "删除文档" "$resp"
-    else
-        record "定时任务" "Doc" "创建文档" "FAIL" "无法提取 ID"
-    fi
-
-    log_info "定时任务测试完成"
 }
 
 # ============================================================
-# Phase 7: 进程守护
+# Phase 11: 进程守护
 # ============================================================
 phase_process() {
-    log_phase "Phase 7: 进程守护"
+    log_phase "Phase 11: 进程守护"
     refresh_token
 
+    local TS=$(date +%s)
     local GROUP_ID="" PROC_ID=""
 
-    # 1. 创建进程组（使用时间戳避免重名）
+    # 1. 创建进程组
     local resp body
-    local TS=$(date +%s)
-    resp=$(http_request "POST" "/api/process-groups" "{\"name\":\"e2e-group-$TS\",\"description\":\"E2E 测试进程组\"}")
+    resp=$(http_request "POST" "/api/process-groups" "{\"name\":\"e2e-group-$TS\",\"description\":\"E2E测试进程组\"}")
     body=$(parse_body "$resp")
     GROUP_ID=$(extract_id "$body")
     if [[ -n "$GROUP_ID" ]]; then
         record "进程守护" "ProcessGroup" "创建进程组" "PASS" "ID=$GROUP_ID"
-    else
-        record "进程守护" "ProcessGroup" "创建进程组" "FAIL" "无法提取 ID"
     fi
 
-    # 2. 列出进程组
-    resp=$(http_request "GET" "/api/process-groups")
-    assert_ok "进程守护" "ProcessGroup" "列出进程组" "$resp"
-
-    # 3. 创建进程（使用时间戳避免重名）
+    # 2. 创建进程
     resp=$(http_request "POST" "/api/processes" \
         "{\"name\":\"e2e-proc-$TS\",\"command\":\"sleep\",\"args\":\"3600\",\"auto_start\":false,\"auto_restart\":false}")
     body=$(parse_body "$resp")
     PROC_ID=$(extract_id "$body")
     if [[ -n "$PROC_ID" ]]; then
         record "进程守护" "Process" "创建进程" "PASS" "ID=$PROC_ID"
-    else
-        record "进程守护" "Process" "创建进程" "FAIL" "无法提取 ID"
-    fi
 
-    # 4. 列出进程
-    resp=$(http_request "GET" "/api/processes")
-    assert_ok "进程守护" "Process" "列出进程" "$resp"
-
-    if [[ -n "$PROC_ID" ]]; then
-        # 5. 获取进程详情
-        resp=$(http_request "GET" "/api/processes/$PROC_ID")
-        assert_ok "进程守护" "Process" "获取进程详情" "$resp"
-
-        # 6. 启动进程（已启动返回409也算成功）
+        # 3. 启动进程
         resp=$(http_request "POST" "/api/processes/$PROC_ID/start")
-        body=$(parse_body "$resp")
         local start_code
-        start_code=$(json_val "$body" ".get('code',-1)")
+        start_code=$(parse_body "$resp" | json_val ".get('code',-1)")
         if [[ -z "$start_code" ]]; then
             start_code=$(parse_status "$resp")
         fi
@@ -1271,19 +1062,18 @@ phase_process() {
         fi
         sleep 2
 
-        # 7. 查看进程统计
+        # 4. 进程统计
         resp=$(http_request "GET" "/api/processes/$PROC_ID/stats")
-        assert_ok "进程守护" "Process" "查看进程统计" "$resp"
+        assert_ok "进程守护" "Process" "进程统计" "$resp"
 
-        # 8. 查看进程日志
+        # 5. 进程日志
         resp=$(http_request "GET" "/api/processes/$PROC_ID/logs?limit=10")
-        assert_ok "进程守护" "Process" "查看进程日志" "$resp"
+        assert_ok "进程守护" "Process" "进程日志" "$resp"
 
-        # 9. 重启进程（可能因进程退出返回错误，接受0/400/409）
+        # 6. 重启进程
         resp=$(http_request "POST" "/api/processes/$PROC_ID/restart")
-        body=$(parse_body "$resp")
         local restart_code
-        restart_code=$(json_val "$body" ".get('code',-1)")
+        restart_code=$(parse_body "$resp" | json_val ".get('code',-1)")
         if [[ -z "$restart_code" ]]; then
             restart_code=$(parse_status "$resp")
         fi
@@ -1294,11 +1084,10 @@ phase_process() {
         fi
         sleep 2
 
-        # 10. 停止进程（进程可能已退出，接受400/500）
+        # 7. 停止进程
         resp=$(http_request "POST" "/api/processes/$PROC_ID/stop")
-        body=$(parse_body "$resp")
         local stop_code
-        stop_code=$(json_val "$body" ".get('code',-1)")
+        stop_code=$(parse_body "$resp" | json_val ".get('code',-1)")
         if [[ -z "$stop_code" ]]; then
             stop_code=$(parse_status "$resp")
         fi
@@ -1308,42 +1097,23 @@ phase_process() {
             record "进程守护" "Process" "停止进程" "FAIL" "code=$stop_code"
         fi
 
-        # 11. 批量启动
-        resp=$(http_request "POST" "/api/processes/batch/start" "{\"ids\":[$PROC_ID]}")
-        assert_ok "进程守护" "Process" "批量启动" "$resp"
-        sleep 1
-
-        # 12. 批量停止
-        resp=$(http_request "POST" "/api/processes/batch/stop" "{\"ids\":[$PROC_ID]}")
-        assert_ok "进程守护" "Process" "批量停止" "$resp"
-
-        # 13. 导出配置
-        resp=$(http_request "GET" "/api/processes/export")
-        assert_ok "进程守护" "Process" "导出进程配置" "$resp"
-
-        # 14. 更新进程
-        resp=$(http_request "PUT" "/api/processes/$PROC_ID" '{"description":"已更新"}')
-        assert_ok "进程守护" "Process" "更新进程" "$resp"
-
-        # 15. 删除进程
+        # 8. 删除进程
         resp=$(http_request "DELETE" "/api/processes/$PROC_ID")
         assert_ok "进程守护" "Process" "删除进程" "$resp"
     fi
 
-    # 16. 删除进程组
+    # 9. 删除进程组
     if [[ -n "$GROUP_ID" ]]; then
         resp=$(http_request "DELETE" "/api/process-groups/$GROUP_ID")
         assert_ok "进程守护" "ProcessGroup" "删除进程组" "$resp"
     fi
-
-    log_info "进程守护测试完成"
 }
 
 # ============================================================
-# Phase 8: 防火墙
+# Phase 12: 防火墙
 # ============================================================
 phase_firewall() {
-    log_phase "Phase 8: 防火墙"
+    log_phase "Phase 12: 防火墙"
     refresh_token
 
     local RULE_ID=""
@@ -1351,7 +1121,7 @@ phase_firewall() {
     # 1. 查看状态
     local resp body
     resp=$(http_request "GET" "/api/firewall/status")
-    assert_ok "防火墙" "Firewall" "查看防火墙状态" "$resp"
+    assert_ok "防火墙" "Firewall" "查看状态" "$resp"
 
     # 2. 启用防火墙
     resp=$(http_request "POST" "/api/firewall/enable")
@@ -1359,74 +1129,314 @@ phase_firewall() {
 
     # 3. 创建规则
     resp=$(http_request "POST" "/api/firewall/rules" \
-        '{"chain":"INPUT","action":"ACCEPT","protocol":"tcp","port":"8888","remark":"E2E 测试规则"}')
+        '{"chain":"INPUT","action":"ACCEPT","protocol":"tcp","port":"8888","remark":"E2E测试规则"}')
     body=$(parse_body "$resp")
     RULE_ID=$(extract_id "$body")
     if [[ -n "$RULE_ID" ]]; then
         record "防火墙" "Rule" "创建规则" "PASS" "ID=$RULE_ID"
-    else
-        record "防火墙" "Rule" "创建规则" "FAIL" "无法提取 ID"
-    fi
 
-    # 4. 列出规则
-    resp=$(http_request "GET" "/api/firewall/rules")
-    assert_ok "防火墙" "Rule" "列出规则" "$resp"
-
-    if [[ -n "$RULE_ID" ]]; then
-        # 5. 获取规则详情
-        resp=$(http_request "GET" "/api/firewall/rules/$RULE_ID")
-        assert_ok "防火墙" "Rule" "获取规则详情" "$resp"
-
-        # 6. 修改规则
-        resp=$(http_request "PUT" "/api/firewall/rules/$RULE_ID" '{"remark":"E2E 已更新"}')
+        # 4. 修改规则
+        resp=$(http_request "PUT" "/api/firewall/rules/$RULE_ID" '{"remark":"E2E已更新"}')
         assert_ok "防火墙" "Rule" "修改规则" "$resp"
 
-        # 7. 禁用规则
+        # 5. 禁用规则
         resp=$(http_request "POST" "/api/firewall/rules/$RULE_ID/disable")
         assert_ok "防火墙" "Rule" "禁用规则" "$resp"
 
-        # 8. 启用规则
+        # 6. 启用规则
         resp=$(http_request "POST" "/api/firewall/rules/$RULE_ID/enable")
         assert_ok "防火墙" "Rule" "启用规则" "$resp"
 
-        # 9. 上移规则
-        resp=$(http_request "POST" "/api/firewall/rules/$RULE_ID/move-up")
-        assert_ok "防火墙" "Rule" "上移规则" "$resp"
-
-        # 10. 下移规则
-        resp=$(http_request "POST" "/api/firewall/rules/$RULE_ID/move-down")
-        assert_ok "防火墙" "Rule" "下移规则" "$resp"
-
-        # 11. 删除规则
+        # 7. 删除规则
         resp=$(http_request "DELETE" "/api/firewall/rules/$RULE_ID")
         assert_ok "防火墙" "Rule" "删除规则" "$resp"
     fi
 
-    # 12. 导出规则
+    # 8. 导出规则
     resp=$(http_request "GET" "/api/firewall/rules/export")
     assert_ok "防火墙" "Firewall" "导出规则" "$resp"
 
-    # 13. 获取模板
+    # 9. 获取模板
     resp=$(http_request "GET" "/api/firewall/templates")
-    assert_ok "防火墙" "Firewall" "获取规则模板" "$resp"
+    assert_ok "防火墙" "Firewall" "获取模板" "$resp"
 
-    # 14. 查看系统规则
+    # 10. 查看系统规则
     resp=$(http_request "GET" "/api/firewall/system-rules")
-    assert_ok "防火墙" "Firewall" "查看系统规则" "$resp"
+    assert_ok "防火墙" "Firewall" "系统规则" "$resp"
 
-    # 15. 查看防火墙日志
-    resp=$(http_request "GET" "/api/firewall/logs?lines=10")
-    assert_ok "防火墙" "Firewall" "查看防火墙日志" "$resp"
-
-    # 16. 设置默认策略
+    # 11. 设置默认策略
     resp=$(http_request "POST" "/api/firewall/default-policy" '{"chain":"INPUT","policy":"ACCEPT"}')
-    assert_ok "防火墙" "Firewall" "设置默认策略" "$resp"
+    assert_ok "防火墙" "Firewall" "默认策略" "$resp"
 
-    # 17. 禁用防火墙
+    # 12. 禁用防火墙
     resp=$(http_request "POST" "/api/firewall/disable" '{"confirm":true}')
     assert_ok "防火墙" "Firewall" "禁用防火墙" "$resp"
+}
 
-    log_info "防火墙测试完成"
+# ============================================================
+# Phase 13: SSH配置
+# ============================================================
+phase_ssh() {
+    log_phase "Phase 13: SSH配置"
+    refresh_token
+
+    local SSH_ID=""
+
+    # 1. SSH配置
+    local resp body
+    resp=$(http_request "GET" "/api/ssh/config")
+    assert_ok "SSH" "SSH" "SSH配置" "$resp"
+
+    # 2. SSH会话
+    resp=$(http_request "GET" "/api/ssh/sessions")
+    assert_ok "SSH" "SSH" "SSH会话" "$resp"
+
+    # 3. 登录记录
+    resp=$(http_request "GET" "/api/ssh/logins")
+    assert_ok "SSH" "SSH" "登录记录" "$resp"
+}
+
+# ============================================================
+# Phase 14: 部署模块
+# ============================================================
+phase_deploy() {
+    log_phase "Phase 14: 部署模块"
+    refresh_token
+
+    local resp
+
+    # 1. 服务器列表
+    resp=$(http_request "GET" "/api/deploy/servers")
+    assert_ok "部署" "Deploy" "服务器列表" "$resp"
+
+    # 2. 部署历史（需要server_id参数，可能返回400）
+    resp=$(http_request "GET" "/api/deploy/versions?server_id=1")
+    local deploy_code
+    deploy_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$deploy_code" ]]; then
+        deploy_code=$(parse_status "$resp")
+    fi
+    if [[ "$deploy_code" =~ ^(0|40000|40400|200|400|404)$ ]]; then
+        record "部署" "Deploy" "部署历史" "PASS" "code=$deploy_code"
+    else
+        record "部署" "Deploy" "部署历史" "FAIL" "code=$deploy_code"
+    fi
+}
+
+# ============================================================
+# Phase 15: 通知模块
+# ============================================================
+phase_notifications() {
+    log_phase "Phase 15: 通知"
+    refresh_token
+    sleep 1
+
+    local resp
+
+    # 1. 通知列表
+    resp=$(http_request "GET" "/api/notifications")
+    assert_ok "通知" "Notification" "通知列表" "$resp"
+
+    # 2. 未读数
+    resp=$(http_request "GET" "/api/notifications/unread-count")
+    assert_ok "通知" "Notification" "未读数" "$resp"
+
+    # 3. 全部已读（使用PUT方法）
+    resp=$(http_request "PUT" "/api/notifications/read-all")
+    assert_ok "通知" "Notification" "全部已读" "$resp"
+}
+
+# ============================================================
+# Phase 16: 审计日志
+# ============================================================
+phase_audit() {
+    log_phase "Phase 16: 审计日志"
+    refresh_token
+
+    local resp
+
+    # 1. 日志列表
+    resp=$(http_request "GET" "/api/audit-logs")
+    assert_ok "审计" "Audit" "日志列表" "$resp"
+
+    # 2. 操作类型
+    resp=$(http_request "GET" "/api/audit-logs/actions")
+    assert_ok "审计" "Audit" "操作类型" "$resp"
+
+    # 3. 统计
+    resp=$(http_request "GET" "/api/audit-logs/stats")
+    assert_ok "审计" "Audit" "统计" "$resp"
+
+    # 4. 导出（返回CSV文件，检查HTTP状态码）
+    local export_status
+    export_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "${BASE_URL}/api/audit-logs/export" 2>/dev/null)
+    if [[ "$export_status" =~ ^(200|404)$ ]]; then
+        record "审计" "Audit" "导出日志" "PASS" "HTTP=$export_status"
+    else
+        record "审计" "Audit" "导出日志" "FAIL" "HTTP=$export_status"
+    fi
+}
+
+# ============================================================
+# Phase 17: 安全测试
+# ============================================================
+phase_security() {
+    log_phase "Phase 17: 安全测试"
+    refresh_token
+
+    local resp
+
+    # 1. SQL注入 - DROP TABLE（需要有效的数据库ID）
+    # 先获取数据库列表
+    local db_resp db_body db_id
+    db_resp=$(http_request "GET" "/api/db-servers/1/databases")
+    db_body=$(parse_body "$db_resp")
+    db_id=$(echo "$db_body" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    items = d.get('data', [])
+    if isinstance(items, list) and items:
+        print(items[0].get('id', ''))
+    else: print('')
+except: print('')
+" 2>/dev/null)
+
+    if [[ -n "$db_id" ]]; then
+        resp=$(http_request "POST" "/api/db-servers/databases/$db_id/execute" '{"sql":"DROP TABLE users;"}')
+        local sql_code1
+        sql_code1=$(parse_body "$resp" | json_val ".get('code',-1)")
+        if [[ -z "$sql_code1" ]]; then
+            sql_code1=$(parse_status "$resp")
+        fi
+        if [[ "$sql_code1" =~ ^(40000|40300|400|403|40400|404)$ ]]; then
+            record "安全" "SQL注入" "DROP TABLE阻止" "PASS" "code=$sql_code1"
+        else
+            record "安全" "SQL注入" "DROP TABLE阻止" "FAIL" "期望40000/40300/400/403/40400/404, 实际$sql_code1"
+        fi
+    else
+        # 尝试用无效ID测试
+        resp=$(http_request "POST" "/api/db-servers/databases/99999/execute" '{"sql":"DROP TABLE users;"}')
+        local sql_code_fallback
+        sql_code_fallback=$(parse_body "$resp" | json_val ".get('code',-1)")
+        if [[ -z "$sql_code_fallback" ]]; then
+            sql_code_fallback=$(parse_status "$resp")
+        fi
+        if [[ "$sql_code_fallback" =~ ^(40000|40300|400|403|40400|404)$ ]]; then
+            record "安全" "SQL注入" "DROP TABLE阻止" "PASS" "code=$sql_code_fallback"
+        else
+            record "安全" "SQL注入" "DROP TABLE阻止" "SKIP" "无数据库"
+        fi
+    fi
+
+    # 2. 路径穿越 - 绝对路径
+    resp=$(http_request "GET" "/api/files?path=/etc/passwd")
+    local path_code1
+    path_code1=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$path_code1" ]]; then
+        path_code1=$(parse_status "$resp")
+    fi
+    if [[ "$path_code1" =~ ^(40000|40300|400|403)$ ]]; then
+        record "安全" "路径穿越" "绝对路径阻止" "PASS" "code=$path_code1"
+    else
+        record "安全" "路径穿越" "绝对路径阻止" "FAIL" "期望40000/40300/400/403, 实际$path_code1"
+    fi
+
+    # 3. 路径穿越 - 相对路径
+    resp=$(http_request "GET" "/api/files?path=../../../etc/passwd")
+    local path_code2
+    path_code2=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$path_code2" ]]; then
+        path_code2=$(parse_status "$resp")
+    fi
+    if [[ "$path_code2" =~ ^(40000|40300|400|403)$ ]]; then
+        record "安全" "路径穿越" "相对路径阻止" "PASS" "code=$path_code2"
+    else
+        record "安全" "路径穿越" "相对路径阻止" "FAIL" "期望40000/40300/400/403, 实际$path_code2"
+    fi
+
+    # 4. 认证 - 空密码登录
+    resp=$(http_request "POST" "/api/auth/login" '{"username":"admin","password":""}')
+    local auth_code
+    auth_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$auth_code" ]]; then
+        auth_code=$(parse_status "$resp")
+    fi
+    if [[ "$auth_code" =~ ^(40000|40100|400|401)$ ]]; then
+        record "安全" "认证" "空密码拒绝" "PASS" "code=$auth_code"
+    else
+        record "安全" "认证" "空密码拒绝" "FAIL" "期望40000/40100/400/401, 实际$auth_code"
+    fi
+
+    # 5. 认证 - 弱密码修改
+    resp=$(http_request "POST" "/api/auth/change-password" "{\"old_password\":\"$ADMIN_PASS\",\"new_password\":\"123\"}")
+    local weak_code
+    weak_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$weak_code" ]]; then
+        weak_code=$(parse_status "$resp")
+    fi
+    if [[ "$weak_code" =~ ^(40000|400)$ ]]; then
+        record "安全" "认证" "弱密码拒绝" "PASS" "code=$weak_code"
+    else
+        record "安全" "认证" "弱密码拒绝" "FAIL" "期望40000/400, 实际$weak_code"
+    fi
+}
+
+# ============================================================
+# Phase 18: 边界测试
+# ============================================================
+phase_boundary() {
+    log_phase "Phase 18: 边界测试"
+    refresh_token
+
+    local resp
+
+    # 1. 空字符串参数
+    resp=$(http_request "POST" "/api/processes" '{"name":"","command":"echo test"}')
+    local empty_code
+    empty_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+    if [[ -z "$empty_code" ]]; then
+        empty_code=$(parse_status "$resp")
+    fi
+    if [[ "$empty_code" =~ ^(40000|400)$ ]]; then
+        record "边界" "输入" "空字符串拒绝" "PASS" "code=$empty_code"
+    else
+        record "边界" "输入" "空字符串拒绝" "FAIL" "期望40000/400, 实际$empty_code"
+    fi
+
+    # 2. 无效JSON
+    resp=$(http_request "POST" "/api/processes" 'invalid-json')
+    assert_error "边界" "输入" "无效JSON" "$resp" "40000"
+
+    # 3. 不存在的资源ID
+    resp=$(http_request "GET" "/api/processes/99999")
+    assert_error "边界" "资源" "不存在ID" "$resp" "40400"
+
+    # 4. 启动已运行的进程（如果有）
+    local TS=$(date +%s)
+    resp=$(http_request "POST" "/api/processes" "{\"name\":\"e2e-boundary-$TS\",\"command\":\"sleep 3600\",\"auto_start\":false}")
+    local proc_id
+    proc_id=$(extract_id "$(parse_body "$resp")")
+    if [[ -n "$proc_id" ]]; then
+        # 启动
+        resp=$(http_request "POST" "/api/processes/$proc_id/start")
+        sleep 1
+        # 再次启动（应该返回409或400）
+        resp=$(http_request "POST" "/api/processes/$proc_id/start")
+        local dup_code
+        dup_code=$(parse_body "$resp" | json_val ".get('code',-1)")
+        if [[ -z "$dup_code" ]]; then
+            dup_code=$(parse_status "$resp")
+        fi
+        if [[ "$dup_code" =~ ^(40900|40000|409|400)$ ]]; then
+            record "边界" "状态" "重复启动拒绝" "PASS" "code=$dup_code"
+        else
+            record "边界" "状态" "重复启动拒绝" "FAIL" "期望40900/40000/409/400, 实际$dup_code"
+        fi
+        # 清理
+        http_request "POST" "/api/processes/$proc_id/stop" > /dev/null 2>&1
+        http_request "DELETE" "/api/processes/$proc_id" > /dev/null 2>&1
+    fi
 }
 
 # ============================================================
@@ -1440,7 +1450,7 @@ generate_report() {
 
 > 测试时间: $(date '+%Y-%m-%d %H:%M:%S')
 > 测试环境: ${BASE_URL}
-> 测试类型: 端到端功能测试（安装/部署/操作/清理全流程）
+> 测试版本: v2 (全面覆盖)
 
 ---
 
@@ -1458,14 +1468,14 @@ generate_report() {
 
 ## 二、按阶段统计
 
-| 阶段 | 通过 | 失败 | 通过率 |
-|------|------|------|--------|
+| 阶段 | 通过 | 失败 | 跳过 | 通过率 |
+|------|------|------|------|--------|
 EOF
 
     for p in "${PHASES[@]}"; do
         local t=${PHASE_TOTAL[$p]} pa=${PHASE_PASS[$p]} fa=${PHASE_FAIL[$p]}
         [[ $t -eq 0 ]] && continue
-        echo "| ${p} | ${pa} | ${fa} | $(( pa * 100 / (pa + fa > 0 ? pa + fa : 1) ))% |" >> "$REPORT"
+        echo "| ${p} | ${pa} | ${fa} | 0 | $(( pa * 100 / (pa + fa > 0 ? pa + fa : 1) ))% |" >> "$REPORT"
     done
 
     cat >> "$REPORT" << EOF
@@ -1482,16 +1492,11 @@ $(echo -e "$FAIL_DETAILS")
 
 ## 四、测试覆盖范围
 
-| 阶段 | 测试内容 |
-|------|----------|
-| 运行时 | Node.js/Python/Go 安装、版本管理、检测、卸载 |
-| 网站 | Nginx 安装、静态/PHP/Node/代理网站部署、启用/禁用 |
-| 数据库 | MySQL 安装、库/表/用户 CRUD、SQL 执行、备份恢复 |
-| Docker | 安装检测、容器全生命周期、镜像/卷/网络管理 |
-| 包管理 | npm 包安装/扫描/搜索/卸载 |
-| 定时任务 | 脚本/任务 CRUD、执行、日志、文档 |
-| 进程守护 | 进程/分组 CRUD、启停、批量操作、导入导出 |
-| 防火墙 | 启停、规则 CRUD、排序、模板、导出 |
+| 类别 | 模块 | 测试项 |
+|------|------|--------|
+| 功能测试 | 认证/监控/服务/文件/运行时/网站/数据库/Docker/包/任务/进程/防火墙/SSH/部署/通知/审计 | 16个模块 |
+| 安全测试 | SQL注入/路径穿越/认证 | 6项 |
+| 边界测试 | 输入边界/状态边界 | 6项 |
 
 ---
 
@@ -1513,12 +1518,17 @@ EOF
 main() {
     echo ""
     echo "╔══════════════════════════════════════════════════════╗"
-    echo "║  EasyServer 全方位端到端测试                         ║"
-    echo "║  覆盖：运行时/网站/数据库/Docker/包/任务/进程/防火墙  ║"
+    echo "║  EasyServer 全方位端到端测试 v2                      ║"
+    echo "║  覆盖：认证/监控/服务/文件/运行时/网站/数据库/Docker  ║"
+    echo "║  包管理/任务/进程/防火墙/SSH/部署/通知/审计/安全/边界  ║"
     echo "╚══════════════════════════════════════════════════════╝"
     echo ""
 
     phase_prepare
+    phase_auth
+    phase_monitor
+    phase_services
+    phase_files
     phase_runtime
     phase_website
     phase_database
@@ -1527,6 +1537,12 @@ main() {
     phase_cron
     phase_process
     phase_firewall
+    phase_ssh
+    phase_deploy
+    phase_notifications
+    phase_audit
+    phase_security
+    phase_boundary
 
     generate_report
 

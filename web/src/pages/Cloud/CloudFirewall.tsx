@@ -22,9 +22,9 @@ export default function CloudFirewall({ firewallRules, selectedInstance, onRefre
       setModalVisible(false);
       form.resetFields();
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -34,8 +34,8 @@ export default function CloudFirewall({ firewallRules, selectedInstance, onRefre
       await cloudApi.deleteFirewallRule(selectedInstance, ruleId);
       message.success('规则已删除');
       onRefresh();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -71,7 +71,7 @@ export default function CloudFirewall({ firewallRules, selectedInstance, onRefre
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: CloudFirewallRule) => (
+      render: (_: unknown, record: CloudFirewallRule) => (
         <Button
           type="link"
           size="small"

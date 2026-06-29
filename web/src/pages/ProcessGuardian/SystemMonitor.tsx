@@ -148,17 +148,18 @@ export default function SystemMonitor() {
       await systemProcessApi.serviceAction(name, action, force);
       message.success(`${action} ${name} 成功`);
       fetchServices();
-    } catch (error: any) {
-      if (error.data?.protected) {
+    } catch (error: unknown) {
+      const axiosErr = error as { response?: { data?: { protected?: boolean; service?: string; reason?: string } }; message?: string };
+      if (axiosErr.response?.data?.protected) {
         setProtectedConfirm({
           visible: true,
-          name: error.data.service || name,
+          name: axiosErr.response.data.service || name,
           action,
-          reason: error.data.reason || '受保护的服务',
+          reason: axiosErr.response.data.reason || '受保护的服务',
         });
         return;
       }
-      message.error(error.message || `${action} 失败`);
+      message.error(axiosErr.message || `${action} 失败`);
     }
   };
 
@@ -175,8 +176,8 @@ export default function SystemMonitor() {
     try {
       const res = await systemProcessApi.getServiceLogs(name, SERVICE_LOG_LINES);
       setLogsContent(res.data?.data?.logs || '暂无日志');
-    } catch (error: any) {
-      setLogsContent(`获取日志失败: ${error.message || '未知错误'}`);
+    } catch (error: unknown) {
+      setLogsContent(`获取日志失败: ${(error instanceof Error ? error.message : '未知错误')}`);
     }
     setLogsLoading(false);
   };
@@ -186,8 +187,8 @@ export default function SystemMonitor() {
       await systemProcessApi.addToWhitelist(name);
       message.success(`已添加 ${name} 到白名单`);
       fetchServices();
-    } catch (error: any) {
-      message.error(error.message || '添加失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '添加失败'));
     }
   };
 
@@ -196,8 +197,8 @@ export default function SystemMonitor() {
       await systemProcessApi.removeFromWhitelist(name);
       message.success(`已移除 ${name}`);
       fetchServices();
-    } catch (error: any) {
-      message.error(error.message || '移除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '移除失败'));
     }
   };
 

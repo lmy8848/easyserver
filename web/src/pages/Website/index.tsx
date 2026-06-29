@@ -95,8 +95,8 @@ export default function WebsitePage() {
       await webServerApi.install(server.id);
       message.success(`${server.display_name} 安装成功`);
       await refreshServer(server.id);
-    } catch (error: any) {
-      message.error(error.message || '安装失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '安装失败'));
     } finally {
       setOperating('');
     }
@@ -108,8 +108,8 @@ export default function WebsitePage() {
       await webServerApi.uninstall(server.id);
       message.success(`${server.display_name} 已卸载`);
       await refreshServer(server.id);
-    } catch (error: any) {
-      message.error(error.message || '卸载失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '卸载失败'));
     } finally {
       setOperating('');
     }
@@ -121,8 +121,8 @@ export default function WebsitePage() {
       await webServerApi.start(server.id);
       message.success(`${server.display_name} 已启动`);
       await refreshServer(server.id);
-    } catch (error: any) {
-      message.error(error.message || '启动失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '启动失败'));
     } finally {
       setOperating('');
     }
@@ -134,8 +134,8 @@ export default function WebsitePage() {
       await webServerApi.stop(server.id);
       message.success(`${server.display_name} 已停止`);
       await refreshServer(server.id);
-    } catch (error: any) {
-      message.error(error.message || '停止失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '停止失败'));
     } finally {
       setOperating('');
     }
@@ -147,8 +147,8 @@ export default function WebsitePage() {
       await webServerApi.restart(server.id);
       message.success(`${server.display_name} 已重启`);
       await refreshServer(server.id);
-    } catch (error: any) {
-      message.error(error.message || '重启失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '重启失败'));
     } finally {
       setOperating('');
     }
@@ -161,8 +161,8 @@ export default function WebsitePage() {
       await webServerApi.reload(server.id);
       message.success('配置已重载');
       await refreshServer(server.id);
-    } catch (error: any) {
-      message.error(error.message || '重载失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '重载失败'));
     } finally {
       setOperating('');
     }
@@ -174,8 +174,8 @@ export default function WebsitePage() {
     try {
       const res = await webServerApi.testConfig(server.id);
       setConfigTestResult(res.data.data || null);
-    } catch (error: any) {
-      setConfigTestResult({ valid: false, message: error.message || 'test failed' });
+    } catch (error: unknown) {
+      setConfigTestResult({ valid: false, message: (error instanceof Error ? error.message : 'test failed') });
     } finally {
       setOperating('');
     }

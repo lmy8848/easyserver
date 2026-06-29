@@ -80,7 +80,7 @@ export default function ServiceList({
       title: '#',
       key: 'index',
       width: 60,
-      render: (_: any, __: any, index: number) => (currentPage - 1) * pageSize + index + 1,
+      render: (_: unknown, __: unknown, index: number) => (currentPage - 1) * pageSize + index + 1,
     },
     {
       title: '服务名称',
@@ -154,7 +154,7 @@ export default function ServiceList({
       title: '操作',
       key: 'action',
       width: 260,
-      render: (_: any, record: Service) => {
+      render: (_: unknown, record: Service) => {
         const isActing = actingService === record.name;
         return (
         <Space size="small">

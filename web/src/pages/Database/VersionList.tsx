@@ -45,8 +45,8 @@ export default function VersionList({
             await dbServerApi.updateVersionPort(v.id, newPort);
             message.success('端口已修改，启动服务后生效');
             onRefreshVersions();
-          } catch (error: any) {
-            message.error(error.message || '修改失败');
+          } catch (error: unknown) {
+            message.error((error instanceof Error ? error.message : '修改失败'));
           }
         }
       },

@@ -36,9 +36,9 @@ export default function CloudSettings({ settings, onRefresh }: CloudSettingsProp
       await settingsApi.updateCloud(values);
       message.success('腾讯云配置已保存');
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     } finally {
       setSaving(false);
@@ -58,10 +58,10 @@ export default function CloudSettings({ settings, onRefresh }: CloudSettingsProp
         message: `连接成功！发现 ${res.data?.data?.instance_count || 0} 个实例`,
       });
       onRefresh();
-    } catch (error: any) {
+    } catch (error: unknown) {
       setTestResult({
         success: false,
-        message: error.message || '连接失败',
+        message: (error instanceof Error ? error.message : '连接失败'),
       });
     } finally {
       setTesting(false);

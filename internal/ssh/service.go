@@ -554,8 +554,9 @@ func parseSSHLogLine(line string) *LoginRecord {
 		record.Method = "publickey"
 	}
 
-	if len(line) >= 15 {
-		record.Time = line[:15]
+	// Extract full ISO timestamp (first field before space)
+	if idx := strings.Index(line, " "); idx >= 0 {
+		record.Time = line[:idx]
 	}
 
 	return record

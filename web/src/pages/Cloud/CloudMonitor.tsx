@@ -21,7 +21,7 @@ export default function CloudMonitor({ selectedInstance }: Props) {
       const start = new Date(Date.now() - 3600 * 1000).toISOString(); // Last 1 hour
       const res = await cloudApi.getMonitor(selectedInstance, metric, start, end);
       setData(res.data?.data?.points || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch monitor data:', error);
       setData([]);
     } finally {

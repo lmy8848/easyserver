@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"easyserver/internal/infra/apperror"
@@ -18,23 +19,28 @@ const maxVisitors = 10000
 type RateLimiter struct {
 	visitors map[string]*visitor
 	mu       sync.RWMutex
-	rate     int
-	interval time.Duration
+	rate     atomic.Int64
+	interval atomic.Int64
 	done     chan struct{}
 }
 
 func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		visitors: make(map[string]*visitor),
-		rate:     rate,
-		interval: interval,
 		done:     make(chan struct{}),
 	}
+	rl.rate.Store(int64(rate))
+	rl.interval.Store(int64(interval))
 
-	// Cleanup old visitors every minute
 	go rl.cleanup()
 
 	return rl
+}
+
+// UpdateRate updates the rate limit and interval at runtime (no restart needed).
+func (rl *RateLimiter) UpdateRate(rate int, interval time.Duration) {
+	rl.rate.Store(int64(rate))
+	rl.interval.Store(int64(interval))
 }
 
 func (rl *RateLimiter) Stop() {
@@ -48,8 +54,9 @@ func (rl *RateLimiter) cleanup() {
 		select {
 		case <-ticker.C:
 			rl.mu.Lock()
+			interval := time.Duration(rl.interval.Load())
 			for ip, v := range rl.visitors {
-				if time.Since(v.lastSeen) > rl.interval {
+				if time.Since(v.lastSeen) > interval {
 					delete(rl.visitors, ip)
 				}
 			}
@@ -64,24 +71,25 @@ func (rl *RateLimiter) isAllowed(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
+	rate := int(rl.rate.Load())
+	interval := time.Duration(rl.interval.Load())
+
 	v, exists := rl.visitors[ip]
 	if !exists {
-		// Enforce max visitors limit to prevent memory exhaustion
 		if len(rl.visitors) >= maxVisitors {
-			// Evict oldest visitors
 			rl.evictOldest()
 		}
 		rl.visitors[ip] = &visitor{count: 1, lastSeen: time.Now()}
 		return true
 	}
 
-	if time.Since(v.lastSeen) > rl.interval {
+	if time.Since(v.lastSeen) > interval {
 		v.count = 1
 		v.lastSeen = time.Now()
 		return true
 	}
 
-	if v.count >= rl.rate {
+	if v.count >= rate {
 		return false
 	}
 
@@ -90,7 +98,6 @@ func (rl *RateLimiter) isAllowed(ip string) bool {
 	return true
 }
 
-// evictOldest removes the oldest 10% of visitors to free memory
 func (rl *RateLimiter) evictOldest() {
 	type entry struct {
 		ip   string
@@ -100,7 +107,6 @@ func (rl *RateLimiter) evictOldest() {
 	for ip, v := range rl.visitors {
 		entries = append(entries, entry{ip, v.lastSeen})
 	}
-	// Sort by lastSeen ascending
 	for i := 0; i < len(entries); i++ {
 		for j := i + 1; j < len(entries); j++ {
 			if entries[j].time.Before(entries[i].time) {
@@ -108,7 +114,6 @@ func (rl *RateLimiter) evictOldest() {
 			}
 		}
 	}
-	// Remove oldest 10%
 	toRemove := len(entries) / 10
 	if toRemove < 1 {
 		toRemove = 1
@@ -118,24 +123,25 @@ func (rl *RateLimiter) evictOldest() {
 	}
 }
 
-// globalRateLimiter is the package-level rate limiter for Stop() access
-var globalRateLimiter *RateLimiter
-var globalRateLimiterOnce sync.Once
+var globalRateLimiter atomic.Value
 
-// StopRateLimiter stops the background cleanup goroutine.
-// Should be called during server shutdown.
 func StopRateLimiter() {
-	if globalRateLimiter != nil {
-		globalRateLimiter.Stop()
+	if v := globalRateLimiter.Load(); v != nil {
+		v.(*RateLimiter).Stop()
 	}
 }
 
-// RateLimitMiddleware limits request rate per IP
+// GetRateLimiter returns the global rate limiter for runtime updates.
+func GetRateLimiter() *RateLimiter {
+	if v := globalRateLimiter.Load(); v != nil {
+		return v.(*RateLimiter)
+	}
+	return nil
+}
+
 func RateLimitMiddleware(rate int, interval time.Duration) gin.HandlerFunc {
 	limiter := NewRateLimiter(rate, interval)
-	globalRateLimiterOnce.Do(func() {
-		globalRateLimiter = limiter
-	})
+	globalRateLimiter.Store(limiter)
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()

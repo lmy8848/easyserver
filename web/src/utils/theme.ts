@@ -26,4 +26,7 @@ export const COLORS = {
   // Terminal
   TERMINAL_BG: '#1e1e1e',
   TERMINAL_FG: '#d4d4d4',
+
+  // Login
+  LOGIN_BG: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
 } as const;

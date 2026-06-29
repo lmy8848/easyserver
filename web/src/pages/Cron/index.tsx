@@ -30,8 +30,8 @@ export default function CronPage() {
     try {
       const res = await cronApi.list();
       setTasks(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取任务列表失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取任务列表失败'));
     } finally {
       setLoading(false);
     }
@@ -54,8 +54,8 @@ export default function CronPage() {
       await cronApi.delete(id);
       message.success('任务已删除');
       fetchTasks();
-    } catch (error: any) {
-      message.error(error.message || '删除失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
 
@@ -70,8 +70,8 @@ export default function CronPage() {
         message.success('任务已启用');
       }
       fetchTasks();
-    } catch (error: any) {
-      message.error(error.message || '操作失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '操作失败'));
     } finally {
       setOperating('');
     }
@@ -83,8 +83,8 @@ export default function CronPage() {
       await cronApi.run(task.id);
       message.success('任务已执行');
       fetchTasks();
-    } catch (error: any) {
-      message.error(error.message || '执行失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '执行失败'));
     } finally {
       setOperating('');
     }
@@ -97,8 +97,8 @@ export default function CronPage() {
     try {
       const res = await cronApi.getLogs(task.id, 50);
       setLogs(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取日志失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
@@ -109,8 +109,8 @@ export default function CronPage() {
     try {
       const res = await cronApi.listDocs();
       setDocs(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '获取文档失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '获取文档失败'));
     } finally {
       setDocsLoading(false);
     }

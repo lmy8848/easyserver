@@ -49,8 +49,8 @@ export default function ScriptPage() {
     try {
       const res = await cronApi.listScripts();
       setScripts(res.data?.data || []);
-    } catch (error: any) {
-      message.error(error.message || '加载脚本失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '加载脚本失败'));
     } finally {
       setLoading(false);
     }
@@ -63,8 +63,8 @@ export default function ScriptPage() {
     try {
       const res = await templateApi.getScriptTemplates();
       setTemplateCategories(res.data?.data?.categories || []);
-    } catch (error: any) {
-      message.error(error.message || '加载模板失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '加载模板失败'));
     } finally {
       setTemplatesLoading(false);
     }
@@ -117,9 +117,9 @@ export default function ScriptPage() {
       }
       setModalVisible(false);
       fetchScripts();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -129,8 +129,8 @@ export default function ScriptPage() {
       await cronApi.deleteScript(id);
       message.success('脚本已删除');
       fetchScripts();
-    } catch (error: any) {
-      message.error(error.message || '删除脚本失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '删除脚本失败'));
     }
   };
 
@@ -178,7 +178,7 @@ export default function ScriptPage() {
       title: '操作',
       key: 'actions',
       width: 150,
-      render: (_: any, record: Script) => (
+      render: (_: unknown, record: Script) => (
         <Space>
           <Tooltip title="复制内容">
             <Button

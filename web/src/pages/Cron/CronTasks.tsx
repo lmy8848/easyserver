@@ -85,8 +85,8 @@ export default function CronTasks({
     try {
       const res = await cronApi.getNextRuns(schedule.trim());
       setNextRuns(res.data?.data?.next_runs || []);
-    } catch (error: any) {
-      message.error(error.message || '解析 Cron 表达式失败');
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '解析 Cron 表达式失败'));
       setNextRuns([]);
     } finally {
       setPreviewLoading(false);
@@ -134,9 +134,9 @@ export default function CronTasks({
       }
       setModalVisible(false);
       onRefresh();
-    } catch (error: any) {
-      if (error.message) {
-        message.error(error.message);
+    } catch (error: unknown) {
+      if ((error instanceof Error ? error.message : String(error))) {
+        message.error((error instanceof Error ? error.message : String(error)));
       }
     }
   };
@@ -188,7 +188,7 @@ export default function CronTasks({
       title: '超时/重试',
       key: 'config',
       width: 120,
-      render: (_: any, record: CronTask) => (
+      render: (_: unknown, record: CronTask) => (
         <Space size={4}>
           {record.timeout > 0 && <Tag>{record.timeout}s</Tag>}
           {record.max_retry > 0 && <Tag color="orange">重试{record.max_retry}</Tag>}
@@ -221,7 +221,7 @@ export default function CronTasks({
       title: '操作',
       key: 'actions',
       width: 200,
-      render: (_: any, record: CronTask) => (
+      render: (_: unknown, record: CronTask) => (
         <Space>
           <Tooltip title="立即执行">
             <Button
