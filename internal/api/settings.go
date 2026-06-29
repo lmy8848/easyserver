@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/url"
@@ -669,17 +668,32 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 			return
 		}
 
-		// Build restart command using actual paths (shell-escaped to prevent injection)
-		safeConfigPath := "'" + strings.ReplaceAll(h.configPath, "'", "'\\''") + "'"
-		safeExecPath := "'" + strings.ReplaceAll(execPath, "'", "'\\''") + "'"
-		cmdStr := fmt.Sprintf("sleep 2 && nohup %s -config %s > /dev/null 2>&1 &",
-			safeExecPath, safeConfigPath)
-		if _, _, err := h.executor.RunCombined(context.Background(), "sh", "-c", cmdStr); err != nil {
-			log.Printf("settings: failed to start restart command: %v", err)
+		// Fork a child process that inherits our TCP listener FD.
+		// Zero-downtime restart — no port contention, no polling.
+		listenerFile := DupListenerFile()
+		if listenerFile == nil {
+			log.Printf("settings: no listener available for restart")
 			return
 		}
+		childEnv := append(os.Environ(),
+			"EASYSERVER_INHERIT_FD=3", // first FD after stdin(0)/stdout(1)/stderr(2)
+		)
+		args := []string{execPath, "-config", h.configPath}
+		if h.cfg.Server.DevMode {
+			args = append(args, "-dev")
+		}
+		child, err := os.StartProcess(execPath, args, &os.ProcAttr{
+			Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, listenerFile},
+			Env:   childEnv,
+		})
+		listenerFile.Close() // close our copy; child has its own
+		if err != nil {
+			log.Printf("settings: failed to fork child process: %v", err)
+			return
+		}
+		log.Printf("settings: forked child PID %d, exiting parent", child.Pid)
 
-		time.Sleep(500 * time.Millisecond)
+		// Exit immediately — child already has the listener FD
 		os.Exit(0)
 	}()
 	Success(c, gin.H{"message": "面板正在重启..."})

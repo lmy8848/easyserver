@@ -7,6 +7,7 @@ import {
 import {
   SearchOutlined, DeleteOutlined, ReloadOutlined,
   DownloadOutlined, EyeOutlined, WarningOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { auditApi, systemApi } from '../services/api';
@@ -213,6 +214,32 @@ export default function AuditLog() {
     }
   };
 
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const handleVerify = async () => {
+    setVerifyLoading(true);
+    try {
+      const res = await auditApi.verifyIntegrity();
+      const { total, valid, invalid } = res.data.data!;
+      if (invalid > 0) {
+        Modal.warning({
+          title: '完整性验证结果',
+          content: `共 ${total} 条记录，${valid} 条有效，${invalid} 条签名异常`,
+          okText: '知道了',
+        });
+      } else {
+        Modal.success({
+          title: '完整性验证通过',
+          content: `共 ${total} 条记录，全部签名有效`,
+          okText: '知道了',
+        });
+      }
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '验证失败'));
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
   const showDetail = (item: AuditLogItem) => {
     setDetailItem(item);
     setDetailVisible(true);
@@ -415,9 +442,10 @@ export default function AuditLog() {
               value={activeTab}
               onChange={(v) => setActiveTab(v as string)}
             />
-            <Button icon={<DownloadOutlined />} onClick={handleExport}>导出CSV</Button>
+            <Button icon={<DownloadOutlined />} onClick={handleExport}>导出</Button>
             <Button icon={<ReloadOutlined />} onClick={() => { fetchLogs(); fetchStats(); }}>刷新</Button>
             <Button danger icon={<DeleteOutlined />} onClick={handleClean}>清理90天前</Button>
+            <Button icon={<SafetyCertificateOutlined />} loading={verifyLoading} onClick={handleVerify}>验证完整性</Button>
           </Space>
         }
       >

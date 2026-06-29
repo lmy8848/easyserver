@@ -18,12 +18,15 @@ func SecurityMiddleware(nonce string) gin.HandlerFunc {
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		// Content Security Policy
-		// - script-src uses nonce to allow only our scripts
+		// - script-src uses nonce to allow only our scripts (production mode only)
 		// - style-src uses unsafe-inline because Ant Design CSS-in-JS requires inline styles
-		// - The nonce is injected into <script> tags at startup via InitCSPNonce()
+		scriptSrc := "'self'"
+		if nonce != "" {
+			scriptSrc += " 'nonce-" + nonce + "'"
+		}
 		c.Header("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'nonce-"+nonce+"'; "+
+				"script-src "+scriptSrc+"; "+
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob:; "+
 				"font-src 'self' data:; "+

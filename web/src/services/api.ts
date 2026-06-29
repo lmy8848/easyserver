@@ -311,6 +311,9 @@ export const auditApi = {
 
   clean: (days?: number) =>
     api.delete<ApiResponse<{ deleted: number }>>('/audit-logs/clean', { params: { days } }),
+
+  verifyIntegrity: () =>
+    api.get<ApiResponse<{ total: number; valid: number; invalid: number }>>('/audit-logs/verify'),
 };
 
 // Web Server API

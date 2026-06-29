@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -59,12 +61,36 @@ func main() {
 		log.Printf("Starting EasyServer on %s", srv.Addr)
 	}
 
+	// Try to inherit listener from parent (hot restart via FD passing)
+	addr := srv.Addr
+	var ln net.Listener
+	if inheritFD := os.Getenv("EASYSERVER_INHERIT_FD"); inheritFD != "" {
+		if fdNum, err := strconv.Atoi(inheritFD); err == nil {
+			f := os.NewFile(uintptr(fdNum), "listener")
+			if f != nil {
+				ln, err = net.FileListener(f)
+				f.Close()
+				if err == nil {
+					log.Printf("restart: inherited listener from parent on %s", addr)
+				}
+			}
+		}
+	}
+	if ln == nil {
+		var err error
+		ln, err = net.Listen("tcp", addr)
+		if err != nil {
+			log.Fatalf("Failed to listen on %s: %v", addr, err)
+		}
+	}
+	api.SetListener(ln)
+
 	go func() {
 		var err error
 		if cfg.Server.TLS.Enabled {
-			err = srv.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+			err = srv.ServeTLS(ln, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
 		} else {
-			err = srv.ListenAndServe()
+			err = srv.Serve(ln)
 		}
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)

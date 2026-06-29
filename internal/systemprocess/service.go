@@ -119,6 +119,9 @@ func (s *Service) ListSystemProcesses(sortBy, order, search string, limit int) (
 			deltaTime := now.Sub(prev.sampleAt).Seconds()
 			if deltaTime > 0 && deltaTicks >= 0 {
 				rawProcs[i].CPUPercent = float64(deltaTicks) / (deltaTime * float64(100)) * 100.0
+				if rawProcs[i].CPUPercent > 100.0 {
+					rawProcs[i].CPUPercent = 100.0
+				}
 			}
 		}
 

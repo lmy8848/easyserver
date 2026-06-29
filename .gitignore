@@ -6,6 +6,7 @@
 easyserver
 easyserver-linux
 easyserver-linux-arm64
+server
 
 # Test binary, built with `go test -c`
 *.test
