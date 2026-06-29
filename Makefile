@@ -1,10 +1,10 @@
-.PHONY: all build build-web build-server build-dev clean run dev test deps fmt build-linux help
+.PHONY: all build build-web build-server build-dev clean run dev test deps fmt build-linux build-linux-arm64 help
 
 # Build all (production with embedded frontend)
 all: build
 
 # Build production binary (with embedded frontend)
-build: build-web build-server
+build: build-server
 	@echo "Build complete: easyserver (production mode)"
 
 # Build frontend
@@ -12,26 +12,28 @@ build-web:
 	@echo "Building frontend..."
 	cd web && npm run build
 	@echo "Copying frontend to embed location..."
+	rm -rf internal/api/web/dist
 	mkdir -p internal/api/web/dist
-	cp -r web/dist/* internal/api/web/dist/
+	cp -a web/dist/. internal/api/web/dist/
 
 # Version injection
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -X easyserver/internal/api.Version=$(VERSION)
+LDFLAGS := -X 'easyserver/internal/api.Version=$(VERSION)'
+GO_BUILD := go build -ldflags "$(LDFLAGS)"
 
 # Build backend (with embedded frontend)
-build-server:
+build-server: build-web
 	@echo "Building backend..."
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o easyserver ./cmd/server
+	$(GO_BUILD) -o easyserver ./cmd/server
 
 # Build development binary (without embedded frontend)
 build-dev:
 	@echo "Building backend (dev mode)..."
-	CGO_ENABLED=0 go build -tags dev -ldflags "$(LDFLAGS)" -o easyserver ./cmd/server
+	$(GO_BUILD) -tags dev -o easyserver ./cmd/server
 
 # Clean build artifacts
 clean:
-	rm -f easyserver
+	rm -f easyserver easyserver-linux easyserver-linux-arm64
 	rm -rf web/dist
 	rm -rf internal/api/web/dist
 
@@ -40,11 +42,9 @@ run: build
 	./easyserver -config config.yaml
 
 # Run in development mode
-dev: build-dev
-	@echo "Starting backend on :8080..."
-	@echo "Starting frontend on :5173..."
-	./easyserver -config config.yaml -dev &
-	cd web && npm run dev
+dev:
+	@echo "Starting backend (with air) and frontend in parallel..."
+	bash -c "go run github.com/air-verse/air@latest & PID1=\$$!; cd web && npm run dev & PID2=\$$!; trap \"kill -TERM \$$PID1 \$$PID2 2>/dev/null || true\" EXIT; wait -n"
 
 # Install dependencies
 deps:
@@ -61,13 +61,13 @@ test:
 	go test ./...
 
 # Cross compile for Linux (CGO disabled; terminal PTY unavailable without C cross-compiler)
-build-linux:
+build-linux: build-web
 	@echo "Building for Linux amd64..."
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o easyserver-linux ./cmd/server
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO_BUILD) -o easyserver-linux ./cmd/server
 
-build-linux-arm64:
+build-linux-arm64: build-web
 	@echo "Building for Linux arm64..."
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o easyserver-linux-arm64 ./cmd/server
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO_BUILD) -o easyserver-linux-arm64 ./cmd/server
 
 # Help
 help:
