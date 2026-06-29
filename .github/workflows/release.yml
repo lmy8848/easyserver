@@ -33,9 +33,10 @@ jobs:
         run: |
           cd web
           npm ci
+          npm run lint
           npm run build
           mkdir -p ../internal/api/web/dist
-          cp -r dist/* ../internal/api/web/dist/
+          cp -a dist/. ../internal/api/web/dist/
 
       - name: Build linux-amd64
         run: |
@@ -63,15 +64,18 @@ jobs:
           data_dir: /tmp/easyserver-data
           EOF
           chmod +x easyserver-linux-amd64
-          timeout 5 ./easyserver-linux-amd64 -config /tmp/easyserver-test.yaml &
-          sleep 2
-          if curl -sf http://127.0.0.1:18080/ >/dev/null 2>&1 || ss -tlnp | grep -q 18080; then
-            echo "Smoke test PASSED — binary starts and listens on :18080"
-          else
-            echo "Smoke test FAILED — binary did not start"
-            exit 1
-          fi
-          kill %1 2>/dev/null || true
+          ./easyserver-linux-amd64 -config /tmp/easyserver-test.yaml &
+          PID=$!
+          # 轮询等待监听，最多 15s
+          for i in $(seq 1 15); do
+            curl -sf http://127.0.0.1:18080/ >/dev/null 2>&1 && { echo "Smoke test PASSED"; break; }
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "Smoke test FAILED — binary exited early"; exit 1
+            fi
+            sleep 1
+            [ "$i" = 15 ] && { echo "Smoke test FAILED — did not listen within 15s"; exit 1; }
+          done
+          kill "$PID" 2>/dev/null || true
 
       - name: Calculate checksums
         run: sha256sum easyserver-linux-amd64 easyserver-linux-arm64 > checksums-sha256.txt
