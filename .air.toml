@@ -8,10 +8,10 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   bin = "./tmp/main"
-  cmd = "make build-dev"
+  cmd = "go build -buildvcs=false -tags dev -o ./easyserver ./cmd/server"
   delay = 1000
   entrypoint = ["./easyserver"]
-  exclude_dir = ["assets", "tmp", "vendor", "testdata", "web"]
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "web", "docs", "data", "deploy"]
   exclude_file = []
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
