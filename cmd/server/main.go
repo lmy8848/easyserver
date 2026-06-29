@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -44,7 +45,21 @@ import (
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	devMode := flag.Bool("dev", false, "run in development mode (no embed, API only)")
+	
+	var showVersion bool
+	flag.BoolVar(&showVersion, "v", false, "print version and exit")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Println(api.GetFullVersionString())
+		os.Exit(0)
+	}
+
+	if len(flag.Args()) > 0 {
+		fmt.Fprintf(os.Stderr, "Error: Unexpected arguments: %v\n", flag.Args())
+		os.Exit(1)
+	}
 
 	// Load config
 	cfg, err := config.Load(*configPath)

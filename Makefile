@@ -17,9 +17,9 @@ build-web:
 	cp -a web/dist/. internal/api/web/dist/
 
 # Version injection
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -d "'" || echo "dev")
 LDFLAGS := -X 'easyserver/internal/api.Version=$(VERSION)'
-GO_BUILD := go build -ldflags "$(LDFLAGS)"
+GO_BUILD := go build -buildvcs=false -ldflags "$(LDFLAGS)"
 
 # Build backend (with embedded frontend)
 build-server: build-web

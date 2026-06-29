@@ -29,6 +29,11 @@ var (
 	GoVersion = runtime.Version()
 )
 
+// GetFullVersionString returns the formatted version information
+func GetFullVersionString() string {
+	return fmt.Sprintf("EasyServer version %s (Go: %s, Platform: %s/%s)", Version, GoVersion, runtime.GOOS, runtime.GOARCH)
+}
+
 type SettingsHandler struct {
 	cfg          *config.Config
 	cfgMu        sync.RWMutex
@@ -623,9 +628,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 // GetSystemInfo returns system information
 func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
 	Success(c, gin.H{
-		"version":    Version,
-		"go_version": GoVersion,
-		"platform":   fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		"version": Version,
 	})
 }
 

@@ -63,6 +63,7 @@ CLAUDE.md
 files.txt
 *.bak
 *.tmp
+tmp/
 
 # Documentation (exclude all docs except GitHub Pages files)
 docs/*
@@ -75,4 +76,4 @@ docs/*
 !README.md
 !web/README.md
 !deploy/README.md
-server
+!CHANGELOG.md

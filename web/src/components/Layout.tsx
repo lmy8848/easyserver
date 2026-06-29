@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { notificationApi } from '../services/api';
+import { notificationApi, settingsApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
@@ -123,6 +123,7 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [sysVersion, setSysVersion] = useState<string>('');
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -130,6 +131,15 @@ export default function Layout() {
   const { user, logout, loadUser } = useAuthStore();
 
   useEffect(() => { loadUser(); }, [loadUser]);
+
+  // Fetch version
+  useEffect(() => {
+    let mounted = true;
+    settingsApi.getSystem().then(res => {
+      if (mounted) setSysVersion(res.data?.data?.version || 'dev');
+    }).catch(err => console.debug('Failed to fetch system version:', err));
+    return () => { mounted = false; };
+  }, []);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
@@ -242,7 +252,8 @@ export default function Layout() {
             </div>
           ))}
         </nav>
-        <div className="sidebar-footer">
+        <div className="sidebar-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between', width: '100%' }}>
+          {!collapsed && <div className="sidebar-version" style={{ fontSize: '12px', color: '#888', paddingLeft: '16px' }}>v{sysVersion || '...'}</div>}
           <button className="sidebar-collapse-btn" onClick={() => setCollapsed(!collapsed)}>
             <Icon name={collapsed ? 'menu-unfold' : 'menu-fold'} />
           </button>

@@ -690,7 +690,7 @@ export const settingsApi = {
     api.get<ApiResponse<AppSettings>>('/settings'),
 
   getSystem: () =>
-    api.get<ApiResponse<{ version: string; go_version: string; platform: string }>>('/settings/system'),
+    api.get<ApiResponse<{ version: string }>>('/settings/system'),
 
   updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean }) =>
     api.put<ApiResponse<{ requires_restart: boolean }>>('/settings/server', data),
