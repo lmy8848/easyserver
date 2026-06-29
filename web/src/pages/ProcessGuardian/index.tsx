@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons';
 import type { ProcessWithStatus, ProcessLog, ProcessGroup } from '../../types';
 import { processApi } from '../../services/api';
-import SystemMonitor from './SystemMonitor';
+import SystemProcesses from './SystemProcesses';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
 const { Text } = Typography;
@@ -349,7 +349,7 @@ export default function ProcessGuardian() {
             label: (
               <span>
                 <DashboardOutlined />
-                系统监控
+                系统进程
               </span>
             ),
           },
@@ -540,7 +540,7 @@ export default function ProcessGuardian() {
       </>
       )}
 
-      {activeTab === 'system' && <SystemMonitor />}
+      {activeTab === 'system' && <SystemProcesses />}
     </div>
   );
 }

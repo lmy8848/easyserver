@@ -457,37 +457,6 @@ export interface SystemProcess {
   threads: number;
 }
 
-export interface SystemOverview {
-  cpu_usage: number;
-  memory_total: number;
-  memory_used: number;
-  memory_usage: number;
-  swap_total: number;
-  swap_used: number;
-  load_avg: [number, number, number];
-  uptime: number;
-  top_cpu: SystemProcess[];
-  top_mem: SystemProcess[];
-  total_procs: number;
-  running_procs: number;
-}
-
-export interface SystemService {
-  name: string;
-  description: string;
-  active_state: string;
-  sub_state: string;
-  pid: number;
-  load_state: string;
-  enabled: boolean;
-}
-
-export interface ServiceWhitelistEntry {
-  id: number;
-  name: string;
-  created_at: string;
-}
-
 // Notification types
 export interface Notification {
   id: number;
