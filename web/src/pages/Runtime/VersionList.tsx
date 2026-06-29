@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, Form, Select, Input, Button, Space, Tag, message } from 'antd';
+import { Modal, Form, Select, Input, Button, Space, Tag, message, Alert } from 'antd';
 import { SyncOutlined } from '@ant-design/icons';
 import type { VersionInfo, CatalogEntry } from './types';
 
@@ -130,6 +130,20 @@ export default function VersionList({
       footer={null}
       destroyOnHidden
     >
+      {selectedRuntime === 'php' && (
+        <Alert
+          message="源码编译提醒"
+          description={
+            <span>
+              该环境需要从源码编译安装。系统将自动为你安装编译所需的系统依赖。<br/>
+              <b>注意：</b> 根据服务器性能，编译过程可能需要几分钟到十几分钟不等，请耐心等待。
+            </span>
+          }
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Form form={form} onFinish={onInstall} layout="vertical">
         <Form.Item
           name="name"

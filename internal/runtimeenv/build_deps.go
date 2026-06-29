@@ -9,11 +9,10 @@ import (
 )
 
 // buildDepsApt 列出在 Debian/Ubuntu 上从源码编译指定运行时所需的系统包。
-// asdf-php、python-build 都是 source build——必须先把工具链装好，否则
-// mise install 会停在 buildconf/configure 阶段并把"autoconf not found"
-// 之类的错抛给用户。
+// asdf-php 走的是 source build——必须先把工具链装好，否则
+// mise install 会停在 buildconf/configure 阶段并抛错。
 //
-// node / go / java 都用预编译二进制，无需本地工具链，因此不在此表。
+// node / go / java / python 都用预编译二进制，无需本地工具链，因此不在此表。
 var buildDepsApt = map[string][]string{
 	"php": {
 		"build-essential", "autoconf", "bison", "re2c", "pkg-config",
@@ -21,11 +20,6 @@ var buildDepsApt = map[string][]string{
 		"libcurl4-openssl-dev", "libonig-dev", "libzip-dev", "zlib1g-dev",
 		"libgd-dev", "libpq-dev", "libbz2-dev", "libjpeg-dev", "libpng-dev",
 		"libreadline-dev", "libtidy-dev", "libxslt1-dev",
-	},
-	"python": {
-		"build-essential", "libssl-dev", "zlib1g-dev", "libbz2-dev",
-		"libreadline-dev", "libsqlite3-dev", "libffi-dev", "liblzma-dev",
-		"pkg-config", "tk-dev", "libncursesw5-dev", "xz-utils",
 	},
 }
 
