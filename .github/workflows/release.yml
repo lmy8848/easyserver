@@ -70,13 +70,14 @@ jobs:
           data_dir: /tmp/easyserver-data
           EOF
           chmod +x easyserver-linux-amd64
-          ./easyserver-linux-amd64 -config /tmp/easyserver-test.yaml &
+          MISE_DATA_DIR=/tmp/mise-data ./easyserver-linux-amd64 -config /tmp/easyserver-test.yaml &
           PID=$!
           # 轮询等待监听，最多 15s
           for i in $(seq 1 15); do
-            curl -sf http://127.0.0.1:18080/ >/dev/null 2>&1 && { echo "Smoke test PASSED"; break; }
+            curl -sf http://127.0.0.1:18080/health >/dev/null 2>&1 && { echo "Smoke test PASSED"; break; }
             if ! kill -0 "$PID" 2>/dev/null; then
-              echo "Smoke test FAILED — binary exited early"; exit 1
+              wait "$PID"; RC=$?
+              echo "Smoke test FAILED — binary exited early with code $RC"; exit 1
             fi
             sleep 1
             [ "$i" = 15 ] && { echo "Smoke test FAILED — did not listen within 15s"; exit 1; }
