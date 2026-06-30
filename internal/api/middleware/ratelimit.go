@@ -9,119 +9,119 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-	type visitor struct {
-		count       int
-		windowStart time.Time
+type visitor struct {
+	count       int
+	windowStart time.Time
+}
+
+const maxVisitors = 10000
+
+type RateLimiter struct {
+	visitors map[string]*visitor
+	mu       sync.RWMutex
+	rate     atomic.Int64
+	interval atomic.Int64
+	done     chan struct{}
+}
+
+func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
+	rl := &RateLimiter{
+		visitors: make(map[string]*visitor),
+		done:     make(chan struct{}),
 	}
+	rl.rate.Store(int64(rate))
+	rl.interval.Store(int64(interval))
 
-	const maxVisitors = 10000
+	go rl.cleanup()
 
-	type RateLimiter struct {
-		visitors map[string]*visitor
-		mu       sync.RWMutex
-		rate     atomic.Int64
-		interval atomic.Int64
-		done     chan struct{}
-	}
+	return rl
+}
 
-	func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
-		rl := &RateLimiter{
-			visitors: make(map[string]*visitor),
-			done:     make(chan struct{}),
-		}
-		rl.rate.Store(int64(rate))
-		rl.interval.Store(int64(interval))
+func (rl *RateLimiter) UpdateRate(rate int, interval time.Duration) {
+	rl.rate.Store(int64(rate))
+	rl.interval.Store(int64(interval))
+}
 
-		go rl.cleanup()
+func (rl *RateLimiter) Stop() {
+	close(rl.done)
+}
 
-		return rl
-	}
-
-	func (rl *RateLimiter) UpdateRate(rate int, interval time.Duration) {
-		rl.rate.Store(int64(rate))
-		rl.interval.Store(int64(interval))
-	}
-
-	func (rl *RateLimiter) Stop() {
-		close(rl.done)
-	}
-
-	func (rl *RateLimiter) cleanup() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				rl.mu.Lock()
-				interval := time.Duration(rl.interval.Load())
-				now := time.Now()
-				for ip, v := range rl.visitors {
-					if now.Sub(v.windowStart) > interval*2 {
-						delete(rl.visitors, ip)
-					}
+func (rl *RateLimiter) cleanup() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			interval := time.Duration(rl.interval.Load())
+			now := time.Now()
+			for ip, v := range rl.visitors {
+				if now.Sub(v.windowStart) > interval*2 {
+					delete(rl.visitors, ip)
 				}
-				rl.mu.Unlock()
-			case <-rl.done:
-				return
 			}
+			rl.mu.Unlock()
+		case <-rl.done:
+			return
 		}
 	}
+}
 
-	func (rl *RateLimiter) isAllowed(ip string) bool {
-		rl.mu.Lock()
-		defer rl.mu.Unlock()
+func (rl *RateLimiter) isAllowed(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
 
-		rate := int(rl.rate.Load())
-		interval := time.Duration(rl.interval.Load())
-		now := time.Now()
+	rate := int(rl.rate.Load())
+	interval := time.Duration(rl.interval.Load())
+	now := time.Now()
 
-		v, exists := rl.visitors[ip]
-		if !exists {
-			if len(rl.visitors) >= maxVisitors {
-				rl.evictOldest()
-			}
-			rl.visitors[ip] = &visitor{count: 1, windowStart: now}
-			return true
+	v, exists := rl.visitors[ip]
+	if !exists {
+		if len(rl.visitors) >= maxVisitors {
+			rl.evictOldest()
 		}
-
-		if now.Sub(v.windowStart) > interval {
-			v.count = 1
-			v.windowStart = now
-			return true
-		}
-
-		if v.count >= rate {
-			return false
-		}
-
-		v.count++
+		rl.visitors[ip] = &visitor{count: 1, windowStart: now}
 		return true
 	}
 
-	func (rl *RateLimiter) evictOldest() {
-		type entry struct {
-			ip   string
-			time time.Time
-		}
-		var entries []entry
-		for ip, v := range rl.visitors {
-			entries = append(entries, entry{ip, v.windowStart})
-		}
-		for i := 0; i < len(entries); i++ {
-			for j := i + 1; j < len(entries); j++ {
-				if entries[j].time.Before(entries[i].time) {
-					entries[i], entries[j] = entries[j], entries[i]
-				}
+	if now.Sub(v.windowStart) > interval {
+		v.count = 1
+		v.windowStart = now
+		return true
+	}
+
+	if v.count >= rate {
+		return false
+	}
+
+	v.count++
+	return true
+}
+
+func (rl *RateLimiter) evictOldest() {
+	type entry struct {
+		ip   string
+		time time.Time
+	}
+	var entries []entry
+	for ip, v := range rl.visitors {
+		entries = append(entries, entry{ip, v.windowStart})
+	}
+	for i := 0; i < len(entries); i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[j].time.Before(entries[i].time) {
+				entries[i], entries[j] = entries[j], entries[i]
 			}
 		}
-		toRemove := len(entries) / 10
-		if toRemove < 1 {
-			toRemove = 1
-		}
-		for i := 0; i < toRemove; i++ {
-			delete(rl.visitors, entries[i].ip)
-		}
 	}
+	toRemove := len(entries) / 10
+	if toRemove < 1 {
+		toRemove = 1
+	}
+	for i := 0; i < toRemove; i++ {
+		delete(rl.visitors, entries[i].ip)
+	}
+}
 
 var rateLimiters sync.Map
 
