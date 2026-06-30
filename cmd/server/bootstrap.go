@@ -257,7 +257,6 @@ func wire(cfg *config.Config) (*appServices, error) {
 	// Env config (with seeding)
 	envConfigRepo := envconfig.NewSQLiteRepository(db)
 	envConfigService := envconfig.NewService(envConfigRepo)
-	envConfigService.InitDefaultGlobalConfigs(ctx)
 	s.EnvConfigService = envConfigService
 
 	// Firewall

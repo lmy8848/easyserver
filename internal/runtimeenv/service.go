@@ -50,12 +50,12 @@ func (s *Service) InitMirrors(ctx context.Context) error {
 	}
 	if count == 0 {
 		mirrors := []RuntimeMirror{
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node/", Enabled: 1, Source: "seed"},
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist/", Enabled: 0, Source: "seed"},
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", Enabled: 0, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang/", Enabled: 1, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl/", Enabled: 0, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang/", Enabled: 0, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node", Enabled: 1, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist", Enabled: 0, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release", Enabled: 0, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang", Enabled: 1, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl", Enabled: 0, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang", Enabled: 0, Source: "seed"},
 		}
 		if err := s.repo.SeedMirrors(ctx, mirrors); err != nil {
 			return err
@@ -754,10 +754,11 @@ func (s *Service) UpdateMirror(ctx context.Context, req *RuntimeMirrorUpdateRequ
 
 	newEnvValue := m.EnvValue
 	if req.EnvValue != nil {
-		if m.Source == "seed" && *req.EnvValue != m.EnvValue {
+		val := strings.TrimRight(*req.EnvValue, "/")
+		if m.Source == "seed" && val != strings.TrimRight(m.EnvValue, "/") {
 			return fmt.Errorf("cannot modify seed mirror URL")
 		}
-		newEnvValue = *req.EnvValue
+		newEnvValue = val
 	}
 	newEnabled := m.Enabled
 	if req.Enabled != nil {
@@ -798,7 +799,7 @@ func (s *Service) CreateMirror(ctx context.Context, req *RuntimeMirrorCreateRequ
 	m := &RuntimeMirror{
 		Lang:     req.Lang,
 		EnvKey:   req.EnvKey,
-		EnvValue: req.EnvValue,
+		EnvValue: strings.TrimRight(req.EnvValue, "/"),
 		Enabled:  enabled,
 		Source:   "user",
 	}

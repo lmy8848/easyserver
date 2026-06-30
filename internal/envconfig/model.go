@@ -22,14 +22,3 @@ type PathEntry struct {
 	Order     int       `json:"order"`      // Order in PATH (lower = higher priority)
 	CreatedAt time.Time `json:"created_at"`
 }
-
-// GlobalConfig represents a global configuration entry
-type GlobalConfig struct {
-	ID          int64     `json:"id"`
-	Category    string    `json:"category"`    // maven, npm, pip, etc.
-	Key         string    `json:"key"`         // registry, mirror, proxy, etc.
-	Value       string    `json:"value"`       // https://registry.npmmirror.com, etc.
-	Description string    `json:"description"` // Human-readable description
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}

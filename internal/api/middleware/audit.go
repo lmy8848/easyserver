@@ -62,7 +62,6 @@ var categoryPrefixes = []struct {
 	{"/api/deploy", audit.ResourceDeploy},
 	{"/api/settings", audit.ResourceSetting},
 	{"/api/env-config", audit.ResourceEnvVar},
-	{"/api/global-config", audit.ResourceEnvVar},
 	{"/api/notifications", audit.ResourceNotification},
 	{"/api/audit-logs", audit.ResourceAudit},
 	{"/api/systemd", audit.ResourceSystem},
