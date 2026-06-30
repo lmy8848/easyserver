@@ -56,6 +56,8 @@ func (s *Service) InitMirrors(ctx context.Context) error {
 			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang", Enabled: 1, Source: "seed"},
 			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl", Enabled: 0, Source: "seed"},
 			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang", Enabled: 0, Source: "seed"},
+			{Lang: "python", EnvKey: "PYTHON_BUILD_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/python", Enabled: 1, Source: "seed"},
+			{Lang: "python", EnvKey: "PYTHON_BUILD_MIRROR_URL", EnvValue: "https://mirrors.aliyun.com/python", Enabled: 0, Source: "seed"},
 		}
 		if err := s.repo.SeedMirrors(ctx, mirrors); err != nil {
 			return err

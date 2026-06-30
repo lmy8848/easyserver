@@ -28,7 +28,7 @@ var catalog = []Runtime{
 		Display:            "Python",
 		MiseTool:           "python",
 		Majors:             []string{"3.10", "3.11", "3.12", "3.13", "3.14"},
-		MirrorEnvs:         []string{},
+		MirrorEnvs:         []string{"PYTHON_BUILD_MIRROR_URL"},
 		SupportsGlobalPkgs: true,
 	},
 	{
