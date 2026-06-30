@@ -312,8 +312,6 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
-	middleware.AuditSummary(c, "更新全局配置 #"+strconv.FormatInt(id, 10))
-
 	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -323,6 +321,7 @@ func (h *EnvConfigHandler) UpdateGlobalConfig(c *gin.Context) {
 		c.Error(ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "更新全局配置 "+config.Key)
 
 	config.Value = req.Value
 	config.Description = req.Description
@@ -343,7 +342,12 @@ func (h *EnvConfigHandler) DeleteGlobalConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
-	middleware.AuditSummary(c, "删除全局配置 #"+strconv.FormatInt(id, 10))
+	config, err := h.envConfigService.GetGlobalConfig(c.Request.Context(), id)
+	if err != nil || config == nil {
+		c.Error(ErrNotFound.WithMessage("配置不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "删除全局配置 "+config.Key)
 
 	if err := h.envConfigService.DeleteGlobalConfig(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))

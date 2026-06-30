@@ -38,6 +38,7 @@ type AuditFilter struct {
 	Type      string
 	StartDate string
 	EndDate   string
+	Status    string
 	Offset    int
 	Limit     int
 }

@@ -171,7 +171,11 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "更新防火墙规则 "+strconv.FormatInt(id, 10))
+	summary := "更新防火墙规则 (端口: " + rule.Port + ")"
+	if req.Port != nil && *req.Port != "" && *req.Port != rule.Port {
+		summary = "更新防火墙规则端口 " + rule.Port + " -> " + *req.Port
+	}
+	middleware.AuditSummary(c, summary)
 	if req.Chain != nil {
 		validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 		if !validChains[strings.ToUpper(*req.Chain)] {
@@ -242,12 +246,13 @@ func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
-	middleware.AuditSummary(c, "删除防火墙规则 "+strconv.FormatInt(id, 10))
 	// Check existence
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "删除防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.DeleteRule(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -263,7 +268,6 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "启用防火墙规则 "+strconv.FormatInt(id, 10))
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
@@ -281,6 +285,7 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "启用防火墙规则 (端口: "+rule.Port+")")
 
 	// Check if enabling this rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
@@ -302,12 +307,13 @@ func (h *FirewallRuleHandler) DisableRule(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
-	middleware.AuditSummary(c, "禁用防火墙规则 "+strconv.FormatInt(id, 10))
 	// Check existence
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "禁用防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.DisableRule(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -322,11 +328,12 @@ func (h *FirewallRuleHandler) MoveRuleUp(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
-	middleware.AuditSummary(c, "上移防火墙规则 "+strconv.FormatInt(id, 10))
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "上移防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.MoveRuleUp(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -341,11 +348,12 @@ func (h *FirewallRuleHandler) MoveRuleDown(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
-	middleware.AuditSummary(c, "下移防火墙规则 "+strconv.FormatInt(id, 10))
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "下移防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.MoveRuleDown(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return

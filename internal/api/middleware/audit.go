@@ -93,6 +93,11 @@ func verbFor(method, fullPath string) audit.ActionCategory {
 		return audit.ActionDelete
 	}
 	for _, s := range segs {
+		if deleteSegs[s] {
+			return audit.ActionDelete
+		}
+	}
+	for _, s := range segs {
 		if createSegs[s] {
 			return audit.ActionCreate
 		}
@@ -132,6 +137,11 @@ var controlSegs = map[string]bool{
 	"start": true, "stop": true, "restart": true, "pause": true,
 	"unpause": true, "down": true, "reload": true, "enable": true,
 	"disable": true, "restore": true,
+}
+
+var deleteSegs = map[string]bool{
+	"uninstall": true, "remove": true, "clear": true, "prune": true,
+	"revoke": true, "delete": true, "drop": true, "destroy": true,
 }
 
 // AuditMiddleware logs every non-GET request (request log) and, when the handler

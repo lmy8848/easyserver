@@ -68,7 +68,12 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的数据库ID"))
 		return
 	}
-	middleware.AuditSummary(c, "删除数据库 #"+strconv.FormatInt(dbID, 10))
+	dbInfo, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), dbID)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("数据库不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "删除数据库 "+dbInfo.Name)
 	if err := h.dbMgmtService.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -166,7 +171,12 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
-	middleware.AuditSummary(c, "执行SQL（数据库 #"+strconv.FormatInt(did, 10)+"）")
+	dbInfo, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("数据库不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "执行SQL (数据库: "+dbInfo.Name+")")
 
 	result, err := h.dbMgmtService.ExecuteSQL(c.Request.Context(), did, req.SQL)
 	if err != nil {

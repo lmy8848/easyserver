@@ -6,7 +6,7 @@ import {
 } from 'antd';
 import {
   SearchOutlined, DeleteOutlined, ReloadOutlined,
-  DownloadOutlined, EyeOutlined, WarningOutlined,
+  DownloadOutlined, EyeOutlined, 
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { auditApi, systemApi } from '../services/api';
@@ -79,6 +79,7 @@ export default function AuditLog() {
   const [pageSize, setPageSize] = useState(50);
   const [username, setUsername] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [resource, setResource] = useState('');
   const [ipFilter, setIpFilter] = useState('');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null);
@@ -114,11 +115,12 @@ export default function AuditLog() {
     if (activeTab !== 'operation' && activeTab !== 'request') return;
     setLoading(true);
     try {
-      const params: { page: number; page_size: number; username?: string; action?: string; resource?: string; ip?: string; start_date?: string; end_date?: string; type?: string } = { page, page_size: pageSize };
+      const params: { page: number; page_size: number; username?: string; action?: string; resource?: string; ip?: string; status?: string; start_date?: string; end_date?: string; type?: string } = { page, page_size: pageSize };
       if (username) params['username'] = username;
       if (actionFilter) params['action'] = actionFilter;
       if (resource) params['resource'] = resource;
       if (ipFilter) params['ip'] = ipFilter;
+      if (statusFilter) params['status'] = statusFilter;
       if (dateRange?.[0]) params['start_date'] = dateRange[0].format('YYYY-MM-DD');
       if (dateRange?.[1]) params['end_date'] = dateRange[1].format('YYYY-MM-DD');
       params['type'] = activeTab;
@@ -131,7 +133,7 @@ export default function AuditLog() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, username, actionFilter, resource, ipFilter, dateRange, activeTab]);
+  }, [page, pageSize, username, actionFilter, statusFilter, resource, ipFilter, dateRange, activeTab]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -163,7 +165,7 @@ export default function AuditLog() {
   }, [fetchLogs]);
 
   useEffect(() => {
-    if (activeTab === 'stats' || activeTab === 'alerts') {
+    if (activeTab === 'stats') {
       fetchStats();
     }
     if (activeTab === 'ssh') {
@@ -336,10 +338,26 @@ export default function AuditLog() {
       title: '资源',
       dataIndex: 'resource',
       key: 'resource',
+      width: 150,
       ellipsis: true,
       render: (_: string, record: AuditLogItem) => {
         const text = getResourceText(record);
         return <Tooltip title={text}><span style={{ fontSize: 12 }}>{text || '-'}</span></Tooltip>;
+      },
+    };
+    const resultCol = {
+      title: '结果',
+      key: 'result',
+      width: 80,
+      render: (_: unknown, record: AuditLogItem) => {
+        const detail = parseDetail(record.detail);
+        let isSuccess = true;
+        if (detail.status && detail.status !== '-') {
+          isSuccess = parseInt(detail.status) < 400;
+        } else if (detail.success !== undefined) {
+          isSuccess = detail.success;
+        }
+        return <Tag color={isSuccess ? 'success' : 'error'}>{isSuccess ? '成功' : '失败'}</Tag>;
       },
     };
     const methodCol = {
@@ -411,10 +429,9 @@ export default function AuditLog() {
     const showRequestCols = activeTab === 'request';
     const showResourceCol = activeTab === 'operation';
     return [
-      timeCol, userCol, actionCol,
-      ...(showResourceCol ? [resourceCol, summaryCol] : []),
-      ...(showRequestCols ? [methodCol, pathCol, statusCol, durationCol, ipCol] : []),
-      detailCol,
+      timeCol, userCol,
+      ...(showResourceCol ? [actionCol, resourceCol, resultCol, summaryCol] : []),
+      ...(showRequestCols ? [methodCol, pathCol, statusCol, durationCol, ipCol, detailCol] : []),
     ];
   }, [activeTab]);
 
@@ -429,7 +446,6 @@ export default function AuditLog() {
                 { label: '操作日志', value: 'operation' },
                 { label: '请求日志', value: 'request' },
                 { label: '统计分析', value: 'stats' },
-                { label: <Badge key="alerts-badge" count={stats?.alerts?.length || 0} size="small"><span style={{ padding: '0 8px' }}>异常告警</span></Badge>, value: 'alerts' },
                 { label: 'SSH 登录', value: 'ssh' },
               ]}
               value={activeTab}
@@ -437,6 +453,7 @@ export default function AuditLog() {
                 setActiveTab(v as string);
                 setUsername('');
                 setActionFilter('');
+                setStatusFilter('');
                 setResource('');
                 setIpFilter('');
                 setDateRange(null);
@@ -460,6 +477,16 @@ export default function AuditLog() {
                 style={{ width: 120 }}
                 allowClear
                 options={(activeTab === 'request' ? ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] : ['创建', '删除', '修改', '执行', '认证', '其他']).map(a => ({ label: a, value: a }))}
+              />
+              <Select
+                placeholder={activeTab === 'request' ? '状态' : '结果'}
+                value={statusFilter || undefined}
+                onChange={v => setStatusFilter(v || '')}
+                style={{ width: 100 }}
+                allowClear
+                options={activeTab === 'request' 
+                  ? [{ label: '2xx', value: '2xx' }, { label: '4xx', value: '4xx' }, { label: '5xx', value: '5xx' }]
+                  : [{ label: '成功', value: 'success' }, { label: '失败', value: 'failed' }]}
               />
               <Input placeholder={activeTab === 'request' ? '请求路径' : '操作资源'} value={resource} onChange={e => setResource(e.target.value)} style={{ width: 180 }} allowClear />
               {activeTab === 'request' && <Input placeholder="IP 地址" value={ipFilter} onChange={e => setIpFilter(e.target.value)} style={{ width: 140 }} allowClear />}
@@ -515,40 +542,7 @@ export default function AuditLog() {
           </>
         )}
 
-        {activeTab === 'alerts' && (
-          <>
-            <Space style={{ marginBottom: 16 }}>
-              <WarningOutlined style={{ color: '#ff4d4f', fontSize: 16 }} />
-              <Text>显示近{statsDays}天内状态码 ≥ 400 的异常操作</Text>
-              <Segmented
-                options={[
-                  { label: '近7天', value: 7 },
-                  { label: '近30天', value: 30 },
-                  { label: '近90天', value: 90 },
-                ]}
-                value={statsDays}
-                onChange={(v) => setStatsDays(v as number)}
-              />
-            </Space>
-            <Table
-              dataSource={stats?.alerts || []}
-              rowKey="id"
-              size="small"
-              pagination={{ pageSize: 50, showTotal: (total) => `共 ${total} 条`, showQuickJumper: false, showSizeChanger: false }}
-              columns={[
-                { title: '时间', dataIndex: 'created_at', width: 160 },
-                { title: '用户', dataIndex: 'username', width: 100 },
-                { title: '操作', dataIndex: 'action', width: 80, render: (v: string) => <Tag color={getActionColor(v)}>{v}</Tag> },
-                { title: '资源', dataIndex: 'resource', ellipsis: true },
-                {
-                  title: '状态', dataIndex: 'status', width: 80,
-                  render: (v: number) => <Tag color={v >= 500 ? 'error' : 'warning'}>{v}</Tag>,
-                },
-                { title: 'IP', dataIndex: 'ip', width: 130 },
-              ]}
-            />
-          </>
-        )}
+
 
         {activeTab === 'ssh' && (
           <>
@@ -602,7 +596,6 @@ export default function AuditLog() {
               <Tag color={getMethodColor(parseDetail(detailItem.detail).method)}>{parseDetail(detailItem.detail).method}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="请求路径"><Text copyable>{parseDetail(detailItem.detail).path}</Text></Descriptions.Item>
-            <Descriptions.Item label="资源路径"><Text copyable>{detailItem.resource}</Text></Descriptions.Item>
             <Descriptions.Item label="响应状态">
               <Tag color={getStatusColor(parseDetail(detailItem.detail).status)}>{parseDetail(detailItem.detail).status}</Tag>
             </Descriptions.Item>

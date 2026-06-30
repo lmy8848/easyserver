@@ -137,7 +137,12 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
-	middleware.AuditSummary(c, "更新数据库版本端口 #"+strconv.FormatInt(vid, 10))
+	vInfo, err := h.dbServerService.GetVersion(c.Request.Context(), vid)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("数据库版本不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ServiceName+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
 
 	if req.Port < 1 || req.Port > 65535 {
 		c.Error(ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))

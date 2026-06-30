@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -59,6 +58,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 	logType := c.Query("type")
+	status := c.Query("status")
 
 	if page < 1 {
 		page = 1
@@ -78,6 +78,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 			Type:      logType,
 			StartDate: startDate,
 			EndDate:   endDate,
+			Status:    status,
 			Offset:    offset,
 			Limit:     pageSize,
 		}
@@ -139,6 +140,25 @@ func (h *AuditHandler) List(c *gin.Context) {
 	if logType != "" {
 		where += " AND type = ?"
 		args = append(args, logType)
+	}
+	if status != "" {
+		if logType == "request" {
+			switch status {
+			case "2xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 200 AND 299"
+			case "4xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 400 AND 499"
+			case "5xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 500"
+			}
+		} else if logType == "operation" {
+			switch status {
+			case "success":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) < 400 OR json_extract(detail, '$.success') = 1 OR (json_extract(detail, '$.status') IS NULL AND json_extract(detail, '$.success') IS NULL))"
+			case "failed":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) >= 400 OR json_extract(detail, '$.success') = 0)"
+			}
+		}
 	}
 
 	// Get total count
@@ -340,55 +360,11 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 
-	// 异常告警：失败操作（4xx/5xx，仅 request 日志含 status）
-	alertRows, err := h.db.Query(`
-		SELECT id, username, action, resource, detail, ip, created_at
-		FROM audit_logs
-		WHERE created_at >= ?
-		  AND type = 'request'
-		  AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 400
-		ORDER BY id DESC
-		LIMIT 200
-	`, since)
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-	defer alertRows.Close()
-
-	type AlertItem struct {
-		ID        int64  `json:"id"`
-		Username  string `json:"username"`
-		Action    string `json:"action"`
-		Resource  string `json:"resource"`
-		Status    int    `json:"status"`
-		IP        string `json:"ip"`
-		CreatedAt string `json:"created_at"`
-	}
-	var alerts []AlertItem
-	for alertRows.Next() {
-		var a AlertItem
-		var detail string
-		var createdAt time.Time
-		if alertRows.Scan(&a.ID, &a.Username, &a.Action, &a.Resource, &detail, &a.IP, &createdAt) == nil {
-			a.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
-			// Parse status from detail
-			var detailObj struct {
-				Status int `json:"status"`
-			}
-			if json.Unmarshal([]byte(detail), &detailObj) == nil {
-				a.Status = detailObj.Status
-			}
-			alerts = append(alerts, a)
-		}
-	}
-
 	Success(c, gin.H{
 		"user_stats":   userStats,
 		"action_stats": actionStats,
 		"day_stats":    dayStats,
 		"status_stats": statusStats,
-		"alerts":       alerts,
 	})
 }
 

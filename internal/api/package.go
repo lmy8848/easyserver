@@ -83,7 +83,14 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "安装包 "+req.Name)
+	summary := "安装包 " + req.Name
+	if req.Manager != "" {
+		summary = req.Manager + " 安装 " + req.Name
+	}
+	if req.Version != "" {
+		summary += " (版本: " + req.Version + ")"
+	}
+	middleware.AuditSummary(c, summary)
 	if err := h.packageService.InstallPackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -118,7 +125,11 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "卸载包 "+req.Name)
+	summary := "卸载包 " + req.Name
+	if req.Manager != "" {
+		summary = req.Manager + " 卸载 " + req.Name
+	}
+	middleware.AuditSummary(c, summary)
 	if err := h.packageService.UninstallPackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -153,11 +164,45 @@ func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "更新包 "+req.Name)
+	// Try to get old version before update
+	var oldVersion string
+	pkgs, err := h.packageService.ListPackages(c.Request.Context(), req.RuntimeID, runtime.Name, runtime.Path)
+	if err == nil {
+		for _, p := range pkgs {
+			if p.Name == req.Name {
+				oldVersion = p.Version
+				break
+			}
+		}
+	}
+
 	if err := h.packageService.UpdatePackage(c.Request.Context(), &req, runtime.Name, runtime.Path); err != nil {
 		c.Error(WrapError(err))
 		return
 	}
+
+	// Try to get new version after update
+	var newVersion string
+	pkgsAfter, err := h.packageService.ListPackages(c.Request.Context(), req.RuntimeID, runtime.Name, runtime.Path)
+	if err == nil {
+		for _, p := range pkgsAfter {
+			if p.Name == req.Name {
+				newVersion = p.Version
+				break
+			}
+		}
+	}
+
+	summary := "更新包 " + req.Name
+	if req.Manager != "" {
+		summary = req.Manager + " 更新 " + req.Name
+	}
+	if oldVersion != "" && newVersion != "" && oldVersion != newVersion {
+		summary += " (" + oldVersion + " -> " + newVersion + ")"
+	} else if newVersion != "" {
+		summary += " (版本: " + newVersion + ")"
+	}
+	middleware.AuditSummary(c, summary)
 
 	Success(c, gin.H{
 		"message": "包更新成功",

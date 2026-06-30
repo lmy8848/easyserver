@@ -59,6 +59,25 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 		where += " AND created_at <= ?"
 		args = append(args, filter.EndDate+" 23:59:59")
 	}
+	if filter.Status != "" {
+		if filter.Type == "request" {
+			switch filter.Status {
+			case "2xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 200 AND 299"
+			case "4xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 400 AND 499"
+			case "5xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 500"
+			}
+		} else if filter.Type == "operation" {
+			switch filter.Status {
+			case "success":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) < 400 OR json_extract(detail, '$.success') = 1 OR (json_extract(detail, '$.status') IS NULL AND json_extract(detail, '$.success') IS NULL))"
+			case "failed":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) >= 400 OR json_extract(detail, '$.success') = 0)"
+			}
+		}
+	}
 
 	var total int64
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM audit_logs WHERE %s", where)

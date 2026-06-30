@@ -110,7 +110,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Also log to audit log
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功")
+		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功 (IP: "+ip+")")
 	}
 
 	Success(c, gin.H{
@@ -262,7 +262,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 
 	// Log successful login
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功")
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功 (IP: "+c.ClientIP()+")")
 	}
 
 	Success(c, gin.H{
@@ -326,7 +326,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 
 	// Log successful login with backup code
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功")
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功 (IP: "+c.ClientIP()+")")
 	}
 
 	Success(c, gin.H{

@@ -151,7 +151,7 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "更新定时任务 "+strconv.FormatInt(id, 10))
+	middleware.AuditSummary(c, "更新定时任务 "+task.Name)
 	// Apply partial updates
 	if req.Name != nil {
 		if strings.ContainsAny(*req.Name, "\r\n") {
@@ -241,12 +241,13 @@ func (h *CronHandler) DeleteTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
-	middleware.AuditSummary(c, "删除定时任务 "+strconv.FormatInt(id, 10))
 	// Check existence
-	if _, err := h.cronService.Get(c.Request.Context(), id); err != nil {
+	task, err := h.cronService.Get(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "删除定时任务 "+task.Name)
 	if err := h.cronService.Delete(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -261,12 +262,13 @@ func (h *CronHandler) EnableTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
-	middleware.AuditSummary(c, "启用定时任务 "+strconv.FormatInt(id, 10))
 	// Check existence
-	if _, err := h.cronService.Get(c.Request.Context(), id); err != nil {
+	task, err := h.cronService.Get(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "启用定时任务 "+task.Name)
 	if err := h.cronService.Enable(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -281,12 +283,13 @@ func (h *CronHandler) DisableTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
-	middleware.AuditSummary(c, "禁用定时任务 "+strconv.FormatInt(id, 10))
 	// Check existence
-	if _, err := h.cronService.Get(c.Request.Context(), id); err != nil {
+	task, err := h.cronService.Get(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "禁用定时任务 "+task.Name)
 	if err := h.cronService.Disable(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -301,7 +304,12 @@ func (h *CronHandler) RunTask(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
-	middleware.AuditSummary(c, "立即执行定时任务 "+strconv.FormatInt(id, 10))
+	task, err := h.cronService.Get(c.Request.Context(), id)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "立即执行定时任务 "+task.Name)
 	if err := h.cronService.RunNow(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -470,7 +478,7 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "更新脚本 "+strconv.FormatInt(id, 10))
+	middleware.AuditSummary(c, "更新脚本 "+script.Name)
 	if req.Name != nil {
 		// Check name uniqueness (exclude current script)
 		existingScripts, listErr := h.cronService.ListScripts(c.Request.Context())
@@ -522,12 +530,13 @@ func (h *CronHandler) DeleteScript(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的脚本ID"))
 		return
 	}
-	middleware.AuditSummary(c, "删除脚本 "+strconv.FormatInt(id, 10))
 	// Check existence
-	if _, err := h.cronService.GetScript(c.Request.Context(), id); err != nil {
+	script, err := h.cronService.GetScript(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("脚本不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "删除脚本 "+script.Name)
 	// Check for dependent tasks
 	tasks, listErr := h.cronService.List(c.Request.Context())
 	if listErr != nil {
@@ -942,7 +951,7 @@ func (h *CronHandler) UpdateDoc(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "更新定时任务文档 "+strconv.FormatInt(id, 10))
+	middleware.AuditSummary(c, "更新定时任务文档 "+doc.Title)
 	if req.Title != nil {
 		doc.Title = *req.Title
 	}
@@ -966,7 +975,12 @@ func (h *CronHandler) DeleteDoc(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的文档ID"))
 		return
 	}
-	middleware.AuditSummary(c, "删除定时任务文档 "+strconv.FormatInt(id, 10))
+	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("文档不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "删除定时任务文档 "+doc.Title)
 	if err := h.cronService.DeleteDoc(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return

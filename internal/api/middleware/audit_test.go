@@ -23,6 +23,7 @@ func TestVerbFor(t *testing.T) {
 		{"POST", "/api/auth/change-password", audit.ActionAuth},
 		{"DELETE", "/api/containers/:id", audit.ActionDelete},
 		{"DELETE", "/api/db-servers/versions/:vid", audit.ActionDelete},
+		{"POST", "/api/runtime/uninstall", audit.ActionDelete},
 		{"POST", "/api/containers/:id/exec", audit.ActionExecute},
 		{"POST", "/api/db-servers/databases/:did/execute", audit.ActionExecute},
 		{"POST", "/api/containers", audit.ActionCreate},           // POST 到无参数集合根
