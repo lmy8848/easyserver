@@ -143,6 +143,8 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新云配置")
+
 	// Validate region
 	validRegions := map[string]bool{
 		"ap-guangzhou":     true,
@@ -200,6 +202,8 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+
+	middleware.AuditSummary(c, "更新服务器配置")
 
 	requiresRestart := false
 
@@ -269,6 +273,8 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+
+	middleware.AuditSummary(c, "更新认证配置")
 
 	if req.SessionTimeout != nil {
 		d, err := time.ParseDuration(*req.SessionTimeout)
@@ -369,6 +375,8 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新监控配置")
+
 	if req.HistoryRetention != nil {
 		d, err := time.ParseDuration(*req.HistoryRetention)
 		if err != nil {
@@ -423,6 +431,8 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新审计配置")
+
 	if req.Enabled != nil {
 		h.cfg.Audit.Enabled = *req.Enabled
 	}
@@ -467,6 +477,8 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新通知配置")
+
 	if req.Enabled != nil {
 		h.cfg.Notify.Enabled = *req.Enabled
 	}
@@ -492,6 +504,7 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
 
 // TestWebhook sends a test notification to the configured webhook
 func (h *SettingsHandler) TestWebhook(c *gin.Context) {
+	middleware.AuditSummary(c, "测试通知 Webhook")
 	h.cfgMu.RLock()
 	defer h.cfgMu.RUnlock()
 	if h.cfg.Notify.WebhookURL == "" {
@@ -515,6 +528,7 @@ func (h *SettingsHandler) TestWebhook(c *gin.Context) {
 
 // TestCloudConnection tests the Tencent Cloud connection
 func (h *SettingsHandler) TestCloudConnection(c *gin.Context) {
+	middleware.AuditSummary(c, "测试云连接")
 	h.cfgMu.RLock()
 	defer h.cfgMu.RUnlock()
 	if h.cfg.TencentCloud.SecretID == "" || h.cfg.TencentCloud.SecretKey == "" {
@@ -569,6 +583,8 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "更新告警规则")
 
 	// Limit number of rules to prevent abuse
 	if len(req.Rules) > 50 {
@@ -634,6 +650,7 @@ func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
 
 // RestartPanel restarts the backend service
 func (h *SettingsHandler) RestartPanel(c *gin.Context) {
+	middleware.AuditSummary(c, "重启面板")
 	// Validate TLS configuration before restart
 	if h.cfg.Server.TLS.Enabled {
 		if h.cfg.Server.TLS.CertFile == "" || h.cfg.Server.TLS.KeyFile == "" {

@@ -43,7 +43,7 @@ const MENU_GROUPS = [
     label: '系统',
     items: [
       { key: '/cloud', icon: 'cloud', label: '腾讯云' },
-      { key: '/audit', icon: 'file-text', label: '操作日志' },
+      { key: '/audit', icon: 'file-text', label: '审计日志' },
       { key: '/settings', icon: 'tool', label: '面板设置' },
       { key: '/security', icon: 'shield', label: '安全设置' },
     ],
@@ -105,7 +105,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/ssh': 'SSH 管理',
   '/containers': '容器管理',
   '/cloud': '腾讯云',
-  '/audit': '操作日志',
+  '/audit': '审计日志',
   '/settings': '面板设置',
   '/security': '安全设置',
 };
@@ -347,7 +347,7 @@ export default function Layout() {
                   </div>
                   <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/audit'); }}>
                     <Icon name="file-text" size={16} />
-                    <span>操作日志</span>
+                    <span>审计日志</span>
                   </div>
                   <div className="user-dropdown-divider" />
                   <div className="user-dropdown-item danger" onClick={() => { setShowUserMenu(false); handleLogout(); }}>

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/envconfig"
 	"easyserver/internal/runtimeenv"
 
@@ -84,6 +85,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "安装运行环境 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.Install(c.Request.Context(), req.Name, req.Version); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -108,6 +110,7 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "卸载运行环境 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
 		if strings.Contains(err.Error(), "conflict:") {
 			conflictsStr := strings.TrimPrefix(err.Error(), "conflict: ")
@@ -143,6 +146,7 @@ func (h *RuntimeHandler) SetDefault(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "设置默认运行环境 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.SetDefault(c.Request.Context(), req.Name, req.Version); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -294,6 +298,7 @@ func (h *RuntimeHandler) UpdateMirror(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新运行环境镜像源 "+idStr)
 	if err := h.runtimeService.UpdateMirror(c.Request.Context(), &req, id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -308,6 +313,7 @@ func (h *RuntimeHandler) CreateMirror(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
+	middleware.AuditSummary(c, "创建运行环境镜像源 "+req.Lang+" "+req.EnvKey)
 	id, err := h.runtimeService.CreateMirror(c.Request.Context(), &req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -324,6 +330,7 @@ func (h *RuntimeHandler) DeleteMirror(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除运行环境镜像源 "+idStr)
 	if err := h.runtimeService.DeleteMirror(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return

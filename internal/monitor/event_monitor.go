@@ -72,7 +72,7 @@ func (m *EventMonitor) monitorServiceFailures() {
 	}
 }
 
-// logEvent is a helper to log a system event.
-func (m *EventMonitor) logEvent(ctx context.Context, action, detail string) {
-	m.auditService.LogSystemEvent(ctx, action, detail)
+// logEvent is a helper to log a system event. summary is a human-readable Chinese description.
+func (m *EventMonitor) logEvent(ctx context.Context, summary string) {
+	m.auditService.LogSystemEvent(ctx, summary)
 }

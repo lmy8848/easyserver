@@ -4,10 +4,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/cloud"
 	"easyserver/internal/infra/config"
-
-	"github.com/gin-gonic/gin"
 )
 
 type CloudHandler struct {
@@ -83,6 +84,7 @@ func (h *CloudHandler) StartInstance(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "启动云主机 "+instanceID)
 	if err := h.cloudService.StartInstance(c.Request.Context(), instanceID); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -110,6 +112,7 @@ func (h *CloudHandler) StopInstance(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "停止云主机 "+instanceID)
 	if err := h.cloudService.StopInstance(c.Request.Context(), instanceID); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -137,6 +140,7 @@ func (h *CloudHandler) RestartInstance(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "重启云主机 "+instanceID)
 	if err := h.cloudService.RestartInstance(c.Request.Context(), instanceID); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -199,6 +203,7 @@ func (h *CloudHandler) AddFirewallRule(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "添加防火墙规则 "+instanceID+" 端口 "+rule.Port)
 	if err := h.cloudService.AddFirewallRule(c.Request.Context(), instanceID, rule); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -222,6 +227,7 @@ func (h *CloudHandler) DeleteFirewallRule(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "删除防火墙规则 "+instanceID+" "+ruleID)
 	if err := h.cloudService.DeleteFirewallRule(c.Request.Context(), instanceID, ruleID); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -270,6 +276,7 @@ func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建云主机快照 "+req.InstanceID+" "+req.Name)
 	if err := h.cloudService.CreateSnapshot(c.Request.Context(), req.InstanceID, req.Name); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -291,6 +298,7 @@ func (h *CloudHandler) ApplySnapshot(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "应用云主机快照 "+snapshotID)
 	if err := h.cloudService.ApplySnapshot(c.Request.Context(), snapshotID); err != nil {
 		c.Error(WrapError(err))
 		return

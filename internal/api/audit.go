@@ -2,12 +2,12 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +37,7 @@ type AuditLogItem struct {
 	Detail    string `json:"detail"`
 	IP        string `json:"ip"`
 	UserAgent string `json:"user_agent"`
+	Type      string `json:"type"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -56,6 +57,8 @@ func (h *AuditHandler) List(c *gin.Context) {
 	ip := c.Query("ip")
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
+	logType := c.Query("type")
+	status := c.Query("status")
 
 	if page < 1 {
 		page = 1
@@ -72,8 +75,10 @@ func (h *AuditHandler) List(c *gin.Context) {
 			Action:    action,
 			Resource:  resource,
 			IP:        ip,
+			Type:      logType,
 			StartDate: startDate,
 			EndDate:   endDate,
+			Status:    status,
 			Offset:    offset,
 			Limit:     pageSize,
 		}
@@ -93,6 +98,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 				Detail:    log.Detail,
 				IP:        log.IP,
 				UserAgent: log.UserAgent,
+				Type:      log.Type,
 				CreatedAt: log.CreatedAt.Format("2006-01-02 15:04:05"),
 			})
 		}
@@ -131,6 +137,29 @@ func (h *AuditHandler) List(c *gin.Context) {
 		where += " AND created_at <= ?"
 		args = append(args, endDate+" 23:59:59")
 	}
+	if logType != "" {
+		where += " AND type = ?"
+		args = append(args, logType)
+	}
+	if status != "" {
+		if logType == "request" {
+			switch status {
+			case "2xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 200 AND 299"
+			case "4xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 400 AND 499"
+			case "5xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 500"
+			}
+		} else if logType == "operation" {
+			switch status {
+			case "success":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) < 400 OR json_extract(detail, '$.success') = 1 OR (json_extract(detail, '$.status') IS NULL AND json_extract(detail, '$.success') IS NULL))"
+			case "failed":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) >= 400 OR json_extract(detail, '$.success') = 0)"
+			}
+		}
+	}
 
 	// Get total count
 	var total int64
@@ -141,7 +170,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	}
 
 	// Get items
-	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at
+	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at
 	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	args = append(args, pageSize, offset)
 
@@ -157,7 +186,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		var item AuditLogItem
 		var createdAt time.Time
 		if err := rows.Scan(&item.ID, &item.UserID, &item.Username, &item.Action,
-			&item.Resource, &item.Detail, &item.IP, &item.UserAgent, &createdAt); err != nil {
+			&item.Resource, &item.Detail, &item.IP, &item.UserAgent, &item.Type, &createdAt); err != nil {
 			continue
 		}
 		item.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
@@ -176,8 +205,9 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 // GetActions returns distinct actions for filtering
 func (h *AuditHandler) GetActions(c *gin.Context) {
+	logType := c.Query("type")
 	if h.auditRepo != nil {
-		actions, err := h.auditRepo.GetActions(c.Request.Context())
+		actions, err := h.auditRepo.GetActions(c.Request.Context(), logType)
 		if err != nil {
 			c.Error(WrapError(err))
 			return
@@ -186,7 +216,13 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
+	var rows *sql.Rows
+	var err error
+	if logType != "" {
+		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs WHERE type = ? ORDER BY action", logType)
+	} else {
+		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
+	}
 	if err != nil {
 		c.Error(WrapError(err))
 		return
@@ -292,7 +328,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 
-	// 按状态码统计
+	// 按状态码统计（仅 request 日志含 status 字段）
 	statusRows, err := h.db.Query(`
 		SELECT
 			CASE
@@ -303,7 +339,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			END as status_group,
 			COUNT(*) as cnt
 		FROM audit_logs
-		WHERE created_at >= ?
+		WHERE created_at >= ? AND type = 'request'
 		GROUP BY status_group
 	`, since)
 	if err != nil {
@@ -324,54 +360,11 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 
-	// 异常告警：失败操作（4xx/5xx）
-	alertRows, err := h.db.Query(`
-		SELECT id, username, action, resource, detail, ip, created_at
-		FROM audit_logs
-		WHERE created_at >= ?
-		  AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 400
-		ORDER BY id DESC
-		LIMIT 200
-	`, since)
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-	defer alertRows.Close()
-
-	type AlertItem struct {
-		ID        int64  `json:"id"`
-		Username  string `json:"username"`
-		Action    string `json:"action"`
-		Resource  string `json:"resource"`
-		Status    int    `json:"status"`
-		IP        string `json:"ip"`
-		CreatedAt string `json:"created_at"`
-	}
-	var alerts []AlertItem
-	for alertRows.Next() {
-		var a AlertItem
-		var detail string
-		var createdAt time.Time
-		if alertRows.Scan(&a.ID, &a.Username, &a.Action, &a.Resource, &detail, &a.IP, &createdAt) == nil {
-			a.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
-			// Parse status from detail
-			var detailObj struct {
-				Status int `json:"status"`
-			}
-			if json.Unmarshal([]byte(detail), &detailObj) == nil {
-				a.Status = detailObj.Status
-			}
-			alerts = append(alerts, a)
-		}
-	}
-
 	Success(c, gin.H{
 		"user_stats":   userStats,
 		"action_stats": actionStats,
 		"day_stats":    dayStats,
 		"status_stats": statusStats,
-		"alerts":       alerts,
 	})
 }
 
@@ -408,6 +401,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	ip := c.Query("ip")
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
+	logType := c.Query("type")
 
 	where := "1=1"
 	args := []interface{}{}
@@ -436,8 +430,12 @@ func (h *AuditHandler) Export(c *gin.Context) {
 		where += " AND created_at <= ?"
 		args = append(args, endDate+" 23:59:59")
 	}
+	if logType != "" {
+		where += " AND type = ?"
+		args = append(args, logType)
+	}
 
-	query := `SELECT id, username, action, resource, detail, ip, created_at
+	query := `SELECT id, username, action, type, resource, detail, ip, created_at
 	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
@@ -456,19 +454,20 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	// Write CSV header
-	c.Writer.WriteString("ID,用户,操作,资源,详情,IP,时间\n")
+	c.Writer.WriteString("ID,用户,操作,类型,资源,详情,IP,时间\n")
 
 	for rows.Next() {
 		var id int64
-		var username, action, resource, detail, ip, createdAt string
-		if err := rows.Scan(&id, &username, &action, &resource, &detail, &ip, &createdAt); err != nil {
+		var username, action, auditType, resource, detail, ip, createdAt string
+		if err := rows.Scan(&id, &username, &action, &auditType, &resource, &detail, &ip, &createdAt); err != nil {
 			continue
 		}
 		// Sanitize CSV fields to prevent formula injection
-		c.Writer.WriteString(fmt.Sprintf("%d,%s,%s,%s,\"%s\",%s,%s\n",
+		c.Writer.WriteString(fmt.Sprintf("%d,%s,%s,%s,%s,\"%s\",%s,%s\n",
 			id,
 			sanitizeCSVField(username),
 			sanitizeCSVField(action),
+			sanitizeCSVField(auditType),
 			sanitizeCSVField(resource),
 			strings.ReplaceAll(detail, "\"", "\"\""),
 			sanitizeCSVField(ip),
@@ -483,6 +482,7 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 		days = 90
 	}
 
+	middleware.AuditSummary(c, "清理 "+strconv.Itoa(days)+" 天前的审计日志")
 	since := time.Now().AddDate(0, 0, -days)
 
 	if h.auditRepo != nil {
@@ -505,26 +505,6 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 	Success(c, gin.H{"deleted": rows})
 }
 
-// VerifyIntegrity verifies the integrity of audit log signatures
-func (h *AuditHandler) VerifyIntegrity(c *gin.Context) {
-	if h.auditService == nil {
-		c.Error(ErrInternal.WithMessage("audit service not available"))
-		return
-	}
-
-	total, valid, invalid, err := h.auditService.VerifyAllSignatures(c.Request.Context())
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-
-	Success(c, gin.H{
-		"total":   total,
-		"valid":   valid,
-		"invalid": invalid,
-	})
-}
-
 func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) {
 	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
 	protected.GET("/audit-logs", handler.List)
@@ -533,5 +513,4 @@ func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *a
 	protected.GET("/audit-logs/clean-policy", handler.GetCleanPolicy)
 	protected.GET("/audit-logs/export", handler.Export)
 	protected.DELETE("/audit-logs/clean", handler.Clean)
-	protected.GET("/audit-logs/verify", handler.VerifyIntegrity)
 }

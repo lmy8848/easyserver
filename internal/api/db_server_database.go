@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
 	"github.com/gin-gonic/gin"
 )
@@ -47,6 +48,7 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "创建数据库 "+req.Name)
 	db, err := h.dbMgmtService.CreateDatabase(c.Request.Context(), sid, &req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -66,6 +68,12 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的数据库ID"))
 		return
 	}
+	dbInfo, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), dbID)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("数据库不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "删除数据库 "+dbInfo.Name)
 	if err := h.dbMgmtService.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -163,6 +171,12 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	dbInfo, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("数据库不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "执行SQL (数据库: "+dbInfo.Name+")")
 
 	result, err := h.dbMgmtService.ExecuteSQL(c.Request.Context(), did, req.SQL)
 	if err != nil {
@@ -193,6 +207,7 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "插入记录到表 "+req.Table)
 
 	result, err := h.dbMgmtService.InsertRecord(c.Request.Context(), did, req.Table, req.Data, c.Query("dry_run") == "true")
 	if err != nil {
@@ -220,6 +235,7 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "更新表 "+req.Table+" 记录")
 
 	result, err := h.dbMgmtService.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
@@ -246,6 +262,7 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "删除表 "+req.Table+" 记录")
 
 	result, err := h.dbMgmtService.DeleteRecord(c.Request.Context(), did, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
@@ -279,6 +296,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "创建表 "+req.Name)
 
 	var columns []database_mgmt.TableColumn
 	for _, col := range req.Columns {
@@ -315,6 +333,7 @@ func (h *DatabaseHandler) DropTable(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
+	middleware.AuditSummary(c, "删除表 "+tableName)
 
 	if err := h.dbMgmtService.DropTable(c.Request.Context(), did, tableName); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {

@@ -3,6 +3,7 @@ package api
 import (
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/notification"
 
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,7 @@ func (h *NotificationHandler) Create(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的请求参数"))
 		return
 	}
+	middleware.AuditSummary(c, "创建通知")
 	if err := h.ns.Create(req); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -64,6 +66,7 @@ func (h *NotificationHandler) MarkAsRead(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的通知 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "标记通知已读 "+strconv.FormatInt(id, 10))
 	if err := h.ns.MarkAsRead(id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -73,6 +76,7 @@ func (h *NotificationHandler) MarkAsRead(c *gin.Context) {
 
 // MarkAllAsRead marks all as read
 func (h *NotificationHandler) MarkAllAsRead(c *gin.Context) {
+	middleware.AuditSummary(c, "全部标记已读")
 	if err := h.ns.MarkAllAsRead(); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -88,6 +92,7 @@ func (h *NotificationHandler) Delete(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的通知 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除通知 "+strconv.FormatInt(id, 10))
 	if err := h.ns.Delete(id); err != nil {
 		c.Error(WrapError(err))
 		return

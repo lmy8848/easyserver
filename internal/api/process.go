@@ -3,6 +3,7 @@ package api
 import (
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/process"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +55,8 @@ func (h *ProcessHandler) CreateProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "创建进程 "+req.Name)
 	p, err := h.pm.Create(c.Request.Context(), &req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -74,6 +77,8 @@ func (h *ProcessHandler) UpdateProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "更新进程 "+strconv.FormatInt(id, 10))
 	if err := h.pm.Update(c.Request.Context(), id, &req); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -88,6 +93,7 @@ func (h *ProcessHandler) DeleteProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除进程 "+strconv.FormatInt(id, 10))
 	if err := h.pm.Delete(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -102,6 +108,7 @@ func (h *ProcessHandler) StartProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
+	middleware.AuditSummary(c, "启动进程 "+strconv.FormatInt(id, 10))
 	if err := h.pm.Start(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -116,6 +123,7 @@ func (h *ProcessHandler) StopProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
+	middleware.AuditSummary(c, "停止进程 "+strconv.FormatInt(id, 10))
 	if err := h.pm.Stop(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -130,6 +138,7 @@ func (h *ProcessHandler) RestartProcess(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的进程ID"))
 		return
 	}
+	middleware.AuditSummary(c, "重启进程 "+strconv.FormatInt(id, 10))
 	if err := h.pm.Restart(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -176,6 +185,8 @@ func (h *ProcessHandler) BatchStart(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "批量启动进程 "+strconv.Itoa(len(req.IDs))+" 个")
 	started, failed, err := h.pm.BatchStart(c.Request.Context(), req.IDs)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -191,6 +202,8 @@ func (h *ProcessHandler) BatchStop(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "批量停止进程 "+strconv.Itoa(len(req.IDs))+" 个")
 	stopped, failed, err := h.pm.BatchStop(c.Request.Context(), req.IDs)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -206,6 +219,8 @@ func (h *ProcessHandler) BatchRestart(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "批量重启进程 "+strconv.Itoa(len(req.IDs))+" 个")
 	restarted, failed, err := h.pm.BatchRestart(c.Request.Context(), req.IDs)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -252,6 +267,8 @@ func (h *ProcessHandler) CreateGroup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "创建进程分组 "+req.Name)
 	g, err := h.pm.CreateGroup(c.Request.Context(), &req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -272,6 +289,8 @@ func (h *ProcessHandler) UpdateGroup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "更新进程分组 "+strconv.FormatInt(id, 10))
 	if err := h.pm.UpdateGroup(c.Request.Context(), id, &req); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -286,6 +305,7 @@ func (h *ProcessHandler) DeleteGroup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的分组ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除进程分组 "+strconv.FormatInt(id, 10))
 	if err := h.pm.DeleteGroup(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -310,6 +330,8 @@ func (h *ProcessHandler) ImportProcesses(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+
+	middleware.AuditSummary(c, "导入进程 "+strconv.Itoa(len(processes))+" 个")
 	count, err := h.pm.Import(c.Request.Context(), processes)
 	if err != nil {
 		c.Error(WrapError(err))

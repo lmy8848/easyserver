@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,7 @@ func (h *FirewallHandler) GetStatus(c *gin.Context) {
 
 // EnableFirewall enables the firewall
 func (h *FirewallHandler) EnableFirewall(c *gin.Context) {
+	middleware.AuditSummary(c, "启用防火墙")
 	if err := h.firewallService.EnableFirewall(c.Request.Context()); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -58,6 +60,7 @@ func (h *FirewallHandler) DisableFirewall(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "禁用防火墙")
 	if err := h.firewallService.DisableFirewall(c.Request.Context()); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -73,6 +76,7 @@ func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "设置防火墙默认策略 "+req.Chain+" "+req.Policy)
 	// Validate chain
 	chain := strings.ToUpper(req.Chain)
 	if chain != "INPUT" && chain != "OUTPUT" {

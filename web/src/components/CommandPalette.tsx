@@ -30,7 +30,7 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     { id: 'nav-websites', label: '网站管理', hint: '/websites', group: '导航', action: () => onSelect('/websites') },
     { id: 'nav-databases', label: '数据库管理', hint: '/databases', group: '导航', action: () => onSelect('/databases') },
     { id: 'nav-cron', label: '计划任务', hint: '/cron', group: '导航', action: () => onSelect('/cron') },
-    { id: 'nav-audit', label: '操作日志', hint: '/audit', group: '导航', action: () => onSelect('/audit') },
+    { id: 'nav-audit', label: '审计日志', hint: '/audit', group: '导航', action: () => onSelect('/audit') },
     { id: 'nav-settings', label: '面板设置', hint: '/settings', group: '导航', action: () => onSelect('/settings') },
     { id: 'nav-security', label: '安全设置', hint: '/security', group: '导航', action: () => onSelect('/security') },
     // Quick actions

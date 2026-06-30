@@ -2,7 +2,6 @@ package api
 
 import (
 	"easyserver/internal/web"
-
 	"github.com/gin-gonic/gin"
 )
 
