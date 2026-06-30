@@ -60,16 +60,7 @@ export interface CatalogEntry {
   majors: string[];
   supports_global_pkgs: boolean;
   mirror_envs: string[];
-}
-
-export interface RuntimeMirror {
-  id: number;
-  lang: string;
-  env_key: string;
-  env_value: string;
-  enabled: number;
-  source: string;
-  updated_at: string;
+  mirror_candidates: string[];
 }
 
 export const RUNTIME_ICON_MAP: Record<string, string> = {

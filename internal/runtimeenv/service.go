@@ -14,64 +14,43 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"easyserver/internal/envconfig"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 )
 
+// EnvConfigProvider provides read access to environment configurations.
+// Implemented by *envconfig.Service; defined here so runtimeenv can read env
+// configs for GenerateMiseConfig without a hard circular dependency.
+type EnvConfigProvider interface {
+	ListEnvConfigs(ctx context.Context) ([]envconfig.EnvConfig, error)
+}
+
 type Service struct {
 	repo         Repository
 	executor     executor.CommandExecutor
+	envConfigs   EnvConfigProvider
 	installLocks sync.Map
 }
 
-// envKeyPattern is the POSIX-ish env-var name whitelist used by CreateMirror
-// to keep user-supplied keys from injecting newlines or '[' into the generated
-// /etc/mise/config.toml. Matches: leading letter/underscore, then any letter,
-// digit, or underscore. See applyDefault / buildMiseConfigContent.
-var envKeyPattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-
-func NewService(repo Repository, exec executor.CommandExecutor) *Service {
+func NewService(repo Repository, exec executor.CommandExecutor, envConfigs EnvConfigProvider) *Service {
 	return &Service{
-		repo:     repo,
-		executor: exec,
+		repo:       repo,
+		executor:   exec,
+		envConfigs: envConfigs,
 	}
 }
 
-// InitMirrors initializes the default mirrors if the table is empty
-func (s *Service) InitMirrors(ctx context.Context) error {
-	// Boot-time state healing (AC3)
+// Init performs boot-time initialization: heals interrupted states and
+// regenerates /etc/mise/config.toml from the current env config + defaults.
+func (s *Service) Init(ctx context.Context) error {
 	if err := s.repo.HealState(ctx); err != nil {
 		log.Printf("runtime: failed to heal state: %v", err)
 	}
-
-	count, err := s.repo.CountMirrors(ctx)
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		mirrors := []RuntimeMirror{
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node", Enabled: 1, Source: "seed"},
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist", Enabled: 0, Source: "seed"},
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release", Enabled: 0, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang", Enabled: 1, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl", Enabled: 0, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang", Enabled: 0, Source: "seed"},
-			{Lang: "python", EnvKey: "PYTHON_BUILD_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/python", Enabled: 1, Source: "seed"},
-			{Lang: "python", EnvKey: "PYTHON_BUILD_MIRROR_URL", EnvValue: "https://mirrors.aliyun.com/python", Enabled: 0, Source: "seed"},
-		}
-		if err := s.repo.SeedMirrors(ctx, mirrors); err != nil {
-			return err
-		}
-	}
-
-	// Unconditional regeneration: covers servers upgraded from pre-Issue-07
-	// where global_default rows already exist but /etc/mise/config.toml has
-	// no [tools] section. Idempotent on subsequent boots.
 	if err := s.GenerateMiseConfig(ctx); err != nil {
 		log.Printf("runtime: failed to generate mise config on boot: %v", err)
 		return err
 	}
-
 	return nil
 }
 
@@ -149,6 +128,12 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 	}
 	if miseTool == "" {
 		return fmt.Errorf("unsupported runtime: %s", name)
+	}
+
+	// Regenerate once per install so mirror env vars from env_configs are fresh
+	// before `mise latest` / `mise install` read /etc/mise/config.toml.
+	if err := s.GenerateMiseConfig(ctx); err != nil {
+		return fmt.Errorf("failed to regenerate mise config before install: %w", err)
 	}
 
 	// `mise latest <tool>@<prefix>` 把"前缀版本"解析成精确版本（如 Node 选
@@ -705,108 +690,4 @@ func (s *Service) applyDefault(ctx context.Context, name, version string) error 
 // shellEscape escapes a string for safe use in shell commands.
 func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-// ListMirrors returns all mirrors
-func (s *Service) ListMirrors(ctx context.Context) ([]RuntimeMirror, error) {
-	return s.repo.ListMirrors(ctx)
-}
-
-// UpdateMirror updates a mirror
-func (s *Service) UpdateMirror(ctx context.Context, req *RuntimeMirrorUpdateRequest, id int64) error {
-	m, err := s.repo.GetMirror(ctx, id)
-	if err != nil {
-		return err
-	}
-	if m == nil {
-		return fmt.Errorf("mirror not found")
-	}
-
-	newEnvValue := m.EnvValue
-	if req.EnvValue != nil {
-		val := strings.TrimRight(*req.EnvValue, "/")
-		if m.Source == "seed" && val != strings.TrimRight(m.EnvValue, "/") {
-			return fmt.Errorf("cannot modify seed mirror URL")
-		}
-		newEnvValue = val
-	}
-	newEnabled := m.Enabled
-	if req.Enabled != nil {
-		newEnabled = *req.Enabled
-	}
-
-	// If enabling, disable others with same EnvKey
-	if newEnabled == 1 {
-		err := s.repo.DisableOtherMirrors(ctx, m.EnvKey, id)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = s.repo.UpdateMirror(ctx, id, newEnvValue, newEnabled)
-	if err != nil {
-		return err
-	}
-
-	return s.GenerateMiseConfig(ctx)
-}
-
-// CreateMirror creates a user mirror
-func (s *Service) CreateMirror(ctx context.Context, req *RuntimeMirrorCreateRequest) (int64, error) {
-	// env_key flows verbatim into /etc/mise/config.toml. A value containing a
-	// newline or '[' would let an admin inject a fake [tools] section and
-	// thereby pin SSH users to an attacker-chosen version. POSIX env-var
-	// naming rules are stricter than what TOML needs, but they're a clear
-	// and well-known whitelist.
-	if !envKeyPattern.MatchString(req.EnvKey) {
-		return 0, fmt.Errorf("invalid env_key %q: must match %s", req.EnvKey, envKeyPattern.String())
-	}
-
-	enabled := 1
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-	m := &RuntimeMirror{
-		Lang:     req.Lang,
-		EnvKey:   req.EnvKey,
-		EnvValue: strings.TrimRight(req.EnvValue, "/"),
-		Enabled:  enabled,
-		Source:   "user",
-	}
-	id, err := s.repo.CreateMirror(ctx, m)
-	if err != nil {
-		return 0, err
-	}
-
-	// If enabling, disable others
-	if enabled == 1 {
-		err := s.repo.DisableOtherMirrors(ctx, m.EnvKey, id)
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	s.GenerateMiseConfig(ctx)
-	return id, nil
-}
-
-// DeleteMirror deletes a mirror
-func (s *Service) DeleteMirror(ctx context.Context, id int64) error {
-	m, err := s.repo.GetMirror(ctx, id)
-	if err != nil {
-		return err
-	}
-	if m == nil {
-		return fmt.Errorf("mirror not found")
-	}
-	if m.Source == "seed" {
-		return fmt.Errorf("cannot delete seed mirror")
-	}
-
-	err = s.repo.DeleteMirror(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	return s.GenerateMiseConfig(ctx)
 }
