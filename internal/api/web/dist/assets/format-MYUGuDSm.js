@@ -1,1 +1,0 @@
-function e(e){if(!e||e===0)return`0 B`;let t=1024,n=[`B`,`KB`,`MB`,`GB`,`TB`],r=Math.floor(Math.log(e)/Math.log(t));return parseFloat((e/t**r).toFixed(2))+` `+n[r]}function t(e){let t=Math.floor(e/86400),n=Math.floor(e%86400/3600),r=Math.floor(e%3600/60);return t>0?`${t}天${n}小时${r}分钟`:n>0?`${n}小时${r}分钟`:`${r}分钟`}export{t as n,e as t};
