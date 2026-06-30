@@ -40,11 +40,6 @@ func performHardCutoverBackup(tx *sql.Tx, db *sql.DB, migrationsDir string) erro
 		return fmt.Errorf("write audit log: %w", err)
 	}
 
-	// 3. UI announcement flag
-	if _, err := tx.Exec("INSERT OR IGNORE INTO global_configs (category, key, value, description) VALUES (?, ?, ?, ?)", "system", "migration_02_notice", "true", "Show notice for schema hard cutover"); err != nil {
-		log.Printf("migrate: failed to set migration_02_notice: %v", err)
-	}
-
 	// 4. DELETE data (保留表结构后再 ALTER 加 FK)
 	if _, err := tx.Exec("DELETE FROM processes"); err != nil {
 		return fmt.Errorf("delete from processes: %w", err)

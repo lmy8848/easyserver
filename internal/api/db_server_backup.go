@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"github.com/gin-gonic/gin"
@@ -29,13 +30,13 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的数据库ID"))
 		return
 	}
-
 	// Get database info
 	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil {
 		c.Error(ErrNotFound.WithMessage("数据库不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "创建数据库备份 "+db.Name)
 
 	// Get db server info to determine type
 	server, err := h.dbServerService.Get(c.Request.Context(), db.DBServerID)
@@ -115,12 +116,12 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("请确认恢复，设置 {\"confirm\": true}"))
 		return
 	}
-
 	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
 	if err != nil {
 		c.Error(ErrNotFound.WithMessage("备份不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "恢复数据库备份 "+backup.DatabaseName)
 
 	// Get db server info to determine type
 	server, err := h.dbServerService.Get(c.Request.Context(), backup.DBServerID)
@@ -143,6 +144,12 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的备份ID"))
 		return
 	}
+	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
+	if err != nil {
+		c.Error(ErrNotFound.WithMessage("备份不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "删除数据库备份 "+backup.DatabaseName)
 
 	if err := h.dbMgmtService.DeleteBackup(c.Request.Context(), bid); err != nil {
 		c.Error(WrapError(err))

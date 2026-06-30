@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -68,6 +69,7 @@ func (h *WebServerHandler) Create(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "创建 Web服务 "+req.Name)
 
 	// Validate Name format: alphanumeric, hyphen, underscore only
 	if !nameRegexp.MatchString(req.Name) {
@@ -110,6 +112,7 @@ func (h *WebServerHandler) Delete(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Delete(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -124,6 +127,7 @@ func (h *WebServerHandler) Install(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "安装 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Install(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -138,6 +142,7 @@ func (h *WebServerHandler) Uninstall(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "卸载 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Uninstall(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -152,6 +157,7 @@ func (h *WebServerHandler) Start(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "启动 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Start(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -166,6 +172,7 @@ func (h *WebServerHandler) Stop(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "停止 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Stop(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -180,6 +187,7 @@ func (h *WebServerHandler) Restart(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "重启 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Restart(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -216,6 +224,7 @@ func (h *WebServerHandler) Reload(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "重载 Web服务 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.Reload(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
@@ -231,6 +240,7 @@ func (h *WebServerHandler) TestConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "测试 Web服务配置 "+strconv.FormatInt(id, 10))
 	ok, msg := h.webServerService.TestConfig(c.Request.Context(), id)
 	Success(c, gin.H{"valid": ok, "message": msg})
 }
@@ -264,6 +274,7 @@ func (h *WebServerHandler) SaveConfig(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "保存 Web服务配置 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.SaveConfig(c.Request.Context(), id, req.Content); err != nil {
 		c.Error(WrapError(err))
@@ -306,6 +317,7 @@ func (h *WebServerHandler) SetAutoStart(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "设置 Web服务自启 #"+strconv.FormatInt(id, 10))
 
 	if err := h.webServerService.SetAutoStart(c.Request.Context(), id, req.Enabled); err != nil {
 		c.Error(WrapError(err))
@@ -382,6 +394,7 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "创建网站 "+req.Domain)
 
 	if err := req.ValidateDomain(); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -413,6 +426,7 @@ func (h *WebServerHandler) UpdateWebsite(c *gin.Context) {
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
+	middleware.AuditSummary(c, "更新网站 #"+strconv.FormatInt(id, 10))
 
 	if err := h.websiteService.Update(c.Request.Context(), sid, id, &req); err != nil {
 		c.Error(WrapError(err))
@@ -432,6 +446,7 @@ func (h *WebServerHandler) DeleteWebsite(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "删除网站 #"+strconv.FormatInt(id, 10))
 
 	if err := h.websiteService.Delete(c.Request.Context(), sid, id); err != nil {
 		c.Error(WrapError(err))
@@ -451,6 +466,7 @@ func (h *WebServerHandler) EnableWebsite(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "启用网站 #"+strconv.FormatInt(id, 10))
 
 	if err := h.websiteService.Enable(c.Request.Context(), sid, id); err != nil {
 		c.Error(WrapError(err))
@@ -470,6 +486,7 @@ func (h *WebServerHandler) DisableWebsite(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
+	middleware.AuditSummary(c, "禁用网站 #"+strconv.FormatInt(id, 10))
 
 	if err := h.websiteService.Disable(c.Request.Context(), sid, id); err != nil {
 		c.Error(WrapError(err))
@@ -520,6 +537,7 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 		Email string `json:"email"`
 	}
 	c.ShouldBindJSON(&req)
+	middleware.AuditSummary(c, "应用网站SSL证书 #"+strconv.FormatInt(id, 10))
 
 	if err := h.websiteService.ApplySSL(c.Request.Context(), sid, id, req.Email); err != nil {
 		c.Error(WrapError(err))

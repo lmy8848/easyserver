@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
 
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,7 @@ func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "保存 MySQL 配置")
 	configPath := database_mgmt.FindMySQLConfig()
 	if configPath == "" {
 		c.Error(ErrBadRequest.WithMessage("未找到 MySQL 配置文件"))
@@ -146,6 +148,7 @@ func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "保存 PostgreSQL 配置")
 	configPath := database_mgmt.FindPostgreSQLConfig()
 	if configPath == "" {
 		c.Error(ErrBadRequest.WithMessage("未找到 PostgreSQL 配置文件"))
@@ -228,6 +231,7 @@ func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "保存 Redis 配置")
 	configPath := database_mgmt.FindRedisConfig()
 	if configPath == "" {
 		c.Error(ErrBadRequest.WithMessage("未找到 Redis 配置文件"))

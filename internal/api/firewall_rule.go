@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
@@ -72,6 +73,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建防火墙规则 "+req.Port)
 	// Validate chain
 	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 	if !validChains[strings.ToUpper(req.Chain)] {
@@ -169,6 +171,11 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 		return
 	}
 
+	summary := "更新防火墙规则 (端口: " + rule.Port + ")"
+	if req.Port != nil && *req.Port != "" && *req.Port != rule.Port {
+		summary = "更新防火墙规则端口 " + rule.Port + " -> " + *req.Port
+	}
+	middleware.AuditSummary(c, summary)
 	if req.Chain != nil {
 		validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 		if !validChains[strings.ToUpper(*req.Chain)] {
@@ -240,10 +247,12 @@ func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) {
 		return
 	}
 	// Check existence
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "删除防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.DeleteRule(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -276,6 +285,7 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "启用防火墙规则 (端口: "+rule.Port+")")
 
 	// Check if enabling this rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
@@ -298,10 +308,12 @@ func (h *FirewallRuleHandler) DisableRule(c *gin.Context) {
 		return
 	}
 	// Check existence
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "禁用防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.DisableRule(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -316,10 +328,12 @@ func (h *FirewallRuleHandler) MoveRuleUp(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "上移防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.MoveRuleUp(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -334,10 +348,12 @@ func (h *FirewallRuleHandler) MoveRuleDown(c *gin.Context) {
 		c.Error(ErrBadRequest.WithMessage("无效的规则ID"))
 		return
 	}
-	if _, err := h.firewallService.GetRule(c.Request.Context(), id); err != nil {
+	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
+	if err != nil {
 		c.Error(ErrNotFound.WithMessage("规则不存在"))
 		return
 	}
+	middleware.AuditSummary(c, "下移防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.MoveRuleDown(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -364,6 +380,7 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "批量启用防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
 	var succeeded, failed []int64
 	var errors []string
 	for _, id := range req.IDs {
@@ -401,6 +418,7 @@ func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "批量禁用防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
 	var succeeded, failed []int64
 	var errors []string
 	for _, id := range req.IDs {
@@ -432,6 +450,7 @@ func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "批量删除防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
 	var succeeded, failed []int64
 	var errors []string
 	for _, id := range req.IDs {
@@ -473,6 +492,7 @@ func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "删除系统防火墙规则 "+rule.Port)
 	// SAFETY: Prevent deleting ACCEPT rules for protected ports (SSH, panel).
 	// Removing an ACCEPT rule for a protected port could lock out the user
 	// if the default policy is DROP.
@@ -548,6 +568,7 @@ func (h *FirewallRuleHandler) ImportRules(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "导入防火墙规则 "+strconv.Itoa(len(data.Rules))+" 条")
 	if data.Version != 1 {
 		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("不支持的导出版本: %d，期望版本 1", data.Version)))
 		return

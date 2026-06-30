@@ -204,7 +204,7 @@ func wire(cfg *config.Config) (*appServices, error) {
 	auditSvc := audit.NewService(db, auditRepo, cfg.Audit.RetentionDays)
 	s.AuditService = auditSvc
 	s.onCleanup(func() {
-		auditSvc.LogSystemEvent(context.Background(), "SERVER_STOP", "EasyServer stopped")
+		auditSvc.LogSystemEvent(context.Background(), "面板停止")
 		auditSvc.Close()
 	})
 
@@ -275,7 +275,6 @@ func wire(cfg *config.Config) (*appServices, error) {
 	// Env config (with seeding)
 	envConfigRepo := envconfig.NewSQLiteRepository(db)
 	envConfigService := envconfig.NewService(envConfigRepo)
-	envConfigService.InitDefaultGlobalConfigs(ctx)
 	s.EnvConfigService = envConfigService
 
 	// Firewall
@@ -351,6 +350,6 @@ func wire(cfg *config.Config) (*appServices, error) {
 		}
 	}
 
-	auditSvc.LogSystemEvent(ctx, "SERVER_START", "EasyServer started")
+	auditSvc.LogSystemEvent(ctx, "面板启动")
 	return s, nil
 }

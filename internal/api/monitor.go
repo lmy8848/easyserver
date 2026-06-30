@@ -223,8 +223,8 @@ func registerMonitorRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup,
 }
 
 // registerServiceRoutes registers service management routes
-func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
-	handler := NewServiceHandler(serviceManager, exec, jwtSecret, allowedOrigins, devMode)
+func registerServiceRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
+	handler := NewServiceHandler(serviceManager, exec, jwtSecret, auditService, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
 	protected.POST("/services/details", handler.GetDetails)
 	protected.GET("/services/:name", handler.Get)

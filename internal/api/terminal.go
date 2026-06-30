@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,8 +27,6 @@ const (
 	TermWSPingInterval = 30 * time.Second
 	// TermWSReadLimit is the maximum message size for WebSocket reads
 	TermWSReadLimit = 4096
-	// TermCmdBufLimit is the maximum size of the command buffer for audit logging
-	TermCmdBufLimit = 8192
 )
 
 // sessionIDRegex validates terminal session IDs to prevent injection
@@ -117,8 +114,8 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// Log terminal session start
 	sessionStartTime := time.Now()
 	if h.auditService != nil {
-		h.auditService.LogOperation(c.Request.Context(), userID, username, "TERMINAL_OPEN",
-			"/terminal/"+sessionID, "Terminal session opened", c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogOperation(c.Request.Context(), userID, username, audit.ActionExecute,
+			audit.ResourceTerminal, map[string]interface{}{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	// Upgrade to WebSocket
@@ -173,9 +170,9 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	if h.auditService != nil {
 		duration := time.Since(sessionStartTime)
 		durationStr := formatDuration(duration)
-		h.auditService.LogOperation(context.Background(), userID, username, "TERMINAL_CLOSE",
-			"/terminal/"+sessionID,
-			fmt.Sprintf("Terminal session closed, duration: %s", durationStr),
+		h.auditService.LogOperation(context.Background(), userID, username, audit.ActionExecute,
+			audit.ResourceTerminal,
+			map[string]interface{}{"summary": "终端会话已关闭", "duration": durationStr, "session_id": sessionID},
 			c.ClientIP(), c.Request.UserAgent())
 	}
 }
@@ -220,10 +217,6 @@ func (h *TerminalHandler) writePump(conn *gorillaWs.Conn, wsWrite <-chan []byte)
 // readPump reads messages from the WebSocket connection and handles them.
 // It writes ping/pong responses through wsWrite to ensure serialized WebSocket writes.
 func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session *terminal.Session, wsWrite chan<- []byte, userID int64, username string, sessionID string) {
-	// Command buffer for logging
-	var commandBuffer strings.Builder
-	commandBuffer.Grow(256)
-
 	// Set up read deadline and pong handler
 	conn.SetReadLimit(TermWSReadLimit)
 	conn.SetPongHandler(func(string) error {
@@ -254,33 +247,6 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 			default:
 			}
 			continue
-		}
-
-		// Track terminal input for command logging
-		if msgType.Type == "input" {
-			for _, ch := range msgType.Data {
-				if ch == '\r' || ch == '\n' {
-					// Enter pressed - log the command
-					cmd := strings.TrimSpace(commandBuffer.String())
-					if cmd != "" && h.auditService != nil {
-						h.auditService.LogTerminalCommand(
-							c.Request.Context(), userID, username, sessionID, cmd, c.ClientIP())
-					}
-					commandBuffer.Reset()
-				} else if ch == 127 || ch == '\b' {
-					// Backspace - remove last char
-					str := commandBuffer.String()
-					if len(str) > 0 {
-						commandBuffer.Reset()
-						commandBuffer.WriteString(str[:len(str)-1])
-					}
-				} else if ch >= 32 {
-					// Prevent unbounded growth of command buffer
-					if commandBuffer.Len() < TermCmdBufLimit {
-						commandBuffer.WriteByte(byte(ch))
-					}
-				}
-			}
 		}
 
 		// Handle terminal input

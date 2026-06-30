@@ -37,8 +37,7 @@ func (m *EventMonitor) checkDiskSpace() {
 		}
 
 		if usage >= 90 {
-			m.logEvent(context.Background(), "DISK_HIGH_USAGE",
-				"Disk usage on "+mountPoint+" is "+usageStr+"%")
+			m.logEvent(context.Background(), "磁盘使用率告警："+mountPoint+" "+usageStr+"%")
 		}
 	}
 }
@@ -76,8 +75,7 @@ func (m *EventMonitor) checkMemoryUsage() {
 		used := total - available
 		percent := float64(used) / float64(total) * 100
 		if percent >= 90 {
-			m.logEvent(context.Background(), "MEMORY_HIGH_USAGE",
-				"Memory usage is "+strconv.FormatFloat(percent, 'f', 1, 64)+"%")
+			m.logEvent(context.Background(), "内存使用率告警："+strconv.FormatFloat(percent, 'f', 1, 64)+"%")
 		}
 	}
 }
@@ -96,8 +94,7 @@ func (m *EventMonitor) checkServiceFailures() {
 			fields := strings.Fields(line)
 			if len(fields) >= 1 {
 				serviceName := strings.TrimSuffix(fields[0], ".service")
-				m.logEvent(context.Background(), "SERVICE_FAILED",
-					"Service "+serviceName+" has failed")
+				m.logEvent(context.Background(), "系统服务异常："+serviceName)
 			}
 		}
 	}

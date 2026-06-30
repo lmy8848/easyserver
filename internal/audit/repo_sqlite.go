@@ -19,10 +19,10 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 
 func (r *sqliteRepo) Log(ctx context.Context, entry *AuditLog) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.UserID, entry.Username, entry.Action, entry.Resource,
-		entry.Detail, entry.IP, entry.UserAgent,
+		entry.Detail, entry.IP, entry.UserAgent, entry.Type,
 	)
 	return err
 }
@@ -47,6 +47,10 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 		where += " AND ip LIKE ?"
 		args = append(args, "%"+filter.IP+"%")
 	}
+	if filter.Type != "" {
+		where += " AND type = ?"
+		args = append(args, filter.Type)
+	}
 	if filter.StartDate != "" {
 		where += " AND created_at >= ?"
 		args = append(args, filter.StartDate)
@@ -54,6 +58,25 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 	if filter.EndDate != "" {
 		where += " AND created_at <= ?"
 		args = append(args, filter.EndDate+" 23:59:59")
+	}
+	if filter.Status != "" {
+		if filter.Type == "request" {
+			switch filter.Status {
+			case "2xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 200 AND 299"
+			case "4xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 400 AND 499"
+			case "5xx":
+				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 500"
+			}
+		} else if filter.Type == "operation" {
+			switch filter.Status {
+			case "success":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) < 400 OR json_extract(detail, '$.success') = 1 OR (json_extract(detail, '$.status') IS NULL AND json_extract(detail, '$.success') IS NULL))"
+			case "failed":
+				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) >= 400 OR json_extract(detail, '$.success') = 0)"
+			}
+		}
 	}
 
 	var total int64
@@ -63,8 +86,8 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at
-		 FROM audit_logs WHERE %s ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at
+		 FROM audit_logs WHERE %s ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
 		where,
 	)
 	args = append(args, filter.Limit, filter.Offset)
@@ -80,7 +103,7 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 		var l AuditLog
 		if err := rows.Scan(
 			&l.ID, &l.UserID, &l.Username, &l.Action,
-			&l.Resource, &l.Detail, &l.IP, &l.UserAgent, &l.CreatedAt,
+			&l.Resource, &l.Detail, &l.IP, &l.UserAgent, &l.Type, &l.CreatedAt,
 		); err != nil {
 			return 0, nil, err
 		}
@@ -93,8 +116,14 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 	return total, logs, nil
 }
 
-func (r *sqliteRepo) GetActions(ctx context.Context) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs ORDER BY action")
+func (r *sqliteRepo) GetActions(ctx context.Context, logType string) ([]string, error) {
+	var rows *sql.Rows
+	var err error
+	if logType != "" {
+		rows, err = r.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs WHERE type = ? ORDER BY action", logType)
+	} else {
+		rows, err = r.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs ORDER BY action")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +140,7 @@ func (r *sqliteRepo) GetActions(ctx context.Context) ([]string, error) {
 	return actions, rows.Err()
 }
 
-func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAuditEntry) error {
+func (r *sqliteRepo) AppendBatch(ctx context.Context, entries []AuditLog) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -119,7 +148,7 @@ func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAudi
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, created_at, signature)
+		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
@@ -127,42 +156,12 @@ func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAudi
 	defer stmt.Close()
 
 	for _, e := range entries {
-		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.CreatedAt, e.Signature); err != nil {
+		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.Type, e.CreatedAt); err != nil {
 			return err
 		}
 	}
 
 	return tx.Commit()
-}
-
-func (r *sqliteRepo) GetSignedEntry(ctx context.Context, id int64) (*SignedAuditEntry, error) {
-	var e SignedAuditEntry
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at, signature
-		 FROM audit_logs WHERE id = ?`, id,
-	).Scan(&e.ID, &e.UserID, &e.Username, &e.Action, &e.Resource, &e.Detail, &e.IP, &e.UserAgent, &e.CreatedAt, &e.Signature)
-	if err != nil {
-		return nil, err
-	}
-	return &e, nil
-}
-
-func (r *sqliteRepo) ListIDsForVerification(ctx context.Context, limit int) ([]int64, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id FROM audit_logs ORDER BY id DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }
 
 func (r *sqliteRepo) Clean(ctx context.Context, before time.Time) (int64, error) {

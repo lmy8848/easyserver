@@ -29,6 +29,18 @@ func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditServic
 	}
 }
 
+// auditSecurity logs a security event for the authenticated user. Auth routes
+// are mounted outside the AuditMiddleware group, so sensitive operations
+// (logout/totp/password) record themselves. summary is a human-readable Chinese description.
+func (h *AuthHandler) auditSecurity(c *gin.Context, summary string) {
+	if h.auditService == nil {
+		return
+	}
+	uname, _ := c.Get("username")
+	unameStr, _ := uname.(string)
+	h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, summary)
+}
+
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
@@ -52,11 +64,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Use LoginWithInfo to log activity
 	user, err := h.authService.LoginWithInfo(c.Request.Context(), req.Username, req.Password, ip, userAgent)
 	if err != nil {
-		// Also log to audit log
-		if h.auditService != nil {
-			h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "LOGIN_FAILED",
-				err.Error(), ip, userAgent)
-		}
 		c.Error(ErrUnauthorized.WithMessage(err.Error()))
 		return
 	}
@@ -103,8 +110,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Also log to audit log
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "LOGIN_SUCCESS",
-			"User logged in successfully", ip, userAgent)
+		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功 (IP: "+ip+")")
 	}
 
 	Success(c, gin.H{
@@ -134,15 +140,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		}
 	}
 
-	// Log logout
-	if h.auditService != nil {
-		if uname, ok := c.Get("username"); ok {
-			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "LOGOUT",
-					"User logged out", c.ClientIP(), c.Request.UserAgent())
-			}
-		}
-	}
+	h.auditSecurity(c, "退出登录")
 	Success(c, nil)
 }
 
@@ -165,7 +163,6 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -174,13 +171,6 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	if err := h.authService.ChangePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
-		// Log failed password change
-		if h.auditService != nil {
-			if unameStr, ok := username.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "PASSWORD_CHANGE_FAILED",
-					err.Error(), c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrBadRequest.WithMessage(err.Error()))
 		return
 	}
@@ -191,14 +181,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		log.Printf("auth: failed to invalidate tokens after password change for user %d: %v", userID, err)
 	}
 
-	// Log successful password change
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "PASSWORD_CHANGED",
-				"Password changed successfully", c.ClientIP(), c.Request.UserAgent())
-		}
-	}
-
+	h.auditSecurity(c, "修改密码")
 	Success(c, nil)
 }
 
@@ -248,14 +231,6 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 
 	// Verify TOTP code
 	if !h.authService.VerifyTOTP(secret, req.Code) {
-		// Log failed TOTP verification
-		if h.auditService != nil {
-			user, _ := h.authService.GetUserByID(c.Request.Context(), userID)
-			if user != nil {
-				h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "TOTP_VERIFICATION_FAILED",
-					"Invalid TOTP code", c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrUnauthorized.WithMessage("TOTP 验证码无效"))
 		return
 	}
@@ -287,8 +262,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 
 	// Log successful login
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "LOGIN_SUCCESS_2FA",
-			"User logged in with 2FA", ip, userAgent)
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功 (IP: "+c.ClientIP()+")")
 	}
 
 	Success(c, gin.H{
@@ -321,13 +295,6 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	}
 	if !valid {
 		// Log failed backup code verification
-		if h.auditService != nil {
-			user, _ := h.authService.GetUserByID(c.Request.Context(), userID)
-			if user != nil {
-				h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "BACKUP_CODE_VERIFICATION_FAILED",
-					"Invalid backup code", c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrUnauthorized.WithMessage("备用码无效"))
 		return
 	}
@@ -359,8 +326,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 
 	// Log successful login with backup code
 	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "LOGIN_SUCCESS_BACKUP_CODE",
-			"User logged in with backup code", ip, userAgent)
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功 (IP: "+c.ClientIP()+")")
 	}
 
 	Success(c, gin.H{
@@ -373,7 +339,6 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 // SetupTOTP generates TOTP setup information (QR code, secret)
 func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	// Check if TOTP is already enabled
 	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
@@ -387,8 +352,8 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	}
 
 	// Generate TOTP setup
-	unameStr, _ := username.(string)
-	result, err := h.authService.GenerateTOTP(userID, unameStr)
+	unameStr, _ := c.Get("username")
+	result, err := h.authService.GenerateTOTP(userID, unameStr.(string))
 	if err != nil {
 		c.Error(ErrInternal.WithMessage("生成 TOTP 设置失败"))
 		return
@@ -407,7 +372,6 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 // EnableTOTP enables 2FA for the user
 func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	var req TOTPEnableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -426,25 +390,11 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	// Enable TOTP
 	backupCodes, err := h.authService.EnableTOTP(c.Request.Context(), userID, secret, req.Code)
 	if err != nil {
-		// Log failed enable attempt
-		if h.auditService != nil {
-			if unameStr, ok := username.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_ENABLE_FAILED",
-					err.Error(), c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
-	// Log successful enable
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_ENABLED",
-				"2FA enabled successfully", c.ClientIP(), c.Request.UserAgent())
-		}
-	}
-
+	h.auditSecurity(c, "开启二次验证")
 	Success(c, gin.H{
 		"backup_codes": backupCodes,
 	})
@@ -453,7 +403,6 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 // DisableTOTP disables 2FA for the user
 func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	var req TOTPDisableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -463,25 +412,11 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 
 	// Disable TOTP
 	if err := h.authService.DisableTOTP(c.Request.Context(), userID, req.Password); err != nil {
-		// Log failed disable attempt
-		if h.auditService != nil {
-			if unameStr, ok := username.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_DISABLE_FAILED",
-					err.Error(), c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrBadRequest.Wrap(err))
 		return
 	}
 
-	// Log successful disable
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_DISABLED",
-				"2FA disabled successfully", c.ClientIP(), c.Request.UserAgent())
-		}
-	}
-
+	h.auditSecurity(c, "关闭二次验证")
 	Success(c, nil)
 }
 
@@ -568,8 +503,7 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 	if h.auditService != nil {
 		if uname, ok := c.Get("username"); ok {
 			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "SESSION_KICKED",
-					"Kicked session", c.ClientIP(), c.Request.UserAgent())
+				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "踢出会话")
 			}
 		}
 	}
@@ -595,8 +529,7 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 	if h.auditService != nil {
 		if uname, ok := c.Get("username"); ok {
 			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "ALL_OTHER_SESSIONS_KICKED",
-					"Kicked all other sessions", c.ClientIP(), c.Request.UserAgent())
+				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "下线其他设备")
 			}
 		}
 	}

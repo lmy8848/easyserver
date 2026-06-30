@@ -1,9 +1,9 @@
 package api
 
 import (
-	"fmt"
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/container"
 	"github.com/gin-gonic/gin"
@@ -40,6 +40,7 @@ func (h *ContainerHandler) DetectDocker(c *gin.Context) {
 
 // InstallDocker installs Docker using official script
 func (h *ContainerHandler) InstallDocker(c *gin.Context) {
+	middleware.AuditSummary(c, "安装 Docker")
 	if err := h.containerService.InstallDocker(c.Request.Context()); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -49,6 +50,7 @@ func (h *ContainerHandler) InstallDocker(c *gin.Context) {
 
 // StartDocker starts the Docker service
 func (h *ContainerHandler) StartDocker(c *gin.Context) {
+	middleware.AuditSummary(c, "启动 Docker")
 	if err := h.containerService.StartDocker(c.Request.Context()); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -58,6 +60,7 @@ func (h *ContainerHandler) StartDocker(c *gin.Context) {
 
 // StopDocker stops the Docker service
 func (h *ContainerHandler) StopDocker(c *gin.Context) {
+	middleware.AuditSummary(c, "停止 Docker")
 	if err := h.containerService.StopDocker(c.Request.Context()); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -67,6 +70,7 @@ func (h *ContainerHandler) StopDocker(c *gin.Context) {
 
 // RestartDocker restarts the Docker service
 func (h *ContainerHandler) RestartDocker(c *gin.Context) {
+	middleware.AuditSummary(c, "重启 Docker")
 	if err := h.containerService.RestartDocker(c.Request.Context()); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -94,6 +98,7 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "配置 Docker 镜像源 "+req.MirrorURL)
 	if err := h.containerService.ConfigureMirror(c.Request.Context(), req.MirrorURL); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -133,6 +138,7 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建容器 "+req.Name)
 	id, err := h.containerService.CreateContainer(c.Request.Context(), req)
 	if err != nil {
 		c.Error(WrapError(err))
@@ -144,6 +150,7 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 // StartContainer starts a container
 func (h *ContainerHandler) StartContainer(c *gin.Context) {
 	id := c.Param("id")
+	middleware.AuditSummary(c, "启动容器 "+id)
 	if err := h.containerService.StartContainer(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -154,6 +161,7 @@ func (h *ContainerHandler) StartContainer(c *gin.Context) {
 // StopContainer stops a container
 func (h *ContainerHandler) StopContainer(c *gin.Context) {
 	id := c.Param("id")
+	middleware.AuditSummary(c, "停止容器 "+id)
 	if err := h.containerService.StopContainer(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -164,6 +172,7 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 // RestartContainer restarts a container
 func (h *ContainerHandler) RestartContainer(c *gin.Context) {
 	id := c.Param("id")
+	middleware.AuditSummary(c, "重启容器 "+id)
 	if err := h.containerService.RestartContainer(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -174,6 +183,7 @@ func (h *ContainerHandler) RestartContainer(c *gin.Context) {
 // PauseContainer pauses a container
 func (h *ContainerHandler) PauseContainer(c *gin.Context) {
 	id := c.Param("id")
+	middleware.AuditSummary(c, "暂停容器 "+id)
 	if err := h.containerService.PauseContainer(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -184,6 +194,7 @@ func (h *ContainerHandler) PauseContainer(c *gin.Context) {
 // UnpauseContainer unpauses a container
 func (h *ContainerHandler) UnpauseContainer(c *gin.Context) {
 	id := c.Param("id")
+	middleware.AuditSummary(c, "恢复容器 "+id)
 	if err := h.containerService.UnpauseContainer(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -195,6 +206,7 @@ func (h *ContainerHandler) UnpauseContainer(c *gin.Context) {
 func (h *ContainerHandler) RemoveContainer(c *gin.Context) {
 	id := c.Param("id")
 	force := c.Query("force") == "true"
+	middleware.AuditSummary(c, "删除容器 "+id)
 	if err := h.containerService.RemoveContainer(c.Request.Context(), id, force); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -233,16 +245,7 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 	}
 
 	// Log exec command for audit
-	_ = c.GetInt64("user_id")
-	username, _ := c.Get("username")
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr,
-				"CONTAINER_EXEC",
-				fmt.Sprintf("Container: %s, Command: %s", id, req.Command),
-				c.ClientIP(), c.Request.UserAgent())
-		}
-	}
+	middleware.AuditSummary(c, "容器内执行命令 "+id+": "+req.Command)
 
 	output, err := h.containerService.ExecInContainer(c.Request.Context(), id, req.Command)
 	if err != nil {
@@ -286,6 +289,7 @@ func (h *ContainerHandler) CopyToContainer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "复制文件到容器 "+id+": "+req.SrcPath+" -> "+req.DestPath)
 	if err := h.containerService.CopyToContainer(c.Request.Context(), id, req.SrcPath, req.DestPath); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -305,6 +309,7 @@ func (h *ContainerHandler) CopyFromContainer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "从容器复制文件 "+id+": "+req.SrcPath+" -> "+req.DestPath)
 	if err := h.containerService.CopyFromContainer(c.Request.Context(), id, req.SrcPath, req.DestPath); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -323,6 +328,7 @@ func (h *ContainerHandler) RenameContainer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "重命名容器 "+id+" 为 "+req.Name)
 	if err := h.containerService.RenameContainer(c.Request.Context(), id, req.Name); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -339,6 +345,7 @@ func (h *ContainerHandler) UpdateContainer(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "更新容器 "+id)
 	if err := h.containerService.UpdateContainer(c.Request.Context(), id, req); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -368,6 +375,7 @@ func (h *ContainerHandler) PullImage(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "拉取镜像 "+req.Image)
 	if err := h.containerService.PullImage(c.Request.Context(), req.Image); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -379,6 +387,7 @@ func (h *ContainerHandler) PullImage(c *gin.Context) {
 func (h *ContainerHandler) RemoveImage(c *gin.Context) {
 	id := c.Param("id")
 	force := c.Query("force") == "true"
+	middleware.AuditSummary(c, "删除镜像 "+id)
 	if err := h.containerService.RemoveImage(c.Request.Context(), id, force); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -408,6 +417,7 @@ func (h *ContainerHandler) ComposeUp(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "启动 Compose "+req.ProjectDir)
 	if err := h.containerService.ComposeUp(c.Request.Context(), req.ProjectDir); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -425,6 +435,7 @@ func (h *ContainerHandler) ComposeDown(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "停止 Compose "+req.ProjectDir)
 	if err := h.containerService.ComposeDown(c.Request.Context(), req.ProjectDir); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -442,6 +453,7 @@ func (h *ContainerHandler) ComposeRestart(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "重启 Compose "+req.ProjectDir)
 	if err := h.containerService.ComposeRestart(c.Request.Context(), req.ProjectDir); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -490,6 +502,7 @@ func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "保存 Compose 配置 "+req.ProjectDir)
 	if err := h.containerService.ComposeSaveConfig(c.Request.Context(), req.ProjectDir, req.Content); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -520,6 +533,7 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建数据卷 "+req.Name)
 	if err := h.containerService.CreateVolume(c.Request.Context(), req.Name, req.Driver); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -531,6 +545,7 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 func (h *ContainerHandler) RemoveVolume(c *gin.Context) {
 	name := c.Param("name")
 	force := c.Query("force") == "true"
+	middleware.AuditSummary(c, "删除数据卷 "+name)
 	if err := h.containerService.RemoveVolume(c.Request.Context(), name, force); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -561,6 +576,7 @@ func (h *ContainerHandler) CreateNetwork(c *gin.Context) {
 		return
 	}
 
+	middleware.AuditSummary(c, "创建网络 "+req.Name)
 	if err := h.containerService.CreateNetwork(c.Request.Context(), req.Name, req.Driver); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -571,6 +587,7 @@ func (h *ContainerHandler) CreateNetwork(c *gin.Context) {
 // RemoveNetwork removes a Docker network
 func (h *ContainerHandler) RemoveNetwork(c *gin.Context) {
 	id := c.Param("id")
+	middleware.AuditSummary(c, "删除网络 "+id)
 	if err := h.containerService.RemoveNetwork(c.Request.Context(), id); err != nil {
 		c.Error(WrapError(err))
 		return

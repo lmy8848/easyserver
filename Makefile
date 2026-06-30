@@ -52,11 +52,11 @@ check-go:
 	@echo "==> gofmt"
 	@out=$$(gofmt -l cmd internal); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
 	@echo "==> go vet"
-	@go vet ./cmd/... ./internal/...
+	@go vet -tags dev ./cmd/... ./internal/...
 	@echo "==> go test"
-	@go test ./cmd/... ./internal/...
+	@go test -tags dev ./cmd/... ./internal/...
 	@echo "==> go build"
-	@go build -o /dev/null ./cmd/server
+	@go build -tags dev -o /dev/null ./cmd/server
 	@echo "✓ 后端检查通过"
 
 check-web:

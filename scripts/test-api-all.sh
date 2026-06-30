@@ -458,7 +458,6 @@ test_all_get_endpoints() {
         "EnvConfig|/api/env-config"
         "EnvConfig|/api/env-config/path"
         "EnvConfig|/api/env-config/script"
-        "EnvConfig|/api/global-config"
         # Web Server
         "WebServer|/api/web-servers"
         "WebServer|/api/web-servers/project-types"
@@ -538,8 +537,6 @@ test_write_endpoints() {
         "POST|Firewall|/api/firewall/rules|{\"name\":\"test-rule\",\"protocol\":\"tcp\",\"port\":\"9999\",\"action\":\"accept\",\"direction\":\"input\",\"chain\":\"INPUT\"}"
         # Env Config
         "POST|EnvConfig|/api/env-config|{\"name\":\"TEST_VAR\",\"value\":\"test_value\"}"
-        # Global Config
-        "POST|EnvConfig|/api/global-config|{\"key\":\"test_key\",\"value\":\"test_value\",\"category\":\"test\",\"description\":\"test\"}"
         # Notifications
         "POST|Notifications|/api/notifications|{\"title\":\"Test\",\"message\":\"Test notification\",\"type\":\"info\"}"
         # Process
@@ -609,12 +606,6 @@ test_crud_flows() {
         "/api/env-config/{id}" \
         '{"name":"CRUD_TEST_VAR","value":"updated_value"}'
 
-    # Global Config CRUD
-    test_crud "GlobalConfig" "POST" "/api/global-config" \
-        '{"key":"crud_test_key","value":"test_value","category":"test","description":"test"}' \
-        "/api/global-config" \
-        "/api/global-config/{id}" \
-        '{"key":"crud_test_key","value":"updated_value","category":"test","description":"updated"}'
 
     # Notifications CRUD
     test_crud "Notifications" "POST" "/api/notifications" \

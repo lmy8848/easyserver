@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"easyserver/internal/envconfig"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra"
 )
@@ -51,12 +50,14 @@ func (s *Service) InitMirrors(ctx context.Context) error {
 	}
 	if count == 0 {
 		mirrors := []RuntimeMirror{
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node/", Enabled: 1, Source: "seed"},
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist/", Enabled: 0, Source: "seed"},
-			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/", Enabled: 0, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang/", Enabled: 1, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl/", Enabled: 0, Source: "seed"},
-			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang/", Enabled: 0, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node", Enabled: 1, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist", Enabled: 0, Source: "seed"},
+			{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release", Enabled: 0, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang", Enabled: 1, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://go.dev/dl", Enabled: 0, Source: "seed"},
+			{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.ustc.edu.cn/golang", Enabled: 0, Source: "seed"},
+			{Lang: "python", EnvKey: "PYTHON_BUILD_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/python", Enabled: 1, Source: "seed"},
+			{Lang: "python", EnvKey: "PYTHON_BUILD_MIRROR_URL", EnvValue: "https://mirrors.aliyun.com/python", Enabled: 0, Source: "seed"},
 		}
 		if err := s.repo.SeedMirrors(ctx, mirrors); err != nil {
 			return err
@@ -538,32 +539,16 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	return nil
 }
 
-// cleanupRelatedData cleans up env vars, PATH entries, AND any global_default
+// cleanupRelatedData cleans up any global_default
 // row pinning this runtime_version. The global_default cleanup is required so
 // Delete(runtime_version) won't trip the FK constraint; the caller is expected
 // to GenerateMiseConfig afterwards so the on-disk [tools] section reflects the
 // removal (see Uninstall / uninstallRuntime).
 func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
-	// Delete environment variables
-	rows, err := s.repo.CleanupEnvConfigs(ctx, runtimeID)
-	if err != nil {
-		log.Printf("runtime: failed to cleanup env configs: %v", err)
-	} else if rows > 0 {
-		log.Printf("runtime: cleaned up %d environment variables", rows)
-	}
-
-	// Delete PATH entries
-	rows, err = s.repo.CleanupPathEntries(ctx, runtimeID)
-	if err != nil {
-		log.Printf("runtime: failed to cleanup path entries: %v", err)
-	} else if rows > 0 {
-		log.Printf("runtime: cleaned up %d PATH entries", rows)
-	}
-
 	// Drop any global_default row pinning this runtime so the upcoming Delete
 	// won't violate the FK and the next GenerateMiseConfig drops the stale
 	// [tools] entry.
-	rows, err = s.repo.CleanupGlobalDefaultsByRuntimeID(ctx, runtimeID)
+	rows, err := s.repo.CleanupGlobalDefaultsByRuntimeID(ctx, runtimeID)
 	if err != nil {
 		log.Printf("runtime: failed to cleanup global_default: %v", err)
 	} else if rows > 0 {
@@ -639,22 +624,6 @@ func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string,
 	}
 
 	return versions, nil
-}
-
-// GetEnvConfigsByRuntimeID returns environment configs for a runtime
-func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.repo.ListEnvConfigsByRuntimeID(ctx, runtimeID)
-}
-
-// GetPathEntriesByRuntimeID returns PATH entries for a runtime
-func (s *Service) GetPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.repo.ListPathEntriesByRuntimeID(ctx, runtimeID)
 }
 
 // isValidUninstallPath checks if the path is safe for deletion
@@ -755,10 +724,11 @@ func (s *Service) UpdateMirror(ctx context.Context, req *RuntimeMirrorUpdateRequ
 
 	newEnvValue := m.EnvValue
 	if req.EnvValue != nil {
-		if m.Source == "seed" && *req.EnvValue != m.EnvValue {
+		val := strings.TrimRight(*req.EnvValue, "/")
+		if m.Source == "seed" && val != strings.TrimRight(m.EnvValue, "/") {
 			return fmt.Errorf("cannot modify seed mirror URL")
 		}
-		newEnvValue = *req.EnvValue
+		newEnvValue = val
 	}
 	newEnabled := m.Enabled
 	if req.Enabled != nil {
@@ -799,7 +769,7 @@ func (s *Service) CreateMirror(ctx context.Context, req *RuntimeMirrorCreateRequ
 	m := &RuntimeMirror{
 		Lang:     req.Lang,
 		EnvKey:   req.EnvKey,
-		EnvValue: req.EnvValue,
+		EnvValue: strings.TrimRight(req.EnvValue, "/"),
 		Enabled:  enabled,
 		Source:   "user",
 	}

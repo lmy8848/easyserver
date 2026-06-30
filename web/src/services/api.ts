@@ -284,10 +284,11 @@ export const auditApi = {
     ip?: string;
     start_date?: string;
     end_date?: string;
-  }) => api.get<ApiResponse<{ total: number; items: Array<{ id: number; user_id: number; username: string; action: string; resource: string; detail: string; status: number; ip: string; user_agent: string; created_at: string }> }>>('/audit-logs', { params }),
+    type?: string;
+  }) => api.get<ApiResponse<{ total: number; items: Array<{ id: number; user_id: number; username: string; action: string; resource: string; detail: string; status: number; ip: string; user_agent: string; type: string; created_at: string }> }>>('/audit-logs', { params }),
 
-  getActions: () =>
-    api.get<ApiResponse<string[]>>('/audit-logs/actions'),
+  getActions: (type?: string) =>
+    api.get<ApiResponse<string[]>>('/audit-logs/actions', { params: { type } }),
 
   getStats: (days?: number) =>
     api.get<ApiResponse<{
@@ -308,6 +309,7 @@ export const auditApi = {
     ip?: string;
     start_date?: string;
     end_date?: string;
+    type?: string;
   }) => api.get('/audit-logs/export', { params, responseType: 'blob' }),
 
   clean: (days?: number) =>
