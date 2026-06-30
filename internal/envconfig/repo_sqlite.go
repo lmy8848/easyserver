@@ -15,10 +15,9 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-func (r *sqliteRepo) ListEnvConfigs(ctx context.Context, runtimeID int64) ([]EnvConfig, error) {
+func (r *sqliteRepo) ListEnvConfigs(ctx context.Context) ([]EnvConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE runtime_id = ? ORDER BY name",
-		runtimeID,
+		"SELECT id, name, value, enabled, created_at, updated_at FROM env_configs ORDER BY name",
 	)
 	if err != nil {
 		return nil, err
@@ -28,12 +27,10 @@ func (r *sqliteRepo) ListEnvConfigs(ctx context.Context, runtimeID int64) ([]Env
 	var configs []EnvConfig
 	for rows.Next() {
 		var c EnvConfig
-		var isGlobal int
-		err := rows.Scan(&c.ID, &c.Name, &c.Value, &c.RuntimeID, &isGlobal, &c.CreatedAt, &c.UpdatedAt)
+		err := rows.Scan(&c.ID, &c.Name, &c.Value, &c.Enabled, &c.CreatedAt, &c.UpdatedAt)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		c.IsGlobal = isGlobal != 0
 		configs = append(configs, c)
 	}
 
@@ -42,25 +39,23 @@ func (r *sqliteRepo) ListEnvConfigs(ctx context.Context, runtimeID int64) ([]Env
 
 func (r *sqliteRepo) GetEnvConfig(ctx context.Context, id int64) (*EnvConfig, error) {
 	c := &EnvConfig{}
-	var isGlobal int
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE id = ?",
+		"SELECT id, name, value, enabled, created_at, updated_at FROM env_configs WHERE id = ?",
 		id,
-	).Scan(&c.ID, &c.Name, &c.Value, &c.RuntimeID, &isGlobal, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Name, &c.Value, &c.Enabled, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	c.IsGlobal = isGlobal != 0
 	return c, nil
 }
 
 func (r *sqliteRepo) CreateEnvConfig(ctx context.Context, c *EnvConfig) error {
 	result, err := r.db.ExecContext(ctx,
-		"INSERT INTO env_configs (name, value, runtime_id, is_global) VALUES (?, ?, ?, ?)",
-		c.Name, c.Value, c.RuntimeID, c.IsGlobal,
+		"INSERT INTO env_configs (name, value, enabled) VALUES (?, ?, ?)",
+		c.Name, c.Value, c.Enabled,
 	)
 	if err != nil {
 		return err
@@ -71,8 +66,8 @@ func (r *sqliteRepo) CreateEnvConfig(ctx context.Context, c *EnvConfig) error {
 
 func (r *sqliteRepo) UpdateEnvConfig(ctx context.Context, c *EnvConfig) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE env_configs SET name = ?, value = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		c.Name, c.Value, c.ID,
+		"UPDATE env_configs SET name = ?, value = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		c.Name, c.Value, c.Enabled, c.ID,
 	)
 	return err
 }
@@ -82,10 +77,9 @@ func (r *sqliteRepo) DeleteEnvConfig(ctx context.Context, id int64) error {
 	return err
 }
 
-func (r *sqliteRepo) ListPathEntries(ctx context.Context, runtimeID int64) ([]PathEntry, error) {
+func (r *sqliteRepo) ListPathEntries(ctx context.Context) ([]PathEntry, error) {
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, path, runtime_id, is_global, order_num, created_at FROM path_entries WHERE runtime_id = ? ORDER BY order_num",
-		runtimeID,
+		"SELECT id, path, enabled, order_num, created_at FROM path_entries ORDER BY order_num",
 	)
 	if err != nil {
 		return nil, err
@@ -95,12 +89,10 @@ func (r *sqliteRepo) ListPathEntries(ctx context.Context, runtimeID int64) ([]Pa
 	var entries []PathEntry
 	for rows.Next() {
 		var e PathEntry
-		var isGlobal int
-		err := rows.Scan(&e.ID, &e.Path, &e.RuntimeID, &isGlobal, &e.Order, &e.CreatedAt)
+		err := rows.Scan(&e.ID, &e.Path, &e.Enabled, &e.Order, &e.CreatedAt)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		e.IsGlobal = isGlobal != 0
 		entries = append(entries, e)
 	}
 
@@ -110,11 +102,11 @@ func (r *sqliteRepo) ListPathEntries(ctx context.Context, runtimeID int64) ([]Pa
 func (r *sqliteRepo) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 	// Get max order
 	var maxOrder int
-	r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(order_num), 0) FROM path_entries WHERE runtime_id = ?", e.RuntimeID).Scan(&maxOrder)
+	r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(order_num), 0) FROM path_entries").Scan(&maxOrder)
 
 	result, err := r.db.ExecContext(ctx,
-		"INSERT INTO path_entries (path, runtime_id, is_global, order_num) VALUES (?, ?, ?, ?)",
-		e.Path, e.RuntimeID, e.IsGlobal, maxOrder+1,
+		"INSERT INTO path_entries (path, enabled, order_num) VALUES (?, ?, ?)",
+		e.Path, e.Enabled, maxOrder+1,
 	)
 	if err != nil {
 		return err
@@ -124,20 +116,34 @@ func (r *sqliteRepo) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 	return nil
 }
 
+func (r *sqliteRepo) UpdatePathEntry(ctx context.Context, e *PathEntry) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE path_entries SET path = ?, enabled = ?, order_num = ? WHERE id = ?",
+		e.Path, e.Enabled, e.Order, e.ID,
+	)
+	return err
+}
+
 func (r *sqliteRepo) DeletePathEntry(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM path_entries WHERE id = ?", id)
 	return err
 }
 
-func (r *sqliteRepo) ReorderPathEntries(ctx context.Context, runtimeID int64, ids []int64) error {
+func (r *sqliteRepo) ReorderPathEntries(ctx context.Context, ids []int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	for i, id := range ids {
-		_, err := r.db.ExecContext(ctx,
-			"UPDATE path_entries SET order_num = ? WHERE id = ? AND runtime_id = ?",
-			i+1, id, runtimeID,
+		_, err := tx.ExecContext(ctx,
+			"UPDATE path_entries SET order_num = ? WHERE id = ?",
+			i+1, id,
 		)
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }

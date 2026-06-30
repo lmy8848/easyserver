@@ -1,12 +1,10 @@
 package api
 
 import (
+	"easyserver/internal/api/middleware"
+	"easyserver/internal/runtimeenv"
 	"fmt"
 	"strings"
-
-	"easyserver/internal/api/middleware"
-	"easyserver/internal/envconfig"
-	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -251,26 +249,8 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 		return
 	}
 
-	// Get related environment variables
-	envConfigs, err := h.runtimeService.GetEnvConfigsByRuntimeID(c.Request.Context(), id)
-	if err != nil {
-		envConfigs = []envconfig.EnvConfig{}
-	}
-
-	// Get related PATH entries
-	pathEntries, err := h.runtimeService.GetPathEntriesByRuntimeID(c.Request.Context(), id)
-	if err != nil {
-		pathEntries = []envconfig.PathEntry{}
-	}
-
 	Success(c, gin.H{
-		"runtime":      env,
-		"env_configs":  envConfigs,
-		"path_entries": pathEntries,
-		"will_cleanup": gin.H{
-			"env_configs_count":  len(envConfigs),
-			"path_entries_count": len(pathEntries),
-		},
+		"runtime": env,
 	})
 }
 

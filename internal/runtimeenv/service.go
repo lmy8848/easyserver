@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"easyserver/internal/envconfig"
 	"easyserver/internal/infra/executor"
 )
 
@@ -539,32 +538,16 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	return nil
 }
 
-// cleanupRelatedData cleans up env vars, PATH entries, AND any global_default
+// cleanupRelatedData cleans up any global_default
 // row pinning this runtime_version. The global_default cleanup is required so
 // Delete(runtime_version) won't trip the FK constraint; the caller is expected
 // to GenerateMiseConfig afterwards so the on-disk [tools] section reflects the
 // removal (see Uninstall / uninstallRuntime).
 func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
-	// Delete environment variables
-	rows, err := s.repo.CleanupEnvConfigs(ctx, runtimeID)
-	if err != nil {
-		log.Printf("runtime: failed to cleanup env configs: %v", err)
-	} else if rows > 0 {
-		log.Printf("runtime: cleaned up %d environment variables", rows)
-	}
-
-	// Delete PATH entries
-	rows, err = s.repo.CleanupPathEntries(ctx, runtimeID)
-	if err != nil {
-		log.Printf("runtime: failed to cleanup path entries: %v", err)
-	} else if rows > 0 {
-		log.Printf("runtime: cleaned up %d PATH entries", rows)
-	}
-
 	// Drop any global_default row pinning this runtime so the upcoming Delete
 	// won't violate the FK and the next GenerateMiseConfig drops the stale
 	// [tools] entry.
-	rows, err = s.repo.CleanupGlobalDefaultsByRuntimeID(ctx, runtimeID)
+	rows, err := s.repo.CleanupGlobalDefaultsByRuntimeID(ctx, runtimeID)
 	if err != nil {
 		log.Printf("runtime: failed to cleanup global_default: %v", err)
 	} else if rows > 0 {
@@ -640,22 +623,6 @@ func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string,
 	}
 
 	return versions, nil
-}
-
-// GetEnvConfigsByRuntimeID returns environment configs for a runtime
-func (s *Service) GetEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.repo.ListEnvConfigsByRuntimeID(ctx, runtimeID)
-}
-
-// GetPathEntriesByRuntimeID returns PATH entries for a runtime
-func (s *Service) GetPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.repo.ListPathEntriesByRuntimeID(ctx, runtimeID)
 }
 
 // isValidUninstallPath checks if the path is safe for deletion

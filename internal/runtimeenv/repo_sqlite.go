@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-
-	"easyserver/internal/envconfig"
 )
 
 // sqliteRepo implements Repository for SQLite
@@ -297,24 +295,6 @@ func (r *sqliteRepo) ListDefaults(ctx context.Context) ([]GlobalDefaultEntry, er
 	return out, rows.Err()
 }
 
-// CleanupEnvConfigs deletes environment configs associated with a runtime
-func (r *sqliteRepo) CleanupEnvConfigs(ctx context.Context, runtimeID int64) (int64, error) {
-	result, err := r.db.ExecContext(ctx, "DELETE FROM env_configs WHERE runtime_id = ?", runtimeID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-// CleanupPathEntries deletes PATH entries associated with a runtime
-func (r *sqliteRepo) CleanupPathEntries(ctx context.Context, runtimeID int64) (int64, error) {
-	result, err := r.db.ExecContext(ctx, "DELETE FROM path_entries WHERE runtime_id = ?", runtimeID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 // CleanupGlobalDefaultsByRuntimeID removes any global_default row that pins to
 // a specific runtime_version row. Required before deleting that runtime_version
 // because of the FK constraint, and ensures /etc/mise/config.toml stays in
@@ -325,64 +305,6 @@ func (r *sqliteRepo) CleanupGlobalDefaultsByRuntimeID(ctx context.Context, runti
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-// ListEnvConfigsByRuntimeID returns environment configs for a runtime
-func (r *sqliteRepo) ListEnvConfigsByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.EnvConfig, error) {
-	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, value, runtime_id, is_global, created_at, updated_at FROM env_configs WHERE runtime_id = ?",
-		runtimeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var configs []envconfig.EnvConfig
-	for rows.Next() {
-		var c envconfig.EnvConfig
-		var isGlobal int
-		err := rows.Scan(&c.ID, &c.Name, &c.Value, &c.RuntimeID, &isGlobal, &c.CreatedAt, &c.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		c.IsGlobal = isGlobal != 0
-		configs = append(configs, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-
-	return configs, nil
-}
-
-// ListPathEntriesByRuntimeID returns PATH entries for a runtime
-func (r *sqliteRepo) ListPathEntriesByRuntimeID(ctx context.Context, runtimeID int64) ([]envconfig.PathEntry, error) {
-	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, path, runtime_id, is_global, order_num, created_at FROM path_entries WHERE runtime_id = ?",
-		runtimeID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []envconfig.PathEntry
-	for rows.Next() {
-		var e envconfig.PathEntry
-		var isGlobal int
-		err := rows.Scan(&e.ID, &e.Path, &e.RuntimeID, &isGlobal, &e.Order, &e.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		e.IsGlobal = isGlobal != 0
-		entries = append(entries, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate: %w", err)
-	}
-
-	return entries, nil
 }
 
 // CountMirrors returns the total number of mirrors

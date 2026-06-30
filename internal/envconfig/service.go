@@ -18,12 +18,11 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// ListEnvConfigs returns all environment configurations
-func (s *Service) ListEnvConfigs(ctx context.Context, runtimeID int64) ([]EnvConfig, error) {
+func (s *Service) ListEnvConfigs(ctx context.Context) ([]EnvConfig, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.ListEnvConfigs(ctx, runtimeID)
+	return s.repo.ListEnvConfigs(ctx)
 }
 
 // GetEnvConfig returns a specific environment configuration
@@ -64,12 +63,11 @@ func (s *Service) DeleteEnvConfig(ctx context.Context, id int64) error {
 	return s.repo.DeleteEnvConfig(ctx, id)
 }
 
-// ListPathEntries returns all PATH entries
-func (s *Service) ListPathEntries(ctx context.Context, runtimeID int64) ([]PathEntry, error) {
+func (s *Service) ListPathEntries(ctx context.Context) ([]PathEntry, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.ListPathEntries(ctx, runtimeID)
+	return s.repo.ListPathEntries(ctx)
 }
 
 // CreatePathEntry creates a new PATH entry
@@ -83,6 +81,17 @@ func (s *Service) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 	return s.repo.CreatePathEntry(ctx, e)
 }
 
+// UpdatePathEntry updates an existing PATH entry
+func (s *Service) UpdatePathEntry(ctx context.Context, e *PathEntry) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !isValidPath(e.Path) {
+		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的路径：%s", e.Path))
+	}
+	return s.repo.UpdatePathEntry(ctx, e)
+}
+
 // DeletePathEntry deletes a PATH entry
 func (s *Service) DeletePathEntry(ctx context.Context, id int64) error {
 	if ctx == nil {
@@ -91,39 +100,47 @@ func (s *Service) DeletePathEntry(ctx context.Context, id int64) error {
 	return s.repo.DeletePathEntry(ctx, id)
 }
 
-// ReorderPathEntries reorders PATH entries
-func (s *Service) ReorderPathEntries(ctx context.Context, runtimeID int64, ids []int64) error {
+func (s *Service) ReorderPathEntries(ctx context.Context, ids []int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.repo.ReorderPathEntries(ctx, runtimeID, ids)
+	return s.repo.ReorderPathEntries(ctx, ids)
 }
 
-// GenerateEnvScript generates a shell script to set environment variables
-func (s *Service) GenerateEnvScript(ctx context.Context, runtimeID int64) (string, error) {
+func (s *Service) GenerateEnvScript(ctx context.Context) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	var script strings.Builder
 
-	configs, err := s.ListEnvConfigs(ctx, runtimeID)
+	configs, err := s.ListEnvConfigs(ctx)
 	if err != nil {
 		return "", err
 	}
 
 	for _, c := range configs {
+		if !c.Enabled {
+			continue
+		}
 		escaped := shellEscapeDoubleQuote(c.Value)
 		script.WriteString(fmt.Sprintf("export %s=\"%s\"\n", c.Name, escaped))
 	}
 
-	entries, err := s.ListPathEntries(ctx, runtimeID)
+	entries, err := s.ListPathEntries(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	if len(entries) > 0 {
+	var enabledEntries []PathEntry
+	for _, e := range entries {
+		if e.Enabled {
+			enabledEntries = append(enabledEntries, e)
+		}
+	}
+
+	if len(enabledEntries) > 0 {
 		script.WriteString("export PATH=\"")
-		for i, e := range entries {
+		for i, e := range enabledEntries {
 			if i > 0 {
 				script.WriteString(":")
 			}

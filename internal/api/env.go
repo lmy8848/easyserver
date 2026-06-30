@@ -16,6 +16,7 @@ func registerEnvRoutes(protected *gin.RouterGroup, envConfigService *envconfig.S
 	protected.DELETE("/env-config/:id", handler.DeleteEnvConfig)
 	protected.GET("/env-config/path", handler.ListPathEntries)
 	protected.POST("/env-config/path", handler.CreatePathEntry)
+	protected.PUT("/env-config/path/:id", handler.UpdatePathEntry)
 	protected.DELETE("/env-config/path/:id", handler.DeletePathEntry)
 	protected.GET("/env-config/script", handler.GenerateEnvScript)
 }
