@@ -16,12 +16,4 @@ type Repository interface {
 	CreatePathEntry(ctx context.Context, entry *PathEntry) error
 	DeletePathEntry(ctx context.Context, id int64) error
 	ReorderPathEntries(ctx context.Context, runtimeID int64, ids []int64) error
-
-	// GlobalConfig CRUD
-	ListGlobalConfigs(ctx context.Context, category string) ([]GlobalConfig, error)
-	GetGlobalConfig(ctx context.Context, id int64) (*GlobalConfig, error)
-	CreateGlobalConfig(ctx context.Context, config *GlobalConfig) error
-	UpdateGlobalConfig(ctx context.Context, config *GlobalConfig) error
-	DeleteGlobalConfig(ctx context.Context, id int64) error
-	CreateGlobalConfigIfNotExists(ctx context.Context, config *GlobalConfig) error
 }
