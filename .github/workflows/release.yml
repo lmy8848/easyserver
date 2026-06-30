@@ -63,6 +63,8 @@ jobs:
             serve_frontend: false
           auth:
             jwt_secret: "ci-smoke-test-jwt-secret-at-least-32-bytes-long!!"
+          deploy:
+            encryption_key: "ci-smoke-test-encryption-key-32-bytes!!"
           filemanager:
             base_path: "/tmp/easyserver-data"
           data_dir: /tmp/easyserver-data
