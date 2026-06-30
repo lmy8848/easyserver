@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"easyserver/internal/api"
-	"easyserver/internal/infra/config"
 	"easyserver/internal/infra"
+	"easyserver/internal/infra/config"
 )
 
 func main() {

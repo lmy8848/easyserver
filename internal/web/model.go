@@ -34,44 +34,44 @@ type WebServer struct {
 
 // Website represents a website deployed on a web server
 type Website struct {
-	ID           int64  `json:"id"`
-	WebServerID  int64  `json:"web_server_id"`
-	Name         string `json:"name"`
-	Domain       string `json:"domain"`
-	RootPath     string `json:"root_path"`
-	Port         int    `json:"port"`
-	ProjectType  string `json:"project_type"` // static, nodejs, php, python, java, proxy
-	AppPort      int    `json:"app_port"`     // app listen port (e.g. 3000 for Node.js)
-	SSLEnabled   bool   `json:"ssl_enabled"`
-	SSLCertPath  string `json:"ssl_cert_path"`
-	SSLKeyPath   string `json:"ssl_key_path"`
-	ProxyEnabled bool   `json:"proxy_enabled"`
-	ProxyPass    string `json:"proxy_pass"`
-	CustomConfig string `json:"custom_config"`
-	ConfigOptions string `json:"config_options"` // JSON structured config options for Nginx
-	ProcessID    int64  `json:"process_id"`      // linked managed process ID (0 = none)
-	BuildCommand  string `json:"build_command"`   // command to build/compile project (e.g. npm run build)
-	StartCommand  string `json:"start_command"`   // command to start the application
+	ID               int64  `json:"id"`
+	WebServerID      int64  `json:"web_server_id"`
+	Name             string `json:"name"`
+	Domain           string `json:"domain"`
+	RootPath         string `json:"root_path"`
+	Port             int    `json:"port"`
+	ProjectType      string `json:"project_type"` // static, nodejs, php, python, java, proxy
+	AppPort          int    `json:"app_port"`     // app listen port (e.g. 3000 for Node.js)
+	SSLEnabled       bool   `json:"ssl_enabled"`
+	SSLCertPath      string `json:"ssl_cert_path"`
+	SSLKeyPath       string `json:"ssl_key_path"`
+	ProxyEnabled     bool   `json:"proxy_enabled"`
+	ProxyPass        string `json:"proxy_pass"`
+	CustomConfig     string `json:"custom_config"`
+	ConfigOptions    string `json:"config_options"`     // JSON structured config options for Nginx
+	ProcessID        int64  `json:"process_id"`         // linked managed process ID (0 = none)
+	BuildCommand     string `json:"build_command"`      // command to build/compile project (e.g. npm run build)
+	StartCommand     string `json:"start_command"`      // command to start the application
 	RuntimeVersionID int64  `json:"runtime_version_id"` // linked runtime version (0 = system PATH)
-	AccessLog    string `json:"access_log"`
-	ErrorLog     string `json:"error_log"`
-	Status       string `json:"status"` // active, disabled
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	AccessLog        string `json:"access_log"`
+	ErrorLog         string `json:"error_log"`
+	Status           string `json:"status"` // active, disabled
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type CreateWebsiteRequest struct {
-	Name         string `json:"name" binding:"required"`
-	Domain       string `json:"domain" binding:"required"`
-	RootPath     string `json:"root_path" binding:"required"`
-	Port         int    `json:"port"`
-	ProjectType  string `json:"project_type"` // static, nodejs, php, python, java, proxy
-	AppPort      int    `json:"app_port"`
-	BuildCommand      string `json:"build_command"`
-	StartCommand      string `json:"start_command"`
-	RuntimeVersionID  int64  `json:"runtime_version_id"`
-	CustomConfig      string `json:"custom_config"`
-	ConfigOptions     string `json:"config_options"`
+	Name             string `json:"name" binding:"required"`
+	Domain           string `json:"domain" binding:"required"`
+	RootPath         string `json:"root_path" binding:"required"`
+	Port             int    `json:"port"`
+	ProjectType      string `json:"project_type"` // static, nodejs, php, python, java, proxy
+	AppPort          int    `json:"app_port"`
+	BuildCommand     string `json:"build_command"`
+	StartCommand     string `json:"start_command"`
+	RuntimeVersionID int64  `json:"runtime_version_id"`
+	CustomConfig     string `json:"custom_config"`
+	ConfigOptions    string `json:"config_options"`
 }
 
 // domainRegexp validates RFC 1123 hostnames: labels of 1-63 alphanumeric or hyphen chars,
@@ -89,18 +89,18 @@ func (r *CreateWebsiteRequest) ValidateDomain() error {
 }
 
 type UpdateWebsiteRequest struct {
-	Name         *string `json:"name"`
-	Domain       *string `json:"domain"`
-	RootPath     *string `json:"root_path"`
-	Port         *int    `json:"port"`
-	ProjectType  *string `json:"project_type"`
-	AppPort      *int    `json:"app_port"`
-	BuildCommand      *string `json:"build_command"`
-	StartCommand      *string `json:"start_command"`
-	RuntimeVersionID  *int64  `json:"runtime_version_id"`
-	CustomConfig      *string `json:"custom_config"`
-	ConfigOptions     *string `json:"config_options"`
-	ProcessID         *int64  `json:"process_id"`
+	Name             *string `json:"name"`
+	Domain           *string `json:"domain"`
+	RootPath         *string `json:"root_path"`
+	Port             *int    `json:"port"`
+	ProjectType      *string `json:"project_type"`
+	AppPort          *int    `json:"app_port"`
+	BuildCommand     *string `json:"build_command"`
+	StartCommand     *string `json:"start_command"`
+	RuntimeVersionID *int64  `json:"runtime_version_id"`
+	CustomConfig     *string `json:"custom_config"`
+	ConfigOptions    *string `json:"config_options"`
+	ProcessID        *int64  `json:"process_id"`
 }
 
 // ProjectTypeConfig defines Nginx config templates per project type

@@ -14,9 +14,9 @@ import (
 
 	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"
-	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"

@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
 	"easyserver/internal/systemd"
 	"easyserver/internal/terminal"
-	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"

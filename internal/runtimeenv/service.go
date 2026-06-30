@@ -14,8 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra"
+	"easyserver/internal/infra/executor"
 )
 
 type Service struct {

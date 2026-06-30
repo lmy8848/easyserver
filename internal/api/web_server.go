@@ -415,10 +415,10 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 	// Auto-link Process Guardian entry when start_command + runtime_version_id are set
 	if req.StartCommand != "" && req.RuntimeVersionID > 0 {
 		proc, pErr := h.processService.Create(c.Request.Context(), &process.CreateProcessRequest{
-				Name:             "website-" + req.Domain,
-				Command:          "sh",
-				Args:             fmt.Sprintf(`-c "%s"`, req.StartCommand),
-				Dir:              req.RootPath,
+			Name:             "website-" + req.Domain,
+			Command:          "sh",
+			Args:             fmt.Sprintf(`-c "%s"`, req.StartCommand),
+			Dir:              req.RootPath,
 			AutoRestart:      boolPtr(false),
 			MaxRestarts:      3,
 			RestartDelay:     5,

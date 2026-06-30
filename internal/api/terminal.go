@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
-	"easyserver/internal/terminal"
 	"easyserver/internal/infra"
+	"easyserver/internal/terminal"
 
 	"github.com/gin-gonic/gin"
 	gorillaWs "github.com/gorilla/websocket"

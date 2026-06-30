@@ -143,24 +143,24 @@ func SessionHeartbeatMiddleware(sessionService *auth.SessionService, sessionTime
 						// to prevent goroutine leak on persistent DB failures.
 						if limiter.shouldCreate(token) {
 							infra.Go(func() {
-									ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-									defer cancel()
-									ip := c.ClientIP()
-									userAgent := c.Request.UserAgent()
-									expiresAt := time.Now().Add(sessionTimeout)
-									if err := sessionService.CreateSession(
-										ctx,
-										token,
-										uid,
-										uname,
-										roleStr,
-										ip,
-										userAgent,
-										expiresAt,
-									); err != nil {
-										log.Printf("session heartbeat: failed to create session for uid=%d: %v", uid, err)
-									}
-								})
+								ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+								defer cancel()
+								ip := c.ClientIP()
+								userAgent := c.Request.UserAgent()
+								expiresAt := time.Now().Add(sessionTimeout)
+								if err := sessionService.CreateSession(
+									ctx,
+									token,
+									uid,
+									uname,
+									roleStr,
+									ip,
+									userAgent,
+									expiresAt,
+								); err != nil {
+									log.Printf("session heartbeat: failed to create session for uid=%d: %v", uid, err)
+								}
+							})
 						}
 					}
 				}

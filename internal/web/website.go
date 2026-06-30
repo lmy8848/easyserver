@@ -128,24 +128,24 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	accessLog := fmt.Sprintf("/var/log/nginx/%s_access.log", req.Domain)
 	errorLog := fmt.Sprintf("/var/log/nginx/%s_error.log", req.Domain)
 
-		website := &Website{
-			WebServerID:       webServerID,
-			Name:              req.Name,
-			Domain:            req.Domain,
-			RootPath:          req.RootPath,
-			Port:              port,
-			ProjectType:       projectType,
-			AppPort:           appPort,
-			ProxyEnabled:      proxyEnabled,
-			ProxyPass:         proxyPass,
-			CustomConfig:      req.CustomConfig,
-			ConfigOptions:     req.ConfigOptions,
-			BuildCommand:      req.BuildCommand,
-			StartCommand:      req.StartCommand,
-			RuntimeVersionID:  req.RuntimeVersionID,
-			AccessLog:         accessLog,
-			ErrorLog:          errorLog,
-		}
+	website := &Website{
+		WebServerID:      webServerID,
+		Name:             req.Name,
+		Domain:           req.Domain,
+		RootPath:         req.RootPath,
+		Port:             port,
+		ProjectType:      projectType,
+		AppPort:          appPort,
+		ProxyEnabled:     proxyEnabled,
+		ProxyPass:        proxyPass,
+		CustomConfig:     req.CustomConfig,
+		ConfigOptions:    req.ConfigOptions,
+		BuildCommand:     req.BuildCommand,
+		StartCommand:     req.StartCommand,
+		RuntimeVersionID: req.RuntimeVersionID,
+		AccessLog:        accessLog,
+		ErrorLog:         errorLog,
+	}
 
 	id, err := s.repo.Create(ctx, website)
 	if err != nil {
@@ -159,20 +159,20 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	website.ID = id
 	s.writeConfigForServer(webServerID, website)
 
-		return &Website{
-			ID:                id,
-			WebServerID:       webServerID,
-			Name:              req.Name,
-			Domain:            req.Domain,
-			RootPath:          req.RootPath,
-			Port:              port,
-			ProjectType:       projectType,
-			AppPort:           appPort,
-			BuildCommand:      req.BuildCommand,
-			StartCommand:      req.StartCommand,
-			RuntimeVersionID:  req.RuntimeVersionID,
-			Status:            "active",
-		}, nil
+	return &Website{
+		ID:               id,
+		WebServerID:      webServerID,
+		Name:             req.Name,
+		Domain:           req.Domain,
+		RootPath:         req.RootPath,
+		Port:             port,
+		ProjectType:      projectType,
+		AppPort:          appPort,
+		BuildCommand:     req.BuildCommand,
+		StartCommand:     req.StartCommand,
+		RuntimeVersionID: req.RuntimeVersionID,
+		Status:           "active",
+	}, nil
 }
 
 // Update updates a website
@@ -207,14 +207,14 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 		}
 		w.RootPath = *req.RootPath
 	}
-		if req.Port != nil {
-			// Check port conflict (exclude self)
-			portCount, _ := s.repo.CountByPortExcludingID(ctx, webServerID, *req.Port, id)
-			if portCount > 0 {
-				return apperror.ErrConflict.WithMessage(fmt.Sprintf("端口 %d 已被其他网站占用", *req.Port))
-			}
-			w.Port = *req.Port
+	if req.Port != nil {
+		// Check port conflict (exclude self)
+		portCount, _ := s.repo.CountByPortExcludingID(ctx, webServerID, *req.Port, id)
+		if portCount > 0 {
+			return apperror.ErrConflict.WithMessage(fmt.Sprintf("端口 %d 已被其他网站占用", *req.Port))
 		}
+		w.Port = *req.Port
+	}
 	if req.ProjectType != nil {
 		w.ProjectType = *req.ProjectType
 	}
@@ -233,12 +233,12 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	if req.StartCommand != nil {
 		w.StartCommand = *req.StartCommand
 	}
-		if req.RuntimeVersionID != nil {
-			w.RuntimeVersionID = *req.RuntimeVersionID
-		}
-		if req.ProcessID != nil {
-			w.ProcessID = *req.ProcessID
-		}
+	if req.RuntimeVersionID != nil {
+		w.RuntimeVersionID = *req.RuntimeVersionID
+	}
+	if req.ProcessID != nil {
+		w.ProcessID = *req.ProcessID
+	}
 
 	if err := s.repo.Update(ctx, w); err != nil {
 		return err
@@ -482,14 +482,14 @@ func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) err
 		return nil
 	}
 
-		os.MkdirAll(ws.SitesAvailable, 0755)
-		os.MkdirAll(ws.SitesEnabled, 0755)
+	os.MkdirAll(ws.SitesAvailable, 0755)
+	os.MkdirAll(ws.SitesEnabled, 0755)
 
-		confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
+	confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 
-		if w.CustomConfig != "" {
-			return os.WriteFile(confPath, []byte(w.CustomConfig), 0644)
-		}
+	if w.CustomConfig != "" {
+		return os.WriteFile(confPath, []byte(w.CustomConfig), 0644)
+	}
 
 	// Select template based on project type
 	var config string
