@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/cron"
 	"easyserver/internal/infra/executor"
 
@@ -970,22 +971,22 @@ func registerCronRoutes(protected *gin.RouterGroup, cronService *cron.Service, e
 	protected.GET("/cron/describe", handler.DescribeSchedule)
 	protected.GET("/cron/next-runs", handler.GetNextRuns)
 	protected.GET("/cron/tasks", handler.ListTasks)
-	protected.POST("/cron/tasks", handler.CreateTask)
+	protected.POST("/cron/tasks", middleware.SetAction("CRON_TASKS_CREATE"), handler.CreateTask)
 	protected.GET("/cron/tasks/:id", handler.GetTask)
-	protected.PUT("/cron/tasks/:id", handler.UpdateTask)
-	protected.DELETE("/cron/tasks/:id", handler.DeleteTask)
-	protected.POST("/cron/tasks/:id/enable", handler.EnableTask)
-	protected.POST("/cron/tasks/:id/disable", handler.DisableTask)
-	protected.POST("/cron/tasks/:id/run", handler.RunTask)
+	protected.PUT("/cron/tasks/:id", middleware.SetAction("CRON_TASKS_UPDATE"), handler.UpdateTask)
+	protected.DELETE("/cron/tasks/:id", middleware.SetAction("CRON_TASKS_DELETE"), handler.DeleteTask)
+	protected.POST("/cron/tasks/:id/enable", middleware.SetAction("CRON_TASKS_ENABLE"), handler.EnableTask)
+	protected.POST("/cron/tasks/:id/disable", middleware.SetAction("CRON_TASKS_DISABLE"), handler.DisableTask)
+	protected.POST("/cron/tasks/:id/run", middleware.SetAction("CRON_TASKS_RUN"), handler.RunTask)
 	protected.GET("/cron/tasks/:id/logs", handler.GetTaskLogs)
 	protected.GET("/cron/scripts", handler.ListScripts)
-	protected.POST("/cron/scripts", handler.CreateScript)
+	protected.POST("/cron/scripts", middleware.SetAction("CRON_SCRIPTS_CREATE"), handler.CreateScript)
 	protected.GET("/cron/scripts/:id", handler.GetScript)
-	protected.PUT("/cron/scripts/:id", handler.UpdateScript)
-	protected.DELETE("/cron/scripts/:id", handler.DeleteScript)
+	protected.PUT("/cron/scripts/:id", middleware.SetAction("CRON_SCRIPTS_UPDATE"), handler.UpdateScript)
+	protected.DELETE("/cron/scripts/:id", middleware.SetAction("CRON_SCRIPTS_DELETE"), handler.DeleteScript)
 	protected.GET("/cron/docs", handler.ListDocs)
-	protected.POST("/cron/docs", handler.CreateDoc)
+	protected.POST("/cron/docs", middleware.SetAction("CRON_DOCS_CREATE"), handler.CreateDoc)
 	protected.GET("/cron/docs/:id", handler.GetDoc)
-	protected.PUT("/cron/docs/:id", handler.UpdateDoc)
-	protected.DELETE("/cron/docs/:id", handler.DeleteDoc)
+	protected.PUT("/cron/docs/:id", middleware.SetAction("CRON_DOCS_UPDATE"), handler.UpdateDoc)
+	protected.DELETE("/cron/docs/:id", middleware.SetAction("CRON_DOCS_DELETE"), handler.DeleteDoc)
 }

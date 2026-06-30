@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,7 @@ type auditEntry struct {
 	ip        string
 	userAgent string
 	createdAt time.Time
+	logType   string
 }
 
 type auditWriter struct {
@@ -92,6 +94,7 @@ func (w *auditWriter) flush(batch []auditEntry) {
 			Detail:    e.detail,
 			IP:        e.ip,
 			UserAgent: e.userAgent,
+			Type:      e.logType,
 			CreatedAt: e.createdAt,
 			Signature: w.signEntry(e),
 		}
@@ -102,6 +105,12 @@ func (w *auditWriter) flush(batch []auditEntry) {
 }
 
 func (w *auditWriter) signEntry(e auditEntry) string {
+	// type (e.logType) is excluded from the HMAC payload: including it would
+	// invalidate signatures for all pre-migration records. type is instead guarded
+	// by VerifySignature, which rejects entries whose type disagrees with their
+	// (signed) action — HTTP method ⇒ request, anything else ⇒ operation. An
+	// attacker with DB write access flipping only type fails that consistency check.
+	// Full type integrity would need versioned signatures (v2|type|...).
 	data := fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s|%s",
 		e.userID, e.username, e.action, e.resource, e.detail, e.ip, e.userAgent, e.createdAt.Format(time.RFC3339Nano))
 	mac := hmac.New(sha256.New, w.signingKey)
@@ -197,7 +206,28 @@ func (s *Service) cleanupOldRecords() {
 }
 
 // LogOperation logs a server-level operation.
-func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string) {
+func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := time.Now()
+	detailData := map[string]interface{}{
+		"timestamp": now.Format(time.RFC3339),
+	}
+	for k, v := range extra {
+		detailData[k] = v
+	}
+	detailJSON, _ := json.Marshal(detailData)
+	entry := auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"}
+	select {
+	case s.writer.ch <- entry:
+	default:
+		log.Printf("audit: channel full, dropping entry")
+	}
+}
+
+// LogRequest logs an HTTP request, written by the global audit middleware.
+func (s *Service) LogRequest(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -206,7 +236,7 @@ func (s *Service) LogOperation(ctx context.Context, userID int64, username, acti
 		"detail":    detail,
 		"timestamp": now.Format(time.RFC3339),
 	})
-	entry := auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now}
+	entry := auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "request"}
 	select {
 	case s.writer.ch <- entry:
 	default:
@@ -225,7 +255,7 @@ func (s *Service) LogTerminalCommand(ctx context.Context, userID int64, username
 		"command":    command,
 		"timestamp":  now.Format(time.RFC3339),
 	})
-	entry := auditEntry{userID, username, "TERMINAL", "/terminal/" + sessionID, string(detailJSON), ip, "WebTerminal", now}
+	entry := auditEntry{userID, username, "TERMINAL", "/terminal/" + sessionID, string(detailJSON), ip, "WebTerminal", now, "operation"}
 	select {
 	case s.writer.ch <- entry:
 	default:
@@ -234,17 +264,21 @@ func (s *Service) LogTerminalCommand(ctx context.Context, userID int64, username
 }
 
 // LogFileOperation logs a file operation.
-func (s *Service) LogFileOperation(ctx context.Context, userID int64, username, action, filePath, ip, userAgent string) {
+func (s *Service) LogFileOperation(ctx context.Context, userID int64, username, action, filePath string, extra map[string]interface{}, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := time.Now()
-	detailJSON, _ := json.Marshal(map[string]interface{}{
+	detailData := map[string]interface{}{
 		"file_path": filePath,
 		"action":    action,
 		"timestamp": now.Format(time.RFC3339),
-	})
-	entry := auditEntry{userID, username, "FILE_" + action, filePath, string(detailJSON), ip, userAgent, now}
+	}
+	for k, v := range extra {
+		detailData[k] = v
+	}
+	detailJSON, _ := json.Marshal(detailData)
+	entry := auditEntry{userID, username, "FILE_" + action, filePath, string(detailJSON), ip, userAgent, now, "operation"}
 	select {
 	case s.writer.ch <- entry:
 	default:
@@ -262,7 +296,7 @@ func (s *Service) LogSecurityEvent(ctx context.Context, username, action, detail
 		"detail":    detail,
 		"timestamp": now.Format(time.RFC3339),
 	})
-	entry := auditEntry{0, username, "SECURITY_" + action, "/auth", string(detailJSON), ip, userAgent, now}
+	entry := auditEntry{0, username, "SECURITY_" + action, "/auth", string(detailJSON), ip, userAgent, now, "operation"}
 	select {
 	case s.writer.ch <- entry:
 	default:
@@ -280,7 +314,7 @@ func (s *Service) LogSystemEvent(ctx context.Context, action, detail string) {
 		"detail":    detail,
 		"timestamp": now.Format(time.RFC3339),
 	})
-	entry := auditEntry{0, "system", "SYSTEM_" + action, "/system", string(detailJSON), "127.0.0.1", "EasyServer", now}
+	entry := auditEntry{0, "system", "SYSTEM_" + action, "/system", string(detailJSON), "127.0.0.1", "EasyServer", now, "operation"}
 	select {
 	case s.writer.ch <- entry:
 	default:
@@ -289,59 +323,26 @@ func (s *Service) LogSystemEvent(ctx context.Context, action, detail string) {
 }
 
 // LogServiceOperation logs a service operation.
-func (s *Service) LogServiceOperation(ctx context.Context, userID int64, username, action, serviceName, ip, userAgent string) {
+func (s *Service) LogServiceOperation(ctx context.Context, userID int64, username, action, serviceName string, extra map[string]interface{}, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := time.Now()
-	detailJSON, _ := json.Marshal(map[string]interface{}{
+	detailData := map[string]interface{}{
 		"service":   serviceName,
 		"action":    action,
 		"timestamp": now.Format(time.RFC3339),
-	})
-	entry := auditEntry{userID, username, "SERVICE_" + action, "/services/" + serviceName, string(detailJSON), ip, userAgent, now}
+	}
+	for k, v := range extra {
+		detailData[k] = v
+	}
+	detailJSON, _ := json.Marshal(detailData)
+	entry := auditEntry{userID, username, "SERVICE_" + strings.ToUpper(action), "/service/" + serviceName, string(detailJSON), ip, userAgent, now, "operation"}
 	select {
 	case s.writer.ch <- entry:
 	default:
 		log.Printf("audit: channel full, dropping entry")
 	}
-}
-
-// GetAuditLogs returns audit logs with filtering.
-func (s *Service) GetAuditLogs(ctx context.Context, page, pageSize int, username, action, resource, ip, startDate, endDate string) (int64, []map[string]interface{}, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	filter := AuditFilter{
-		Username:  username,
-		Action:    action,
-		Resource:  resource,
-		IP:        ip,
-		StartDate: startDate,
-		EndDate:   endDate,
-		Offset:    (page - 1) * pageSize,
-		Limit:     pageSize,
-	}
-	total, logs, err := s.auditRepo.Query(ctx, filter)
-	if err != nil {
-		return 0, nil, err
-	}
-	items := make([]map[string]interface{}, 0, len(logs))
-	for _, l := range logs {
-		items = append(items, map[string]interface{}{
-			"id":         l.ID,
-			"user_id":    l.UserID,
-			"username":   l.Username,
-			"action":     l.Action,
-			"resource":   l.Resource,
-			"detail":     l.Detail,
-			"ip":         l.IP,
-			"user_agent": l.UserAgent,
-			"created_at": l.CreatedAt.Format("2006-01-02 15:04:05"),
-		})
-	}
-	return total, items, nil
 }
 
 // VerifySignature verifies the integrity of an audit log entry.
@@ -360,7 +361,24 @@ func (s *Service) VerifySignature(ctx context.Context, id int64) (bool, error) {
 	mac.Write([]byte(data))
 	expected := hex.EncodeToString(mac.Sum(nil))
 
-	return hmac.Equal([]byte(entry.Signature), []byte(expected)), nil
+	if !hmac.Equal([]byte(entry.Signature), []byte(expected)) {
+		return false, nil
+	}
+	// type is not in the HMAC payload; reject if it disagrees with the (signed)
+	// action to detect type tampering.
+	if isRequestAction(entry.Action) != (entry.Type == "request") {
+		return false, nil
+	}
+	return true, nil
+}
+
+// isRequestAction reports whether action is an HTTP method, i.e. a request-log action.
+func isRequestAction(action string) bool {
+	switch action {
+	case "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS":
+		return true
+	}
+	return false
 }
 
 // VerifyAllSignatures verifies integrity of all audit log entries.

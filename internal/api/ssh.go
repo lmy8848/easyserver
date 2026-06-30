@@ -1,6 +1,7 @@
 package api
 
 import (
+	"easyserver/internal/api/middleware"
 	"strconv"
 	"strings"
 
@@ -194,13 +195,13 @@ func registerSSHRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 
 	// SSH Config
 	protected.GET("/ssh/config", handler.GetConfig)
-	protected.PUT("/ssh/config", handler.SaveConfig)
-	protected.POST("/ssh/config/test", handler.TestConfig)
-	protected.POST("/ssh/config/reload", handler.ReloadSSH)
+	protected.PUT("/ssh/config", middleware.SetAction("SSH_SAVE_CONFIG"), handler.SaveConfig)
+	protected.POST("/ssh/config/test", middleware.SetAction("SSH_TEST_CONFIG"), handler.TestConfig)
+	protected.POST("/ssh/config/reload", middleware.SetAction("SSH_RELOAD"), handler.ReloadSSH)
 
 	// SSH Sessions
 	protected.GET("/ssh/sessions", handler.GetSessions)
-	protected.POST("/ssh/sessions/:pid/kill", handler.KillSession)
+	protected.POST("/ssh/sessions/:pid/kill", middleware.SetAction("SSH_KILL_SESSION"), handler.KillSession)
 
 	// SSH Login History
 	protected.GET("/ssh/logins", handler.GetLoginHistory)

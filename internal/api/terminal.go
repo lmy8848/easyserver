@@ -117,7 +117,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	sessionStartTime := time.Now()
 	if h.auditService != nil {
 		h.auditService.LogOperation(c.Request.Context(), userID, username, "TERMINAL_OPEN",
-			"/terminal/"+sessionID, "Terminal session opened", c.ClientIP(), c.Request.UserAgent())
+			"/terminal/"+sessionID, map[string]interface{}{"detail": "Terminal session opened"}, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	// Upgrade to WebSocket
@@ -174,7 +174,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		durationStr := formatDuration(duration)
 		h.auditService.LogOperation(context.Background(), userID, username, "TERMINAL_CLOSE",
 			"/terminal/"+sessionID,
-			fmt.Sprintf("Terminal session closed, duration: %s", durationStr),
+			map[string]interface{}{"duration": durationStr, "detail": "Terminal session closed"},
 			c.ClientIP(), c.Request.UserAgent())
 	}
 }

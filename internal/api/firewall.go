@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/firewall"
 
 	"github.com/gin-gonic/gin"
@@ -327,32 +328,32 @@ func registerFirewallRoutes(protected *gin.RouterGroup, firewallService *firewal
 
 	// Status and control
 	protected.GET("/firewall/status", handler.GetStatus)
-	protected.POST("/firewall/enable", handler.EnableFirewall)
-	protected.POST("/firewall/disable", handler.DisableFirewall)
-	protected.POST("/firewall/default-policy", handler.SetDefaultPolicy)
+	protected.POST("/firewall/enable", middleware.SetAction("FIREWALL_ENABLE"), handler.EnableFirewall)
+	protected.POST("/firewall/disable", middleware.SetAction("FIREWALL_DISABLE"), handler.DisableFirewall)
+	protected.POST("/firewall/default-policy", middleware.SetAction("FIREWALL_SET_DEFAULT_POLICY"), handler.SetDefaultPolicy)
 	protected.GET("/firewall/logs", handler.GetLogs)
 
 	// Rules CRUD
 	protected.GET("/firewall/rules", ruleHandler.ListRules)
-	protected.POST("/firewall/rules", ruleHandler.CreateRule)
+	protected.POST("/firewall/rules", middleware.SetAction("FIREWALL_RULES_CREATE"), ruleHandler.CreateRule)
 	protected.GET("/firewall/rules/export", ruleHandler.ExportRules)
-	protected.POST("/firewall/rules/import", ruleHandler.ImportRules)
-	protected.POST("/firewall/rules/bulk-enable", ruleHandler.BulkEnableRules)
-	protected.POST("/firewall/rules/bulk-disable", ruleHandler.BulkDisableRules)
-	protected.POST("/firewall/rules/bulk-delete", ruleHandler.BulkDeleteRules)
+	protected.POST("/firewall/rules/import", middleware.SetAction("FIREWALL_RULES_IMPORT"), ruleHandler.ImportRules)
+	protected.POST("/firewall/rules/bulk-enable", middleware.SetAction("FIREWALL_RULES_BULK_ENABLE"), ruleHandler.BulkEnableRules)
+	protected.POST("/firewall/rules/bulk-disable", middleware.SetAction("FIREWALL_RULES_BULK_DISABLE"), ruleHandler.BulkDisableRules)
+	protected.POST("/firewall/rules/bulk-delete", middleware.SetAction("FIREWALL_RULES_BULK_DELETE"), ruleHandler.BulkDeleteRules)
 	protected.GET("/firewall/rules/:id", ruleHandler.GetRule)
-	protected.PUT("/firewall/rules/:id", ruleHandler.UpdateRule)
-	protected.DELETE("/firewall/rules/:id", ruleHandler.DeleteRule)
-	protected.POST("/firewall/rules/:id/enable", ruleHandler.EnableRule)
-	protected.POST("/firewall/rules/:id/disable", ruleHandler.DisableRule)
-	protected.POST("/firewall/rules/:id/move-up", ruleHandler.MoveRuleUp)
-	protected.POST("/firewall/rules/:id/move-down", ruleHandler.MoveRuleDown)
+	protected.PUT("/firewall/rules/:id", middleware.SetAction("FIREWALL_RULES_UPDATE"), ruleHandler.UpdateRule)
+	protected.DELETE("/firewall/rules/:id", middleware.SetAction("FIREWALL_RULES_DELETE"), ruleHandler.DeleteRule)
+	protected.POST("/firewall/rules/:id/enable", middleware.SetAction("FIREWALL_RULES_ENABLE"), ruleHandler.EnableRule)
+	protected.POST("/firewall/rules/:id/disable", middleware.SetAction("FIREWALL_RULES_DISABLE"), ruleHandler.DisableRule)
+	protected.POST("/firewall/rules/:id/move-up", middleware.SetAction("FIREWALL_RULES_MOVE_UP"), ruleHandler.MoveRuleUp)
+	protected.POST("/firewall/rules/:id/move-down", middleware.SetAction("FIREWALL_RULES_MOVE_DOWN"), ruleHandler.MoveRuleDown)
 
 	// System rules
 	protected.GET("/firewall/system-rules", ruleHandler.GetSystemRules)
-	protected.POST("/firewall/system-rules/delete", ruleHandler.DeleteSystemRule)
+	protected.POST("/firewall/system-rules/delete", middleware.SetAction("FIREWALL_DELETE_SYSTEM_RULE"), ruleHandler.DeleteSystemRule)
 
 	// Templates
 	protected.GET("/firewall/templates", templateHandler.GetTemplates)
-	protected.POST("/firewall/templates/apply", templateHandler.ApplyTemplate)
+	protected.POST("/firewall/templates/apply", middleware.SetAction("FIREWALL_TEMPLATES_APPLY"), templateHandler.ApplyTemplate)
 }

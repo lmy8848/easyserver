@@ -1,6 +1,7 @@
 package api
 
 import (
+	"easyserver/internal/api/middleware"
 	"strconv"
 
 	"easyserver/internal/process"
@@ -322,33 +323,33 @@ func registerProcessRoutes(protected *gin.RouterGroup, pm *process.Service) {
 
 	// Process CRUD
 	protected.GET("/processes", handler.ListProcesses)
-	protected.POST("/processes", handler.CreateProcess)
+	protected.POST("/processes", middleware.SetAction("PROCESS_CREATE"), handler.CreateProcess)
 	protected.GET("/processes/:id", handler.GetProcess)
-	protected.PUT("/processes/:id", handler.UpdateProcess)
-	protected.DELETE("/processes/:id", handler.DeleteProcess)
+	protected.PUT("/processes/:id", middleware.SetAction("PROCESS_UPDATE"), handler.UpdateProcess)
+	protected.DELETE("/processes/:id", middleware.SetAction("PROCESS_DELETE"), handler.DeleteProcess)
 
 	// Process lifecycle
-	protected.POST("/processes/:id/start", handler.StartProcess)
-	protected.POST("/processes/:id/stop", handler.StopProcess)
-	protected.POST("/processes/:id/restart", handler.RestartProcess)
+	protected.POST("/processes/:id/start", middleware.SetAction("PROCESS_START"), handler.StartProcess)
+	protected.POST("/processes/:id/stop", middleware.SetAction("PROCESS_STOP"), handler.StopProcess)
+	protected.POST("/processes/:id/restart", middleware.SetAction("PROCESS_RESTART"), handler.RestartProcess)
 
 	// Process logs and stats
 	protected.GET("/processes/:id/logs", handler.GetProcessLogs)
 	protected.GET("/processes/:id/stats", handler.GetProcessStats)
 
 	// Batch operations
-	protected.POST("/processes/batch/start", handler.BatchStart)
-	protected.POST("/processes/batch/stop", handler.BatchStop)
-	protected.POST("/processes/batch/restart", handler.BatchRestart)
+	protected.POST("/processes/batch/start", middleware.SetAction("PROCESS_BATCH_START"), handler.BatchStart)
+	protected.POST("/processes/batch/stop", middleware.SetAction("PROCESS_BATCH_STOP"), handler.BatchStop)
+	protected.POST("/processes/batch/restart", middleware.SetAction("PROCESS_BATCH_RESTART"), handler.BatchRestart)
 
 	// Process groups
 	protected.GET("/process-groups", handler.ListGroups)
-	protected.POST("/process-groups", handler.CreateGroup)
+	protected.POST("/process-groups", middleware.SetAction("PROCESS_GROUP_CREATE"), handler.CreateGroup)
 	protected.GET("/process-groups/:id", handler.GetGroup)
-	protected.PUT("/process-groups/:id", handler.UpdateGroup)
-	protected.DELETE("/process-groups/:id", handler.DeleteGroup)
+	protected.PUT("/process-groups/:id", middleware.SetAction("PROCESS_GROUP_UPDATE"), handler.UpdateGroup)
+	protected.DELETE("/process-groups/:id", middleware.SetAction("PROCESS_GROUP_DELETE"), handler.DeleteGroup)
 
 	// Import/Export
 	protected.GET("/processes/export", handler.ExportProcesses)
-	protected.POST("/processes/import", handler.ImportProcesses)
+	protected.POST("/processes/import", middleware.SetAction("PROCESS_IMPORT"), handler.ImportProcesses)
 }

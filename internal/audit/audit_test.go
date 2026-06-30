@@ -28,6 +28,7 @@ func setupAuditTestDB(t *testing.T) *sql.DB {
 			detail TEXT DEFAULT '',
 			ip TEXT DEFAULT '',
 			user_agent TEXT DEFAULT '',
+			type TEXT NOT NULL DEFAULT 'operation',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			signature TEXT DEFAULT ''
 		)`,
@@ -98,7 +99,7 @@ func TestLogOperation(t *testing.T) {
 	defer db.Close()
 	svc := newTestAuditService(db)
 
-	svc.LogOperation(context.Background(), 1, "admin", "TEST_ACTION", "/test", "test detail", "127.0.0.1", "test-agent")
+	svc.LogOperation(context.Background(), 1, "admin", "TEST_ACTION", "/test", map[string]interface{}{"detail": "test detail"}, "127.0.0.1", "test-agent")
 	svc.Close() // drain and flush to DB
 
 	var userID int64
@@ -133,7 +134,7 @@ func TestLogOperation_NilContext(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	// Should not panic
-	svc.LogOperation(nil, 1, "admin", "TEST", "/test", "detail", "127.0.0.1", "agent")
+	svc.LogOperation(nil, 1, "admin", "TEST", "/test", nil, "127.0.0.1", "agent")
 	svc.Close()
 
 	var count int
@@ -206,8 +207,8 @@ func TestFlush(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	entries := []auditEntry{
-		{userID: 1, username: "admin", action: "ACTION1", resource: "/r1", detail: "{}", ip: "127.0.0.1", userAgent: "agent", createdAt: time.Now()},
-		{userID: 2, username: "user", action: "ACTION2", resource: "/r2", detail: "{}", ip: "10.0.0.1", userAgent: "agent", createdAt: time.Now()},
+		{userID: 1, username: "admin", action: "ACTION1", resource: "/r1", detail: "{}", ip: "127.0.0.1", userAgent: "agent", logType: "operation", createdAt: time.Now()},
+		{userID: 2, username: "user", action: "ACTION2", resource: "/r2", detail: "{}", ip: "10.0.0.1", userAgent: "agent", logType: "operation", createdAt: time.Now()},
 	}
 
 	svc.writer.flush(entries)
@@ -231,6 +232,16 @@ func TestFlush(t *testing.T) {
 	if len(sig) != 64 {
 		t.Errorf("signature length = %d, want 64", len(sig))
 	}
+
+	// Verify type was persisted
+	var logType string
+	err = db.QueryRow("SELECT type FROM audit_logs WHERE id = 1").Scan(&logType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logType != "operation" {
+		t.Errorf("type = %q, want %q", logType, "operation")
+	}
 }
 
 // --- TestVerifySignature ---
@@ -241,7 +252,7 @@ func TestVerifySignature(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	// Insert an entry via flush
-	entry := auditEntry{userID: 1, username: "admin", action: "TEST", resource: "/test", detail: "{}", ip: "127.0.0.1", userAgent: "agent", createdAt: time.Now()}
+	entry := auditEntry{userID: 1, username: "admin", action: "TEST", resource: "/test", detail: "{}", ip: "127.0.0.1", userAgent: "agent", logType: "operation", createdAt: time.Now()}
 	svc.writer.flush([]auditEntry{entry})
 
 	// Verify the signature

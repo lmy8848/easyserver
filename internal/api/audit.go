@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"easyserver/internal/api/middleware"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -37,6 +38,7 @@ type AuditLogItem struct {
 	Detail    string `json:"detail"`
 	IP        string `json:"ip"`
 	UserAgent string `json:"user_agent"`
+	Type      string `json:"type"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -56,6 +58,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	ip := c.Query("ip")
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
+	logType := c.Query("type")
 
 	if page < 1 {
 		page = 1
@@ -72,6 +75,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 			Action:    action,
 			Resource:  resource,
 			IP:        ip,
+			Type:      logType,
 			StartDate: startDate,
 			EndDate:   endDate,
 			Offset:    offset,
@@ -93,6 +97,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 				Detail:    log.Detail,
 				IP:        log.IP,
 				UserAgent: log.UserAgent,
+				Type:      log.Type,
 				CreatedAt: log.CreatedAt.Format("2006-01-02 15:04:05"),
 			})
 		}
@@ -131,6 +136,10 @@ func (h *AuditHandler) List(c *gin.Context) {
 		where += " AND created_at <= ?"
 		args = append(args, endDate+" 23:59:59")
 	}
+	if logType != "" {
+		where += " AND type = ?"
+		args = append(args, logType)
+	}
 
 	// Get total count
 	var total int64
@@ -141,7 +150,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	}
 
 	// Get items
-	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at
+	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at
 	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	args = append(args, pageSize, offset)
 
@@ -157,7 +166,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		var item AuditLogItem
 		var createdAt time.Time
 		if err := rows.Scan(&item.ID, &item.UserID, &item.Username, &item.Action,
-			&item.Resource, &item.Detail, &item.IP, &item.UserAgent, &createdAt); err != nil {
+			&item.Resource, &item.Detail, &item.IP, &item.UserAgent, &item.Type, &createdAt); err != nil {
 			continue
 		}
 		item.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
@@ -176,8 +185,9 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 // GetActions returns distinct actions for filtering
 func (h *AuditHandler) GetActions(c *gin.Context) {
+	logType := c.Query("type")
 	if h.auditRepo != nil {
-		actions, err := h.auditRepo.GetActions(c.Request.Context())
+		actions, err := h.auditRepo.GetActions(c.Request.Context(), logType)
 		if err != nil {
 			c.Error(WrapError(err))
 			return
@@ -186,7 +196,13 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 		return
 	}
 
-	rows, err := h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
+	var rows *sql.Rows
+	var err error
+	if logType != "" {
+		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs WHERE type = ? ORDER BY action", logType)
+	} else {
+		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
+	}
 	if err != nil {
 		c.Error(WrapError(err))
 		return
@@ -408,6 +424,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	ip := c.Query("ip")
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
+	logType := c.Query("type")
 
 	where := "1=1"
 	args := []interface{}{}
@@ -436,8 +453,12 @@ func (h *AuditHandler) Export(c *gin.Context) {
 		where += " AND created_at <= ?"
 		args = append(args, endDate+" 23:59:59")
 	}
+	if logType != "" {
+		where += " AND type = ?"
+		args = append(args, logType)
+	}
 
-	query := `SELECT id, username, action, resource, detail, ip, created_at
+	query := `SELECT id, username, action, type, resource, detail, ip, created_at
 	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
@@ -456,19 +477,20 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	// Write CSV header
-	c.Writer.WriteString("ID,用户,操作,资源,详情,IP,时间\n")
+	c.Writer.WriteString("ID,用户,操作,类型,资源,详情,IP,时间\n")
 
 	for rows.Next() {
 		var id int64
-		var username, action, resource, detail, ip, createdAt string
-		if err := rows.Scan(&id, &username, &action, &resource, &detail, &ip, &createdAt); err != nil {
+		var username, action, auditType, resource, detail, ip, createdAt string
+		if err := rows.Scan(&id, &username, &action, &auditType, &resource, &detail, &ip, &createdAt); err != nil {
 			continue
 		}
 		// Sanitize CSV fields to prevent formula injection
-		c.Writer.WriteString(fmt.Sprintf("%d,%s,%s,%s,\"%s\",%s,%s\n",
+		c.Writer.WriteString(fmt.Sprintf("%d,%s,%s,%s,%s,\"%s\",%s,%s\n",
 			id,
 			sanitizeCSVField(username),
 			sanitizeCSVField(action),
+			sanitizeCSVField(auditType),
 			sanitizeCSVField(resource),
 			strings.ReplaceAll(detail, "\"", "\"\""),
 			sanitizeCSVField(ip),
@@ -532,6 +554,6 @@ func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *a
 	protected.GET("/audit-logs/stats", handler.Stats)
 	protected.GET("/audit-logs/clean-policy", handler.GetCleanPolicy)
 	protected.GET("/audit-logs/export", handler.Export)
-	protected.DELETE("/audit-logs/clean", handler.Clean)
+	protected.DELETE("/audit-logs/clean", middleware.SetAction("AUDIT_CLEAN"), handler.Clean)
 	protected.GET("/audit-logs/verify", handler.VerifyIntegrity)
 }

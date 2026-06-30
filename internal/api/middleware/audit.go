@@ -12,6 +12,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// SetAction is a declarative middleware to set the operation action name
+func SetAction(action string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set("audit_action", action)
+		c.Next()
+	}
+}
+
 // maxAuditBodySize is the maximum request body size read for audit logging (64KB)
 const maxAuditBodySize = 64 * 1024
 
@@ -28,7 +36,15 @@ func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
 			if readErr != nil {
 				log.Printf("audit: failed to read request body: %v", readErr)
 			}
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+			// Restore the body: combine the bytes we just read with the rest of the unread body
+			c.Request.Body = struct {
+				io.Reader
+				io.Closer
+			}{
+				io.MultiReader(bytes.NewReader(bodyBytes), c.Request.Body),
+				c.Request.Body,
+			}
 		}
 
 		c.Next()
@@ -50,6 +66,7 @@ func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
 			uname = v
 		}
 
+		// 1. Log Request
 		detail := map[string]interface{}{
 			"method":      c.Request.Method,
 			"path":        c.Request.URL.Path,
@@ -57,7 +74,33 @@ func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
 			"duration_ms": time.Since(start).Milliseconds(),
 		}
 		detailJSON, _ := json.Marshal(detail)
+		auditService.LogRequest(c.Request.Context(), uid, uname, c.Request.Method, c.Request.URL.Path, string(detailJSON), c.ClientIP(), c.Request.UserAgent())
 
-		auditService.LogOperation(c.Request.Context(), uid, uname, c.Request.Method, c.Request.URL.Path, string(detailJSON), c.ClientIP(), c.Request.UserAgent())
+		// 2. Declarative Operation Log
+		action := c.GetString("audit_action")
+		if action != "" {
+			extra := make(map[string]interface{})
+			if len(bodyBytes) > 0 {
+				_ = json.Unmarshal(bodyBytes, &extra)
+			}
+			for _, p := range c.Params {
+				extra[p.Key] = p.Value
+			}
+
+			status := c.Writer.Status()
+			extra["status"] = status
+
+			// Record success/failure explicitly based on HTTP status and errors
+			if status >= 400 || len(c.Errors) > 0 {
+				extra["success"] = false
+				if len(c.Errors) > 0 {
+					extra["error"] = c.Errors.String()
+				}
+			} else {
+				extra["success"] = true
+			}
+
+			auditService.LogOperation(c.Request.Context(), uid, uname, action, c.Request.URL.Path, extra, c.ClientIP(), c.Request.UserAgent())
+		}
 	}
 }

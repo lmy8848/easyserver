@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/audit"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"
 
@@ -32,14 +33,16 @@ type ServiceHandler struct {
 	executor          executor.CommandExecutor
 	jwtSecret         string
 	upgrader          gorillaWs.Upgrader
+	auditService      *audit.Service
 	protectedServices []string // Services that cannot be stopped/disabled
 }
 
-func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
+func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) *ServiceHandler {
 	return &ServiceHandler{
 		serviceManager:    serviceManager,
 		executor:          exec,
 		jwtSecret:         jwtSecret,
+		auditService:      auditService,
 		upgrader:          createUpgrader(allowedOrigins, devMode),
 		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
@@ -166,7 +169,6 @@ func (h *ServiceHandler) Restart(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
-
 	Success(c, gin.H{"name": name, "state": "active"})
 }
 
@@ -182,7 +184,6 @@ func (h *ServiceHandler) Enable(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
-
 	Success(c, gin.H{"name": name, "enabled": true})
 }
 
@@ -204,7 +205,6 @@ func (h *ServiceHandler) Disable(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
-
 	Success(c, gin.H{"name": name, "enabled": false})
 }
 

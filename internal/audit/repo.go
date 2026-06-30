@@ -15,6 +15,7 @@ type SignedAuditEntry struct {
 	Detail    string
 	IP        string
 	UserAgent string
+	Type      string
 	CreatedAt time.Time
 	Signature string
 }
@@ -23,7 +24,7 @@ type SignedAuditEntry struct {
 type Repository interface {
 	Log(ctx context.Context, entry *AuditLog) error
 	Query(ctx context.Context, filter AuditFilter) (int64, []AuditLog, error)
-	GetActions(ctx context.Context) ([]string, error)
+	GetActions(ctx context.Context, logType string) ([]string, error)
 	Clean(ctx context.Context, before time.Time) (int64, error)
 
 	AppendSignedBatch(ctx context.Context, entries []SignedAuditEntry) error
@@ -37,6 +38,7 @@ type AuditFilter struct {
 	Action    string
 	Resource  string
 	IP        string
+	Type      string
 	StartDate string
 	EndDate   string
 	Offset    int

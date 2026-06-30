@@ -1,6 +1,7 @@
 package api
 
 import (
+	"easyserver/internal/api/middleware"
 	"strconv"
 
 	"easyserver/internal/notification"
@@ -103,8 +104,8 @@ func registerNotificationRoutes(protected *gin.RouterGroup, ns *notification.Ser
 		notifGroup.GET("", handler.List)
 		notifGroup.GET("/unread-count", handler.CountUnread)
 		notifGroup.POST("", handler.Create)
-		notifGroup.PUT("/:id/read", handler.MarkAsRead)
-		notifGroup.PUT("/read-all", handler.MarkAllAsRead)
-		notifGroup.DELETE("/:id", handler.Delete)
+		notifGroup.PUT("/:id/read", middleware.SetAction("NOTIFICATION_MARK_READ"), handler.MarkAsRead)
+		notifGroup.PUT("/read-all", middleware.SetAction("NOTIFICATION_MARK_ALL_READ"), handler.MarkAllAsRead)
+		notifGroup.DELETE("/:id", middleware.SetAction("NOTIFICATION_DELETE"), handler.Delete)
 	}
 }

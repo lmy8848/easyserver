@@ -1,9 +1,9 @@
 package api
 
 import (
-	"fmt"
 	"strconv"
 
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/container"
 	"github.com/gin-gonic/gin"
@@ -233,16 +233,6 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 	}
 
 	// Log exec command for audit
-	_ = c.GetInt64("user_id")
-	username, _ := c.Get("username")
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr,
-				"CONTAINER_EXEC",
-				fmt.Sprintf("Container: %s, Command: %s", id, req.Command),
-				c.ClientIP(), c.Request.UserAgent())
-		}
-	}
 
 	output, err := h.containerService.ExecInContainer(c.Request.Context(), id, req.Command)
 	if err != nil {
@@ -583,53 +573,53 @@ func registerContainerRoutes(protected *gin.RouterGroup, containerService *conta
 
 	// Docker management
 	protected.GET("/docker/status", handler.DetectDocker)
-	protected.POST("/docker/install", handler.InstallDocker)
-	protected.POST("/docker/start", handler.StartDocker)
-	protected.POST("/docker/stop", handler.StopDocker)
-	protected.POST("/docker/restart", handler.RestartDocker)
+	protected.POST("/docker/install", middleware.SetAction("DOCKER_INSTALL"), handler.InstallDocker)
+	protected.POST("/docker/start", middleware.SetAction("DOCKER_START"), handler.StartDocker)
+	protected.POST("/docker/stop", middleware.SetAction("DOCKER_STOP"), handler.StopDocker)
+	protected.POST("/docker/restart", middleware.SetAction("DOCKER_RESTART"), handler.RestartDocker)
 	protected.GET("/docker/info", handler.GetDockerInfo)
-	protected.POST("/docker/mirror", handler.ConfigureMirror)
+	protected.POST("/docker/mirror", middleware.SetAction("CONTAINER_CONFIGURE_MIRROR"), handler.ConfigureMirror)
 
 	// Container management
 	protected.GET("/containers", handler.ListContainers)
 	protected.GET("/containers/:id", handler.GetContainer)
-	protected.POST("/containers", handler.CreateContainer)
-	protected.POST("/containers/:id/start", handler.StartContainer)
-	protected.POST("/containers/:id/stop", handler.StopContainer)
-	protected.POST("/containers/:id/restart", handler.RestartContainer)
-	protected.POST("/containers/:id/pause", handler.PauseContainer)
-	protected.POST("/containers/:id/unpause", handler.UnpauseContainer)
-	protected.DELETE("/containers/:id", handler.RemoveContainer)
+	protected.POST("/containers", middleware.SetAction("CONTAINERS_CREATE"), handler.CreateContainer)
+	protected.POST("/containers/:id/start", middleware.SetAction("CONTAINERS_START"), handler.StartContainer)
+	protected.POST("/containers/:id/stop", middleware.SetAction("CONTAINERS_STOP"), handler.StopContainer)
+	protected.POST("/containers/:id/restart", middleware.SetAction("CONTAINERS_RESTART"), handler.RestartContainer)
+	protected.POST("/containers/:id/pause", middleware.SetAction("CONTAINER_PAUSE"), handler.PauseContainer)
+	protected.POST("/containers/:id/unpause", middleware.SetAction("CONTAINER_UNPAUSE"), handler.UnpauseContainer)
+	protected.DELETE("/containers/:id", middleware.SetAction("CONTAINERS_DELETE"), handler.RemoveContainer)
 	protected.GET("/containers/:id/logs", handler.GetContainerLogs)
-	protected.POST("/containers/:id/exec", handler.ExecInContainer)
+	protected.POST("/containers/:id/exec", middleware.SetAction("CONTAINER_EXEC"), handler.ExecInContainer)
 	protected.GET("/containers/:id/stats", handler.GetContainerStats)
 	protected.GET("/containers/:id/top", handler.GetContainerTop)
-	protected.POST("/containers/:id/copy-to", handler.CopyToContainer)
-	protected.POST("/containers/:id/copy-from", handler.CopyFromContainer)
-	protected.POST("/containers/:id/rename", handler.RenameContainer)
-	protected.PUT("/containers/:id/update", handler.UpdateContainer)
+	protected.POST("/containers/:id/copy-to", middleware.SetAction("CONTAINER_COPY_TO"), handler.CopyToContainer)
+	protected.POST("/containers/:id/copy-from", middleware.SetAction("CONTAINER_COPY_FROM"), handler.CopyFromContainer)
+	protected.POST("/containers/:id/rename", middleware.SetAction("CONTAINER_RENAME"), handler.RenameContainer)
+	protected.PUT("/containers/:id/update", middleware.SetAction("CONTAINER_UPDATE"), handler.UpdateContainer)
 
 	// Image management
 	protected.GET("/images", handler.ListImages)
-	protected.POST("/images/pull", handler.PullImage)
-	protected.DELETE("/images/:id", handler.RemoveImage)
+	protected.POST("/images/pull", middleware.SetAction("IMAGES_PULL"), handler.PullImage)
+	protected.DELETE("/images/:id", middleware.SetAction("IMAGES_DELETE"), handler.RemoveImage)
 
 	// Compose management
 	protected.GET("/compose/projects", handler.ListComposeProjects)
-	protected.POST("/compose/up", handler.ComposeUp)
-	protected.POST("/compose/down", handler.ComposeDown)
-	protected.POST("/compose/restart", handler.ComposeRestart)
+	protected.POST("/compose/up", middleware.SetAction("COMPOSE_UP"), handler.ComposeUp)
+	protected.POST("/compose/down", middleware.SetAction("COMPOSE_DOWN"), handler.ComposeDown)
+	protected.POST("/compose/restart", middleware.SetAction("COMPOSE_RESTART"), handler.ComposeRestart)
 	protected.GET("/compose/logs", handler.ComposeLogs)
 	protected.GET("/compose/config", handler.ComposeGetConfig)
-	protected.PUT("/compose/config", handler.ComposeSaveConfig)
+	protected.PUT("/compose/config", middleware.SetAction("COMPOSE_SAVE_CONFIG"), handler.ComposeSaveConfig)
 
 	// Volume management
 	protected.GET("/volumes", handler.ListVolumes)
-	protected.POST("/volumes", handler.CreateVolume)
-	protected.DELETE("/volumes/:name", handler.RemoveVolume)
+	protected.POST("/volumes", middleware.SetAction("VOLUMES_CREATE"), handler.CreateVolume)
+	protected.DELETE("/volumes/:name", middleware.SetAction("VOLUMES_DELETE"), handler.RemoveVolume)
 
 	// Network management
 	protected.GET("/networks", handler.ListNetworks)
-	protected.POST("/networks", handler.CreateNetwork)
-	protected.DELETE("/networks/:id", handler.RemoveNetwork)
+	protected.POST("/networks", middleware.SetAction("NETWORKS_CREATE"), handler.CreateNetwork)
+	protected.DELETE("/networks/:id", middleware.SetAction("NETWORKS_DELETE"), handler.RemoveNetwork)
 }

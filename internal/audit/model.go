@@ -11,5 +11,6 @@ type AuditLog struct {
 	Detail    string    `json:"detail" db:"detail"`
 	IP        string    `json:"ip" db:"ip"`
 	UserAgent string    `json:"user_agent" db:"user_agent"`
+	Type      string    `json:"type" db:"type"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }

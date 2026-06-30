@@ -134,15 +134,6 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		}
 	}
 
-	// Log logout
-	if h.auditService != nil {
-		if uname, ok := c.Get("username"); ok {
-			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "LOGOUT",
-					"User logged out", c.ClientIP(), c.Request.UserAgent())
-			}
-		}
-	}
 	Success(c, nil)
 }
 
@@ -165,7 +156,6 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -174,13 +164,6 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	if err := h.authService.ChangePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
-		// Log failed password change
-		if h.auditService != nil {
-			if unameStr, ok := username.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "PASSWORD_CHANGE_FAILED",
-					err.Error(), c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrBadRequest.WithMessage(err.Error()))
 		return
 	}
@@ -189,14 +172,6 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	// This forces re-authentication on all devices
 	if err := h.authService.InvalidateAllUserTokens(c.Request.Context(), userID); err != nil {
 		log.Printf("auth: failed to invalidate tokens after password change for user %d: %v", userID, err)
-	}
-
-	// Log successful password change
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "PASSWORD_CHANGED",
-				"Password changed successfully", c.ClientIP(), c.Request.UserAgent())
-		}
 	}
 
 	Success(c, nil)
@@ -373,7 +348,6 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 // SetupTOTP generates TOTP setup information (QR code, secret)
 func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	// Check if TOTP is already enabled
 	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
@@ -387,8 +361,8 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	}
 
 	// Generate TOTP setup
-	unameStr, _ := username.(string)
-	result, err := h.authService.GenerateTOTP(userID, unameStr)
+	unameStr, _ := c.Get("username")
+	result, err := h.authService.GenerateTOTP(userID, unameStr.(string))
 	if err != nil {
 		c.Error(ErrInternal.WithMessage("生成 TOTP 设置失败"))
 		return
@@ -407,7 +381,6 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 // EnableTOTP enables 2FA for the user
 func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	var req TOTPEnableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -426,23 +399,8 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	// Enable TOTP
 	backupCodes, err := h.authService.EnableTOTP(c.Request.Context(), userID, secret, req.Code)
 	if err != nil {
-		// Log failed enable attempt
-		if h.auditService != nil {
-			if unameStr, ok := username.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_ENABLE_FAILED",
-					err.Error(), c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrBadRequest.Wrap(err))
 		return
-	}
-
-	// Log successful enable
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_ENABLED",
-				"2FA enabled successfully", c.ClientIP(), c.Request.UserAgent())
-		}
 	}
 
 	Success(c, gin.H{
@@ -453,7 +411,6 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 // DisableTOTP disables 2FA for the user
 func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	username, _ := c.Get("username")
 
 	var req TOTPDisableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -463,23 +420,8 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 
 	// Disable TOTP
 	if err := h.authService.DisableTOTP(c.Request.Context(), userID, req.Password); err != nil {
-		// Log failed disable attempt
-		if h.auditService != nil {
-			if unameStr, ok := username.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_DISABLE_FAILED",
-					err.Error(), c.ClientIP(), c.Request.UserAgent())
-			}
-		}
 		c.Error(ErrBadRequest.Wrap(err))
 		return
-	}
-
-	// Log successful disable
-	if h.auditService != nil {
-		if unameStr, ok := username.(string); ok {
-			h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "TOTP_DISABLED",
-				"2FA disabled successfully", c.ClientIP(), c.Request.UserAgent())
-		}
 	}
 
 	Success(c, nil)
@@ -618,25 +560,25 @@ func registerAuthRoutes(
 	auth := api.Group("/auth")
 	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout)
 	{
-		auth.POST("/login", authHandler.Login)
-		auth.POST("/verify-totp", authHandler.VerifyTOTP)
-		auth.POST("/verify-backup", authHandler.VerifyBackupCode)
+		auth.POST("/login", middleware.SetAction("AUTH_LOGIN"), authHandler.Login)
+		auth.POST("/verify-totp", middleware.SetAction("AUTH_VERIFY_TOTP"), authHandler.VerifyTOTP)
+		auth.POST("/verify-backup", middleware.SetAction("AUTH_VERIFY_BACKUP"), authHandler.VerifyBackupCode)
 	}
 
 	// Protected auth routes
 	authProtected := api.Group("/auth")
 	authProtected.Use(middleware.JWTMiddleware(jwtSecret, sessionValidator, tokenValidator))
 	{
-		authProtected.POST("/logout", authHandler.Logout)
+		authProtected.POST("/logout", middleware.SetAction("AUTH_LOGOUT"), authHandler.Logout)
 		authProtected.GET("/me", authHandler.GetProfile)
-		authProtected.POST("/change-password", authHandler.ChangePassword)
-		authProtected.POST("/totp/setup", authHandler.SetupTOTP)
-		authProtected.POST("/totp/enable", authHandler.EnableTOTP)
-		authProtected.POST("/totp/disable", authHandler.DisableTOTP)
+		authProtected.POST("/change-password", middleware.SetAction("AUTH_CHANGE_PASSWORD"), authHandler.ChangePassword)
+		authProtected.POST("/totp/setup", middleware.SetAction("AUTH_SETUP_TOTP"), authHandler.SetupTOTP)
+		authProtected.POST("/totp/enable", middleware.SetAction("AUTH_TOTP_ENABLE"), authHandler.EnableTOTP)
+		authProtected.POST("/totp/disable", middleware.SetAction("AUTH_TOTP_DISABLE"), authHandler.DisableTOTP)
 		authProtected.GET("/totp/status", authHandler.GetTOTPStatus)
 		// Session management
 		authProtected.GET("/sessions", authHandler.GetSessions)
-		authProtected.POST("/sessions/kick", authHandler.KickSession)
-		authProtected.POST("/sessions/kick-all", authHandler.KickAllOtherSessions)
+		authProtected.POST("/sessions/kick", middleware.SetAction("AUTH_KICK_SESSION"), authHandler.KickSession)
+		authProtected.POST("/sessions/kick-all", middleware.SetAction("AUTH_KICK_ALL_SESSIONS"), authHandler.KickAllOtherSessions)
 	}
 }

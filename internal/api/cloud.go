@@ -4,10 +4,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
+	"easyserver/internal/api/middleware"
 	"easyserver/internal/cloud"
 	"easyserver/internal/infra/config"
-
-	"github.com/gin-gonic/gin"
 )
 
 type CloudHandler struct {
@@ -366,11 +367,11 @@ func registerCloudRoutes(protected *gin.RouterGroup, cloudService *cloud.Service
 	protected.GET("/cloud/firewall/:id", handler.GetFirewallRules)
 	protected.GET("/cloud/snapshots", handler.GetSnapshots)
 	protected.GET("/cloud/traffic", handler.GetTraffic)
-	protected.POST("/cloud/instances/:id/start", handler.StartInstance)
-	protected.POST("/cloud/instances/:id/stop", handler.StopInstance)
-	protected.POST("/cloud/instances/:id/restart", handler.RestartInstance)
-	protected.POST("/cloud/firewall/:id", handler.AddFirewallRule)
-	protected.DELETE("/cloud/firewall/:id/:ruleId", handler.DeleteFirewallRule)
-	protected.POST("/cloud/snapshots", handler.CreateSnapshot)
-	protected.POST("/cloud/snapshots/:id/apply", handler.ApplySnapshot)
+	protected.POST("/cloud/instances/:id/start", middleware.SetAction("CLOUD_INSTANCES_START"), handler.StartInstance)
+	protected.POST("/cloud/instances/:id/stop", middleware.SetAction("CLOUD_INSTANCES_STOP"), handler.StopInstance)
+	protected.POST("/cloud/instances/:id/restart", middleware.SetAction("CLOUD_INSTANCES_RESTART"), handler.RestartInstance)
+	protected.POST("/cloud/firewall/:id", middleware.SetAction("CLOUD_FIREWALL_ADD"), handler.AddFirewallRule)
+	protected.DELETE("/cloud/firewall/:id/:ruleId", middleware.SetAction("CLOUD_FIREWALL_DELETE"), handler.DeleteFirewallRule)
+	protected.POST("/cloud/snapshots", middleware.SetAction("CLOUD_SNAPSHOTS_CREATE"), handler.CreateSnapshot)
+	protected.POST("/cloud/snapshots/:id/apply", middleware.SetAction("CLOUD_SNAPSHOTS_APPLY"), handler.ApplySnapshot)
 }

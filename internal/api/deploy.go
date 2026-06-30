@@ -1,6 +1,7 @@
 package api
 
 import (
+	"easyserver/internal/api/middleware"
 	"strconv"
 	"strings"
 
@@ -276,16 +277,16 @@ func (h *DeployHandler) RollbackVersion(c *gin.Context) {
 func registerDeployRoutes(protected *gin.RouterGroup, deployService *deploy.Service) {
 	handler := NewDeployHandler(deployService)
 	protected.GET("/deploy/servers", handler.ListServers)
-	protected.POST("/deploy/servers", handler.CreateServer)
+	protected.POST("/deploy/servers", middleware.SetAction("DEPLOY_CREATE_SERVER"), handler.CreateServer)
 	protected.GET("/deploy/servers/:id", handler.GetServer)
-	protected.PUT("/deploy/servers/:id", handler.UpdateServer)
-	protected.DELETE("/deploy/servers/:id", handler.DeleteServer)
-	protected.POST("/deploy/servers/:id/test", handler.TestConnection)
+	protected.PUT("/deploy/servers/:id", middleware.SetAction("DEPLOY_UPDATE_SERVER"), handler.UpdateServer)
+	protected.DELETE("/deploy/servers/:id", middleware.SetAction("DEPLOY_DELETE_SERVER"), handler.DeleteServer)
+	protected.POST("/deploy/servers/:id/test", middleware.SetAction("DEPLOY_TEST_SERVER"), handler.TestConnection)
 	protected.GET("/deploy/tasks", handler.ListTasks)
-	protected.POST("/deploy/tasks", handler.CreateTask)
+	protected.POST("/deploy/tasks", middleware.SetAction("DEPLOY_CREATE_TASK"), handler.CreateTask)
 	protected.GET("/deploy/tasks/:id", handler.GetTask)
-	protected.DELETE("/deploy/tasks/:id", handler.DeleteTask)
-	protected.POST("/deploy/tasks/:id/exec", handler.ExecuteTask)
+	protected.DELETE("/deploy/tasks/:id", middleware.SetAction("DEPLOY_DELETE_TASK"), handler.DeleteTask)
+	protected.POST("/deploy/tasks/:id/exec", middleware.SetAction("DEPLOY_EXECUTE_TASK"), handler.ExecuteTask)
 	protected.GET("/deploy/versions", handler.ListVersions)
-	protected.POST("/deploy/versions/:id/rollback", handler.RollbackVersion)
+	protected.POST("/deploy/versions/:id/rollback", middleware.SetAction("DEPLOY_ROLLBACK_VERSION"), handler.RollbackVersion)
 }

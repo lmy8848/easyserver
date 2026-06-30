@@ -19,10 +19,10 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 
 func (r *sqliteRepo) Log(ctx context.Context, entry *AuditLog) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.UserID, entry.Username, entry.Action, entry.Resource,
-		entry.Detail, entry.IP, entry.UserAgent,
+		entry.Detail, entry.IP, entry.UserAgent, entry.Type,
 	)
 	return err
 }
@@ -47,6 +47,10 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 		where += " AND ip LIKE ?"
 		args = append(args, "%"+filter.IP+"%")
 	}
+	if filter.Type != "" {
+		where += " AND type = ?"
+		args = append(args, filter.Type)
+	}
 	if filter.StartDate != "" {
 		where += " AND created_at >= ?"
 		args = append(args, filter.StartDate)
@@ -63,8 +67,8 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at
-		 FROM audit_logs WHERE %s ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at
+		 FROM audit_logs WHERE %s ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
 		where,
 	)
 	args = append(args, filter.Limit, filter.Offset)
@@ -80,7 +84,7 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 		var l AuditLog
 		if err := rows.Scan(
 			&l.ID, &l.UserID, &l.Username, &l.Action,
-			&l.Resource, &l.Detail, &l.IP, &l.UserAgent, &l.CreatedAt,
+			&l.Resource, &l.Detail, &l.IP, &l.UserAgent, &l.Type, &l.CreatedAt,
 		); err != nil {
 			return 0, nil, err
 		}
@@ -93,8 +97,14 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 	return total, logs, nil
 }
 
-func (r *sqliteRepo) GetActions(ctx context.Context) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs ORDER BY action")
+func (r *sqliteRepo) GetActions(ctx context.Context, logType string) ([]string, error) {
+	var rows *sql.Rows
+	var err error
+	if logType != "" {
+		rows, err = r.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs WHERE type = ? ORDER BY action", logType)
+	} else {
+		rows, err = r.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs ORDER BY action")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -119,15 +129,15 @@ func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAudi
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, created_at, signature)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type, created_at, signature)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, e := range entries {
-		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.CreatedAt, e.Signature); err != nil {
+		if _, err := stmt.ExecContext(ctx, e.UserID, e.Username, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent, e.Type, e.CreatedAt, e.Signature); err != nil {
 			return err
 		}
 	}
@@ -138,9 +148,9 @@ func (r *sqliteRepo) AppendSignedBatch(ctx context.Context, entries []SignedAudi
 func (r *sqliteRepo) GetSignedEntry(ctx context.Context, id int64) (*SignedAuditEntry, error) {
 	var e SignedAuditEntry
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, created_at, signature
+		`SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at, signature
 		 FROM audit_logs WHERE id = ?`, id,
-	).Scan(&e.ID, &e.UserID, &e.Username, &e.Action, &e.Resource, &e.Detail, &e.IP, &e.UserAgent, &e.CreatedAt, &e.Signature)
+	).Scan(&e.ID, &e.UserID, &e.Username, &e.Action, &e.Resource, &e.Detail, &e.IP, &e.UserAgent, &e.Type, &e.CreatedAt, &e.Signature)
 	if err != nil {
 		return nil, err
 	}
