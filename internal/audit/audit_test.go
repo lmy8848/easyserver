@@ -53,12 +53,12 @@ func TestLogOperation(t *testing.T) {
 	defer db.Close()
 	svc := newTestAuditService(db)
 
-	svc.LogOperation(context.Background(), 1, "admin", "TEST_ACTION", "/test", map[string]interface{}{"detail": "test detail"}, "127.0.0.1", "test-agent")
+	svc.LogOperation(context.Background(), 1, "admin", ActionUpdate, ResourceOther, map[string]interface{}{"detail": "test detail"}, "127.0.0.1", "test-agent")
 	svc.Close() // drain and flush to DB
 
 	var userID int64
 	var username, action, ip, detail string
-	err := db.QueryRow("SELECT user_id, username, action, ip, detail FROM audit_logs WHERE action = 'TEST_ACTION'").
+	err := db.QueryRow("SELECT user_id, username, action, ip, detail FROM audit_logs WHERE action = '修改'").
 		Scan(&userID, &username, &action, &ip, &detail)
 	if err != nil {
 		t.Fatalf("query audit_logs: %v", err)
@@ -69,8 +69,8 @@ func TestLogOperation(t *testing.T) {
 	if username != "admin" {
 		t.Errorf("username = %q, want %q", username, "admin")
 	}
-	if action != "TEST_ACTION" {
-		t.Errorf("action = %q, want %q", action, "TEST_ACTION")
+	if action != "修改" {
+		t.Errorf("action = %q, want %q", action, "修改")
 	}
 	if ip != "127.0.0.1" {
 		t.Errorf("ip = %q, want %q", ip, "127.0.0.1")
@@ -88,11 +88,11 @@ func TestLogOperation_NilContext(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	// Should not panic
-	svc.LogOperation(nil, 1, "admin", "TEST", "/test", nil, "127.0.0.1", "agent")
+	svc.LogOperation(nil, 1, "admin", ActionOther, ResourceOther, nil, "127.0.0.1", "agent")
 	svc.Close()
 
 	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE action = 'TEST'").Scan(&count); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE action = '其他'").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
@@ -121,8 +121,8 @@ func TestLogSecurityEvent(t *testing.T) {
 	if action != "认证" {
 		t.Errorf("action = %q, want %q", action, "认证")
 	}
-	if resource != "/auth" {
-		t.Errorf("resource = %q, want %q", resource, "/auth")
+	if resource != string(ResourceAuth) {
+		t.Errorf("resource = %q, want %q", resource, string(ResourceAuth))
 	}
 	if ip != "" || ua != "" {
 		t.Errorf("operation log ip/ua should be empty, got ip=%q ua=%q", ip, ua)

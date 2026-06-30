@@ -17,23 +17,23 @@ func TestVerbFor(t *testing.T) {
 	cases := []struct {
 		method   string
 		fullPath string
-		want     string
+		want     audit.ActionCategory
 	}{
-		{"POST", "/api/auth/login", "认证"},
-		{"POST", "/api/auth/change-password", "认证"},
-		{"DELETE", "/api/containers/:id", "删除"},
-		{"DELETE", "/api/db-servers/versions/:vid", "删除"},
-		{"POST", "/api/containers/:id/exec", "执行"},
-		{"POST", "/api/db-servers/databases/:did/execute", "执行"},
-		{"POST", "/api/containers", "创建"},           // POST 到无参数集合根
-		{"POST", "/api/runtime/install", "创建"},      // install 段
-		{"POST", "/api/images/pull", "创建"},          // pull 段
-		{"POST", "/api/containers/:id/start", "修改"}, // 有参数，start 非创建/执行段
-		{"POST", "/api/docker/start", "修改"},         // 无参但 start 是状态变更，非创建
-		{"POST", "/api/compose/down", "修改"},         // down 是状态变更，非创建
-		{"PUT", "/api/containers/:id/update", "修改"},
-		{"PATCH", "/api/firewall/rules/:id", "修改"},
-		{"GET", "/api/containers", "其他"}, // GET 不参与写审计，分类兜底
+		{"POST", "/api/auth/login", audit.ActionAuth},
+		{"POST", "/api/auth/change-password", audit.ActionAuth},
+		{"DELETE", "/api/containers/:id", audit.ActionDelete},
+		{"DELETE", "/api/db-servers/versions/:vid", audit.ActionDelete},
+		{"POST", "/api/containers/:id/exec", audit.ActionExecute},
+		{"POST", "/api/db-servers/databases/:did/execute", audit.ActionExecute},
+		{"POST", "/api/containers", audit.ActionCreate},           // POST 到无参数集合根
+		{"POST", "/api/runtime/install", audit.ActionCreate},      // install 段
+		{"POST", "/api/images/pull", audit.ActionCreate},          // pull 段
+		{"POST", "/api/containers/:id/start", audit.ActionUpdate}, // 有参数，start 非创建/执行段
+		{"POST", "/api/docker/start", audit.ActionUpdate},         // 无参但 start 是状态变更，非创建
+		{"POST", "/api/compose/down", audit.ActionUpdate},         // down 是状态变更，非创建
+		{"PUT", "/api/containers/:id/update", audit.ActionUpdate},
+		{"PATCH", "/api/firewall/rules/:id", audit.ActionUpdate},
+		{"GET", "/api/containers", audit.ActionOther}, // GET 不参与写审计，分类兜底
 	}
 	for _, c := range cases {
 		got := verbFor(c.method, c.fullPath)
@@ -46,16 +46,16 @@ func TestVerbFor(t *testing.T) {
 func TestCategoryFor(t *testing.T) {
 	cases := []struct {
 		path string
-		want string
+		want audit.ResourceCategory
 	}{
-		{"/api/db-servers/versions/3", "数据库"},
-		{"/api/runtime/install", "运行环境"},
-		{"/api/containers/123/start", "容器"},
-		{"/api/docker/start", "容器"},
-		{"/api/cron/tasks", "定时任务"},
-		{"/api/firewall/rules", "防火墙"},
-		{"/api/auth/login", "认证"},
-		{"/api/unknown-thing", "其他"},
+		{"/api/db-servers/versions/3", audit.ResourceDatabase},
+		{"/api/runtime/install", audit.ResourceRuntime},
+		{"/api/containers/123/start", audit.ResourceContainer},
+		{"/api/docker/start", audit.ResourceContainer},
+		{"/api/cron/tasks", audit.ResourceCron},
+		{"/api/firewall/rules", audit.ResourceFirewall},
+		{"/api/auth/login", audit.ResourceAuth},
+		{"/api/unknown-thing", audit.ResourceOther},
 	}
 	for _, c := range cases {
 		got := categoryFor(c.path)

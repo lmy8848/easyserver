@@ -28,70 +28,73 @@ func AuditDetail(c *gin.Context, key string, value any) {
 }
 
 // categoryFor derives a coarse resource category from the URL path (longest-prefix match).
-func categoryFor(path string) string {
+func categoryFor(path string) audit.ResourceCategory {
 	for _, p := range categoryPrefixes {
 		if strings.HasPrefix(path, p.prefix) {
 			return p.category
 		}
 	}
-	return "其他"
+	return audit.ResourceOther
 }
 
-var categoryPrefixes = []struct{ prefix, category string }{
-	{"/api/db-servers", "数据库"},
-	{"/api/runtime", "运行环境"},
-	{"/api/packages", "软件包"},
-	{"/api/containers", "容器"},
-	{"/api/docker", "容器"},
-	{"/api/images", "容器"},
-	{"/api/compose", "容器"},
-	{"/api/volumes", "容器"},
-	{"/api/networks", "容器"},
-	{"/api/cloud", "云服务器"},
-	{"/api/cron", "定时任务"},
-	{"/api/firewall", "防火墙"},
-	{"/api/ssh", "SSH"},
-	{"/api/terminal", "终端"},
-	{"/api/process", "守护进程"},
-	{"/api/files", "文件"},
-	{"/api/websites", "网站"},
-	{"/api/web-servers", "Web服务"},
-	{"/api/deploy", "发布"},
-	{"/api/settings", "面板设置"},
-	{"/api/env-config", "环境变量"},
-	{"/api/global-config", "环境变量"},
-	{"/api/notifications", "通知"},
-	{"/api/audit-logs", "审计"},
-	{"/api/systemd", "系统服务"},
-	{"/api/services", "系统服务"},
-	{"/api/auth", "认证"},
+var categoryPrefixes = []struct {
+	prefix   string
+	category audit.ResourceCategory
+}{
+	{"/api/db-servers", audit.ResourceDatabase},
+	{"/api/runtime", audit.ResourceRuntime},
+	{"/api/packages", audit.ResourcePackage},
+	{"/api/containers", audit.ResourceContainer},
+	{"/api/docker", audit.ResourceContainer},
+	{"/api/images", audit.ResourceContainer},
+	{"/api/compose", audit.ResourceContainer},
+	{"/api/volumes", audit.ResourceContainer},
+	{"/api/networks", audit.ResourceContainer},
+	{"/api/cloud", audit.ResourceCloud},
+	{"/api/cron", audit.ResourceCron},
+	{"/api/firewall", audit.ResourceFirewall},
+	{"/api/ssh", audit.ResourceSSH},
+	{"/api/terminal", audit.ResourceTerminal},
+	{"/api/process", audit.ResourceDaemon},
+	{"/api/files", audit.ResourceFile},
+	{"/api/websites", audit.ResourceWebsite},
+	{"/api/web-servers", audit.ResourceWebServer},
+	{"/api/deploy", audit.ResourceDeploy},
+	{"/api/settings", audit.ResourceSetting},
+	{"/api/env-config", audit.ResourceEnvVar},
+	{"/api/global-config", audit.ResourceEnvVar},
+	{"/api/notifications", audit.ResourceNotification},
+	{"/api/audit-logs", audit.ResourceAudit},
+	{"/api/systemd", audit.ResourceSystem},
+	{"/api/services", audit.ResourceSystem},
+	{"/api/auth", audit.ResourceAuth},
 }
 
 // verbFor maps method + route template to one of six coarse verbs:
 // 创建/删除/修改/执行/认证/其他. Route params appear as ":id" in FullPath.
-func verbFor(method, fullPath string) string {
+func verbFor(method, fullPath string) audit.ActionCategory {
 	if strings.HasPrefix(fullPath, "/api/auth") {
-		return "认证"
+		return audit.ActionAuth
 	}
 	segs := strings.Split(strings.TrimPrefix(fullPath, "/api/"), "/")
 	for _, s := range segs {
 		if execSegs[s] {
-			return "执行"
+			return audit.ActionExecute
 		}
 	}
 	// State-change verbs (start/stop/restart/...) before create heuristics, so
 	// POST /docker/start (no param) is not misclassified as 创建.
 	for _, s := range segs {
 		if controlSegs[s] {
-			return "修改"
+			return audit.ActionUpdate
 		}
 	}
 	if method == "DELETE" {
-		return "删除"
+		return audit.ActionDelete
 	}
 	for _, s := range segs {
 		if createSegs[s] {
-			return "创建"
+			return audit.ActionCreate
 		}
 	}
 	if method == "POST" {
@@ -103,13 +106,13 @@ func verbFor(method, fullPath string) string {
 			}
 		}
 		if !hasParam {
-			return "创建"
+			return audit.ActionCreate
 		}
 	}
 	if method == "POST" || method == "PUT" || method == "PATCH" {
-		return "修改"
+		return audit.ActionUpdate
 	}
-	return "其他"
+	return audit.ActionOther
 }
 
 var execSegs = map[string]bool{

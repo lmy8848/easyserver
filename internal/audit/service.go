@@ -164,7 +164,7 @@ func (s *Service) enqueue(entry auditEntry) {
 }
 
 // LogOperation logs a server-level operation.
-func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
+func (s *Service) LogOperation(ctx context.Context, userID int64, username string, action ActionCategory, resource ResourceCategory, extra map[string]interface{}, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -176,7 +176,7 @@ func (s *Service) LogOperation(ctx context.Context, userID int64, username, acti
 		detailData[k] = v
 	}
 	detailJSON, _ := json.Marshal(detailData)
-	s.enqueue(auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"})
+	s.enqueue(auditEntry{userID, username, string(action), string(resource), string(detailJSON), ip, userAgent, now, "operation"})
 }
 
 // LogRequest logs an HTTP request, written by the global audit middleware.
@@ -202,7 +202,7 @@ func (s *Service) LogSecurityEvent(ctx context.Context, username, summary string
 		"summary":   summary,
 		"timestamp": now.Format(time.RFC3339),
 	})
-	s.enqueue(auditEntry{0, username, "认证", "/auth", string(detailJSON), "", "", now, "operation"})
+	s.enqueue(auditEntry{0, username, string(ActionAuth), string(ResourceAuth), string(detailJSON), "", "", now, "operation"})
 }
 
 // LogSystemEvent logs a system event. The action column is the coarse verb
@@ -216,5 +216,5 @@ func (s *Service) LogSystemEvent(ctx context.Context, summary string) {
 		"summary":   summary,
 		"timestamp": now.Format(time.RFC3339),
 	})
-	s.enqueue(auditEntry{0, "system", "其他", "/system", string(detailJSON), "", "", now, "operation"})
+	s.enqueue(auditEntry{0, "system", string(ActionOther), string(ResourceSystem), string(detailJSON), "", "", now, "operation"})
 }
