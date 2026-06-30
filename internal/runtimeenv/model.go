@@ -37,31 +37,6 @@ type RuntimeSetDefaultRequest struct {
 
 // RuntimeDetectResult represents detected runtime environments on the system
 
-// RuntimeMirror represents a mirror source configuration
-type RuntimeMirror struct {
-	ID        int64     `json:"id"`
-	Lang      string    `json:"lang"`
-	EnvKey    string    `json:"env_key"`
-	EnvValue  string    `json:"env_value"`
-	Enabled   int       `json:"enabled"` // 0 or 1
-	Source    string    `json:"source"`  // 'seed' or 'user'
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// RuntimeMirrorCreateRequest represents a request to create a mirror
-type RuntimeMirrorCreateRequest struct {
-	Lang     string `json:"lang" binding:"required,oneof=node python go java php"`
-	EnvKey   string `json:"env_key" binding:"required"`
-	EnvValue string `json:"env_value" binding:"required"`
-	Enabled  *int   `json:"enabled"`
-}
-
-// RuntimeMirrorUpdateRequest represents a request to update a mirror
-type RuntimeMirrorUpdateRequest struct {
-	EnvValue *string `json:"env_value"`
-	Enabled  *int    `json:"enabled"`
-}
-
 // GlobalDefaultEntry is one row of the global_default table joined with runtime_version,
 // used by the mise config generator to render the [tools] section.
 type GlobalDefaultEntry struct {

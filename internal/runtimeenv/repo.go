@@ -39,15 +39,6 @@ type Repository interface {
 	// Cleanup related data
 	CleanupGlobalDefaultsByRuntimeID(ctx context.Context, runtimeID int64) (int64, error)
 
-	// Mirrors
-	CountMirrors(ctx context.Context) (int, error)
-	SeedMirrors(ctx context.Context, mirrors []RuntimeMirror) error
-	ListMirrors(ctx context.Context) ([]RuntimeMirror, error)
-	GetMirror(ctx context.Context, id int64) (*RuntimeMirror, error)
-	UpdateMirror(ctx context.Context, id int64, envValue string, enabled int) error
-	CreateMirror(ctx context.Context, mirror *RuntimeMirror) (int64, error)
-	DisableOtherMirrors(ctx context.Context, envKey string, excludeID int64) error
-	DeleteMirror(ctx context.Context, id int64) error
 	GetConflictingReferences(ctx context.Context, runtimeID int64) ([]string, error)
 	HealState(ctx context.Context) error
 }

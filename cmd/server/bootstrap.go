@@ -282,11 +282,11 @@ func wire(cfg *config.Config) (*appServices, error) {
 	firewallRepo := firewall.NewSQLiteRepository(db)
 	s.FirewallService = firewall.NewService(firewallRepo, cmdExec)
 
-	// Runtime + package (with mirror seed)
+	// Runtime + package
 	runtimeRepo := runtimeenv.NewSQLiteRepository(db)
-	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec)
-	if err := runtimeService.InitMirrors(ctx); err != nil {
-		log.Printf("ERROR: Failed to seed mirrors: %v", err)
+	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec, envConfigService)
+	if err := runtimeService.Init(ctx); err != nil {
+		log.Printf("ERROR: Failed to init runtime service: %v", err)
 	}
 	s.RuntimeService = runtimeService
 	s.PackageManagerService = runtimeenv.NewPackageService(cmdExec)

@@ -7,18 +7,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"easyserver/internal/envconfig"
 )
 
 const miseConfigPath = "/etc/mise/config.toml"
 
 // buildMiseConfigContent renders the textual content of /etc/mise/config.toml
-// from the given enabled mirrors and global defaults. Pure function — no I/O —
-// so its output can be asserted in tests without filesystem fakes.
+// from the given enabled env configs and global defaults. Pure function — no
+// I/O — so its output can be asserted in tests without filesystem fakes.
 //
 // Layout:
 //
 //	[env]
 //	MISE_NODE_MIRROR_URL = "..."
+//	JAVA_HOME = "..."
 //
 //	[tools]
 //	node = "20.11.0"
@@ -26,19 +29,20 @@ const miseConfigPath = "/etc/mise/config.toml"
 //
 // Tool keys that contain ':' or '/' are TOML-quoted; bare identifiers are not,
 // to keep the file readable for the common node/python/go cases.
-func buildMiseConfigContent(mirrors []RuntimeMirror, defaults []GlobalDefaultEntry) string {
+func buildMiseConfigContent(envConfigs []envconfig.EnvConfig, defaults []GlobalDefaultEntry) string {
 	var buf bytes.Buffer
 
 	buf.WriteString("[env]\n")
-	for _, m := range mirrors {
-		if m.Enabled == 1 {
-			// %q on both key and value: TOML basic strings overlap with Go
-			// quoted strings for the chars EnvKey/EnvValue can plausibly hold.
-			// Belt-and-suspenders with the CreateMirror regex check — even if
-			// an unsanitized key sneaks in (e.g. via direct DB write), it
-			// can't break out of its quoted form to forge a new section.
-			buf.WriteString(fmt.Sprintf("%q = %q\n", m.EnvKey, m.EnvValue))
+	for _, c := range envConfigs {
+		if !c.Enabled {
+			continue
 		}
+		// %q on both key and value: TOML basic strings overlap with Go
+		// quoted strings for the chars Name/Value can plausibly hold.
+		// Belt-and-suspenders with isValidEnvName — even if an unsanitized
+		// key sneaks in (e.g. via direct DB write), it can't break out of
+		// its quoted form to forge a new section.
+		buf.WriteString(fmt.Sprintf("%q = %q\n", c.Name, c.Value))
 	}
 
 	if len(defaults) > 0 {
@@ -61,10 +65,10 @@ func buildMiseConfigContent(mirrors []RuntimeMirror, defaults []GlobalDefaultEnt
 	return buf.String()
 }
 
-// GenerateMiseConfig regenerates /etc/mise/config.toml from the current DB state
-// of mirrors and global defaults. Atomic write: temp file + rename.
+// GenerateMiseConfig regenerates /etc/mise/config.toml from the current DB
+// state of env configs and global defaults. Atomic write: temp file + rename.
 func (s *Service) GenerateMiseConfig(ctx context.Context) error {
-	mirrors, err := s.repo.ListMirrors(ctx)
+	envConfigs, err := s.envConfigs.ListEnvConfigs(ctx)
 	if err != nil {
 		return err
 	}
@@ -73,7 +77,7 @@ func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 		return err
 	}
 
-	content := buildMiseConfigContent(mirrors, defaults)
+	content := buildMiseConfigContent(envConfigs, defaults)
 
 	dir := filepath.Dir(miseConfigPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {

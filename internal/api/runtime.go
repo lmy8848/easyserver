@@ -254,70 +254,6 @@ func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
 	})
 }
 
-// ListMirrors
-func (h *RuntimeHandler) ListMirrors(c *gin.Context) {
-	mirrors, err := h.runtimeService.ListMirrors(c.Request.Context())
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-	Success(c, gin.H{"mirrors": mirrors})
-}
-
-// UpdateMirror
-func (h *RuntimeHandler) UpdateMirror(c *gin.Context) {
-	idStr := c.Param("id")
-	var id int64
-	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
-		return
-	}
-	var req runtimeenv.RuntimeMirrorUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求"))
-		return
-	}
-
-	middleware.AuditSummary(c, "更新运行环境镜像源 "+idStr)
-	if err := h.runtimeService.UpdateMirror(c.Request.Context(), &req, id); err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-	Success(c, gin.H{"message": "修改成功"})
-}
-
-// CreateMirror
-func (h *RuntimeHandler) CreateMirror(c *gin.Context) {
-	var req runtimeenv.RuntimeMirrorCreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
-	}
-	middleware.AuditSummary(c, "创建运行环境镜像源 "+req.Lang+" "+req.EnvKey)
-	id, err := h.runtimeService.CreateMirror(c.Request.Context(), &req)
-	if err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-	Success(c, gin.H{"id": id, "message": "创建成功"})
-}
-
-// DeleteMirror
-func (h *RuntimeHandler) DeleteMirror(c *gin.Context) {
-	idStr := c.Param("id")
-	var id int64
-	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
-		return
-	}
-	middleware.AuditSummary(c, "删除运行环境镜像源 "+idStr)
-	if err := h.runtimeService.DeleteMirror(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
-		return
-	}
-	Success(c, gin.H{"message": "删除成功"})
-}
-
 // GetRemoteVersions gets available remote versions
 func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
 	name := c.Param("name")
@@ -353,10 +289,6 @@ func registerRuntimeRoutes(protected *gin.RouterGroup, runtimeService *runtimeen
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)
 	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
-	protected.GET("/runtime/mirrors", runtimeHandler.ListMirrors)
-	protected.PUT("/runtime/mirrors/:id", runtimeHandler.UpdateMirror)
-	protected.POST("/runtime/mirrors", runtimeHandler.CreateMirror)
-	protected.DELETE("/runtime/mirrors/:id", runtimeHandler.DeleteMirror)
 
 	// Package management
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)

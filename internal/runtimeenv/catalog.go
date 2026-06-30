@@ -6,11 +6,12 @@ import (
 )
 
 type Runtime struct {
-	Lang               string   `json:"lang"`        // "node"
-	Display            string   `json:"display"`     // "Node.js"
-	MiseTool           string   `json:"mise_tool"`   // mise 插件名
-	Majors             []string `json:"majors"`      // UI 可选的主版本列表
-	MirrorEnvs         []string `json:"mirror_envs"` // 该语言会用到的 env key（供镜像表 seed 使用）
+	Lang               string   `json:"lang"`              // "node"
+	Display            string   `json:"display"`           // "Node.js"
+	MiseTool           string   `json:"mise_tool"`         // mise 插件名
+	Majors             []string `json:"majors"`            // UI 可选的主版本列表
+	MirrorEnvs         []string `json:"mirror_envs"`       // 该语言会用到的 env key（MirrorPanel 据此过滤 EnvConfig）
+	MirrorCandidates   []string `json:"mirror_candidates"` // 候选镜像地址（不含 mise 默认源），供 MirrorPanel 新增时选择
 	SupportsGlobalPkgs bool     `json:"supports_global_pkgs"`
 }
 
@@ -21,6 +22,7 @@ var catalog = []Runtime{
 		MiseTool:           "node",
 		Majors:             []string{"16", "18", "20", "22", "24"},
 		MirrorEnvs:         []string{"MISE_NODE_MIRROR_URL"},
+		MirrorCandidates:   []string{"https://npmmirror.com/mirrors/node", "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release"},
 		SupportsGlobalPkgs: true,
 	},
 	{
@@ -29,6 +31,7 @@ var catalog = []Runtime{
 		MiseTool:           "python",
 		Majors:             []string{"3.10", "3.11", "3.12", "3.13", "3.14"},
 		MirrorEnvs:         []string{"PYTHON_BUILD_MIRROR_URL"},
+		MirrorCandidates:   []string{"https://npmmirror.com/mirrors/python", "https://mirrors.aliyun.com/python"},
 		SupportsGlobalPkgs: true,
 	},
 	{
@@ -37,6 +40,7 @@ var catalog = []Runtime{
 		MiseTool:           "go",
 		Majors:             []string{"1.22", "1.23", "1.24", "1.25", "1.26"},
 		MirrorEnvs:         []string{"MISE_GO_DOWNLOAD_MIRROR"},
+		MirrorCandidates:   []string{"https://mirrors.aliyun.com/golang", "https://mirrors.ustc.edu.cn/golang"},
 		SupportsGlobalPkgs: false,
 	},
 	{
@@ -45,6 +49,7 @@ var catalog = []Runtime{
 		MiseTool:           "vfox:version-fox/vfox-java",
 		Majors:             []string{"8", "11", "17", "21", "25"},
 		MirrorEnvs:         []string{},
+		MirrorCandidates:   []string{},
 		SupportsGlobalPkgs: false,
 	},
 	{
@@ -58,6 +63,7 @@ var catalog = []Runtime{
 		MiseTool:           "php",
 		Majors:             []string{"8.1", "8.2", "8.3", "8.4", "8.5"},
 		MirrorEnvs:         []string{},
+		MirrorCandidates:   []string{},
 		SupportsGlobalPkgs: true,
 	},
 }
@@ -90,6 +96,7 @@ func GetCatalog() []Runtime {
 			MiseTool:           r.MiseTool,
 			Majors:             append([]string{}, r.Majors...),
 			MirrorEnvs:         append([]string{}, r.MirrorEnvs...),
+			MirrorCandidates:   append([]string{}, r.MirrorCandidates...),
 			SupportsGlobalPkgs: r.SupportsGlobalPkgs,
 		}
 	}

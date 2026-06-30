@@ -3,22 +3,25 @@ package runtimeenv
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"easyserver/internal/envconfig"
 )
 
 // minimal runnable check for the pure builder. Real I/O (mkdir + atomic rename)
 // is covered indirectly by the integration verification in issue 07's AC.
 func TestBuildMiseConfigContent(t *testing.T) {
-	mirrors := []RuntimeMirror{
-		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://npmmirror.com/mirrors/node/", Enabled: 1},
-		{Lang: "node", EnvKey: "MISE_NODE_MIRROR_URL", EnvValue: "https://nodejs.org/dist/", Enabled: 0}, // disabled → must not appear
-		{Lang: "go", EnvKey: "MISE_GO_DOWNLOAD_MIRROR", EnvValue: "https://mirrors.aliyun.com/golang/", Enabled: 1},
+	envConfigs := []envconfig.EnvConfig{
+		{Name: "MISE_NODE_MIRROR_URL", Value: "https://npmmirror.com/mirrors/node/", Enabled: true},
+		{Name: "MISE_NODE_MIRROR_URL", Value: "https://nodejs.org/dist/", Enabled: false}, // disabled → must not appear
+		{Name: "MISE_GO_DOWNLOAD_MIRROR", Value: "https://mirrors.aliyun.com/golang/", Enabled: true},
 	}
 	defaults := []GlobalDefaultEntry{
 		{Lang: "node", Exact: "20.11.0"},
 		{Lang: "java", Exact: "21.0.0"}, // mise tool name contains ':' and '/' → must be quoted
 	}
 
-	got := buildMiseConfigContent(mirrors, defaults)
+	got := buildMiseConfigContent(envConfigs, defaults)
 
 	mustContain(t, got, `"MISE_NODE_MIRROR_URL" = "https://npmmirror.com/mirrors/node/"`)
 	mustContain(t, got, `"MISE_GO_DOWNLOAD_MIRROR" = "https://mirrors.aliyun.com/golang/"`)
@@ -59,13 +62,13 @@ func TestBuildMiseConfigContent_UnknownLangIsSkipped(t *testing.T) {
 	mustContain(t, got, `node = "20.11.0"`)
 }
 
-// TOML injection regression: even if a malformed env_key slips past
-// CreateMirror's regex (defense-in-depth), the %q rendering must NOT let it
-// forge a new section. The hostile bytes survive as escapes inside a quoted
-// key — that's the goal: TOML parser sees one weird key, not a new section.
+// TOML injection regression: even if a malformed env var name slips past
+// isValidEnvName (defense-in-depth), the %q rendering must NOT let it forge a
+// new section. The hostile bytes survive as escapes inside a quoted key —
+// that's the goal: TOML parser sees one weird key, not a new section.
 func TestBuildMiseConfigContent_EnvKeyInjectionEscaped(t *testing.T) {
-	got := buildMiseConfigContent([]RuntimeMirror{
-		{EnvKey: "FOO\n[tools]\nnode", EnvValue: "x", Enabled: 1},
+	got := buildMiseConfigContent([]envconfig.EnvConfig{
+		{Name: "FOO\n[tools]\nnode", Value: "x", Enabled: true},
 	}, nil)
 
 	// No section header other than the legitimate [env] should appear at the
@@ -80,6 +83,15 @@ func TestBuildMiseConfigContent_EnvKeyInjectionEscaped(t *testing.T) {
 	// The hostile bytes should survive as escapes inside the quoted key —
 	// proof the rendering did NOT pass them through raw.
 	mustContain(t, got, `"FOO\n[tools]\nnode"`)
+}
+
+// Ensure the time field doesn't affect output — it's metadata, not rendered.
+func TestBuildMiseConfigContent_TimeFieldIgnored(t *testing.T) {
+	now := time.Now()
+	got := buildMiseConfigContent([]envconfig.EnvConfig{
+		{Name: "FOO", Value: "bar", Enabled: true, CreatedAt: now, UpdatedAt: now},
+	}, nil)
+	mustContain(t, got, `"FOO" = "bar"`)
 }
 
 func mustContain(t *testing.T, haystack, needle string) {
