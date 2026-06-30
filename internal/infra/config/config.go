@@ -142,10 +142,39 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Merge defaults for fields not present in YAML (yaml.Unmarshal zeros them)
+	cfg.mergeDefaults()
+
 	// Override with environment variables
 	cfg.applyEnvOverrides()
 
 	return cfg, nil
+}
+
+// mergeDefaults restores default values for int/duration fields that were
+// zeroed by yaml.Unmarshal when the YAML key is absent.
+func (c *Config) mergeDefaults() {
+	if c.Server.AssetsRateLimit == 0 {
+		c.Server.AssetsRateLimit = 5000
+	}
+	if c.Server.AssetsRateInterval == 0 {
+		c.Server.AssetsRateInterval = time.Minute
+	}
+	if c.Auth.RateLimit == 0 {
+		c.Auth.RateLimit = 1000
+	}
+	if c.Auth.RateInterval == 0 {
+		c.Auth.RateInterval = time.Minute
+	}
+	if c.Auth.LoginRateLimit == 0 {
+		c.Auth.LoginRateLimit = 10
+	}
+	if c.Auth.LoginRateInterval == 0 {
+		c.Auth.LoginRateInterval = time.Minute
+	}
+	if c.Auth.SessionCleanupInterval == 0 {
+		c.Auth.SessionCleanupInterval = 5 * time.Minute
+	}
 }
 
 func (c *Config) applyEnvOverrides() {

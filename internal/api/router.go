@@ -18,6 +18,7 @@ import (
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
 	"easyserver/internal/filemanager"
+	"easyserver/internal/fileshare"
 	"easyserver/internal/firewall"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
@@ -87,6 +88,9 @@ type Router struct {
 	// File manager
 	fileManager *filemanager.Manager
 
+	// File share repo
+	fileShareRepo fileshare.Repository
+
 	// Cloud service (nil if disabled)
 	cloudService *cloud.Service
 }
@@ -148,6 +152,9 @@ type RouterDeps struct {
 	// File manager
 	FileManager *filemanager.Manager
 
+	// File share repository
+	FileShareRepo fileshare.Repository
+
 	// Cloud service (nil if disabled)
 	CloudService *cloud.Service
 }
@@ -204,6 +211,9 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 
 		// File manager
 		fileManager: deps.FileManager,
+
+		// File share repo
+		fileShareRepo: deps.FileShareRepo,
 
 		// Cloud service
 		cloudService: deps.CloudService,
@@ -280,7 +290,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerDeployRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
 	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
 	registerEnvRoutes(protected, r.envConfigService)
-	registerWebServerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService)
+	registerWebServerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
 	registerDatabaseRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
 	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
@@ -290,6 +300,10 @@ func (r *Router) Setup() *gin.Engine {
 	registerProcessRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)
 	registerNotificationRoutes(protected, r.notificationService)
+	registerFileShareRoutes(protected, r.fileShareRepo, r.fileManager)
+
+	// Public file share download route (no auth, before static assets to avoid conflict)
+	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
 	if r.cfg.Server.ServeFrontend {

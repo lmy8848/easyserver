@@ -1,13 +1,14 @@
 package api
 
 import (
+	"easyserver/internal/process"
 	"easyserver/internal/web"
 	"github.com/gin-gonic/gin"
 )
 
 // registerWebServerRoutes registers web server and website management routes
-func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *web.Service, websiteService *web.WebsiteService) {
-	handler := NewWebServerHandler(webServerService, websiteService)
+func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *web.Service, websiteService *web.WebsiteService, processService *process.Service) {
+	handler := NewWebServerHandler(webServerService, websiteService, processService)
 
 	// Utilities (must be before /:id to avoid conflict)
 	protected.GET("/web-servers/project-types", handler.GetProjectTypes)
@@ -43,4 +44,10 @@ func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *web.S
 	protected.POST("/web-servers/:id/websites/:wid/disable", handler.DisableWebsite)
 	protected.GET("/web-servers/:id/websites/:wid/logs", handler.GetWebsiteLogs)
 	protected.POST("/web-servers/:id/websites/:wid/ssl", handler.ApplyWebsiteSSL)
+
+	// Website process management
+	protected.POST("/web-servers/:id/websites/:wid/build", handler.BuildWebsite)
+	protected.POST("/web-servers/:id/websites/:wid/process/start", handler.StartWebsiteProcess)
+	protected.POST("/web-servers/:id/websites/:wid/process/stop", handler.StopWebsiteProcess)
+	protected.GET("/web-servers/:id/websites/:wid/process", handler.GetWebsiteProcessStatus)
 }

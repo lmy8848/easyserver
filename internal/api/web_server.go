@@ -1,14 +1,17 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"easyserver/internal/api/middleware"
+	"easyserver/internal/process"
 	"easyserver/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -17,12 +20,14 @@ import (
 type WebServerHandler struct {
 	webServerService *web.Service
 	websiteService   *web.WebsiteService
+	processService   *process.Service
 }
 
-func NewWebServerHandler(webServerService *web.Service, websiteService *web.WebsiteService) *WebServerHandler {
+func NewWebServerHandler(webServerService *web.Service, websiteService *web.WebsiteService, processService *process.Service) *WebServerHandler {
 	return &WebServerHandler{
 		webServerService: webServerService,
 		websiteService:   websiteService,
+		processService:   processService,
 	}
 }
 
@@ -406,6 +411,30 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
+
+	// Auto-link Process Guardian entry when start_command + runtime_version_id are set
+	if req.StartCommand != "" && req.RuntimeVersionID > 0 {
+		proc, pErr := h.processService.Create(c.Request.Context(), &process.CreateProcessRequest{
+				Name:             "website-" + req.Domain,
+				Command:          "sh",
+				Args:             fmt.Sprintf(`-c "%s"`, req.StartCommand),
+				Dir:              req.RootPath,
+			AutoRestart:      boolPtr(false),
+			MaxRestarts:      3,
+			RestartDelay:     5,
+			StopTimeout:      10,
+			StartupTimeout:   30,
+			AutoStart:        boolPtr(true),
+			LogFile:          fmt.Sprintf("/var/log/easyserver/%s.log", req.Domain),
+			RuntimeVersionID: req.RuntimeVersionID,
+		})
+		if pErr == nil && proc != nil {
+			// Link the process ID back to the website
+			h.websiteService.LinkProcess(c.Request.Context(), site.ID, proc.ID)
+			site.ProcessID = proc.ID
+		}
+	}
+
 	Success(c, site)
 }
 
@@ -448,6 +477,16 @@ func (h *WebServerHandler) DeleteWebsite(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "删除网站 #"+strconv.FormatInt(id, 10))
 
+	// Get the website first to check for linked process
+	site, _ := h.websiteService.Get(c.Request.Context(), sid, id)
+	if site != nil && site.ProcessID > 0 {
+		// Try to delete the linked process (best-effort)
+		if err := h.processService.Delete(c.Request.Context(), site.ProcessID); err != nil {
+			// Log but don't fail — the process might already be gone
+			fmt.Printf("website: deleting linked process %d: %v\n", site.ProcessID, err)
+		}
+	}
+
 	if err := h.websiteService.Delete(c.Request.Context(), sid, id); err != nil {
 		c.Error(WrapError(err))
 		return
@@ -472,6 +511,13 @@ func (h *WebServerHandler) EnableWebsite(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
+
+	// Auto-start linked process
+	site, _ := h.websiteService.Get(c.Request.Context(), sid, id)
+	if site != nil && site.ProcessID > 0 {
+		h.processService.Start(c.Request.Context(), site.ProcessID)
+	}
+
 	Success(c, gin.H{"status": "active"})
 }
 
@@ -492,6 +538,13 @@ func (h *WebServerHandler) DisableWebsite(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
+
+	// Auto-stop linked process
+	site, _ := h.websiteService.Get(c.Request.Context(), sid, id)
+	if site != nil && site.ProcessID > 0 {
+		h.processService.Stop(c.Request.Context(), site.ProcessID)
+	}
+
 	Success(c, gin.H{"status": "disabled"})
 }
 
@@ -544,6 +597,212 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"message": "SSL 证书已应用"})
+}
+
+func (h *WebServerHandler) BuildWebsite(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+
+	site, err := h.websiteService.Get(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if site == nil {
+		c.Error(ErrNotFound.WithMessage("网站不存在"))
+		return
+	}
+	if site.BuildCommand == "" {
+		c.Error(ErrBadRequest.WithMessage("该网站未设置编译命令"))
+		return
+	}
+
+	middleware.AuditSummary(c, "编译网站 "+site.Domain)
+
+	// Run build command in project root directory
+	buildCmd := exec.CommandContext(c.Request.Context(), "sh", "-c", site.BuildCommand)
+	buildCmd.Dir = site.RootPath
+	out, err := buildCmd.CombinedOutput()
+	if err != nil {
+		Success(c, gin.H{"success": false, "output": string(out) + "\n" + err.Error()})
+		return
+	}
+	Success(c, gin.H{"success": true, "output": string(out)})
+}
+
+func (h *WebServerHandler) StartWebsiteProcess(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+
+	site, err := h.websiteService.Get(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if site == nil {
+		c.Error(ErrNotFound.WithMessage("网站不存在"))
+		return
+	}
+	if site.StartCommand == "" {
+		c.Error(ErrBadRequest.WithMessage("该网站未设置启动命令"))
+		return
+	}
+
+	middleware.AuditSummary(c, "启动网站进程 "+site.Domain)
+
+	// For websites with ProcessID already linked, use Process Guardian
+	if site.ProcessID > 0 {
+		if err := h.processService.Start(c.Request.Context(), site.ProcessID); err != nil {
+			c.Error(ErrInternal.WithMessage(fmt.Sprintf("启动进程失败: %v", err)))
+			return
+		}
+		Success(c, gin.H{"message": "进程已启动", "process_id": site.ProcessID})
+		return
+	}
+
+	// Otherwise, try to start via Process Guardian by creating a new process
+	// We use the command directly with nohup pattern
+	logFile := fmt.Sprintf("/var/log/easyserver/%s.log", site.Domain)
+	os.MkdirAll("/var/log/easyserver", 0755)
+
+	cmd := fmt.Sprintf("cd %s && nohup %s > %s 2>&1 &", site.RootPath, site.StartCommand, logFile)
+	if _, _, err := processRunCommand(c.Request.Context(), "sh", "-c", cmd); err != nil {
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("启动失败: %v", err)))
+		return
+	}
+	Success(c, gin.H{"message": "已启动", "log_file": logFile})
+}
+
+func (h *WebServerHandler) StopWebsiteProcess(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+
+	site, err := h.websiteService.Get(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if site == nil {
+		c.Error(ErrNotFound.WithMessage("网站不存在"))
+		return
+	}
+
+	middleware.AuditSummary(c, "停止网站进程 "+site.Domain)
+
+	if site.ProcessID > 0 {
+		if err := h.processService.Stop(c.Request.Context(), site.ProcessID); err != nil {
+			c.Error(ErrInternal.WithMessage(fmt.Sprintf("停止进程失败: %v", err)))
+			return
+		}
+		Success(c, gin.H{"message": "进程已停止"})
+		return
+	}
+
+	// Kill by matching the start command pattern
+	if site.StartCommand != "" {
+		// Try pkill -f with a pattern matching the start command
+		h.processService.Stop(c.Request.Context(), 0)
+		// Also try to find and kill the process by port
+		processRunCommand(c.Request.Context(), "sh", "-c",
+			fmt.Sprintf("lsof -ti:%d | xargs -r kill 2>/dev/null", site.AppPort))
+	}
+
+	Success(c, gin.H{"message": "已停止"})
+}
+
+func (h *WebServerHandler) GetWebsiteProcessStatus(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+
+	site, err := h.websiteService.Get(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	if site == nil {
+		c.Error(ErrNotFound.WithMessage("网站不存在"))
+		return
+	}
+
+	if site.ProcessID > 0 {
+		proc, err := h.processService.Get(c.Request.Context(), site.ProcessID)
+		if err != nil {
+			c.Error(ErrInternal.Wrap(err))
+			return
+		}
+		if proc != nil {
+			status := ""
+			if proc.Status != nil {
+				status = proc.Status.Status
+			}
+			Success(c, gin.H{
+				"process_id": site.ProcessID,
+				"status":     status,
+				"managed":    true,
+				"process":    proc,
+			})
+			return
+		}
+	}
+
+	// Check if anything is listening on the app port
+	status := "stopped"
+	port := site.AppPort
+	if port > 0 {
+		out, _, _ := processRunCommand(c.Request.Context(), "sh", "-c",
+			fmt.Sprintf("ss -tlnp sport = :%d 2>/dev/null | grep -q LISTEN && echo 'running'", port))
+		if out == "running" {
+			status = "running"
+		}
+	}
+
+	Success(c, gin.H{
+		"process_id": site.ProcessID,
+		"status":     status,
+		"managed":    site.ProcessID > 0,
+	})
+}
+
+func processRunCommand(ctx context.Context, name string, args ...string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), "", err
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 // GetProjectTypes returns available project types

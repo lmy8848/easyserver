@@ -5,6 +5,7 @@ import {
   FolderOutlined, FileOutlined, EditOutlined, DeleteOutlined,
   DownloadOutlined, CopyOutlined, FormOutlined, ScissorOutlined,
   ExpandOutlined, LockOutlined, FileImageOutlined, FileTextOutlined,
+  LinkOutlined,
 } from '@ant-design/icons';
 import type { FileEntry } from '../../types';
 import { formatFileSize } from './types';
@@ -24,6 +25,7 @@ interface FileManagerTableProps {
   onPreview: (path: string) => void;
   onDownload: (path: string) => void;
   onExtract: (path: string) => void;
+  onShare: (path: string) => void;
   onSelectedKeysChange: (keys: string[]) => void;
 }
 
@@ -42,6 +44,7 @@ export default function FileManagerTable({
   onPreview,
   onDownload,
   onExtract,
+  onShare,
   onSelectedKeysChange,
 }: FileManagerTableProps) {
   const getActionMenu = (record: FileEntry) => ({
@@ -57,6 +60,12 @@ export default function FileManagerTable({
         icon: <DownloadOutlined />,
         label: '下载',
         onClick: () => onDownload(record.path),
+      }] : []),
+      ...(!record.is_dir ? [{
+        key: 'share',
+        icon: <LinkOutlined />,
+        label: '生成外链',
+        onClick: () => onShare(record.path),
       }] : []),
       {
         key: 'details',

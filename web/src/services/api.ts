@@ -6,7 +6,7 @@ import type {
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
   ManagedProcess, ProcessWithStatus, ProcessLog, ProcessGroup, ProcessStats, PaginatedData,
-  SystemProcess,
+  SystemProcess, FileShare,
   Notification, SSHLogin, SSHConfig, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
 } from '../types';
@@ -314,9 +314,21 @@ export const auditApi = {
 
   clean: (days?: number) =>
     api.delete<ApiResponse<{ deleted: number }>>('/audit-logs/clean', { params: { days } }),
+};
 
-  verifyIntegrity: () =>
-    api.get<ApiResponse<{ total: number; valid: number; invalid: number }>>('/audit-logs/verify'),
+// File Share API
+export const fileShareApi = {
+  create: (data: { file_path: string; password?: string; expires_at?: string; max_downloads?: number }) =>
+    api.post<ApiResponse<FileShare>>('/file-shares', data),
+
+  list: () =>
+    api.get<ApiResponse<FileShare[]>>('/file-shares'),
+
+  delete: (id: number) =>
+    api.delete<ApiResponse>(`/file-shares/${id}`),
+
+  cleanupExpired: () =>
+    api.post<ApiResponse<{ deleted: number }>>('/file-shares/cleanup'),
 };
 
 // Web Server API
@@ -410,6 +422,18 @@ export const websiteApi = {
 
   applySSL: (serverId: number, id: number, email?: string) =>
     api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/ssl`, { email }),
+
+  build: (serverId: number, id: number) =>
+    api.post<ApiResponse<{ success: boolean; output: string }>>(`/web-servers/${serverId}/websites/${id}/build`),
+
+  startProcess: (serverId: number, id: number) =>
+    api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/process/start`),
+
+  stopProcess: (serverId: number, id: number) =>
+    api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/process/stop`),
+
+  getProcessStatus: (serverId: number, id: number) =>
+    api.get<ApiResponse<{ process_id: number; status: string; managed: boolean; process?: any }>>(`/web-servers/${serverId}/websites/${id}/process`),
 };
 
 // Database Server API

@@ -205,6 +205,11 @@ export interface Website {
   proxy_enabled: boolean;
   proxy_pass: string;
   custom_config: string;
+  config_options: string;
+  process_id: number;
+  build_command: string;
+  start_command: string;
+  runtime_version_id: number;
   access_log: string;
   error_log: string;
   status: string;
@@ -503,6 +508,24 @@ export interface FileSearchResult {
   is_dir: boolean;
   size: number;
   match?: string;
+}
+
+// File Share types
+export interface FileShare {
+  id: number;
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  token: string;
+  password: string;
+  expires_at: string;
+  max_downloads: number;
+  download_count: number;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+  file_exists?: boolean;
+  current_size?: number;
 }
 
 // DB config

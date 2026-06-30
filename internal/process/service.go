@@ -107,16 +107,17 @@ func (s *Service) Get(ctx context.Context, id int64) (*ProcessWithStatus, error)
 
 // Create adds a new process configuration
 func (s *Service) Create(ctx context.Context, req *CreateProcessRequest) (*Process, error) {
-	// Refuse to bind a process to a runtime that's not actually usable.
-	// Without this, the FK lets you save anything that exists in the
-	// runtime_version table, and the failure only surfaces at Start with an
-	// opaque mise error. Mirrors the status check on SetDefault (Issue 07).
-	status, err := s.repo.GetRuntimeVersionStatus(ctx, req.RuntimeVersionID)
-	if err != nil {
-		return nil, fmt.Errorf("validate runtime_version: %w", err)
-	}
-	if status != "installed" {
-		return nil, fmt.Errorf("runtime_version %d is %q, only 'installed' runtimes can be bound", req.RuntimeVersionID, status)
+	// When RuntimeVersionID is 0 (website-linked or system-level process),
+	// skip the runtime status check — the command runs on $PATH directly.
+	// Otherwise, refuse to bind to a runtime that's not actually usable.
+	if req.RuntimeVersionID > 0 {
+		status, err := s.repo.GetRuntimeVersionStatus(ctx, req.RuntimeVersionID)
+		if err != nil {
+			return nil, fmt.Errorf("validate runtime_version: %w", err)
+		}
+		if status != "installed" {
+			return nil, fmt.Errorf("runtime_version %d is %q, only 'installed' runtimes can be bound", req.RuntimeVersionID, status)
+		}
 	}
 
 	autoRestart := true
@@ -255,18 +256,25 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		}
 	}
 
-	// Wrap the user command in `mise exec <lang>@<exact> --` so the child
-	// process resolves binaries via the runtime version pinned in the DB,
-	// regardless of system PATH or what mise's global default is. See
-	// ADR-0002 §4 and Issue 06.
-	miseTool, ok := runtimeenv.MiseToolFor(p.RuntimeLang)
-	if !ok {
-		s.updateStatus(ctx, id, "failed", 0, 0, "unsupported runtime: "+p.RuntimeLang)
-		return fmt.Errorf("unsupported runtime lang %q for process %d", p.RuntimeLang, id)
+	// When RuntimeVersionID is 0 (website-linked or system-level process),
+	// run the command directly on $PATH without mise wrapping. Otherwise,
+	// wrap in `mise exec <lang>@<exact> --` so binaries resolve via the
+	// pinned runtime version (see ADR-0002 §4 and Issue 06).
+	var execCmd string
+	var execArgs []string
+	if p.RuntimeVersionID > 0 {
+		miseTool, ok := runtimeenv.MiseToolFor(p.RuntimeLang)
+		if !ok {
+			s.updateStatus(ctx, id, "failed", 0, 0, "unsupported runtime: "+p.RuntimeLang)
+			return fmt.Errorf("unsupported runtime lang %q for process %d", p.RuntimeLang, id)
+		}
+		execCmd = "/usr/local/bin/mise"
+		execArgs = append([]string{"exec", miseTool + "@" + p.RuntimeExact, "--", p.Command}, args...)
+		opts.Env = append(opts.Env, "MISE_DATA_DIR=/var/lib/easyserver/mise")
+	} else {
+		execCmd = p.Command
+		execArgs = args
 	}
-	execCmd := "/usr/local/bin/mise"
-	execArgs := append([]string{"exec", miseTool + "@" + p.RuntimeExact, "--", p.Command}, args...)
-	opts.Env = append(opts.Env, "MISE_DATA_DIR=/var/lib/easyserver/mise")
 
 	// Start process
 	proc, err := s.executor.Start(ctx, opts, execCmd, execArgs...)

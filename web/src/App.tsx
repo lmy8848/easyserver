@@ -30,6 +30,7 @@ const SSH = lazy(() => import('./pages/SSH'));
 const Container = lazy(() => import('./pages/Container'));
 const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
 const Notifications = lazy(() => import('./pages/Notifications'));
+const FileShares = lazy(() => import('./pages/FileShares'));
 
 const PageLoading = memo(function PageLoading() {
   return (
@@ -91,6 +92,7 @@ function App() {
                 <Route path="containers" element={<Container />} />
                 <Route path="processes" element={<ProcessGuardian />} />
                 <Route path="notifications" element={<Notifications />} />
+                <Route path="file-shares" element={<FileShares />} />
               </Route>
               <Route path="/404" element={<NotFound />} />
               <Route path="*" element={<NotFound />} />

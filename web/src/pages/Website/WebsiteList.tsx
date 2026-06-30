@@ -12,10 +12,11 @@ import {
   UndoOutlined, CodeOutlined, ToolOutlined,
   CheckCircleOutlined, CloseCircleOutlined, FolderOutlined,
 } from '@ant-design/icons';
-import { webServerApi, websiteApi } from '../../services/api';
+import api, { webServerApi, websiteApi } from '../../services/api';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';
 import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './types';
+import type { RuntimeEnvironment } from '../Runtime/types';
 import { getServiceStatusColor, ServiceStatusTag } from '../../utils/status';
 
 interface WebsiteListProps {
@@ -78,6 +79,21 @@ export default function WebsiteList({
   const [sslSite, setSslSite] = useState<Website | null>(null);
   const [sslForm] = Form.useForm();
 
+  // Build output modal
+  const [buildVisible, setBuildVisible] = useState(false);
+  const [buildOutput, setBuildOutput] = useState('');
+  const [buildSuccess, setBuildSuccess] = useState<boolean | null>(null);
+  const [buildLoading, setBuildLoading] = useState(false);
+
+  // Process status tracking
+  const [processStatuses, setProcessStatuses] = useState<Record<number, { status: string; managed: boolean }>>({});
+
+  // Runtime versions for process linking
+  const [runtimeEnvs, setRuntimeEnvs] = useState<RuntimeEnvironment[]>([]);
+
+  // Config options editor
+  const [configOptionsText, setConfigOptionsText] = useState('');
+
   // Directory browser state
   const [dirBrowserVisible, setDirBrowserVisible] = useState(false);
   const [dirBrowserPath, setDirBrowserPath] = useState('/var/www');
@@ -114,10 +130,18 @@ export default function WebsiteList({
     }
   };
 
+  const fetchRuntimeEnvs = async () => {
+    try {
+      const res = await api.get('/runtime');
+      setRuntimeEnvs(res.data?.data?.environments || []);
+    } catch { /* silent */ }
+  };
+
   // Fetch websites on mount
   useEffect(() => {
     fetchWebsites();
     fetchProjectTypes();
+    fetchRuntimeEnvs();
     return () => { if (pathTimerRef.current) clearTimeout(pathTimerRef.current); };
   }, [fetchWebsites]);
 
@@ -169,13 +193,19 @@ export default function WebsiteList({
 
   const handleEditSite = (site: Website) => {
     setEditingSite(site);
+    setConfigOptionsText(site.config_options || '');
     form.setFieldsValue({
       name: site.name,
       domain: site.domain,
       root_path: site.root_path,
       port: site.port,
+      project_type: site.project_type,
+      app_port: site.app_port,
       proxy_enabled: site.proxy_enabled,
       proxy_pass: site.proxy_pass,
+      build_command: site.build_command,
+      start_command: site.start_command,
+      runtime_version_id: site.runtime_version_id || undefined,
       custom_config: site.custom_config,
     });
     setModalVisible(true);
@@ -184,11 +214,16 @@ export default function WebsiteList({
   const handleSubmitSite = async () => {
     try {
       const values = await form.validateFields();
+      const payload = {
+        ...values,
+        config_options: configOptionsText || undefined,
+        runtime_version_id: values.runtime_version_id || 0,
+      };
       if (editingSite) {
-        await websiteApi.update(selectedServer.id, editingSite.id, values);
+        await websiteApi.update(selectedServer.id, editingSite.id, payload);
         message.success('更新成功');
       } else {
-        await websiteApi.create(selectedServer.id, values);
+        await websiteApi.create(selectedServer.id, payload);
         message.success('创建成功');
       }
       setModalVisible(false);
@@ -263,6 +298,67 @@ export default function WebsiteList({
     }
   };
 
+  // Build
+  const handleBuild = async (site: Website) => {
+    setBuildLoading(true);
+    setBuildVisible(true);
+    setBuildOutput('正在编译...');
+    setBuildSuccess(null);
+    try {
+      const res = await websiteApi.build(selectedServer.id, site.id);
+      setBuildOutput(res.data.data?.output || '(无输出)');
+      setBuildSuccess(res.data.data?.success ?? false);
+    } catch (error: unknown) {
+      setBuildOutput((error instanceof Error ? error.message : '编译失败'));
+      setBuildSuccess(false);
+    } finally {
+      setBuildLoading(false);
+    }
+  };
+
+  const handleStartProcess = async (site: Website) => {
+    try {
+      await websiteApi.startProcess(selectedServer.id, site.id);
+      message.success('进程启动请求已发送');
+      setTimeout(fetchProcessStatuses, 2000);
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '启动失败'));
+    }
+  };
+
+  const handleStopProcess = async (site: Website) => {
+    try {
+      await websiteApi.stopProcess(selectedServer.id, site.id);
+      message.success('进程已停止');
+      setTimeout(fetchProcessStatuses, 2000);
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '停止失败'));
+    }
+  };
+
+  const fetchProcessStatuses = async () => {
+    const statuses: Record<number, { status: string; managed: boolean }> = {};
+    for (const site of websites) {
+      if (!site.build_command && !site.start_command) continue;
+      try {
+        const res = await websiteApi.getProcessStatus(selectedServer.id, site.id);
+        const data = res.data.data;
+        if (data) {
+          statuses[site.id] = { status: data.status || 'stopped', managed: data.managed };
+        }
+      } catch {
+        // ignore
+      }
+    }
+    setProcessStatuses(statuses);
+  };
+
+  useEffect(() => {
+    if (websites.length > 0) {
+      fetchProcessStatuses();
+    }
+  }, [websites.length]);
+
   // Site table columns
   const siteColumns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
@@ -282,16 +378,28 @@ export default function WebsiteList({
     },
     { title: '根目录', dataIndex: 'root_path', key: 'root_path', ellipsis: true },
     {
-      title: 'SSL', key: 'ssl', width: 80,
+      title: 'SSL', key: 'ssl', width: 60,
       render: (_: unknown, r: Website) => r.ssl_enabled
         ? <Tag icon={<SafetyOutlined />} color="success">已启用</Tag>
         : <Tag color="default">未启用</Tag>,
     },
     {
-      title: '反代', key: 'proxy', width: 80,
+      title: '反代', key: 'proxy', width: 60,
       render: (_: unknown, r: Website) => r.proxy_enabled
         ? <Tooltip title={r.proxy_pass}><Tag color="blue">已启用</Tag></Tooltip>
         : <Tag color="default">关闭</Tag>,
+    },
+    {
+      title: '进程', key: 'process', width: 80,
+      render: (_: unknown, r: Website) => {
+        if (!r.build_command && !r.start_command) return <Tag color="default">未配置</Tag>;
+        const ps = processStatuses[r.id];
+        if (!ps) return <Tag color="default">查询中...</Tag>;
+        return ps.status === 'running'
+          ? <Tag color="success">运行中</Tag>
+          : ps.status === 'starting' ? <Tag color="processing">启动中</Tag>
+          : <Tag color="error">已停止</Tag>;
+      },
     },
     {
       title: '状态', key: 'status', width: 80,
@@ -300,7 +408,7 @@ export default function WebsiteList({
         : <Tag color="error">已禁用</Tag>,
     },
     {
-      title: '操作', key: 'action', width: 320,
+      title: '操作', key: 'action', width: 380,
       render: (_: unknown, record: Website) => (
         <Space size="small" wrap>
           <Tooltip title="编辑">
@@ -309,6 +417,21 @@ export default function WebsiteList({
           <Tooltip title={record.status === 'active' ? '禁用' : '启用'}>
             <Button type="link" size="small" icon={record.status === 'active' ? <PauseCircleOutlined /> : <PlayCircleOutlined />} onClick={() => handleToggleSite(record)} />
           </Tooltip>
+          {record.build_command && (
+            <Tooltip title="编译">
+              <Button type="link" size="small" icon={<CodeOutlined />} onClick={() => handleBuild(record)} />
+            </Tooltip>
+          )}
+          {record.start_command && (
+            <>
+              <Tooltip title="启动进程">
+                <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => handleStartProcess(record)} />
+              </Tooltip>
+              <Tooltip title="停止进程">
+                <Button type="link" size="small" icon={<StopOutlined />} onClick={() => handleStopProcess(record)} />
+              </Tooltip>
+            </>
+          )}
           <Tooltip title="访问日志">
             <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => showLogs(record, 'access')} />
           </Tooltip>
@@ -526,6 +649,37 @@ export default function WebsiteList({
               ) : null;
             }}
           </Form.Item>
+          <Form.Item name="build_command" label="编译命令" extra="创建/编译项目的命令（如 npm run build、mvn package），留空跳过">
+            <Input placeholder="如：npm run build" />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.project_type !== cur.project_type}>
+            {({ getFieldValue }) => {
+              const pt = getFieldValue('project_type');
+              if (!pt || pt === 'static') return null;
+              return (
+                <Form.Item name="start_command" label="启动命令" extra="启动应用进程的命令（如 npm start、java -jar app.jar）">
+                  <Input placeholder={`如：${pt === 'nodejs' ? 'npm start' : pt === 'java' ? 'java -jar app.jar' : pt === 'python' ? 'python app.py' : ''}`} />
+                </Form.Item>
+              );
+            }}
+          </Form.Item>
+          <Form.Item name="runtime_version_id" label="运行时版本" extra="选择项目使用的运行时版本（如 Node.js 20.x），留空则使用系统 PATH">
+            <Select allowClear placeholder="使用系统 PATH" style={{ width: '100%' }}>
+              {runtimeEnvs.filter(e => e.status === 'installed').map(env => (
+                <Select.Option key={env.id} value={env.id}>
+                  {env.name} {env.version}{env.is_default ? ' (默认)' : ''}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item label="Nginx 配置选项 (JSON)" extra="额外 Nginx 配置项，如 https、缓存等（可选）">
+            <Input.TextArea
+              rows={3}
+              value={configOptionsText}
+              onChange={e => setConfigOptionsText(e.target.value)}
+              placeholder={'{\n  "ssl_redirect": true,\n  "cache_enabled": true\n}'}
+            />
+          </Form.Item>
           <Form.Item name="custom_config" label="自定义配置（留空使用默认模板）">
             <Input.TextArea rows={4} placeholder="留空则根据项目类型自动生成配置" />
           </Form.Item>
@@ -572,6 +726,32 @@ export default function WebsiteList({
         </Form>
         {sslSite?.ssl_enabled && (
           <Tag color="success">SSL 已启用: {sslSite.ssl_cert_path}</Tag>
+        )}
+      </Modal>
+
+      {/* Build Output Modal */}
+      <Modal
+        title="编译输出"
+        open={buildVisible}
+        onCancel={() => setBuildVisible(false)}
+        footer={
+          <Space>
+            {buildSuccess === true && <Tag icon={<CheckCircleOutlined />} color="success">编译成功</Tag>}
+            {buildSuccess === false && <Tag icon={<CloseCircleOutlined />} color="error">编译失败</Tag>}
+            <Button onClick={() => setBuildVisible(false)}>关闭</Button>
+          </Space>
+        }
+        width={800}
+      >
+        {buildLoading ? (
+          <p>正在编译...</p>
+        ) : (
+          <Input.TextArea
+            value={buildOutput}
+            readOnly
+            rows={20}
+            style={{ fontFamily: 'monospace', fontSize: 12 }}
+          />
         )}
       </Modal>
 

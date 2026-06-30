@@ -20,6 +20,7 @@ import (
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
 	"easyserver/internal/filemanager"
+	"easyserver/internal/fileshare"
 	"easyserver/internal/firewall"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
@@ -334,6 +335,14 @@ func wire(cfg *config.Config) (*appServices, error) {
 		return nil, fmt.Errorf("init file manager: %w", err)
 	}
 	s.FileManager = fileManager
+
+	// File share repository + startup cleanup
+	s.FileShareRepo = fileshare.NewSQLiteShareRepository(db)
+	if deleted, err := s.FileShareRepo.DeleteExpired(ctx); err != nil {
+		log.Printf("ERROR: failed to cleanup expired file shares on startup: %v", err)
+	} else if deleted > 0 {
+		log.Printf("Cleaned up %d expired file shares on startup", deleted)
+	}
 
 	// Cloud service (optional)
 	if cfg.TencentCloud.Enabled {

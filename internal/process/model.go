@@ -80,7 +80,7 @@ type CreateProcessRequest struct {
 	AutoStart        *bool  `json:"auto_start"`
 	LogFile          string `json:"log_file"`
 	GroupID          int64  `json:"group_id"`
-	RuntimeVersionID int64  `json:"runtime_version_id" binding:"required,min=1"`
+	RuntimeVersionID int64  `json:"runtime_version_id"` // 0 = no runtime binding (e.g. website-linked)
 }
 
 // UpdateProcessRequest is the request body for updating a process

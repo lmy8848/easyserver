@@ -22,6 +22,9 @@ type WebsiteRepository interface {
 	Delete(ctx context.Context, webServerID, id int64) error
 	UpdateStatus(ctx context.Context, webServerID, id int64, status string) error
 	UpdateSSL(ctx context.Context, id int64, certPath, keyPath string) error
+	UpdateProcessID(ctx context.Context, id int64, processID int64) error
 	CountByDomain(ctx context.Context, domain string) (int, error)
 	CountByDomainExcludingID(ctx context.Context, domain string, excludeID int64) (int, error)
+	CountByPort(ctx context.Context, webServerID int64, port int) (int, error)
+	CountByPortExcludingID(ctx context.Context, webServerID int64, port int, excludeID int64) (int, error)
 }

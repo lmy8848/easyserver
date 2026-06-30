@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Modal, message } from 'antd';
-import { fileApi } from '../../services/api';
+import { Modal, message, Input, Form, InputNumber } from 'antd';
+import { fileApi, fileShareApi } from '../../services/api';
 import type { FileEntry } from '../../types';
 import { isValidPath } from './types';
 import FileManagerHeader from './FileManagerHeader';
@@ -47,6 +47,14 @@ export default function FileManager() {
   const [chmodVisible, setChmodVisible] = useState(false);
   const [chmodPath, setChmodPath] = useState('');
   const [chmodMode, setChmodMode] = useState('644');
+
+  // 文件外链
+  const [shareConfigVisible, setShareConfigVisible] = useState(false);
+  const [shareConfigPath, setShareConfigPath] = useState('');
+  const [shareConfigLoading, setShareConfigLoading] = useState(false);
+  const [shareForm] = Form.useForm();
+  const [shareResultVisible, setShareResultVisible] = useState(false);
+  const [shareLink, setShareLink] = useState('');
 
   // 文件详情
   const [detailVisible, setDetailVisible] = useState(false);
@@ -336,6 +344,43 @@ export default function FileManager() {
     }
   };
 
+  const handleShare = (path: string) => {
+    setShareConfigPath(path);
+    shareForm.resetFields();
+    setShareConfigVisible(true);
+  };
+
+  const handleShareCreate = async () => {
+    try {
+      const values = await shareForm.validateFields();
+      setShareConfigLoading(true);
+      const password = values.password || '';
+      const res = await fileShareApi.create({
+        file_path: shareConfigPath,
+        password: password,
+        expires_at: values.expires_at || '',
+        max_downloads: values.max_downloads || 0,
+      });
+      const share = res.data.data;
+      const base = `${window.location.origin}/share/${share.token}`;
+      setShareLink(password ? `${base}?password=${encodeURIComponent(password)}` : base);
+      setShareConfigVisible(false);
+      setShareResultVisible(true);
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'errorFields' in error) {
+        return;
+      }
+      const errMsg = (error instanceof Error ? error.message : null)
+        || (error && typeof error === 'object' && 'response' in error
+          ? String((error as any).response?.data?.message || '')
+          : '')
+        || '生成外链失败';
+      message.error(errMsg);
+    } finally {
+      setShareConfigLoading(false);
+    }
+  };
+
   const showDetails = async (path: string) => {
     try {
       const res = await fileApi.getDetails(toRelativePath(path));
@@ -465,6 +510,7 @@ export default function FileManager() {
           onPreview={showPreview}
           onDownload={handleDownload}
           onExtract={handleExtract}
+          onShare={handleShare}
           onSelectedKeysChange={setSelectedKeys}
         />
       </FileManagerHeader>
@@ -477,6 +523,74 @@ export default function FileManager() {
         onSave={handleSave}
         onContentChange={setEditContent}
       />
+
+      <Modal
+        title="生成文件外链"
+        open={shareConfigVisible}
+        onCancel={() => setShareConfigVisible(false)}
+        onOk={handleShareCreate}
+        okText="生成"
+        confirmLoading={shareConfigLoading}
+        cancelText="取消"
+        width={480}
+      >
+        <Form form={shareForm} layout="vertical">
+          <Form.Item label="文件路径">
+            <Input value={shareConfigPath} disabled />
+          </Form.Item>
+          <Form.Item name="expires_at" label="过期时间"
+            extra="留空为永久有效。支持：1h, 1d, 7d 或具体时间 2026-07-01 12:00:00"
+          >
+            <Input placeholder="留空、1h、7d 或 2026-07-01 12:00:00" />
+          </Form.Item>
+          <Form.Item name="max_downloads" label="最大下载次数" extra="0 表示不限制">
+            <InputNumber min={0} max={100000} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="password" label="访问密码（可选）">
+            <Input.Password placeholder="留空表示不需要密码" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="外链生成成功"
+        open={shareResultVisible}
+        onCancel={() => setShareResultVisible(false)}
+        footer={null}
+        width={500}
+      >
+        <p>文件分享链接已生成，复制链接发送给他人即可下载：</p>
+        <Input
+          value={shareLink}
+          readOnly
+          style={{ fontFamily: 'monospace', marginBottom: 12 }}
+          addonAfter={
+            <span
+              style={{ cursor: 'pointer', color: '#1890ff' }}
+              onClick={() => {
+                navigator.clipboard.writeText(shareLink).then(() => {
+                  message.success('已复制');
+                }).catch(() => {
+                  const ta = document.createElement('textarea');
+                  ta.value = shareLink;
+                  document.body.appendChild(ta);
+                  ta.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(ta);
+                  message.success('已复制');
+                });
+              }}
+            >
+              复制
+            </span>
+          }
+        />
+        {shareLink.includes('?password=') && (
+          <p style={{ color: '#faad14', fontSize: 13, marginTop: 8 }}>
+            ⚠ 该外链设置了密码，分享时请将完整链接（含 ?password=xxx）发送给对方
+          </p>
+        )}
+      </Modal>
 
       <MkdirModal
         visible={mkdirVisible}
