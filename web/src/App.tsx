@@ -31,6 +31,7 @@ const Container = lazy(() => import('./pages/Container'));
 const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const FileShares = lazy(() => import('./pages/FileShares'));
+const PortMonitor = lazy(() => import('./pages/PortMonitor'));
 
 const PageLoading = memo(function PageLoading() {
   return (
@@ -91,6 +92,7 @@ function App() {
                 <Route path="ssh" element={<SSH />} />
                 <Route path="containers" element={<Container />} />
                 <Route path="processes" element={<ProcessGuardian />} />
+                <Route path="ports" element={<PortMonitor />} />
                 <Route path="notifications" element={<Notifications />} />
                 <Route path="file-shares" element={<FileShares />} />
               </Route>
