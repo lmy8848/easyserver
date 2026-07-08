@@ -544,9 +544,16 @@ export interface ParamMeta {
   default: string;
 }
 
+// TLS certificate info parsed from the configured cert
+export interface TLSCertInfo {
+  domain: string;
+  issuer: string;
+  expires_at: string;
+}
+
 // Settings
 export interface AppSettings {
-  server: { port: number; host: string; serve_frontend: boolean; tls_enabled: boolean; assets_rate_limit: number; assets_rate_interval: string };
+  server: { port: number; host: string; serve_frontend: boolean; tls: { enabled: boolean; cert_info: TLSCertInfo | null }; domain: string; redirect_mode: string; www_handling: string; max_upload_size: number; assets_rate_limit: number; assets_rate_interval: string };
   auth: { session_timeout: string; idle_timeout: string; max_login_attempts: number; lockout_duration: string; rate_limit: number; rate_interval: string; login_rate_limit: number; login_rate_interval: string };
   monitor: { history_retention: string; collect_interval: string };
   database: { path: string };

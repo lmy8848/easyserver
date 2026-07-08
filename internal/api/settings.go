@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"net/url"
@@ -90,12 +93,19 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 
 	Success(c, gin.H{
 		"server": gin.H{
-			"port":                 h.cfg.Server.Port,
-			"host":                 h.cfg.Server.Host,
-			"serve_frontend":       h.cfg.Server.ServeFrontend,
-			"tls_enabled":          h.cfg.Server.TLS.Enabled,
+			"port":           h.cfg.Server.Port,
+			"host":           h.cfg.Server.Host,
+			"serve_frontend": h.cfg.Server.ServeFrontend,
+			"tls": gin.H{
+				"enabled":   h.cfg.Server.TLS.Enabled,
+				"cert_info": certInfoFromConfig(h.cfg),
+			},
+			"domain":               h.cfg.Server.Domain,
+			"redirect_mode":        h.cfg.Server.RedirectMode,
+			"www_handling":         h.cfg.Server.WwwHandling,
 			"assets_rate_limit":    h.cfg.Server.AssetsRateLimit,
 			"assets_rate_interval": h.cfg.Server.AssetsRateInterval.String(),
+			"max_upload_size":      h.cfg.Server.MaxUploadSize,
 		},
 		"auth": gin.H{
 			"session_timeout":     h.cfg.Auth.SessionTimeout.String(),
@@ -201,6 +211,10 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		Port               *int    `json:"port"`
 		Host               *string `json:"host"`
 		ServeFrontend      *bool   `json:"serve_frontend"`
+		Domain             *string `json:"domain"`
+		RedirectMode       *string `json:"redirect_mode"`
+		WwwHandling        *string `json:"www_handling"`
+		MaxUploadSize      *int64  `json:"max_upload_size"`
 		AssetsRateLimit    *int    `json:"assets_rate_limit"`
 		AssetsRateInterval *string `json:"assets_rate_interval"`
 	}
@@ -250,6 +264,26 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		h.cfg.Server.ServeFrontend = *req.ServeFrontend
 		requiresRestart = true
 	}
+	if req.Domain != nil {
+		h.cfg.Server.Domain = strings.TrimSpace(*req.Domain)
+	}
+	if req.RedirectMode != nil {
+		h.cfg.Server.RedirectMode = *req.RedirectMode
+	}
+	if req.WwwHandling != nil {
+		h.cfg.Server.WwwHandling = *req.WwwHandling
+	}
+	if req.MaxUploadSize != nil {
+		if *req.MaxUploadSize < 0 {
+			c.Error(ErrBadRequest.WithMessage("max_upload_size 不能为负数"))
+			return
+		}
+		if *req.MaxUploadSize > 4<<30 { // 4 GB max
+			c.Error(ErrBadRequest.WithMessage("max_upload_size 不能超过 4GB"))
+			return
+		}
+		h.cfg.Server.MaxUploadSize = *req.MaxUploadSize
+	}
 	if req.AssetsRateLimit != nil {
 		if *req.AssetsRateLimit < 100 || *req.AssetsRateLimit > 100000 {
 			c.Error(ErrBadRequest.WithMessage("assets_rate_limit 必须在 100 到 100000 之间"))
@@ -287,6 +321,155 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		"message":          "服务器配置已更新",
 		"requires_restart": requiresRestart,
 	})
+}
+
+// tlsCertInfo holds parsed certificate metadata for API responses.
+type tlsCertInfo struct {
+	Domain    string `json:"domain"`
+	Issuer    string `json:"issuer"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// UpdateTLSConfig updates TLS certificate configuration.
+// Accepts PEM-encoded cert/key content, validates the pair, writes to disk,
+// and updates the config file. Requires restart to take effect.
+func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) {
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
+
+	var req struct {
+		Enabled     *bool   `json:"enabled"`
+		CertContent *string `json:"cert_content"`
+		KeyContent  *string `json:"key_content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+
+	middleware.AuditSummary(c, "更新 TLS 配置")
+
+	if req.Enabled == nil {
+		c.Error(ErrBadRequest.WithMessage("缺少 enabled 字段"))
+		return
+	}
+
+	// If disabling, just update the flag
+	if !*req.Enabled {
+		h.cfg.Server.TLS.Enabled = false
+		if err := h.saveConfig(); err != nil {
+			c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
+			return
+		}
+		Success(c, gin.H{
+			"message":          "TLS 已禁用",
+			"requires_restart": true,
+			"cert_info":        nil,
+		})
+		return
+	}
+
+	// Enabling TLS — cert and key content are required
+	if req.CertContent == nil || req.KeyContent == nil ||
+		strings.TrimSpace(*req.CertContent) == "" || strings.TrimSpace(*req.KeyContent) == "" {
+		c.Error(ErrBadRequest.WithMessage("启用 TLS 需要提供证书和私钥内容"))
+		return
+	}
+
+	// Validate PEM format and that cert matches key
+	certPEM := []byte(strings.TrimSpace(*req.CertContent))
+	keyPEM := []byte(strings.TrimSpace(*req.KeyContent))
+
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("证书与私钥不配对或格式无效: %v", err)))
+		return
+	}
+
+	// Determine cert storage directory (next to config file)
+	configDir := filepath.Dir(h.configPath)
+	certDir := filepath.Join(configDir, "certs")
+	if err := os.MkdirAll(certDir, 0700); err != nil {
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("创建证书目录失败: %v", err)))
+		return
+	}
+
+	certPath := filepath.Join(certDir, "server.crt")
+	keyPath := filepath.Join(certDir, "server.key")
+
+	// Atomic write: write to temp file then rename
+	certTmp := certPath + ".tmp"
+	if err := os.WriteFile(certTmp, certPEM, 0644); err != nil {
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("写入证书文件失败: %v", err)))
+		return
+	}
+	if err := os.Rename(certTmp, certPath); err != nil {
+		os.Remove(certTmp)
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("更新证书文件失败: %v", err)))
+		return
+	}
+
+	keyTmp := keyPath + ".tmp"
+	if err := os.WriteFile(keyTmp, keyPEM, 0600); err != nil {
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("写入私钥文件失败: %v", err)))
+		return
+	}
+	if err := os.Rename(keyTmp, keyPath); err != nil {
+		os.Remove(keyTmp)
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("更新私钥文件失败: %v", err)))
+		return
+	}
+
+	// Update config
+	h.cfg.Server.TLS.Enabled = true
+	h.cfg.Server.TLS.CertFile = certPath
+	h.cfg.Server.TLS.KeyFile = keyPath
+
+	if err := h.saveConfig(); err != nil {
+		c.Error(ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
+		return
+	}
+
+	// Parse cert info for response
+	certInfo := parseCertInfo(certPEM)
+
+	Success(c, gin.H{
+		"message":          "TLS 证书已更新，需要重启面板生效",
+		"requires_restart": true,
+		"cert_info":        certInfo,
+	})
+}
+
+// parseCertInfo extracts domain, issuer, and expiry from a PEM-encoded certificate.
+func parseCertInfo(certPEM []byte) *tlsCertInfo {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil
+	}
+	domain := cert.Subject.CommonName
+	if len(cert.DNSNames) > 0 {
+		domain = cert.DNSNames[0]
+	}
+	return &tlsCertInfo{
+		Domain:    domain,
+		Issuer:    cert.Issuer.CommonName,
+		ExpiresAt: cert.NotAfter.Format(time.RFC3339),
+	}
+}
+
+// certInfoFromConfig loads and parses the currently configured TLS certificate.
+func certInfoFromConfig(cfg *config.Config) *tlsCertInfo {
+	if !cfg.Server.TLS.Enabled || cfg.Server.TLS.CertFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(cfg.Server.TLS.CertFile)
+	if err != nil {
+		return nil
+	}
+	return parseCertInfo(data)
 }
 
 // UpdateAuthConfig updates authentication configuration
@@ -708,9 +891,18 @@ func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
 	})
 }
 
-// RestartPanel restarts the backend service
+// RestartPanel restarts the backend service.
+// When force=true (e.g. port change), the listener is closed so the child
+// process creates a fresh one on the new address.
 func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	middleware.AuditSummary(c, "重启面板")
+
+	var req struct {
+		Force *bool `json:"force"`
+	}
+	_ = c.ShouldBindJSON(&req) // optional body, ignore parse errors
+	force := req.Force != nil && *req.Force
+
 	// Validate TLS configuration before restart
 	if h.cfg.Server.TLS.Enabled {
 		if h.cfg.Server.TLS.CertFile == "" || h.cfg.Server.TLS.KeyFile == "" {
@@ -732,7 +924,7 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	// Return success first, then restart
 	infra.Go(func() {
 		time.Sleep(1 * time.Second)
-		log.Println("settings: restarting panel...")
+		log.Printf("settings: restarting panel (force=%v)...", force)
 
 		// Resolve the actual executable path
 		execPath, err := os.Executable()
@@ -746,7 +938,28 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 			return
 		}
 
-		// Fork a child process that inherits our TCP listener FD.
+		if force {
+			// Force mode: close the listener so the child re-binds on the
+			// new port/host from config. No FD inheritance.
+			CloseListener()
+			args := []string{execPath, "-config", h.configPath}
+			if h.cfg.Server.DevMode {
+				args = append(args, "-dev")
+			}
+			child, err := os.StartProcess(execPath, args, &os.ProcAttr{
+				Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+				Env:   os.Environ(),
+			})
+			if err != nil {
+				log.Printf("settings: failed to fork child process (force): %v", err)
+				return
+			}
+			log.Printf("settings: forked child PID %d (force restart, new listener), exiting parent", child.Pid)
+			os.Exit(0)
+			return
+		}
+
+		// Graceful mode: fork a child process that inherits our TCP listener FD.
 		// Zero-downtime restart — no port contention, no polling.
 		listenerFile := DupListenerFile()
 		if listenerFile == nil {
@@ -782,6 +995,7 @@ func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, conf
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)
 	protected.PUT("/settings/server", handler.UpdateServerConfig)
+	protected.PUT("/settings/tls", handler.UpdateTLSConfig)
 	protected.PUT("/settings/auth", handler.UpdateAuthConfig)
 	protected.PUT("/settings/monitor", handler.UpdateMonitorConfig)
 	protected.PUT("/settings/audit", handler.UpdateAuditConfig)

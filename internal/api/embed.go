@@ -84,19 +84,29 @@ func ServeWeb(e *gin.Engine) {
 		return
 	}
 
+	// htmlNoCache sets Cache-Control to prevent CDN/browser caching of HTML.
+	htmlNoCache := func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+	}
+
 	// Serve the cached index.html (with nonce injected) for root
 	if len(cachedIndexHTML) > 0 {
 		e.GET("/", func(c *gin.Context) {
+			htmlNoCache(c)
 			c.Data(http.StatusOK, "text/html; charset=utf-8", cachedIndexHTML)
 		})
 	} else {
 		e.GET("/", func(c *gin.Context) {
+			htmlNoCache(c)
 			c.FileFromFS("/", http.FS(webFS))
 		})
 	}
 
-	// Serve static assets (JS, CSS, images, etc.)
+	// Serve static assets (JS/CSS with hash) - cache for 1 year
 	e.GET("/assets/*filepath", func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 		c.FileFromFS("/assets/"+c.Param("filepath"), http.FS(webFS))
 	})
 
@@ -108,11 +118,16 @@ func ServeWeb(e *gin.Engine) {
 			// Check if file exists
 			_, err := webFS.Open(strings.TrimPrefix(path, "/"))
 			if err == nil {
+				// Non-HTML assets: cache; HTML: no cache
+				if strings.HasSuffix(path, ".html") {
+					htmlNoCache(c)
+				}
 				c.FileFromFS(path, http.FS(webFS))
 				return
 			}
 
 			// For SPA routing, serve the cached index.html with nonce
+			htmlNoCache(c)
 			if len(cachedIndexHTML) > 0 {
 				c.Data(http.StatusOK, "text/html; charset=utf-8", cachedIndexHTML)
 			} else {

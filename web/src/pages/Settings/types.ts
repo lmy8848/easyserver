@@ -1,9 +1,19 @@
+export interface TLSCertInfo {
+  domain: string;
+  issuer: string;
+  expires_at: string;
+}
+
 export interface Settings {
   server: {
     port: number;
     host: string;
     serve_frontend: boolean;
-    tls_enabled: boolean;
+    tls: { enabled: boolean; cert_info: TLSCertInfo | null };
+    domain: string;
+    redirect_mode: string;
+    www_handling: string;
+    max_upload_size: number;
     assets_rate_limit: number;
     assets_rate_interval: string;
   };

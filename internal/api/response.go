@@ -67,6 +67,17 @@ func DupListenerFile() *os.File {
 	return f
 }
 
+// CloseListener closes the global listener so the next process can bind a
+// new one (e.g. after a port change). Safe to call multiple times.
+func CloseListener() {
+	globalListener.mu.Lock()
+	defer globalListener.mu.Unlock()
+	if globalListener.ln != nil {
+		globalListener.ln.Close()
+		globalListener.ln = nil
+	}
+}
+
 // 错误码常量
 const (
 	CodeSuccess       = apperror.CodeSuccess

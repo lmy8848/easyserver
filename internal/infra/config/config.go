@@ -32,9 +32,13 @@ type ServerConfig struct {
 	ServeFrontend      bool          `yaml:"serve_frontend"`
 	AllowedOrigins     []string      `yaml:"allowed_origins"`
 	DevMode            bool          `yaml:"dev_mode"`
+	Domain             string        `yaml:"domain"`
+	RedirectMode       string        `yaml:"redirect_mode"` // "off" | "ip_only" | "non_matching"
+	WwwHandling        string        `yaml:"www_handling"`  // "off" | "force_www" | "remove_www"
 	TLS                TLSConfig     `yaml:"tls"`
 	AssetsRateLimit    int           `yaml:"assets_rate_limit"`
 	AssetsRateInterval time.Duration `yaml:"assets_rate_interval"`
+	MaxUploadSize      int64         `yaml:"max_upload_size"` // bytes, 0 = use default (512MB)
 }
 
 type TLSConfig struct {

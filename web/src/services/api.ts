@@ -15,7 +15,6 @@ const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
   headers: {
-    'Content-Type': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
   },
 });
@@ -40,6 +39,13 @@ api.interceptors.request.use(
 // Response interceptor - handle errors
 api.interceptors.response.use(
   (response) => {
+    // Log all upload responses for debugging
+    if (response.config.url?.includes('/upload')) {
+      console.log('[API Response] URL:', response.config.url);
+      console.log('[API Response] Status:', response.status, response.statusText);
+      console.log('[API Response] Headers:', response.headers);
+      console.log('[API Response] Data:', response.data);
+    }
     return response;
   },
   (error) => {
@@ -153,6 +159,9 @@ export const serviceApi = {
 };
 
 // File API
+const UPLOAD_TIMEOUT = 10 * 60 * 1000; // 10 minutes for large files
+const UPLOAD_MAX_RETRIES = 2;
+
 export const fileApi = {
   list: (path: string) =>
     api.get<ApiResponse<{ path: string; parent: string; entries: FileEntry[] }>>('/files', { params: { path } }),
@@ -160,13 +169,40 @@ export const fileApi = {
   mkdir: (path: string) =>
     api.post<ApiResponse>('/files/mkdir', { path }),
 
-  upload: (file: File, path: string) => {
+  upload: (file: File, path: string, onProgress?: (percent: number) => void) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('path', path);
-    return api.post<ApiResponse>('/files/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    console.log('[API Upload] File:', { name: file.name, size: file.size, type: file.type });
+    console.log('[API Upload] Path:', path);
+
+    const doUpload = (attempt: number): Promise<any> => {
+      if (attempt > 0) {
+        console.log(`[API Upload] Retry attempt ${attempt}/${UPLOAD_MAX_RETRIES}`);
+      }
+      return api.post<ApiResponse>('/files/upload', formData, {
+        timeout: UPLOAD_TIMEOUT,
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            onProgress(percent);
+          }
+        },
+      }).catch((error) => {
+        // Retry on network/timeout errors, not on 4xx/5xx responses
+        const isNetworkError = !error.response && (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message?.includes('timeout') || error.message?.includes('Network Error'));
+        if (isNetworkError && attempt < UPLOAD_MAX_RETRIES) {
+          console.log(`[API Upload] Network error, will retry: ${error.message}`);
+          // Reset progress for retry
+          if (onProgress) onProgress(0);
+          return new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)))
+            .then(() => doUpload(attempt + 1));
+        }
+        throw error;
+      });
+    };
+
+    return doUpload(0);
   },
 
   download: (path: string) =>
@@ -260,6 +296,9 @@ export const cloudApi = {
 
 // System API
 export const systemApi = {
+  getListeningPorts: () =>
+    api.get<ApiResponse<{ ports: Array<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>; total: number }>>('/system/ports'),
+
   getSSHLogins: (limit?: number) =>
     api.get<ApiResponse<SSHLogin[]>>('/system/ssh-logins', { params: { limit } }),
 
@@ -722,8 +761,11 @@ export const settingsApi = {
   getSystem: () =>
     api.get<ApiResponse<{ version: string }>>('/settings/system'),
 
-  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean; assets_rate_limit?: number; assets_rate_interval?: string }) =>
+  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean; domain?: string; redirect_mode?: string; www_handling?: string; max_upload_size?: number; assets_rate_limit?: number; assets_rate_interval?: string }) =>
     api.put<ApiResponse<{ requires_restart: boolean }>>('/settings/server', data),
+
+  updateTLS: (data: { enabled: boolean; cert_content?: string; key_content?: string }) =>
+    api.put<ApiResponse<{ requires_restart: boolean; cert_info: { domain: string; issuer: string; expires_at: string } | null }>>('/settings/tls', data),
 
   updateAuth: (data: { session_timeout?: string; idle_timeout?: string; max_login_attempts?: number; lockout_duration?: string; rate_limit?: number; rate_interval?: string; login_rate_limit?: number; login_rate_interval?: string }) =>
     api.put<ApiResponse>('/settings/auth', data),
@@ -740,8 +782,8 @@ export const settingsApi = {
   testCloud: () =>
     api.post<ApiResponse<{ message: string; instance_count: number }>>('/settings/cloud/test'),
 
-  restart: () =>
-    api.post<ApiResponse>('/settings/restart'),
+  restart: (force?: boolean) =>
+    api.post<ApiResponse>('/settings/restart', force ? { force: true } : undefined),
 
   updateNotify: (data: { enabled?: boolean; webhook_url?: string }) =>
     api.put<ApiResponse>('/settings/notify', data),
