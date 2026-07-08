@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Modal, message, Input, Form, InputNumber } from 'antd';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Modal, message, Input, Form, InputNumber, Progress, Spin, Button } from 'antd';
 import { fileApi, fileShareApi } from '../../services/api';
 import type { FileEntry } from '../../types';
 import { isValidPath } from './types';
@@ -16,6 +16,32 @@ export default function FileManager() {
   const [currentPath, setCurrentPath] = useState<string>('');
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Drag-and-drop upload state
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<{ name: string; progress: number; status: 'pending' | 'uploading' | 'done' | 'error'; error?: string }[]>([]);
+  const uploadQueueRef = useRef(uploadQueue);
+  useEffect(() => { uploadQueueRef.current = uploadQueue; }, [uploadQueue]);
+
+  // Overwrite confirmation state
+  const [overwriteVisible, setOverwriteVisible] = useState(false);
+  const [overwriteConflicts, setOverwriteConflicts] = useState<string[]>([]);
+  const overwriteResolveRef = useRef<((v: boolean) => void) | null>(null);
+
+  // Show overwrite confirmation, returns Promise<boolean> (true = overwrite all)
+  const confirmOverwrite = useCallback((conflicts: string[]): Promise<boolean> => {
+    return new Promise((resolve) => {
+      overwriteResolveRef.current = resolve;
+      setOverwriteConflicts(conflicts);
+      setOverwriteVisible(true);
+    });
+  }, []);
+
+  const handleOverwriteDecision = useCallback((overwrite: boolean) => {
+    setOverwriteVisible(false);
+    overwriteResolveRef.current?.(overwrite);
+    overwriteResolveRef.current = null;
+  }, []);
 
   // 编辑文件
   const [editVisible, setEditVisible] = useState(false);
@@ -442,11 +468,129 @@ export default function FileManager() {
   };
 
   const handleUpload = async (file: File) => {
+    // Check for conflict
+    const existingNames = new Set(files.map(f => f.name));
+    if (existingNames.has(file.name)) {
+      const overwrite = await confirmOverwrite([file.name]);
+      if (!overwrite) {
+        message.info('已跳过重复文件');
+        return;
+      }
+    }
     await fileApi.upload(file, toRelativePath(currentPath));
     message.success('上传成功');
     setLoading(true);
     fetchFiles(currentPath);
   };
+
+  // Drag-and-drop upload
+  const uploadFiles = useCallback(async (fileList: FileList | File[]) => {
+    let fileArray = Array.from(fileList);
+    if (fileArray.length === 0) return;
+
+    console.log('[Upload] Files to upload:', fileArray.length, fileArray.map(f => ({ name: f.name, size: f.size, type: f.type })));
+
+    // Check for conflicts with existing files (use state files, not param)
+    const existingNames = new Set(files.map(f => f.name));
+    const conflicts = fileArray.filter(f => existingNames.has(f.name)).map(f => f.name);
+    if (conflicts.length > 0) {
+      const overwrite = await confirmOverwrite(conflicts);
+      if (!overwrite) {
+        // Skip conflicting files
+        const conflictSet = new Set(conflicts);
+        fileArray = fileArray.filter(f => !conflictSet.has(f.name));
+        if (fileArray.length === 0) {
+          message.info('已跳过所有重复文件');
+          return;
+        }
+      }
+    }
+
+    // Initialize queue
+    const queue = fileArray.map(f => ({ name: f.name, progress: 0, status: 'pending' as const }));
+    setUploadQueue(queue);
+
+    const relPath = toRelativePath(currentPath);
+    let successCount = 0;
+
+    for (let i = 0; i < fileArray.length; i++) {
+      // Update status to uploading
+      setUploadQueue(prev => prev.map((item, idx) =>
+        idx === i ? { ...item, status: 'uploading' as const } : item
+      ));
+
+      try {
+        const f = fileArray[i];
+        if (!f) continue;
+        await fileApi.upload(f, relPath, (percent) => {
+          setUploadQueue(prev => prev.map((item, idx) =>
+            idx === i ? { ...item, progress: percent } : item
+          ));
+        });
+        // Update progress to 100%
+        setUploadQueue(prev => prev.map((item, idx) =>
+          idx === i ? { ...item, progress: 100, status: 'done' as const } : item
+        ));
+        successCount++;
+      } catch (error: any) {
+        const errMsg = error?.response?.data?.message || error?.message || '上传失败';
+        setUploadQueue(prev => prev.map((item, idx) =>
+          idx === i ? { ...item, status: 'error' as const, error: errMsg } : item
+        ));
+      }
+    }
+
+    if (successCount > 0) {
+      message.success(`成功上传 ${successCount} 个文件`);
+      setLoading(true);
+      fetchFiles(currentPath);
+    }
+
+    // Clear queue after 3 seconds
+    setTimeout(() => setUploadQueue([]), 3000);
+  }, [currentPath, files, confirmOverwrite]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+
+    console.log('[Drop] DataTransfer types:', Array.from(e.dataTransfer.types));
+    console.log('[Drop] Files count:', e.dataTransfer.files?.length ?? 0);
+    if (e.dataTransfer.files?.length) {
+      const firstFile = e.dataTransfer.files[0]!;
+      console.log('[Drop] First file:', {
+        name: firstFile.name,
+        size: firstFile.size,
+        type: firstFile.type,
+        constructor: firstFile.constructor.name,
+        isFile: firstFile instanceof File,
+      });
+      uploadFiles(e.dataTransfer.files);
+    } else {
+      console.log('[Drop] No files in DataTransfer');
+      // Log all items for debugging
+      for (let i = 0; i < (e.dataTransfer.items?.length || 0); i++) {
+        const item = e.dataTransfer.items[i];
+        if (!item) continue;
+        console.log(`[Drop] Item ${i}:`, { kind: item.kind, type: item.type });
+      }
+    }
+  }, [uploadFiles]);
 
   const handleSearchItemClick = (record: any) => {
     if (record.is_dir) {
@@ -477,8 +621,104 @@ export default function FileManager() {
     return sortOrder === 'asc' ? cmp : -cmp;
   });
 
+  // Upload queue summary for display
+  const uploadingCount = uploadQueue.filter(u => u.status === 'uploading').length;
+  const doneCount = uploadQueue.filter(u => u.status === 'done').length;
+  const errorCount = uploadQueue.filter(u => u.status === 'error').length;
+  const showQueue = uploadQueue.length > 0 && (uploadingCount > 0 || doneCount > 0 || errorCount > 0);
+
   return (
-    <div>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{ position: 'relative', minHeight: '200px' }}
+    >
+      {/* Drag overlay */}
+      {dragOver && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 1000,
+          background: 'rgba(99, 102, 241, 0.08)',
+          border: '2px dashed #6366f1',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            fontSize: 24,
+            fontWeight: 600,
+            color: '#6366f1',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <span style={{ fontSize: 48 }}>📁</span>
+            <span>拖放文件到此处上传</span>
+          </div>
+        </div>
+      )}
+
+      {/* Upload progress */}
+      {showQueue && (
+        <div style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          zIndex: 1010,
+          background: '#fff',
+          borderRadius: 8,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+          padding: '16px 20px',
+          minWidth: 280,
+          maxHeight: 360,
+          overflowY: 'auto',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {uploadingCount > 0 && <Spin size="small" />}
+            <span>
+              {uploadingCount > 0
+                ? `正在上传 ${uploadingCount} 个文件...`
+                : `上传完成: ${doneCount} 成功${errorCount > 0 ? `, ${errorCount} 失败` : ''}`
+              }
+            </span>
+          </div>
+          {uploadQueue.slice(0, 8).map((item, idx) => (
+            <div key={idx} style={{ marginBottom: 4 }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 12,
+                color: item.status === 'error' ? '#ff4d4f' : '#666',
+                marginBottom: 2,
+              }}>
+                <span style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  maxWidth: 180,
+                }}>{item.name}</span>
+                <span style={{ flexShrink: 0, marginLeft: 8 }}>
+                  {item.status === 'done' ? '✓' : item.status === 'error' ? '✗' : `${item.progress}%`}
+                </span>
+              </div>
+              {item.status === 'uploading' && (
+                <Progress percent={item.progress} size="small" showInfo={false} style={{ marginBottom: 0 }} />
+              )}
+            </div>
+          ))}
+          {uploadQueue.length > 8 && (
+            <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+              ...还有 {uploadQueue.length - 8} 个文件
+            </div>
+          )}
+        </div>
+      )}
+
       <FileManagerHeader
         basePath={basePath}
         currentPath={currentPath}
@@ -652,6 +892,36 @@ export default function FileManager() {
         content={previewContent}
         onClose={() => setPreviewVisible(false)}
       />
+
+      <Modal
+        title="文件已存在"
+        open={overwriteVisible}
+        onCancel={() => handleOverwriteDecision(false)}
+        footer={[
+          <Button key="skip" onClick={() => handleOverwriteDecision(false)}>
+            跳过重复文件
+          </Button>,
+          <Button key="overwrite" type="primary" danger onClick={() => handleOverwriteDecision(true)}>
+            覆盖已有文件
+          </Button>,
+        ]}
+      >
+        <p style={{ marginBottom: 8, color: '#666' }}>
+          以下 {overwriteConflicts.length} 个文件已存在，是否覆盖？
+        </p>
+        <div style={{
+          maxHeight: 200,
+          overflowY: 'auto',
+          background: '#fafafa',
+          borderRadius: 4,
+          padding: '8px 12px',
+          fontSize: 13,
+        }}>
+          {overwriteConflicts.map((name, i) => (
+            <div key={i} style={{ padding: '2px 0', color: '#cf1322' }}>⚠ {name}</div>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }

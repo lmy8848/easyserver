@@ -85,9 +85,13 @@ func NewManager(basePath string) (*Manager, error) {
 }
 
 // ValidatePath checks if path is safe (no path traversal, no symlink escape).
+// An empty path or "." is treated as basePath (root of sandbox).
 func (m *Manager) ValidatePath(path string) (string, error) {
 	if strings.Contains(path, "\x00") {
 		return "", fmt.Errorf("invalid path: contains null byte")
+	}
+	if path == "" || path == "." || path == "/" {
+		return m.basePath, nil
 	}
 	cleanPath := filepath.Clean(path)
 	absBase := m.basePath
@@ -298,27 +302,40 @@ func (m *Manager) WriteContent(path, content string) error {
 	return nil
 }
 
+// uploadBuf is a reusable 1 MiB buffer for io.CopyBuffer (vs default 32 KiB).
+var uploadBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 1024*1024)
+		return &buf
+	},
+}
+
 // Upload writes content from a reader to a file.
+// The mutex is held only during path validation and file creation — the actual
+// data copy runs outside the lock so concurrent uploads proceed in parallel.
 func (m *Manager) Upload(src io.Reader, path string) (int64, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
+		m.mu.Unlock()
 		return 0, err
 	}
 
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC | syscall.O_NOFOLLOW
 	dst, err := os.OpenFile(validPath, flags, 0644)
 	if err != nil {
+		m.mu.Unlock()
 		if os.IsExist(err) || strings.Contains(err.Error(), "not a directory") {
 			return 0, fmt.Errorf("upload %s: target is a symlink, refused for security", path)
 		}
 		return 0, fmt.Errorf("create %s: %w", path, err)
 	}
+	m.mu.Unlock()
 	defer dst.Close()
 
-	n, err := io.Copy(dst, src)
+	bufPtr := uploadBufPool.Get().(*[]byte)
+	defer uploadBufPool.Put(bufPtr)
+	n, err := io.CopyBuffer(dst, src, *bufPtr)
 	if err != nil {
 		return n, fmt.Errorf("upload %s: %w", path, err)
 	}

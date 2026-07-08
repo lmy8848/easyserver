@@ -6,8 +6,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// registerFileRoutes registers file management routes
-func registerFileRoutes(protected *gin.RouterGroup, fileManager *filemanager.Manager) {
+// registerFileRoutes registers file management routes.
+// fileRoutesWithLargeBody is used only for the upload endpoint (larger body limit).
+func registerFileRoutes(protected *gin.RouterGroup, fileRoutesWithLargeBody *gin.RouterGroup, fileManager *filemanager.Manager) {
 	handler := NewFileManagerHandler(fileManager)
 	protected.GET("/files", handler.List)
 	protected.GET("/files/download", handler.Download)
@@ -17,7 +18,12 @@ func registerFileRoutes(protected *gin.RouterGroup, fileManager *filemanager.Man
 	protected.GET("/files/details", handler.GetDetails)
 	protected.GET("/files/mime-type", handler.GetMimeType)
 	protected.POST("/files/mkdir", handler.Mkdir)
-	protected.POST("/files/upload", handler.Upload)
+	// Upload uses the large-body route group
+	if fileRoutesWithLargeBody != nil {
+		fileRoutesWithLargeBody.POST("/upload", handler.Upload)
+	} else {
+		protected.POST("/files/upload", handler.Upload)
+	}
 	protected.PUT("/files/rename", handler.Rename)
 	protected.DELETE("/files", handler.Delete)
 	protected.POST("/files/move", handler.Move)

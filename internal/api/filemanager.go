@@ -2,9 +2,13 @@ package api
 
 import (
 	"fmt"
+	"log"
+	"mime/multipart"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"easyserver/internal/api/middleware"
@@ -12,6 +16,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// Debug helpers for upload diagnostics.
+func keysOfMap(m map[string][]*multipart.FileHeader) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func keysOfStringMap(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
 
 type FileManagerHandler struct {
 	fileManager *filemanager.Manager
@@ -86,12 +107,22 @@ func (h *FileManagerHandler) Mkdir(c *gin.Context) {
 func (h *FileManagerHandler) Upload(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
+		// Debug: log what we received
+		log.Printf("DEBUG upload: ContentType=%q, ContentLength=%d, err=%v", c.ContentType(), c.Request.ContentLength, err)
+		if c.Request.MultipartForm != nil {
+			log.Printf("DEBUG upload: MultipartForm.File keys=%v", keysOfMap(c.Request.MultipartForm.File))
+			log.Printf("DEBUG upload: MultipartForm.Value keys=%v", keysOfStringMap(c.Request.MultipartForm.Value))
+		}
+		log.Printf("DEBUG upload: PostForm keys=%v", c.Request.PostForm)
 		c.Error(ErrBadRequest.WithMessage("no file provided"))
 		return
 	}
 	defer file.Close()
 
 	path := c.PostForm("path")
+	// Sanitize path: strip any drive letters or illegal characters
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = regexp.MustCompile(`^[A-Za-z]:`).ReplaceAllString(path, "")
 	if path == "" {
 		path = "/" + header.Filename
 	}
@@ -339,9 +370,12 @@ func (h *FileManagerHandler) Compress(c *gin.Context) {
 
 // Extract extracts an archive
 func (h *FileManagerHandler) Extract(c *gin.Context) {
+	// Dest 允许为空：空串表示解压到根目录(basePath)，与 ValidatePath 的
+	// "empty path or '.' is treated as basePath" 语义一致。前端 toRelativePath
+	// 在根目录下返回空串，这里不能用 binding:"required"，否则根目录解压会被拒。
 	var req struct {
 		Source string `json:"source" binding:"required"`
-		Dest   string `json:"dest" binding:"required"`
+		Dest   string `json:"dest"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
