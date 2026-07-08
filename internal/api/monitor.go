@@ -38,11 +38,22 @@ func createUpgrader(allowedOrigins []string, devMode bool) gorillaWs.Upgrader {
 		WriteBufferSize: 1024,
 		Subprotocols:    []string{"token"},
 		CheckOrigin: func(r *http.Request) bool {
-			// In dev mode, allow localhost
+			origin := r.Header.Get("Origin")
+
+			// In dev mode, allow localhost and any same-host origin (e.g. Vite dev server)
 			if devMode {
-				origin := r.Header.Get("Origin")
 				if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
 					return true
+				}
+				// Allow origins from the same host (e.g. http://124.221.35.180:5173)
+				if host := r.Host; host != "" {
+					hostPart := host
+					if idx := strings.Index(host, ":"); idx >= 0 {
+						hostPart = host[:idx]
+					}
+					if strings.Contains(origin, "://"+hostPart) {
+						return true
+					}
 				}
 			}
 
@@ -52,7 +63,6 @@ func createUpgrader(allowedOrigins []string, devMode bool) gorillaWs.Upgrader {
 			}
 
 			// Check against allowed origins
-			origin := r.Header.Get("Origin")
 			for _, allowed := range allowedOrigins {
 				if origin == allowed {
 					return true

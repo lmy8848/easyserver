@@ -32,24 +32,23 @@ export default function Dashboard() {
     });
   }, []);
 
-  // Fetch initial data
+  // Fetch initial data — stats first (non-blocking), then history.
+  // History (monitor/history) scans a large table and can take hundreds of
+  // ms on a high-latency link; rendering immediately from stats + live
+  // WebSocket keeps the post-login Dashboard feeling instant.
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [statsRes, historyRes] = await Promise.all([
-          monitorApi.getStats(),
-          monitorApi.getHistory(),
-        ]);
-        setStats(statsRes.data.data);
-        setHistory(historyRes.data.data.points || []);
-      } catch (error) {
-        console.error('Failed to fetch monitor data:', error);
-      } finally {
+    // Stats: fast, blocks initial render so cards show real data immediately.
+    monitorApi.getStats()
+      .then(res => {
+        setStats(res.data.data);
         setLoading(false);
-      }
-    };
+      })
+      .catch(() => setLoading(false));
 
-    fetchData();
+    // History: async, does not block the loading state.
+    monitorApi.getHistory()
+      .then(res => setHistory(res.data.data.points || []))
+      .catch(() => {});
   }, []);
 
   // Fetch history when time range changes
@@ -97,25 +96,36 @@ export default function Dashboard() {
   const sanitizeTooltipText = (text: string): string =>
     text.replace(/[<>&"']/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] || ch));
 
+  // 时间轴标签格式：1h/6h 显示 HH:mm；24h 跨日，显示 MM-DD HH:mm 避免同时段重复。
+  // time 类型 xAxis 的 axisLabel.formatter 传入毫秒时间戳(number)，tooltip 复用同一函数。
+  const formatChartTime = useCallback((ts: number | string): string => {
+    const d = new Date(ts);
+    if (timeRange === '24h') {
+      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  }, [timeRange]);
+
   const cpuChartOption = useMemo(() => ({
     title: { text: 'CPU 使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: number}>) => {
-        const time = sanitizeTooltipText(params[0]?.axisValue || '');
+      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: any}>) => {
+        const ts = params[0]?.axisValue || (Array.isArray(params[0]?.value) ? params[0].value[0] : '');
+        const time = sanitizeTooltipText(ts ? formatChartTime(ts) : '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
           const name = sanitizeTooltipText(p.seriesName || '');
-          html += `<div>${p.marker} ${name}: ${p.value}%</div>`;
+          const v = Array.isArray(p.value) ? p.value[1] : p.value;
+          html += `<div>${p.marker} ${name}: ${v}%</div>`;
         });
         return html;
       },
     },
     grid: { top: 40, right: 20, bottom: 30, left: 50 },
     xAxis: {
-      type: 'category' as const,
-      data: history.map(p => new Date(p.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })),
-      axisLabel: { fontSize: 11, hideOverlap: true, rotate: 0 },
+      type: 'time' as const,
+      axisLabel: { fontSize: 11, hideOverlap: true, formatter: (v: number) => formatChartTime(v) },
     },
     yAxis: {
       type: 'value' as const,
@@ -126,32 +136,33 @@ export default function Dashboard() {
     series: [{
       name: 'CPU',
       type: 'line',
-      data: history.map(p => p.cpu.usage_percent),
+      data: history.map(p => [p.timestamp, p.cpu.usage_percent]),
       smooth: true,
       areaStyle: { opacity: 0.3 },
       showSymbol: false,
     }],
-  }), [history]);
+  }), [history, formatChartTime]);
 
   const memChartOption = useMemo(() => ({
     title: { text: '内存使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: number}>) => {
-        const time = sanitizeTooltipText(params[0]?.axisValue || '');
+      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: any}>) => {
+        const ts = params[0]?.axisValue || (Array.isArray(params[0]?.value) ? params[0].value[0] : '');
+        const time = sanitizeTooltipText(ts ? formatChartTime(ts) : '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
           const name = sanitizeTooltipText(p.seriesName || '');
-          html += `<div>${p.marker} ${name}: ${p.value}%</div>`;
+          const v = Array.isArray(p.value) ? p.value[1] : p.value;
+          html += `<div>${p.marker} ${name}: ${v}%</div>`;
         });
         return html;
       },
     },
     grid: { top: 40, right: 20, bottom: 30, left: 50 },
     xAxis: {
-      type: 'category' as const,
-      data: history.map(p => new Date(p.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })),
-      axisLabel: { fontSize: 11, hideOverlap: true, rotate: 0 },
+      type: 'time' as const,
+      axisLabel: { fontSize: 11, hideOverlap: true, formatter: (v: number) => formatChartTime(v) },
     },
     yAxis: {
       type: 'value' as const,
@@ -162,24 +173,26 @@ export default function Dashboard() {
     series: [{
       name: '内存',
       type: 'line',
-      data: history.map(p => p.memory.usage_percent),
+      data: history.map(p => [p.timestamp, p.memory.usage_percent]),
       smooth: true,
       areaStyle: { opacity: 0.3 },
       itemStyle: { color: '#52c41a' },
       showSymbol: false,
     }],
-  }), [history]);
+  }), [history, formatChartTime]);
 
   const netChartOption = useMemo(() => ({
     title: { text: '网络流量', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
-      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: number}>) => {
-        const time = sanitizeTooltipText(params[0]?.axisValue || '');
+      formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: any}>) => {
+        const ts = params[0]?.axisValue || (Array.isArray(params[0]?.value) ? params[0].value[0] : '');
+        const time = sanitizeTooltipText(ts ? formatChartTime(ts) : '');
         let html = `<div>${time}</div>`;
         params.forEach((p: any) => {
           const name = sanitizeTooltipText(p.seriesName || '');
-          html += `<div>${p.marker} ${name}: ${formatBytes(p.value)}/s</div>`;
+          const v = Array.isArray(p.value) ? p.value[1] : p.value;
+          html += `<div>${p.marker} ${name}: ${formatBytes(v)}/s</div>`;
         });
         return html;
       },
@@ -187,9 +200,8 @@ export default function Dashboard() {
     legend: { bottom: 0, data: ['上传', '下载'] },
     grid: { top: 40, right: 20, bottom: 40, left: 60 },
     xAxis: {
-      type: 'category' as const,
-      data: history.map(p => new Date(p.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })),
-      axisLabel: { fontSize: 11, hideOverlap: true, rotate: 0 },
+      type: 'time' as const,
+      axisLabel: { fontSize: 11, hideOverlap: true, formatter: (v: number) => formatChartTime(v) },
     },
     yAxis: {
       type: 'value' as const,
@@ -201,7 +213,7 @@ export default function Dashboard() {
       {
         name: '上传',
         type: 'line',
-        data: history.map(p => p.network.bytes_sent),
+        data: history.map(p => [p.timestamp, p.network.bytes_sent]),
         smooth: true,
         showSymbol: false,
         itemStyle: { color: '#faad14' },
@@ -210,14 +222,14 @@ export default function Dashboard() {
       {
         name: '下载',
         type: 'line',
-        data: history.map(p => p.network.bytes_recv),
+        data: history.map(p => [p.timestamp, p.network.bytes_recv]),
         smooth: true,
         showSymbol: false,
         itemStyle: { color: '#1890ff' },
         areaStyle: { opacity: 0.2 },
       },
     ],
-  }), [history]);
+  }), [history, formatChartTime]);
 
   if (loading) {
     return (

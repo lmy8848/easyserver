@@ -97,7 +97,12 @@ func (r *sqliteRepo) GetLatest(ctx context.Context) (*MonitorPoint, error) {
 	return p, nil
 }
 
-// GetHistory returns monitor points in the given time range
+// GetHistory returns monitor points in the given time range.
+// Caps the SQL fetch at maxHistoryPoints*2 rows so a long-running server
+// (86k+ rows in monitor_data) does NOT load the full table into memory —
+// the original query without this cap was the cause of the slow post-login
+// Dashboard render. The caller (service layer) downsamples the result to
+// maxHistoryPoints with even stride.
 func (r *sqliteRepo) GetHistory(ctx context.Context, start, end time.Time) ([]MonitorPoint, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
@@ -106,8 +111,9 @@ func (r *sqliteRepo) GetHistory(ctx context.Context, start, end time.Time) ([]Mo
 		        net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp
 		 FROM monitor_data
 		 WHERE timestamp >= ? AND timestamp <= ?
-		 ORDER BY timestamp ASC`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339),
+		 ORDER BY timestamp ASC
+		 LIMIT ?`,
+		start.Format(time.RFC3339), end.Format(time.RFC3339), maxHistoryPoints*2,
 	)
 	if err != nil {
 		return nil, err
