@@ -175,6 +175,41 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	}, nil
 }
 
+// recalcProxyDefaults recomputes app_port/proxy_enabled/proxy_pass from project_type,
+// mirroring Create's switch logic. Used by Update when project_type changes so that
+// switching static->nodejs (etc.) produces a valid proxy_pass instead of leaving it empty.
+func recalcProxyDefaults(w *Website) {
+	switch w.ProjectType {
+	case "nodejs":
+		if w.AppPort == 0 {
+			w.AppPort = 3000
+		}
+		w.ProxyEnabled = true
+		w.ProxyPass = fmt.Sprintf("http://127.0.0.1:%d", w.AppPort)
+	case "python":
+		if w.AppPort == 0 {
+			w.AppPort = 8000
+		}
+		w.ProxyEnabled = true
+		w.ProxyPass = fmt.Sprintf("http://127.0.0.1:%d", w.AppPort)
+	case "java", "proxy":
+		if w.AppPort == 0 {
+			w.AppPort = 8080
+		}
+		w.ProxyEnabled = true
+		w.ProxyPass = fmt.Sprintf("http://127.0.0.1:%d", w.AppPort)
+	case "php":
+		if w.AppPort == 0 {
+			w.AppPort = 9000
+		}
+		w.ProxyEnabled = false
+		w.ProxyPass = ""
+	default: // static
+		w.ProxyEnabled = false
+		w.ProxyPass = ""
+	}
+}
+
 // Update updates a website
 func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req *UpdateWebsiteRequest) error {
 	if ctx == nil {
@@ -189,6 +224,7 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	}
 
 	oldDomain := w.Domain
+	oldProjectType := w.ProjectType
 
 	if req.Name != nil {
 		w.Name = *req.Name
@@ -220,6 +256,11 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	}
 	if req.AppPort != nil {
 		w.AppPort = *req.AppPort
+	}
+	// 项目类型变更时重算 proxy 默认值（与 Create 一致）。否则 static 改 nodejs
+	// 后 proxy_pass 仍为空，nginxProxyTemplate 会生成无效的 "proxy_pass ;" 配置。
+	if req.ProjectType != nil && *req.ProjectType != oldProjectType {
+		recalcProxyDefaults(w)
 	}
 	if req.CustomConfig != nil {
 		w.CustomConfig = *req.CustomConfig
@@ -379,8 +420,17 @@ func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, log
 	if logType == "error" {
 		logPath = w.ErrorLog
 	}
+	if logType == "app" {
+		// 应用启动/运行日志：StartWebsiteProcess 和进程守护把 nohup stdout 重定向到这里
+		logPath = fmt.Sprintf("/var/log/easyserver/%s.log", w.Domain)
+	}
 	if logPath == "" {
 		return "", nil
+	}
+	// 文件不存在时给出友好提示，而不是返回 tail 的 stderr（"tail: cannot open ..."）。
+	// nginx 在网站首次有访问/错误时才会创建该日志文件。
+	if _, err := os.Stat(logPath); err != nil {
+		return fmt.Sprintf("日志文件尚不存在: %s\n（网站产生访问或错误后 nginx 会自动创建该文件）", logPath), nil
 	}
 	if lines <= 0 {
 		lines = 200
@@ -388,7 +438,7 @@ func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, log
 
 	out, _, err := s.executor.RunCombined(ctx, "tail", "-n", fmt.Sprintf("%d", lines), logPath)
 	if err != nil {
-		return fmt.Sprintf("(no log file: %s)", logPath), nil
+		return fmt.Sprintf("(读取日志失败: %s)", logPath), nil
 	}
 	return out, nil
 }
@@ -570,6 +620,11 @@ server {
 }
 
 func nginxProxyTemplate(w *Website) string {
+	// 防御：proxy_pass 为空时回退到 static 模板，避免生成无效的 "proxy_pass ;"
+	// 配置（nginx -t 会失败，导致整站不生效、日志文件不生成）。
+	if strings.TrimSpace(w.ProxyPass) == "" {
+		return nginxStaticTemplate(w)
+	}
 	return fmt.Sprintf(`# EasyServer - %s proxy: %s
 server {
     listen %d;

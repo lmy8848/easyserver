@@ -99,6 +99,7 @@ export default function WebsiteList({
   const [dirBrowserPath, setDirBrowserPath] = useState('/var/www');
   const [dirEntries, setDirEntries] = useState<DirEntry[]>([]);
   const [dirLoading, setDirLoading] = useState(false);
+  const [dirJumpPath, setDirJumpPath] = useState('');
   const [pathValidation, setPathValidation] = useState<PathValidation | null>(null);
 
   // Project types
@@ -688,7 +689,7 @@ export default function WebsiteList({
 
       {/* Log Modal */}
       <Modal
-        title={`${logSite?.domain} - ${logType === 'error' ? '错误' : '访问'}日志`}
+        title={`${logSite?.domain} - ${logType === 'error' ? '错误' : logType === 'app' ? '应用' : '访问'}日志`}
         open={logVisible}
         onCancel={() => setLogVisible(false)}
         footer={null}
@@ -700,6 +701,7 @@ export default function WebsiteList({
           items={[
             { key: 'access', label: '访问日志' },
             { key: 'error', label: '错误日志' },
+            { key: 'app', label: '应用日志' },
           ]}
         />
         <Input.TextArea
@@ -778,6 +780,27 @@ export default function WebsiteList({
         }
         width={640}
       >
+        {/* 快速跳转：输入路径或点快捷根目录。默认 /var/www，向上 .. 受 allowedRoots 限制
+            无法跳到 /opt 等其他允许根，加此入口让用户能选到 /opt/easyserver/data 下上传的应用 */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Input
+              style={{ flex: 1 }}
+              placeholder="输入路径跳转，如 /opt/easyserver/data"
+              value={dirJumpPath}
+              onChange={(e) => setDirJumpPath(e.target.value)}
+              onPressEnter={() => { if (dirJumpPath.trim()) browseTo(dirJumpPath.trim()); }}
+            />
+            <Button type="primary" onClick={() => { if (dirJumpPath.trim()) browseTo(dirJumpPath.trim()); }}>跳转</Button>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12 }}>
+            <span style={{ color: '#8c8c8c', marginRight: 4 }}>快捷:</span>
+            {['/var/www', '/opt', '/home', '/srv'].map(p => (
+              <Button key={p} size="small" type="link" style={{ padding: '0 4px' }} onClick={() => { setDirJumpPath(p); browseTo(p); }}>{p}</Button>
+            ))}
+          </div>
+        </div>
+
         {/* Breadcrumb */}
         <div style={{ marginBottom: 12, padding: '6px 12px', background: '#f5f5f5', borderRadius: 4, fontSize: 13, fontFamily: 'monospace' }}>
           {dirBrowserPath.split('/').filter(Boolean).map((seg, i, arr) => {

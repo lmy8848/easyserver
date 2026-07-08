@@ -22,6 +22,14 @@ export default function WebsitePage() {
   // ConfigEditor ref for calling showConfig/showServiceLogs from WebsiteList
   const configEditorRef = useRef<ConfigEditorRef>(null);
 
+  // Ref to hold the latest selectedServer so the polling interval can read
+  // current data without depending on the object identity. Without this,
+  // setState({...prev}) creates a new reference every tick, the effect
+  // re-runs, clears the interval, fires again immediately — an infinite
+  // loop that burns through the API rate limit within seconds.
+  const selectedServerRef = useRef<WebServer | null>(null);
+  useEffect(() => { selectedServerRef.current = selectedServer; }, [selectedServer]);
+
   const fetchServers = async () => {
     setLoading(true);
     try {
@@ -39,22 +47,27 @@ export default function WebsitePage() {
     fetchServers();
   }, []);
 
-  // Auto-refresh process info when viewing server detail (every 10s)
+  // Auto-refresh process info when viewing server detail (every 10s).
+  // Only the server ID is a dependency — the interval reads the latest
+  // data through selectedServerRef so it is never re-created by setState.
   useEffect(() => {
-    if (!selectedServer || selectedServer.status === 'not_installed') return;
+    const server = selectedServerRef.current;
+    if (!server || server.status === 'not_installed') return;
 
     const refresh = async () => {
+      const current = selectedServerRef.current;
+      if (!current) return;
       try {
         const [procRes, statusRes] = await Promise.all([
-          webServerApi.getProcessInfo(selectedServer.id),
-          webServerApi.status(selectedServer.id),
+          webServerApi.getProcessInfo(current.id),
+          webServerApi.status(current.id),
         ]);
         const proc = procRes.data.data;
         const status = statusRes.data.data;
         if (proc || status) {
           setSelectedServer(prev => prev ? { ...prev, ...proc, ...status } : prev);
           setServers(prev => prev.map(s =>
-            s.id === selectedServer.id ? { ...s, ...proc, ...status } : s
+            s.id === current.id ? { ...s, ...proc, ...status } : s
           ));
         }
       } catch (error) {
@@ -65,7 +78,7 @@ export default function WebsitePage() {
     refresh(); // immediate
     const timer = setInterval(refresh, 10000);
     return () => clearInterval(timer);
-  }, [selectedServer]);
+  }, [selectedServer?.id]);
 
   // Enter server detail
   const enterServer = async (server: WebServer) => {
