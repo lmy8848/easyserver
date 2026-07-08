@@ -24,10 +24,14 @@ type Service struct {
 }
 
 // NewFirewallService creates a new FirewallService
-func NewService(repo Repository, exec executor.CommandExecutor) *Service {
+func NewService(repo Repository, exec executor.CommandExecutor, panelPort ...int) *Service {
+	protected := []string{"22"} // SSH is always protected
+	if len(panelPort) > 0 && panelPort[0] > 0 {
+		protected = append(protected, fmt.Sprintf("%d", panelPort[0]))
+	}
 	return &Service{
 		repo:           repo,
-		protectedPorts: []string{"22"}, // SSH port is always protected
+		protectedPorts: protected,
 		executor:       exec,
 	}
 }
@@ -1137,10 +1141,8 @@ func (s *Service) SetDefaultPolicy(ctx context.Context, chain, policy string) er
 
 // ensureProtectedPortsBeforeDrop adds ACCEPT rules for protected ports before setting INPUT to DROP
 func (s *Service) ensureProtectedPortsBeforeDrop(ctx context.Context, tool string) error {
-	// Protected ports: SSH (22) and panel port (8080)
-	protectedPorts := []string{"22", "8080"}
-
-	for _, port := range protectedPorts {
+	// protectedPorts is initialized from config (SSH + panel port)
+	for _, port := range s.protectedPorts {
 		// Check if ACCEPT rule already exists for this port
 		exists, err := s.hasAcceptRuleForPort(ctx, tool, port)
 		if err != nil {

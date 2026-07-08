@@ -278,9 +278,9 @@ func wire(cfg *config.Config) (*appServices, error) {
 	envConfigService := envconfig.NewService(envConfigRepo)
 	s.EnvConfigService = envConfigService
 
-	// Firewall
+	// Firewall (protect SSH + panel port from being accidentally blocked)
 	firewallRepo := firewall.NewSQLiteRepository(db)
-	s.FirewallService = firewall.NewService(firewallRepo, cmdExec)
+	s.FirewallService = firewall.NewService(firewallRepo, cmdExec, cfg.Server.Port)
 
 	// Runtime + package
 	runtimeRepo := runtimeenv.NewSQLiteRepository(db)
