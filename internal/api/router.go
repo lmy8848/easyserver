@@ -223,7 +223,7 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 func (r *Router) Setup() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
-	e.MaxMultipartMemory = 32 << 20
+	e.MaxMultipartMemory = 64 << 20 // 64 MB multipart memory (rest goes to temp disk)
 
 	// Create IP whitelist
 	ipWhitelist := middleware.NewIPWhitelist(&r.cfg.Auth)
@@ -242,6 +242,7 @@ func (r *Router) Setup() *gin.Engine {
 	// Global middleware (no rate limiter — tiered limiters are applied per group below)
 	e.Use(gin.Logger(), gin.Recovery(),
 		ErrorHandler(),
+		DomainRedirectMiddleware(r.cfg.Server.Domain, r.cfg.Server.RedirectMode, r.cfg.Server.WwwHandling),
 		middleware.SecurityMiddleware(cspNonce),
 		middleware.CORSMiddleware(r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode),
 		middleware.IPWhitelistMiddleware(ipWhitelist),
@@ -253,9 +254,14 @@ func (r *Router) Setup() *gin.Engine {
 	})
 
 	// API routes — Tier 2: general API limiter
+	// MaxUploadSize from config (default 512MB); 0 = use default
+	maxUploadSize := r.cfg.Server.MaxUploadSize
+	if maxUploadSize <= 0 {
+		maxUploadSize = 512 << 20 // 512 MB default
+	}
 	api := e.Group("/api")
 	api.Use(
-		middleware.MaxBodySizeMiddleware(middleware.DefaultMaxBodySize),
+		middleware.MaxBodySizeMiddleware(maxUploadSize),
 		middleware.RateLimitMiddleware("api", r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
 	)
 
@@ -274,6 +280,22 @@ func (r *Router) Setup() *gin.Engine {
 		middleware.CSRFMiddleware(),
 	)
 
+	// File upload sub-group: extended timeouts for large uploads, no MaxBodySize (use Gin's multipart memory limit instead)
+	fileRoutes := api.Group("/files",
+		middleware.ReadTimeout(10*time.Minute),
+		middleware.WriteTimeout(10*time.Minute),
+	)
+	fileRoutes.Use(
+		middleware.RateLimitMiddleware("api", r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
+		middleware.JWTMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
+		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
+			return r.authService.GetIPWhitelist(context.Background(), userID)
+		}),
+		middleware.SessionHeartbeatMiddleware(r.sessionService, r.cfg.Auth.SessionTimeout),
+		middleware.AuditMiddleware(r.auditService),
+		middleware.CSRFMiddleware(),
+	)
+
 	// WebSocket routes
 	wsGroup := e.Group("/ws")
 	wsGroup.Use(middleware.WSAuthMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator))
@@ -282,10 +304,11 @@ func (r *Router) Setup() *gin.Engine {
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerServiceRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerFileRoutes(protected, r.fileManager)
+	registerFileRoutes(protected, fileRoutes, r.fileManager)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor)
 	registerSystemRoutes(protected, r.executor)
+	protected.GET("/system/ports", (&PortMonitorHandler{}).GetListeningPorts)
 	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	registerDeployRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
 	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
