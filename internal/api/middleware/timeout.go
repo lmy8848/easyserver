@@ -24,3 +24,15 @@ func WriteTimeout(d time.Duration) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// ReadTimeout overrides http.Server.ReadTimeout for the current request.
+// Use for file upload routes where reading the request body can take longer
+// than the global server ReadTimeout.
+func ReadTimeout(d time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := http.NewResponseController(c.Writer).SetReadDeadline(time.Now().Add(d)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			log.Printf("middleware.ReadTimeout: SetReadDeadline failed on %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+		}
+		c.Next()
+	}
+}

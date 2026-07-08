@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -72,13 +73,22 @@ func SecurityMiddleware(nonce string) gin.HandlerFunc {
 const (
 	// DefaultMaxBodySize is the maximum request body size for JSON/POST requests.
 	DefaultMaxBodySize = 10 << 20 // 10 MB
+	// MaxBodySizeLarge is the limit for file upload endpoints (512 MB).
+	MaxBodySizeLarge = 512 << 20 // 512 MB
 )
 
 // MaxBodySizeMiddleware limits request body size to prevent memory exhaustion
-// from oversized JSON payloads.
+// from oversized JSON payloads. Skips multipart forms (file uploads) since
+// Gin's MaxMultipartMemory already controls that and MaxBytesReader breaks
+// multipart parsing by failing silently when the limit is reached.
 func MaxBodySizeMiddleware(maxSize int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Body != nil {
+			// Skip multipart: Gin handles this via MaxMultipartMemory
+			if ct := c.ContentType(); ct != "" && strings.HasPrefix(ct, "multipart/") {
+				c.Next()
+				return
+			}
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize)
 		}
 		c.Next()
