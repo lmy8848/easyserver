@@ -276,8 +276,9 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		execArgs = args
 	}
 
-	// Start process
-	proc, err := s.executor.Start(ctx, opts, execCmd, execArgs...)
+	// Start process - 用 context.Background() 而非请求 ctx，避免 API 返回后
+	// 请求 context 取消导致进程被 exec.CommandContext Kill（表现为启动后立即 exit 1）
+	proc, err := s.executor.Start(context.Background(), opts, execCmd, execArgs...)
 	if err != nil {
 		s.updateStatus(ctx, id, "failed", 0, 0, err.Error())
 		return fmt.Errorf("failed to start process: %w", err)
