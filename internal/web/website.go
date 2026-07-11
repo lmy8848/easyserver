@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -483,6 +484,29 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 	return s.repo.UpdateSSL(ctx, id, certPath, keyPath)
 }
 
+// UploadSSL 启用用户上传的证书：更新数据库 + 重新生成 nginx 配置(含 SSL) + reload。
+// 与 ApplySSL(certbot 申请) 不同，这里接收已写好的证书文件路径。
+func (s *WebsiteService) UploadSSL(ctx context.Context, webServerID, id int64, certPath, keyPath string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := s.repo.UpdateSSL(ctx, id, certPath, keyPath); err != nil {
+		return err
+	}
+	w, err := s.repo.Get(ctx, webServerID, id)
+	if err != nil || w == nil {
+		return apperror.ErrNotFound.WithMessage("网站不存在")
+	}
+	if err := s.writeConfigForServer(webServerID, w); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
+	if ws != nil && ws.Status == "running" {
+		s.reloadWebServer(ctx, ws)
+	}
+	return nil
+}
+
 // Internal helpers
 
 // validateDomain validates that a domain name is safe to use in file paths
@@ -601,22 +625,76 @@ func sanitizeNginxValue(s string) string {
 	return b.String()
 }
 
+// NginxConfigOptions 是 config_options JSON 的结构化开关
+type NginxConfigOptions struct {
+	WebSocket     bool `json:"websocket"`      // proxy 类型是否加 WebSocket 头
+	Gzip          bool `json:"gzip"`           // 是否开启 gzip
+	HTTPSRedirect bool `json:"https_redirect"` // SSL 时 80->443 跳转
+	AccessLog     bool `json:"access_log"`     // 是否记访问日志
+}
+
+// ParseConfigOptions 解析 config_options JSON，缺失字段用默认值
+// （代理类型默认开 WebSocket + AccessLog，其余关）
+func ParseConfigOptions(s, projectType string) NginxConfigOptions {
+	isProxy := projectType == "nodejs" || projectType == "python" || projectType == "java" || projectType == "proxy"
+	opts := NginxConfigOptions{WebSocket: isProxy, Gzip: false, HTTPSRedirect: false, AccessLog: true}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return opts
+	}
+	var m map[string]bool
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return opts
+	}
+	if v, ok := m["websocket"]; ok {
+		opts.WebSocket = v
+	}
+	if v, ok := m["gzip"]; ok {
+		opts.Gzip = v
+	}
+	if v, ok := m["https_redirect"]; ok {
+		opts.HTTPSRedirect = v
+	}
+	if v, ok := m["access_log"]; ok {
+		opts.AccessLog = v
+	}
+	return opts
+}
+
+// nginxSSLConfig 返回 SSL 配置：listen 后缀(ssl) + 证书指令块。SSLEnabled 且证书路径存在时生效。
+func nginxSSLConfig(w *Website) (listenSuffix, sslBlock string) {
+	if !w.SSLEnabled || w.SSLCertPath == "" || w.SSLKeyPath == "" {
+		return "", ""
+	}
+	return " ssl", fmt.Sprintf("    ssl_certificate %s;\n    ssl_certificate_key %s;\n", sanitizeNginxValue(w.SSLCertPath), sanitizeNginxValue(w.SSLKeyPath))
+}
+
 func nginxStaticTemplate(w *Website) string {
+	opts := ParseConfigOptions(w.ConfigOptions, w.ProjectType)
+	listenSuffix, sslBlock := nginxSSLConfig(w)
+	gzipBlock := ""
+	if opts.Gzip {
+		gzipBlock = "    gzip on;\n    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;\n"
+	}
+	accessLogLine := fmt.Sprintf("    access_log %s;", sanitizeNginxValue(w.AccessLog))
+	if !opts.AccessLog {
+		accessLogLine = "    access_log off;"
+	}
 	return fmt.Sprintf(`# EasyServer - Static site: %s
 server {
-    listen %d;
+    listen %d%s;
     server_name %s;
     root %s;
     index index.html index.htm;
-
+%s%s
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    access_log %s;
+    %s
     error_log %s;
 }
-`, sanitizeNginxValue(w.Name), w.Port, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), sanitizeNginxValue(w.AccessLog), sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.Name), w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), sslBlock, gzipBlock, accessLogLine, sanitizeNginxValue(w.ErrorLog))
 }
 
 func nginxProxyTemplate(w *Website) string {
@@ -625,27 +703,44 @@ func nginxProxyTemplate(w *Website) string {
 	if strings.TrimSpace(w.ProxyPass) == "" {
 		return nginxStaticTemplate(w)
 	}
+	opts := ParseConfigOptions(w.ConfigOptions, w.ProjectType)
+	listenSuffix, sslBlock := nginxSSLConfig(w)
+	wsHeaders := ""
+	if opts.WebSocket {
+		wsHeaders = "        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n"
+	}
+	gzipBlock := ""
+	if opts.Gzip {
+		gzipBlock = "    gzip on;\n    gzip_types text/plain text/css application/json application/javascript text/xml application/xml;\n"
+	}
+	accessLogLine := fmt.Sprintf("    access_log %s;", sanitizeNginxValue(w.AccessLog))
+	if !opts.AccessLog {
+		accessLogLine = "    access_log off;"
+	}
+	httpsRedirect := ""
+	if opts.HTTPSRedirect && w.SSLEnabled {
+		// 497 = HTTP 请求发到 SSL 端口时 nginx 内部错误码，用 301 跳到 HTTPS 域名
+		httpsRedirect = fmt.Sprintf("    error_page 497 =301 https://%s$request_uri;\n", sanitizeNginxValue(w.Domain))
+	}
 	return fmt.Sprintf(`# EasyServer - %s proxy: %s
 server {
-    listen %d;
+    listen %d%s;
     server_name %s;
-
+%s%s%s
     location / {
         proxy_pass %s;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
+%s        proxy_read_timeout 86400;
     }
 
-    access_log %s;
+    %s
     error_log %s;
 }
-`, sanitizeNginxValue(w.ProjectType), sanitizeNginxValue(w.Name), w.Port, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.ProxyPass), sanitizeNginxValue(w.AccessLog), sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.ProjectType), sanitizeNginxValue(w.Name), w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sslBlock, gzipBlock, httpsRedirect, sanitizeNginxValue(w.ProxyPass), wsHeaders, accessLogLine, sanitizeNginxValue(w.ErrorLog))
 }
 
 func nginxPHPTemplate(w *Website) string {

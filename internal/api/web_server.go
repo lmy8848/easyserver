@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"os/exec"
@@ -461,7 +462,39 @@ func (h *WebServerHandler) UpdateWebsite(c *gin.Context) {
 		c.Error(WrapError(err))
 		return
 	}
+
+	// 更新后若有了 start_command + runtime 但未关联进程守护，创建并关联。
+	// Update 原本不创建进程守护，导致走 nohup 模式，启动/状态不可靠。
+	if site, _ := h.websiteService.Get(c.Request.Context(), sid, id); site != nil {
+		h.ensureWebsiteProcess(c.Request.Context(), site)
+	}
+
 	Success(c, nil)
+}
+
+// ensureWebsiteProcess 若网站配置了 start_command + runtime 但未关联进程守护，
+// 创建进程守护并关联。Update 时不自动启动，由用户手动启停。
+func (h *WebServerHandler) ensureWebsiteProcess(ctx context.Context, site *web.Website) {
+	if site.ProcessID > 0 || site.StartCommand == "" || site.RuntimeVersionID <= 0 {
+		return
+	}
+	proc, pErr := h.processService.Create(ctx, &process.CreateProcessRequest{
+		Name:             "website-" + site.Domain,
+		Command:          "sh",
+		Args:             fmt.Sprintf(`-c "%s"`, site.StartCommand),
+		Dir:              site.RootPath,
+		AutoRestart:      boolPtr(false),
+		MaxRestarts:      3,
+		RestartDelay:     5,
+		StopTimeout:      10,
+		StartupTimeout:   30,
+		AutoStart:        boolPtr(false),
+		LogFile:          fmt.Sprintf("/var/log/easyserver/%s.log", site.Domain),
+		RuntimeVersionID: site.RuntimeVersionID,
+	})
+	if pErr == nil && proc != nil {
+		h.websiteService.LinkProcess(ctx, site.ID, proc.ID)
+	}
 }
 
 func (h *WebServerHandler) DeleteWebsite(c *gin.Context) {
@@ -597,6 +630,60 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 		return
 	}
 	Success(c, gin.H{"message": "SSL 证书已应用"})
+}
+
+// UploadWebsiteSSL 接收用户上传的 PEM 证书+私钥，校验后写文件并启用 SSL
+func (h *WebServerHandler) UploadWebsiteSSL(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+
+	var req struct {
+		CertContent string `json:"cert_content" binding:"required"`
+		KeyContent  string `json:"key_content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+	middleware.AuditSummary(c, "上传网站SSL证书 #"+strconv.FormatInt(id, 10))
+
+	// 校验 PEM 格式且 cert 与 key 匹配
+	certPEM := []byte(strings.TrimSpace(req.CertContent))
+	keyPEM := []byte(strings.TrimSpace(req.KeyContent))
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		c.Error(ErrBadRequest.WithMessage("证书与私钥不匹配或格式错误: " + err.Error()))
+		return
+	}
+
+	sslDir := "/etc/nginx/ssl"
+	if err := os.MkdirAll(sslDir, 0700); err != nil {
+		c.Error(ErrInternal.WithMessage("创建 SSL 目录失败"))
+		return
+	}
+	certPath := filepath.Join(sslDir, fmt.Sprintf("site_%d.crt", id))
+	keyPath := filepath.Join(sslDir, fmt.Sprintf("site_%d.key", id))
+	if err := os.WriteFile(certPath, certPEM, 0644); err != nil {
+		c.Error(ErrInternal.WithMessage("写证书文件失败"))
+		return
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		c.Error(ErrInternal.WithMessage("写私钥文件失败"))
+		return
+	}
+
+	if err := h.websiteService.UploadSSL(c.Request.Context(), sid, id, certPath, keyPath); err != nil {
+		c.Error(WrapError(err))
+		return
+	}
+	Success(c, gin.H{"message": "证书已上传并启用"})
 }
 
 func (h *WebServerHandler) BuildWebsite(c *gin.Context) {

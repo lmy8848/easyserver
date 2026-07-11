@@ -44,6 +44,7 @@ func registerWebServerRoutes(protected *gin.RouterGroup, webServerService *web.S
 	protected.POST("/web-servers/:id/websites/:wid/disable", handler.DisableWebsite)
 	protected.GET("/web-servers/:id/websites/:wid/logs", handler.GetWebsiteLogs)
 	protected.POST("/web-servers/:id/websites/:wid/ssl", handler.ApplyWebsiteSSL)
+	protected.POST("/web-servers/:id/websites/:wid/ssl/upload", handler.UploadWebsiteSSL)
 
 	// Website process management
 	protected.POST("/web-servers/:id/websites/:wid/build", handler.BuildWebsite)

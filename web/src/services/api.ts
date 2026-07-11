@@ -462,6 +462,9 @@ export const websiteApi = {
   applySSL: (serverId: number, id: number, email?: string) =>
     api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/ssl`, { email }),
 
+  uploadSSL: (serverId: number, id: number, certContent: string, keyContent: string) =>
+    api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/ssl/upload`, { cert_content: certContent, key_content: keyContent }),
+
   build: (serverId: number, id: number) =>
     api.post<ApiResponse<{ success: boolean; output: string }>>(`/web-servers/${serverId}/websites/${id}/build`),
 

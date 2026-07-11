@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select,
+  Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
   message, Popconfirm, Tooltip, Row, Col,
   Table, Tabs, Empty,
 } from 'antd';
@@ -78,6 +78,8 @@ export default function WebsiteList({
   const [sslVisible, setSslVisible] = useState(false);
   const [sslSite, setSslSite] = useState<Website | null>(null);
   const [sslForm] = Form.useForm();
+  const [sslCertContent, setSslCertContent] = useState('');
+  const [sslKeyContent, setSslKeyContent] = useState('');
 
   // Build output modal
   const [buildVisible, setBuildVisible] = useState(false);
@@ -93,6 +95,13 @@ export default function WebsiteList({
 
   // Config options editor
   const [configOptionsText, setConfigOptionsText] = useState('');
+
+  // 解析 config_options JSON 为结构化开关，缺失字段用默认值
+  const parseConfigOptions = (s: string) => {
+    const def = { websocket: true, gzip: false, https_redirect: false, access_log: true };
+    if (!s) return def;
+    try { return { ...def, ...JSON.parse(s) }; } catch { return def; }
+  };
 
   // Directory browser state
   const [dirBrowserVisible, setDirBrowserVisible] = useState(false);
@@ -299,6 +308,25 @@ export default function WebsiteList({
     }
   };
 
+  const handleUploadSSL = async () => {
+    const ssl = sslSite;
+    if (!ssl) return;
+    if (!sslCertContent.trim() || !sslKeyContent.trim()) {
+      message.error('请输入证书和私钥内容');
+      return;
+    }
+    try {
+      await websiteApi.uploadSSL(selectedServer.id, ssl.id, sslCertContent, sslKeyContent);
+      message.success('SSL 证书上传成功');
+      setSslVisible(false);
+      setSslCertContent('');
+      setSslKeyContent('');
+      fetchWebsites();
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : 'SSL 上传失败'));
+    }
+  };
+
   // Build
   const handleBuild = async (site: Website) => {
     setBuildLoading(true);
@@ -321,7 +349,10 @@ export default function WebsiteList({
     try {
       await websiteApi.startProcess(selectedServer.id, site.id);
       message.success('进程启动请求已发送');
+      // 多次轮询，应对 npm start 等慢启动（进程守护启动后状态需要时间同步）
       setTimeout(fetchProcessStatuses, 2000);
+      setTimeout(fetchProcessStatuses, 5000);
+      setTimeout(fetchProcessStatuses, 9000);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '启动失败'));
     }
@@ -396,10 +427,12 @@ export default function WebsiteList({
         if (!r.build_command && !r.start_command) return <Tag color="default">未配置</Tag>;
         const ps = processStatuses[r.id];
         if (!ps) return <Tag color="default">查询中...</Tag>;
-        return ps.status === 'running'
+        const tag = ps.status === 'running'
           ? <Tag color="success">运行中</Tag>
           : ps.status === 'starting' ? <Tag color="processing">启动中</Tag>
           : <Tag color="error">已停止</Tag>;
+        // 未关联进程守护（nohup 模式）时 Tooltip 提示，引导用户重新编辑以创建进程守护
+        return ps.managed ? tag : <Tooltip title="未关联进程守护，仅检测端口。重新编辑网站填写启动命令+运行环境可启用进程守护">{tag}</Tooltip>;
       },
     },
     {
@@ -673,13 +706,17 @@ export default function WebsiteList({
               ))}
             </Select>
           </Form.Item>
-          <Form.Item label="Nginx 配置选项 (JSON)" extra="额外 Nginx 配置项，如 https、缓存等（可选）">
-            <Input.TextArea
-              rows={3}
-              value={configOptionsText}
-              onChange={e => setConfigOptionsText(e.target.value)}
-              placeholder={'{\n  "ssl_redirect": true,\n  "cache_enabled": true\n}'}
-            />
+          <Form.Item label="Nginx 配置选项" extra="按需开启，保存后自动生成配置">
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              <Space>
+                <Switch checked={parseConfigOptions(configOptionsText).websocket} onChange={v => setConfigOptionsText(JSON.stringify({ ...parseConfigOptions(configOptionsText), websocket: v }))} /> WebSocket
+                <Switch checked={parseConfigOptions(configOptionsText).gzip} onChange={v => setConfigOptionsText(JSON.stringify({ ...parseConfigOptions(configOptionsText), gzip: v }))} /> Gzip 压缩
+              </Space>
+              <Space>
+                <Switch checked={parseConfigOptions(configOptionsText).https_redirect} onChange={v => setConfigOptionsText(JSON.stringify({ ...parseConfigOptions(configOptionsText), https_redirect: v }))} /> HTTPS 跳转
+                <Switch checked={parseConfigOptions(configOptionsText).access_log} onChange={v => setConfigOptionsText(JSON.stringify({ ...parseConfigOptions(configOptionsText), access_log: v }))} /> 访问日志
+              </Space>
+            </Space>
           </Form.Item>
           <Form.Item name="custom_config" label="自定义配置（留空使用默认模板）">
             <Input.TextArea rows={4} placeholder="留空则根据项目类型自动生成配置" />
@@ -717,15 +754,40 @@ export default function WebsiteList({
         title={`SSL 证书 - ${sslSite?.domain}`}
         open={sslVisible}
         onCancel={() => setSslVisible(false)}
-        onOk={handleApplySSL}
-        okText="申请证书"
-        cancelText="取消"
+        footer={null}
       >
-        <Form form={sslForm} layout="vertical">
-          <Form.Item name="email" label="邮箱（可选）">
-            <Input placeholder="admin@example.com" />
-          </Form.Item>
-        </Form>
+        <Tabs
+          defaultActiveKey="apply"
+          items={[
+            {
+              key: 'apply',
+              label: "申请证书(Let's Encrypt)",
+              children: (
+                <Form form={sslForm} layout="vertical">
+                  <Form.Item name="email" label="邮箱（可选）">
+                    <Input placeholder="admin@example.com" />
+                  </Form.Item>
+                  <Button type="primary" onClick={handleApplySSL}>申请证书</Button>
+                </Form>
+              ),
+            },
+            {
+              key: 'upload',
+              label: '上传证书',
+              children: (
+                <Form layout="vertical">
+                  <Form.Item label="证书内容 (PEM)">
+                    <Input.TextArea rows={6} value={sslCertContent} onChange={(e) => setSslCertContent(e.target.value)} placeholder="-----BEGIN CERTIFICATE-----..." />
+                  </Form.Item>
+                  <Form.Item label="私钥内容 (PEM)">
+                    <Input.TextArea rows={6} value={sslKeyContent} onChange={(e) => setSslKeyContent(e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----..." />
+                  </Form.Item>
+                  <Button type="primary" onClick={handleUploadSSL}>上传并启用</Button>
+                </Form>
+              ),
+            },
+          ]}
+        />
         {sslSite?.ssl_enabled && (
           <Tag color="success">SSL 已启用: {sslSite.ssl_cert_path}</Tag>
         )}
