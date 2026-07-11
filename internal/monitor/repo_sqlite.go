@@ -111,9 +111,8 @@ func (r *sqliteRepo) GetHistory(ctx context.Context, start, end time.Time) ([]Mo
 		        net_bytes_sent, net_bytes_recv, net_packets_sent, net_packets_recv, timestamp
 		 FROM monitor_data
 		 WHERE timestamp >= ? AND timestamp <= ?
-		 ORDER BY timestamp ASC
-		 LIMIT ?`,
-		start.Format(time.RFC3339), end.Format(time.RFC3339), maxHistoryPoints*2,
+		 ORDER BY timestamp ASC`,
+		start.Format(time.RFC3339), end.Format(time.RFC3339),
 	)
 	if err != nil {
 		return nil, err

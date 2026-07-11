@@ -106,8 +106,9 @@ export default function Dashboard() {
     return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }, [timeRange]);
 
-  // 检测数据点间空隙（超过 2 分钟视为采集中断），插入 null 断点避免线段跨越无数据时段
-  const MAX_MONITOR_GAP_MS = 2 * 60 * 1000;
+  // 检测数据点间空隙（超过 10 分钟视为采集中断），插入 null 断点避免线段跨越无数据时段。
+  // 阈值需大于降采样后的最大间隔（24h/360≈4min），否则降采样点之间也会被误判为断点。
+  const MAX_MONITOR_GAP_MS = 10 * 60 * 1000;
   const insertNullGaps = (data: any[]) => {
     if (data.length < 2) return data;
     const result: (string | number | null)[][] = [data[0]];
@@ -123,6 +124,7 @@ export default function Dashboard() {
   };
 
   const cpuChartOption = useMemo(() => ({
+    animation: false,
     title: { text: 'CPU 使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
@@ -161,6 +163,7 @@ export default function Dashboard() {
   }), [history, formatChartTime]);
 
   const memChartOption = useMemo(() => ({
+    animation: false,
     title: { text: '内存使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
@@ -200,6 +203,7 @@ export default function Dashboard() {
   }), [history, formatChartTime]);
 
   const netChartOption = useMemo(() => ({
+    animation: false,
     title: { text: '网络流量', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
