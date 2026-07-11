@@ -369,26 +369,32 @@ func (s *MonitorService) readTopProcesses() []ProcessInfo {
 			continue
 		}
 
-		statFields := strings.Fields(string(statData))
-		if len(statFields) < 24 {
+		// 进程名(comm)在括号里，可能含空格(如 "npm start")。用最后一个 ')'
+		// 定位 comm 结束，避免 strings.Fields 把名字拆开导致后续字段错位
+		// （否则 RSS 会读到 vsize 等错误字段，内存显示成 TB 级）。
+		statStr := string(statData)
+		firstParen := strings.IndexByte(statStr, '(')
+		lastParen := strings.LastIndexByte(statStr, ')')
+		if firstParen < 0 || lastParen < 0 || lastParen <= firstParen {
+			continue
+		}
+		name := statStr[firstParen+1 : lastParen]
+		// rest 从 state 开始，rest[k] 对应原 stat 字段 k+3
+		restFields := strings.Fields(statStr[lastParen+1:])
+		if len(restFields) < 22 { // 至少到 rss(原 field 24 = rest[21])
 			continue
 		}
 
-		// Parse process name (field 1, in parentheses)
-		name := statFields[1]
-		name = strings.TrimPrefix(name, "(")
-		name = strings.TrimSuffix(name, ")")
+		// State (原 field 3 = rest[0])
+		state := restFields[0]
 
-		// State (field 2)
-		state := statFields[2]
-
-		// User time (field 13) and system time (field 14) in clock ticks
-		utime, _ := strconv.ParseUint(statFields[13], 10, 64)
-		stime, _ := strconv.ParseUint(statFields[14], 10, 64)
+		// User time (原 field 14 = rest[11]) and system time (原 field 15 = rest[12]) in clock ticks
+		utime, _ := strconv.ParseUint(restFields[11], 10, 64)
+		stime, _ := strconv.ParseUint(restFields[12], 10, 64)
 		totalTime := utime + stime
 
-		// RSS (field 23) in pages
-		rssPages, _ := strconv.ParseUint(statFields[23], 10, 64)
+		// RSS (原 field 24 = rest[21]) in pages
+		rssPages, _ := strconv.ParseUint(restFields[21], 10, 64)
 		pageSize := uint64(os.Getpagesize())
 		memBytes := rssPages * pageSize
 
