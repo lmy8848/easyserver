@@ -106,6 +106,22 @@ export default function Dashboard() {
     return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }, [timeRange]);
 
+  // 检测数据点间空隙（超过 2 分钟视为采集中断），插入 null 断点避免线段跨越无数据时段
+  const MAX_MONITOR_GAP_MS = 2 * 60 * 1000;
+  const insertNullGaps = (data: any[]) => {
+    if (data.length < 2) return data;
+    const result: (string | number | null)[][] = [data[0]];
+    for (let i = 1; i < data.length; i++) {
+      const prevTime = new Date(data[i-1][0]).getTime();
+      const currTime = new Date(data[i][0]).getTime();
+      if (currTime - prevTime > MAX_MONITOR_GAP_MS) {
+        result.push([new Date(prevTime + 1000).toISOString(), null]);
+      }
+      result.push(data[i]);
+    }
+    return result;
+  };
+
   const cpuChartOption = useMemo(() => ({
     title: { text: 'CPU 使用率', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
@@ -136,10 +152,11 @@ export default function Dashboard() {
     series: [{
       name: 'CPU',
       type: 'line',
-      data: history.map(p => [p.timestamp, p.cpu.usage_percent]),
+      data: insertNullGaps(history.map(p => [p.timestamp, p.cpu.usage_percent])),
       smooth: true,
       areaStyle: { opacity: 0.3 },
       showSymbol: false,
+      connectNulls: false,
     }],
   }), [history, formatChartTime]);
 
@@ -173,11 +190,12 @@ export default function Dashboard() {
     series: [{
       name: '内存',
       type: 'line',
-      data: history.map(p => [p.timestamp, p.memory.usage_percent]),
+      data: insertNullGaps(history.map(p => [p.timestamp, p.memory.usage_percent])),
       smooth: true,
       areaStyle: { opacity: 0.3 },
       itemStyle: { color: '#52c41a' },
       showSymbol: false,
+      connectNulls: false,
     }],
   }), [history, formatChartTime]);
 
@@ -213,16 +231,17 @@ export default function Dashboard() {
       {
         name: '上传',
         type: 'line',
-        data: history.map(p => [p.timestamp, p.network.bytes_sent]),
+        data: insertNullGaps(history.map(p => [p.timestamp, p.network.bytes_sent])),
         smooth: true,
         showSymbol: false,
+        connectNulls: false,
         itemStyle: { color: '#faad14' },
         areaStyle: { opacity: 0.2 },
       },
       {
         name: '下载',
         type: 'line',
-        data: history.map(p => [p.timestamp, p.network.bytes_recv]),
+        data: insertNullGaps(history.map(p => [p.timestamp, p.network.bytes_recv])),
         smooth: true,
         showSymbol: false,
         itemStyle: { color: '#1890ff' },
