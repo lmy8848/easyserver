@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
   message, Popconfirm, Tooltip, Row, Col,
@@ -422,24 +422,26 @@ export default function WebsiteList({
         : <Tag color="default">关闭</Tag>,
     },
     {
-      title: '进程', key: 'process', width: 80,
+      title: '状态', key: 'status', width: 160,
       render: (_: unknown, r: Website) => {
-        if (!r.build_command && !r.start_command) return <Tag color="default">未配置</Tag>;
-        const ps = processStatuses[r.id];
-        if (!ps) return <Tag color="default">查询中...</Tag>;
-        const tag = ps.status === 'running'
-          ? <Tag color="success">运行中</Tag>
-          : ps.status === 'starting' ? <Tag color="processing">启动中</Tag>
-          : <Tag color="error">已停止</Tag>;
-        // 未关联进程守护（nohup 模式）时 Tooltip 提示，引导用户重新编辑以创建进程守护
-        return ps.managed ? tag : <Tooltip title="未关联进程守护，仅检测端口。重新编辑网站填写启动命令+运行环境可启用进程守护">{tag}</Tooltip>;
+        const siteTag = r.status === 'active'
+          ? <Tag color="success">网站:启用</Tag>
+          : <Tag color="error">网站:禁用</Tag>;
+        let procTag: ReactNode = null;
+        if (r.build_command || r.start_command) {
+          const ps = processStatuses[r.id];
+          if (!ps) {
+            procTag = <Tag color="default">进程:查询中</Tag>;
+          } else {
+            const inner = ps.status === 'running'
+              ? <Tag color="success">进程:运行中</Tag>
+              : ps.status === 'starting' ? <Tag color="processing">进程:启动中</Tag>
+              : <Tag color="error">进程:已停止</Tag>;
+            procTag = ps.managed ? inner : <Tooltip title="未关联进程守护，仅检测端口">{inner}</Tooltip>;
+          }
+        }
+        return <Space size={4} wrap>{siteTag}{procTag}</Space>;
       },
-    },
-    {
-      title: '状态', key: 'status', width: 80,
-      render: (_: unknown, r: Website) => r.status === 'active'
-        ? <Tag color="success">运行中</Tag>
-        : <Tag color="error">已禁用</Tag>,
     },
     {
       title: '操作', key: 'action', width: 380,
