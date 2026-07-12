@@ -410,16 +410,16 @@ export default function WebsiteList({
     },
     { title: '根目录', dataIndex: 'root_path', key: 'root_path', ellipsis: true },
     {
-      title: 'SSL', key: 'ssl', width: 60,
+      title: 'SSL', key: 'ssl', width: 90, align: 'center' as const,
       render: (_: unknown, r: Website) => r.ssl_enabled
-        ? <Tag icon={<SafetyOutlined />} color="success">已启用</Tag>
-        : <Tag color="default">未启用</Tag>,
+        ? <Tag icon={<SafetyOutlined />} color="success" style={{ margin: 0 }}>已启用</Tag>
+        : <Tag color="default" style={{ margin: 0 }}>未启用</Tag>,
     },
     {
-      title: '反代', key: 'proxy', width: 60,
+      title: '反代', key: 'proxy', width: 80, align: 'center' as const,
       render: (_: unknown, r: Website) => r.proxy_enabled
-        ? <Tooltip title={r.proxy_pass}><Tag color="blue">已启用</Tag></Tooltip>
-        : <Tag color="default">关闭</Tag>,
+        ? <Tooltip title={r.proxy_pass}><Tag color="blue" style={{ margin: 0 }}>已启用</Tag></Tooltip>
+        : <Tag color="default" style={{ margin: 0 }}>关闭</Tag>,
     },
     {
       title: '状态', key: 'status', width: 160,
