@@ -526,6 +526,20 @@ export interface FileShare {
   updated_at: string;
   file_exists?: boolean;
   current_size?: number;
+  has_password?: boolean;
+}
+
+// Public (non-sensitive) metadata for a share link, consumed by the download page.
+export interface ShareInfo {
+  file_name: string;
+  file_size: number;
+  exists: boolean;
+  needs_password: boolean;
+  expired: boolean;
+  downloads_left: number; // -1 = unlimited
+  download_count: number;
+  max_downloads: number;
+  expires_at: string;
 }
 
 // DB config

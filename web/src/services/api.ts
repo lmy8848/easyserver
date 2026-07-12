@@ -6,7 +6,7 @@ import type {
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
   ManagedProcess, ProcessWithStatus, ProcessLog, ProcessGroup, ProcessStats, PaginatedData,
-  SystemProcess, FileShare,
+  SystemProcess, FileShare, ShareInfo,
   Notification, SSHLogin, SSHConfig, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
 } from '../types';
@@ -363,11 +363,32 @@ export const fileShareApi = {
   list: () =>
     api.get<ApiResponse<FileShare[]>>('/file-shares'),
 
+  get: (id: number) =>
+    api.get<ApiResponse<FileShare>>(`/file-shares/${id}`),
+
+  update: (id: number, data: {
+    password?: string | null;
+    expires_at?: string;
+    max_downloads?: number;
+    clear_expiry?: boolean;
+  }) =>
+    api.put<ApiResponse<FileShare>>(`/file-shares/${id}`, data),
+
   delete: (id: number) =>
     api.delete<ApiResponse>(`/file-shares/${id}`),
 
   cleanupExpired: () =>
     api.post<ApiResponse<{ deleted: number }>>('/file-shares/cleanup'),
+};
+
+// Public share endpoints live at the root (/share/:token/...), NOT under /api,
+// and may be accessed without auth (share recipients). Use a bare axios call.
+export const publicShareApi = {
+  getInfo: (token: string) =>
+    axios.get<ApiResponse<ShareInfo>>(`/share/${token}/info`),
+
+  verify: (token: string, password: string) =>
+    axios.post<ApiResponse<{ ok: boolean }>>(`/share/${token}/verify`, { password }),
 };
 
 // Web Server API

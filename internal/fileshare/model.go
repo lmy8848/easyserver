@@ -23,3 +23,16 @@ type CreateShareRequest struct {
 	ExpiresAt    string `json:"expires_at"`
 	MaxDownloads int    `json:"max_downloads"`
 }
+
+// UpdateShareRequest is the request body for updating a share's metadata.
+// File path and token are intentionally excluded — only access-control
+// fields (password / expiry / download cap) may be modified after creation.
+// Password is a pointer so we can distinguish "clear password" (empty string)
+// from "leave unchanged" (nil). SetPassword=true means the provided Password
+// (possibly empty) should replace the stored value.
+type UpdateShareRequest struct {
+	Password     *string `json:"password"`
+	ExpiresAt    string  `json:"expires_at"`
+	MaxDownloads *int    `json:"max_downloads"`
+	ClearExpiry  bool    `json:"clear_expiry"`
+}

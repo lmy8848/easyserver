@@ -32,6 +32,7 @@ const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const FileShares = lazy(() => import('./pages/FileShares'));
 const PortMonitor = lazy(() => import('./pages/PortMonitor'));
+const ShareDownload = lazy(() => import('./pages/ShareDownload'));
 
 const PageLoading = memo(function PageLoading() {
   return (
@@ -65,6 +66,7 @@ function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/change-password" element={<ChangePassword />} />
+              <Route path="/share/:token" element={<ShareDownload />} />
               <Route
                 path="/"
                 element={

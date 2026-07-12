@@ -325,7 +325,8 @@ func (r *Router) Setup() *gin.Engine {
 	registerNotificationRoutes(protected, r.notificationService)
 	registerFileShareRoutes(protected, r.fileShareRepo, r.fileManager)
 
-	// Public file share download route (no auth, before static assets to avoid conflict)
+	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
+	// /share/:token itself is NOT registered so it falls through to the SPA fallback.
 	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
