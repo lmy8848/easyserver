@@ -106,6 +106,13 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 			"assets_rate_limit":    h.cfg.Server.AssetsRateLimit,
 			"assets_rate_interval": h.cfg.Server.AssetsRateInterval.String(),
 			"max_upload_size":      h.cfg.Server.MaxUploadSize,
+			"turnstile": gin.H{
+				"site_key":            h.cfg.Server.Turnstile.SiteKey,
+				"secret_key":          h.cfg.Server.Turnstile.SecretKey,
+				"enable_login":        h.cfg.Server.Turnstile.EnableLogin,
+				"enable_qr_login":     h.cfg.Server.Turnstile.EnableQRLogin,
+				"enable_public_share": h.cfg.Server.Turnstile.EnablePublicShare,
+			},
 		},
 		"auth": gin.H{
 			"session_timeout":     h.cfg.Auth.SessionTimeout.String(),
@@ -217,6 +224,13 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		MaxUploadSize      *int64  `json:"max_upload_size"`
 		AssetsRateLimit    *int    `json:"assets_rate_limit"`
 		AssetsRateInterval *string `json:"assets_rate_interval"`
+		Turnstile          *struct {
+			SiteKey           *string `json:"site_key"`
+			SecretKey         *string `json:"secret_key"`
+			EnableLogin       *bool   `json:"enable_login"`
+			EnableQRLogin     *bool   `json:"enable_qr_login"`
+			EnablePublicShare *bool   `json:"enable_public_share"`
+		} `json:"turnstile"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -302,6 +316,23 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 			return
 		}
 		h.cfg.Server.AssetsRateInterval = d
+	}
+	if req.Turnstile != nil {
+		if req.Turnstile.SiteKey != nil {
+			h.cfg.Server.Turnstile.SiteKey = *req.Turnstile.SiteKey
+		}
+		if req.Turnstile.SecretKey != nil {
+			h.cfg.Server.Turnstile.SecretKey = *req.Turnstile.SecretKey
+		}
+		if req.Turnstile.EnableLogin != nil {
+			h.cfg.Server.Turnstile.EnableLogin = *req.Turnstile.EnableLogin
+		}
+		if req.Turnstile.EnableQRLogin != nil {
+			h.cfg.Server.Turnstile.EnableQRLogin = *req.Turnstile.EnableQRLogin
+		}
+		if req.Turnstile.EnablePublicShare != nil {
+			h.cfg.Server.Turnstile.EnablePublicShare = *req.Turnstile.EnablePublicShare
+		}
 	}
 
 	// Save to config file

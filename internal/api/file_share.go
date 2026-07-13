@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/api/middleware"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/fileshare"
+	"easyserver/internal/infra/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,10 +23,11 @@ import (
 type FileShareHandler struct {
 	shareRepo   fileshare.Repository
 	fileManager *filemanager.Manager
+	cfg         *config.Config
 }
 
-func NewFileShareHandler(shareRepo fileshare.Repository, fm *filemanager.Manager) *FileShareHandler {
-	return &FileShareHandler{shareRepo: shareRepo, fileManager: fm}
+func NewFileShareHandler(shareRepo fileshare.Repository, fm *filemanager.Manager, cfg *config.Config) *FileShareHandler {
+	return &FileShareHandler{shareRepo: shareRepo, fileManager: fm, cfg: cfg}
 }
 
 // detectContentType returns a MIME type based on file extension.
@@ -513,6 +515,16 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		return
 	}
 
+	// Verify Turnstile if enabled for public shares. The token arrives as a
+	// query param because this is a GET (redirect/blob) download.
+	if h.cfg.Turnstile.EnablePublicShare {
+		tsToken := c.Query("turnstile_token")
+		if !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, tsToken, c.ClientIP()) {
+			c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
+			return
+		}
+	}
+
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
 		c.Error(ErrInternal.Wrap(err))
@@ -603,8 +615,8 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 }
 
 // registerFileShareRoutes registers file share management routes (protected)
-func registerFileShareRoutes(protected *gin.RouterGroup, shareRepo fileshare.Repository, fileManager *filemanager.Manager) {
-	handler := NewFileShareHandler(shareRepo, fileManager)
+func registerFileShareRoutes(protected *gin.RouterGroup, shareRepo fileshare.Repository, fileManager *filemanager.Manager, cfg *config.Config) {
+	handler := NewFileShareHandler(shareRepo, fileManager, cfg)
 
 	protected.POST("/file-shares", handler.CreateShare)
 	protected.GET("/file-shares", handler.ListShares)
@@ -618,8 +630,8 @@ func registerFileShareRoutes(protected *gin.RouterGroup, shareRepo fileshare.Rep
 // /share/:token is intentionally NOT registered here so it falls through to
 // the SPA fallback (NoRoute) and renders the React download page; the info
 // and download sub-paths are explicit and take precedence over NoRoute.
-func RegisterPublicShareRoute(e *gin.Engine, shareRepo fileshare.Repository, fileManager *filemanager.Manager, rateLimit int, rateInterval time.Duration) {
-	handler := NewFileShareHandler(shareRepo, fileManager)
+func RegisterPublicShareRoute(e *gin.Engine, shareRepo fileshare.Repository, fileManager *filemanager.Manager, rateLimit int, rateInterval time.Duration, cfg *config.Config) {
+	handler := NewFileShareHandler(shareRepo, fileManager, cfg)
 	// Public share endpoints are unauthenticated, so rate-limit by IP to blunt
 	// password brute-force on /verify and download abuse on /download.
 	g := e.Group("/share")

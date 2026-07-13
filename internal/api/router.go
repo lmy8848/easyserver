@@ -286,7 +286,7 @@ func (r *Router) Setup() *gin.Engine {
 	)
 
 	// Auth routes (public + protected)
-	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.qrLoginService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval)
+	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.qrLoginService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval, r.cfg)
 
 	// Protected routes (JWT + SingleAdmin + Audit + Session Heartbeat)
 	protected := api.Group("")
@@ -343,11 +343,11 @@ func (r *Router) Setup() *gin.Engine {
 	registerProcessRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)
 	registerNotificationRoutes(protected, r.notificationService)
-	registerFileShareRoutes(protected, r.fileShareRepo, r.fileManager)
+	registerFileShareRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
 
 	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
 	// /share/:token itself is NOT registered so it falls through to the SPA fallback.
-	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager, r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval)
+	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager, r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval, r.cfg)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
 	if r.cfg.Server.ServeFrontend {

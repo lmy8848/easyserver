@@ -16,6 +16,13 @@ export interface Settings {
     max_upload_size: number;
     assets_rate_limit: number;
     assets_rate_interval: string;
+    turnstile: {
+      site_key: string;
+      secret_key: string;
+      enable_login: boolean;
+      enable_qr_login: boolean;
+      enable_public_share: boolean;
+    };
   };
   auth: {
     session_timeout: string;

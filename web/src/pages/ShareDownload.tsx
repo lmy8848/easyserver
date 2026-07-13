@@ -6,8 +6,9 @@ import {
   FileTextOutlined, VideoCameraOutlined, AudioOutlined, DownloadOutlined,
   LockOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
-import { publicShareApi } from '../services/api';
+import { publicShareApi, authApi } from '../services/api';
 import type { ShareInfo } from '../types';
+import Turnstile from '../components/Turnstile';
 
 const PAGE_CSS = `
 @keyframes esShareGradient {
@@ -63,6 +64,19 @@ export default function ShareDownload() {
   const [error, setError] = useState('');
   const [password, setPassword] = useState(searchParams.get('password') || '');
   const [verifying, setVerifying] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const turnstileEnabled = !!turnstileSiteKey;
+
+  // 加载 Turnstile 公开配置
+  useEffect(() => {
+    authApi.getTurnstileConfig().then((res) => {
+      const cfg = res.data.data;
+      if (cfg?.enable_public_share && cfg.site_key) {
+        setTurnstileSiteKey(cfg.site_key);
+      }
+    }).catch(() => undefined);
+  }, []);
 
   const fetchInfo = useCallback(async () => {
     setLoading(true);
@@ -84,9 +98,15 @@ export default function ShareDownload() {
 
   const handleDownload = async () => {
     if (!info) return;
+    // Turnstile 启用时需先通过验证
+    if (turnstileEnabled && !turnstileToken) {
+      message.warning('请先完成人机验证');
+      return;
+    }
+    const ts = turnstileToken ? `&turnstile_token=${encodeURIComponent(turnstileToken)}` : '';
     // No password: go straight to the download endpoint.
     if (!info.needs_password) {
-      window.location.href = `/share/${token}/download`;
+      window.location.href = `/share/${token}/download?turnstile_token=${encodeURIComponent(turnstileToken)}`;
       return;
     }
     if (!password) {
@@ -98,7 +118,7 @@ export default function ShareDownload() {
     setVerifying(true);
     try {
       await publicShareApi.verify(token, password);
-      window.location.href = `/share/${token}/download?password=${encodeURIComponent(password)}`;
+      window.location.href = `/share/${token}/download?password=${encodeURIComponent(password)}${ts}`;
     } catch (err: unknown) {
       const msg = (err && typeof err === 'object' && 'response' in err)
         ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message || '')
@@ -194,6 +214,17 @@ export default function ShareDownload() {
                 onPressEnter={handleDownload}
                 style={{ height: 44, borderRadius: 10, marginBottom: 16 }}
               />
+            )}
+
+            {turnstileEnabled && (
+              <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
+                <Turnstile
+                  siteKey={turnstileSiteKey}
+                  onVerify={(t) => setTurnstileToken(t)}
+                  onExpire={() => setTurnstileToken('')}
+                  theme="auto"
+                />
+              </div>
             )}
 
             <Button type="primary" icon={<DownloadOutlined />} block loading={verifying}

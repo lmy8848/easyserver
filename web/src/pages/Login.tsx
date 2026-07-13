@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../services/api';
 import type { User } from '../types';
+import Turnstile from '../components/Turnstile';
 
 const { Title, Text } = Typography;
 
@@ -64,6 +65,13 @@ interface QRData {
   expires_at: string;
 }
 
+interface TurnstileConfig {
+  site_key: string;
+  enable_login: boolean;
+  enable_qr_login: boolean;
+  enable_public_share: boolean;
+}
+
 export default function Login() {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'login' | 'totp' | 'backup'>('login');
@@ -71,11 +79,26 @@ export default function Login() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
 
+  // Turnstile 配置(公开,无私钥)
+  const [turnstileCfg, setTurnstileCfg] = useState<TurnstileConfig | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string>('');
+
   // 扫码登录状态
   const [loginMode, setLoginMode] = useState<'password' | 'qr'>('password');
   const [qrData, setQrData] = useState<QRData | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrStatus, setQrStatus] = useState<'pending' | 'expired'>('pending');
+
+  // 加载 Turnstile 公开配置
+  useEffect(() => {
+    authApi.getTurnstileConfig().then((res) => {
+      const cfg = res.data.data;
+      if (cfg) {
+        setTurnstileCfg(cfg);
+        setTurnstileToken('');
+      }
+    }).catch(() => { /* 静默失败,Turnstile 可选 */ });
+  }, []);
 
   // If already authenticated, redirect to home
   useEffect(() => {
@@ -108,9 +131,14 @@ export default function Login() {
   }, [navigate]);
 
   const onFinish = async (values: { username: string; password: string }) => {
+    // Turnstile 启用但未通过验证时,阻止登录
+    if (turnstileCfg?.enable_login && !turnstileToken) {
+      message.warning('请先完成人机验证');
+      return;
+    }
     setLoading(true);
     try {
-      const response = await authApi.login(values.username, values.password);
+      const response = await authApi.login(values.username, values.password, turnstileToken);
       const data = response.data.data;
 
       if (data.requires_totp) {
@@ -128,9 +156,13 @@ export default function Login() {
   };
 
   const onTOTPFinish = async (values: { code: string }) => {
+    if (turnstileCfg?.enable_login && !turnstileToken) {
+      message.warning('请先完成人机验证');
+      return;
+    }
     setLoading(true);
     try {
-      const response = await authApi.verifyTOTP(tempToken, values.code);
+      const response = await authApi.verifyTOTP(tempToken, values.code, turnstileToken);
       handleLoginSuccess(response.data.data);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '验证码错误'));
@@ -140,9 +172,13 @@ export default function Login() {
   };
 
   const onBackupCodeFinish = async (values: { backup_code: string }) => {
+    if (turnstileCfg?.enable_login && !turnstileToken) {
+      message.warning('请先完成人机验证');
+      return;
+    }
     setLoading(true);
     try {
-      const response = await authApi.verifyBackupCode(tempToken, values.backup_code);
+      const response = await authApi.verifyBackupCode(tempToken, values.backup_code, turnstileToken);
       handleLoginSuccess(response.data.data);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '备份码错误'));
@@ -241,6 +277,17 @@ export default function Login() {
         <Input.Password prefix={<LockOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="密码" style={inputStyle} />
       </Form.Item>
 
+      {turnstileCfg?.enable_login && turnstileCfg.site_key && (
+        <Form.Item style={{ marginBottom: 12 }}>
+          <Turnstile
+            siteKey={turnstileCfg.site_key}
+            onVerify={(t) => setTurnstileToken(t)}
+            onExpire={() => setTurnstileToken('')}
+            theme="auto"
+          />
+        </Form.Item>
+      )}
+
       <Form.Item style={{ marginBottom: 0 }}>
         <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
           登录
@@ -303,6 +350,17 @@ export default function Login() {
             maxLength={6} style={{ ...inputStyle, textAlign: 'center', fontSize: 26, letterSpacing: 12 }} />
         </Form.Item>
 
+        {turnstileCfg?.enable_login && turnstileCfg.site_key && (
+          <Form.Item style={{ marginBottom: 12 }}>
+            <Turnstile
+              siteKey={turnstileCfg.site_key}
+              onVerify={(t) => setTurnstileToken(t)}
+              onExpire={() => setTurnstileToken('')}
+              theme="auto"
+            />
+          </Form.Item>
+        )}
+
         <Form.Item style={{ marginBottom: 0 }}>
           <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
             验证
@@ -338,6 +396,17 @@ export default function Login() {
         <Form.Item name="backup_code" rules={[{ required: true, message: '请输入备份码' }]}>
           <Input prefix={<KeyOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="备份码" style={inputStyle} />
         </Form.Item>
+
+        {turnstileCfg?.enable_login && turnstileCfg.site_key && (
+          <Form.Item style={{ marginBottom: 12 }}>
+            <Turnstile
+              siteKey={turnstileCfg.site_key}
+              onVerify={(t) => setTurnstileToken(t)}
+              onExpire={() => setTurnstileToken('')}
+              theme="auto"
+            />
+          </Form.Item>
+        )}
 
         <Form.Item style={{ marginBottom: 0 }}>
           <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>

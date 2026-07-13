@@ -38,6 +38,11 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         max_upload_size: settings.server.max_upload_size ? Math.round(settings.server.max_upload_size / 1024 / 1024) : 512,
         assets_rate_limit: settings.server.assets_rate_limit,
         assets_rate_interval: settings.server.assets_rate_interval,
+        turnstile_site_key: settings.server.turnstile.site_key,
+        turnstile_secret_key: settings.server.turnstile.secret_key,
+        turnstile_enable_login: settings.server.turnstile.enable_login,
+        turnstile_enable_qr_login: settings.server.turnstile.enable_qr_login,
+        turnstile_enable_public_share: settings.server.turnstile.enable_public_share,
       });
       // Only set on first load (don't overwrite when settings refresh after save)
       if (originalPortRef.current === undefined) {
@@ -65,11 +70,26 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
     try {
       const values = await form.validateFields();
       setSaving(true);
-      // Convert MB to bytes for backend
-      const payload = { ...values };
-      if (payload.max_upload_size != null) {
-        payload.max_upload_size = payload.max_upload_size * 1024 * 1024;
-      }
+      // Build payload from individual fields to avoid `any`/index-signature
+      // friction with the form values object.
+      const payload: Record<string, unknown> = {
+        host: values.host,
+        port: values.port,
+        serve_frontend: values.serve_frontend,
+        domain: values.domain,
+        redirect_mode: values.redirect_mode,
+        www_handling: values.www_handling,
+        max_upload_size: values.max_upload_size != null ? values.max_upload_size * 1024 * 1024 : undefined,
+        assets_rate_limit: values.assets_rate_limit,
+        assets_rate_interval: values.assets_rate_interval,
+        turnstile: {
+          site_key: values.turnstile_site_key || '',
+          secret_key: values.turnstile_secret_key || '',
+          enable_login: !!values.turnstile_enable_login,
+          enable_qr_login: !!values.turnstile_enable_qr_login,
+          enable_public_share: !!values.turnstile_enable_public_share,
+        },
+      };
       const res = await settingsApi.updateServer(payload);
       if (res.data?.data?.requires_restart) {
         setRequiresRestart(true);
@@ -214,6 +234,56 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
             extra="静态资源速率限制的时间窗口，如 1m、5m"
           >
             <Input placeholder="1m" />
+          </Form.Item>
+
+          <Divider />
+          <Typography.Title level={5} style={{ margin: 0 }}>Cloudflare Turnstile</Typography.Title>
+          <Paragraph style={{ color: '#8c8c8c', fontSize: 12, marginBottom: 8 }}>
+            配置 Cloudflare Turnstile 人机验证,在登录/扫码/外链下载前要求用户完成验证。
+            需在 <a href="https://dash.cloudflare.com/" target="_blank" rel="noreferrer">Cloudflare Dashboard</a> 创建 Turnstile 站点。
+          </Paragraph>
+
+          <Form.Item
+            name="turnstile_site_key"
+            label="Site Key"
+            extra="Turnstile 站点密钥(公开)"
+          >
+            <Input placeholder="0x4AAAAAA..." />
+          </Form.Item>
+
+          <Form.Item
+            name="turnstile_secret_key"
+            label="Secret Key"
+            extra="Turnstile 密钥(敏感,请妥善保管)"
+          >
+            <Input.Password placeholder="0x4AAAAAA..." autoComplete="off" />
+          </Form.Item>
+
+          <Form.Item
+            name="turnstile_enable_login"
+            label="登录验证"
+            extra="密码登录和 TOTP/备份码验证时要求 Turnstile"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="turnstile_enable_qr_login"
+            label="扫码登录验证"
+            extra="手机端扫码确认登录时要求 Turnstile"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="turnstile_enable_public_share"
+            label="外链下载验证"
+            extra="公开文件外链下载时要求 Turnstile"
+            valuePropName="checked"
+          >
+            <Switch />
           </Form.Item>
 
           <Form.Item>

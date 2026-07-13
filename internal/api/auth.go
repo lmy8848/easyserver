@@ -7,6 +7,7 @@ import (
 	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/infra/config"
 	"easyserver/internal/qrlogin"
 
 	"github.com/gin-gonic/gin"
@@ -18,15 +19,17 @@ type AuthHandler struct {
 	sessionService *auth.SessionService
 	jwtSecret      string
 	sessionTimeout time.Duration
+	cfg            *config.Config
 }
 
-func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditService *audit.Service, sessionService *auth.SessionService, sessionTimeout time.Duration) *AuthHandler {
+func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditService *audit.Service, sessionService *auth.SessionService, sessionTimeout time.Duration, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
 		auditService:   auditService,
 		sessionService: sessionService,
 		jwtSecret:      jwtSecret,
 		sessionTimeout: sessionTimeout,
+		cfg:            cfg,
 	}
 }
 
@@ -53,9 +56,19 @@ type ChangePasswordRequest struct {
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
-	var req LoginRequest
+	var req struct {
+		Username       string `json:"username" binding:"required"`
+		Password       string `json:"password" binding:"required"`
+		TurnstileToken string `json:"turnstile_token"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+
+	// Verify Cloudflare Turnstile challenge if enabled for login.
+	if h.cfg.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
 
@@ -218,9 +231,17 @@ type TOTPDisableRequest struct {
 
 // VerifyTOTP handles TOTP verification during login (step 2)
 func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
-	var req TOTPVerifyRequest
+	var req struct {
+		TOTPVerifyRequest
+		TurnstileToken string `json:"turnstile_token"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+
+	if h.cfg.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
 
@@ -283,9 +304,17 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 
 // VerifyBackupCode handles backup code verification during login (step 2)
 func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
-	var req BackupCodeVerifyRequest
+	var req struct {
+		BackupCodeVerifyRequest
+		TurnstileToken string `json:"turnstile_token"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+
+	if h.cfg.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
 
@@ -558,15 +587,25 @@ func registerAuthRoutes(
 	sessionTimeout time.Duration,
 	loginRateLimit int,
 	loginRateInterval time.Duration,
+	cfg *config.Config,
 ) {
 	// Public auth routes (no JWT required) — Tier 3: strict login limiter
 	auth := api.Group("/auth")
 	auth.Use(middleware.RateLimitMiddleware("login", loginRateLimit, loginRateInterval))
-	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout)
+	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout, cfg)
 	{
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/verify-totp", authHandler.VerifyTOTP)
 		auth.POST("/verify-backup", authHandler.VerifyBackupCode)
+		// Public Turnstile config (no secret key): site key + enabled flows.
+		auth.GET("/turnstile/config", func(c *gin.Context) {
+			Success(c, gin.H{
+				"site_key":            cfg.Turnstile.SiteKey,
+				"enable_login":        cfg.Turnstile.EnableLogin,
+				"enable_qr_login":     cfg.Turnstile.EnableQRLogin,
+				"enable_public_share": cfg.Turnstile.EnablePublicShare,
+			})
+		})
 	}
 
 	// Protected auth routes

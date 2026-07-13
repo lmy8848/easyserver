@@ -69,8 +69,8 @@ api.interceptors.response.use(
 
 // Auth API
 export const authApi = {
-  login: (username: string, password: string) =>
-    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean; requires_totp?: boolean; temp_token?: string }>>('/auth/login', { username, password }),
+  login: (username: string, password: string, turnstileToken?: string) =>
+    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean; requires_totp?: boolean; temp_token?: string }>>('/auth/login', { username, password, turnstile_token: turnstileToken }),
 
   logout: () =>
     api.post<ApiResponse>('/auth/logout'),
@@ -82,11 +82,11 @@ export const authApi = {
     api.post<ApiResponse>('/auth/change-password', { old_password: oldPassword, new_password: newPassword }),
 
   // TOTP verification (login step 2)
-  verifyTOTP: (tempToken: string, code: string) =>
-    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean }>>('/auth/verify-totp', { temp_token: tempToken, code }),
+  verifyTOTP: (tempToken: string, code: string, turnstileToken?: string) =>
+    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean }>>('/auth/verify-totp', { temp_token: tempToken, code, turnstile_token: turnstileToken }),
 
-  verifyBackupCode: (tempToken: string, backupCode: string) =>
-    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean }>>('/auth/verify-backup', { temp_token: tempToken, backup_code: backupCode }),
+  verifyBackupCode: (tempToken: string, backupCode: string, turnstileToken?: string) =>
+    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean }>>('/auth/verify-backup', { temp_token: tempToken, backup_code: backupCode, turnstile_token: turnstileToken }),
 
   // TOTP setup (protected)
   setupTOTP: () =>
@@ -110,6 +110,10 @@ export const authApi = {
 
   kickAllOtherSessions: () =>
     api.post<ApiResponse>('/auth/sessions/kick-all'),
+
+  // Turnstile config (public: site key + enabled flows, no secret).
+  getTurnstileConfig: () =>
+    api.get<ApiResponse<{ site_key: string; enable_login: boolean; enable_qr_login: boolean; enable_public_share: boolean }>>('/auth/turnstile/config'),
 
   // Scan-to-login (QR). Web creates+p polls; mobile (authenticated) confirms.
   createQRSession: () =>
@@ -791,7 +795,7 @@ export const settingsApi = {
   getSystem: () =>
     api.get<ApiResponse<{ version: string }>>('/settings/system'),
 
-  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean; domain?: string; redirect_mode?: string; www_handling?: string; max_upload_size?: number; assets_rate_limit?: number; assets_rate_interval?: string }) =>
+  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean; domain?: string; redirect_mode?: string; www_handling?: string; max_upload_size?: number; assets_rate_limit?: number; assets_rate_interval?: string; turnstile?: { site_key?: string; secret_key?: string; enable_login?: boolean; enable_qr_login?: boolean; enable_public_share?: boolean } }) =>
     api.put<ApiResponse<{ requires_restart: boolean }>>('/settings/server', data),
 
   updateTLS: (data: { enabled: boolean; cert_content?: string; key_content?: string }) =>
