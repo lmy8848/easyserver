@@ -42,9 +42,11 @@ func SecurityMiddleware(nonce string) gin.HandlerFunc {
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		// Content Security Policy
-		// - script-src uses nonce to allow only our scripts (production mode only)
+		// - script-src uses nonce to allow only our scripts (production mode only);
+		//   https://challenges.cloudflare.com is for Cloudflare Turnstile.
 		// - style-src uses unsafe-inline because Ant Design CSS-in-JS requires inline styles
-		scriptSrc := "'self'"
+		// - frame-src + worker-src allow Turnstile's challenge iframe and web worker.
+		scriptSrc := "'self' https://challenges.cloudflare.com"
 		if nonce != "" {
 			scriptSrc += " 'nonce-" + nonce + "'"
 		}
@@ -54,8 +56,9 @@ func SecurityMiddleware(nonce string) gin.HandlerFunc {
 				"style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob:; "+
 				"font-src 'self' data:; "+
-				"connect-src 'self' ws: wss:; "+
-				"worker-src 'self' blob:; "+
+				"connect-src 'self' ws: wss: https://challenges.cloudflare.com; "+
+				"worker-src 'self' blob: https://challenges.cloudflare.com; "+
+				"frame-src https://challenges.cloudflare.com; "+
 				"frame-ancestors 'none'; "+
 				"base-uri 'self'; "+
 				"form-action 'self';",
