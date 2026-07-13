@@ -241,9 +241,10 @@ func validateSingleStatement(sql string) *ValidationResult {
 		return &ValidationResult{Valid: false, Message: "accessing INFORMATION_SCHEMA is not allowed"}
 	}
 
-	// Block MySQL system database
-	if strings.Contains(upper, "MYSQL.") && !strings.HasPrefix(upper, "SELECT") {
-		return &ValidationResult{Valid: false, Message: "modifying mysql system database is not allowed"}
+	// Block MySQL system database (mysql.user etc.) for ALL statement types,
+	// including SELECT — it exposes password hashes and user/host grants.
+	if strings.Contains(upper, "MYSQL.") {
+		return &ValidationResult{Valid: false, Message: "accessing mysql system database is not allowed"}
 	}
 
 	// Block PostgreSQL system catalogs

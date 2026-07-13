@@ -27,8 +27,21 @@ interface AuthState {
 // SECURITY NOTE: Token is stored in localStorage for SPA compatibility.
 // This is acceptable for single-admin panels but exposes token to XSS attacks.
 // For multi-user production systems, consider migrating to httpOnly cookies.
+// Hydrate user from localStorage on init so the must_change_pass guard works
+// on the first frame after a refresh (before loadUser completes).
+function hydrateUser(): User | null {
+  try {
+    const raw = localStorage.getItem('user');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return isValidUser(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
+  user: hydrateUser(),
   token: localStorage.getItem('token'),
   isAuthenticated: !!localStorage.getItem('token'),
   isLoading: false,
@@ -90,9 +103,10 @@ export const useAuthStore = create<AuthState>((set) => ({
         isLoading: false,
       });
     } catch (error: unknown) {
-      // Only clear token on 401 (unauthorized), not on 500 (server error)
-      const errObj = error as Record<string, unknown> | undefined;
-      if (errObj?.['code'] === 40100 || errObj?.['code'] === 40101) {
+      // Only clear token on 401 (unauthorized), not on 500 (server error).
+      // Business codes live in response.data.code, not on the error object.
+      const bizCode = (error as { response?: { data?: { code?: number } } })?.response?.data?.code;
+      if (bizCode === 40100 || bizCode === 40101) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         set({

@@ -42,6 +42,7 @@ type Service struct {
 	processes map[int64]*managedProcess
 	mu        sync.RWMutex
 	stopCh    chan struct{}
+	stopOnce  sync.Once
 }
 
 // NewService creates a new Service.
@@ -61,7 +62,8 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 
 // Shutdown stops all managed processes gracefully
 func (s *Service) Shutdown() {
-	close(s.stopCh)
+	// Guard against double-close of stopCh (panics on the second call).
+	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, mp := range s.processes {

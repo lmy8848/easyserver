@@ -276,13 +276,20 @@ func (s *Service) GetRule(ctx context.Context, id int64) (*FirewallRule, error) 
 
 // CreateRule creates a new firewall rule and applies it
 func (s *Service) CreateRule(ctx context.Context, rule *FirewallRule) error {
-	// Apply the rule to the system
+	// Save to database FIRST, then apply. If apply fails we can delete the DB
+	// record (no orphaned system rule); the reverse order would leave a rule
+	// on the system that the panel can't see or remove.
+	if err := s.repo.CreateRule(ctx, rule); err != nil {
+		return fmt.Errorf("failed to save rule to database: %w", err)
+	}
 	if err := s.applyRule(ctx, rule); err != nil {
+		// Rollback the DB record so system and DB stay consistent.
+		if delErr := s.repo.DeleteRule(ctx, rule.ID); delErr != nil {
+			log.Printf("firewall: failed to rollback DB rule after apply failure: %v", delErr)
+		}
 		return fmt.Errorf("failed to apply rule: %w", err)
 	}
-
-	// Save to database
-	return s.repo.CreateRule(ctx, rule)
+	return nil
 }
 
 // UpdateRule updates an existing firewall rule
@@ -701,6 +708,15 @@ func iptablesTool(ipVersion string) string {
 	return "iptables"
 }
 
+// iptablesPortRange normalizes a port range to the colon form iptables/ufw
+// expect (e.g. "8000:9000"); the API accepts the more readable "8000-9000".
+func iptablesPortRange(port string) string {
+	if i := strings.IndexByte(port, '-'); i > 0 {
+		return port[:i] + ":" + port[i+1:]
+	}
+	return port
+}
+
 // applyIptablesRule applies a rule using iptables
 func (s *Service) applyIptablesRule(ctx context.Context, rule *FirewallRule) error {
 	if err := validateFirewallRuleFields(rule); err != nil {
@@ -719,7 +735,7 @@ func (s *Service) applyIptablesRule(ctx context.Context, rule *FirewallRule) err
 	}
 
 	if rule.Port != "" {
-		args = append(args, "--dport", rule.Port)
+		args = append(args, "--dport", iptablesPortRange(rule.Port))
 	}
 
 	args = append(args, "-j", rule.Action)
@@ -745,7 +761,7 @@ func (s *Service) removeIptablesRule(ctx context.Context, rule *FirewallRule) er
 	}
 
 	if rule.Port != "" {
-		args = append(args, "--dport", rule.Port)
+		args = append(args, "--dport", iptablesPortRange(rule.Port))
 	}
 
 	args = append(args, "-j", rule.Action)
@@ -1163,28 +1179,39 @@ func (s *Service) ensureProtectedPortsBeforeDrop(ctx context.Context, tool strin
 	return nil
 }
 
-// hasAcceptRuleForPort checks if there's an ACCEPT rule for the given port
+// hasAcceptRuleForPort checks if there's an ACCEPT rule for the given port.
+// Matches line-by-line so that cross-line false positives (e.g. ACCEPT on one
+// line and the port on another) don't skip a needed protection rule.
 func (s *Service) hasAcceptRuleForPort(ctx context.Context, tool, port string) (bool, error) {
+	var output string
+	var err error
 	switch tool {
 	case "ufw":
-		output, _, err := s.executor.RunCombined(ctx, "ufw", "status", "numbered")
-		if err != nil {
-			return false, err
-		}
-		// Look for ALLOW IN rule for the port
-		return strings.Contains(output, port+"/tcp") && strings.Contains(output, "ALLOW IN"), nil
+		output, _, err = s.executor.RunCombined(ctx, "ufw", "status", "numbered")
 	case "iptables":
-		output, _, err := s.executor.RunCombined(ctx, "iptables", "-L", "INPUT", "-n")
-		if err != nil {
-			return false, err
-		}
-		return strings.Contains(output, "tcp dpt:"+port) && strings.Contains(output, "ACCEPT"), nil
+		output, _, err = s.executor.RunCombined(ctx, "iptables", "-L", "INPUT", "-n")
 	case "nft":
-		output, _, err := s.executor.RunCombined(ctx, "nft", "list", "chain", "inet", "filter", "INPUT")
-		if err != nil {
-			return false, err
+		output, _, err = s.executor.RunCombined(ctx, "nft", "list", "chain", "inet", "filter", "INPUT")
+	default:
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Build the tokens that must appear together on a single rule line.
+	var portToken, actionToken string
+	switch tool {
+	case "ufw":
+		portToken, actionToken = port+"/tcp", "ALLOW IN"
+	case "iptables":
+		portToken, actionToken = "tcp dpt:"+port, "ACCEPT"
+	case "nft":
+		portToken, actionToken = "tcp dport "+port, "accept"
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, portToken) && strings.Contains(line, actionToken) {
+			return true, nil
 		}
-		return strings.Contains(output, "tcp dport "+port) && strings.Contains(output, "accept"), nil
 	}
 	return false, nil
 }
@@ -1210,18 +1237,35 @@ func (s *Service) addAcceptRuleForPort(ctx context.Context, tool, port string) e
 	return fmt.Errorf("unsupported tool: %s", tool)
 }
 
-// verifyAndRollback checks if SSH is still reachable after policy change, rolls back if not
+// verifyAndRollback checks protected ports are still reachable after an INPUT
+// DROP policy, and rolls back to oldPolicy if any became unreachable. This
+// prevents locking the admin out of their own server.
 func (s *Service) verifyAndRollback(ctx context.Context, tool, chain, oldPolicy string) {
-	// Wait a moment for the policy to take effect
+	// Give the new policy a moment to take effect.
 	time.Sleep(3 * time.Second)
 
-	// Try to verify SSH connectivity by checking if the port is listening
-	// We can't test external connectivity from inside, so we just check if the service is running
-	log.Printf("firewall: verifying SSH connectivity after policy change...")
+	blocked := []string{}
+	for _, port := range s.protectedPorts {
+		addr := "127.0.0.1:" + port
+		conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		if err != nil {
+			blocked = append(blocked, port)
+			continue
+		}
+		conn.Close()
+	}
 
-	// If we get here, assume it's okay
-	// In production, you might want to use an external health check service
-	log.Printf("firewall: policy change applied successfully")
+	if len(blocked) == 0 {
+		log.Printf("firewall: protected ports reachable after policy change")
+		return
+	}
+
+	log.Printf("firewall: PROTECTED PORTS UNREACHABLE after INPUT DROP (%v), rolling back to %s", blocked, oldPolicy)
+	if err := s.SetDefaultPolicy(ctx, chain, oldPolicy); err != nil {
+		log.Printf("firewall: ROLLBACK FAILED (%s -> %s): %v", chain, oldPolicy, err)
+	} else {
+		log.Printf("firewall: rolled back %s to %s", chain, oldPolicy)
+	}
 }
 
 // setUfwDefaultPolicy sets default policy via ufw

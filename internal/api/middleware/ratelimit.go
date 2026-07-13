@@ -144,8 +144,13 @@ func GetRateLimiter(name string) *RateLimiter {
 // Use different names for different tiers (e.g. "api", "login", "assets") so
 // each tier gets its own independent limiter.
 func RateLimitMiddleware(name string, rate int, interval time.Duration) gin.HandlerFunc {
-	limiter := NewRateLimiter(rate, interval)
-	rateLimiters.Store(name, limiter)
+	// Reuse an existing limiter for the same name instead of replacing it (which
+	// would leak the old limiter's cleanup goroutine).
+	limiter := GetRateLimiter(name)
+	if limiter == nil {
+		limiter = NewRateLimiter(rate, interval)
+		rateLimiters.Store(name, limiter)
+	}
 
 	return func(c *gin.Context) {
 		ip := c.ClientIP()

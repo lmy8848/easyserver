@@ -287,7 +287,8 @@ export default function Runtime() {
       setLogsData(res.data.data);
       setLogsVisible(true);
     } catch (error: unknown) {
-      if ((error as any)?.code === 40400) {
+      const bizCode = (error as { response?: { data?: { code?: number } } })?.response?.data?.code;
+      if (bizCode === 40400) {
         fetchEnvironments();
         message.info('该记录已被移除');
       } else {

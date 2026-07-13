@@ -8,18 +8,20 @@ import (
 )
 
 type sqliteSessionRepo struct {
-	db *sql.DB
+	db          *sql.DB
+	idleTimeout time.Duration
 }
 
-func NewSQLiteSessionRepository(db *sql.DB) SessionRepo {
-	return &sqliteSessionRepo{db: db}
+func NewSQLiteSessionRepository(db *sql.DB, idleTimeout time.Duration) SessionRepo {
+	return &sqliteSessionRepo{db: db, idleTimeout: idleTimeout}
 }
 
 func (r *sqliteSessionRepo) Create(ctx context.Context, session *Session) error {
+	// Store only a SHA-256 of the token, never the plaintext JWT.
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO sessions (token, user_id, username, role, ip, user_agent, last_active, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.Token, session.UserID, session.Username, session.Role,
+		hashToken(session.Token), session.UserID, session.Username, session.Role,
 		session.IP, session.UserAgent, time.Now(), session.ExpiresAt,
 	)
 	return err
@@ -29,7 +31,7 @@ func (r *sqliteSessionRepo) GetByToken(ctx context.Context, token string) (*Sess
 	session := &Session{}
 	err := r.db.QueryRowContext(ctx,
 		`SELECT user_id, username, role, ip, user_agent, last_active, expires_at
-		 FROM sessions WHERE token = ?`, token,
+		 FROM sessions WHERE token = ?`, hashToken(token),
 	).Scan(
 		&session.UserID, &session.Username, &session.Role,
 		&session.IP, &session.UserAgent, &session.LoginAt, &session.ExpiresAt,
@@ -45,7 +47,7 @@ func (r *sqliteSessionRepo) GetByToken(ctx context.Context, token string) (*Sess
 }
 
 func (r *sqliteSessionRepo) DeleteByToken(ctx context.Context, token string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE token = ?", token)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE token = ?", hashToken(token))
 	return err
 }
 
@@ -65,18 +67,29 @@ func (r *sqliteSessionRepo) DeleteInactive(ctx context.Context, inactiveSince ti
 }
 
 func (r *sqliteSessionRepo) DeleteByUserIDExcept(ctx context.Context, userID int64, exceptToken string) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, exceptToken)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ? AND token != ?", userID, hashToken(exceptToken))
 	return err
 }
 
 func (r *sqliteSessionRepo) IsValid(ctx context.Context, token string) (bool, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > ?",
-		token, time.Now(),
-	).Scan(&count)
-	if err != nil {
-		return false, err
+	// When idleTimeout <= 0 the idle check is disabled; only expiry applies.
+	if r.idleTimeout > 0 {
+		err := r.db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > ? AND last_active > ?",
+			hashToken(token), time.Now(), time.Now().Add(-r.idleTimeout),
+		).Scan(&count)
+		if err != nil {
+			return false, err
+		}
+	} else {
+		err := r.db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM sessions WHERE token = ? AND expires_at > ?",
+			hashToken(token), time.Now(),
+		).Scan(&count)
+		if err != nil {
+			return false, err
+		}
 	}
 	return count > 0, nil
 }
@@ -136,7 +149,7 @@ func (r *sqliteSessionRepo) GetActive(ctx context.Context) ([]Session, error) {
 func (r *sqliteSessionRepo) UpdateActivity(ctx context.Context, token string) error {
 	result, err := r.db.ExecContext(ctx,
 		"UPDATE sessions SET last_active = ? WHERE token = ?",
-		time.Now(), token,
+		time.Now(), hashToken(token),
 	)
 	if err != nil {
 		return err

@@ -168,7 +168,7 @@ func wire(cfg *config.Config) (*appServices, error) {
 
 	// Repositories — only auditRepo is exposed downstream.
 	userRepo := auth.NewSQLiteUserRepository(db)
-	sessionRepo := auth.NewSQLiteSessionRepository(db)
+	sessionRepo := auth.NewSQLiteSessionRepository(db, cfg.Auth.IdleTimeout)
 	tokenRepo := auth.NewSQLiteTokenRepository(db)
 	auditRepo := audit.NewSQLiteRepository(db)
 	activityRepo := auth.NewSQLiteActivityRepository(db)
@@ -183,6 +183,9 @@ func wire(cfg *config.Config) (*appServices, error) {
 		return nil, fmt.Errorf("init default admin: %w", err)
 	}
 	s.AuthService = authSvc
+	// Stop auth cleanup loops on shutdown BEFORE db.Close() so they don't touch
+	// a closed database. Registered first so it runs last (LIFO cleanup order).
+	s.onCleanup(func() { authSvc.Close() })
 
 	// Monitor service + collection goroutine
 	var monitorWg sync.WaitGroup

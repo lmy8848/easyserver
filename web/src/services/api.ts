@@ -39,13 +39,6 @@ api.interceptors.request.use(
 // Response interceptor - handle errors
 api.interceptors.response.use(
   (response) => {
-    // Log all upload responses for debugging
-    if (response.config.url?.includes('/upload')) {
-      console.log('[API Response] URL:', response.config.url);
-      console.log('[API Response] Status:', response.status, response.statusText);
-      console.log('[API Response] Headers:', response.headers);
-      console.log('[API Response] Data:', response.data);
-    }
     return response;
   },
   (error) => {
@@ -123,7 +116,7 @@ export const authApi = {
     api.post<ApiResponse<{ qr_token: string; qr_code_base64: string; expires_at: string }>>('/auth/qr/session'),
 
   getQRStatus: (qrToken: string) =>
-    api.get<ApiResponse<{ status: string; expires_at: string; token?: string; user?: User; must_change_pass?: boolean }>>('/auth/qr/status', { params: { qr_token: qrToken } }),
+    api.post<ApiResponse<{ status: string; expires_at: string; token?: string; user?: User; must_change_pass?: boolean }>>('/auth/qr/status', { qr_token: qrToken }),
 
   confirmQRLogin: (qrToken: string) =>
     api.post<ApiResponse<{ ok: boolean }>>('/auth/qr/confirm', { qr_token: qrToken }),
