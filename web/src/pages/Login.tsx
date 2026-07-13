@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Form, Input, Button, message, Typography, Space } from 'antd';
-import { UserOutlined, LockOutlined, SafetyOutlined, KeyOutlined, CloudServerOutlined } from '@ant-design/icons';
+import { useState, useEffect, useCallback } from 'react';
+import { Form, Input, Button, message, Typography, Space, Segmented } from 'antd';
+import { UserOutlined, LockOutlined, SafetyOutlined, KeyOutlined, CloudServerOutlined, ReloadOutlined, QrcodeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../services/api';
+import type { User } from '../types';
 
 const { Title, Text } = Typography;
 
@@ -32,6 +33,10 @@ const LOGIN_ANIM_CSS = `
   from { opacity: 0; transform: translateX(16px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+@keyframes esQrBreath {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.02); opacity: 0.92; }
+}
 .es-login-step { animation: esLoginStepIn 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
 .es-login-orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.55; pointer-events: none; }
 /* 深色玻璃卡片下的输入框占位符 / 自动填充配色 */
@@ -46,7 +51,18 @@ const LOGIN_ANIM_CSS = `
 .es-login-card .ant-input-affix-wrapper { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
 .es-login-card .ant-input-affix-wrapper > input.ant-input { background: transparent; color: #fff; }
 .es-login-card .ant-form-item-explain-error { color: #ff7875; }
+/* Segmented 适配深色玻璃 */
+.es-login-card .ant-segmented { background: rgba(255,255,255,0.08); padding: 3px; border-radius: 10px; }
+.es-login-card .ant-segmented .ant-segmented-item { color: rgba(255,255,255,0.55); }
+.es-login-card .ant-segmented .ant-segmented-item-selected { color: #fff; }
+.es-login-card .ant-segmented .ant-segmented-thumb { background: rgba(255,255,255,0.14); }
 `;
+
+interface QRData {
+  qr_token: string;
+  qr_code_base64: string;
+  expires_at: string;
+}
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
@@ -54,6 +70,12 @@ export default function Login() {
   const [tempToken, setTempToken] = useState<string>('');
   const navigate = useNavigate();
   const { isAuthenticated } = useAuthStore();
+
+  // 扫码登录状态
+  const [loginMode, setLoginMode] = useState<'password' | 'qr'>('password');
+  const [qrData, setQrData] = useState<QRData | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrStatus, setQrStatus] = useState<'pending' | 'expired'>('pending');
 
   // If already authenticated, redirect to home
   useEffect(() => {
@@ -67,7 +89,7 @@ export default function Login() {
    * must_change_pass is stored on the user object from the server,
    * not in a separate localStorage key (prevents client tampering).
    */
-  const handleLoginSuccess = (data: { token: string; user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
+  const handleLoginSuccess = useCallback((data: { token: string; user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
     useAuthStore.setState({
       user: { ...data.user, must_change_pass: data.must_change_pass },
       token: data.token,
@@ -83,7 +105,7 @@ export default function Login() {
     } else {
       navigate('/');
     }
-  };
+  }, [navigate]);
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
@@ -129,6 +151,57 @@ export default function Login() {
     }
   };
 
+  // 生成新的扫码登录二维码
+  const startQrLogin = async () => {
+    setQrLoading(true);
+    setQrStatus('pending');
+    try {
+      const res = await authApi.createQRSession();
+      setQrData(res.data.data);
+    } catch {
+      message.error('生成二维码失败');
+      setQrData(null);
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  // 切到扫码模式时自动生成；切回密码模式时取消未完成的会话
+  const switchMode = (mode: 'password' | 'qr') => {
+    setLoginMode(mode);
+    if (mode === 'qr') {
+      startQrLogin();
+    } else if (qrData) {
+      authApi.cancelQRLogin(qrData.qr_token).catch(() => undefined);
+      setQrData(null);
+    }
+  };
+
+  // 轮询扫码状态。pollQRStatus 随 qrData 变化重建,effect 依赖它自动重跑。
+  const pollQRStatus = useCallback(async () => {
+    if (!qrData) return;
+    try {
+      const res = await authApi.getQRStatus(qrData.qr_token);
+      const d = res.data.data;
+      if (!d) return;
+      if (d.status === 'confirmed' && d.token && d.user) {
+        handleLoginSuccess({ token: d.token, user: d.user as User, must_change_pass: d.must_change_pass });
+      } else if (d.status === 'expired' || d.status === 'cancelled') {
+        setQrStatus('expired');
+        setQrData(null);
+      }
+    } catch {
+      /* 网络抖动忽略，继续轮询 */
+    }
+  }, [qrData, handleLoginSuccess]);
+
+  useEffect(() => {
+    if (loginMode !== 'qr' || !qrData) return;
+    pollQRStatus();
+    const id = setInterval(pollQRStatus, 2000);
+    return () => clearInterval(id);
+  }, [loginMode, qrData, pollQRStatus]);
+
   const inputStyle: React.CSSProperties = {
     height: 46,
     borderRadius: 10,
@@ -137,39 +210,75 @@ export default function Login() {
     color: '#fff',
   };
 
-  const renderLoginForm = () => (
-    <div className="es-login-step" style={{ animation: 'esLoginFadeUp 0.5s cubic-bezier(0.22,1,0.36,1)' }}>
-      <div style={{ textAlign: 'center', marginBottom: 28 }}>
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 64, height: 64, borderRadius: 18, marginBottom: 16,
-          background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
-          boxShadow: '0 8px 24px rgba(24,144,255,0.45)',
-        }}>
-          <CloudServerOutlined style={{ fontSize: 34, color: '#fff' }} />
-        </div>
-        <Title level={2} style={{ margin: 0, color: '#fff', letterSpacing: 1 }}>EasyServer</Title>
-        <p style={{ color: 'rgba(255,255,255,0.55)', marginTop: 6, fontSize: 13, letterSpacing: 2 }}>LINUX 服务器管理面板</p>
+  const primaryBtnStyle: React.CSSProperties = {
+    height: 46, borderRadius: 10, fontWeight: 600, fontSize: 15, border: 'none',
+    background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+    boxShadow: '0 6px 20px rgba(24,144,255,0.35)',
+  };
+
+  const renderBrand = () => (
+    <div style={{ textAlign: 'center', marginBottom: 28 }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 64, height: 64, borderRadius: 18, marginBottom: 16,
+        background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+        boxShadow: '0 8px 24px rgba(24,144,255,0.45)',
+      }}>
+        <CloudServerOutlined style={{ fontSize: 34, color: '#fff' }} />
       </div>
+      <Title level={2} style={{ margin: 0, color: '#fff', letterSpacing: 1 }}>EasyServer</Title>
+      <p style={{ color: 'rgba(255,255,255,0.55)', marginTop: 6, fontSize: 13, letterSpacing: 2 }}>LINUX 服务器管理面板</p>
+    </div>
+  );
 
-      <Form name="login" onFinish={onFinish} autoComplete="off" size="large">
-        <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-          <Input prefix={<UserOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="用户名" style={inputStyle} />
-        </Form.Item>
+  const renderPasswordForm = () => (
+    <Form name="login" onFinish={onFinish} autoComplete="off" size="large">
+      <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+        <Input prefix={<UserOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="用户名" style={inputStyle} />
+      </Form.Item>
 
-        <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
-          <Input.Password prefix={<LockOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="密码" style={inputStyle} />
-        </Form.Item>
+      <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+        <Input.Password prefix={<LockOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="密码" style={inputStyle} />
+      </Form.Item>
 
-        <Form.Item style={{ marginBottom: 0 }}>
-          <Button type="primary" htmlType="submit" loading={loading} block
-            style={{ height: 46, borderRadius: 10, fontWeight: 600, fontSize: 15, border: 'none',
-              background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
-              boxShadow: '0 6px 20px rgba(24,144,255,0.35)' }}>
-            登录
-          </Button>
-        </Form.Item>
-      </Form>
+      <Form.Item style={{ marginBottom: 0 }}>
+        <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
+          登录
+        </Button>
+      </Form.Item>
+    </Form>
+  );
+
+  const renderQRForm = () => (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{
+        display: 'inline-block', padding: 12, borderRadius: 16,
+        background: 'rgba(255,255,255,0.95)', marginBottom: 16,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+      }}>
+        {qrLoading || !qrData ? (
+          <div style={{ width: 200, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+            生成中...
+          </div>
+        ) : qrStatus === 'expired' ? (
+          <div style={{ width: 200, height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <QrcodeOutlined style={{ fontSize: 56, color: '#bbb' }} />
+            <span style={{ color: '#999', fontSize: 13 }}>二维码已过期</span>
+          </div>
+        ) : (
+          <img src={qrData.qr_code_base64} alt="登录二维码"
+            style={{ width: 200, height: 200, display: 'block', animation: 'esQrBreath 3s ease-in-out infinite' }} />
+        )}
+      </div>
+      <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, marginBottom: 8 }}>
+        {qrStatus === 'expired' ? '二维码已失效' : '请使用手机 App 扫码登录'}
+      </div>
+      {qrStatus === 'expired' && (
+        <Button icon={<ReloadOutlined />} onClick={startQrLogin} loading={qrLoading}
+          style={{ background: 'rgba(255,255,255,0.1)', borderColor: 'rgba(255,255,255,0.2)', color: '#fff' }}>
+          刷新二维码
+        </Button>
+      )}
     </div>
   );
 
@@ -195,10 +304,7 @@ export default function Login() {
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 0 }}>
-          <Button type="primary" htmlType="submit" loading={loading} block
-            style={{ height: 46, borderRadius: 10, fontWeight: 600, fontSize: 15, border: 'none',
-              background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
-              boxShadow: '0 6px 20px rgba(24,144,255,0.35)' }}>
+          <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
             验证
           </Button>
         </Form.Item>
@@ -234,10 +340,7 @@ export default function Login() {
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 0 }}>
-          <Button type="primary" htmlType="submit" loading={loading} block
-            style={{ height: 46, borderRadius: 10, fontWeight: 600, fontSize: 15, border: 'none',
-              background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
-              boxShadow: '0 6px 20px rgba(24,144,255,0.35)' }}>
+          <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
             验证
           </Button>
         </Form.Item>
@@ -286,7 +389,24 @@ export default function Login() {
         boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
         animation: 'esLoginPulse 6s ease-in-out infinite, esLoginFadeUp 0.6s cubic-bezier(0.22,1,0.36,1)',
       }}>
-        {step === 'login' && renderLoginForm()}
+        {step === 'login' && (
+          <>
+            <div style={{ animation: 'esLoginFadeUp 0.5s cubic-bezier(0.22,1,0.36,1)' }}>
+              {renderBrand()}
+              <Segmented
+                value={loginMode}
+                onChange={(v) => switchMode(v as 'password' | 'qr')}
+                options={[
+                  { label: '密码登录', value: 'password' },
+                  { label: '扫码登录', value: 'qr' },
+                ]}
+                block
+                style={{ marginBottom: 24 }}
+              />
+            </div>
+            {loginMode === 'password' ? renderPasswordForm() : renderQRForm()}
+          </>
+        )}
         {step === 'totp' && renderTOTPForm()}
         {step === 'backup' && renderBackupCodeForm()}
 

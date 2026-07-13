@@ -117,6 +117,19 @@ export const authApi = {
 
   kickAllOtherSessions: () =>
     api.post<ApiResponse>('/auth/sessions/kick-all'),
+
+  // Scan-to-login (QR). Web creates+p polls; mobile (authenticated) confirms.
+  createQRSession: () =>
+    api.post<ApiResponse<{ qr_token: string; qr_code_base64: string; expires_at: string }>>('/auth/qr/session'),
+
+  getQRStatus: (qrToken: string) =>
+    api.get<ApiResponse<{ status: string; expires_at: string; token?: string; user?: User; must_change_pass?: boolean }>>('/auth/qr/status', { params: { qr_token: qrToken } }),
+
+  confirmQRLogin: (qrToken: string) =>
+    api.post<ApiResponse<{ ok: boolean }>>('/auth/qr/confirm', { qr_token: qrToken }),
+
+  cancelQRLogin: (qrToken: string) =>
+    api.post<ApiResponse>('/auth/qr/cancel', { qr_token: qrToken }),
 };
 
 // Monitor API

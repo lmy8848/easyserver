@@ -7,6 +7,7 @@ import (
 	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/qrlogin"
 
 	"github.com/gin-gonic/gin"
 )
@@ -542,6 +543,7 @@ func registerAuthRoutes(
 	authService *auth.AuthService,
 	auditService *audit.Service,
 	sessionService *auth.SessionService,
+	qrService *qrlogin.Service,
 	jwtSecret string,
 	sessionValidator func(string) (bool, error),
 	tokenValidator func(int64, string, time.Time) (bool, error),
@@ -575,4 +577,7 @@ func registerAuthRoutes(
 		authProtected.POST("/sessions/kick", authHandler.KickSession)
 		authProtected.POST("/sessions/kick-all", authHandler.KickAllOtherSessions)
 	}
+
+	// Scan-to-login: public (rate-limited) session/status/cancel + protected confirm.
+	registerQRLoginRoutes(auth, authProtected, qrService, authService, auditService)
 }

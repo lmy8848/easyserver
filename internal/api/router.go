@@ -26,6 +26,7 @@ import (
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
 	"easyserver/internal/process"
+	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
@@ -46,6 +47,7 @@ type Router struct {
 	monitorService       *monitor.MonitorService
 	auditService         *audit.Service
 	sessionService       *auth.SessionService
+	qrLoginService       *qrlogin.Service
 	alertService         *alert.Service
 	processManager       *process.Service
 	systemProcessService *systemprocess.Service
@@ -155,6 +157,9 @@ type RouterDeps struct {
 	// File share repository
 	FileShareRepo fileshare.Repository
 
+	// QR login service (scan-to-login)
+	QRLoginService *qrlogin.Service
+
 	// Cloud service (nil if disabled)
 	CloudService *cloud.Service
 }
@@ -213,7 +218,8 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 		fileManager: deps.FileManager,
 
 		// File share repo
-		fileShareRepo: deps.FileShareRepo,
+		fileShareRepo:  deps.FileShareRepo,
+		qrLoginService: deps.QRLoginService,
 
 		// Cloud service
 		cloudService: deps.CloudService,
@@ -266,7 +272,7 @@ func (r *Router) Setup() *gin.Engine {
 	)
 
 	// Auth routes (public + protected)
-	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval)
+	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.qrLoginService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval)
 
 	// Protected routes (JWT + SingleAdmin + Audit + Session Heartbeat)
 	protected := api.Group("")

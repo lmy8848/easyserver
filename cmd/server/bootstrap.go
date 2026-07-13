@@ -30,6 +30,7 @@ import (
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
 	"easyserver/internal/process"
+	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
@@ -216,6 +217,9 @@ func wire(cfg *config.Config) (*appServices, error) {
 	// Session service + cleanup goroutine
 	sessionSvc := auth.NewSessionService(sessionRepo)
 	s.SessionService = sessionSvc
+
+	// QR login service (scan-to-login): depends on session service for coexisting web sessions.
+	s.QRLoginService = qrlogin.NewService(qrlogin.NewSQLiteRepository(db), cfg.Auth.JWTSecret, cfg.Auth.SessionTimeout, sessionSvc)
 	sessionDone := make(chan struct{})
 	infra.Go(func() {
 		ticker := time.NewTicker(cfg.Auth.SessionCleanupInterval)
