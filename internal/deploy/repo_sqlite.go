@@ -87,9 +87,14 @@ func (r *sqliteRepo) CreateServer(ctx context.Context, srv *Server) error {
 }
 
 func (r *sqliteRepo) UpdateServer(ctx context.Context, srv *Server) error {
+	// Only overwrite auth_data when a new value is supplied. Editing a server's
+	// name/host without re-submitting credentials must not wipe the stored,
+	// encrypted auth_data (which cannot be round-tripped back from the DB).
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE deploy_servers SET name=?, host=?, port=?, username=?, auth_type=?, auth_data=? WHERE id=?",
-		srv.Name, srv.Host, srv.Port, srv.Username, srv.AuthType, srv.AuthData, srv.ID,
+		`UPDATE deploy_servers SET name=?, host=?, port=?, username=?, auth_type=?,
+			auth_data = CASE WHEN ? = '' THEN auth_data ELSE ? END
+		 WHERE id=?`,
+		srv.Name, srv.Host, srv.Port, srv.Username, srv.AuthType, srv.AuthData, srv.AuthData, srv.ID,
 	)
 	return err
 }
@@ -220,6 +225,19 @@ func (r *sqliteRepo) DeleteTask(ctx context.Context, id int64) error {
 func (r *sqliteRepo) UpdateTaskStatus(ctx context.Context, id int64, status string, result string) error {
 	_, err := r.db.ExecContext(ctx, "UPDATE deploy_tasks SET status=?, result=? WHERE id=?", status, result, id)
 	return err
+}
+
+// TryStartTask atomically transitions a task to "running" only if it is not
+// already running, closing the check-then-set race that let concurrent executes
+// both run. Returns true if this call won the right to execute.
+func (r *sqliteRepo) TryStartTask(ctx context.Context, id int64) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		"UPDATE deploy_tasks SET status='running', result='' WHERE id=? AND status!='running'", id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // --- Version CRUD ---

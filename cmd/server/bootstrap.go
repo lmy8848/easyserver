@@ -259,6 +259,11 @@ func wire(cfg *config.Config) (*appServices, error) {
 	s.ServiceManager = systemd.NewServiceManager(cmdExec, ".")
 	cronRepo := cron.NewSQLiteRepository(db)
 	s.CronService = cron.NewService(cronRepo, cmdExec)
+	// Sync enabled cron tasks to /etc/cron.d on startup so schedules take effect
+	// after a panel restart (the CRUD methods also sync on change).
+	if err := s.CronService.SyncToSystemCrontab(ctx); err != nil {
+		log.Printf("cron: startup sync to system crontab failed: %v", err)
+	}
 
 	// Database services (with seeding)
 	dbServerRepo := dbserver.NewSQLiteRepository(db)

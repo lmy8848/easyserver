@@ -22,6 +22,9 @@ type Repository interface {
 	CreateTask(ctx context.Context, task *Task) error
 	DeleteTask(ctx context.Context, id int64) error
 	UpdateTaskStatus(ctx context.Context, id int64, status string, result string) error
+	// TryStartTask atomically transitions a task to "running" only if not already
+	// running, closing the check-then-set race. Returns true if this call won.
+	TryStartTask(ctx context.Context, id int64) (bool, error)
 
 	// Version CRUD
 	ListVersions(ctx context.Context, serverID int64) ([]Version, error)

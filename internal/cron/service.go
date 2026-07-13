@@ -68,7 +68,11 @@ func (s *Service) Create(ctx context.Context, task *CronTask) error {
 	if status != "installed" {
 		return fmt.Errorf("runtime_version %d is not installed (status=%s)", task.RuntimeVersionID, status)
 	}
-	return s.repo.CreateTask(ctx, task)
+	if err := s.repo.CreateTask(ctx, task); err != nil {
+		return err
+	}
+	_ = s.SyncToSystemCrontab(ctx)
+	return nil
 }
 
 // Update updates an existing cron task
@@ -90,22 +94,38 @@ func (s *Service) Update(ctx context.Context, task *CronTask) error {
 			return fmt.Errorf("runtime_version %d is not installed (status=%s)", task.RuntimeVersionID, status)
 		}
 	}
-	return s.repo.UpdateTask(ctx, task)
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		return err
+	}
+	_ = s.SyncToSystemCrontab(ctx)
+	return nil
 }
 
 // Delete deletes a cron task and its logs
 func (s *Service) Delete(ctx context.Context, id int64) error {
-	return s.repo.DeleteTask(ctx, id)
+	if err := s.repo.DeleteTask(ctx, id); err != nil {
+		return err
+	}
+	_ = s.SyncToSystemCrontab(ctx)
+	return nil
 }
 
 // Enable enables a cron task
 func (s *Service) Enable(ctx context.Context, id int64) error {
-	return s.repo.EnableTask(ctx, id)
+	if err := s.repo.EnableTask(ctx, id); err != nil {
+		return err
+	}
+	_ = s.SyncToSystemCrontab(ctx)
+	return nil
 }
 
 // Disable disables a cron task
 func (s *Service) Disable(ctx context.Context, id int64) error {
-	return s.repo.DisableTask(ctx, id)
+	if err := s.repo.DisableTask(ctx, id); err != nil {
+		return err
+	}
+	_ = s.SyncToSystemCrontab(ctx)
+	return nil
 }
 
 // RunNow executes a cron task immediately (async)

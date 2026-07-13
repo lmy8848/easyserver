@@ -203,17 +203,14 @@ func (s *Service) DeleteTask(ctx context.Context, id int64) error {
 
 // ExecuteTask executes a deploy task
 func (s *Service) ExecuteTask(ctx context.Context, taskID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	// All DB operations run on a context divorced from the client request so a
+	// cancelled request (client disconnect, timeout) cannot abort status updates
+	// and leave the task stuck in "running".
+	ctx = context.Background()
+
 	task, err := s.GetTask(ctx, taskID)
 	if err != nil {
 		return err
-	}
-
-	// Guard: reject if task is already running
-	if task.Status == "running" {
-		return fmt.Errorf("task %d is already running", taskID)
 	}
 
 	srv, err := s.GetServer(ctx, task.ServerID)
@@ -221,29 +218,35 @@ func (s *Service) ExecuteTask(ctx context.Context, taskID int64) error {
 		return err
 	}
 
-	// Update task status
-	if err := s.repo.UpdateTaskStatus(ctx, taskID, "running", ""); err != nil {
-		return fmt.Errorf("failed to update task status: %w", err)
+	// Atomically claim the task: only one executor wins the transition to
+	// "running", eliminating the check-then-set race.
+	started, err := s.repo.TryStartTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to claim task: %w", err)
+	}
+	if !started {
+		return fmt.Errorf("task %d is already running", taskID)
 	}
 
 	// Execute based on task type
 	var result string
+	var execErr error
 	switch task.Type {
 	case "sync":
-		result, err = s.executeSync(srv, task)
+		result, execErr = s.executeSync(srv, task)
 	case "command":
-		result, err = s.executeCommand(srv, task)
+		result, execErr = s.executeCommand(srv, task)
 	case "rollback":
-		result, err = s.executeRollback(srv, task)
+		result, execErr = s.executeRollback(srv, task)
 	default:
-		err = fmt.Errorf("unknown task type: %s", task.Type)
+		execErr = fmt.Errorf("unknown task type: %s", task.Type)
 	}
 
-	if err != nil {
-		if updateErr := s.repo.UpdateTaskStatus(ctx, taskID, "failed", err.Error()); updateErr != nil {
+	if execErr != nil {
+		if updateErr := s.repo.UpdateTaskStatus(ctx, taskID, "failed", execErr.Error()); updateErr != nil {
 			log.Printf("deploy: failed to update task status to failed: %v", updateErr)
 		}
-		return err
+		return execErr
 	}
 
 	if err := s.repo.UpdateTaskStatus(ctx, taskID, "success", result); err != nil {

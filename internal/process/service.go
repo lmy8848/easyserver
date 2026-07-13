@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/runtimeenv"
 )
@@ -30,6 +29,7 @@ type managedProcess struct {
 	ID        int64
 	proc      executor.Process
 	cancel    context.CancelFunc
+	done      chan struct{} // closed by waitForExit after Wait(); stopProcess selects on it
 	startedAt time.Time
 	mu        sync.Mutex
 }
@@ -293,6 +293,7 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		ID:        id,
 		proc:      proc,
 		cancel:    cancel,
+		done:      make(chan struct{}),
 		startedAt: time.Now(),
 	}
 
@@ -520,22 +521,20 @@ func (s *Service) Import(ctx context.Context, processes []Process) (int, error) 
 func (s *Service) stopProcess(mp *managedProcess, stopTimeout int) {
 	mp.cancel()
 	if mp.proc != nil {
-		// SIGTERM first for graceful shutdown
+		// SIGTERM first for graceful shutdown. Do NOT call Wait() here —
+		// waitForExit owns Wait(). Instead select on mp.done, which
+		// waitForExit closes after Wait() returns. This avoids the double-Wait
+		// race on the same *exec.Cmd.
 		mp.proc.Signal(syscall.SIGTERM)
-		done := make(chan error, 1)
-		infra.Go(func() {
-			done <- mp.proc.Wait()
-		})
-		// Wait configured timeout, then SIGKILL
 		if stopTimeout <= 0 {
 			stopTimeout = defaultStopTimeoutSec
 		}
 		select {
-		case <-done:
+		case <-mp.done:
 			// Process exited gracefully
 		case <-time.After(time.Duration(stopTimeout) * time.Second):
 			mp.proc.Kill()
-			<-done // Wait for SIGKILL to take effect
+			<-mp.done // Wait for SIGKILL to take effect
 		}
 	}
 }
@@ -543,6 +542,9 @@ func (s *Service) stopProcess(mp *managedProcess, stopTimeout int) {
 func (s *Service) waitForExit(ctx context.Context, mp *managedProcess, autoRestart bool, maxRestarts, restartDelay, startupTimeout int) {
 	startTime := time.Now()
 	err := mp.proc.Wait()
+	// Signal stopProcess that the process has exited. Safe to close exactly once
+	// because waitForExit is the sole owner of Wait() per process.
+	close(mp.done)
 	exitCode := 0
 	if err != nil {
 		// Process exited with error

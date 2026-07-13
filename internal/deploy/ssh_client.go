@@ -162,8 +162,10 @@ func (c *SSHClient) UploadFile(localPath, remotePath string) error {
 		return fmt.Errorf("ssh: failed to open stdout pipe: %w", err)
 	}
 
-	// Start scp in sink mode (-t = to remote).
-	if err := session.Start(fmt.Sprintf("scp -t %q", remotePath)); err != nil {
+	// Start scp in sink mode (-t = to remote). Use shellEscape (single-quote)
+	// not Go's %q, which produces a Go string literal that $/backtick still
+	// evaluate under shell double-quote-ish contexts -> command injection.
+	if err := session.Start(fmt.Sprintf("scp -t %s", shellEscape(remotePath))); err != nil {
 		return fmt.Errorf("ssh: failed to start scp: %w", err)
 	}
 
@@ -244,8 +246,8 @@ func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
 		return fmt.Errorf("ssh: failed to open stdout pipe: %w", err)
 	}
 
-	// Start scp in source mode (-f = from remote).
-	if err := session.Start(fmt.Sprintf("scp -f %q", remotePath)); err != nil {
+	// Start scp in source mode (-f = from remote). shellEscape, not %q (see above).
+	if err := session.Start(fmt.Sprintf("scp -f %s", shellEscape(remotePath))); err != nil {
 		return fmt.Errorf("ssh: failed to start scp: %w", err)
 	}
 
