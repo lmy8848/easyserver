@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net/http"
 	"time"
 
@@ -231,6 +232,19 @@ func (r *Router) Setup() *gin.Engine {
 	e := gin.New()
 	e.MaxMultipartMemory = 64 << 20 // 64 MB multipart memory (rest goes to temp disk)
 
+	// Trust only configured reverse proxies for X-Forwarded-For. Gin's default
+	// trusts 0.0.0.0/0, which lets any client spoof ClientIP and bypass IP
+	// whitelist, rate limiting and audit logging. Default to localhost (same-
+	// host nginx). Front by a CDN by setting server.trusted_proxies to its ranges.
+	trustedProxies := r.cfg.Server.TrustedProxies
+	if trustedProxies == nil {
+		trustedProxies = []string{"127.0.0.1"}
+	}
+	if err := e.SetTrustedProxies(trustedProxies); err != nil {
+		log.Printf("router: invalid trusted_proxies %v, falling back to RemoteAddr only: %v", trustedProxies, err)
+		_ = e.SetTrustedProxies(nil)
+	}
+
 	// Create IP whitelist
 	ipWhitelist := middleware.NewIPWhitelist(&r.cfg.Auth)
 
@@ -310,7 +324,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerServiceRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerFileRoutes(protected, fileRoutes, r.fileManager)
+	registerFileRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor)
 	registerSystemRoutes(protected, r.executor)
@@ -333,7 +347,7 @@ func (r *Router) Setup() *gin.Engine {
 
 	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
 	// /share/:token itself is NOT registered so it falls through to the SPA fallback.
-	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager)
+	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager, r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
 	if r.cfg.Server.ServeFrontend {

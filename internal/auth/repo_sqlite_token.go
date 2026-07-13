@@ -68,7 +68,9 @@ func (r *sqliteTokenRepo) IsUserInvalidated(ctx context.Context, userID int64, i
 		return false, nil
 	}
 	if err != nil {
-		return false, nil
+		// fail-closed: surface DB errors so the JWT middleware rejects the token
+		// instead of silently letting a revoked token back in.
+		return false, err
 	}
 	return issuedAt.Before(createdAt), nil
 }

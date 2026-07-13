@@ -138,15 +138,25 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		h.writePump(conn, wsWrite)
 	})
 
-	// Start forwarding goroutine: session.Send (PTY output) -> wsWrite
+	// Start forwarding goroutine: session.Send (PTY output) -> wsWrite.
+	// Exits when session.done is closed (session.Close) rather than when
+	// session.Send is closed, because readLoop never closes Send.
 	var fwdWg sync.WaitGroup
 	fwdWg.Add(1)
 	infra.Go(func() {
 		defer fwdWg.Done()
-		for msg := range session.Send {
+		for {
 			select {
-			case wsWrite <- msg:
-			default:
+			case msg, ok := <-session.Send:
+				if !ok {
+					return
+				}
+				select {
+				case wsWrite <- msg:
+				default:
+				}
+			case <-session.Done():
+				return
 			}
 		}
 	})

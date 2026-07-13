@@ -36,13 +36,20 @@ func (h *QRLoginHandler) CreateQRSession(c *gin.Context) {
 
 // GetQRStatus is polled by the web client. On confirmed it returns the web
 // login token + user payload (one-time; the session is consumed).
+// Uses POST + body so the qr_token (a secret that redeems a web JWT) never
+// lands in URL/access logs/Referer the way a query string would.
 func (h *QRLoginHandler) GetQRStatus(c *gin.Context) {
-	qrToken := c.Query("qr_token")
-	if qrToken == "" {
+	var req qrlogin.ConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(ErrBadRequest.Wrap(err))
+		return
+	}
+	if req.QRToken == "" {
 		c.Error(ErrBadRequest.WithMessage("缺少 qr_token"))
 		return
 	}
-	res, err := h.qrService.GetStatus(c.Request.Context(), qrToken)
+	c.Header("Cache-Control", "no-store")
+	res, err := h.qrService.GetStatus(c.Request.Context(), req.QRToken)
 	if err != nil {
 		c.Error(ErrInternal.Wrap(err))
 		return
@@ -114,7 +121,7 @@ func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) {
 func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service) {
 	h := NewQRLoginHandler(qrService, authService, auditService)
 	publicAuth.POST("/qr/session", h.CreateQRSession)
-	publicAuth.GET("/qr/status", h.GetQRStatus)
+	publicAuth.POST("/qr/status", h.GetQRStatus)
 	publicAuth.POST("/qr/cancel", h.CancelQRLogin)
 	authProtected.POST("/qr/confirm", h.ConfirmQRLogin)
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -196,9 +197,9 @@ func (h *CloudHandler) AddFirewallRule(c *gin.Context) {
 		return
 	}
 
-	// Prevent blocking panel port on current instance
-	panelPortStr := strconv.Itoa(h.panelPort)
-	if h.isCurrentInstance(instanceID) && rule.Port == panelPortStr && rule.Action != "ACCEPT" {
+	// Prevent blocking panel port on current instance. Check exact match,
+	// "ALL", and port ranges (e.g. "80-443") so a broad DROP can't slip past.
+	if h.isCurrentInstance(instanceID) && rule.Action != "ACCEPT" && portCoversPanel(rule.Port, h.panelPort) {
 		c.Error(ErrBadRequest.WithMessage("cannot block panel port on the current instance"))
 		return
 	}
@@ -361,6 +362,25 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 	}
 
 	Success(c, traffic)
+}
+
+// portCoversPanel reports whether a firewall rule's port spec (exact, "ALL",
+// or "min-max" range) includes panelPort.
+func portCoversPanel(portSpec string, panelPort int) bool {
+	if portSpec == "" {
+		return false
+	}
+	if portSpec == "ALL" || portSpec == strconv.Itoa(panelPort) {
+		return true
+	}
+	if i := strings.IndexByte(portSpec, '-'); i > 0 {
+		lo, err1 := strconv.Atoi(strings.TrimSpace(portSpec[:i]))
+		hi, err2 := strconv.Atoi(strings.TrimSpace(portSpec[i+1:]))
+		if err1 == nil && err2 == nil {
+			return panelPort >= lo && panelPort <= hi
+		}
+	}
+	return false
 }
 
 func registerCloudRoutes(protected *gin.RouterGroup, cloudService *cloud.Service, cfg *config.TencentCloudConfig, panelPort int) {

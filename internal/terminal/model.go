@@ -15,6 +15,7 @@ type Session struct {
 	PTY          interface{} // *os.File on linux+cgo, nil on stub
 	Cmd          interface{} // *exec.Cmd on linux+cgo, nil on stub
 	Send         chan []byte
+	done         chan struct{} // signals readLoop + forwarder to stop
 	mu           sync.Mutex
 	closed       bool
 	LastActivity time.Time
@@ -25,6 +26,12 @@ func (s *Session) IsClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
+}
+
+// Done returns a channel that is closed when the session is closing. Consumers
+// (e.g. the WebSocket forwarder) select on it to stop without touching Send.
+func (s *Session) Done() <-chan struct{} {
+	return s.done
 }
 
 // UpdateActivity records the last activity time.

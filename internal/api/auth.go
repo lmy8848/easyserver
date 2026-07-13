@@ -182,6 +182,14 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		log.Printf("auth: failed to invalidate tokens after password change for user %d: %v", userID, err)
 	}
 
+	// Also remove all sessions so sessionValidator rejects old tokens immediately
+	// (token invalidation is fail-closed but sessions are the primary check).
+	if h.sessionService != nil {
+		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), userID); err != nil {
+			log.Printf("auth: failed to remove sessions after password change for user %d: %v", userID, err)
+		}
+	}
+
 	h.auditSecurity(c, "修改密码")
 	Success(c, nil)
 }

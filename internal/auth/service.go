@@ -369,8 +369,9 @@ func (s *AuthService) IsUserTokenInvalidated(ctx context.Context, userID int64, 
 	}
 	invalidated, err := s.tokenRepo.IsUserInvalidated(ctx, userID, issuedAt)
 	if err != nil {
+		// fail-closed: on DB error reject the token rather than risk reviving it.
 		log.Printf("auth: error checking token invalidation: %v", err)
-		return false, nil
+		return false, err
 	}
 	return invalidated, nil
 }

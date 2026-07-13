@@ -27,12 +27,17 @@ type NotifyConfig struct {
 }
 
 type ServerConfig struct {
-	Port               int           `yaml:"port"`
-	Host               string        `yaml:"host"`
-	ServeFrontend      bool          `yaml:"serve_frontend"`
-	AllowedOrigins     []string      `yaml:"allowed_origins"`
-	DevMode            bool          `yaml:"dev_mode"`
-	Domain             string        `yaml:"domain"`
+	Port           int      `yaml:"port"`
+	Host           string   `yaml:"host"`
+	ServeFrontend  bool     `yaml:"serve_frontend"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
+	DevMode        bool     `yaml:"dev_mode"`
+	Domain         string   `yaml:"domain"`
+	// TrustedProxies is the list of trusted reverse-proxy CIDRs whose
+	// X-Forwarded-For is honored by c.ClientIP(). Default ["127.0.0.1"] (same-
+	// host nginx). Set to the CDN ranges (e.g. Cloudflare) when fronted by one.
+	// Empty/nil disables XFF trust entirely (ClientIP uses RemoteAddr).
+	TrustedProxies     []string      `yaml:"trusted_proxies"`
 	RedirectMode       string        `yaml:"redirect_mode"` // "off" | "ip_only" | "non_matching"
 	WwwHandling        string        `yaml:"www_handling"`  // "off" | "force_www" | "remove_www"
 	TLS                TLSConfig     `yaml:"tls"`

@@ -53,6 +53,7 @@ func (m *Manager) CreateSession(id string) (*Session, error) {
 		PTY:          ptmx,
 		Cmd:          cmd,
 		Send:         make(chan []byte, SendChanSize),
+		done:         make(chan struct{}),
 		LastActivity: time.Now(),
 	}
 
@@ -123,7 +124,10 @@ func (s *Session) Close() {
 		cmd.Wait()
 	}
 
-	close(s.Send)
+	// Signal readLoop and the forwarder to stop. Do NOT close s.Send: readLoop
+	// may still be mid-`s.Send <- msg` and closing a channel that a sender is
+	// writing to panics. The buffered Send is GC'd with the Session.
+	close(s.done)
 }
 
 // readLoop reads from PTY and sends to WebSocket.
@@ -131,8 +135,10 @@ func (s *Session) readLoop() {
 	buf := make([]byte, PTYReadBufSize)
 
 	for {
-		if s.IsClosed() {
+		select {
+		case <-s.done:
 			return
+		default:
 		}
 
 		ptmx, ok := s.PTY.(*os.File)
@@ -142,30 +148,26 @@ func (s *Session) readLoop() {
 
 		n, err := ptmx.Read(buf)
 		if err != nil {
-			if !s.IsClosed() {
-				exitMsg, _ := json.Marshal(map[string]interface{}{
-					"type": "exit",
-					"code": 0,
-				})
-				select {
-				case s.Send <- exitMsg:
-				default:
-				}
+			select {
+			case s.Send <- mustJSON(map[string]interface{}{"type": "exit", "code": 0}):
+			default:
 			}
 			return
 		}
 
 		if n > 0 {
-			outputMsg, _ := json.Marshal(map[string]interface{}{
-				"type": "output",
-				"data": string(buf[:n]),
-			})
 			select {
-			case s.Send <- outputMsg:
+			case s.Send <- mustJSON(map[string]interface{}{"type": "output", "data": string(buf[:n])}):
 			default:
 			}
 		}
 	}
+}
+
+// mustJSON marshals v to JSON, returning a fallback on the (unexpected) error.
+func mustJSON(v interface{}) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 // HandleInput handles input from WebSocket.
