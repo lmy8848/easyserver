@@ -313,7 +313,7 @@ var uploadBufPool = sync.Pool{
 // Upload writes content from a reader to a file.
 // The mutex is held only during path validation and file creation — the actual
 // data copy runs outside the lock so concurrent uploads proceed in parallel.
-func (m *Manager) Upload(src io.Reader, path string) (int64, error) {
+func (m *Manager) Upload(src io.Reader, path string, maxSize int64) (int64, error) {
 	m.mu.Lock()
 	validPath, err := m.ValidatePath(path)
 	if err != nil {
@@ -333,11 +333,18 @@ func (m *Manager) Upload(src io.Reader, path string) (int64, error) {
 	m.mu.Unlock()
 	defer dst.Close()
 
+	if maxSize > 0 {
+		src = io.LimitReader(src, maxSize+1)
+	}
 	bufPtr := uploadBufPool.Get().(*[]byte)
 	defer uploadBufPool.Put(bufPtr)
 	n, err := io.CopyBuffer(dst, src, *bufPtr)
 	if err != nil {
 		return n, fmt.Errorf("upload %s: %w", path, err)
+	}
+	if maxSize > 0 && n > maxSize {
+		_ = os.Remove(validPath)
+		return n, fmt.Errorf("upload %s: exceeds max size %d bytes", path, maxSize)
 	}
 	return n, nil
 }

@@ -35,12 +35,17 @@ func keysOfStringMap(m map[string][]string) []string {
 }
 
 type FileManagerHandler struct {
-	fileManager *filemanager.Manager
+	fileManager   *filemanager.Manager
+	maxUploadSize int64
 }
 
-func NewFileManagerHandler(fm *filemanager.Manager) *FileManagerHandler {
+func NewFileManagerHandler(fm *filemanager.Manager, maxUploadSize int64) *FileManagerHandler {
+	if maxUploadSize <= 0 {
+		maxUploadSize = 512 << 20 // 512 MB default
+	}
 	return &FileManagerHandler{
-		fileManager: fm,
+		fileManager:   fm,
+		maxUploadSize: maxUploadSize,
 	}
 }
 
@@ -129,7 +134,7 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 
 	middleware.AuditSummary(c, "上传文件 "+header.Filename+" 到 "+path)
 	// Use FileManager.Upload for secure file upload
-	size, err := h.fileManager.Upload(file, path)
+	size, err := h.fileManager.Upload(file, path, h.maxUploadSize)
 	if err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
 		return

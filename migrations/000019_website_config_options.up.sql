@@ -1,8 +1,7 @@
--- Add process_id and config_options columns to websites
-ALTER TABLE websites ADD COLUMN process_id INTEGER DEFAULT 0;
-ALTER TABLE websites ADD COLUMN config_options TEXT DEFAULT '';
-
--- Create file_shares table for external file sharing
+-- file_shares table for external file sharing.
+-- The websites.process_id / config_options columns are added idempotently by the
+-- version-19 pre-migration hook in migrate.go (ALTER TABLE ADD COLUMN is not
+-- idempotent in SQLite, so we check pragma_table_info first).
 CREATE TABLE IF NOT EXISTS file_shares (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT NOT NULL,

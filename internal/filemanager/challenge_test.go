@@ -290,7 +290,7 @@ func TestChallenge_Upload_IntermediateSymlinkRejected(t *testing.T) {
 	os.Symlink(outside, filepath.Join(base, "escape"))
 
 	m, _ := NewManager(base)
-	_, err := m.Upload(strings.NewReader("payload"), "/escape/newfile")
+	_, err := m.Upload(strings.NewReader("payload"), "/escape/newfile", 0)
 	if err == nil {
 		// Did anything land in outside?
 		if data, err := os.ReadFile(filepath.Join(outside, "newfile")); err == nil {

@@ -8,8 +8,8 @@ import (
 
 // registerFileRoutes registers file management routes.
 // fileRoutesWithLargeBody is used only for the upload endpoint (larger body limit).
-func registerFileRoutes(protected *gin.RouterGroup, fileRoutesWithLargeBody *gin.RouterGroup, fileManager *filemanager.Manager) {
-	handler := NewFileManagerHandler(fileManager)
+func registerFileRoutes(protected *gin.RouterGroup, fileRoutesWithLargeBody *gin.RouterGroup, fileManager *filemanager.Manager, maxUploadSize int64) {
+	handler := NewFileManagerHandler(fileManager, maxUploadSize)
 	protected.GET("/files", handler.List)
 	protected.GET("/files/download", handler.Download)
 	protected.GET("/files/content", handler.GetContent)

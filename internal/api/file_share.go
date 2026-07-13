@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -480,7 +481,7 @@ func (h *FileShareHandler) VerifyShare(c *gin.Context) {
 		return
 	}
 
-	if share.Password != "" && body.Password != share.Password {
+	if share.Password != "" && subtle.ConstantTimeCompare([]byte(body.Password), []byte(share.Password)) != 1 {
 		c.Error(ErrForbidden.WithMessage("密码错误"))
 		return
 	}
@@ -522,14 +523,14 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		return
 	}
 
-	// Check password
+	// Check password (constant-time to avoid timing oracle)
 	if share.Password != "" {
 		password := c.Query("password")
 		if password == "" {
 			c.Error(ErrForbidden.WithMessage("需要密码访问，请在链接后添加 ?password=xxx"))
 			return
 		}
-		if password != share.Password {
+		if subtle.ConstantTimeCompare([]byte(password), []byte(share.Password)) != 1 {
 			c.Error(ErrForbidden.WithMessage("密码错误"))
 			return
 		}
@@ -544,13 +545,6 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 			c.Error(ErrNotFound.WithMessage("分享链接已过期"))
 			return
 		}
-	}
-
-	// Check max downloads
-	if share.MaxDownloads > 0 && share.DownloadCount >= share.MaxDownloads {
-		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(ErrNotFound.WithMessage("分享链接下载次数已达上限"))
-		return
 	}
 
 	// Validate file path
@@ -575,8 +569,19 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		return
 	}
 
-	// Increment download count
-	h.shareRepo.IncrementDownloads(c.Request.Context(), share.ID)
+	// Atomically increment download count, refusing if the cap is reached. This
+	// closes the check-then-increment race where concurrent requests could push
+	// DownloadCount past MaxDownloads.
+	allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
+	if err != nil {
+		c.Error(ErrInternal.Wrap(err))
+		return
+	}
+	if !allowed {
+		h.shareRepo.Delete(c.Request.Context(), share.ID)
+		c.Error(ErrNotFound.WithMessage("分享链接下载次数已达上限"))
+		return
+	}
 
 	// Serve file
 	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
@@ -613,9 +618,15 @@ func registerFileShareRoutes(protected *gin.RouterGroup, shareRepo fileshare.Rep
 // /share/:token is intentionally NOT registered here so it falls through to
 // the SPA fallback (NoRoute) and renders the React download page; the info
 // and download sub-paths are explicit and take precedence over NoRoute.
-func RegisterPublicShareRoute(e *gin.Engine, shareRepo fileshare.Repository, fileManager *filemanager.Manager) {
+func RegisterPublicShareRoute(e *gin.Engine, shareRepo fileshare.Repository, fileManager *filemanager.Manager, rateLimit int, rateInterval time.Duration) {
 	handler := NewFileShareHandler(shareRepo, fileManager)
-	e.GET("/share/:token/info", handler.ShareInfo)
-	e.POST("/share/:token/verify", handler.VerifyShare)
-	e.GET("/share/:token/download", handler.PublicDownload)
+	// Public share endpoints are unauthenticated, so rate-limit by IP to blunt
+	// password brute-force on /verify and download abuse on /download.
+	g := e.Group("/share")
+	if rateLimit > 0 {
+		g.Use(middleware.RateLimitMiddleware("share", rateLimit, rateInterval))
+	}
+	g.GET("/:token/info", handler.ShareInfo)
+	g.POST("/:token/verify", handler.VerifyShare)
+	g.GET("/:token/download", handler.PublicDownload)
 }

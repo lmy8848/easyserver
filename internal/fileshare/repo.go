@@ -11,5 +11,9 @@ type Repository interface {
 	Update(ctx context.Context, id int64, req *UpdateShareRequest) error
 	Delete(ctx context.Context, id int64) error
 	IncrementDownloads(ctx context.Context, id int64) error
+	// IncrementDownloadsIfUnderLimit atomically bumps download_count only if the
+	// cap hasn't been reached, returning whether the increment happened. Prevents
+	// the check-then-increment race that could exceed MaxDownloads.
+	IncrementDownloadsIfUnderLimit(ctx context.Context, id int64) (bool, error)
 	DeleteExpired(ctx context.Context) (int64, error)
 }

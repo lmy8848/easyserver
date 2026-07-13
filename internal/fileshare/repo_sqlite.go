@@ -126,6 +126,19 @@ func (r *sqliteShareRepo) IncrementDownloads(ctx context.Context, id int64) erro
 	return err
 }
 
+// IncrementDownloadsIfUnderLimit atomically increments only when under the cap.
+// Returns false (without incrementing) when MaxDownloads > 0 and the cap is met.
+func (r *sqliteShareRepo) IncrementDownloadsIfUnderLimit(ctx context.Context, id int64) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE file_shares
+		SET download_count = download_count + 1, updated_at = datetime('now')
+		WHERE id = ? AND (max_downloads = 0 OR download_count < max_downloads)`, id)
+	if err != nil {
+		return false, fmt.Errorf("increment downloads if under limit: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 func (r *sqliteShareRepo) DeleteExpired(ctx context.Context) (int64, error) {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM file_shares WHERE
 		(expires_at != '' AND expires_at <= datetime('now')) OR

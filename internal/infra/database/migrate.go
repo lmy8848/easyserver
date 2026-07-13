@@ -63,6 +63,13 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 				return performHardCutoverBackup(tx, db, migrationsDir)
 			}
 		}
+		// Version 19 (website_config_options): add websites.process_id /
+		// config_options idempotently. ALTER TABLE ADD COLUMN is not idempotent
+		// in SQLite, so existing deployments that already have the columns (from
+		// the legacy createTables fallback) must not re-run the ALTER.
+		if version == 19 {
+			hook = ensureWebsitesColumns
+		}
 
 		log.Printf("migrate: running migration %s", name)
 		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name, hook); err != nil {
@@ -157,6 +164,34 @@ func runMigration(db *sql.DB, path string, version int, name string, preTxHook f
 	}
 
 	return tx.Commit()
+}
+
+// ensureWebsitesColumns idempotently adds websites.process_id and
+// websites.config_options. Used as the version-19 pre-migration hook so that
+// deployments which already have the columns (legacy createTables fallback) and
+// fresh installs both converge safely.
+func ensureWebsitesColumns(tx *sql.Tx) error {
+	cols := []struct{ name, def string }{
+		{"process_id", "INTEGER DEFAULT 0"},
+		{"config_options", "TEXT DEFAULT ''"},
+	}
+	for _, c := range cols {
+		var cnt int
+		if err := tx.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('websites') WHERE name = ?", c.name,
+		).Scan(&cnt); err != nil {
+			return fmt.Errorf("check column %s: %w", c.name, err)
+		}
+		if cnt > 0 {
+			continue // column already exists, skip ALTER
+		}
+		if _, err := tx.Exec(
+			fmt.Sprintf("ALTER TABLE websites ADD COLUMN %s %s", c.name, c.def),
+		); err != nil {
+			return fmt.Errorf("add column %s: %w", c.name, err)
+		}
+	}
+	return nil
 }
 
 // splitStatements splits SQL content by semicolons, respecting quoted strings
