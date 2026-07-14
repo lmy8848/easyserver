@@ -72,7 +72,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Turnstile.EnableQRLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableQRLogin && !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -128,8 +128,8 @@ func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) {
 
 // registerQRLoginRoutes wires the scan-to-login endpoints onto the auth groups.
 // publicAuth is the rate-limited public group; authProtected requires a JWT.
-func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service) {
-	h := NewQRLoginHandler(qrService, authService, auditService, r.cfg)
+func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service, cfg *config.Config) {
+	h := NewQRLoginHandler(qrService, authService, auditService, cfg)
 	publicAuth.POST("/qr/session", h.CreateQRSession)
 	publicAuth.POST("/qr/status", h.GetQRStatus)
 	publicAuth.POST("/qr/cancel", h.CancelQRLogin)

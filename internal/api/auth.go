@@ -67,7 +67,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Verify Cloudflare Turnstile challenge if enabled for login.
-	if h.cfg.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -240,7 +240,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -313,7 +313,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableLogin && !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -600,10 +600,10 @@ func registerAuthRoutes(
 		// Public Turnstile config (no secret key): site key + enabled flows.
 		auth.GET("/turnstile/config", func(c *gin.Context) {
 			Success(c, gin.H{
-				"site_key":            cfg.Turnstile.SiteKey,
-				"enable_login":        cfg.Turnstile.EnableLogin,
-				"enable_qr_login":     cfg.Turnstile.EnableQRLogin,
-				"enable_public_share": cfg.Turnstile.EnablePublicShare,
+				"site_key":            cfg.Server.Turnstile.SiteKey,
+				"enable_login":        cfg.Server.Turnstile.EnableLogin,
+				"enable_qr_login":     cfg.Server.Turnstile.EnableQRLogin,
+				"enable_public_share": cfg.Server.Turnstile.EnablePublicShare,
 			})
 		})
 	}
@@ -626,5 +626,5 @@ func registerAuthRoutes(
 	}
 
 	// Scan-to-login: public (rate-limited) session/status/cancel + protected confirm.
-	registerQRLoginRoutes(auth, authProtected, qrService, authService, auditService)
+	registerQRLoginRoutes(auth, authProtected, qrService, authService, auditService, cfg)
 }

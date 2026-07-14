@@ -517,9 +517,9 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 
 	// Verify Turnstile if enabled for public shares. The token arrives as a
 	// query param because this is a GET (redirect/blob) download.
-	if h.cfg.Turnstile.EnablePublicShare {
+	if h.cfg.Server.Turnstile.EnablePublicShare {
 		tsToken := c.Query("turnstile_token")
-		if !verifier.Verify(c.Request.Context(), h.cfg.Turnstile.SecretKey, tsToken, c.ClientIP()) {
+		if !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, tsToken, c.ClientIP()) {
 			c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 			return
 		}
