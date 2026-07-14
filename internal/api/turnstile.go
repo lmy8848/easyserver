@@ -14,7 +14,7 @@ import (
 const turnstileVerifyEndpoint = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 // turnstileTimeout bounds the outbound verification request.
-const turnstileTimeout = 8 * time.Second
+const turnstileTimeout = 3 * time.Second
 
 // siteverifyResponse mirrors Cloudflare's siteverify reply.
 type siteverifyResponse struct {
