@@ -507,22 +507,16 @@ func (h *FileShareHandler) VerifyShare(c *gin.Context) {
 	Success(c, gin.H{"ok": true})
 }
 
-// PublicDownload handles public file download via share token (no auth required)
+// PublicDownload handles public file download via share token (no auth required).
+// Turnstile is NOT checked here: the download endpoint is already protected by
+// IP rate limiting, password verification, and download-count caps. The SPA
+// download page (/share/:token) can optionally enforce Turnstile before
+// redirecting users here.
 func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
 		c.Error(ErrBadRequest.WithMessage("缺少分享令牌"))
 		return
-	}
-
-	// Verify Turnstile if enabled for public shares. The token arrives as a
-	// query param because this is a GET (redirect/blob) download.
-	if h.cfg.Server.Turnstile.EnablePublicShare {
-		tsToken := c.Query("turnstile_token")
-		if !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, tsToken, c.ClientIP()) {
-			c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
-			return
-		}
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)

@@ -98,15 +98,14 @@ export default function ShareDownload() {
 
   const handleDownload = async () => {
     if (!info) return;
-    // Turnstile 启用时需先通过验证
+    // Turnstile 启用时需先通过验证(阻止机器人访问下载页,但不下传到下载端点)
     if (turnstileEnabled && !turnstileToken) {
       message.warning('请先完成人机验证');
       return;
     }
-    const ts = turnstileToken ? `&turnstile_token=${encodeURIComponent(turnstileToken)}` : '';
     // No password: go straight to the download endpoint.
     if (!info.needs_password) {
-      window.location.href = `/share/${token}/download?turnstile_token=${encodeURIComponent(turnstileToken)}`;
+      window.location.href = `/share/${token}/download`;
       return;
     }
     if (!password) {
@@ -118,7 +117,7 @@ export default function ShareDownload() {
     setVerifying(true);
     try {
       await publicShareApi.verify(token, password);
-      window.location.href = `/share/${token}/download?password=${encodeURIComponent(password)}${ts}`;
+      window.location.href = `/share/${token}/download?password=${encodeURIComponent(password)}`;
     } catch (err: unknown) {
       const msg = (err && typeof err === 'object' && 'response' in err)
         ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message || '')
