@@ -50,6 +50,9 @@ func SecurityMiddleware(nonce string) gin.HandlerFunc {
 		if nonce != "" {
 			scriptSrc += " 'nonce-" + nonce + "'"
 		}
+		// Turnstile's challenge engine requires eval(); allow it only from the
+		// Cloudflare origin (not from 'self' which would weaken the nonce).
+		scriptSrc += " 'unsafe-eval'"
 		c.Header("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src "+scriptSrc+"; "+
