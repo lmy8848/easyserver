@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 // Cloudflare Turnstile injects a global `turnstile` object once the script
 // loads. We lazily append the script exactly once per page.
@@ -55,6 +55,8 @@ interface TurnstileProps {
 // Turnstile wraps Cloudflare's client-side CAPTCHA. It renders the challenge
 // into a container div and reports the resulting token up via onVerify. Parent
 // components read the token and include it with the login request.
+// Callbacks are held in refs so they don't cause the widget to re-render on
+// every parent re-render (which triggers error 600010).
 export default function Turnstile({
   siteKey,
   onVerify,
@@ -65,7 +67,10 @@ export default function Turnstile({
 }: TurnstileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const onVerifyRef = useRef(onVerify);
+  const onExpireRef = useRef(onExpire);
+  onVerifyRef.current = onVerify;
+  onExpireRef.current = onExpire;
 
   useEffect(() => {
     let cancelled = false;
@@ -73,16 +78,15 @@ export default function Turnstile({
       if (cancelled || !containerRef.current || !window.turnstile) return;
       const id = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
-        callback: onVerify,
+        callback: (token: string) => onVerifyRef.current?.(token),
         'expired-callback': () => {
           widgetIdRef.current = null;
-          onExpire?.();
+          onExpireRef.current?.();
         },
         theme,
         size,
       });
       widgetIdRef.current = id;
-      setReady(true);
     });
     return () => {
       cancelled = true;
@@ -95,14 +99,8 @@ export default function Turnstile({
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, onVerify, onExpire, theme, size]);
-
-  // Expose a way for the parent to reset the widget (e.g. after a failed attempt)
-  useEffect(() => {
-    if (ready && widgetIdRef.current && window.turnstile) {
-      // no-op: widget mounted
-    }
-  }, [ready]);
+    // Only re-render when siteKey/theme/size change. Callbacks are stable via refs.
+  }, [siteKey, theme, size]);
 
   return <div ref={containerRef} className={className} />;
 }
