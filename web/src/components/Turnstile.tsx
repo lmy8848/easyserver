@@ -69,8 +69,12 @@ export default function Turnstile({
   const widgetIdRef = useRef<string | null>(null);
   const onVerifyRef = useRef(onVerify);
   const onExpireRef = useRef(onExpire);
-  onVerifyRef.current = onVerify;
-  onExpireRef.current = onExpire;
+
+  // Keep refs current without triggering re-renders.
+  useEffect(() => {
+    onVerifyRef.current = onVerify;
+    onExpireRef.current = onExpire;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -103,15 +107,4 @@ export default function Turnstile({
   }, [siteKey, theme, size]);
 
   return <div ref={containerRef} className={className} />;
-}
-
-// Reset a rendered widget so the user can re-solve the challenge.
-export function resetTurnstile(): void {
-  if (window.turnstile) {
-    try {
-      window.turnstile.reset();
-    } catch {
-      /* ignore */
-    }
-  }
 }
