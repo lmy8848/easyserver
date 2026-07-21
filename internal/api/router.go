@@ -17,6 +17,7 @@ import (
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
+	envconfighttp "easyserver/internal/envconfig/http"
 	"easyserver/internal/filemanager"
 	filemanagerhttp "easyserver/internal/filemanager/http"
 	"easyserver/internal/fileshare"
@@ -346,7 +347,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	registerDeployRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
 	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
-	registerEnvRoutes(protected, r.envConfigService)
+	envconfighttp.RegisterRoutes(protected, r.envConfigService)
 	registerWebServerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
 	registerDatabaseRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
 	registerCronRoutes(protected, r.cronService, r.executor)
