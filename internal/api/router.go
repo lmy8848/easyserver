@@ -28,6 +28,7 @@ import (
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/launcher"
 	"easyserver/internal/monitor"
+	monitorhttp "easyserver/internal/monitor/http"
 	"easyserver/internal/notification"
 	notificationhttp "easyserver/internal/notification/http"
 	"easyserver/internal/notify"
@@ -338,14 +339,14 @@ func (r *Router) Setup() *gin.Engine {
 	wsGroup.Use(middleware.WSAuthMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator))
 
 	// Register domain routes
-	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
+	monitorhttp.RegisterRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	systemdhttp.RegisterRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
 	registerSystemRoutes(protected, r.executor)
-	protected.GET("/system/ports", (&PortMonitorHandler{}).GetListeningPorts)
+	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	registerDeployRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
 	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
