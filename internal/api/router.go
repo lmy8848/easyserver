@@ -50,6 +50,7 @@ import (
 	"easyserver/internal/terminal"
 	terminalhttp "easyserver/internal/terminal/http"
 	"easyserver/internal/web"
+	webhttp "easyserver/internal/web/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -358,7 +359,7 @@ func (r *Router) Setup() *gin.Engine {
 	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
 	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
 	envconfighttp.RegisterRoutes(protected, r.envConfigService)
-	registerWebServerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
+	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
 	registerDatabaseRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
 	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
