@@ -18,6 +18,7 @@ import (
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
 	"easyserver/internal/filemanager"
+	filemanagerhttp "easyserver/internal/filemanager/http"
 	"easyserver/internal/fileshare"
 	filesharehttp "easyserver/internal/fileshare/http"
 	"easyserver/internal/firewall"
@@ -335,7 +336,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerServiceRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerFileRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
+	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
 	registerSystemRoutes(protected, r.executor)
