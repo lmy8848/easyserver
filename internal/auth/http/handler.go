@@ -10,9 +10,9 @@ import (
 	"easyserver/internal/auth"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
-	"easyserver/internal/infra/turnstile"
 	"easyserver/internal/qrlogin"
 
 	"github.com/gin-gonic/gin"
@@ -75,7 +75,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Verify Cloudflare Turnstile challenge if enabled for login.
-	if h.cfg.Server.Turnstile.EnableLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -272,7 +272,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Server.Turnstile.EnableLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -369,7 +369,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Server.Turnstile.EnableLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
@@ -770,7 +770,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Server.Turnstile.EnableQRLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableQRLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}

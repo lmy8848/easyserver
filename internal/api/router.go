@@ -33,9 +33,9 @@ import (
 	firewallhttp "easyserver/internal/firewall/http"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
-	"easyserver/internal/infra/launcher"
 	"easyserver/internal/monitor"
 	monitorhttp "easyserver/internal/monitor/http"
 	"easyserver/internal/notification"
@@ -127,8 +127,9 @@ type RouterDeps struct {
 	// Cloud service (nil if disabled)
 	CloudService *cloud.Service
 
-	// Launcher for hot restart (FD passing)
-	Launcher *launcher.Launcher
+	// Signal for hot restart (FD passing). Handlers call Request; the App
+	// event loop acts on it.
+	Signal *infra.Signal
 }
 
 func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
@@ -230,7 +231,7 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	terminalhttp.RegisterRoutes(protected, wsGroup, deps.TerminalManager, cfg.Auth.JWTSecret, deps.AuditService, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, deps.FileManager, maxUploadSize)
 	audithttp.RegisterRoutes(protected, deps.DB, deps.AuditService, deps.AuditRepo)
-	settingshttp.RegisterRoutes(protected, cfg, configPath, deps.AlertService, deps.Executor, deps.Launcher)
+	settingshttp.RegisterRoutes(protected, cfg, configPath, deps.AlertService, deps.Executor, deps.Signal)
 	systemprocesshttp.RegisterSystemRoutes(protected, deps.Executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	cloudhttp.RegisterRoutes(protected, deps.CloudService, &cfg.TencentCloud, cfg.Server.Port)
