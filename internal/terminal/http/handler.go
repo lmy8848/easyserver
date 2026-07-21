@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/httpx"
 	"easyserver/internal/infra"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/terminal"
 
 	"github.com/gin-gonic/gin"
@@ -71,33 +72,33 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// User info already set by WSAuthMiddleware
 	userIDIface, ok := c.Get("user_id")
 	if !ok {
-		c.Error(ErrUnauthorized.WithMessage("用户ID未找到"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("用户ID未找到"))
 		return
 	}
 	userID, ok := userIDIface.(int64)
 	if !ok {
-		c.Error(ErrInternal.WithMessage("用户ID类型无效"))
+		c.Error(apperror.ErrInternal.WithMessage("用户ID类型无效"))
 		return
 	}
 	usernameIface, ok := c.Get("username")
 	if !ok {
-		c.Error(ErrUnauthorized.WithMessage("用户名未找到"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("用户名未找到"))
 		return
 	}
 	username, ok := usernameIface.(string)
 	if !ok {
-		c.Error(ErrInternal.WithMessage("用户名类型无效"))
+		c.Error(apperror.ErrInternal.WithMessage("用户名类型无效"))
 		return
 	}
 
 	// Get and validate session ID from URL
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		c.Error(ErrBadRequest.WithMessage("会话ID不能为空"))
+		c.Error(apperror.ErrBadRequest.WithMessage("会话ID不能为空"))
 		return
 	}
 	if !sessionIDRegex.MatchString(sessionID) {
-		c.Error(ErrBadRequest.WithMessage("会话ID格式无效"))
+		c.Error(apperror.ErrBadRequest.WithMessage("会话ID格式无效"))
 		return
 	}
 
@@ -107,7 +108,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		// Try to get existing session
 		session, err = h.terminalManager.GetSession(sessionID)
 		if err != nil {
-			c.Error(WrapError(err))
+			c.Error(apperror.WrapError(err))
 			return
 		}
 	}
@@ -265,4 +266,13 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 			log.Printf("terminal: handle input error: %v", err)
 		}
 	}
+}
+
+// RegisterRoutes registers terminal routes
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
+	protected.GET("/terminal/:id", func(c *gin.Context) {
+		httpx.Success(c, nil)
+	})
+	handler := NewTerminalHandler(terminalManager, jwtSecret, auditService, allowedOrigins, devMode)
+	wsGroup.GET("/terminal/:id", handler.HandleWebSocket)
 }
