@@ -6,6 +6,7 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/turnstile"
 	"easyserver/internal/qrlogin"
 
 	"github.com/gin-gonic/gin"
@@ -72,7 +73,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) {
 		return
 	}
 
-	if h.cfg.Server.Turnstile.EnableQRLogin && !verifier.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+	if h.cfg.Server.Turnstile.EnableQRLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
 		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
