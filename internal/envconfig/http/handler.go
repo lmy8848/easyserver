@@ -1,11 +1,13 @@
-package api
+package http
 
 import (
 	"fmt"
 	"strconv"
 
 	"easyserver/internal/envconfig"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,11 +24,11 @@ func NewEnvConfigHandler(envConfigService *envconfig.Service) *EnvConfigHandler 
 func (h *EnvConfigHandler) ListEnvConfigs(c *gin.Context) {
 	configs, err := h.envConfigService.ListEnvConfigs(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"configs": configs,
 	})
 }
@@ -36,21 +38,21 @@ func (h *EnvConfigHandler) GetEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
 	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	if config == nil {
-		c.Error(ErrNotFound.WithMessage("配置不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
 
-	Success(c, config)
+	httpx.Success(c, config)
 }
 
 // CreateEnvConfig creates a new environment configuration
@@ -61,7 +63,7 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 		Enabled bool   `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 	middleware.AuditSummary(c, "创建环境变量 "+req.Name)
@@ -73,11 +75,11 @@ func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) {
 	}
 
 	if err := h.envConfigService.CreateEnvConfig(c.Request.Context(), config); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, config)
+	httpx.Success(c, config)
 }
 
 // UpdateEnvConfig updates an environment configuration
@@ -85,7 +87,7 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
@@ -95,18 +97,18 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 		Enabled bool   `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 	middleware.AuditSummary(c, "更新环境变量 "+req.Name)
 
 	config, err := h.envConfigService.GetEnvConfig(c.Request.Context(), id)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	if config == nil {
-		c.Error(ErrNotFound.WithMessage("配置不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("配置不存在"))
 		return
 	}
 
@@ -115,11 +117,11 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) {
 	config.Enabled = req.Enabled
 
 	if err := h.envConfigService.UpdateEnvConfig(c.Request.Context(), config); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, config)
+	httpx.Success(c, config)
 }
 
 // DeleteEnvConfig deletes an environment configuration
@@ -127,28 +129,28 @@ func (h *EnvConfigHandler) DeleteEnvConfig(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 	middleware.AuditSummary(c, "删除环境变量 #"+strconv.FormatInt(id, 10))
 
 	if err := h.envConfigService.DeleteEnvConfig(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"message": "删除成功"})
+	httpx.Success(c, gin.H{"message": "删除成功"})
 }
 
 // ListPathEntries returns all PATH entries
 func (h *EnvConfigHandler) ListPathEntries(c *gin.Context) {
 	entries, err := h.envConfigService.ListPathEntries(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"entries": entries,
 	})
 }
@@ -160,7 +162,7 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 		Enabled bool   `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 	middleware.AuditSummary(c, "添加 PATH 条目 "+req.Path)
@@ -171,18 +173,18 @@ func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) {
 	}
 
 	if err := h.envConfigService.CreatePathEntry(c.Request.Context(), entry); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, entry)
+	httpx.Success(c, entry)
 }
 
 // UpdatePathEntry updates an existing PATH entry
 func (h *EnvConfigHandler) UpdatePathEntry(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 
@@ -191,7 +193,7 @@ func (h *EnvConfigHandler) UpdatePathEntry(c *gin.Context) {
 		Enabled bool   `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -211,7 +213,7 @@ func (h *EnvConfigHandler) UpdatePathEntry(c *gin.Context) {
 		}
 	}
 	if existing == nil {
-		c.Error(ErrNotFound.WithMessage("PATH 条目不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("PATH 条目不存在"))
 		return
 	}
 
@@ -222,7 +224,7 @@ func (h *EnvConfigHandler) UpdatePathEntry(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // DeletePathEntry deletes a PATH entry
@@ -230,28 +232,43 @@ func (h *EnvConfigHandler) DeletePathEntry(c *gin.Context) {
 	idStr := c.Param("id")
 	var id int64
 	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
 	middleware.AuditSummary(c, "删除 PATH 条目 #"+strconv.FormatInt(id, 10))
 
 	if err := h.envConfigService.DeletePathEntry(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"message": "删除成功"})
+	httpx.Success(c, gin.H{"message": "删除成功"})
 }
 
 // GenerateEnvScript generates a shell script to set environment variables
 func (h *EnvConfigHandler) GenerateEnvScript(c *gin.Context) {
 	script, err := h.envConfigService.GenerateEnvScript(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"script": script,
 	})
+}
+
+// RegisterRoutes registers environment configuration routes
+func RegisterRoutes(protected *gin.RouterGroup, envConfigService *envconfig.Service) {
+	handler := NewEnvConfigHandler(envConfigService)
+	protected.GET("/env-config", handler.ListEnvConfigs)
+	protected.GET("/env-config/:id", handler.GetEnvConfig)
+	protected.POST("/env-config", handler.CreateEnvConfig)
+	protected.PUT("/env-config/:id", handler.UpdateEnvConfig)
+	protected.DELETE("/env-config/:id", handler.DeleteEnvConfig)
+	protected.GET("/env-config/path", handler.ListPathEntries)
+	protected.POST("/env-config/path", handler.CreatePathEntry)
+	protected.PUT("/env-config/path/:id", handler.UpdatePathEntry)
+	protected.DELETE("/env-config/path/:id", handler.DeletePathEntry)
+	protected.GET("/env-config/script", handler.GenerateEnvScript)
 }
