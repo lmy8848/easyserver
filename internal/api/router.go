@@ -9,6 +9,7 @@ import (
 
 	"easyserver/internal/alert"
 	"easyserver/internal/audit"
+	audithttp "easyserver/internal/audit/http"
 	"easyserver/internal/auth"
 	authhttp "easyserver/internal/auth/http"
 	"easyserver/internal/cloud"
@@ -347,7 +348,7 @@ func (r *Router) Setup() *gin.Engine {
 	systemdhttp.RegisterRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
-	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
+	audithttp.RegisterRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
 	registerSystemRoutes(protected, r.executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)

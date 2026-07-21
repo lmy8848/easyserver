@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"database/sql"
@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 
 	"github.com/gin-gonic/gin"
 )
@@ -84,7 +86,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		}
 		total, logs, err := h.auditRepo.Query(c.Request.Context(), filter)
 		if err != nil {
-			c.Error(WrapError(err))
+			c.Error(apperror.WrapError(err))
 			return
 		}
 		items := make([]AuditLogItem, 0, len(logs))
@@ -102,7 +104,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 				CreatedAt: log.CreatedAt.Format("2006-01-02 15:04:05"),
 			})
 		}
-		Success(c, AuditLogListResponse{
+		httpx.Success(c, AuditLogListResponse{
 			Total: total,
 			Items: items,
 		})
@@ -165,18 +167,18 @@ func (h *AuditHandler) List(c *gin.Context) {
 	var total int64
 	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
 	if err := h.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
 	// Get items
 	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at
-	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+		          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	args = append(args, pageSize, offset)
 
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer rows.Close()
@@ -193,11 +195,11 @@ func (h *AuditHandler) List(c *gin.Context) {
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, AuditLogListResponse{
+	httpx.Success(c, AuditLogListResponse{
 		Total: total,
 		Items: items,
 	})
@@ -209,10 +211,10 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 	if h.auditRepo != nil {
 		actions, err := h.auditRepo.GetActions(c.Request.Context(), logType)
 		if err != nil {
-			c.Error(WrapError(err))
+			c.Error(apperror.WrapError(err))
 			return
 		}
-		Success(c, actions)
+		httpx.Success(c, actions)
 		return
 	}
 
@@ -224,7 +226,7 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
 	}
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer rows.Close()
@@ -237,7 +239,7 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 		}
 	}
 
-	Success(c, actions)
+	httpx.Success(c, actions)
 }
 
 // Stats returns audit log statistics
@@ -250,15 +252,15 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 
 	// 按用户统计
 	userRows, err := h.db.Query(`
-		SELECT username, COUNT(*) as cnt
-		FROM audit_logs
-		WHERE created_at >= ?
-		GROUP BY username
-		ORDER BY cnt DESC
-		LIMIT 10
-	`, since)
+			SELECT username, COUNT(*) as cnt
+			FROM audit_logs
+			WHERE created_at >= ?
+			GROUP BY username
+			ORDER BY cnt DESC
+			LIMIT 10
+		`, since)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer userRows.Close()
@@ -277,15 +279,15 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 
 	// 按操作类型统计
 	actionRows, err := h.db.Query(`
-		SELECT action, COUNT(*) as cnt
-		FROM audit_logs
-		WHERE created_at >= ?
-		GROUP BY action
-		ORDER BY cnt DESC
-		LIMIT 10
-	`, since)
+			SELECT action, COUNT(*) as cnt
+			FROM audit_logs
+			WHERE created_at >= ?
+			GROUP BY action
+			ORDER BY cnt DESC
+			LIMIT 10
+		`, since)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer actionRows.Close()
@@ -304,14 +306,14 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 
 	// 按天统计
 	dayRows, err := h.db.Query(`
-		SELECT DATE(created_at) as day, COUNT(*) as cnt
-		FROM audit_logs
-		WHERE created_at >= ?
-		GROUP BY DATE(created_at)
-		ORDER BY day ASC
-	`, since)
+			SELECT DATE(created_at) as day, COUNT(*) as cnt
+			FROM audit_logs
+			WHERE created_at >= ?
+			GROUP BY DATE(created_at)
+			ORDER BY day ASC
+		`, since)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer dayRows.Close()
@@ -330,20 +332,20 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 
 	// 按状态码统计（仅 request 日志含 status 字段）
 	statusRows, err := h.db.Query(`
-		SELECT
-			CASE
-				WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 500 THEN '5xx'
-				WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 400 THEN '4xx'
-				WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 200 THEN '2xx'
-				ELSE 'other'
-			END as status_group,
-			COUNT(*) as cnt
-		FROM audit_logs
-		WHERE created_at >= ? AND type = 'request'
-		GROUP BY status_group
-	`, since)
+			SELECT
+				CASE
+					WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 500 THEN '5xx'
+					WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 400 THEN '4xx'
+					WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 200 THEN '2xx'
+					ELSE 'other'
+				END as status_group,
+				COUNT(*) as cnt
+			FROM audit_logs
+			WHERE created_at >= ? AND type = 'request'
+			GROUP BY status_group
+		`, since)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer statusRows.Close()
@@ -360,7 +362,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"user_stats":   userStats,
 		"action_stats": actionStats,
 		"day_stats":    dayStats,
@@ -386,7 +388,7 @@ func (h *AuditHandler) GetCleanPolicy(c *gin.Context) {
 	var count int
 	h.db.QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&count)
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"retention_days": 90,
 		"total_records":  count,
 		"auto_clean":     true,
@@ -436,10 +438,10 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	}
 
 	query := `SELECT id, username, action, type, resource, detail, ip, created_at
-	          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
+		          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
 	rows, err := h.db.Query(query, args...)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 	defer rows.Close()
@@ -488,24 +490,25 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 	if h.auditRepo != nil {
 		rows, err := h.auditRepo.Clean(c.Request.Context(), since)
 		if err != nil {
-			c.Error(WrapError(err))
+			c.Error(apperror.WrapError(err))
 			return
 		}
-		Success(c, gin.H{"deleted": rows})
+		httpx.Success(c, gin.H{"deleted": rows})
 		return
 	}
 
 	result, err := h.db.Exec("DELETE FROM audit_logs WHERE created_at < ?", since)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
 	rows, _ := result.RowsAffected()
-	Success(c, gin.H{"deleted": rows})
+	httpx.Success(c, gin.H{"deleted": rows})
 }
 
-func registerAuditRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) {
+// RegisterRoutes wires audit routes onto the gin router group.
+func RegisterRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) {
 	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
 	protected.GET("/audit-logs", handler.List)
 	protected.GET("/audit-logs/actions", handler.GetActions)
