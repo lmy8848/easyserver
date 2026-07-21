@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"time"
 
@@ -60,6 +61,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		Username       string `json:"username" binding:"required"`
 		Password       string `json:"password" binding:"required"`
 		TurnstileToken string `json:"turnstile_token"`
+		ClientType     string `json:"client_type"`
+		DeviceID       string `json:"device_id"`
+		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -111,15 +115,36 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Create session (single session per user - remove old sessions first)
+	// Create session. In single-session mode (default) a new login evicts the
+	// user's other sessions; when AllowMultiSession is on they coexist so mobile
+	// and web can stay logged in at the same time.
 	if h.sessionService != nil {
-		// Remove all existing sessions for this user
-		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil {
-			log.Printf("warning: remove old sessions: %v", err)
+		if !h.cfg.Auth.AllowMultiSession {
+			if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil {
+				log.Printf("warning: remove old sessions: %v", err)
+			}
 		}
-		// Create new session
+		clientType := req.ClientType
+		if clientType == "" {
+			clientType = "web"
+		}
 		expiresAt := time.Now().Add(h.sessionTimeout)
-		h.sessionService.CreateSession(c.Request.Context(), token, user.ID, user.Username, string(user.Role), ip, userAgent, expiresAt)
+		sess := &auth.Session{
+			UserID:     user.ID,
+			Username:   user.Username,
+			Role:       string(user.Role),
+			IP:         ip,
+			UserAgent:  userAgent,
+			ClientType: clientType,
+			DeviceID:   req.DeviceID,
+			DeviceInfo: req.DeviceInfo,
+			ExpiresAt:  expiresAt,
+			Token:      token,
+		}
+		if err := h.createSessionWithBinding(c, sess); err != nil {
+			c.Error(err)
+			return
+		}
 	}
 
 	// Also log to audit log
@@ -234,6 +259,9 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	var req struct {
 		TOTPVerifyRequest
 		TurnstileToken string `json:"turnstile_token"`
+		ClientType     string `json:"client_type"`
+		DeviceID       string `json:"device_id"`
+		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -283,11 +311,32 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	if h.sessionService != nil {
-		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil {
-			log.Printf("warning: remove old sessions: %v", err)
+		if !h.cfg.Auth.AllowMultiSession {
+			if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil {
+				log.Printf("warning: remove old sessions: %v", err)
+			}
+		}
+		clientType := req.ClientType
+		if clientType == "" {
+			clientType = "web"
 		}
 		expiresAt := time.Now().Add(h.sessionTimeout)
-		h.sessionService.CreateSession(c.Request.Context(), token, user.ID, user.Username, string(user.Role), ip, userAgent, expiresAt)
+		sess := &auth.Session{
+			UserID:     user.ID,
+			Username:   user.Username,
+			Role:       string(user.Role),
+			IP:         ip,
+			UserAgent:  userAgent,
+			ClientType: clientType,
+			DeviceID:   req.DeviceID,
+			DeviceInfo: req.DeviceInfo,
+			ExpiresAt:  expiresAt,
+			Token:      token,
+		}
+		if err := h.createSessionWithBinding(c, sess); err != nil {
+			c.Error(err)
+			return
+		}
 	}
 
 	// Log successful login
@@ -307,6 +356,9 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	var req struct {
 		BackupCodeVerifyRequest
 		TurnstileToken string `json:"turnstile_token"`
+		ClientType     string `json:"client_type"`
+		DeviceID       string `json:"device_id"`
+		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -355,11 +407,32 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	if h.sessionService != nil {
-		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil {
-			log.Printf("warning: remove old sessions: %v", err)
+		if !h.cfg.Auth.AllowMultiSession {
+			if err := h.sessionService.RemoveUserSessions(c.Request.Context(), user.ID); err != nil {
+				log.Printf("warning: remove old sessions: %v", err)
+			}
+		}
+		clientType := req.ClientType
+		if clientType == "" {
+			clientType = "web"
 		}
 		expiresAt := time.Now().Add(h.sessionTimeout)
-		h.sessionService.CreateSession(c.Request.Context(), token, user.ID, user.Username, string(user.Role), ip, userAgent, expiresAt)
+		sess := &auth.Session{
+			UserID:     user.ID,
+			Username:   user.Username,
+			Role:       string(user.Role),
+			IP:         ip,
+			UserAgent:  userAgent,
+			ClientType: clientType,
+			DeviceID:   req.DeviceID,
+			DeviceInfo: req.DeviceInfo,
+			ExpiresAt:  expiresAt,
+			Token:      token,
+		}
+		if err := h.createSessionWithBinding(c, sess); err != nil {
+			c.Error(err)
+			return
+		}
 	}
 
 	// Log successful login with backup code
@@ -473,7 +546,52 @@ func (h *AuthHandler) GetTOTPStatus(c *gin.Context) {
 	})
 }
 
-// GetSessions returns all active sessions for the current user
+// createSessionWithBinding creates a session, enforcing the mobile single-device
+// binding when enabled. For mobile logins with binding on: requires device_id
+// (M2), delegates to CreateMobileSessionBound (atomic check+replace, H1/M3); on
+// rejection it audits + emits a login-blocked notification (M1) and returns 403.
+// Other logins go through CreateSession with the error checked (H2). device_id
+// is a client-reported soft identifier, not a security boundary (M5).
+func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Session) error {
+	if h.sessionService == nil {
+		return nil
+	}
+	if sess.ClientType == "mobile" && h.cfg.Auth.MobileDeviceBinding {
+		if sess.DeviceID == "" {
+			return ErrBadRequest.WithMessage("移动端登录缺少设备标识 device_id")
+		}
+		if err := h.sessionService.CreateMobileSessionBound(c.Request.Context(), sess); err != nil {
+			if errors.Is(err, auth.ErrMobileDeviceBound) {
+				if h.auditService != nil {
+					h.auditService.LogSecurityEvent(c.Request.Context(), sess.Username, "移动端登录被拒(已有其他设备登录)")
+				}
+				if h.authService != nil {
+					h.authService.NotifyLogin(auth.LoginEvent{
+						Username:  sess.Username,
+						IP:        sess.IP,
+						UserAgent: sess.UserAgent,
+						Time:      time.Now().Format(time.RFC3339),
+						Success:   false,
+						Reason:    "移动端绑定:已有其他设备登录",
+					})
+				}
+				return ErrForbidden.WithMessage("已有其他移动设备登录，请先在面板「会话管理」中解绑该设备后再试")
+			}
+			log.Printf("auth: create mobile session for user %d: %v", sess.UserID, err)
+			return ErrInternal.WithMessage("创建会话失败")
+		}
+		return nil
+	}
+	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.Username, sess.Role, sess.IP, sess.UserAgent, sess.ClientType, sess.DeviceID, sess.DeviceInfo, sess.ExpiresAt); err != nil {
+		log.Printf("auth: create session for user %d: %v", sess.UserID, err)
+		return ErrInternal.WithMessage("创建会话失败")
+	}
+	return nil
+}
+
+// GetSessions returns all active sessions for the current user. Each session is
+// annotated with is_current (the calling token's hash matches) so the UI can
+// hide the self-kick action.
 func (h *AuthHandler) GetSessions(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 
@@ -483,19 +601,32 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 		return
 	}
 
-	if sessions == nil {
-		sessions = []auth.Session{}
+	currentHash := ""
+	if raw, ok := c.Get("token"); ok {
+		if tokenStr, ok := raw.(string); ok && tokenStr != "" {
+			currentHash = auth.HashToken(tokenStr)
+		}
 	}
 
-	Success(c, sessions)
+	type sessionView struct {
+		auth.Session
+		IsCurrent bool `json:"is_current"`
+	}
+	views := make([]sessionView, 0, len(sessions))
+	for _, s := range sessions {
+		views = append(views, sessionView{Session: s, IsCurrent: currentHash != "" && s.Token == currentHash})
+	}
+	Success(c, views)
 }
 
 // KickSession removes a specific session (kick other device)
 func (h *AuthHandler) KickSession(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	currentToken := c.GetHeader("Authorization")
-	if len(currentToken) > 7 && currentToken[:7] == "Bearer " {
-		currentToken = currentToken[7:]
+	var currentToken string
+	if raw, ok := c.Get("token"); ok {
+		if tokenStr, ok := raw.(string); ok {
+			currentToken = tokenStr
+		}
 	}
 
 	var req struct {
@@ -506,8 +637,9 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		return
 	}
 
-	// Prevent kicking yourself
-	if req.Token == currentToken {
+	// Prevent kicking yourself (req.Token is the stored hash; currentToken is
+	// plaintext, so compare against its hash).
+	if currentToken != "" && req.Token == auth.HashToken(currentToken) {
 		c.Error(ErrBadRequest.WithMessage("不能踢出自己的会话，请使用登出功能"))
 		return
 	}
@@ -531,8 +663,9 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		return
 	}
 
-	// Remove the session
-	if err := h.sessionService.RemoveSessionByToken(c.Request.Context(), req.Token); err != nil {
+	// Remove the session. req.Token is the stored hash (from GetSessions), so
+	// delete by it as-is - do NOT re-hash (that would never match).
+	if err := h.sessionService.RemoveSessionByStoredToken(c.Request.Context(), req.Token); err != nil {
 		c.Error(ErrInternal.WithMessage("删除会话失败"))
 		return
 	}

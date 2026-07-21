@@ -568,7 +568,7 @@ export interface TLSCertInfo {
 // Settings
 export interface AppSettings {
   server: { port: number; host: string; serve_frontend: boolean; tls: { enabled: boolean; cert_info: TLSCertInfo | null }; domain: string; redirect_mode: string; www_handling: string; max_upload_size: number; assets_rate_limit: number; assets_rate_interval: string; turnstile: { site_key: string; secret_key: string; enable_login: boolean; enable_qr_login: boolean; enable_public_share: boolean } };
-  auth: { session_timeout: string; idle_timeout: string; max_login_attempts: number; lockout_duration: string; rate_limit: number; rate_interval: string; login_rate_limit: number; login_rate_interval: string };
+  auth: { session_timeout: string; idle_timeout: string; max_login_attempts: number; lockout_duration: string; rate_limit: number; rate_interval: string; login_rate_limit: number; login_rate_interval: string; allow_multi_session: boolean; mobile_device_binding: boolean };
   monitor: { history_retention: string; collect_interval: string };
   database: { path: string };
   audit: { enabled: boolean; log_path: string };

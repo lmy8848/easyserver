@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Card, Form, Input, Button, message, InputNumber,
+  Card, Form, Input, Button, message, InputNumber, Switch,
 } from 'antd';
 import { settingsApi } from '../../services/api';
 import type { Settings } from './types';
@@ -25,6 +25,8 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
         rate_interval: settings.auth.rate_interval,
         login_rate_limit: settings.auth.login_rate_limit,
         login_rate_interval: settings.auth.login_rate_interval,
+        allow_multi_session: settings.auth.allow_multi_session,
+        mobile_device_binding: settings.auth.mobile_device_binding,
       });
     }
   }, [settings, form]);
@@ -59,6 +61,8 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           rate_interval: '1m',
           login_rate_limit: 10,
           login_rate_interval: '1m',
+          allow_multi_session: false,
+          mobile_device_binding: true,
         }}
       >
         <Form.Item
@@ -123,6 +127,35 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="登录速率限制的时间窗口，如 1m、5m"
         >
           <Input placeholder="1m" />
+        </Form.Item>
+
+        <Form.Item
+          name="allow_multi_session"
+          label="允许多端同时登录"
+          valuePropName="checked"
+          extra="开启后新登录不会踢出其他设备会话（移动端与 Web 可同时在线）；关闭后新登录会使其他设备下线。扫码登录始终共存，不受此开关影响。"
+        >
+          <Switch />
+        </Form.Item>
+
+        <Form.Item
+          shouldUpdate={(prev, cur) => prev.allow_multi_session !== cur.allow_multi_session}
+          noStyle
+        >
+          {({ getFieldValue }) => {
+            const multi = getFieldValue('allow_multi_session') as boolean;
+            return (
+              <Form.Item
+                name="mobile_device_binding"
+                label="移动端单设备绑定"
+                valuePropName="checked"
+                extra="开启后移动端同一账号仅允许一台设备登录：其他设备登录会被拒绝，换设备需先在「安全设置-会话管理」中解绑旧设备。需配合「允许多端同时登录」开启才能让 Web 与移动端共存。"
+                tooltip={!multi ? '需先开启「允许多端同时登录」' : undefined}
+              >
+                <Switch disabled={!multi} />
+              </Form.Item>
+            );
+          }}
         </Form.Item>
 
         <Form.Item>

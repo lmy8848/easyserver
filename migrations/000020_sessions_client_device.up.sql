@@ -1,0 +1,8 @@
+-- Adds client_type / device_id / device_info to sessions so mobile logins can be
+-- single-device-bound (see createSessionWithBinding in internal/api/auth.go).
+--
+-- IMPORTANT: the columns are added idempotently by the version-20 pre-migration
+-- hook (ensureSessionsColumns) in migrate.go, NOT by SQL here. ALTER TABLE ADD
+-- COLUMN is not idempotent in SQLite, so the hook checks pragma_table_info
+-- first. This file is intentionally statement-free and MUST be applied via
+-- Migrate() (which runs the hook); running it standalone will NOT add columns.

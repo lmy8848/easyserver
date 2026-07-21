@@ -76,6 +76,7 @@ func JWTMiddleware(secret string, sessionValidator auth.SessionValidator, valida
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
+		c.Set("token", tokenString)
 		c.Next()
 	}
 }

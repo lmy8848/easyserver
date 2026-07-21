@@ -115,14 +115,16 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 			},
 		},
 		"auth": gin.H{
-			"session_timeout":     h.cfg.Auth.SessionTimeout.String(),
-			"idle_timeout":        h.cfg.Auth.IdleTimeout.String(),
-			"max_login_attempts":  h.cfg.Auth.MaxLoginAttempts,
-			"lockout_duration":    h.cfg.Auth.LockoutDuration.String(),
-			"rate_limit":          h.cfg.Auth.RateLimit,
-			"rate_interval":       h.cfg.Auth.RateInterval.String(),
-			"login_rate_limit":    h.cfg.Auth.LoginRateLimit,
-			"login_rate_interval": h.cfg.Auth.LoginRateInterval.String(),
+			"session_timeout":       h.cfg.Auth.SessionTimeout.String(),
+			"idle_timeout":          h.cfg.Auth.IdleTimeout.String(),
+			"max_login_attempts":    h.cfg.Auth.MaxLoginAttempts,
+			"lockout_duration":      h.cfg.Auth.LockoutDuration.String(),
+			"rate_limit":            h.cfg.Auth.RateLimit,
+			"rate_interval":         h.cfg.Auth.RateInterval.String(),
+			"login_rate_limit":      h.cfg.Auth.LoginRateLimit,
+			"login_rate_interval":   h.cfg.Auth.LoginRateInterval.String(),
+			"allow_multi_session":   h.cfg.Auth.AllowMultiSession,
+			"mobile_device_binding": h.cfg.Auth.MobileDeviceBinding,
 		},
 		"monitor": gin.H{
 			"history_retention": h.cfg.Monitor.HistoryRetention.String(),
@@ -508,14 +510,16 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	h.cfgMu.Lock()
 	defer h.cfgMu.Unlock()
 	var req struct {
-		SessionTimeout    *string `json:"session_timeout"`
-		IdleTimeout       *string `json:"idle_timeout"`
-		MaxLoginAttempts  *int    `json:"max_login_attempts"`
-		LockoutDuration   *string `json:"lockout_duration"`
-		RateLimit         *int    `json:"rate_limit"`
-		RateInterval      *string `json:"rate_interval"`
-		LoginRateLimit    *int    `json:"login_rate_limit"`
-		LoginRateInterval *string `json:"login_rate_interval"`
+		SessionTimeout      *string `json:"session_timeout"`
+		IdleTimeout         *string `json:"idle_timeout"`
+		MaxLoginAttempts    *int    `json:"max_login_attempts"`
+		LockoutDuration     *string `json:"lockout_duration"`
+		RateLimit           *int    `json:"rate_limit"`
+		RateInterval        *string `json:"rate_interval"`
+		LoginRateLimit      *int    `json:"login_rate_limit"`
+		LoginRateInterval   *string `json:"login_rate_interval"`
+		AllowMultiSession   *bool   `json:"allow_multi_session"`
+		MobileDeviceBinding *bool   `json:"mobile_device_binding"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(ErrBadRequest.Wrap(err))
@@ -612,6 +616,12 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 			return
 		}
 		h.cfg.Auth.LoginRateInterval = d
+	}
+	if req.AllowMultiSession != nil {
+		h.cfg.Auth.AllowMultiSession = *req.AllowMultiSession
+	}
+	if req.MobileDeviceBinding != nil {
+		h.cfg.Auth.MobileDeviceBinding = *req.MobileDeviceBinding
 	}
 
 	// Sync API rate limiter at runtime

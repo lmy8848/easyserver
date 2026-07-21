@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Button, Switch, Modal, Input, message, Typography, Space, List, Alert, Table, Popconfirm } from 'antd';
+import { Card, Button, Switch, Modal, Input, message, Typography, Space, List, Alert, Table, Popconfirm, Tag } from 'antd';
 import { SafetyOutlined, KeyOutlined, CopyOutlined, DownloadOutlined, LockOutlined, DesktopOutlined, DeleteOutlined, LogoutOutlined, ReloadOutlined } from '@ant-design/icons';
 import { authApi } from '../services/api';
 
@@ -11,6 +11,10 @@ interface Session {
   role: string;
   ip: string;
   user_agent: string;
+  client_type: string;
+  device_id?: string;
+  device_info?: string;
+  is_current: boolean;
   login_at: string;
   expires_at: string;
   token?: string;
@@ -361,14 +365,17 @@ export default function SecuritySettings() {
         <Table
           columns={[
             { title: 'IP 地址', dataIndex: 'ip', key: 'ip', width: 150 },
-            { title: '设备', dataIndex: 'user_agent', key: 'user_agent', ellipsis: true },
+            { title: '类型', dataIndex: 'client_type', key: 'client_type', width: 80,
+              render: (t: string) => t === 'mobile' ? <Tag color="blue">移动</Tag> : <Tag>Web</Tag> },
+            { title: '设备', key: 'device', ellipsis: true,
+              render: (_: unknown, r: Session) => r.client_type === 'mobile' ? (r.device_info || '移动设备') : r.user_agent },
             { title: '登录时间', dataIndex: 'login_at', key: 'login_at', width: 180,
               render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
             { title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 180,
               render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
             { title: '操作', key: 'action', width: 100,
               render: (_: unknown, record: Session) => (
-                record.token ? (
+                record.token && !record.is_current ? (
                   <Popconfirm
                     title="确定要踢出此设备？"
                     onConfirm={() => handleKickSession(record.token!)}
@@ -379,7 +386,7 @@ export default function SecuritySettings() {
                       踢出
                     </Button>
                   </Popconfirm>
-                ) : null
+                ) : record.is_current ? <Text type="secondary">当前</Text> : null
               ),
             },
           ]}

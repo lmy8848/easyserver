@@ -102,6 +102,9 @@ func createTables(db *sql.DB) error {
 			role TEXT NOT NULL,
 			ip TEXT DEFAULT '',
 			user_agent TEXT DEFAULT '',
+			client_type TEXT NOT NULL DEFAULT 'web',
+			device_id TEXT NOT NULL DEFAULT '',
+			device_info TEXT NOT NULL DEFAULT '',
 			last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			expires_at DATETIME NOT NULL

@@ -39,14 +39,17 @@ type UserActivity struct {
 }
 
 type Session struct {
-	UserID    int64     `json:"user_id"`
-	Username  string    `json:"username"`
-	Role      string    `json:"role"`
-	IP        string    `json:"ip"`
-	UserAgent string    `json:"user_agent"`
-	LoginAt   time.Time `json:"login_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Token     string    `json:"token,omitempty"`
+	UserID     int64     `json:"user_id"`
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	IP         string    `json:"ip"`
+	UserAgent  string    `json:"user_agent"`
+	ClientType string    `json:"client_type"`
+	DeviceID   string    `json:"device_id,omitempty"`
+	DeviceInfo string    `json:"device_info,omitempty"`
+	LoginAt    time.Time `json:"login_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	Token      string    `json:"token,omitempty"`
 }
 
 // LoginEvent represents a login event for notification

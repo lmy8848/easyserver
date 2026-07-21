@@ -70,6 +70,11 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 		if version == 19 {
 			hook = ensureWebsitesColumns
 		}
+		// Version 20 (sessions_client_device): add sessions.client_type /
+		// device_id / device_info idempotently for mobile single-device binding.
+		if version == 20 {
+			hook = ensureSessionsColumns
+		}
 
 		log.Printf("migrate: running migration %s", name)
 		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name, hook); err != nil {
@@ -187,6 +192,35 @@ func ensureWebsitesColumns(tx *sql.Tx) error {
 		}
 		if _, err := tx.Exec(
 			fmt.Sprintf("ALTER TABLE websites ADD COLUMN %s %s", c.name, c.def),
+		); err != nil {
+			return fmt.Errorf("add column %s: %w", c.name, err)
+		}
+	}
+	return nil
+}
+
+// ensureSessionsColumns idempotently adds sessions.client_type / device_id /
+// device_info. Used as the version-20 pre-migration hook so that deployments
+// which already have the columns (legacy createTables fallback) and fresh
+// installs both converge safely.
+func ensureSessionsColumns(tx *sql.Tx) error {
+	cols := []struct{ name, def string }{
+		{"client_type", "TEXT NOT NULL DEFAULT 'web'"},
+		{"device_id", "TEXT NOT NULL DEFAULT ''"},
+		{"device_info", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, c := range cols {
+		var cnt int
+		if err := tx.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = ?", c.name,
+		).Scan(&cnt); err != nil {
+			return fmt.Errorf("check column %s: %w", c.name, err)
+		}
+		if cnt > 0 {
+			continue // column already exists, skip ALTER
+		}
+		if _, err := tx.Exec(
+			fmt.Sprintf("ALTER TABLE sessions ADD COLUMN %s %s", c.name, c.def),
 		); err != nil {
 			return fmt.Errorf("add column %s: %w", c.name, err)
 		}

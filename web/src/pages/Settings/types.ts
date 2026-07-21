@@ -33,6 +33,8 @@ export interface Settings {
     rate_interval: string;
     login_rate_limit: number;
     login_rate_interval: string;
+    allow_multi_session: boolean;
+    mobile_device_binding: boolean;
   };
   monitor: {
     history_retention: string;

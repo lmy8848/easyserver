@@ -34,6 +34,17 @@ type SessionRepo interface {
 	DeleteExpired(ctx context.Context) error
 	DeleteInactive(ctx context.Context, inactiveSince time.Time) error
 	DeleteByUserIDExcept(ctx context.Context, userID int64, exceptToken string) error
+	// DeleteByStoredToken deletes a session by the already-hashed token value
+	// stored in the DB (no re-hashing). Used by the kick path, which receives
+	// the hash back from GetSessions, and by same-device mobile refresh.
+	DeleteByStoredToken(ctx context.Context, storedToken string) error
+	// DeleteMobileByUserID deletes all mobile sessions for a user (used to
+	// refresh/replace the bound mobile device session).
+	DeleteMobileByUserID(ctx context.Context, userID int64) error
+	// DeleteMobileByUserIDExcept deletes all mobile sessions for a user except
+	// the one whose token hashes to exceptToken (plaintext). Used by the
+	// same-device refresh path to remove the old session after creating the new.
+	DeleteMobileByUserIDExcept(ctx context.Context, userID int64, exceptToken string) error
 	IsValid(ctx context.Context, token string) (bool, error)
 	GetActiveByUserID(ctx context.Context, userID int64) ([]Session, error)
 	GetActive(ctx context.Context) ([]Session, error)

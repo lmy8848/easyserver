@@ -139,7 +139,7 @@ func (s *Service) Confirm(ctx context.Context, qrToken string, userID int64, use
 	// Coexist: create the web session WITHOUT removing the mobile's session.
 	if s.sessionService != nil {
 		expiresAt := time.Now().Add(s.sessionTimeout)
-		if err := s.sessionService.CreateSession(ctx, webToken, userID, username, role, ip, userAgent, expiresAt); err != nil {
+		if err := s.sessionService.CreateSession(ctx, webToken, userID, username, role, ip, userAgent, "web", "", "", expiresAt); err != nil {
 			return fmt.Errorf("create web session: %w", err)
 		}
 	}

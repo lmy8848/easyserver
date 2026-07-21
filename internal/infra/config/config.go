@@ -79,6 +79,19 @@ type AuthConfig struct {
 	LoginRateInterval      time.Duration `yaml:"login_rate_interval"`
 	IPWhitelist            []string      `yaml:"ip_whitelist"`
 	SessionCleanupInterval time.Duration `yaml:"session_cleanup_interval"`
+	// AllowMultiSession, when true, lets a user stay logged in on multiple
+	// devices at once: a new password/TOTP/backup-code login no longer evicts
+	// the user's existing sessions. Default false (single session) preserves the
+	// original "new login kicks old sessions" behavior. Scan-to-login always
+	// coexists regardless of this flag. Toggleable from the panel auth settings.
+	AllowMultiSession bool `yaml:"allow_multi_session"`
+	// MobileDeviceBinding, when true, restricts mobile logins (client_type
+	// "mobile") to a single trusted device per user: a login from a different
+	// device_id is rejected until the trusted session is revoked from the panel;
+	// the same device may re-login (refresh). Default true. Only meaningful when
+	// AllowMultiSession is on (otherwise global single-session already evicts
+	// everything on each login). Web sessions are unaffected.
+	MobileDeviceBinding bool `yaml:"mobile_device_binding"`
 }
 
 type MonitorConfig struct {
@@ -147,6 +160,7 @@ func Load(path string) (*Config, error) {
 			LoginRateLimit:         10,
 			LoginRateInterval:      time.Minute,
 			SessionCleanupInterval: 5 * time.Minute,
+			MobileDeviceBinding:    true,
 		},
 		Monitor: MonitorConfig{
 			HistoryRetention: 24 * time.Hour,

@@ -86,6 +86,15 @@ func (s *AuthService) SetNotifyService(notifier LoginNotifier) {
 	s.notifier = notifier
 }
 
+// NotifyLogin exposes the login notifier so handlers can emit login events
+// outside the normal LoginWithInfo flow (e.g. a mobile-binding rejection that
+// happens after credentials were verified but before a session is created).
+func (s *AuthService) NotifyLogin(event LoginEvent) {
+	if s.notifier != nil {
+		s.notifier.NotifyLogin(event)
+	}
+}
+
 func (s *AuthService) tokenBlacklistCleanupLoop() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -322,6 +331,13 @@ func (s *AuthService) ForceDisableTOTP(ctx context.Context, userID int64) error 
 func hashToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
+}
+
+// HashToken is the exported sha256 hex digest of a token, used for token
+// storage/lookup. Exposed so handlers can compare a presented plaintext token
+// against the stored hash (e.g. marking the current session in GetSessions).
+func HashToken(token string) string {
+	return hashToken(token)
 }
 
 func (s *AuthService) AddTokenToBlacklist(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
