@@ -28,6 +28,7 @@ import (
 	"easyserver/internal/infra/launcher"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
+	notificationhttp "easyserver/internal/notification/http"
 	"easyserver/internal/notify"
 	"easyserver/internal/process"
 	"easyserver/internal/qrlogin"
@@ -354,7 +355,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerTemplateRoutes(protected)
 	registerProcessRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)
-	registerNotificationRoutes(protected, r.notificationService)
+	notificationhttp.RegisterRoutes(protected, r.notificationService)
 	filesharehttp.RegisterRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
 
 	// Public file share routes (no auth): /share/:token/info + /share/:token/download.

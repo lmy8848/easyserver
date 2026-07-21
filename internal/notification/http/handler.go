@@ -1,9 +1,11 @@
-package api
+package http
 
 import (
 	"strconv"
 
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/notification"
 
 	"github.com/gin-gonic/gin"
@@ -27,35 +29,35 @@ func (h *NotificationHandler) List(c *gin.Context) {
 
 	notifications, err := h.ns.List(unreadOnly, limit)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, notifications)
+	httpx.Success(c, notifications)
 }
 
 // CountUnread returns unread count
 func (h *NotificationHandler) CountUnread(c *gin.Context) {
 	count, err := h.ns.CountUnread()
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"count": count})
+	httpx.Success(c, gin.H{"count": count})
 }
 
 // Create adds a new notification (admin only)
 func (h *NotificationHandler) Create(c *gin.Context) {
 	var req notification.CreateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求参数"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求参数"))
 		return
 	}
 	middleware.AuditSummary(c, "创建通知")
 	if err := h.ns.Create(req); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "通知已创建"})
+	httpx.Success(c, gin.H{"message": "通知已创建"})
 }
 
 // MarkAsRead marks a notification as read
@@ -63,25 +65,25 @@ func (h *NotificationHandler) MarkAsRead(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的通知 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的通知 ID"))
 		return
 	}
 	middleware.AuditSummary(c, "标记通知已读 "+strconv.FormatInt(id, 10))
 	if err := h.ns.MarkAsRead(id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "已标记为已读"})
+	httpx.Success(c, gin.H{"message": "已标记为已读"})
 }
 
 // MarkAllAsRead marks all as read
 func (h *NotificationHandler) MarkAllAsRead(c *gin.Context) {
 	middleware.AuditSummary(c, "全部标记已读")
 	if err := h.ns.MarkAllAsRead(); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "全部已标记为已读"})
+	httpx.Success(c, gin.H{"message": "全部已标记为已读"})
 }
 
 // Delete removes a notification
@@ -89,18 +91,18 @@ func (h *NotificationHandler) Delete(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的通知 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的通知 ID"))
 		return
 	}
 	middleware.AuditSummary(c, "删除通知 "+strconv.FormatInt(id, 10))
 	if err := h.ns.Delete(id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "已删除"})
+	httpx.Success(c, gin.H{"message": "已删除"})
 }
 
-func registerNotificationRoutes(protected *gin.RouterGroup, ns *notification.Service) {
+func RegisterRoutes(protected *gin.RouterGroup, ns *notification.Service) {
 	handler := NewNotificationHandler(ns)
 
 	notifGroup := protected.Group("/notifications")
