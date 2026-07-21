@@ -22,13 +22,11 @@ import (
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/launcher"
+	"easyserver/internal/infra/version"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
 )
-
-// Version is the build version, set via ldflags.
-var Version = "dev"
 
 type SettingsHandler struct {
 	cfg          *config.Config
@@ -923,7 +921,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 // GetSystemInfo returns system information
 func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
 	httpx.Success(c, gin.H{
-		"version": Version,
+		"version": version.Version,
 	})
 }
 

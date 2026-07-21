@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/launcher"
+	"easyserver/internal/infra/version"
 )
 
 func main() {
@@ -26,7 +27,7 @@ func main() {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Println(api.GetFullVersionString())
+		fmt.Println(version.GetFullVersionString())
 		return
 	}
 
