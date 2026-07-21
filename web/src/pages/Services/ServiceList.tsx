@@ -94,9 +94,9 @@ export default function ServiceList({
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
-      render: (desc: string, record: Service) => (
-        <Tooltip title={`${record.display_name}（${record.category}）— ${desc}`}>
-          <span>{desc}</span>
+      render: (desc: string) => (
+        <Tooltip title={desc || '无描述'}>
+          <span>{desc || '-'}</span>
         </Tooltip>
       ),
     },
@@ -119,17 +119,25 @@ export default function ServiceList({
       dataIndex: 'enabled',
       key: 'enabled',
       width: 100,
-      render: (enabled: boolean, record: Service) => (
-        <Tooltip title={canManageService ? (enabled ? '点击禁用开机自启' : '点击启用开机自启') : '无权限操作'}>
-          <Switch
-            size="small"
-            checked={enabled}
-            loading={actingService === record.name}
-            onChange={(checked) => onToggleEnabled(record, checked)}
-            disabled={!canManageService || actingService === record.name || record.state === 'not-found'}
-          />
-        </Tooltip>
-      ),
+      render: (enabled: boolean, record: Service) => {
+        const unmanageable = record.unit_file_state === 'static' || record.unit_file_state === 'masked';
+        const tip = !canManageService
+          ? '无权限操作'
+          : unmanageable
+            ? `状态 ${record.unit_file_state}，无法切换开机自启`
+            : enabled ? '点击禁用开机自启' : '点击启用开机自启';
+        return (
+          <Tooltip title={tip}>
+            <Switch
+              size="small"
+              checked={enabled}
+              loading={actingService === record.name}
+              onChange={(checked) => onToggleEnabled(record, checked)}
+              disabled={!canManageService || actingService === record.name || record.state === 'not-found' || unmanageable}
+            />
+          </Tooltip>
+        );
+      },
     },
     {
       title: 'PID',

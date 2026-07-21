@@ -45,9 +45,11 @@ export default function ServiceDetail({ visible, service, onClose }: ServiceDeta
               : '-'}
           </Descriptions.Item>
           <Descriptions.Item label="开机自启">
-            {service.enabled
-              ? <Tag icon={<CheckCircleOutlined />} color="success">已启用</Tag>
-              : <Tag icon={<CloseCircleOutlined />} color="default">未启用</Tag>}
+            {service.unit_file_state === 'static' || service.unit_file_state === 'masked'
+              ? <Tag color="warning">{service.unit_file_state}</Tag>
+              : service.enabled
+                ? <Tag icon={<CheckCircleOutlined />} color="success">已启用</Tag>
+                : <Tag icon={<CloseCircleOutlined />} color="default">未启用</Tag>}
           </Descriptions.Item>
           <Descriptions.Item label="配置文件路径">
             <Text copyable>/etc/systemd/system/{service.name}.service</Text>
