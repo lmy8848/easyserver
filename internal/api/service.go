@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
@@ -45,7 +46,7 @@ func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.Com
 		executor:          exec,
 		jwtSecret:         jwtSecret,
 		auditService:      auditService,
-		upgrader:          createUpgrader(allowedOrigins, devMode),
+		upgrader:          httpx.CreateUpgrader(allowedOrigins, devMode),
 		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
 }

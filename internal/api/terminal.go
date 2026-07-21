@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"easyserver/internal/audit"
+	"easyserver/internal/httpx"
 	"easyserver/internal/infra"
 	"easyserver/internal/terminal"
 
@@ -55,7 +56,7 @@ func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, aud
 		terminalManager: terminalManager,
 		auditService:    auditService,
 		jwtSecret:       jwtSecret,
-		upgrader:        createUpgrader(allowedOrigins, devMode),
+		upgrader:        httpx.CreateUpgrader(allowedOrigins, devMode),
 	}
 }
 
