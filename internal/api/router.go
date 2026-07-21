@@ -10,6 +10,7 @@ import (
 	"easyserver/internal/alert"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	authhttp "easyserver/internal/auth/http"
 	"easyserver/internal/cloud"
 	cloudhttp "easyserver/internal/cloud/http"
 	"easyserver/internal/container"
@@ -307,7 +308,7 @@ func (r *Router) Setup() *gin.Engine {
 	)
 
 	// Auth routes (public + protected)
-	registerAuthRoutes(api, r.authService, r.auditService, r.sessionService, r.qrLoginService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval, r.cfg)
+	authhttp.RegisterRoutes(api, r.authService, r.auditService, r.sessionService, r.qrLoginService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval, r.cfg)
 
 	// Protected routes (JWT + SingleAdmin + Audit + Session Heartbeat)
 	protected := api.Group("")
