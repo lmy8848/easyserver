@@ -6,6 +6,7 @@ import {
   DeleteOutlined, CloudDownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import type { Image, ImageCategory } from './types';
 
 export default function ImageTab() {
@@ -14,7 +15,7 @@ export default function ImageTab() {
   const [pullVisible, setPullVisible] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [pullForm] = Form.useForm();
-  const [templates, setTemplates] = useState<ImageCategory[]>([]);
+  const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
   const loadImages = async () => {
     try {
@@ -27,16 +28,7 @@ export default function ImageTab() {
     }
   };
 
-  const loadTemplates = async () => {
-    try {
-      const res = await api.get('/templates/docker-images');
-      setTemplates(res.data?.data?.categories || []);
-    } catch {
-      // ignore
-    }
-  };
-
-  useEffect(() => { loadImages(); loadTemplates(); }, []);
+  useEffect(() => { loadImages(); }, []);
 
   const handlePull = async () => {
     let values;

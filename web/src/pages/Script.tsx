@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, Select,
-  message, Popconfirm, Table, Empty, Tooltip, Collapse, Spin,
+  message, Popconfirm, Table, Empty, Tooltip, Collapse,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
   CodeOutlined, CopyOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import type { Script } from '../types';
-import { cronApi, templateApi } from '../services/api';
+import { cronApi } from '../services/api';
+import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
 
 const LANG_OPTIONS = [
   { label: 'Shell', value: 'sh' },
@@ -22,26 +23,12 @@ const LANG_COLORS: Record<string, string> = {
   python: 'orange',
 };
 
-interface ScriptTemplate {
-  name: string;
-  language?: string;
-  description: string;
-  content: string;
-}
-
-interface TemplateCategory {
-  name: string;
-  templates: ScriptTemplate[];
-}
-
 export default function ScriptPage() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [templateModalVisible, setTemplateModalVisible] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
-  const [templateCategories, setTemplateCategories] = useState<TemplateCategory[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
   const [form] = Form.useForm();
 
   const fetchScripts = useCallback(async () => {
@@ -58,18 +45,6 @@ export default function ScriptPage() {
 
   useEffect(() => { fetchScripts(); }, [fetchScripts]);
 
-  const fetchTemplates = async () => {
-    setTemplatesLoading(true);
-    try {
-      const res = await templateApi.getScriptTemplates();
-      setTemplateCategories(res.data?.data?.categories || []);
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '加载模板失败'));
-    } finally {
-      setTemplatesLoading(false);
-    }
-  };
-
   const handleCreate = () => {
     setEditingScript(null);
     form.resetFields();
@@ -78,7 +53,6 @@ export default function ScriptPage() {
   };
 
   const handleCreateFromTemplate = () => {
-    fetchTemplates();
     setTemplateModalVisible(true);
   };
 
@@ -271,16 +245,12 @@ export default function ScriptPage() {
         width={700}
         styles={{ body: { maxHeight: '60vh', overflowY: 'auto' } }}
       >
-        {templatesLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin size="large" />
-          </div>
-        ) : templateCategories.length === 0 ? (
+        {SCRIPT_TEMPLATES.length === 0 ? (
           <Empty description="暂无模板" />
         ) : (
           <Collapse
-            defaultActiveKey={templateCategories.map((_, i) => String(i))}
-            items={templateCategories.map((category, index) => ({
+            defaultActiveKey={SCRIPT_TEMPLATES.map((_, i) => String(i))}
+            items={SCRIPT_TEMPLATES.map((category, index) => ({
               key: String(index),
               label: <Space><FileTextOutlined /> {category.name}</Space>,
               children: (
