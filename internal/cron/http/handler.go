@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"context"
@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"easyserver/internal/cron"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"
@@ -31,32 +33,32 @@ func NewCronHandler(cronService *cron.Service, exec executor.CommandExecutor) *C
 func (h *CronHandler) ListTasks(c *gin.Context) {
 	tasks, err := h.cronService.List(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, tasks)
+	httpx.Success(c, tasks)
 }
 
 // GetTask returns a cron task by ID
 func (h *CronHandler) GetTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 	task, err := h.cronService.Get(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
-	Success(c, task)
+	httpx.Success(c, task)
 }
 
 // CreateTask creates a new cron task
 func (h *CronHandler) CreateTask(c *gin.Context) {
 	var req cron.CreateCronTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -64,11 +66,11 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	// Validate cron expression (5 fields: minute hour day month weekday)
 	parts := strings.Fields(req.Schedule)
 	if len(parts) != 5 {
-		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: 需要 5 个字段 (分 时 日 月 周)"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 cron 表达式: 需要 5 个字段 (分 时 日 月 周)"))
 		return
 	}
 	if err := validateCronFieldRanges(parts); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
 		return
 	}
 
@@ -76,35 +78,35 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	// /etc/cron.d/easyserver line — a stray '\n' would silently inject an
 	// extra cron entry that the UI cannot see or remove.
 	if strings.ContainsAny(req.Name, "\r\n") || strings.ContainsAny(req.Command, "\r\n") {
-		c.Error(ErrBadRequest.WithMessage("名称和命令不允许包含换行符"))
+		c.Error(apperror.ErrBadRequest.WithMessage("名称和命令不允许包含换行符"))
 		return
 	}
 
 	// Validate: either command or script_id must be provided
 	if req.Command == "" && req.ScriptID == 0 {
-		c.Error(ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
 		return
 	}
 
 	// Validate timeout and retry bounds
 	if req.Timeout < 0 || req.Timeout > 86400 {
-		c.Error(ErrBadRequest.WithMessage("超时时间必须在 0 到 86400 秒之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("超时时间必须在 0 到 86400 秒之间"))
 		return
 	}
 	if req.MaxRetry < 0 || req.MaxRetry > 10 {
-		c.Error(ErrBadRequest.WithMessage("最大重试次数必须在 0 到 10 之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("最大重试次数必须在 0 到 10 之间"))
 		return
 	}
 
 	// Validate name uniqueness
 	existing, err := h.cronService.List(c.Request.Context())
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查任务名称失败: " + err.Error()))
+		c.Error(apperror.ErrInternal.WithMessage("检查任务名称失败: " + err.Error()))
 		return
 	}
 	for _, t := range existing {
 		if t.Name == req.Name {
-			c.Error(ErrBadRequest.WithMessage("任务名称已存在"))
+			c.Error(apperror.ErrBadRequest.WithMessage("任务名称已存在"))
 			return
 		}
 	}
@@ -125,29 +127,29 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	}
 
 	if err := h.cronService.Create(c.Request.Context(), task); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, task)
+	httpx.Success(c, task)
 }
 
 // UpdateTask updates an existing cron task
 func (h *CronHandler) UpdateTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 
 	task, err := h.cronService.Get(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
 
 	var req cron.UpdateCronTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -155,18 +157,18 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 	// Apply partial updates
 	if req.Name != nil {
 		if strings.ContainsAny(*req.Name, "\r\n") {
-			c.Error(ErrBadRequest.WithMessage("名称不允许包含换行符"))
+			c.Error(apperror.ErrBadRequest.WithMessage("名称不允许包含换行符"))
 			return
 		}
 		// Check name uniqueness (exclude current task)
 		existing, listErr := h.cronService.List(c.Request.Context())
 		if listErr != nil {
-			c.Error(ErrInternal.WithMessage("检查任务名称失败: " + listErr.Error()))
+			c.Error(apperror.ErrInternal.WithMessage("检查任务名称失败: " + listErr.Error()))
 			return
 		}
 		for _, t := range existing {
 			if t.ID != id && t.Name == *req.Name {
-				c.Error(ErrBadRequest.WithMessage("任务名称已存在"))
+				c.Error(apperror.ErrBadRequest.WithMessage("任务名称已存在"))
 				return
 			}
 		}
@@ -174,7 +176,7 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 	}
 	if req.Command != nil {
 		if strings.ContainsAny(*req.Command, "\r\n") {
-			c.Error(ErrBadRequest.WithMessage("命令不允许包含换行符"))
+			c.Error(apperror.ErrBadRequest.WithMessage("命令不允许包含换行符"))
 			return
 		}
 		task.Command = *req.Command
@@ -182,11 +184,11 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 	if req.Schedule != nil {
 		parts := strings.Fields(*req.Schedule)
 		if len(parts) != 5 {
-			c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: 需要 5 个字段"))
+			c.Error(apperror.ErrBadRequest.WithMessage("无效的 cron 表达式: 需要 5 个字段"))
 			return
 		}
 		if err := validateCronFieldRanges(parts); err != nil {
-			c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
+			c.Error(apperror.ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
 			return
 		}
 		task.Schedule = *req.Schedule
@@ -199,14 +201,14 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 	}
 	if req.Timeout != nil {
 		if *req.Timeout < 0 || *req.Timeout > 86400 {
-			c.Error(ErrBadRequest.WithMessage("超时时间必须在 0 到 86400 秒之间"))
+			c.Error(apperror.ErrBadRequest.WithMessage("超时时间必须在 0 到 86400 秒之间"))
 			return
 		}
 		task.Timeout = *req.Timeout
 	}
 	if req.MaxRetry != nil {
 		if *req.MaxRetry < 0 || *req.MaxRetry > 10 {
-			c.Error(ErrBadRequest.WithMessage("最大重试次数必须在 0 到 10 之间"))
+			c.Error(apperror.ErrBadRequest.WithMessage("最大重试次数必须在 0 到 10 之间"))
 			return
 		}
 		task.MaxRetry = *req.MaxRetry
@@ -223,105 +225,105 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 
 	// Validate command/script_id relationship
 	if task.Command == "" && task.ScriptID == 0 {
-		c.Error(ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
 		return
 	}
 
 	if err := h.cronService.Update(c.Request.Context(), task); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, task)
+	httpx.Success(c, task)
 }
 
 // DeleteTask deletes a cron task
 func (h *CronHandler) DeleteTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 	// Check existence
 	task, err := h.cronService.Get(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "删除定时任务 "+task.Name)
 	if err := h.cronService.Delete(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "任务已删除"})
+	httpx.Success(c, gin.H{"message": "任务已删除"})
 }
 
 // EnableTask enables a cron task
 func (h *CronHandler) EnableTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 	// Check existence
 	task, err := h.cronService.Get(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "启用定时任务 "+task.Name)
 	if err := h.cronService.Enable(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "任务已启用"})
+	httpx.Success(c, gin.H{"message": "任务已启用"})
 }
 
 // DisableTask disables a cron task
 func (h *CronHandler) DisableTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 	// Check existence
 	task, err := h.cronService.Get(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "禁用定时任务 "+task.Name)
 	if err := h.cronService.Disable(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "任务已禁用"})
+	httpx.Success(c, gin.H{"message": "任务已禁用"})
 }
 
 // RunTask executes a cron task immediately
 func (h *CronHandler) RunTask(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 	task, err := h.cronService.Get(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("任务不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("任务不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "立即执行定时任务 "+task.Name)
 	if err := h.cronService.RunNow(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "任务已执行"})
+	httpx.Success(c, gin.H{"message": "任务已执行"})
 }
 
 // GetTaskLogs returns execution logs for a cron task
 func (h *CronHandler) GetTaskLogs(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的任务ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的任务ID"))
 		return
 	}
 
@@ -334,42 +336,42 @@ func (h *CronHandler) GetTaskLogs(c *gin.Context) {
 
 	logs, err := h.cronService.GetLogs(c.Request.Context(), id, limit)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, logs)
+	httpx.Success(c, logs)
 }
 
 // ListScripts returns all scripts
 func (h *CronHandler) ListScripts(c *gin.Context) {
 	scripts, err := h.cronService.ListScripts(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, scripts)
+	httpx.Success(c, scripts)
 }
 
 // GetScript returns a script by ID
 func (h *CronHandler) GetScript(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的脚本ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
 		return
 	}
 	script, err := h.cronService.GetScript(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("脚本不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
 		return
 	}
-	Success(c, script)
+	httpx.Success(c, script)
 }
 
 // CreateScript creates a new script
 func (h *CronHandler) CreateScript(c *gin.Context) {
 	var req cron.CreateScriptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -382,31 +384,31 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 
 	// Validate language is supported
 	if err := validateScriptLanguage(language); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Check language interpreter exists on server
 	if err := h.checkInterpreterInstalled(language); err != nil {
-		c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("language '%s' is not installed: %v", language, err)))
+		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("language '%s' is not installed: %v", language, err)))
 		return
 	}
 
 	// Validate content is not empty
 	if strings.TrimSpace(req.Content) == "" {
-		c.Error(ErrBadRequest.WithMessage("脚本内容不能为空"))
+		c.Error(apperror.ErrBadRequest.WithMessage("脚本内容不能为空"))
 		return
 	}
 
 	// Validate name uniqueness
 	existingScripts, err := h.cronService.ListScripts(c.Request.Context())
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查脚本名称失败: " + err.Error()))
+		c.Error(apperror.ErrInternal.WithMessage("检查脚本名称失败: " + err.Error()))
 		return
 	}
 	for _, s := range existingScripts {
 		if s.Name == req.Name {
-			c.Error(ErrBadRequest.WithMessage("脚本名称已存在"))
+			c.Error(apperror.ErrBadRequest.WithMessage("脚本名称已存在"))
 			return
 		}
 	}
@@ -420,13 +422,13 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 
 	if err := h.cronService.CreateScript(c.Request.Context(), script); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
-			c.Error(ErrConflict.WithMessage("脚本名称已存在"))
+			c.Error(apperror.ErrConflict.WithMessage("脚本名称已存在"))
 			return
 		}
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, script)
+	httpx.Success(c, script)
 }
 
 // validateScriptLanguage checks if the language is supported
@@ -462,19 +464,19 @@ func (h *CronHandler) checkInterpreterInstalled(language string) error {
 func (h *CronHandler) UpdateScript(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的脚本ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
 		return
 	}
 
 	script, err := h.cronService.GetScript(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("脚本不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
 		return
 	}
 
 	var req cron.UpdateScriptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -483,12 +485,12 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 		// Check name uniqueness (exclude current script)
 		existingScripts, listErr := h.cronService.ListScripts(c.Request.Context())
 		if listErr != nil {
-			c.Error(ErrInternal.WithMessage("检查脚本名称失败: " + listErr.Error()))
+			c.Error(apperror.ErrInternal.WithMessage("检查脚本名称失败: " + listErr.Error()))
 			return
 		}
 		for _, s := range existingScripts {
 			if s.ID != id && s.Name == *req.Name {
-				c.Error(ErrBadRequest.WithMessage("脚本名称已存在"))
+				c.Error(apperror.ErrBadRequest.WithMessage("脚本名称已存在"))
 				return
 			}
 		}
@@ -499,61 +501,61 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 	}
 	if req.Content != nil {
 		if strings.TrimSpace(*req.Content) == "" {
-			c.Error(ErrBadRequest.WithMessage("脚本内容不能为空"))
+			c.Error(apperror.ErrBadRequest.WithMessage("脚本内容不能为空"))
 			return
 		}
 		script.Content = *req.Content
 	}
 	if req.Language != nil {
 		if err := validateScriptLanguage(*req.Language); err != nil {
-			c.Error(ErrBadRequest.Wrap(err))
+			c.Error(apperror.ErrBadRequest.Wrap(err))
 			return
 		}
 		if err := h.checkInterpreterInstalled(*req.Language); err != nil {
-			c.Error(ErrBadRequest.WithMessage(fmt.Sprintf("language '%s' is not installed: %v", *req.Language, err)))
+			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("language '%s' is not installed: %v", *req.Language, err)))
 			return
 		}
 		script.Language = *req.Language
 	}
 
 	if err := h.cronService.UpdateScript(c.Request.Context(), script); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, script)
+	httpx.Success(c, script)
 }
 
 // DeleteScript deletes a script
 func (h *CronHandler) DeleteScript(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的脚本ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
 		return
 	}
 	// Check existence
 	script, err := h.cronService.GetScript(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("脚本不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "删除脚本 "+script.Name)
 	// Check for dependent tasks
 	tasks, listErr := h.cronService.List(c.Request.Context())
 	if listErr != nil {
-		c.Error(ErrInternal.WithMessage("检查依赖任务失败: " + listErr.Error()))
+		c.Error(apperror.ErrInternal.WithMessage("检查依赖任务失败: " + listErr.Error()))
 		return
 	}
 	for _, t := range tasks {
 		if int64(t.ScriptID) == id {
-			c.Error(ErrConflict.WithMessage(fmt.Sprintf("脚本被任务 '%s' 使用，请先移除引用", t.Name)))
+			c.Error(apperror.ErrConflict.WithMessage(fmt.Sprintf("脚本被任务 '%s' 使用，请先移除引用", t.Name)))
 			return
 		}
 	}
 	if err := h.cronService.DeleteScript(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "脚本已删除"})
+	httpx.Success(c, gin.H{"message": "脚本已删除"})
 }
 
 // GetPresets returns common cron expression presets
@@ -570,34 +572,34 @@ func (h *CronHandler) GetPresets(c *gin.Context) {
 		{"label": "工作日9点", "value": "0 9 * * 1-5", "description": "工作日每天9点执行"},
 		{"label": "工作日18点", "value": "0 18 * * 1-5", "description": "工作日每天18点执行"},
 	}
-	Success(c, presets)
+	httpx.Success(c, presets)
 }
 
 // DescribeSchedule returns a human-readable description of a cron expression
 func (h *CronHandler) DescribeSchedule(c *gin.Context) {
 	schedule := c.Query("schedule")
 	if schedule == "" {
-		c.Error(ErrBadRequest.WithMessage("schedule 参数不能为空"))
+		c.Error(apperror.ErrBadRequest.WithMessage("schedule 参数不能为空"))
 		return
 	}
 	desc := describeCronExpression(schedule)
-	Success(c, gin.H{"description": desc})
+	httpx.Success(c, gin.H{"description": desc})
 }
 
 // GetNextRuns returns the next N execution times for a cron expression
 func (h *CronHandler) GetNextRuns(c *gin.Context) {
 	schedule := c.Query("schedule")
 	if schedule == "" {
-		c.Error(ErrBadRequest.WithMessage("schedule 参数不能为空"))
+		c.Error(apperror.ErrBadRequest.WithMessage("schedule 参数不能为空"))
 		return
 	}
 
 	runs, err := calculateNextRuns(schedule, 5)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 cron 表达式: " + err.Error()))
 		return
 	}
-	Success(c, gin.H{"next_runs": runs})
+	httpx.Success(c, gin.H{"next_runs": runs})
 }
 
 // describeCronExpression parses a 5-field cron expression and returns a Chinese description
@@ -883,25 +885,25 @@ func parseCronField(field string, min, max int) (map[int]bool, error) {
 func (h *CronHandler) ListDocs(c *gin.Context) {
 	docs, err := h.cronService.ListDocs(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, docs)
+	httpx.Success(c, docs)
 }
 
 // GetDoc returns a cron documentation section by ID
 func (h *CronHandler) GetDoc(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的文档ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的文档ID"))
 		return
 	}
 	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("文档不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("文档不存在"))
 		return
 	}
-	Success(c, doc)
+	httpx.Success(c, doc)
 }
 
 // CreateDoc creates a new cron documentation section
@@ -912,7 +914,7 @@ func (h *CronHandler) CreateDoc(c *gin.Context) {
 		SortOrder int    `json:"sort_order"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -923,22 +925,22 @@ func (h *CronHandler) CreateDoc(c *gin.Context) {
 		SortOrder: req.SortOrder,
 	}
 	if err := h.cronService.CreateDoc(c.Request.Context(), doc); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, doc)
+	httpx.Success(c, doc)
 }
 
 // UpdateDoc updates an existing cron documentation section
 func (h *CronHandler) UpdateDoc(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的文档ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的文档ID"))
 		return
 	}
 	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("文档不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("文档不存在"))
 		return
 	}
 	var req struct {
@@ -947,7 +949,7 @@ func (h *CronHandler) UpdateDoc(c *gin.Context) {
 		SortOrder *int    `json:"sort_order"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -962,33 +964,33 @@ func (h *CronHandler) UpdateDoc(c *gin.Context) {
 		doc.SortOrder = *req.SortOrder
 	}
 	if err := h.cronService.UpdateDoc(c.Request.Context(), doc); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, doc)
+	httpx.Success(c, doc)
 }
 
 // DeleteDoc deletes a cron documentation section
 func (h *CronHandler) DeleteDoc(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的文档ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的文档ID"))
 		return
 	}
 	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("文档不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("文档不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "删除定时任务文档 "+doc.Title)
 	if err := h.cronService.DeleteDoc(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "文档已删除"})
+	httpx.Success(c, gin.H{"message": "文档已删除"})
 }
 
-func registerCronRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
+func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
 	// Seed default documentation (tables managed by migration system)
 	if err := cronService.SeedDefaultDocs(context.Background()); err != nil {
 		log.Printf("WARNING: seed default cron docs failed: %v", err)
