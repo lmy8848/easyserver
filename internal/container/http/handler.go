@@ -1,12 +1,13 @@
-package api
+package http
 
 import (
-	"strconv"
-
 	"easyserver/internal/audit"
 	"easyserver/internal/container"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
+	"strconv"
 )
 
 // ContainerHandler handles all container-related requests
@@ -32,60 +33,60 @@ func NewContainerHandler(
 func (h *ContainerHandler) DetectDocker(c *gin.Context) {
 	status, err := h.containerService.DetectDocker(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, status)
+	httpx.Success(c, status)
 }
 
 // InstallDocker installs Docker using official script
 func (h *ContainerHandler) InstallDocker(c *gin.Context) {
 	middleware.AuditSummary(c, "安装 Docker")
 	if err := h.containerService.InstallDocker(c.Request.Context()); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Docker 安装成功"})
+	httpx.Success(c, gin.H{"message": "Docker 安装成功"})
 }
 
 // StartDocker starts the Docker service
 func (h *ContainerHandler) StartDocker(c *gin.Context) {
 	middleware.AuditSummary(c, "启动 Docker")
 	if err := h.containerService.StartDocker(c.Request.Context()); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Docker 已启动"})
+	httpx.Success(c, gin.H{"message": "Docker 已启动"})
 }
 
 // StopDocker stops the Docker service
 func (h *ContainerHandler) StopDocker(c *gin.Context) {
 	middleware.AuditSummary(c, "停止 Docker")
 	if err := h.containerService.StopDocker(c.Request.Context()); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Docker 已停止"})
+	httpx.Success(c, gin.H{"message": "Docker 已停止"})
 }
 
 // RestartDocker restarts the Docker service
 func (h *ContainerHandler) RestartDocker(c *gin.Context) {
 	middleware.AuditSummary(c, "重启 Docker")
 	if err := h.containerService.RestartDocker(c.Request.Context()); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Docker 已重启"})
+	httpx.Success(c, gin.H{"message": "Docker 已重启"})
 }
 
 // GetDockerInfo returns Docker system info
 func (h *ContainerHandler) GetDockerInfo(c *gin.Context) {
 	info, err := h.containerService.GetDockerInfo(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, info)
+	httpx.Success(c, info)
 }
 
 // ConfigureMirror configures Docker registry mirror
@@ -94,16 +95,16 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 		MirrorURL string `json:"mirror_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "配置 Docker 镜像源 "+req.MirrorURL)
 	if err := h.containerService.ConfigureMirror(c.Request.Context(), req.MirrorURL); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "镜像源已配置"})
+	httpx.Success(c, gin.H{"message": "镜像源已配置"})
 }
 
 // ========== Container Management ==========
@@ -113,10 +114,10 @@ func (h *ContainerHandler) ListContainers(c *gin.Context) {
 	all := c.Query("all") == "true"
 	containers, err := h.containerService.ListContainers(c.Request.Context(), all)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"containers": containers})
+	httpx.Success(c, gin.H{"containers": containers})
 }
 
 // GetContainer returns a specific container
@@ -124,27 +125,27 @@ func (h *ContainerHandler) GetContainer(c *gin.Context) {
 	id := c.Param("id")
 	container, err := h.containerService.GetContainer(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("容器不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("容器不存在"))
 		return
 	}
-	Success(c, container)
+	httpx.Success(c, container)
 }
 
 // CreateContainer creates a new container
 func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 	var req container.CreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "创建容器 "+req.Name)
 	id, err := h.containerService.CreateContainer(c.Request.Context(), req)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"id": id, "message": "容器已创建"})
+	httpx.Success(c, gin.H{"id": id, "message": "容器已创建"})
 }
 
 // StartContainer starts a container
@@ -152,10 +153,10 @@ func (h *ContainerHandler) StartContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "启动容器 "+id)
 	if err := h.containerService.StartContainer(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已启动"})
+	httpx.Success(c, gin.H{"message": "容器已启动"})
 }
 
 // StopContainer stops a container
@@ -163,10 +164,10 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "停止容器 "+id)
 	if err := h.containerService.StopContainer(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已停止"})
+	httpx.Success(c, gin.H{"message": "容器已停止"})
 }
 
 // RestartContainer restarts a container
@@ -174,10 +175,10 @@ func (h *ContainerHandler) RestartContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "重启容器 "+id)
 	if err := h.containerService.RestartContainer(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已重启"})
+	httpx.Success(c, gin.H{"message": "容器已重启"})
 }
 
 // PauseContainer pauses a container
@@ -185,10 +186,10 @@ func (h *ContainerHandler) PauseContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "暂停容器 "+id)
 	if err := h.containerService.PauseContainer(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已暂停"})
+	httpx.Success(c, gin.H{"message": "容器已暂停"})
 }
 
 // UnpauseContainer unpauses a container
@@ -196,10 +197,10 @@ func (h *ContainerHandler) UnpauseContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "恢复容器 "+id)
 	if err := h.containerService.UnpauseContainer(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已恢复"})
+	httpx.Success(c, gin.H{"message": "容器已恢复"})
 }
 
 // RemoveContainer removes a container
@@ -208,10 +209,10 @@ func (h *ContainerHandler) RemoveContainer(c *gin.Context) {
 	force := c.Query("force") == "true"
 	middleware.AuditSummary(c, "删除容器 "+id)
 	if err := h.containerService.RemoveContainer(c.Request.Context(), id, force); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已删除"})
+	httpx.Success(c, gin.H{"message": "容器已删除"})
 }
 
 // GetContainerLogs returns container logs
@@ -227,10 +228,10 @@ func (h *ContainerHandler) GetContainerLogs(c *gin.Context) {
 
 	logs, err := h.containerService.GetContainerLogs(c.Request.Context(), id, tail)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"logs": logs})
+	httpx.Success(c, gin.H{"logs": logs})
 }
 
 // ExecInContainer executes a command in a container
@@ -240,7 +241,7 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 		Command string `json:"command" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -249,10 +250,10 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 
 	output, err := h.containerService.ExecInContainer(c.Request.Context(), id, req.Command)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"output": output})
+	httpx.Success(c, gin.H{"output": output})
 }
 
 // GetContainerStats returns real-time container stats
@@ -260,10 +261,10 @@ func (h *ContainerHandler) GetContainerStats(c *gin.Context) {
 	id := c.Param("id")
 	stats, err := h.containerService.GetContainerStats(c.Request.Context(), id)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, stats)
+	httpx.Success(c, stats)
 }
 
 // GetContainerTop returns processes running in a container
@@ -271,10 +272,10 @@ func (h *ContainerHandler) GetContainerTop(c *gin.Context) {
 	id := c.Param("id")
 	processes, err := h.containerService.GetContainerTop(c.Request.Context(), id)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"processes": processes})
+	httpx.Success(c, gin.H{"processes": processes})
 }
 
 // CopyToContainer copies a file to a container
@@ -285,16 +286,16 @@ func (h *ContainerHandler) CopyToContainer(c *gin.Context) {
 		DestPath string `json:"dest_path" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "复制文件到容器 "+id+": "+req.SrcPath+" -> "+req.DestPath)
 	if err := h.containerService.CopyToContainer(c.Request.Context(), id, req.SrcPath, req.DestPath); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "文件已复制到容器"})
+	httpx.Success(c, gin.H{"message": "文件已复制到容器"})
 }
 
 // CopyFromContainer copies a file from a container
@@ -305,16 +306,16 @@ func (h *ContainerHandler) CopyFromContainer(c *gin.Context) {
 		DestPath string `json:"dest_path" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "从容器复制文件 "+id+": "+req.SrcPath+" -> "+req.DestPath)
 	if err := h.containerService.CopyFromContainer(c.Request.Context(), id, req.SrcPath, req.DestPath); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "文件已从容器复制"})
+	httpx.Success(c, gin.H{"message": "文件已从容器复制"})
 }
 
 // RenameContainer renames a container
@@ -324,16 +325,16 @@ func (h *ContainerHandler) RenameContainer(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "重命名容器 "+id+" 为 "+req.Name)
 	if err := h.containerService.RenameContainer(c.Request.Context(), id, req.Name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已重命名"})
+	httpx.Success(c, gin.H{"message": "容器已重命名"})
 }
 
 // UpdateContainer updates container resources
@@ -341,16 +342,16 @@ func (h *ContainerHandler) UpdateContainer(c *gin.Context) {
 	id := c.Param("id")
 	var req container.UpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "更新容器 "+id)
 	if err := h.containerService.UpdateContainer(c.Request.Context(), id, req); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "容器已更新"})
+	httpx.Success(c, gin.H{"message": "容器已更新"})
 }
 
 // ========== Image Management ==========
@@ -359,10 +360,10 @@ func (h *ContainerHandler) UpdateContainer(c *gin.Context) {
 func (h *ContainerHandler) ListImages(c *gin.Context) {
 	images, err := h.containerService.ListImages(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"images": images})
+	httpx.Success(c, gin.H{"images": images})
 }
 
 // PullImage pulls a Docker image
@@ -371,16 +372,16 @@ func (h *ContainerHandler) PullImage(c *gin.Context) {
 		Image string `json:"image" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "拉取镜像 "+req.Image)
 	if err := h.containerService.PullImage(c.Request.Context(), req.Image); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "镜像已拉取"})
+	httpx.Success(c, gin.H{"message": "镜像已拉取"})
 }
 
 // RemoveImage removes a Docker image
@@ -389,10 +390,10 @@ func (h *ContainerHandler) RemoveImage(c *gin.Context) {
 	force := c.Query("force") == "true"
 	middleware.AuditSummary(c, "删除镜像 "+id)
 	if err := h.containerService.RemoveImage(c.Request.Context(), id, force); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "镜像已删除"})
+	httpx.Success(c, gin.H{"message": "镜像已删除"})
 }
 
 // ========== Compose Management ==========
@@ -401,10 +402,10 @@ func (h *ContainerHandler) RemoveImage(c *gin.Context) {
 func (h *ContainerHandler) ListComposeProjects(c *gin.Context) {
 	projects, err := h.containerService.ListProjects(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"projects": projects})
+	httpx.Success(c, gin.H{"projects": projects})
 }
 
 // ComposeUp runs docker compose up -d
@@ -413,16 +414,16 @@ func (h *ContainerHandler) ComposeUp(c *gin.Context) {
 		ProjectDir string `json:"project_dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "启动 Compose "+req.ProjectDir)
 	if err := h.containerService.ComposeUp(c.Request.Context(), req.ProjectDir); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Compose 已启动"})
+	httpx.Success(c, gin.H{"message": "Compose 已启动"})
 }
 
 // ComposeDown runs docker compose down
@@ -431,16 +432,16 @@ func (h *ContainerHandler) ComposeDown(c *gin.Context) {
 		ProjectDir string `json:"project_dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "停止 Compose "+req.ProjectDir)
 	if err := h.containerService.ComposeDown(c.Request.Context(), req.ProjectDir); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Compose 已停止"})
+	httpx.Success(c, gin.H{"message": "Compose 已停止"})
 }
 
 // ComposeRestart runs docker compose restart
@@ -449,16 +450,16 @@ func (h *ContainerHandler) ComposeRestart(c *gin.Context) {
 		ProjectDir string `json:"project_dir" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "重启 Compose "+req.ProjectDir)
 	if err := h.containerService.ComposeRestart(c.Request.Context(), req.ProjectDir); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "Compose 已重启"})
+	httpx.Success(c, gin.H{"message": "Compose 已重启"})
 }
 
 // ComposeLogs returns compose project logs
@@ -474,10 +475,10 @@ func (h *ContainerHandler) ComposeLogs(c *gin.Context) {
 
 	logs, err := h.containerService.ComposeGetLogs(c.Request.Context(), projectDir, tail)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"logs": logs})
+	httpx.Success(c, gin.H{"logs": logs})
 }
 
 // ComposeGetConfig reads docker-compose.yml content
@@ -485,10 +486,10 @@ func (h *ContainerHandler) ComposeGetConfig(c *gin.Context) {
 	projectDir := c.Query("dir")
 	content, err := h.containerService.ComposeGetConfig(c.Request.Context(), projectDir)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"content": content})
+	httpx.Success(c, gin.H{"content": content})
 }
 
 // ComposeSaveConfig writes docker-compose.yml content
@@ -498,16 +499,16 @@ func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) {
 		Content    string `json:"content" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "保存 Compose 配置 "+req.ProjectDir)
 	if err := h.containerService.ComposeSaveConfig(c.Request.Context(), req.ProjectDir, req.Content); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "配置已保存"})
+	httpx.Success(c, gin.H{"message": "配置已保存"})
 }
 
 // ========== Volume Management ==========
@@ -516,10 +517,10 @@ func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) {
 func (h *ContainerHandler) ListVolumes(c *gin.Context) {
 	volumes, err := h.containerService.ListVolumes(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"volumes": volumes})
+	httpx.Success(c, gin.H{"volumes": volumes})
 }
 
 // CreateVolume creates a new Docker volume
@@ -529,16 +530,16 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 		Driver string `json:"driver"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "创建数据卷 "+req.Name)
 	if err := h.containerService.CreateVolume(c.Request.Context(), req.Name, req.Driver); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "卷已创建"})
+	httpx.Success(c, gin.H{"message": "卷已创建"})
 }
 
 // RemoveVolume removes a Docker volume
@@ -547,10 +548,10 @@ func (h *ContainerHandler) RemoveVolume(c *gin.Context) {
 	force := c.Query("force") == "true"
 	middleware.AuditSummary(c, "删除数据卷 "+name)
 	if err := h.containerService.RemoveVolume(c.Request.Context(), name, force); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "卷已删除"})
+	httpx.Success(c, gin.H{"message": "卷已删除"})
 }
 
 // ========== Network Management ==========
@@ -559,10 +560,10 @@ func (h *ContainerHandler) RemoveVolume(c *gin.Context) {
 func (h *ContainerHandler) ListNetworks(c *gin.Context) {
 	networks, err := h.containerService.ListNetworks(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"networks": networks})
+	httpx.Success(c, gin.H{"networks": networks})
 }
 
 // CreateNetwork creates a new Docker network
@@ -572,16 +573,16 @@ func (h *ContainerHandler) CreateNetwork(c *gin.Context) {
 		Driver string `json:"driver"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
 	middleware.AuditSummary(c, "创建网络 "+req.Name)
 	if err := h.containerService.CreateNetwork(c.Request.Context(), req.Name, req.Driver); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "网络已创建"})
+	httpx.Success(c, gin.H{"message": "网络已创建"})
 }
 
 // RemoveNetwork removes a Docker network
@@ -589,13 +590,13 @@ func (h *ContainerHandler) RemoveNetwork(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "删除网络 "+id)
 	if err := h.containerService.RemoveNetwork(c.Request.Context(), id); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"message": "网络已删除"})
+	httpx.Success(c, gin.H{"message": "网络已删除"})
 }
 
-func registerContainerRoutes(protected *gin.RouterGroup, containerService *container.Service, auditService *audit.Service) {
+func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Service, auditService *audit.Service) {
 	handler := NewContainerHandler(containerService, auditService)
 
 	// Docker management
