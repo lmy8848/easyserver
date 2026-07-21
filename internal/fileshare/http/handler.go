@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"crypto/rand"
@@ -14,7 +14,9 @@ import (
 
 	"easyserver/internal/filemanager"
 	"easyserver/internal/fileshare"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
 
 	"github.com/gin-gonic/gin"
@@ -171,31 +173,31 @@ func parseExpiresAt(s string) (string, error) {
 func (h *FileShareHandler) CreateShare(c *gin.Context) {
 	var req fileshare.CreateShareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate file path
 	validPath, err := h.fileManager.ValidatePath(req.FilePath)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("文件路径无效"))
+		c.Error(apperror.ErrBadRequest.WithMessage("文件路径无效"))
 		return
 	}
 
 	// Check file exists
 	info, err := os.Stat(validPath)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("文件不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("文件不存在"))
 		return
 	}
 	if info.IsDir() {
-		c.Error(ErrBadRequest.WithMessage("不支持分享目录"))
+		c.Error(apperror.ErrBadRequest.WithMessage("不支持分享目录"))
 		return
 	}
 
 	// Check file size limit (max 500MB)
 	if info.Size() > fileShareMaxSize {
-		c.Error(ErrBadRequest.WithMessage("文件超过500MB，不支持分享"))
+		c.Error(apperror.ErrBadRequest.WithMessage("文件超过500MB，不支持分享"))
 		return
 	}
 
@@ -207,13 +209,13 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 	// Validate + normalize expires_at (relative or absolute). Empty =永久有效.
 	expiresAt, err := parseExpiresAt(req.ExpiresAt)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage(err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage(err.Error()))
 		return
 	}
 
 	token, err := generateToken()
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 
@@ -231,13 +233,13 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 
 	id, err := h.shareRepo.Create(c.Request.Context(), share)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	share.ID = id
 	// Don't expose password in response
 	share.Password = ""
-	Success(c, share)
+	httpx.Success(c, share)
 }
 
 // ShareListItem is an enriched share record with current file status.
@@ -255,7 +257,7 @@ func (h *FileShareHandler) ListShares(c *gin.Context) {
 
 	shares, err := h.shareRepo.List(c.Request.Context(), uid)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 
@@ -273,7 +275,7 @@ func (h *FileShareHandler) ListShares(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	Success(c, items)
+	httpx.Success(c, items)
 }
 
 // GetShare returns a single share owned by the current user, including its
@@ -282,7 +284,7 @@ func (h *FileShareHandler) ListShares(c *gin.Context) {
 func (h *FileShareHandler) GetShare(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的ID"))
 		return
 	}
 
@@ -291,14 +293,14 @@ func (h *FileShareHandler) GetShare(c *gin.Context) {
 
 	share, err := h.shareRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if share == nil || share.CreatedBy != uid {
-		c.Error(ErrNotFound.WithMessage("外链不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("外链不存在"))
 		return
 	}
-	Success(c, share)
+	httpx.Success(c, share)
 }
 
 // UpdateShare modifies a share's access-control fields (password / expiry /
@@ -307,13 +309,13 @@ func (h *FileShareHandler) GetShare(c *gin.Context) {
 func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的ID"))
 		return
 	}
 
 	var req fileshare.UpdateShareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -322,17 +324,17 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 
 	share, err := h.shareRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if share == nil || share.CreatedBy != uid {
-		c.Error(ErrNotFound.WithMessage("外链不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("外链不存在"))
 		return
 	}
 
 	// Guard: validate max_downloads if provided.
 	if req.MaxDownloads != nil && *req.MaxDownloads < 0 {
-		c.Error(ErrBadRequest.WithMessage("最大下载次数不能为负数"))
+		c.Error(apperror.ErrBadRequest.WithMessage("最大下载次数不能为负数"))
 		return
 	}
 
@@ -340,14 +342,14 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 	if !req.ClearExpiry {
 		parsed, perr := parseExpiresAt(req.ExpiresAt)
 		if perr != nil {
-			c.Error(ErrBadRequest.WithMessage(perr.Error()))
+			c.Error(apperror.ErrBadRequest.WithMessage(perr.Error()))
 			return
 		}
 		req.ExpiresAt = parsed
 	}
 
 	if err := h.shareRepo.Update(c.Request.Context(), id, &req); err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 
@@ -356,13 +358,13 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 	// Return refreshed record without leaking password to the list view.
 	updated, err := h.shareRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if updated != nil {
 		updated.Password = ""
 	}
-	Success(c, updated)
+	httpx.Success(c, updated)
 }
 
 // DeleteShare revokes a file share
@@ -370,26 +372,26 @@ func (h *FileShareHandler) DeleteShare(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的ID"))
 		return
 	}
 
 	middleware.AuditSummary(c, "撤销文件外链 #"+idStr)
 	if err := h.shareRepo.Delete(c.Request.Context(), id); err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // CleanupExpired removes expired file shares
 func (h *FileShareHandler) CleanupExpired(c *gin.Context) {
 	count, err := h.shareRepo.DeleteExpired(c.Request.Context())
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
-	Success(c, gin.H{"deleted": count})
+	httpx.Success(c, gin.H{"deleted": count})
 }
 
 // ShareInfoResponse is the public metadata for a share link. It intentionally
@@ -412,17 +414,17 @@ type ShareInfoResponse struct {
 func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
-		c.Error(ErrBadRequest.WithMessage("缺少分享令牌"))
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
 		return
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if share == nil {
-		c.Error(ErrNotFound.WithMessage("分享链接不存在或已失效"))
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接不存在或已失效"))
 		return
 	}
 
@@ -454,7 +456,7 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 		}
 	}
 
-	Success(c, resp)
+	httpx.Success(c, resp)
 }
 
 // VerifyShare checks password/expiry/download-cap without serving the file or
@@ -464,7 +466,7 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 func (h *FileShareHandler) VerifyShare(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
-		c.Error(ErrBadRequest.WithMessage("缺少分享令牌"))
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
 		return
 	}
 
@@ -475,36 +477,36 @@ func (h *FileShareHandler) VerifyShare(c *gin.Context) {
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if share == nil {
-		c.Error(ErrNotFound.WithMessage("分享链接不存在或已失效"))
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接不存在或已失效"))
 		return
 	}
 
 	if share.Password != "" && subtle.ConstantTimeCompare([]byte(body.Password), []byte(share.Password)) != 1 {
-		c.Error(ErrForbidden.WithMessage("密码错误"))
+		c.Error(apperror.ErrForbidden.WithMessage("密码错误"))
 		return
 	}
 	if share.ExpiresAt != "" {
 		if expires, perr := time.Parse("2006-01-02 15:04:05", share.ExpiresAt); perr == nil && time.Now().After(expires) {
-			c.Error(ErrNotFound.WithMessage("分享链接已过期"))
+			c.Error(apperror.ErrNotFound.WithMessage("分享链接已过期"))
 			return
 		}
 	}
 	if share.MaxDownloads > 0 && share.DownloadCount >= share.MaxDownloads {
-		c.Error(ErrNotFound.WithMessage("分享链接下载次数已达上限"))
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
 		return
 	}
 	if validPath, verr := h.fileManager.ValidatePath(share.FilePath); verr == nil {
 		if info, serr := os.Stat(validPath); serr != nil || info.IsDir() {
-			c.Error(ErrNotFound.WithMessage("文件不存在或已移动"))
+			c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 			return
 		}
 	}
 
-	Success(c, gin.H{"ok": true})
+	httpx.Success(c, gin.H{"ok": true})
 }
 
 // PublicDownload handles public file download via share token (no auth required).
@@ -515,17 +517,17 @@ func (h *FileShareHandler) VerifyShare(c *gin.Context) {
 func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
-		c.Error(ErrBadRequest.WithMessage("缺少分享令牌"))
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
 		return
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if share == nil {
-		c.Error(ErrNotFound.WithMessage("分享链接不存在或已失效"))
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接不存在或已失效"))
 		return
 	}
 
@@ -533,11 +535,11 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	if share.Password != "" {
 		password := c.Query("password")
 		if password == "" {
-			c.Error(ErrForbidden.WithMessage("需要密码访问，请在链接后添加 ?password=xxx"))
+			c.Error(apperror.ErrForbidden.WithMessage("需要密码访问，请在链接后添加 ?password=xxx"))
 			return
 		}
 		if subtle.ConstantTimeCompare([]byte(password), []byte(share.Password)) != 1 {
-			c.Error(ErrForbidden.WithMessage("密码错误"))
+			c.Error(apperror.ErrForbidden.WithMessage("密码错误"))
 			return
 		}
 	}
@@ -548,7 +550,7 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		if err == nil && time.Now().After(expires) {
 			// Auto-cleanup expired share
 			h.shareRepo.Delete(c.Request.Context(), share.ID)
-			c.Error(ErrNotFound.WithMessage("分享链接已过期"))
+			c.Error(apperror.ErrNotFound.WithMessage("分享链接已过期"))
 			return
 		}
 	}
@@ -556,7 +558,7 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	// Validate file path
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
 	if err != nil {
-		c.Error(ErrNotFound.WithMessage("文件不存在或已移动"))
+		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 		return
 	}
 
@@ -565,13 +567,13 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	if err != nil {
 		// File was moved/deleted - remove share
 		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(ErrNotFound.WithMessage("文件不存在或已移动"))
+		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 		return
 	}
 
 	if info.IsDir() {
 		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(ErrBadRequest.WithMessage("文件类型无效"))
+		c.Error(apperror.ErrBadRequest.WithMessage("文件类型无效"))
 		return
 	}
 
@@ -580,19 +582,19 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	// DownloadCount past MaxDownloads.
 	allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	if !allowed {
 		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(ErrNotFound.WithMessage("分享链接下载次数已达上限"))
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
 		return
 	}
 
 	// Serve file
 	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		c.Error(ErrInternal.Wrap(err))
+		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	defer f.Close()
@@ -608,8 +610,8 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	c.DataFromReader(200, info.Size(), contentType, f, extraHeaders)
 }
 
-// registerFileShareRoutes registers file share management routes (protected)
-func registerFileShareRoutes(protected *gin.RouterGroup, shareRepo fileshare.Repository, fileManager *filemanager.Manager, cfg *config.Config) {
+// RegisterRoutes registers file share management routes (protected)
+func RegisterRoutes(protected *gin.RouterGroup, shareRepo fileshare.Repository, fileManager *filemanager.Manager, cfg *config.Config) {
 	handler := NewFileShareHandler(shareRepo, fileManager, cfg)
 
 	protected.POST("/file-shares", handler.CreateShare)
