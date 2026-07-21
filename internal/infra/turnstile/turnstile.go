@@ -1,4 +1,4 @@
-package api
+package turnstile
 
 import (
 	"bytes"
@@ -22,22 +22,23 @@ type siteverifyResponse struct {
 	ErrorCodes []string `json:"error-codes,omitempty"`
 }
 
-// TurnstileVerifier checks a Turnstile response token with Cloudflare.
-type TurnstileVerifier interface {
+// Verifier checks a Turnstile response token with Cloudflare.
+type Verifier interface {
 	Verify(ctx context.Context, secret, token, remoteIP string) bool
 }
 
-// verifier is the process-wide Turnstile verifier. Tests may swap it.
-var verifier TurnstileVerifier = newHTTPTurnstileVerifier()
+// Default is the process-wide Turnstile verifier. Tests may swap it.
+var Default Verifier = NewHTTPVerifier()
 
-// httpTurnstileVerifier implements TurnstileVerifier using a package-level
+// HTTPVerifier implements Verifier using a package-level
 // *http.Client so real calls share one client.
-type httpTurnstileVerifier struct {
+type HTTPVerifier struct {
 	httpClient *http.Client
 }
 
-func newHTTPTurnstileVerifier() *httpTurnstileVerifier {
-	return &httpTurnstileVerifier{
+// NewHTTPVerifier returns a Verifier backed by Cloudflare's siteverify API.
+func NewHTTPVerifier() *HTTPVerifier {
+	return &HTTPVerifier{
 		httpClient: &http.Client{Timeout: turnstileTimeout},
 	}
 }
@@ -45,7 +46,7 @@ func newHTTPTurnstileVerifier() *httpTurnstileVerifier {
 // Verify checks a Turnstile response token with Cloudflare. It returns true
 // only when Cloudflare reports success. Network/parse failures are treated as
 // a failure to verify (closed), callers may decide to hard- or soft-fail.
-func (v *httpTurnstileVerifier) Verify(ctx context.Context, secret, token, remoteIP string) bool {
+func (v *HTTPVerifier) Verify(ctx context.Context, secret, token, remoteIP string) bool {
 	if secret == "" {
 		// No secret configured -> nothing to verify against; treat as valid so
 		// the panel still works when Turnstile is unconfigured.
