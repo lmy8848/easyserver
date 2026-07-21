@@ -1,10 +1,12 @@
-package api
+package http
 
 import (
 	"strconv"
 	"strings"
 
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/ssh"
 	"github.com/gin-gonic/gin"
 )
@@ -23,10 +25,10 @@ func NewSSHHandler(sshService *ssh.Service) *SSHHandler {
 func (h *SSHHandler) GetConfig(c *gin.Context) {
 	config, err := h.sshService.GetConfig()
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, config)
+	httpx.Success(c, config)
 }
 
 // SaveConfig saves the SSH configuration
@@ -45,7 +47,7 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&config); err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
 		return
 	}
 
@@ -53,45 +55,45 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 
 	// Validate port
 	if config.Port < 1 || config.Port > 65535 {
-		c.Error(ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
 		return
 	}
 
 	// Validate PermitRootLogin
 	validPermitRootLogin := map[string]bool{"yes": true, "no": true, "prohibit-password": true}
 	if config.PermitRootLogin != "" && !validPermitRootLogin[config.PermitRootLogin] {
-		c.Error(ErrBadRequest.WithMessage("permit_root_login 必须是 yes、no 或 prohibit-password"))
+		c.Error(apperror.ErrBadRequest.WithMessage("permit_root_login 必须是 yes、no 或 prohibit-password"))
 		return
 	}
 
 	// Validate PasswordAuthentication
 	validYesNo := map[string]bool{"yes": true, "no": true}
 	if config.PasswordAuthentication != "" && !validYesNo[config.PasswordAuthentication] {
-		c.Error(ErrBadRequest.WithMessage("password_auth 必须是 yes 或 no"))
+		c.Error(apperror.ErrBadRequest.WithMessage("password_auth 必须是 yes 或 no"))
 		return
 	}
 
 	// Validate PubkeyAuthentication
 	if config.PubkeyAuthentication != "" && !validYesNo[config.PubkeyAuthentication] {
-		c.Error(ErrBadRequest.WithMessage("pubkey_auth 必须是 yes 或 no"))
+		c.Error(apperror.ErrBadRequest.WithMessage("pubkey_auth 必须是 yes 或 no"))
 		return
 	}
 
 	// Validate numeric bounds
 	if config.MaxAuthTries < 0 || config.MaxAuthTries > 100 {
-		c.Error(ErrBadRequest.WithMessage("max_auth_tries 必须在 0 到 100 之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("max_auth_tries 必须在 0 到 100 之间"))
 		return
 	}
 	if config.LoginGraceTime < 0 || config.LoginGraceTime > 3600 {
-		c.Error(ErrBadRequest.WithMessage("login_grace_time 必须在 0 到 3600 之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("login_grace_time 必须在 0 到 3600 之间"))
 		return
 	}
 	if config.ClientAliveInterval < 0 || config.ClientAliveInterval > 86400 {
-		c.Error(ErrBadRequest.WithMessage("client_alive_interval 必须在 0 到 86400 之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("client_alive_interval 必须在 0 到 86400 之间"))
 		return
 	}
 	if config.ClientAliveCountMax < 0 || config.ClientAliveCountMax > 100 {
-		c.Error(ErrBadRequest.WithMessage("client_alive_count_max 必须在 0 到 100 之间"))
+		c.Error(apperror.ErrBadRequest.WithMessage("client_alive_count_max 必须在 0 到 100 之间"))
 		return
 	}
 
@@ -114,11 +116,11 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) {
 	}
 
 	if err := h.sshService.SaveConfig(sshConfig); err != nil {
-		c.Error(ErrInternal.WithMessage("保存配置失败: " + err.Error()))
+		c.Error(apperror.ErrInternal.WithMessage("保存配置失败: " + err.Error()))
 		return
 	}
 
-	Success(c, gin.H{"message": "SSH 配置已保存"})
+	httpx.Success(c, gin.H{"message": "SSH 配置已保存"})
 }
 
 // TestConfig tests the SSH configuration
@@ -126,30 +128,30 @@ func (h *SSHHandler) TestConfig(c *gin.Context) {
 	middleware.AuditSummary(c, "测试 SSH 配置")
 	output, err := h.sshService.TestConfig(c.Request.Context())
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage(output))
+		c.Error(apperror.ErrBadRequest.WithMessage(output))
 		return
 	}
-	Success(c, gin.H{"message": output})
+	httpx.Success(c, gin.H{"message": output})
 }
 
 // ReloadSSH reloads the SSH service
 func (h *SSHHandler) ReloadSSH(c *gin.Context) {
 	middleware.AuditSummary(c, "重载 SSH 服务")
 	if err := h.sshService.ReloadSSH(c.Request.Context()); err != nil {
-		c.Error(ErrInternal.WithMessage("重载 SSH 失败: " + err.Error()))
+		c.Error(apperror.ErrInternal.WithMessage("重载 SSH 失败: " + err.Error()))
 		return
 	}
-	Success(c, gin.H{"message": "SSH 服务已重载"})
+	httpx.Success(c, gin.H{"message": "SSH 服务已重载"})
 }
 
 // GetSessions returns active SSH sessions
 func (h *SSHHandler) GetSessions(c *gin.Context) {
 	sessions, err := h.sshService.GetSessions(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"sessions": sessions})
+	httpx.Success(c, gin.H{"sessions": sessions})
 }
 
 // KillSession kills an SSH session
@@ -157,7 +159,7 @@ func (h *SSHHandler) KillSession(c *gin.Context) {
 	pidStr := c.Param("pid")
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
-		c.Error(ErrBadRequest.WithMessage("无效的 PID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 PID"))
 		return
 	}
 
@@ -165,19 +167,19 @@ func (h *SSHHandler) KillSession(c *gin.Context) {
 
 	// Validate PID bounds
 	if pid <= 1 {
-		c.Error(ErrBadRequest.WithMessage("无效的 PID: 必须大于 1"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 PID: 必须大于 1"))
 		return
 	}
 	if pid > 4194304 { // Max PID on Linux
-		c.Error(ErrBadRequest.WithMessage("无效的 PID: 数值过大"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 PID: 数值过大"))
 		return
 	}
 
 	if err := h.sshService.KillSession(c.Request.Context(), pid); err != nil {
-		c.Error(ErrInternal.WithMessage("终止会话失败: " + err.Error()))
+		c.Error(apperror.ErrInternal.WithMessage("终止会话失败: " + err.Error()))
 		return
 	}
-	Success(c, gin.H{"message": "会话已终止"})
+	httpx.Success(c, gin.H{"message": "会话已终止"})
 }
 
 // GetLoginHistory returns SSH login history
@@ -190,13 +192,13 @@ func (h *SSHHandler) GetLoginHistory(c *gin.Context) {
 
 	records, err := h.sshService.GetLoginHistory(c.Request.Context(), limit)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"records": records})
+	httpx.Success(c, gin.H{"records": records})
 }
 
-func registerSSHRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
+func RegisterRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 	handler := NewSSHHandler(sshService)
 
 	// SSH Config
