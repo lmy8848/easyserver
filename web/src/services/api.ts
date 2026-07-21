@@ -922,13 +922,4 @@ export const notificationApi = {
     api.delete<ApiResponse>(`/notifications/${id}`),
 };
 
-// Template API
-export const templateApi = {
-  getDockerImages: () =>
-    api.get<ApiResponse<{ categories: Array<{ name: string; description: string; images: Array<{ name: string; tag: string; description: string }> }> }>>('/templates/docker-images'),
-
-  getScriptTemplates: () =>
-    api.get<ApiResponse<{ categories: Array<{ name: string; description: string; templates: Array<{ name: string; description: string; content: string }> }> }>>('/templates/scripts'),
-};
-
 export default api;

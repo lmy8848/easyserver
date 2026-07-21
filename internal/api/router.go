@@ -53,7 +53,6 @@ import (
 	systemdhttp "easyserver/internal/systemd/http"
 	"easyserver/internal/systemprocess"
 	systemprocesshttp "easyserver/internal/systemprocess/http"
-	templatehttp "easyserver/internal/template/http"
 	"easyserver/internal/terminal"
 	terminalhttp "easyserver/internal/terminal/http"
 	"easyserver/internal/web"
@@ -244,7 +243,6 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	firewallhttp.RegisterRoutes(protected, deps.FirewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, deps.SSHConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
-	templatehttp.RegisterRoutes(protected)
 	processhttp.RegisterRoutes(protected, deps.ProcessManager)
 	systemprocesshttp.RegisterSystemProcessRoutes(protected, deps.SystemProcessService)
 	notificationhttp.RegisterRoutes(protected, deps.NotificationService)

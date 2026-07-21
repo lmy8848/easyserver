@@ -9,6 +9,7 @@ import {
   CodeOutlined, InfoCircleOutlined, LineChartOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import type { Container, ContainerStats, ImageCategory } from './types';
 import { formatBytes, getStatusColor } from './types';
 
@@ -25,7 +26,7 @@ export default function ContainerTab() {
   const [actionLoading, setActionLoading] = useState<string>('');
   const [createForm] = Form.useForm();
   const [execForm] = Form.useForm();
-  const [templates, setTemplates] = useState<ImageCategory[]>([]);
+  const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
   const loadContainers = async () => {
     try {
@@ -38,16 +39,7 @@ export default function ContainerTab() {
     }
   };
 
-  const loadTemplates = async () => {
-    try {
-      const res = await api.get('/templates/docker-images');
-      setTemplates(res.data?.data?.categories || []);
-    } catch {
-      // ignore
-    }
-  };
-
-  useEffect(() => { loadContainers(); loadTemplates(); }, []);
+  useEffect(() => { loadContainers(); }, []);
 
   const handleAction = async (action: string, id: string) => {
     setActionLoading(`${id}:${action}`);
