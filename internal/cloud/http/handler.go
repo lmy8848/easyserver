@@ -1,15 +1,15 @@
-package api
+package http
 
 import (
+	"easyserver/internal/cloud"
+	"easyserver/internal/httpx"
+	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/config"
+	"github.com/gin-gonic/gin"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/gin-gonic/gin"
-
-	"easyserver/internal/cloud"
-	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/config"
 )
 
 type CloudHandler struct {
@@ -34,17 +34,17 @@ func (h *CloudHandler) isCurrentInstance(instanceID string) bool {
 // GetInstances returns all instances
 func (h *CloudHandler) GetInstances(c *gin.Context) {
 	if h.cloudService == nil {
-		Success(c, gin.H{"instances": []interface{}{}, "total_count": 0})
+		httpx.Success(c, gin.H{"instances": []interface{}{}, "total_count": 0})
 		return
 	}
 
 	instances, err := h.cloudService.GetInstances(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"instances":   instances,
 		"total_count": len(instances),
 	})
@@ -54,163 +54,163 @@ func (h *CloudHandler) GetInstances(c *gin.Context) {
 func (h *CloudHandler) GetInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	instance, err := h.cloudService.GetInstance(c.Request.Context(), instanceID)
 	if err != nil {
-		c.Error(ErrNotFound.Wrap(err))
+		c.Error(apperror.ErrNotFound.Wrap(err))
 		return
 	}
 
-	Success(c, instance)
+	httpx.Success(c, instance)
 }
 
 // StartInstance starts an instance
 func (h *CloudHandler) StartInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	middleware.AuditSummary(c, "启动云主机 "+instanceID)
 	if err := h.cloudService.StartInstance(c.Request.Context(), instanceID); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"instance_id": instanceID, "state": "STARTING"})
+	httpx.Success(c, gin.H{"instance_id": instanceID, "state": "STARTING"})
 }
 
 // StopInstance stops an instance
 func (h *CloudHandler) StopInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	// Prevent stopping the current instance
 	if h.isCurrentInstance(instanceID) {
-		c.Error(ErrBadRequest.WithMessage("cannot stop the instance running this panel"))
+		c.Error(apperror.ErrBadRequest.WithMessage("cannot stop the instance running this panel"))
 		return
 	}
 
 	middleware.AuditSummary(c, "停止云主机 "+instanceID)
 	if err := h.cloudService.StopInstance(c.Request.Context(), instanceID); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"instance_id": instanceID, "state": "STOPPING"})
+	httpx.Success(c, gin.H{"instance_id": instanceID, "state": "STOPPING"})
 }
 
 // RestartInstance restarts an instance
 func (h *CloudHandler) RestartInstance(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	// Prevent restarting the current instance (panel will be unavailable during restart)
 	if h.isCurrentInstance(instanceID) {
-		c.Error(ErrBadRequest.WithMessage("cannot restart the instance running this panel, use /api/settings/restart instead"))
+		c.Error(apperror.ErrBadRequest.WithMessage("cannot restart the instance running this panel, use /api/settings/restart instead"))
 		return
 	}
 
 	middleware.AuditSummary(c, "重启云主机 "+instanceID)
 	if err := h.cloudService.RestartInstance(c.Request.Context(), instanceID); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"instance_id": instanceID, "state": "REBOOTING"})
+	httpx.Success(c, gin.H{"instance_id": instanceID, "state": "REBOOTING"})
 }
 
 // GetFirewallRules returns firewall rules
 func (h *CloudHandler) GetFirewallRules(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		Success(c, gin.H{"rules": []interface{}{}})
+		httpx.Success(c, gin.H{"rules": []interface{}{}})
 		return
 	}
 
 	rules, err := h.cloudService.GetFirewallRules(c.Request.Context(), instanceID)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"rules": rules})
+	httpx.Success(c, gin.H{"rules": rules})
 }
 
 // AddFirewallRule adds a firewall rule
 func (h *CloudHandler) AddFirewallRule(c *gin.Context) {
 	instanceID := c.Param("id")
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	var rule cloud.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Validate port format (e.g., "80", "443", "8000-9000", "ALL")
 	if rule.Port == "" {
-		c.Error(ErrBadRequest.WithMessage("port is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("port is required"))
 		return
 	}
 
 	// Prevent blocking panel port on current instance. Check exact match,
 	// "ALL", and port ranges (e.g. "80-443") so a broad DROP can't slip past.
 	if h.isCurrentInstance(instanceID) && rule.Action != "ACCEPT" && portCoversPanel(rule.Port, h.panelPort) {
-		c.Error(ErrBadRequest.WithMessage("cannot block panel port on the current instance"))
+		c.Error(apperror.ErrBadRequest.WithMessage("cannot block panel port on the current instance"))
 		return
 	}
 
 	middleware.AuditSummary(c, "添加防火墙规则 "+instanceID+" 端口 "+rule.Port)
 	if err := h.cloudService.AddFirewallRule(c.Request.Context(), instanceID, rule); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // DeleteFirewallRule deletes a firewall rule
@@ -219,22 +219,22 @@ func (h *CloudHandler) DeleteFirewallRule(c *gin.Context) {
 	ruleID := c.Param("ruleId")
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance ID is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance ID is required"))
 		return
 	}
 
 	middleware.AuditSummary(c, "删除防火墙规则 "+instanceID+" "+ruleID)
 	if err := h.cloudService.DeleteFirewallRule(c.Request.Context(), instanceID, ruleID); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // GetSnapshots returns snapshots
@@ -242,28 +242,28 @@ func (h *CloudHandler) GetSnapshots(c *gin.Context) {
 	instanceID := c.Query("instance_id")
 
 	if h.cloudService == nil {
-		Success(c, gin.H{"snapshots": []interface{}{}})
+		httpx.Success(c, gin.H{"snapshots": []interface{}{}})
 		return
 	}
 
 	if instanceID == "" {
-		c.Error(ErrBadRequest.WithMessage("instance_id query parameter is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("instance_id query parameter is required"))
 		return
 	}
 
 	snapshots, err := h.cloudService.GetSnapshots(c.Request.Context(), instanceID)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"snapshots": snapshots})
+	httpx.Success(c, gin.H{"snapshots": snapshots})
 }
 
 // CreateSnapshot creates a snapshot
 func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
@@ -273,39 +273,39 @@ func (h *CloudHandler) CreateSnapshot(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	middleware.AuditSummary(c, "创建云主机快照 "+req.InstanceID+" "+req.Name)
 	if err := h.cloudService.CreateSnapshot(c.Request.Context(), req.InstanceID, req.Name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // ApplySnapshot applies a snapshot (rollback)
 func (h *CloudHandler) ApplySnapshot(c *gin.Context) {
 	snapshotID := c.Param("id")
 	if snapshotID == "" {
-		c.Error(ErrBadRequest.WithMessage("snapshot id is required"))
+		c.Error(apperror.ErrBadRequest.WithMessage("snapshot id is required"))
 		return
 	}
 
 	if h.cloudService == nil {
-		c.Error(ErrNotFound.WithMessage("cloud service not enabled"))
+		c.Error(apperror.ErrNotFound.WithMessage("cloud service not enabled"))
 		return
 	}
 
 	middleware.AuditSummary(c, "应用云主机快照 "+snapshotID)
 	if err := h.cloudService.ApplySnapshot(c.Request.Context(), snapshotID); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"snapshot_id": snapshotID, "status": "APPLYING"})
+	httpx.Success(c, gin.H{"snapshot_id": snapshotID, "status": "APPLYING"})
 }
 
 // GetMonitorData returns monitor data
@@ -316,7 +316,7 @@ func (h *CloudHandler) GetMonitorData(c *gin.Context) {
 	endStr := c.Query("end")
 
 	if h.cloudService == nil {
-		Success(c, gin.H{"metric": metric, "points": []interface{}{}})
+		httpx.Success(c, gin.H{"metric": metric, "points": []interface{}{}})
 		return
 	}
 
@@ -336,11 +336,11 @@ func (h *CloudHandler) GetMonitorData(c *gin.Context) {
 
 	data, err := h.cloudService.GetMonitorData(c.Request.Context(), instanceID, metric, start, end)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, data)
+	httpx.Success(c, data)
 }
 
 // GetTraffic returns traffic info
@@ -351,17 +351,17 @@ func (h *CloudHandler) GetTraffic(c *gin.Context) {
 	}
 
 	if h.cloudService == nil {
-		Success(c, gin.H{})
+		httpx.Success(c, gin.H{})
 		return
 	}
 
 	traffic, err := h.cloudService.GetTraffic(c.Request.Context(), instanceID)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, traffic)
+	httpx.Success(c, traffic)
 }
 
 // portCoversPanel reports whether a firewall rule's port spec (exact, "ALL",
@@ -383,7 +383,7 @@ func portCoversPanel(portSpec string, panelPort int) bool {
 	return false
 }
 
-func registerCloudRoutes(protected *gin.RouterGroup, cloudService *cloud.Service, cfg *config.TencentCloudConfig, panelPort int) {
+func RegisterRoutes(protected *gin.RouterGroup, cloudService *cloud.Service, cfg *config.TencentCloudConfig, panelPort int) {
 	if cloudService == nil {
 		return // Cloud service not enabled, skip route registration
 	}
