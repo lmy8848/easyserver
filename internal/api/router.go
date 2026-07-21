@@ -46,6 +46,7 @@ import (
 	"easyserver/internal/systemd"
 	systemdhttp "easyserver/internal/systemd/http"
 	"easyserver/internal/systemprocess"
+	systemprocesshttp "easyserver/internal/systemprocess/http"
 	"easyserver/internal/terminal"
 	terminalhttp "easyserver/internal/terminal/http"
 	"easyserver/internal/web"
@@ -351,7 +352,7 @@ func (r *Router) Setup() *gin.Engine {
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	audithttp.RegisterRoutes(protected, r.db, r.auditService, r.auditRepo)
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
-	registerSystemRoutes(protected, r.executor)
+	systemprocesshttp.RegisterSystemRoutes(protected, r.executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	cloudhttp.RegisterRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
@@ -365,7 +366,7 @@ func (r *Router) Setup() *gin.Engine {
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
 	registerTemplateRoutes(protected)
 	processhttp.RegisterRoutes(protected, r.processManager)
-	registerSystemProcessRoutes(protected, r.systemProcessService)
+	systemprocesshttp.RegisterSystemProcessRoutes(protected, r.systemProcessService)
 	notificationhttp.RegisterRoutes(protected, r.notificationService)
 	filesharehttp.RegisterRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
 
