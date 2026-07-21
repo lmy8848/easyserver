@@ -19,6 +19,7 @@ import (
 	"easyserver/internal/envconfig"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/fileshare"
+	filesharehttp "easyserver/internal/fileshare/http"
 	"easyserver/internal/firewall"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
@@ -353,11 +354,11 @@ func (r *Router) Setup() *gin.Engine {
 	registerProcessRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)
 	registerNotificationRoutes(protected, r.notificationService)
-	registerFileShareRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
+	filesharehttp.RegisterRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
 
 	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
 	// /share/:token itself is NOT registered so it falls through to the SPA fallback.
-	RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager, r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval, r.cfg)
+	filesharehttp.RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager, r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval, r.cfg)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
 	if r.cfg.Server.ServeFrontend {
