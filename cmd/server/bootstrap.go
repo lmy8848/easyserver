@@ -259,7 +259,7 @@ func wire(cfg *config.Config) (*appServices, error) {
 
 	// Container, systemd, cron
 	s.ContainerService = container.NewService(cmdExec)
-	s.ServiceManager = systemd.NewServiceManager(cmdExec, ".")
+	s.ServiceManager = systemd.NewServiceManager(cmdExec)
 	cronRepo := cron.NewSQLiteRepository(db)
 	s.CronService = cron.NewService(cronRepo, cmdExec)
 	// Sync enabled cron tasks to /etc/cron.d on startup so schedules take effect
