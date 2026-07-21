@@ -5,7 +5,7 @@ all: build
 
 # Version injection
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -d "'" || echo "dev")
-LDFLAGS := -X 'easyserver/internal/api.Version=$(VERSION)'
+LDFLAGS := -X 'easyserver/internal/infra/version.Version=$(VERSION)'
 GO_BUILD := go build -buildvcs=false -ldflags "$(LDFLAGS)"
 
 # Build production binary (with embedded frontend)

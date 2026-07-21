@@ -45,13 +45,13 @@ jobs:
       - name: Build linux-amd64
         run: |
           VERSION=${{ github.ref_name }}
-          LDFLAGS="-X easyserver/internal/api.Version=${VERSION}"
+          LDFLAGS="-X easyserver/internal/infra/version.Version=${VERSION}"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o easyserver-linux-amd64 ./cmd/server
 
       - name: Build linux-arm64
         run: |
           VERSION=${{ github.ref_name }}
-          LDFLAGS="-X easyserver/internal/api.Version=${VERSION}"
+          LDFLAGS="-X easyserver/internal/infra/version.Version=${VERSION}"
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o easyserver-linux-arm64 ./cmd/server
 
       - name: Smoke test (amd64)
