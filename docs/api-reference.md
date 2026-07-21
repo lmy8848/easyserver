@@ -280,7 +280,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 2.4 `POST /api/auth/logout`
 
-**描述**: 退出登录，将当前令牌加入黑名单并删除会话  
+**描述**: 退出登录，将当前令牌加入黑名单并删除会话（前端未使用，由登录页面跳转替代）  
 **认证**: 需要 JWT
 
 **请求参数**: 无（从 Authorization 头获取令牌）
@@ -703,9 +703,41 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 4.2 `GET /api/services/:name`
+### 4.2 `POST /api/services/details`
 
-**描述**: 获取指定服务的详细信息  
+**描述**: 批量获取服务详细信息  
+**认证**: 需要 JWT
+
+**请求参数 (Request Body)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| names | string[] | 是 | 服务名称列表 |
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "name": "nginx",
+      "description": "nginx HTTP server",
+      "load_state": "loaded",
+      "active_state": "active",
+      "sub_state": "running",
+      "enabled": true
+    }
+  ]
+}
+```
+
+---
+
+### 4.4 `GET /api/services/:name`
+
+**描述**: 获取指定服务的详细信息（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -1028,24 +1060,6 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 6.2 `GET /api/files/base-path`
-
-**描述**: 获取文件管理器的基础路径  
-**认证**: 需要 JWT
-
-**响应示例**:
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "base_path": "/home/user"
-  }
-}
-```
-
----
 
 ### 6.3 `GET /api/files/download`
 
@@ -1136,7 +1150,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 6.6 `GET /api/files/search-content`
 
-**描述**: 按文件内容搜索  
+**描述**: 按文件内容搜索（前端未使用）  
 **认证**: 需要 JWT
 
 **查询参数**:
@@ -1189,7 +1203,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 6.8 `GET /api/files/mime-type`
 
-**描述**: 获取文件的 MIME 类型  
+**描述**: 获取文件的 MIME 类型（前端未使用）  
 **认证**: 需要 JWT
 
 **查询参数**:
@@ -1374,7 +1388,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 6.16 `POST /api/files/compress`
 
-**描述**: 压缩文件为 zip 归档  
+**描述**: 压缩文件为 zip 归档（前端未使用）  
 **认证**: 需要 JWT
 
 **请求参数 (Request Body)**:
@@ -1446,7 +1460,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 6.19 `PUT /api/files/chown`
 
-**描述**: 修改文件所有者  
+**描述**: 修改文件所有者（前端未使用）  
 **认证**: 需要 JWT
 
 **请求参数 (Request Body)**:
@@ -1518,7 +1532,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 7.2 `GET /api/audit-logs/actions`
 
-**描述**: 获取所有不同的操作类型列表  
+**描述**: 获取所有不同的操作类型列表（前端未使用）  
 **认证**: 需要 JWT
 
 **响应示例**:
@@ -1588,7 +1602,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 7.4 `GET /api/audit-logs/clean-policy`
 
-**描述**: 获取审计日志清理策略  
+**描述**: 获取审计日志清理策略（前端未使用）  
 **认证**: 需要 JWT
 
 **响应示例**:
@@ -1643,12 +1657,6 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 7.7 `GET /api/audit-logs/verify`
-
-**描述**: 验证审计日志完整性  
-**认证**: 需要 JWT
-
----
 
 ## 8. 系统设置
 
@@ -1746,7 +1754,39 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 8.4 `PUT /api/settings/auth`
+### 8.4 `PUT /api/settings/tls`
+
+**描述**: 更新 TLS/SSL 证书配置  
+**认证**: 需要 JWT
+
+**请求参数 (Request Body)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| enabled | bool | 是 | 是否启用 HTTPS |
+| cert_content | string | 否 | 证书内容（PEM 格式） |
+| key_content | string | 否 | 私钥内容（PEM 格式） |
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "requires_restart": true,
+    "cert_info": {
+      "domain": "example.com",
+      "issuer": "Let's Encrypt",
+      "expires_at": "2025-01-15T10:00:00Z"
+    }
+  }
+}
+```
+
+---
+
+### 8.5 `PUT /api/settings/auth`
 
 **描述**: 更新认证配置  
 **认证**: 需要 JWT
@@ -2042,7 +2082,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 9.2 `GET /api/system/ssh-config`
 
-**描述**: 获取系统 SSH 配置信息  
+**描述**: 获取系统 SSH 配置信息（前端未使用，SSH 配置通过 /api/ssh/config 管理）  
 **认证**: 需要 JWT
 
 ---
@@ -2062,7 +2102,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 9.4 `GET /api/system/check-ports`
 
-**描述**: 批量检查端口可用性  
+**描述**: 批量检查端口可用性（前端未使用）  
 **认证**: 需要 JWT
 
 **查询参数**:
@@ -2070,6 +2110,36 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | ports | string | 是 | 端口列表（逗号分隔，如 "80,443,8080"） |
+
+---
+
+### 9.5 `GET /api/system/ports`
+
+**描述**: 获取系统监听端口列表  
+**认证**: 需要 JWT
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 10,
+    "ports": [
+      {
+        "protocol": "tcp",
+        "port": 80,
+        "local_addr": "0.0.0.0:80",
+        "state": "LISTEN",
+        "pid": 1234,
+        "process_name": "nginx",
+        "user": "root"
+      }
+    ]
+  }
+}
+```
 
 ---
 
@@ -2108,7 +2178,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 10.2 `GET /api/cloud/instances/:id`
 
-**描述**: 获取指定实例详情  
+**描述**: 获取指定实例详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -2794,7 +2864,20 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 12.3 `POST /api/runtime/install`
+### 12.3 `GET /api/runtime/:name/remote-versions`
+
+**描述**: 获取指定运行环境的远程可用版本列表  
+**认证**: 需要 JWT
+
+**路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| name | string | 运行环境名称 |
+
+---
+
+### 12.4 `POST /api/runtime/install`
 
 **描述**: 安装运行环境  
 **认证**: 需要 JWT
@@ -2836,19 +2919,6 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 12.6 `GET /api/runtime/detect`
-
-**描述**: 检测系统中已安装的运行环境  
-**认证**: 需要 JWT
-
----
-
-### 12.7 `POST /api/runtime/import-detected`
-
-**描述**: 导入检测到的运行环境到管理列表  
-**认证**: 需要 JWT
-
----
 
 ### 12.8 `GET /api/runtime/progress/:id`
 
@@ -2863,18 +2933,6 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 12.9 `GET /api/runtime/check-deps/:name`
-
-**描述**: 检查运行环境依赖  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 运行环境名称 |
-
----
 
 ### 12.10 `GET /api/runtime/logs/:id`
 
@@ -2902,78 +2960,20 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 12.12 `GET /api/runtime-versions/:name`
+### 12.12 `GET /api/runtime/catalog`
 
-**描述**: 获取指定运行环境的可用版本列表  
+**描述**: 获取支持的运行环境目录列表  
 **认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 运行环境名称 |
 
 ---
 
-### 12.13 `POST /api/runtime-versions/:name/fetch`
-
-**描述**: 从远程获取最新版本列表  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 运行环境名称 |
-
----
-
-### 12.14 `GET /api/runtime-versions/:name/resolve/:alias`
-
-**描述**: 解析版本别名（如 lts -> 18.17.0）  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 运行环境名称 |
-| alias | string | 版本别名 |
-
----
-
-### 12.15 `GET /api/runtime-versions/:name/suggestions`
-
-**描述**: 获取版本建议  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 运行环境名称 |
-
----
-
-### 12.16 `GET /api/packages`
+### 12.13 `GET /api/packages`
 
 **描述**: 获取已安装的包列表  
 **认证**: 需要 JWT
 
 ---
 
-### 12.17 `GET /api/packages/scan/:id`
-
-**描述**: 扫描指定运行环境的已安装包  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| id | string | 运行环境 ID |
-
----
 
 ### 12.18 `GET /api/packages/search`
 
@@ -2989,7 +2989,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 12.19 `GET /api/packages/versions/:name`
+### 12.19 `GET /api/packages/versions/{name}`
 
 **描述**: 获取包的可用版本列表  
 **认证**: 需要 JWT
@@ -2998,7 +2998,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| name | string | 包名称 |
+| name | string | 包名称（支持路径格式，如 npm/express） |
 
 ---
 
@@ -3042,6 +3042,40 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 |------|------|------|------|
 | name | string | 是 | 包管理器名称 |
 | package | string | 是 | 包名 |
+
+---
+
+### 12.23 `GET /api/packages/registry`
+
+**描述**: 获取包管理器的镜像源配置  
+**认证**: 需要 JWT
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "npm": "https://registry.npmmirror.com",
+    "pip": "https://pypi.tuna.tsinghua.edu.cn/simple"
+  }
+}
+```
+
+---
+
+### 12.24 `POST /api/packages/registry`
+
+**描述**: 设置包管理器的镜像源  
+**认证**: 需要 JWT
+
+**请求参数 (Request Body)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 包管理器名称（npm、pip、go） |
+| url | string | 是 | 镜像源 URL |
 
 ---
 
@@ -3201,7 +3235,27 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 13.8 `DELETE /api/env-config/path/:id`
+### 13.8 `PUT /api/env-config/path/:id`
+
+**描述**: 更新 PATH 条目  
+**认证**: 需要 JWT
+
+**路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| id | int | PATH 条目 ID |
+
+**请求参数 (Request Body)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | 路径 |
+| runtime_id | int | 否 | 运行环境 ID |
+
+---
+
+### 13.9 `DELETE /api/env-config/path/:id`
 
 **描述**: 删除 PATH 条目  
 **认证**: 需要 JWT
@@ -3239,100 +3293,6 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 13.10 `GET /api/global-config`
-
-**描述**: 获取全局配置列表  
-**认证**: 需要 JWT
-
-**查询参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| category | string | 否 | 按分类过滤 |
-
-**响应示例**:
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "configs": [
-      {
-        "id": 1,
-        "category": "general",
-        "key": "timezone",
-        "value": "Asia/Shanghai",
-        "description": "系统时区"
-      }
-    ]
-  }
-}
-```
-
----
-
-### 13.11 `GET /api/global-config/:id`
-
-**描述**: 获取全局配置详情  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| id | int | 配置 ID |
-
----
-
-### 13.12 `POST /api/global-config`
-
-**描述**: 创建全局配置  
-**认证**: 需要 JWT
-
-**请求参数 (Request Body)**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| category | string | 是 | 分类 |
-| key | string | 是 | 键名 |
-| value | string | 是 | 值 |
-| description | string | 否 | 描述 |
-
----
-
-### 13.13 `PUT /api/global-config/:id`
-
-**描述**: 更新全局配置  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| id | int | 配置 ID |
-
-**请求参数 (Request Body)**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| value | string | 是 | 值 |
-| description | string | 否 | 描述 |
-
----
-
-### 13.14 `DELETE /api/global-config/:id`
-
-**描述**: 删除全局配置  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| id | int | 配置 ID |
-
----
 
 ## 14. Web服务器
 
@@ -3409,7 +3369,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 14.6 `POST /api/web-servers`
 
-**描述**: 创建 Web 服务器（基于预定义模板）  
+**描述**: 创建 Web 服务器（基于预定义模板，前端未使用）  
 **认证**: 需要 JWT
 
 **请求参数 (Request Body)**:
@@ -3430,7 +3390,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 14.7 `DELETE /api/web-servers/:id`
 
-**描述**: 删除 Web 服务器  
+**描述**: 删除 Web 服务器（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -3672,7 +3632,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 14.19 `POST /api/web-servers/:id/auto-start`
 
-**描述**: 设置 Web 服务器开机自启  
+**描述**: 设置 Web 服务器开机自启（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -3731,7 +3691,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 14.22 `GET /api/web-servers/:id/websites/:wid`
 
-**描述**: 获取网站详情  
+**描述**: 获取网站详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -4534,7 +4494,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 15.35 `GET /api/db-servers/mysql/common-params`
 
-**描述**: 获取 MySQL 常用参数说明  
+**描述**: 获取 MySQL 常用参数说明（前端未使用）  
 **认证**: 需要 JWT
 
 **查询参数**:
@@ -4563,7 +4523,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 15.38 `GET /api/db-servers/postgresql/common-params`
 
-**描述**: 获取 PostgreSQL 常用参数说明  
+**描述**: 获取 PostgreSQL 常用参数说明（前端未使用）  
 **认证**: 需要 JWT
 
 ---
@@ -4586,7 +4546,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 15.41 `GET /api/db-servers/redis/common-params`
 
-**描述**: 获取 Redis 常用参数说明  
+**描述**: 获取 Redis 常用参数说明（前端未使用）  
 **认证**: 需要 JWT
 
 ---
@@ -4690,7 +4650,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 16.6 `GET /api/cron/tasks/:id`
 
-**描述**: 获取定时任务详情  
+**描述**: 获取定时任务详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -4842,7 +4802,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 16.15 `GET /api/cron/scripts/:id`
 
-**描述**: 获取脚本详情  
+**描述**: 获取脚本详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -4896,14 +4856,14 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 16.18 `GET /api/cron/docs`
 
-**描述**: 获取定时任务文档列表  
+**描述**: 获取定时任务文档列表（前端未使用）  
 **认证**: 需要 JWT
 
 ---
 
 ### 16.19 `POST /api/cron/docs`
 
-**描述**: 创建定时任务文档  
+**描述**: 创建定时任务文档（前端未使用）  
 **认证**: 需要 JWT
 
 **请求参数 (Request Body)**:
@@ -4917,7 +4877,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 16.20 `GET /api/cron/docs/:id`
 
-**描述**: 获取文档详情  
+**描述**: 获取文档详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -4930,7 +4890,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 16.21 `PUT /api/cron/docs/:id`
 
-**描述**: 更新文档  
+**描述**: 更新文档（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -4943,7 +4903,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 16.22 `DELETE /api/cron/docs/:id`
 
-**描述**: 删除文档  
+**描述**: 删除文档（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -5180,7 +5140,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 17.13 `GET /api/firewall/rules/:id`
 
-**描述**: 获取单条规则详情  
+**描述**: 获取单条规则详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -5290,7 +5250,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 17.21 `POST /api/firewall/system-rules/delete`
 
-**描述**: 删除系统级防火墙规则  
+**描述**: 删除系统级防火墙规则（前端未使用）  
 **认证**: 需要 JWT
 
 ---
@@ -5989,7 +5949,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 20.1 `GET /api/templates/docker-images`
 
-**描述**: 获取 Docker 镜像模板列表  
+**描述**: 获取 Docker 镜像模板列表（前端未使用，仅使用脚本模板）  
 **认证**: 需要 JWT
 
 **响应示例**:
@@ -6135,7 +6095,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.3 `GET /api/processes/:id`
 
-**描述**: 获取进程详情  
+**描述**: 获取进程详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6176,7 +6136,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.6 `POST /api/processes/:id/start`
 
-**描述**: 启动进程  
+**描述**: 启动进程（前端未使用，仅使用批量启动）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6189,7 +6149,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.7 `POST /api/processes/:id/stop`
 
-**描述**: 停止进程  
+**描述**: 停止进程（前端未使用，仅使用批量停止）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6202,7 +6162,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.8 `POST /api/processes/:id/restart`
 
-**描述**: 重启进程  
+**描述**: 重启进程（前端未使用，仅使用批量重启）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6256,7 +6216,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.10 `GET /api/processes/:id/stats`
 
-**描述**: 获取进程运行时资源统计  
+**描述**: 获取进程运行时资源统计（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6361,7 +6321,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.15 `POST /api/process-groups`
 
-**描述**: 创建进程分组  
+**描述**: 创建进程分组（前端未使用）  
 **认证**: 需要 JWT
 
 **请求参数 (Request Body)**:
@@ -6388,7 +6348,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.17 `PUT /api/process-groups/:id`
 
-**描述**: 更新进程分组  
+**描述**: 更新进程分组（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6408,7 +6368,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 21.18 `DELETE /api/process-groups/:id`
 
-**描述**: 删除进程分组  
+**描述**: 删除进程分组（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6449,14 +6409,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ## 22. 系统进程
 
-### 22.1 `GET /api/system/overview`
-
-**描述**: 获取系统资源概览  
-**认证**: 需要 JWT
-
----
-
-### 22.2 `GET /api/system/processes`
+### 22.1 `GET /api/system/processes`
 
 **描述**: 获取系统进程列表  
 **认证**: 需要 JWT
@@ -6472,9 +6425,9 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
-### 22.3 `GET /api/system/processes/:pid`
+### 22.2 `GET /api/system/processes/:pid`
 
-**描述**: 获取系统进程详情  
+**描述**: 获取系统进程详情（前端未使用）  
 **认证**: 需要 JWT
 
 **路径参数**:
@@ -6482,138 +6435,6 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | pid | int | 进程 PID |
-
----
-
-### 22.4 `GET /api/system/services`
-
-**描述**: 获取系统 systemd 服务列表  
-**认证**: 需要 JWT
-
----
-
-### 22.5 `POST /api/system/services/:name/action`
-
-**描述**: 对 systemd 服务执行操作  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 服务名称 |
-
-**请求参数 (Request Body)**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| action | string | 是 | 操作（start/stop/restart/reload/enable/disable） |
-| force | bool | 否 | 是否强制操作（对受保护服务） |
-
-**响应示例**:
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "message": "服务 nginx start 成功"
-  }
-}
-```
-
-**错误码**:
-
-| 错误码 | 说明 |
-|--------|------|
-| 40300 | 受保护的服务，需设置 force: true |
-
----
-
-### 22.6 `GET /api/system/services/:name/logs`
-
-**描述**: 获取系统服务日志  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 服务名称 |
-
-**查询参数**:
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| lines | int | 100 | 返回行数 |
-
-**响应示例**:
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "logs": ["log line 1", "log line 2"],
-    "service": "nginx"
-  }
-}
-```
-
----
-
-### 22.7 `GET /api/system/services/protected`
-
-**描述**: 获取受保护的服务列表  
-**认证**: 需要 JWT
-
-**响应示例**:
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": [
-    {
-      "name": "sshd",
-      "reason": "SSH 守护进程，停止后将无法远程访问"
-    }
-  ]
-}
-```
-
----
-
-### 22.8 `GET /api/system/services/whitelist`
-
-**描述**: 获取服务白名单  
-**认证**: 需要 JWT
-
----
-
-### 22.9 `POST /api/system/services/whitelist`
-
-**描述**: 添加服务到白名单  
-**认证**: 需要 JWT
-
-**请求参数 (Request Body)**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| name | string | 是 | 服务名称 |
-
----
-
-### 22.10 `DELETE /api/system/services/whitelist/:name`
-
-**描述**: 从白名单移除服务  
-**认证**: 需要 JWT
-
-**路径参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| name | string | 服务名称 |
 
 ---
 
@@ -6673,7 +6494,7 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ### 23.3 `POST /api/notifications`
 
-**描述**: 创建通知（管理员操作）  
+**描述**: 创建通知（管理员操作，前端未使用，由系统自动创建）  
 **认证**: 需要 JWT
 
 **请求参数 (Request Body)**:
