@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/filemanager"
 	"easyserver/internal/fileshare"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 
 	"github.com/gin-gonic/gin"

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/cron"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"

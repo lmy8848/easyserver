@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"

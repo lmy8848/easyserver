@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"easyserver/internal/alert"
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/cloud"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"

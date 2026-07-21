@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"easyserver/internal/api/middleware"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"

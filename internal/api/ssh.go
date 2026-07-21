@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/api/middleware"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/ssh"
 	"github.com/gin-gonic/gin"
 )

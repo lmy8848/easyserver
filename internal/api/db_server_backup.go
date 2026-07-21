@@ -4,9 +4,9 @@ import (
 	"os"
 	"strconv"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
+	"easyserver/internal/httpx/middleware"
 	"github.com/gin-gonic/gin"
 )
 
