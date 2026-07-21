@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/cloud"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 )
 

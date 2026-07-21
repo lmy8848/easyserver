@@ -3,8 +3,8 @@ package api
 import (
 	"fmt"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/firewall"
+	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
 )

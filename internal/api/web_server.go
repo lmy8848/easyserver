@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"easyserver/internal/api/middleware"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/process"
 	"easyserver/internal/web"
 

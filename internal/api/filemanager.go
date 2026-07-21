@@ -11,8 +11,8 @@ import (
 	"strings"
 	"syscall"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/filemanager"
+	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
 )

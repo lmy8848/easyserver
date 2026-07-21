@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/envconfig"
+	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
 )

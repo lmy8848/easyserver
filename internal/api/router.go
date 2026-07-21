@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"easyserver/internal/alert"
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/cloud"
@@ -21,6 +20,7 @@ import (
 	"easyserver/internal/filemanager"
 	"easyserver/internal/fileshare"
 	"easyserver/internal/firewall"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"

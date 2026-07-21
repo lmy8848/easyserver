@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/qrlogin"
 

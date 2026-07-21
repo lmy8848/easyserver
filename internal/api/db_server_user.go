@@ -3,8 +3,8 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/database_mgmt"
+	"easyserver/internal/httpx/middleware"
 	"github.com/gin-gonic/gin"
 )
 

@@ -1,7 +1,7 @@
 package api
 
 import (
-	"easyserver/internal/api/middleware"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/runtimeenv"
 	"fmt"
 	"strings"

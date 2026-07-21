@@ -3,9 +3,9 @@ package api
 import (
 	"strconv"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
 	"easyserver/internal/container"
+	"easyserver/internal/httpx/middleware"
 	"github.com/gin-gonic/gin"
 )
 

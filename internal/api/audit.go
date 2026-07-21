@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/api/middleware"
 	"easyserver/internal/audit"
+	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
 )
