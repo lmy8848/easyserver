@@ -45,12 +45,14 @@ import (
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	runtimeenvhttp "easyserver/internal/runtimeenv/http"
+	settingshttp "easyserver/internal/settings/http"
 	"easyserver/internal/ssh"
 	sshhttp "easyserver/internal/ssh/http"
 	"easyserver/internal/systemd"
 	systemdhttp "easyserver/internal/systemd/http"
 	"easyserver/internal/systemprocess"
 	systemprocesshttp "easyserver/internal/systemprocess/http"
+	templatehttp "easyserver/internal/template/http"
 	"easyserver/internal/terminal"
 	terminalhttp "easyserver/internal/terminal/http"
 	"easyserver/internal/web"
@@ -356,7 +358,7 @@ func (r *Router) Setup() *gin.Engine {
 	terminalhttp.RegisterRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	audithttp.RegisterRoutes(protected, r.db, r.auditService, r.auditRepo)
-	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
+	settingshttp.RegisterRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
 	systemprocesshttp.RegisterSystemRoutes(protected, r.executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	cloudhttp.RegisterRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
@@ -369,7 +371,7 @@ func (r *Router) Setup() *gin.Engine {
 	firewallhttp.RegisterRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, r.sshConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
-	registerTemplateRoutes(protected)
+	templatehttp.RegisterRoutes(protected)
 	processhttp.RegisterRoutes(protected, r.processManager)
 	systemprocesshttp.RegisterSystemProcessRoutes(protected, r.systemProcessService)
 	notificationhttp.RegisterRoutes(protected, r.notificationService)
