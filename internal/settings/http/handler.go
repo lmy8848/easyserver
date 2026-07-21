@@ -21,8 +21,6 @@ import (
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
-	"easyserver/internal/infra/launcher"
-	"easyserver/internal/infra/version"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -34,16 +32,16 @@ type SettingsHandler struct {
 	configPath   string
 	alertService *alert.Service
 	executor     executor.CommandExecutor
-	launcher     *launcher.Launcher
+	sig          *infra.Signal
 }
 
-func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, l *launcher.Launcher) *SettingsHandler {
+func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, sig *infra.Signal) *SettingsHandler {
 	return &SettingsHandler{
 		cfg:          cfg,
 		configPath:   configPath,
 		alertService: alertService,
 		executor:     exec,
-		launcher:     l,
+		sig:          sig,
 	}
 }
 
@@ -921,7 +919,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 // GetSystemInfo returns system information
 func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
 	httpx.Success(c, gin.H{
-		"version": version.Version,
+		"version": infra.Version,
 	})
 }
 
@@ -958,19 +956,17 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	// Return success first, then restart
 	infra.Go(func() {
 		time.Sleep(1 * time.Second)
-		if err := h.launcher.Restart(launcher.RestartOpts{
+		h.sig.Request(infra.RestartOpts{
 			ConfigPath: h.configPath,
 			DevMode:    h.cfg.Server.DevMode,
 			Force:      force,
-		}); err != nil {
-			log.Printf("settings: restart failed: %v", err)
-		}
+		})
 	})
 	httpx.Success(c, gin.H{"message": "面板正在重启..."})
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, l *launcher.Launcher) {
-	handler := NewSettingsHandler(cfg, configPath, alertService, exec, l)
+func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, sig *infra.Signal) {
+	handler := NewSettingsHandler(cfg, configPath, alertService, exec, sig)
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)
 	protected.PUT("/settings/server", handler.UpdateServerConfig)
