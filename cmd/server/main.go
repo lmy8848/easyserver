@@ -55,10 +55,9 @@ func main() {
 	}
 	services.Launcher = launcher.New(ln)
 
-	router := api.NewRouter(cfg, *configPath, services.RouterDeps)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      router.Setup(),
+		Handler:      api.Setup(cfg, *configPath, services.RouterDeps),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second, // long-running routes override via middleware.WriteTimeout
 		IdleTimeout:  60 * time.Second,

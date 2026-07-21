@@ -62,69 +62,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type Router struct {
-	cfg                  *config.Config
-	configPath           string
-	db                   *sql.DB
-	executor             executor.CommandExecutor
-	auditRepo            audit.Repository
-	authService          *auth.AuthService
-	monitorService       *monitor.MonitorService
-	auditService         *audit.Service
-	sessionService       *auth.SessionService
-	qrLoginService       *qrlogin.Service
-	alertService         *alert.Service
-	processManager       *process.Service
-	systemProcessService *systemprocess.Service
-	notificationService  *notification.Service
-	serviceManager       *systemd.ServiceManager
-
-	// Container service
-	containerService *container.Service
-
-	// Cron service
-	cronService *cron.Service
-
-	// Database services
-	dbServerService     *dbserver.Service
-	databaseMgmtService *database_mgmt.Service
-
-	// Deploy service
-	deployService *deploy.Service
-
-	// Environment config service
-	envConfigService *envconfig.Service
-
-	// Firewall service
-	firewallService *firewall.Service
-
-	// Runtime services
-	runtimeService        *runtimeenv.Service
-	packageManagerService *runtimeenv.PackageService
-
-	// SSH service
-	sshConfigService *ssh.Service
-
-	// Web server services
-	webServerService *web.Service
-	websiteService   *web.WebsiteService
-
-	// Terminal manager
-	terminalManager *terminal.Manager
-
-	// File manager
-	fileManager *filemanager.Manager
-
-	// File share repo
-	fileShareRepo fileshare.Repository
-
-	// Cloud service (nil if disabled)
-	cloudService *cloud.Service
-
-	// Launcher for hot restart (FD passing)
-	launcher *launcher.Launcher
-}
-
 // RouterDeps holds the shared service instances created once in main.go.
 // Passing them in (instead of re-creating inside NewRouter) guarantees a
 // single instance per service so that in-memory caches, background goroutines,
@@ -195,72 +132,7 @@ type RouterDeps struct {
 	Launcher *launcher.Launcher
 }
 
-func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
-	return &Router{
-		cfg:                  cfg,
-		configPath:           configPath,
-		db:                   deps.DB,
-		executor:             deps.Executor,
-		auditRepo:            deps.AuditRepo,
-		authService:          deps.AuthService,
-		monitorService:       deps.MonitorService,
-		auditService:         deps.AuditService,
-		sessionService:       deps.SessionService,
-		alertService:         deps.AlertService,
-		processManager:       deps.ProcessManager,
-		systemProcessService: deps.SystemProcessService,
-		notificationService:  deps.NotificationService,
-		serviceManager:       deps.ServiceManager,
-
-		// Container service
-		containerService: deps.ContainerService,
-
-		// Cron service
-		cronService: deps.CronService,
-
-		// Database services
-		dbServerService:     deps.DBServerService,
-		databaseMgmtService: deps.DatabaseMgmtService,
-
-		// Deploy service
-		deployService: deps.DeployService,
-
-		// Environment config service
-		envConfigService: deps.EnvConfigService,
-
-		// Firewall service
-		firewallService: deps.FirewallService,
-
-		// Runtime services
-		runtimeService:        deps.RuntimeService,
-		packageManagerService: deps.PackageManagerService,
-
-		// SSH service
-		sshConfigService: deps.SSHConfigService,
-
-		// Web server services
-		webServerService: deps.WebServerService,
-		websiteService:   deps.WebsiteService,
-
-		// Terminal manager
-		terminalManager: deps.TerminalManager,
-
-		// File manager
-		fileManager: deps.FileManager,
-
-		// File share repo
-		fileShareRepo:  deps.FileShareRepo,
-		qrLoginService: deps.QRLoginService,
-
-		// Cloud service
-		cloudService: deps.CloudService,
-
-		// Launcher
-		launcher: deps.Launcher,
-	}
-}
-
-func (r *Router) Setup() *gin.Engine {
+func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
 	e.MaxMultipartMemory = 64 << 20 // 64 MB multipart memory (rest goes to temp disk)
@@ -269,7 +141,7 @@ func (r *Router) Setup() *gin.Engine {
 	// trusts 0.0.0.0/0, which lets any client spoof ClientIP and bypass IP
 	// whitelist, rate limiting and audit logging. Default to localhost (same-
 	// host nginx). Front by a CDN by setting server.trusted_proxies to its ranges.
-	trustedProxies := r.cfg.Server.TrustedProxies
+	trustedProxies := cfg.Server.TrustedProxies
 	if trustedProxies == nil {
 		trustedProxies = []string{"127.0.0.1"}
 	}
@@ -279,14 +151,14 @@ func (r *Router) Setup() *gin.Engine {
 	}
 
 	// Create IP whitelist
-	ipWhitelist := middleware.NewIPWhitelist(&r.cfg.Auth)
+	ipWhitelist := middleware.NewIPWhitelist(&cfg.Auth)
 
 	// Validators
 	tokenValidator := func(userID int64, tokenString string, issuedAt time.Time) (bool, error) {
-		return r.authService.IsUserTokenInvalidated(context.Background(), userID, issuedAt)
+		return deps.AuthService.IsUserTokenInvalidated(context.Background(), userID, issuedAt)
 	}
 	sessionValidator := func(token string) (bool, error) {
-		return r.sessionService.IsSessionValid(context.Background(), token)
+		return deps.SessionService.IsSessionValid(context.Background(), token)
 	}
 
 	// Initialize CSP nonce: injects nonce into <script> tags of embedded index.html
@@ -295,9 +167,9 @@ func (r *Router) Setup() *gin.Engine {
 	// Global middleware (no rate limiter — tiered limiters are applied per group below)
 	e.Use(gin.Logger(), gin.Recovery(),
 		httpx.ErrorHandler(),
-		middleware.DomainRedirectMiddleware(r.cfg.Server.Domain, r.cfg.Server.RedirectMode, r.cfg.Server.WwwHandling),
+		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.RedirectMode, cfg.Server.WwwHandling),
 		middleware.SecurityMiddleware(cspNonce),
-		middleware.CORSMiddleware(r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode),
+		middleware.CORSMiddleware(cfg.Server.AllowedOrigins, cfg.Server.DevMode),
 		middleware.IPWhitelistMiddleware(ipWhitelist),
 	)
 
@@ -308,28 +180,28 @@ func (r *Router) Setup() *gin.Engine {
 
 	// API routes — Tier 2: general API limiter
 	// MaxUploadSize from config (default 512MB); 0 = use default
-	maxUploadSize := r.cfg.Server.MaxUploadSize
+	maxUploadSize := cfg.Server.MaxUploadSize
 	if maxUploadSize <= 0 {
 		maxUploadSize = 512 << 20 // 512 MB default
 	}
 	api := e.Group("/api")
 	api.Use(
 		middleware.MaxBodySizeMiddleware(maxUploadSize),
-		middleware.RateLimitMiddleware("api", r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
+		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval),
 	)
 
 	// Auth routes (public + protected)
-	authhttp.RegisterRoutes(api, r.authService, r.auditService, r.sessionService, r.qrLoginService, r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator, r.cfg.Auth.SessionTimeout, r.cfg.Auth.LoginRateLimit, r.cfg.Auth.LoginRateInterval, r.cfg)
+	authhttp.RegisterRoutes(api, deps.AuthService, deps.AuditService, deps.SessionService, deps.QRLoginService, cfg.Auth.JWTSecret, sessionValidator, tokenValidator, cfg.Auth.SessionTimeout, cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval, cfg)
 
 	// Protected routes (JWT + SingleAdmin + Audit + Session Heartbeat)
 	protected := api.Group("")
 	protected.Use(
-		middleware.JWTMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
+		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
-			return r.authService.GetIPWhitelist(context.Background(), userID)
+			return deps.AuthService.GetIPWhitelist(context.Background(), userID)
 		}),
-		middleware.SessionHeartbeatMiddleware(r.sessionService, r.cfg.Auth.SessionTimeout),
-		middleware.AuditMiddleware(r.auditService),
+		middleware.SessionHeartbeatMiddleware(deps.SessionService, cfg.Auth.SessionTimeout),
+		middleware.AuditMiddleware(deps.AuditService),
 		middleware.CSRFMiddleware(),
 	)
 
@@ -339,52 +211,52 @@ func (r *Router) Setup() *gin.Engine {
 		middleware.WriteTimeout(10*time.Minute),
 	)
 	fileRoutes.Use(
-		middleware.RateLimitMiddleware("api", r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval),
-		middleware.JWTMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
+		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval),
+		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
-			return r.authService.GetIPWhitelist(context.Background(), userID)
+			return deps.AuthService.GetIPWhitelist(context.Background(), userID)
 		}),
-		middleware.SessionHeartbeatMiddleware(r.sessionService, r.cfg.Auth.SessionTimeout),
-		middleware.AuditMiddleware(r.auditService),
+		middleware.SessionHeartbeatMiddleware(deps.SessionService, cfg.Auth.SessionTimeout),
+		middleware.AuditMiddleware(deps.AuditService),
 		middleware.CSRFMiddleware(),
 	)
 
 	// WebSocket routes
 	wsGroup := e.Group("/ws")
-	wsGroup.Use(middleware.WSAuthMiddleware(r.cfg.Auth.JWTSecret, sessionValidator, tokenValidator))
+	wsGroup.Use(middleware.WSAuthMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator))
 
 	// Register domain routes
-	monitorhttp.RegisterRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	systemdhttp.RegisterRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	terminalhttp.RegisterRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
-	audithttp.RegisterRoutes(protected, r.db, r.auditService, r.auditRepo)
-	settingshttp.RegisterRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
-	systemprocesshttp.RegisterSystemRoutes(protected, r.executor)
+	monitorhttp.RegisterRoutes(protected, wsGroup, deps.MonitorService, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	systemdhttp.RegisterRoutes(protected, wsGroup, deps.ServiceManager, deps.Executor, cfg.Auth.JWTSecret, deps.AuditService, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	terminalhttp.RegisterRoutes(protected, wsGroup, deps.TerminalManager, cfg.Auth.JWTSecret, deps.AuditService, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	filemanagerhttp.RegisterRoutes(protected, fileRoutes, deps.FileManager, maxUploadSize)
+	audithttp.RegisterRoutes(protected, deps.DB, deps.AuditService, deps.AuditRepo)
+	settingshttp.RegisterRoutes(protected, cfg, configPath, deps.AlertService, deps.Executor, deps.Launcher)
+	systemprocesshttp.RegisterSystemRoutes(protected, deps.Executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
-	cloudhttp.RegisterRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
-	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
-	runtimeenvhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
-	envconfighttp.RegisterRoutes(protected, r.envConfigService)
-	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
-	dbserverhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
-	cronhttp.RegisterRoutes(protected, r.cronService, r.executor)
-	firewallhttp.RegisterRoutes(protected, r.firewallService, r.cfg.Server.Port)
-	sshhttp.RegisterRoutes(protected, r.sshConfigService)
-	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
+	cloudhttp.RegisterRoutes(protected, deps.CloudService, &cfg.TencentCloud, cfg.Server.Port)
+	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DeployService)
+	runtimeenvhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.RuntimeService, deps.PackageManagerService)
+	envconfighttp.RegisterRoutes(protected, deps.EnvConfigService)
+	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.WebServerService, deps.WebsiteService, deps.ProcessManager)
+	dbserverhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DBServerService, deps.DatabaseMgmtService)
+	cronhttp.RegisterRoutes(protected, deps.CronService, deps.Executor)
+	firewallhttp.RegisterRoutes(protected, deps.FirewallService, cfg.Server.Port)
+	sshhttp.RegisterRoutes(protected, deps.SSHConfigService)
+	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
 	templatehttp.RegisterRoutes(protected)
-	processhttp.RegisterRoutes(protected, r.processManager)
-	systemprocesshttp.RegisterSystemProcessRoutes(protected, r.systemProcessService)
-	notificationhttp.RegisterRoutes(protected, r.notificationService)
-	filesharehttp.RegisterRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
+	processhttp.RegisterRoutes(protected, deps.ProcessManager)
+	systemprocesshttp.RegisterSystemProcessRoutes(protected, deps.SystemProcessService)
+	notificationhttp.RegisterRoutes(protected, deps.NotificationService)
+	filesharehttp.RegisterRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)
 
 	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
 	// /share/:token itself is NOT registered so it falls through to the SPA fallback.
-	filesharehttp.RegisterPublicShareRoute(e, r.fileShareRepo, r.fileManager, r.cfg.Auth.RateLimit, r.cfg.Auth.RateInterval, r.cfg)
+	filesharehttp.RegisterPublicShareRoute(e, deps.FileShareRepo, deps.FileManager, cfg.Auth.RateLimit, cfg.Auth.RateInterval, cfg)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
-	if r.cfg.Server.ServeFrontend {
-		e.Use(middleware.RateLimitMiddleware("assets", r.cfg.Server.AssetsRateLimit, r.cfg.Server.AssetsRateInterval))
+	if cfg.Server.ServeFrontend {
+		e.Use(middleware.RateLimitMiddleware("assets", cfg.Server.AssetsRateLimit, cfg.Server.AssetsRateInterval))
 		ServeWeb(e)
 	}
 
