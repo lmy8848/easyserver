@@ -16,7 +16,7 @@ COPY --from=frontend /web/dist ./web/dist
 # Copy dist to embed location
 RUN mkdir -p internal/api/web/dist && cp -r web/dist/* internal/api/web/dist/
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X easyserver/internal/api.Version=${VERSION}" -o easyserver ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X easyserver/internal/infra/version.Version=${VERSION}" -o easyserver ./cmd/server
 
 # Stage 3: Final image
 FROM debian:bookworm-20260601-slim
