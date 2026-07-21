@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"bufio"
@@ -10,10 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"easyserver/internal/httpx"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/systemprocess"
 
 	"github.com/gin-gonic/gin"
 )
+
+// ============================================================
+// SystemHandler — SSH logins, port checking, SSH config
+// ============================================================
 
 type SystemHandler struct {
 	executor executor.CommandExecutor
@@ -45,12 +52,12 @@ func (h *SystemHandler) GetSSHLogins(c *gin.Context) {
 		// Fallback to parsing /var/log/auth.log
 		logins, err = getAuthLogins(limit)
 		if err != nil {
-			c.Error(WrapError(err))
+			c.Error(apperror.WrapError(err))
 			return
 		}
 	}
 
-	Success(c, logins)
+	httpx.Success(c, logins)
 }
 
 // getLastLogins uses the `last` command to get login history
@@ -231,7 +238,7 @@ func (h *SystemHandler) GetSystemSSHConfig(c *gin.Context) {
 		status = strings.TrimSpace(output)
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"port":                    port,
 		"permit_root_login":       permitRootLogin,
 		"password_authentication": passwordAuth,
@@ -243,13 +250,13 @@ func (h *SystemHandler) GetSystemSSHConfig(c *gin.Context) {
 func (h *SystemHandler) CheckPort(c *gin.Context) {
 	portStr := c.Query("port")
 	if portStr == "" {
-		c.Error(ErrBadRequest.WithMessage("端口不能为空"))
+		c.Error(apperror.ErrBadRequest.WithMessage("端口不能为空"))
 		return
 	}
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {
-		c.Error(ErrBadRequest.WithMessage("无效的端口号 (1-65535)"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的端口号 (1-65535)"))
 		return
 	}
 
@@ -259,7 +266,7 @@ func (h *SystemHandler) CheckPort(c *gin.Context) {
 	if listenErr != nil {
 		// Port is in use - try to find what's using it
 		processInfo := h.getPortProcess(c.Request.Context(), port)
-		Success(c, gin.H{
+		httpx.Success(c, gin.H{
 			"available": false,
 			"port":      port,
 			"process":   processInfo,
@@ -271,7 +278,7 @@ func (h *SystemHandler) CheckPort(c *gin.Context) {
 		listener.Close()
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"available": true,
 		"port":      port,
 		"message":   fmt.Sprintf("端口 %d 可用", port),
@@ -331,7 +338,7 @@ func (h *SystemHandler) getPortProcess(ctx context.Context, port int) string {
 func (h *SystemHandler) CheckPorts(c *gin.Context) {
 	portsStr := c.Query("ports") // comma-separated: "80,443,3306"
 	if portsStr == "" {
-		c.Error(ErrBadRequest.WithMessage("端口列表不能为空"))
+		c.Error(apperror.ErrBadRequest.WithMessage("端口列表不能为空"))
 		return
 	}
 
@@ -360,5 +367,73 @@ func (h *SystemHandler) CheckPorts(c *gin.Context) {
 		})
 	}
 
-	Success(c, results)
+	httpx.Success(c, results)
+}
+
+// ============================================================
+// SystemProcessHandler — system process monitoring
+// ============================================================
+
+// SystemProcessHandler handles system process monitoring API requests.
+type SystemProcessHandler struct {
+	sps *systemprocess.Service
+}
+
+// NewSystemProcessHandler creates a new SystemProcessHandler.
+func NewSystemProcessHandler(sps *systemprocess.Service) *SystemProcessHandler {
+	return &SystemProcessHandler{sps: sps}
+}
+
+// ListSystemProcesses returns all running system processes.
+func (h *SystemProcessHandler) ListSystemProcesses(c *gin.Context) {
+	sortBy := c.DefaultQuery("sort_by", "memory")
+	order := c.DefaultQuery("order", "desc")
+	search := c.Query("search")
+	limitStr := c.DefaultQuery("limit", "100")
+	limit, _ := strconv.Atoi(limitStr)
+
+	processes, err := h.sps.ListSystemProcesses(sortBy, order, search, limit)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, processes)
+}
+
+// GetSystemProcess returns details for a specific process.
+func (h *SystemProcessHandler) GetSystemProcess(c *gin.Context) {
+	pidStr := c.Param("pid")
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的PID"))
+		return
+	}
+
+	proc, err := systemprocess.GetSystemProcess(pid)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage(fmt.Sprintf("进程 %d 不存在", pid)))
+		return
+	}
+	httpx.Success(c, proc)
+}
+
+// RegisterSystemRoutes registers /system/* routes (ssh-logins, ssh-config, check-port, check-ports)
+func RegisterSystemRoutes(protected *gin.RouterGroup, exec executor.CommandExecutor) {
+	handler := NewSystemHandler(exec)
+	protected.GET("/system/ssh-logins", handler.GetSSHLogins)
+	protected.GET("/system/ssh-config", handler.GetSystemSSHConfig)
+	protected.GET("/system/check-port", handler.CheckPort)
+	protected.GET("/system/check-ports", handler.CheckPorts)
+}
+
+// RegisterSystemProcessRoutes registers system process routes
+func RegisterSystemProcessRoutes(protected *gin.RouterGroup, sps *systemprocess.Service) {
+	handler := NewSystemProcessHandler(sps)
+
+	sysGroup := protected.Group("/system")
+	{
+		// System processes (read-only monitoring)
+		sysGroup.GET("/processes", handler.ListSystemProcesses)
+		sysGroup.GET("/processes/:pid", handler.GetSystemProcess)
+	}
 }
