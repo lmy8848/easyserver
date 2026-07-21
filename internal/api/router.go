@@ -30,6 +30,7 @@ import (
 	"easyserver/internal/fileshare"
 	filesharehttp "easyserver/internal/fileshare/http"
 	"easyserver/internal/firewall"
+	firewallhttp "easyserver/internal/firewall/http"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
@@ -365,7 +366,7 @@ func (r *Router) Setup() *gin.Engine {
 	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
 	dbserverhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
 	cronhttp.RegisterRoutes(protected, r.cronService, r.executor)
-	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
+	firewallhttp.RegisterRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, r.sshConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
 	registerTemplateRoutes(protected)
