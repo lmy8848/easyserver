@@ -17,6 +17,7 @@ import (
 	"easyserver/internal/container"
 	containerhttp "easyserver/internal/container/http"
 	"easyserver/internal/cron"
+	cronhttp "easyserver/internal/cron/http"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
@@ -361,7 +362,7 @@ func (r *Router) Setup() *gin.Engine {
 	envconfighttp.RegisterRoutes(protected, r.envConfigService)
 	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
 	registerDatabaseRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
-	registerCronRoutes(protected, r.cronService, r.executor)
+	cronhttp.RegisterRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, r.sshConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
