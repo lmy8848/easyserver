@@ -229,14 +229,29 @@ func ensureSessionsColumns(tx *sql.Tx) error {
 }
 
 // splitStatements splits SQL content by semicolons, respecting quoted strings
+// and -- line comments (semicolons inside comments or quotes do not split).
 func splitStatements(content string) []string {
 	var statements []string
 	var current strings.Builder
 	inQuote := false
 	quoteChar := byte(0)
+	inComment := false // -- line comment
 
 	for i := 0; i < len(content); i++ {
 		ch := content[i]
+
+		// Detect start of -- line comment (outside quotes)
+		if !inQuote && !inComment && ch == '-' && i+1 < len(content) && content[i+1] == '-' {
+			inComment = true
+		}
+
+		if inComment {
+			current.WriteByte(ch)
+			if ch == '\n' {
+				inComment = false
+			}
+			continue
+		}
 
 		if !inQuote && (ch == '\'' || ch == '"') {
 			inQuote = true
