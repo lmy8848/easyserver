@@ -1,8 +1,10 @@
-package api
+package http
 
 import (
 	"encoding/json"
 	"os"
+
+	"easyserver/internal/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,17 +28,17 @@ func (h *TemplateHandler) GetDockerImages(c *gin.Context) {
 	data, err := os.ReadFile(h.templatePath)
 	if err != nil {
 		// Return default templates if file not found
-		Success(c, getDefaultTemplates())
+		httpx.Success(c, getDefaultTemplates())
 		return
 	}
 
 	var templates map[string]interface{}
 	if err := json.Unmarshal(data, &templates); err != nil {
-		Success(c, getDefaultTemplates())
+		httpx.Success(c, getDefaultTemplates())
 		return
 	}
 
-	Success(c, templates)
+	httpx.Success(c, templates)
 }
 
 // getDefaultTemplates returns hardcoded default templates
@@ -66,19 +68,19 @@ func getDefaultTemplates() map[string]interface{} {
 func (h *TemplateHandler) GetTemplateCategories(c *gin.Context) {
 	data, err := os.ReadFile(h.templatePath)
 	if err != nil {
-		Success(c, []string{})
+		httpx.Success(c, []string{})
 		return
 	}
 
 	var templates map[string]interface{}
 	if err := json.Unmarshal(data, &templates); err != nil {
-		Success(c, []string{})
+		httpx.Success(c, []string{})
 		return
 	}
 
 	categories, ok := templates["categories"].([]interface{})
 	if !ok {
-		Success(c, []string{})
+		httpx.Success(c, []string{})
 		return
 	}
 
@@ -91,27 +93,27 @@ func (h *TemplateHandler) GetTemplateCategories(c *gin.Context) {
 		}
 	}
 
-	Success(c, names)
+	httpx.Success(c, names)
 }
 
 // GetScriptTemplates returns script templates
 func (h *TemplateHandler) GetScriptTemplates(c *gin.Context) {
 	data, err := os.ReadFile(h.scriptTemplatesPath)
 	if err != nil {
-		Success(c, gin.H{"categories": []interface{}{}})
+		httpx.Success(c, gin.H{"categories": []interface{}{}})
 		return
 	}
 
 	var templates map[string]interface{}
 	if err := json.Unmarshal(data, &templates); err != nil {
-		Success(c, gin.H{"categories": []interface{}{}})
+		httpx.Success(c, gin.H{"categories": []interface{}{}})
 		return
 	}
 
-	Success(c, templates)
+	httpx.Success(c, templates)
 }
 
-func registerTemplateRoutes(protected *gin.RouterGroup) {
+func RegisterRoutes(protected *gin.RouterGroup) {
 	handler := NewTemplateHandler("templates/docker-images.json", "templates/script-templates.json")
 	protected.GET("/templates/docker-images", handler.GetDockerImages)
 	protected.GET("/templates/categories", handler.GetTemplateCategories)
