@@ -34,6 +34,7 @@ import (
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
+	sshhttp "easyserver/internal/ssh/http"
 	"easyserver/internal/systemd"
 	"easyserver/internal/systemprocess"
 	"easyserver/internal/terminal"
@@ -350,7 +351,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerDatabaseRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
 	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
-	registerSSHRoutes(protected, r.sshConfigService)
+	sshhttp.RegisterRoutes(protected, r.sshConfigService)
 	registerContainerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
 	registerTemplateRoutes(protected)
 	registerProcessRoutes(protected, r.processManager)
