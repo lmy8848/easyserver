@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,62 +12,8 @@ import (
 	"easyserver/internal/infra/executor"
 )
 
-// serviceInfoEntry represents a service knowledge base entry.
-type serviceInfoEntry struct {
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	Desc     string `json:"desc"`
-}
-
-// serviceKnowledgeBase maps service names to their info.
-var serviceKnowledgeBase map[string]serviceInfoEntry
-var serviceKnowledgeOnce sync.Once
-
-// loadServiceKnowledgeBase loads the service knowledge base from JSON file.
-func loadServiceKnowledgeBase(dataDir string) {
-	serviceKnowledgeOnce.Do(func() {
-		serviceKnowledgeBase = make(map[string]serviceInfoEntry)
-
-		// Try multiple paths
-		paths := []string{
-			dataDir + "/templates/service-info.json",
-			"templates/service-info.json",
-		}
-
-		for _, path := range paths {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-
-			if err := json.Unmarshal(data, &serviceKnowledgeBase); err != nil {
-				log.Printf("systemd: failed to parse service-info.json: %v", err)
-				continue
-			}
-			log.Printf("systemd: loaded %d service descriptions", len(serviceKnowledgeBase))
-			return
-		}
-
-		log.Printf("systemd: service-info.json not found, using default descriptions")
-	})
-}
-
-// enrichServiceInfo enriches service info with knowledge base data.
+// enrichServiceInfo fills in default display fields for a service.
 func enrichServiceInfo(svc *ServiceInfo) {
-	if entry, ok := serviceKnowledgeBase[svc.Name]; ok {
-		if svc.DisplayName == "" {
-			svc.DisplayName = entry.Name
-		}
-		if svc.Category == "" {
-			svc.Category = entry.Category
-		}
-		// Only override description if systemd description is generic
-		if svc.Description == "" || svc.Description == svc.Name+".service" {
-			svc.Description = entry.Desc
-		}
-	}
-
-	// Set defaults
 	if svc.DisplayName == "" {
 		svc.DisplayName = svc.Name
 	}
@@ -112,13 +57,11 @@ type journalEntry struct {
 type ServiceManager struct {
 	mu       sync.RWMutex
 	executor executor.CommandExecutor
-	dataDir  string
 }
 
 // NewServiceManager creates a new ServiceManager.
-func NewServiceManager(exec executor.CommandExecutor, dataDir string) *ServiceManager {
-	loadServiceKnowledgeBase(dataDir)
-	return &ServiceManager{executor: exec, dataDir: dataDir}
+func NewServiceManager(exec executor.CommandExecutor) *ServiceManager {
+	return &ServiceManager{executor: exec}
 }
 
 // List returns all systemd services with basic info (name, state, description).
