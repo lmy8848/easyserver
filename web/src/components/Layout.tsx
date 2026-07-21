@@ -258,7 +258,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="sidebar-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between', width: '100%' }}>
-          {!collapsed && <div className="sidebar-version" style={{ fontSize: '12px', color: '#888', paddingLeft: '16px' }}>v{sysVersion || '...'}</div>}
+          {!collapsed && <div className="sidebar-version" style={{ fontSize: '12px', color: '#888', paddingLeft: '16px' }}>{sysVersion || '...'}</div>}
           <button className="sidebar-collapse-btn" onClick={() => setCollapsed(!collapsed)}>
             <Icon name={collapsed ? 'menu-unfold' : 'menu-fold'} />
           </button>

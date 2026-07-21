@@ -110,6 +110,14 @@ func ServeWeb(e *gin.Engine) {
 		c.FileFromFS("/assets/"+c.Param("filepath"), http.FS(webFS))
 	})
 
+	// favicon: no-cache so icon changes are visible immediately (browser & CDN).
+	faviconHandler := func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, must-revalidate")
+		c.FileFromFS("/favicon.svg", http.FS(webFS))
+	}
+	e.GET("/favicon.svg", faviconHandler)
+	e.HEAD("/favicon.svg", faviconHandler)
+
 	e.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
