@@ -1,10 +1,6 @@
 package api
 
 import (
-	"net"
-	"os"
-	"sync"
-
 	"easyserver/internal/httpx"
 	"easyserver/internal/infra/apperror"
 )
@@ -30,49 +26,6 @@ var (
 	ErrDockerNotInstalled = apperror.ErrDockerNotInstalled
 	ErrServiceNotReady    = apperror.ErrServiceNotReady
 )
-
-// globalListener holds the TCP listener for hot restart FD passing.
-var globalListener struct {
-	mu sync.Mutex
-	ln net.Listener
-}
-
-// SetListener stores the listener so RestartPanel can pass its FD to the child.
-func SetListener(ln net.Listener) {
-	globalListener.mu.Lock()
-	globalListener.ln = ln
-	globalListener.mu.Unlock()
-}
-
-// DupListenerFile returns a dup'd *os.File for the listener, or nil.
-// The caller must close the file when done.
-func DupListenerFile() *os.File {
-	globalListener.mu.Lock()
-	defer globalListener.mu.Unlock()
-	if globalListener.ln == nil {
-		return nil
-	}
-	tcpLn, ok := globalListener.ln.(*net.TCPListener)
-	if !ok {
-		return nil
-	}
-	f, err := tcpLn.File()
-	if err != nil {
-		return nil
-	}
-	return f
-}
-
-// CloseListener closes the global listener so the next process can bind a
-// new one (e.g. after a port change). Safe to call multiple times.
-func CloseListener() {
-	globalListener.mu.Lock()
-	defer globalListener.mu.Unlock()
-	if globalListener.ln != nil {
-		globalListener.ln.Close()
-		globalListener.ln = nil
-	}
-}
 
 // 错误码常量
 const (

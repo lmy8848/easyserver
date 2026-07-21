@@ -5,17 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"easyserver/internal/api"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/launcher"
 )
 
 func main() {
@@ -47,9 +46,18 @@ func main() {
 		log.Fatalf("Failed to initialize services: %v", err)
 	}
 
+	// Acquire listener: inherit FD from parent (hot restart) or bind fresh.
+	// Launcher holds it so the settings handler can pass the FD to a child on restart.
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	ln, err := launcher.AcquireListener(addr)
+	if err != nil {
+		log.Fatalf("Failed to listen on %s: %v", addr, err)
+	}
+	services.Launcher = launcher.New(ln)
+
 	router := api.NewRouter(cfg, *configPath, services.RouterDeps)
 	srv := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Addr:         addr,
 		Handler:      router.Setup(),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second, // long-running routes override via middleware.WriteTimeout
@@ -61,30 +69,6 @@ func main() {
 	} else {
 		log.Printf("Starting EasyServer on %s", srv.Addr)
 	}
-
-	// Try to inherit listener from parent (hot restart via FD passing)
-	addr := srv.Addr
-	var ln net.Listener
-	if inheritFD := os.Getenv("EASYSERVER_INHERIT_FD"); inheritFD != "" {
-		if fdNum, err := strconv.Atoi(inheritFD); err == nil {
-			f := os.NewFile(uintptr(fdNum), "listener")
-			if f != nil {
-				ln, err = net.FileListener(f)
-				f.Close()
-				if err == nil {
-					log.Printf("restart: inherited listener from parent on %s", addr)
-				}
-			}
-		}
-	}
-	if ln == nil {
-		var err error
-		ln, err = net.Listen("tcp", addr)
-		if err != nil {
-			log.Fatalf("Failed to listen on %s: %v", addr, err)
-		}
-	}
-	api.SetListener(ln)
 
 	infra.Go(func() {
 		var err error

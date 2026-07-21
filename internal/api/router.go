@@ -23,6 +23,7 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/launcher"
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
@@ -96,6 +97,9 @@ type Router struct {
 
 	// Cloud service (nil if disabled)
 	cloudService *cloud.Service
+
+	// Launcher for hot restart (FD passing)
+	launcher *launcher.Launcher
 }
 
 // RouterDeps holds the shared service instances created once in main.go.
@@ -163,6 +167,9 @@ type RouterDeps struct {
 
 	// Cloud service (nil if disabled)
 	CloudService *cloud.Service
+
+	// Launcher for hot restart (FD passing)
+	Launcher *launcher.Launcher
 }
 
 func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
@@ -224,6 +231,9 @@ func NewRouter(cfg *config.Config, configPath string, deps RouterDeps) *Router {
 
 		// Cloud service
 		cloudService: deps.CloudService,
+
+		// Launcher
+		launcher: deps.Launcher,
 	}
 }
 
@@ -326,7 +336,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerFileRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
-	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor)
+	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
 	registerSystemRoutes(protected, r.executor)
 	protected.GET("/system/ports", (&PortMonitorHandler{}).GetListeningPorts)
 	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)

@@ -20,6 +20,7 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/launcher"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -43,14 +44,16 @@ type SettingsHandler struct {
 	configPath   string
 	alertService *alert.Service
 	executor     executor.CommandExecutor
+	launcher     *launcher.Launcher
 }
 
-func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor) *SettingsHandler {
+func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, l *launcher.Launcher) *SettingsHandler {
 	return &SettingsHandler{
 		cfg:          cfg,
 		configPath:   configPath,
 		alertService: alertService,
 		executor:     exec,
+		launcher:     l,
 	}
 }
 
@@ -965,74 +968,19 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	// Return success first, then restart
 	infra.Go(func() {
 		time.Sleep(1 * time.Second)
-		log.Printf("settings: restarting panel (force=%v)...", force)
-
-		// Resolve the actual executable path
-		execPath, err := os.Executable()
-		if err != nil {
-			log.Printf("settings: failed to resolve executable path: %v", err)
-			return
+		if err := h.launcher.Restart(launcher.RestartOpts{
+			ConfigPath: h.configPath,
+			DevMode:    h.cfg.Server.DevMode,
+			Force:      force,
+		}); err != nil {
+			log.Printf("settings: restart failed: %v", err)
 		}
-		execPath, err = filepath.EvalSymlinks(execPath)
-		if err != nil {
-			log.Printf("settings: failed to resolve symlink: %v", err)
-			return
-		}
-
-		if force {
-			// Force mode: close the listener so the child re-binds on the
-			// new port/host from config. No FD inheritance.
-			CloseListener()
-			args := []string{execPath, "-config", h.configPath}
-			if h.cfg.Server.DevMode {
-				args = append(args, "-dev")
-			}
-			child, err := os.StartProcess(execPath, args, &os.ProcAttr{
-				Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-				Env:   os.Environ(),
-			})
-			if err != nil {
-				log.Printf("settings: failed to fork child process (force): %v", err)
-				return
-			}
-			log.Printf("settings: forked child PID %d (force restart, new listener), exiting parent", child.Pid)
-			os.Exit(0)
-			return
-		}
-
-		// Graceful mode: fork a child process that inherits our TCP listener FD.
-		// Zero-downtime restart — no port contention, no polling.
-		listenerFile := DupListenerFile()
-		if listenerFile == nil {
-			log.Printf("settings: no listener available for restart")
-			return
-		}
-		childEnv := append(os.Environ(),
-			"EASYSERVER_INHERIT_FD=3", // first FD after stdin(0)/stdout(1)/stderr(2)
-		)
-		args := []string{execPath, "-config", h.configPath}
-		if h.cfg.Server.DevMode {
-			args = append(args, "-dev")
-		}
-		child, err := os.StartProcess(execPath, args, &os.ProcAttr{
-			Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, listenerFile},
-			Env:   childEnv,
-		})
-		listenerFile.Close() // close our copy; child has its own
-		if err != nil {
-			log.Printf("settings: failed to fork child process: %v", err)
-			return
-		}
-		log.Printf("settings: forked child PID %d, exiting parent", child.Pid)
-
-		// Exit immediately — child already has the listener FD
-		os.Exit(0)
 	})
 	Success(c, gin.H{"message": "面板正在重启..."})
 }
 
-func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor) {
-	handler := NewSettingsHandler(cfg, configPath, alertService, exec)
+func registerSettingsRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, l *launcher.Launcher) {
+	handler := NewSettingsHandler(cfg, configPath, alertService, exec, l)
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)
 	protected.PUT("/settings/server", handler.UpdateServerConfig)
