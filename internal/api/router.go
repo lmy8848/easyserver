@@ -31,6 +31,7 @@ import (
 	filesharehttp "easyserver/internal/fileshare/http"
 	"easyserver/internal/firewall"
 	firewallhttp "easyserver/internal/firewall/http"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/executor"
@@ -293,8 +294,8 @@ func (r *Router) Setup() *gin.Engine {
 
 	// Global middleware (no rate limiter — tiered limiters are applied per group below)
 	e.Use(gin.Logger(), gin.Recovery(),
-		ErrorHandler(),
-		DomainRedirectMiddleware(r.cfg.Server.Domain, r.cfg.Server.RedirectMode, r.cfg.Server.WwwHandling),
+		httpx.ErrorHandler(),
+		middleware.DomainRedirectMiddleware(r.cfg.Server.Domain, r.cfg.Server.RedirectMode, r.cfg.Server.WwwHandling),
 		middleware.SecurityMiddleware(cspNonce),
 		middleware.CORSMiddleware(r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode),
 		middleware.IPWhitelistMiddleware(ipWhitelist),
