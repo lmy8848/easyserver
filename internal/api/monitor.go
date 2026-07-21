@@ -3,12 +3,11 @@ package api
 import (
 	"encoding/json"
 	"log"
-	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"easyserver/internal/audit"
+	"easyserver/internal/httpx"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
@@ -31,49 +30,6 @@ const (
 	MonitorWSReadLimit = 512
 )
 
-// createUpgrader creates a WebSocket upgrader with origin checking
-func createUpgrader(allowedOrigins []string, devMode bool) gorillaWs.Upgrader {
-	return gorillaWs.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		Subprotocols:    []string{"token"},
-		CheckOrigin: func(r *http.Request) bool {
-			origin := r.Header.Get("Origin")
-
-			// In dev mode, allow localhost and any same-host origin (e.g. Vite dev server)
-			if devMode {
-				if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
-					return true
-				}
-				// Allow origins from the same host (e.g. http://124.221.35.180:5173)
-				if host := r.Host; host != "" {
-					hostPart := host
-					if idx := strings.Index(host, ":"); idx >= 0 {
-						hostPart = host[:idx]
-					}
-					if strings.Contains(origin, "://"+hostPart) {
-						return true
-					}
-				}
-			}
-
-			// If no origins configured, deny all (except dev mode localhost)
-			if len(allowedOrigins) == 0 {
-				return false
-			}
-
-			// Check against allowed origins
-			for _, allowed := range allowedOrigins {
-				if origin == allowed {
-					return true
-				}
-			}
-
-			return false
-		},
-	}
-}
-
 type MonitorHandler struct {
 	monitorService *monitor.MonitorService
 	jwtSecret      string
@@ -84,7 +40,7 @@ func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string,
 	return &MonitorHandler{
 		monitorService: monitorService,
 		jwtSecret:      jwtSecret,
-		upgrader:       createUpgrader(allowedOrigins, devMode),
+		upgrader:       httpx.CreateUpgrader(allowedOrigins, devMode),
 	}
 }
 
