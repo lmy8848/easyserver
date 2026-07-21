@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"easyserver/internal/infra/apperror"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -144,6 +146,6 @@ func ServeWeb(e *gin.Engine) {
 			return
 		}
 
-		c.Error(ErrNotFound.WithMessage("页面未找到"))
+		c.Error(apperror.ErrNotFound.WithMessage("页面未找到"))
 	})
 }
