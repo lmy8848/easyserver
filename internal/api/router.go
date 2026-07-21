@@ -43,6 +43,7 @@ import (
 	processhttp "easyserver/internal/process/http"
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
+	runtimeenvhttp "easyserver/internal/runtimeenv/http"
 	"easyserver/internal/ssh"
 	sshhttp "easyserver/internal/ssh/http"
 	"easyserver/internal/systemd"
@@ -359,7 +360,7 @@ func (r *Router) Setup() *gin.Engine {
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	cloudhttp.RegisterRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
 	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
-	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
+	runtimeenvhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
 	envconfighttp.RegisterRoutes(protected, r.envConfigService)
 	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
 	dbserverhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.dbServerService, r.databaseMgmtService)
