@@ -32,6 +32,7 @@ import (
 	notificationhttp "easyserver/internal/notification/http"
 	"easyserver/internal/notify"
 	"easyserver/internal/process"
+	processhttp "easyserver/internal/process/http"
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
@@ -356,7 +357,7 @@ func (r *Router) Setup() *gin.Engine {
 	sshhttp.RegisterRoutes(protected, r.sshConfigService)
 	registerContainerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
 	registerTemplateRoutes(protected)
-	registerProcessRoutes(protected, r.processManager)
+	processhttp.RegisterRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)
 	notificationhttp.RegisterRoutes(protected, r.notificationService)
 	filesharehttp.RegisterRoutes(protected, r.fileShareRepo, r.fileManager, r.cfg)
