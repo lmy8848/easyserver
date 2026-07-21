@@ -11,11 +11,14 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/cloud"
+	cloudhttp "easyserver/internal/cloud/http"
 	"easyserver/internal/container"
+	containerhttp "easyserver/internal/container/http"
 	"easyserver/internal/cron"
 	"easyserver/internal/database_mgmt"
 	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
+	deployhttp "easyserver/internal/deploy/http"
 	"easyserver/internal/envconfig"
 	envconfighttp "easyserver/internal/envconfig/http"
 	"easyserver/internal/filemanager"
@@ -347,8 +350,8 @@ func (r *Router) Setup() *gin.Engine {
 	registerSettingsRoutes(protected, r.cfg, r.configPath, r.alertService, r.executor, r.launcher)
 	registerSystemRoutes(protected, r.executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
-	registerCloudRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
-	registerDeployRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
+	cloudhttp.RegisterRoutes(protected, r.cloudService, &r.cfg.TencentCloud, r.cfg.Server.Port)
+	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.deployService)
 	registerRuntimeRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.runtimeService, r.packageManagerService)
 	envconfighttp.RegisterRoutes(protected, r.envConfigService)
 	registerWebServerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.webServerService, r.websiteService, r.processManager)
@@ -356,7 +359,7 @@ func (r *Router) Setup() *gin.Engine {
 	registerCronRoutes(protected, r.cronService, r.executor)
 	registerFirewallRoutes(protected, r.firewallService, r.cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, r.sshConfigService)
-	registerContainerRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
+	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), r.containerService, r.auditService)
 	registerTemplateRoutes(protected)
 	processhttp.RegisterRoutes(protected, r.processManager)
 	registerSystemProcessRoutes(protected, r.systemProcessService)
