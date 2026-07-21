@@ -94,12 +94,11 @@ export type HistoryPoint = MonitorSnapshot;
 // Service types
 export interface Service {
   name: string;
-  display_name: string;
   description: string;
-  category: string;
   state: string;
   sub_state: string;
   enabled: boolean;
+  unit_file_state: string;
   pid: number;
   memory_bytes: number;
   cpu_percent: number;

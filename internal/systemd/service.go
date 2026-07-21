@@ -12,25 +12,14 @@ import (
 	"easyserver/internal/infra/executor"
 )
 
-// enrichServiceInfo fills in default display fields for a service.
-func enrichServiceInfo(svc *ServiceInfo) {
-	if svc.DisplayName == "" {
-		svc.DisplayName = svc.Name
-	}
-	if svc.Category == "" {
-		svc.Category = "其他"
-	}
-}
-
 // ServiceInfo represents a systemd service.
 type ServiceInfo struct {
 	Name          string  `json:"name"`
-	DisplayName   string  `json:"display_name"`
 	Description   string  `json:"description"`
-	Category      string  `json:"category"`
 	State         string  `json:"state"`
 	SubState      string  `json:"sub_state"`
 	Enabled       bool    `json:"enabled"`
+	UnitFileState string  `json:"unit_file_state"`
 	PID           int     `json:"pid"`
 	MemoryBytes   uint64  `json:"memory_bytes"`
 	CPUPercent    float64 `json:"cpu_percent"`
@@ -100,7 +89,6 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			svc.Description = strings.Join(fields[4:], " ")
 		}
 
-		enrichServiceInfo(&svc)
 		services = append(services, svc)
 	}
 
@@ -181,6 +169,23 @@ func (m *ServiceManager) batchGetDetailedInfoChunk(ctx context.Context, services
 	}
 }
 
+// parseMemoryCurrent parses systemd MemoryCurrent value.
+// systemd returns "[not set]" or uint64 max when memory accounting is
+// unavailable; both should be treated as 0.
+func parseMemoryCurrent(v string) uint64 {
+	if v == "" || v == "[not set]" {
+		return 0
+	}
+	var n uint64
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+		return 0
+	}
+	if n == ^uint64(0) {
+		return 0
+	}
+	return n
+}
+
 func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, props map[string]string) {
 	for i := range services {
 		if services[i].Name+".service" == id || services[i].Name == id {
@@ -188,9 +193,10 @@ func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, pr
 				fmt.Sscanf(v, "%d", &services[i].PID)
 			}
 			if v, ok := props["MemoryCurrent"]; ok {
-				fmt.Sscanf(v, "%d", &services[i].MemoryBytes)
+				services[i].MemoryBytes = parseMemoryCurrent(v)
 			}
 			if v, ok := props["UnitFileState"]; ok {
+				services[i].UnitFileState = v
 				services[i].Enabled = v == "enabled"
 			}
 			if v, ok := props["ActiveState"]; ok {
@@ -237,10 +243,11 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 		case "MainPID":
 			fmt.Sscanf(value, "%d", &svc.PID)
 		case "MemoryCurrent":
-			fmt.Sscanf(value, "%d", &svc.MemoryBytes)
+			svc.MemoryBytes = parseMemoryCurrent(value)
 		case "Description":
 			svc.Description = value
 		case "UnitFileState":
+			svc.UnitFileState = value
 			svc.Enabled = value == "enabled"
 		}
 	}
