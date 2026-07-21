@@ -1,13 +1,16 @@
-package api
+package http
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"time"
 
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/turnstile"
 	"easyserver/internal/qrlogin"
@@ -67,13 +70,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Verify Cloudflare Turnstile challenge if enabled for login.
 	if h.cfg.Server.Turnstile.EnableLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
-		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
+		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
 
@@ -83,14 +86,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Use LoginWithInfo to log activity
 	user, err := h.authService.LoginWithInfo(c.Request.Context(), req.Username, req.Password, ip, userAgent)
 	if err != nil {
-		c.Error(ErrUnauthorized.WithMessage(err.Error()))
+		c.Error(apperror.ErrUnauthorized.WithMessage(err.Error()))
 		return
 	}
 
 	// Check if TOTP is enabled for this user
 	totpEnabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), user.ID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查 TOTP 状态失败"))
+		c.Error(apperror.ErrInternal.WithMessage("检查 TOTP 状态失败"))
 		return
 	}
 
@@ -98,11 +101,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if totpEnabled {
 		tempToken, err := auth.GenerateTOTPTempToken(h.jwtSecret, user.ID)
 		if err != nil {
-			c.Error(ErrInternal.WithMessage("生成临时令牌失败"))
+			c.Error(apperror.ErrInternal.WithMessage("生成临时令牌失败"))
 			return
 		}
 
-		Success(c, gin.H{
+		httpx.Success(c, gin.H{
 			"requires_totp": true,
 			"temp_token":    tempToken,
 		})
@@ -112,7 +115,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// If TOTP is not enabled, proceed with normal login
 	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("生成令牌失败"))
+		c.Error(apperror.ErrInternal.WithMessage("生成令牌失败"))
 		return
 	}
 
@@ -153,7 +156,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功 (IP: "+ip+")")
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"token":            token,
 		"user":             user,
 		"must_change_pass": user.MustChangePass,
@@ -181,24 +184,24 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	}
 
 	h.auditSecurity(c, "退出登录")
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 func (h *AuthHandler) GetProfile(c *gin.Context) {
 	userID := c.GetInt64("user_id")
 	if userID == 0 {
-		c.Error(ErrUnauthorized.WithMessage("未登录"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("未登录"))
 		return
 	}
 
 	// Get user from database
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("获取用户信息失败"))
+		c.Error(apperror.ErrInternal.WithMessage("获取用户信息失败"))
 		return
 	}
 
-	Success(c, user)
+	httpx.Success(c, user)
 }
 
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
@@ -206,12 +209,12 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if err := h.authService.ChangePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
-		c.Error(ErrBadRequest.WithMessage(err.Error()))
+		c.Error(apperror.ErrBadRequest.WithMessage(err.Error()))
 		return
 	}
 
@@ -230,7 +233,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	h.auditSecurity(c, "修改密码")
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // TOTP verification request
@@ -265,46 +268,46 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if h.cfg.Server.Turnstile.EnableLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
-		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
+		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
 
 	// Validate temp token
 	userID, err := auth.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
 	if err != nil {
-		c.Error(ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
 		return
 	}
 
 	// Get user's TOTP secret
 	secret, err := h.authService.GetTOTPSecret(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrUnauthorized.WithMessage("该用户未启用 TOTP"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("该用户未启用 TOTP"))
 		return
 	}
 
 	// Verify TOTP code
 	if !h.authService.VerifyTOTP(secret, req.Code) {
-		c.Error(ErrUnauthorized.WithMessage("TOTP 验证码无效"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("TOTP 验证码无效"))
 		return
 	}
 
 	// Get user info
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("获取用户信息失败"))
+		c.Error(apperror.ErrInternal.WithMessage("获取用户信息失败"))
 		return
 	}
 
 	// Generate full token
 	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("生成令牌失败"))
+		c.Error(apperror.ErrInternal.WithMessage("生成令牌失败"))
 		return
 	}
 
@@ -345,7 +348,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功 (IP: "+c.ClientIP()+")")
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"token":            token,
 		"user":             user,
 		"must_change_pass": user.MustChangePass,
@@ -362,45 +365,45 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	if h.cfg.Server.Turnstile.EnableLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
-		c.Error(ErrForbidden.WithMessage("人机验证失败,请重试"))
+		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
 		return
 	}
 
 	// Validate temp token
 	userID, err := auth.ValidateTOTPTempToken(h.jwtSecret, req.TempToken)
 	if err != nil {
-		c.Error(ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("临时令牌无效或已过期"))
 		return
 	}
 
 	// Verify backup code
 	valid, err := h.authService.VerifyBackupCode(c.Request.Context(), userID, req.BackupCode)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("验证备用码失败"))
+		c.Error(apperror.ErrInternal.WithMessage("验证备用码失败"))
 		return
 	}
 	if !valid {
 		// Log failed backup code verification
-		c.Error(ErrUnauthorized.WithMessage("备用码无效"))
+		c.Error(apperror.ErrUnauthorized.WithMessage("备用码无效"))
 		return
 	}
 
 	// Get user info
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("获取用户信息失败"))
+		c.Error(apperror.ErrInternal.WithMessage("获取用户信息失败"))
 		return
 	}
 
 	// Generate full token
 	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("生成令牌失败"))
+		c.Error(apperror.ErrInternal.WithMessage("生成令牌失败"))
 		return
 	}
 
@@ -441,7 +444,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功 (IP: "+c.ClientIP()+")")
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"token":            token,
 		"user":             user,
 		"must_change_pass": user.MustChangePass,
@@ -455,11 +458,11 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	// Check if TOTP is already enabled
 	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查 TOTP 状态失败"))
+		c.Error(apperror.ErrInternal.WithMessage("检查 TOTP 状态失败"))
 		return
 	}
 	if enabled {
-		c.Error(ErrBadRequest.WithMessage("TOTP 已启用"))
+		c.Error(apperror.ErrBadRequest.WithMessage("TOTP 已启用"))
 		return
 	}
 
@@ -467,18 +470,18 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) {
 	unameStr, _ := c.Get("username")
 	result, err := h.authService.GenerateTOTP(userID, unameStr.(string))
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("生成 TOTP 设置失败"))
+		c.Error(apperror.ErrInternal.WithMessage("生成 TOTP 设置失败"))
 		return
 	}
 
 	// Store the secret temporarily (totp_enabled = 0, secret stored for verification)
 	err = h.authService.StorePendingSecret(c.Request.Context(), userID, result.Secret)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("存储 TOTP 密钥失败"))
+		c.Error(apperror.ErrInternal.WithMessage("存储 TOTP 密钥失败"))
 		return
 	}
 
-	Success(c, result)
+	httpx.Success(c, result)
 }
 
 // EnableTOTP enables 2FA for the user
@@ -487,7 +490,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 
 	var req TOTPEnableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -495,19 +498,19 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 	secret, err := h.authService.GetPendingSecret(c.Request.Context(), userID)
 	if err != nil {
 		// If no pending secret, need to setup first
-		c.Error(ErrBadRequest.WithMessage("请先设置 TOTP"))
+		c.Error(apperror.ErrBadRequest.WithMessage("请先设置 TOTP"))
 		return
 	}
 
 	// Enable TOTP
 	backupCodes, err := h.authService.EnableTOTP(c.Request.Context(), userID, secret, req.Code)
 	if err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	h.auditSecurity(c, "开启二次验证")
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"backup_codes": backupCodes,
 	})
 }
@@ -518,18 +521,18 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 
 	var req TOTPDisableRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Disable TOTP
 	if err := h.authService.DisableTOTP(c.Request.Context(), userID, req.Password); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	h.auditSecurity(c, "关闭二次验证")
-	Success(c, nil)
+	httpx.Success(c, nil)
 }
 
 // GetTOTPStatus returns the TOTP status for the user
@@ -538,11 +541,11 @@ func (h *AuthHandler) GetTOTPStatus(c *gin.Context) {
 
 	enabled, err := h.authService.IsTOTPEnabled(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("检查 TOTP 状态失败"))
+		c.Error(apperror.ErrInternal.WithMessage("检查 TOTP 状态失败"))
 		return
 	}
 
-	Success(c, gin.H{
+	httpx.Success(c, gin.H{
 		"enabled": enabled,
 	})
 }
@@ -559,7 +562,7 @@ func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Sessio
 	}
 	if sess.ClientType == "mobile" && h.cfg.Auth.MobileDeviceBinding {
 		if sess.DeviceID == "" {
-			return ErrBadRequest.WithMessage("移动端登录缺少设备标识 device_id")
+			return apperror.ErrBadRequest.WithMessage("移动端登录缺少设备标识 device_id")
 		}
 		if err := h.sessionService.CreateMobileSessionBound(c.Request.Context(), sess); err != nil {
 			if errors.Is(err, auth.ErrMobileDeviceBound) {
@@ -576,16 +579,16 @@ func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Sessio
 						Reason:    "移动端绑定:已有其他设备登录",
 					})
 				}
-				return ErrForbidden.WithMessage("已有其他移动设备登录，请先在面板「会话管理」中解绑该设备后再试")
+				return apperror.ErrForbidden.WithMessage("已有其他移动设备登录，请先在面板「会话管理」中解绑该设备后再试")
 			}
 			log.Printf("auth: create mobile session for user %d: %v", sess.UserID, err)
-			return ErrInternal.WithMessage("创建会话失败")
+			return apperror.ErrInternal.WithMessage("创建会话失败")
 		}
 		return nil
 	}
 	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.Username, sess.Role, sess.IP, sess.UserAgent, sess.ClientType, sess.DeviceID, sess.DeviceInfo, sess.ExpiresAt); err != nil {
 		log.Printf("auth: create session for user %d: %v", sess.UserID, err)
-		return ErrInternal.WithMessage("创建会话失败")
+		return apperror.ErrInternal.WithMessage("创建会话失败")
 	}
 	return nil
 }
@@ -598,7 +601,7 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 
 	sessions, err := h.sessionService.GetUserSessions(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("获取会话列表失败"))
+		c.Error(apperror.ErrInternal.WithMessage("获取会话列表失败"))
 		return
 	}
 
@@ -617,7 +620,7 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 	for _, s := range sessions {
 		views = append(views, sessionView{Session: s, IsCurrent: currentHash != "" && s.Token == currentHash})
 	}
-	Success(c, views)
+	httpx.Success(c, views)
 }
 
 // KickSession removes a specific session (kick other device)
@@ -634,21 +637,21 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		Token string `json:"token" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(ErrBadRequest.Wrap(err))
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
 	// Prevent kicking yourself (req.Token is the stored hash; currentToken is
 	// plaintext, so compare against its hash).
 	if currentToken != "" && req.Token == auth.HashToken(currentToken) {
-		c.Error(ErrBadRequest.WithMessage("不能踢出自己的会话，请使用登出功能"))
+		c.Error(apperror.ErrBadRequest.WithMessage("不能踢出自己的会话，请使用登出功能"))
 		return
 	}
 
 	// Verify the session belongs to the current user
 	sessions, err := h.sessionService.GetUserSessions(c.Request.Context(), userID)
 	if err != nil {
-		c.Error(ErrInternal.WithMessage("获取会话列表失败"))
+		c.Error(apperror.ErrInternal.WithMessage("获取会话列表失败"))
 		return
 	}
 
@@ -660,14 +663,14 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		}
 	}
 	if !found {
-		c.Error(ErrNotFound.WithMessage("会话不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("会话不存在"))
 		return
 	}
 
 	// Remove the session. req.Token is the stored hash (from GetSessions), so
 	// delete by it as-is - do NOT re-hash (that would never match).
 	if err := h.sessionService.RemoveSessionByStoredToken(c.Request.Context(), req.Token); err != nil {
-		c.Error(ErrInternal.WithMessage("删除会话失败"))
+		c.Error(apperror.ErrInternal.WithMessage("删除会话失败"))
 		return
 	}
 
@@ -680,7 +683,7 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		}
 	}
 
-	Success(c, gin.H{"message": "会话已踢出"})
+	httpx.Success(c, gin.H{"message": "会话已踢出"})
 }
 
 // KickAllOtherSessions removes all sessions except the current one
@@ -693,7 +696,7 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 
 	// Remove all other sessions
 	if err := h.sessionService.RemoveOtherSessions(c.Request.Context(), userID, currentToken); err != nil {
-		c.Error(ErrInternal.WithMessage("删除会话失败"))
+		c.Error(apperror.ErrInternal.WithMessage("删除会话失败"))
 		return
 	}
 
@@ -706,10 +709,133 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 		}
 	}
 
-	Success(c, gin.H{"message": "已踢出所有其他会话"})
+	httpx.Success(c, gin.H{"message": "已踢出所有其他会话"})
 }
 
-func registerAuthRoutes(
+type QRLoginHandler struct {
+	qrService    *qrlogin.Service
+	auditService *audit.Service
+	authService  *auth.AuthService
+	cfg          *config.Config
+}
+
+func NewQRLoginHandler(qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service, cfg *config.Config) *QRLoginHandler {
+	return &QRLoginHandler{qrService: qrService, authService: authService, auditService: auditService, cfg: cfg}
+}
+
+// CreateQRSession starts a new pending scan-to-login session and returns the QR
+// token + base64 PNG for the web to render.
+func (h *QRLoginHandler) CreateQRSession(c *gin.Context) {
+	res, err := h.qrService.CreateSession(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.ErrInternal.Wrap(err))
+		return
+	}
+	httpx.Success(c, res)
+}
+
+// GetQRStatus is polled by the web client. On confirmed it returns the web
+// login token + user payload (one-time; the session is consumed).
+// Uses POST + body so the qr_token (a secret that redeems a web JWT) never
+// lands in URL/access logs/Referer the way a query string would.
+func (h *QRLoginHandler) GetQRStatus(c *gin.Context) {
+	var req qrlogin.ConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+	if req.QRToken == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少 qr_token"))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	res, err := h.qrService.GetStatus(c.Request.Context(), req.QRToken)
+	if err != nil {
+		c.Error(apperror.ErrInternal.Wrap(err))
+		return
+	}
+	httpx.Success(c, res)
+}
+
+// ConfirmQRLogin is called by the authenticated mobile app after scanning. The
+// mobile's JWT (validated by middleware) authorizes issuing a web session for
+// the same admin user. Creates a coexisting session (mobile stays logged in).
+func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) {
+	var req struct {
+		qrlogin.ConfirmRequest
+		TurnstileToken string `json:"turnstile_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+
+	if h.cfg.Server.Turnstile.EnableQRLogin && !turnstile.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
+		c.Error(apperror.ErrForbidden.WithMessage("人机验证失败,请重试"))
+		return
+	}
+
+	userID := c.GetInt64("user_id")
+	if userID == 0 {
+		c.Error(apperror.ErrUnauthorized.WithMessage("未登录"))
+		return
+	}
+
+	// Fetch the user to build the web login payload (mirrors password login).
+	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
+	if err != nil {
+		c.Error(apperror.ErrInternal.WithMessage("获取用户信息失败"))
+		return
+	}
+
+	// {user, must_change_pass} payload handed to the web client on pickup.
+	payload, _ := json.Marshal(struct {
+		User           any  `json:"user"`
+		MustChangePass bool `json:"must_change_pass"`
+	}{User: user, MustChangePass: user.MustChangePass})
+
+	ip := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+	if err := h.qrService.Confirm(c.Request.Context(), req.QRToken, user.ID, user.Username, string(user.Role), ip, userAgent, string(payload)); err != nil {
+		switch err {
+		case qrlogin.ErrNotPending, qrlogin.ErrExpired:
+			c.Error(apperror.ErrBadRequest.WithMessage(err.Error()))
+		default:
+			c.Error(apperror.ErrInternal.Wrap(err))
+		}
+		return
+	}
+
+	if h.auditService != nil {
+		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "扫码登录授权 (IP: "+ip+")")
+	}
+	httpx.Success(c, gin.H{"ok": true})
+}
+
+// CancelQRLogin dismisses a pending QR session.
+func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) {
+	var req qrlogin.ConfirmRequest
+	_ = c.ShouldBindJSON(&req)
+	if req.QRToken == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少 qr_token"))
+		return
+	}
+	_ = h.qrService.Cancel(c.Request.Context(), req.QRToken)
+	httpx.Success(c, nil)
+}
+
+// registerQRLoginRoutes wires the scan-to-login endpoints onto the auth groups.
+// publicAuth is the rate-limited public group; authProtected requires a JWT.
+func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service, cfg *config.Config) {
+	h := NewQRLoginHandler(qrService, authService, auditService, cfg)
+	publicAuth.POST("/qr/session", h.CreateQRSession)
+	publicAuth.POST("/qr/status", h.GetQRStatus)
+	publicAuth.POST("/qr/cancel", h.CancelQRLogin)
+	authProtected.POST("/qr/confirm", h.ConfirmQRLogin)
+}
+
+// RegisterRoutes wires auth routes onto the gin router group.
+func RegisterRoutes(
 	api *gin.RouterGroup,
 	authService *auth.AuthService,
 	auditService *audit.Service,
@@ -733,7 +859,7 @@ func registerAuthRoutes(
 		auth.POST("/verify-backup", authHandler.VerifyBackupCode)
 		// Public Turnstile config (no secret key): site key + enabled flows.
 		auth.GET("/turnstile/config", func(c *gin.Context) {
-			Success(c, gin.H{
+			httpx.Success(c, gin.H{
 				"site_key":            cfg.Server.Turnstile.SiteKey,
 				"enable_login":        cfg.Server.Turnstile.EnableLogin,
 				"enable_qr_login":     cfg.Server.Turnstile.EnableQRLogin,
