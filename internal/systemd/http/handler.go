@@ -1,4 +1,4 @@
-package api
+package http
 
 import (
 	"bufio"
@@ -16,6 +16,7 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"
 
@@ -65,11 +66,11 @@ func (h *ServiceHandler) isProtectedService(name string) bool {
 func (h *ServiceHandler) List(c *gin.Context) {
 	services, err := h.serviceManager.List(c.Request.Context())
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, services)
+	httpx.Success(c, services)
 }
 
 // GetDetails returns detailed info (PID, memory, enabled) for specific services
@@ -78,66 +79,66 @@ func (h *ServiceHandler) GetDetails(c *gin.Context) {
 		Names []string `json:"names"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || len(req.Names) == 0 {
-		c.Error(ErrBadRequest.WithMessage("缺少服务名称参数"))
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少服务名称参数"))
 		return
 	}
 
 	for _, name := range req.Names {
 		name = strings.TrimSpace(name)
 		if name == "" || !validateServiceName(name) {
-			c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+			c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 			return
 		}
 	}
 
 	details, err := h.serviceManager.GetDetails(c.Request.Context(), req.Names)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, details)
+	httpx.Success(c, details)
 }
 
 // Get returns a specific service
 func (h *ServiceHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	svc, err := h.serviceManager.Get(c.Request.Context(), name)
 	if err != nil {
-		c.Error(ErrNotFound.Wrap(err))
+		c.Error(apperror.ErrNotFound.Wrap(err))
 		return
 	}
 
-	Success(c, svc)
+	httpx.Success(c, svc)
 }
 
 // Start starts a service
 func (h *ServiceHandler) Start(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	middleware.AuditSummary(c, "启动系统服务 "+name)
 	if err := h.serviceManager.Start(c.Request.Context(), name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"name": name, "state": "active"})
+	httpx.Success(c, gin.H{"name": name, "state": "active"})
 }
 
 // Stop stops a service
 func (h *ServiceHandler) Stop(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
@@ -145,23 +146,23 @@ func (h *ServiceHandler) Stop(c *gin.Context) {
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
-		c.Error(ErrBadRequest.WithMessage("无法停止面板自身的服务"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无法停止面板自身的服务"))
 		return
 	}
 
 	if err := h.serviceManager.Stop(c.Request.Context(), name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"name": name, "state": "inactive"})
+	httpx.Success(c, gin.H{"name": name, "state": "inactive"})
 }
 
 // Restart restarts a service
 func (h *ServiceHandler) Restart(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
@@ -169,38 +170,38 @@ func (h *ServiceHandler) Restart(c *gin.Context) {
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
-		c.Error(ErrBadRequest.WithMessage("无法从此处重启面板自身服务，请使用 /api/settings/restart"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无法从此处重启面板自身服务，请使用 /api/settings/restart"))
 		return
 	}
 
 	if err := h.serviceManager.Restart(c.Request.Context(), name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"name": name, "state": "active"})
+	httpx.Success(c, gin.H{"name": name, "state": "active"})
 }
 
 // Enable enables a service
 func (h *ServiceHandler) Enable(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
 	middleware.AuditSummary(c, "启用系统服务 "+name)
 	if err := h.serviceManager.Enable(c.Request.Context(), name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"name": name, "enabled": true})
+	httpx.Success(c, gin.H{"name": name, "enabled": true})
 }
 
 // Disable disables a service
 func (h *ServiceHandler) Disable(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
@@ -208,22 +209,22 @@ func (h *ServiceHandler) Disable(c *gin.Context) {
 
 	// Check if service is protected
 	if h.isProtectedService(name) {
-		c.Error(ErrBadRequest.WithMessage("无法禁用面板自身的服务"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无法禁用面板自身的服务"))
 		return
 	}
 
 	if err := h.serviceManager.Disable(c.Request.Context(), name); err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
-	Success(c, gin.H{"name": name, "enabled": false})
+	httpx.Success(c, gin.H{"name": name, "enabled": false})
 }
 
 // GetLogs returns service logs
 func (h *ServiceHandler) GetLogs(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
@@ -237,11 +238,11 @@ func (h *ServiceHandler) GetLogs(c *gin.Context) {
 
 	logs, err := h.serviceManager.GetLogs(c.Request.Context(), name, tail, since)
 	if err != nil {
-		c.Error(WrapError(err))
+		c.Error(apperror.WrapError(err))
 		return
 	}
 
-	Success(c, gin.H{"lines": logs})
+	httpx.Success(c, gin.H{"lines": logs})
 }
 
 // HandleLogsWebSocket streams service logs via WebSocket
@@ -249,7 +250,7 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	// User info already set by WSAuthMiddleware
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
-		c.Error(ErrBadRequest.WithMessage("无效的服务名称"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
@@ -393,4 +394,19 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 			return
 		}
 	}
+}
+
+// RegisterRoutes registers service management routes
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
+	handler := NewServiceHandler(serviceManager, exec, jwtSecret, auditService, allowedOrigins, devMode)
+	protected.GET("/services", handler.List)
+	protected.POST("/services/details", handler.GetDetails)
+	protected.GET("/services/:name", handler.Get)
+	protected.GET("/services/:name/logs", handler.GetLogs)
+	protected.POST("/services/:name/start", handler.Start)
+	protected.POST("/services/:name/stop", handler.Stop)
+	protected.POST("/services/:name/restart", handler.Restart)
+	protected.POST("/services/:name/enable", handler.Enable)
+	protected.POST("/services/:name/disable", handler.Disable)
+	wsGroup.GET("/services/:name/logs", handler.HandleLogsWebSocket)
 }

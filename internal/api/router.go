@@ -37,6 +37,7 @@ import (
 	"easyserver/internal/ssh"
 	sshhttp "easyserver/internal/ssh/http"
 	"easyserver/internal/systemd"
+	systemdhttp "easyserver/internal/systemd/http"
 	"easyserver/internal/systemprocess"
 	"easyserver/internal/terminal"
 	"easyserver/internal/web"
@@ -337,7 +338,7 @@ func (r *Router) Setup() *gin.Engine {
 
 	// Register domain routes
 	registerMonitorRoutes(protected, wsGroup, r.monitorService, r.cfg.Auth.JWTSecret, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
-	registerServiceRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
+	systemdhttp.RegisterRoutes(protected, wsGroup, r.serviceManager, r.executor, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	registerTerminalRoutes(protected, wsGroup, r.terminalManager, r.cfg.Auth.JWTSecret, r.auditService, r.cfg.Server.AllowedOrigins, r.cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, r.fileManager, maxUploadSize)
 	registerAuditRoutes(protected, r.db, r.auditService, r.auditRepo)
