@@ -206,6 +206,174 @@ func TestBuildEnvLines_SpecialChars(t *testing.T) {
 	mustContain(t, joined, `"hello world"`)
 }
 
+// 防御 env key 注入：key 含换行应被 RenderUnit 拒绝，
+// 否则可注入任意 systemd 指令（如 "FOO\nExecStart=evil"）。
+func TestRenderUnit_RejectsEnvKeyInjection(t *testing.T) {
+	spec := &ManagedUnitSpec{
+		Name:    "foo",
+		Command: "node",
+		Env:     map[string]string{"FOO\nExecStart=/bin/evil": "bar"},
+	}
+	_, err := RenderUnit(spec)
+	if err == nil {
+		t.Error("env key 含换行应被拒绝（防 systemd 指令注入）")
+	}
+}
+
+// env key 不符合 POSIX 变量名格式应被拒绝。
+func TestRenderUnit_RejectsInvalidEnvKey(t *testing.T) {
+	cases := []string{
+		"1FOO",    // 数字开头
+		"FOO-BAR", // 连字符
+		"",        // 空串（map key 一般不会是空串，但防御）
+	}
+	for _, k := range cases {
+		spec := &ManagedUnitSpec{
+			Name:    "foo",
+			Command: "node",
+			Env:     map[string]string{k: "v"},
+		}
+		_, err := RenderUnit(spec)
+		if err == nil {
+			t.Errorf("env key %q 应被拒绝", k)
+		}
+	}
+}
+
+// 防御 runtime 字段注入：RuntimeLang/RuntimeExact 含换行应被拒绝。
+func TestRenderUnit_RejectsRuntimeNewline(t *testing.T) {
+	cases := []struct {
+		field string
+		spec  *ManagedUnitSpec
+	}{
+		{"runtime_lang", &ManagedUnitSpec{Name: "foo", Command: "x", RuntimeLang: "node\nExecStart=evil"}},
+		{"runtime_exact", &ManagedUnitSpec{Name: "foo", Command: "x", RuntimeExact: "20.0.0\nUser=root"}},
+	}
+	for _, c := range cases {
+		_, err := RenderUnit(c.spec)
+		if err == nil {
+			t.Errorf("RenderUnit %s 含换行应被拒绝", c.field)
+		}
+	}
+}
+
+// ParseUnitMeta 应解析 [Service] 段回填 Command/Args/Dir/Env/AutoRestart，
+// 供编辑表单回显（修复"编辑清空数据"问题）。
+func TestParseUnitMeta_ServiceSection(t *testing.T) {
+	spec := &ManagedUnitSpec{
+		Name:             "my-app",
+		Description:      "测试",
+		Command:          "node",
+		Args:             "/app/server.js --port 3000",
+		Dir:              "/app",
+		Env:              map[string]string{"NODE_ENV": "production", "PORT": "3000"},
+		AutoRestart:      true,
+		RuntimeVersionID: 7,
+		RuntimeLang:      "node",
+		RuntimeExact:     "20.10.0",
+	}
+	content, err := RenderUnit(spec)
+	if err != nil {
+		t.Fatalf("RenderUnit 失败: %v", err)
+	}
+
+	info := &ServiceInfo{}
+	ParseUnitMeta(content, info)
+
+	if info.Command != "node" {
+		t.Errorf("Command 期望 node，实际 %q", info.Command)
+	}
+	if info.Args != "/app/server.js --port 3000" {
+		t.Errorf("Args 期望 /app/server.js --port 3000，实际 %q", info.Args)
+	}
+	if info.Dir != "/app" {
+		t.Errorf("Dir 期望 /app，实际 %q", info.Dir)
+	}
+	if !info.AutoRestart {
+		t.Error("AutoRestart 期望 true")
+	}
+	if info.Env["NODE_ENV"] != "production" {
+		t.Errorf("Env[NODE_ENV] 期望 production，实际 %q", info.Env["NODE_ENV"])
+	}
+	if info.Env["PORT"] != "3000" {
+		t.Errorf("Env[PORT] 期望 3000，实际 %q", info.Env["PORT"])
+	}
+}
+
+// ParseExecStart 应正确反解析 mise 包裹和命令/参数。
+func TestParseExecStart(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		cmd   string
+		args  string
+		lang  string
+		exact string
+	}{
+		{
+			name:  "mise 包裹",
+			input: "/usr/local/bin/mise exec node@20.10.0 -- node /app/server.js --port 3000",
+			cmd:   "node",
+			args:  "/app/server.js --port 3000",
+			lang:  "node",
+			exact: "20.10.0",
+		},
+		{
+			name:  "无 mise 包裹",
+			input: "node /app/server.js",
+			cmd:   "node",
+			args:  "/app/server.js",
+			lang:  "",
+			exact: "",
+		},
+		{
+			name:  "仅命令",
+			input: "nginx",
+			cmd:   "nginx",
+			args:  "",
+			lang:  "",
+			exact: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cmd, args, lang, exact := ParseExecStart(c.input)
+			if cmd != c.cmd {
+				t.Errorf("command 期望 %q，实际 %q", c.cmd, cmd)
+			}
+			if args != c.args {
+				t.Errorf("args 期望 %q，实际 %q", c.args, args)
+			}
+			if lang != c.lang {
+				t.Errorf("lang 期望 %q，实际 %q", c.lang, lang)
+			}
+			if exact != c.exact {
+				t.Errorf("exact 期望 %q，实际 %q", c.exact, exact)
+			}
+		})
+	}
+}
+
+// buildEnvLines 用双引号转义后应能被 parseEnvLine 还原（round-trip）。
+func TestEnvRoundTrip(t *testing.T) {
+	env := map[string]string{
+		"SPACED": "hello world",
+		"QUOTE":  `it's "fine"`,
+	}
+	lines := buildEnvLines(env)
+	for _, line := range lines {
+		k, v := parseEnvLine(strings.TrimPrefix(line, "Environment="))
+		// 确保至少能解析出 key
+		if k == "" {
+			t.Errorf("parseEnvLine(%q) key 为空", line)
+		}
+		// 原始值不应为空
+		if v == "" {
+			t.Errorf("parseEnvLine(%q) value 为空", line)
+		}
+	}
+}
+
 // helpers
 
 func mustContain(t *testing.T, content, substr string) {

@@ -160,6 +160,21 @@ func (r *sqliteRepo) GetRuntimeVersionStatus(ctx context.Context, runtimeVersion
 	return status, nil
 }
 
+// GetRuntime 返回 runtime_version 行的 lang/exact/status。
+// 供 systemd 包的 ServiceManager.fillRuntime 调用，补全托管 unit 的 mise 包裹参数。
+func (r *sqliteRepo) GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error) {
+	err = r.db.QueryRowContext(ctx,
+		"SELECT lang, exact, status FROM runtime_version WHERE id = ?", id).
+		Scan(&lang, &exact, &status)
+	if err == sql.ErrNoRows {
+		return "", "", "", fmt.Errorf("runtime_version %d not found", id)
+	}
+	if err != nil {
+		return "", "", "", err
+	}
+	return lang, exact, status, nil
+}
+
 func (r *sqliteRepo) ListEnabledTasks(ctx context.Context) ([]CronTask, error) {
 	rows, err := r.db.QueryContext(ctx, selectCronTaskColumns+" WHERE t.enabled = 1 ORDER BY t.id")
 	if err != nil {

@@ -33,6 +33,13 @@ type ServiceInfo struct {
 	RuntimeVersionID int64  `json:"runtime_version_id"`
 	RuntimeLang      string `json:"runtime_lang"`
 	RuntimeExact     string `json:"runtime_exact"`
+
+	// 托管服务配置回显（解析 [Service] 段得到；编辑表单用）
+	Command     string            `json:"command"`
+	Args        string            `json:"args"`
+	Dir         string            `json:"dir"`
+	Env         map[string]string `json:"env"`
+	AutoRestart bool              `json:"auto_restart"`
 }
 
 // LogLine represents a log line from journalctl.
@@ -51,10 +58,19 @@ type journalEntry struct {
 	Transport         string `json:"_TRANSPORT"`
 }
 
+// RuntimeLookup 查询 runtime_version 表，补 lang/exact/status。
+// 由 cron 包实现（systemd 包不反向依赖 cron），在 app.go 注入。
+type RuntimeLookup interface {
+	// GetRuntime 返回 runtime_version 行的 lang/exact/status。
+	// 不存在返回错误。
+	GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error)
+}
+
 // ServiceManager manages systemd services.
 type ServiceManager struct {
-	mu       sync.RWMutex
+	mu       sync.Mutex // 保护 managed CRUD 并发（创建/更新/删除互斥）
 	executor executor.CommandExecutor
+	runtime  RuntimeLookup // 可选，nil 时跳过 runtime 补全
 }
 
 // NewServiceManager creates a new ServiceManager.
@@ -62,8 +78,14 @@ func NewServiceManager(exec executor.CommandExecutor) *ServiceManager {
 	return &ServiceManager{executor: exec}
 }
 
+// SetRuntimeLookup 注入 runtime 查询依赖（app.go 装配时调用）。
+func (m *ServiceManager) SetRuntimeLookup(r RuntimeLookup) {
+	m.runtime = r
+}
+
 // List returns all systemd services with basic info (name, state, description).
 // 对 easyserver-* 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
+// 批量补全 PID/enabled/memory/uptime，前端无需再调 GetDetails。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
 	if err != nil || exitCode != 0 {
@@ -100,7 +122,7 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			svc.Description = strings.Join(fields[4:], " ")
 		}
 
-		// 托管服务：读 unit 文件补元数据（本地 IO，不调 systemctl）
+		// 托管服务：读 unit 文件补元数据 + 配置回显（本地 IO，不调 systemctl）
 		if shortName := UnitName(fields[0]); shortName != "" {
 			if content, _ := readUnitFile(shortName); content != "" {
 				ParseUnitMeta(content, &svc)
@@ -109,6 +131,9 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 
 		services = append(services, svc)
 	}
+
+	// 批量补全 PID/enabled/memory/uptime（避免前端 N+1 调 GetDetails）
+	m.batchGetDetailedInfo(ctx, services)
 
 	return services, nil
 }
@@ -478,11 +503,20 @@ func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) 
 // ============================================================
 
 // CreateManaged 生成 unit 文件、daemon-reload、按需 enable/start。
-// 已存在同名 unit 返回错误。
+// 已存在同名 unit 返回错误。全程持 m.mu 防并发创建同名。
 func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return err
 	}
+
+	// runtime 补全：前端只传 runtime_version_id，后端查 DB 补 lang/exact。
+	if err := m.fillRuntime(ctx, spec); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.managedUnitExists(spec.Name) {
 		return fmt.Errorf("托管服务 %s 已存在", spec.Name)
 	}
@@ -494,26 +528,45 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 	if err := writeUnitFile(spec.Name, content); err != nil {
 		return fmt.Errorf("写 unit 文件失败: %w", err)
 	}
+	// daemon-reload 失败：回滚（删 unit 文件），避免孤儿文件阻塞重试。
 	if err := m.daemonReload(ctx); err != nil {
-		return err
+		_ = removeUnitFile(spec.Name)
+		return fmt.Errorf("daemon-reload 失败（已回滚）: %w", err)
 	}
 	if spec.AutoStart {
 		if err := m.enableManaged(ctx, spec.Name); err != nil {
-			return err
+			// enable 失败：回滚 unit 文件 + reload。
+			_ = removeUnitFile(spec.Name)
+			_ = m.daemonReload(ctx)
+			return fmt.Errorf("enable 失败（已回滚）: %w", err)
 		}
 		if err := m.startManaged(ctx, spec.Name); err != nil {
-			return err
+			// start 失败：disable + 回滚 unit 文件 + reload。
+			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "disable", managedUnitPrefix+spec.Name+managedUnitSuffix)
+			_ = removeUnitFile(spec.Name)
+			_ = m.daemonReload(ctx)
+			return fmt.Errorf("start 失败（已回滚）: %w", err)
 		}
 	}
 	return nil
 }
 
 // UpdateManaged 重写 unit 文件 + daemon-reload。
-// 运行中则重启使新配置生效；enabled 状态保持不变。
+// 运行中则 restart 使新配置生效；enabled 状态按 AutoStart 切换。
+// 全程持 m.mu 防并发更新/删除。
 func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return err
 	}
+
+	// runtime 补全
+	if err := m.fillRuntime(ctx, spec); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if !m.managedUnitExists(spec.Name) {
 		return fmt.Errorf("托管服务 %s 不存在", spec.Name)
 	}
@@ -541,40 +594,70 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		}
 	}
 
-	// 运行中则重启使新配置生效
+	// 运行中则 restart 使新配置生效（而非 startManaged 的幂等 no-op）
 	info, err := m.Get(ctx, managedUnitPrefix+spec.Name)
 	if err == nil && info.State == "active" {
-		if err := m.startManaged(ctx, spec.Name); err != nil {
-			// restart 失败不回滚 unit 文件，让用户看到错误后手动处理
-			return fmt.Errorf("unit 已更新但重启失败: %w", err)
+		fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
+		output, exitCode, rerr := m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
+		if rerr != nil || exitCode != 0 {
+			return fmt.Errorf("unit 已更新但重启失败: %s", output)
 		}
 	}
 	return nil
 }
 
 // DeleteManaged 停止 + disable + 删 unit 文件 + daemon-reload。
+// 全程持 m.mu 防并发。stop 失败返回错误（避免孤儿进程）。
 func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 	if err := ValidateManagedName(name); err != nil {
 		return err
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if !m.managedUnitExists(name) {
 		return fmt.Errorf("托管服务 %s 不存在", name)
 	}
 
-	fullName := managedUnitPrefix + name
-	// 停止（best-effort，可能本来就 inactive）
-	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "stop", fullName+managedUnitSuffix); err != nil {
-		// 记录但继续，确保 unit 文件能删掉
-		log.Printf("systemd: stop %s during delete: %v", fullName, err)
-	}
-	// disable（best-effort）
-	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "disable", fullName+managedUnitSuffix); err != nil {
+	fullName := managedUnitPrefix + name + managedUnitSuffix
+
+	// 先 disable（best-effort，可能本来就未 enable）
+	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "disable", fullName); err != nil {
 		log.Printf("systemd: disable %s during delete: %v", fullName, err)
 	}
+
+	// 停止：失败则返回错误，避免删 unit 后留孤儿进程。
+	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "stop", fullName); err != nil {
+		return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
+	}
+
 	if err := removeUnitFile(name); err != nil {
 		return fmt.Errorf("删除 unit 文件失败: %w", err)
 	}
 	return m.daemonReload(ctx)
+}
+
+// fillRuntime 当 spec.RuntimeVersionID > 0 时查 DB 补 RuntimeLang/RuntimeExact，
+// 并校验 runtime 状态为 installed。前端只传 ID，lang/exact 由后端补全，
+// 避免前端传错或不一致。
+func (m *ServiceManager) fillRuntime(ctx context.Context, spec *ManagedUnitSpec) error {
+	if spec.RuntimeVersionID <= 0 {
+		return nil
+	}
+	if m.runtime == nil {
+		return fmt.Errorf("runtime 查询未配置，无法绑定运行时版本 %d", spec.RuntimeVersionID)
+	}
+	lang, exact, status, err := m.runtime.GetRuntime(ctx, spec.RuntimeVersionID)
+	if err != nil {
+		return fmt.Errorf("查询运行时版本 %d 失败: %w", spec.RuntimeVersionID, err)
+	}
+	if status != "installed" {
+		return fmt.Errorf("运行时版本 %d 状态为 %s，无法绑定（需先安装）", spec.RuntimeVersionID, status)
+	}
+	spec.RuntimeLang = lang
+	spec.RuntimeExact = exact
+	return nil
 }
 
 // --- managed helpers ---

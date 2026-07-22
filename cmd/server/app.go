@@ -344,8 +344,9 @@ func (a *App) wire() error {
 
 	// Container, systemd, cron
 	a.ContainerService = container.NewService(cmdExec)
-	a.ServiceManager = systemd.NewServiceManager(cmdExec)
 	cronRepo := cron.NewSQLiteRepository(db)
+	a.ServiceManager = systemd.NewServiceManager(cmdExec)
+	a.ServiceManager.SetRuntimeLookup(cronRepo) // 注入 runtime 查询，托管 unit 绑定 runtime 时补 lang/exact
 	a.CronService = cron.NewService(cronRepo, cmdExec)
 	// Sync enabled cron tasks to /etc/cron.d on startup so schedules take effect
 	// after a panel restart (the CRUD methods also sync on change).

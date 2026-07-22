@@ -371,6 +371,10 @@ export default function CronTasks({
             label="运行时版本"
             rules={[{ required: true, message: '请选择已安装的运行时版本' }]}
             extra="任务会通过 mise exec <lang>@<exact> -- sh -c <cmd> 执行"
+            // RuntimeVersionSelect 的 value/onChange 是 {id,lang,exact} 对象，
+            // 表单只存 id（cron API 只需要 id）。
+            getValueFromEvent={(v?: { id: number }) => v?.id}
+            getValueProps={(v: number) => ({ value: v ? { id: v } : undefined })}
           >
             <RuntimeVersionSelect />
           </Form.Item>

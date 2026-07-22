@@ -19,6 +19,13 @@ const { TextArea } = Input;
 
 const MODAL_TOP_OFFSET = 40;
 
+// 表单中间类型：env 是 JSON 字符串（TextArea），runtime 是 {id,lang,exact} 对象。
+// 提交时 handleSubmit 再转成 ManagedServiceSpec（env -> object, runtime -> 三字段）。
+type ManagedServiceForm = Omit<ManagedServiceSpec, 'env' | 'runtime_version_id' | 'runtime_lang' | 'runtime_exact'> & {
+  env: string;
+  runtime?: { id: number; lang: string; exact: string };
+};
+
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   active: { color: 'green', label: '运行中' },
   inactive: { color: 'default', label: '已停止' },
@@ -63,7 +70,7 @@ function ManagedTab() {
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
-  const [form] = Form.useForm<ManagedServiceSpec>();
+  const [form] = Form.useForm<ManagedServiceForm>();
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -89,24 +96,29 @@ function ManagedTab() {
   const handleCreate = () => {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ auto_restart: true, max_restarts: 10, restart_delay: 5, stop_timeout: 10, auto_start: false });
+    form.setFieldsValue({ auto_restart: true, max_restarts: 10, restart_delay: 5, stop_timeout: 10, auto_start: false, env: '' });
     setModalVisible(true);
   };
 
   const handleEdit = (s: Service) => {
     setEditing(s);
+    // 后端 ParseUnitMeta 已从 [Service] 段回填 command/args/dir/env/auto_restart，
+    // 编辑时直接用，不再清空。
     form.setFieldsValue({
       name: s.name,
       description: s.description,
-      command: '', // command/args/dir/env 需从 unit 解析，后端暂未返回，编辑时留空让用户重填
-      args: '',
-      dir: '',
-      auto_restart: s.state !== 'inactive', // 近似
+      command: s.command || '',
+      args: s.args || '',
+      dir: s.dir || '',
+      env: s.env && Object.keys(s.env).length > 0 ? JSON.stringify(s.env, null, 2) : '',
+      auto_restart: s.auto_restart,
       max_restarts: 10,
       restart_delay: 5,
       stop_timeout: 10,
       auto_start: s.enabled,
-      runtime_version_id: s.runtime_version_id || undefined,
+      runtime: (s.runtime_version_id && s.runtime_lang && s.runtime_exact)
+        ? { id: s.runtime_version_id, lang: s.runtime_lang, exact: s.runtime_exact }
+        : undefined,
     });
     setModalVisible(true);
   };
@@ -114,7 +126,34 @@ function ManagedTab() {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      const spec: ManagedServiceSpec = { ...values };
+      // env 表单是 TextArea（JSON 字符串），parse 成 object 给后端。
+      let env: Record<string, string> = {};
+      if (typeof values.env === 'string' && values.env.trim()) {
+        try {
+          env = JSON.parse(values.env);
+        } catch {
+          message.error('环境变量不是合法的 JSON');
+          return;
+        }
+      }
+      // runtime 表单存的是 {id,lang,exact} 对象，拆成三字段给后端。
+      const rt = values.runtime as { id: number; lang: string; exact: string } | undefined;
+      const spec: ManagedServiceSpec = {
+        name: values.name,
+        description: values.description,
+        command: values.command,
+        args: values.args || '',
+        dir: values.dir || '',
+        env,
+        auto_restart: values.auto_restart,
+        max_restarts: values.max_restarts,
+        restart_delay: values.restart_delay,
+        stop_timeout: values.stop_timeout,
+        auto_start: values.auto_start,
+        runtime_version_id: rt?.id || 0,
+        runtime_lang: rt?.lang || '',
+        runtime_exact: rt?.exact || '',
+      };
       if (editing) {
         await serviceApi.update(editing.name, spec);
         message.success('更新成功');
@@ -276,7 +315,7 @@ function ManagedTab() {
 function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
   visible: boolean;
   editing: Service | null;
-  form: ReturnType<typeof Form.useForm<ManagedServiceSpec>>[0];
+  form: ReturnType<typeof Form.useForm<ManagedServiceForm>>[0];
   onOk: () => void;
   onCancel: () => void;
 }) {
@@ -307,7 +346,7 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
           <Input placeholder="命令行参数（空格分隔）" />
         </Form.Item>
         <Form.Item
-          name="runtime_version_id"
+          name="runtime"
           label="运行时版本"
           extra="启动命令会自动通过 mise exec <lang>@<exact> 包裹"
         >
@@ -423,19 +462,23 @@ function SystemTab() {
     },
     {
       title: '操作', key: 'action', width: 180,
-      render: (_: unknown, r: Service) => (
-        <Space size="small">
-          <Button size="small" icon={<CaretRightOutlined />}
-            disabled={r.state === 'active'} loading={actingService === r.name}
-            onClick={() => handleAction(r.name, 'start')}>启动</Button>
-          <Button size="small" icon={<PauseOutlined />}
-            disabled={r.state === 'inactive'} loading={actingService === r.name}
-            onClick={() => handleAction(r.name, 'stop')}>停止</Button>
-          <Button size="small" icon={<RedoOutlined />}
-            loading={actingService === r.name}
-            onClick={() => handleAction(r.name, 'restart')}>重启</Button>
-        </Space>
-      ),
+      render: (_: unknown, r: Service) => {
+        // 保护面板自身服务，禁止操作避免锁死自己
+        const isSelf = r.name === 'easyserver';
+        return (
+          <Space size="small">
+            <Button size="small" icon={<CaretRightOutlined />}
+              disabled={isSelf || r.state === 'active'} loading={actingService === r.name}
+              onClick={() => handleAction(r.name, 'start')}>启动</Button>
+            <Button size="small" icon={<PauseOutlined />}
+              disabled={isSelf || r.state === 'inactive'} loading={actingService === r.name}
+              onClick={() => handleAction(r.name, 'stop')}>停止</Button>
+            <Button size="small" icon={<RedoOutlined />}
+              disabled={isSelf} loading={actingService === r.name}
+              onClick={() => handleAction(r.name, 'restart')}>重启</Button>
+          </Space>
+        );
+      },
     },
   ];
 

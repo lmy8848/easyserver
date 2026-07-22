@@ -22,6 +22,10 @@ const (
 // 防止用户输入注入到文件名或 unit 指令里。
 var unitNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$`)
 
+// envKeyRegex 限制 env 变量名格式，防止 key 含换行注入 unit 指令。
+// 标准 POSIX 环境变量名：字母/数字/下划线，不以数字开头。
+var envKeyRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // ManagedUnitSpec 是创建/更新托管服务的输入配置。
 // 对应原 internal/process 的 CreateProcessRequest 字段子集（去掉了 group/log_file/startup_timeout）。
 type ManagedUnitSpec struct {
@@ -90,6 +94,19 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	}
 	if strings.ContainsAny(spec.Dir, "\n\r") {
 		return "", fmt.Errorf("dir 不能包含换行")
+	}
+	// 防御纵深：runtime 字段也不能含换行，否则可注入 unit 指令。
+	if strings.ContainsAny(spec.RuntimeLang, "\n\r") {
+		return "", fmt.Errorf("runtime_lang 不能包含换行")
+	}
+	if strings.ContainsAny(spec.RuntimeExact, "\n\r") {
+		return "", fmt.Errorf("runtime_exact 不能包含换行")
+	}
+	// env key 校验：只允许合法的 shell 变量名，防注入。
+	for k := range spec.Env {
+		if !envKeyRegex.MatchString(k) {
+			return "", fmt.Errorf("env key %q 非法（只允许字母数字下划线，不以数字开头）", k)
+		}
 	}
 
 	execStart := buildExecStart(spec)
@@ -175,7 +192,8 @@ func buildExecStart(spec *ManagedUnitSpec) string {
 }
 
 // buildEnvLines 把 env map 转成 systemd Environment= 行。
-// 值含空格或特殊字符时用引号包裹；拒绝换行。
+// key 已在 RenderUnit 中用 envKeyRegex 校验；value 含换行跳过，
+// 含空格/制表/引号时用双引号包裹并转义（systemd Environment= 语义）。
 func buildEnvLines(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil
@@ -186,7 +204,9 @@ func buildEnvLines(env map[string]string) []string {
 			continue // 跳过非法值，不阻断整体生成
 		}
 		if strings.ContainsAny(v, " \t\"'") {
-			v = fmt.Sprintf("%q", v)
+			// systemd Environment= 双引号语义：内部双引号和反斜杠转义。
+			// 与 Go %q 不同（Go 转义不可见字符），这里只转义 " 和 \。
+			v = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
 		}
 		lines = append(lines, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -194,48 +214,118 @@ func buildEnvLines(env map[string]string) []string {
 }
 
 // ParseUnitMeta 从 unit 文件内容解析元数据注释，填入 info 的托管字段。
-// 只读 [Unit] 段的注释和 Description，不依赖文件存在。
+// 读 [Unit] 段注释（ManagedBy/Runtime*）+ Description；
+// 读 [Service] 段 ExecStart/WorkingDirectory/Environment/Restart 回填配置。
 // 调用方负责设置 info.Name（不含前缀）。
 func ParseUnitMeta(content string, info *ServiceInfo) {
 	scanner := strings.Split(content, "\n")
-	inUnitSection := false
+	section := ""
 	for _, line := range scanner {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			inUnitSection = trimmed == "[Unit]"
+			section = trimmed
 			continue
 		}
-		if !inUnitSection {
-			continue
-		}
-		// 注释行：# Key=Value
-		if strings.HasPrefix(trimmed, "# ") {
-			kv := strings.SplitN(strings.TrimPrefix(trimmed, "# "), "=", 2)
-			if len(kv) != 2 {
+
+		// [Unit] 段：注释元数据 + Description
+		if section == "[Unit]" {
+			if strings.HasPrefix(trimmed, "# ") {
+				kv := strings.SplitN(strings.TrimPrefix(trimmed, "# "), "=", 2)
+				if len(kv) != 2 {
+					continue
+				}
+				key := strings.TrimSpace(kv[0])
+				val := strings.TrimSpace(kv[1])
+				switch key {
+				case managedMarkerKey:
+					info.Managed = val == managedMarkerValue
+				case "RuntimeVersionID":
+					fmt.Sscanf(val, "%d", &info.RuntimeVersionID)
+				case "RuntimeLang":
+					info.RuntimeLang = val
+				case "RuntimeExact":
+					info.RuntimeExact = val
+				}
 				continue
 			}
-			key := strings.TrimSpace(kv[0])
-			val := strings.TrimSpace(kv[1])
-			switch key {
-			case managedMarkerKey:
-				info.Managed = val == managedMarkerValue
-			case "RuntimeVersionID":
-				fmt.Sscanf(val, "%d", &info.RuntimeVersionID)
-			case "RuntimeLang":
-				info.RuntimeLang = val
-			case "RuntimeExact":
-				info.RuntimeExact = val
+			if strings.HasPrefix(trimmed, "Description=") {
+				desc := strings.TrimPrefix(trimmed, "Description=")
+				desc = strings.TrimPrefix(desc, "easyserver-managed: ")
+				info.Description = desc
 			}
-			continue
 		}
-		// Description= 行
-		if strings.HasPrefix(trimmed, "Description=") {
-			desc := strings.TrimPrefix(trimmed, "Description=")
-			// 去掉 "easyserver-managed: " 前缀还原显示名
-			desc = strings.TrimPrefix(desc, "easyserver-managed: ")
-			info.Description = desc
+
+		// [Service] 段：回填配置供编辑表单用
+		if section == "[Service]" {
+			switch {
+			case strings.HasPrefix(trimmed, "ExecStart="):
+				execStart := strings.TrimPrefix(trimmed, "ExecStart=")
+				cmd, args, lang, exact := ParseExecStart(execStart)
+				info.Command = cmd
+				info.Args = args
+				// 若 [Unit] 注释里有 runtime 信息则优先，否则从 ExecStart 反解析
+				if info.RuntimeLang == "" {
+					info.RuntimeLang = lang
+				}
+				if info.RuntimeExact == "" {
+					info.RuntimeExact = exact
+				}
+			case strings.HasPrefix(trimmed, "WorkingDirectory="):
+				info.Dir = strings.TrimPrefix(trimmed, "WorkingDirectory=")
+			case strings.HasPrefix(trimmed, "Environment="):
+				k, v := parseEnvLine(strings.TrimPrefix(trimmed, "Environment="))
+				if k != "" {
+					if info.Env == nil {
+						info.Env = make(map[string]string)
+					}
+					info.Env[k] = v
+				}
+			case trimmed == "Restart=on-failure":
+				info.AutoRestart = true
+			}
 		}
 	}
+}
+
+// ParseExecStart 反解析 ExecStart 值，拆出 mise 包裹、command、args。
+// 输入如 "/usr/local/bin/mise exec node@20.10.0 -- node /app/server.js --port 3000"
+// 返回 command="node", args="/app/server.js --port 3000", lang="node", exact="20.10.0"。
+// 无 mise 包裹时 lang/exact 为空。
+func ParseExecStart(execStart string) (command, args, lang, exact string) {
+	parts := parseArgs(execStart)
+	idx := 0
+	if len(parts) >= 5 && parts[0] == "/usr/local/bin/mise" && parts[1] == "exec" && parts[3] == "--" {
+		// parts[2] = "node@20.10.0"
+		rv := strings.SplitN(parts[2], "@", 2)
+		if len(rv) == 2 {
+			lang, exact = rv[0], rv[1]
+		}
+		idx = 4
+	}
+	if idx < len(parts) {
+		command = parts[idx]
+		idx++
+	}
+	if idx < len(parts) {
+		// args 用空格重新 join，保持简单文本（与原 parseArgs 可逆）
+		args = strings.Join(parts[idx:], " ")
+	}
+	return command, args, lang, exact
+}
+
+// parseEnvLine 解析 Environment= 行的 "KEY=VALUE" 或 KEY="quoted value"。
+func parseEnvLine(line string) (key, val string) {
+	eq := strings.Index(line, "=")
+	if eq < 0 {
+		return "", ""
+	}
+	key = line[:eq]
+	val = line[eq+1:]
+	// 去掉 systemd 双引号包裹
+	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+		val = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(val[1 : len(val)-1])
+	}
+	return key, val
 }
 
 // escapeUnitValue 转义 unit 文件值里的换行（防御性，正常已在 RenderUnit 前拦截）。
