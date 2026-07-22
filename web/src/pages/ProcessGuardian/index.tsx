@@ -65,14 +65,12 @@ function ManagedTab() {
   const [editing, setEditing] = useState<Service | null>(null);
   const [form] = Form.useForm<ManagedServiceSpec>();
 
-  // 托管服务的完整名是 easyserver-<name>，启停/重启走通用 serviceApi
-  const fullName = (name: string) => `easyserver-${name}`;
-
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await serviceApi.listManaged();
-      setServices(res.data?.data || []);
+      const res = await serviceApi.list();
+      // 只展示托管服务（managed=true）
+      setServices((res.data?.data || []).filter(s => s.managed));
     } catch {
       message.error('获取托管服务列表失败');
     } finally {
@@ -116,13 +114,12 @@ function ManagedTab() {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      // env 表单是 JSON 文本框，转成对象
       const spec: ManagedServiceSpec = { ...values };
       if (editing) {
-        await serviceApi.updateManaged(editing.name, spec);
+        await serviceApi.update(editing.name, spec);
         message.success('更新成功');
       } else {
-        await serviceApi.createManaged(spec);
+        await serviceApi.create(spec);
         message.success('创建成功');
       }
       setModalVisible(false);
@@ -135,7 +132,7 @@ function ManagedTab() {
 
   const handleDelete = async (name: string) => {
     try {
-      await serviceApi.deleteManaged(name);
+      await serviceApi.delete(name);
       message.success('已删除');
       fetch();
     } catch (e) {
@@ -148,7 +145,7 @@ function ManagedTab() {
       : action === 'stop' ? serviceApi.stop : serviceApi.restart;
     setOperating(`${action}-${name}`);
     try {
-      await fn(fullName(name));
+      await fn(name);
       message.success(`${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
       fetch();
     } catch (e) {
@@ -367,9 +364,8 @@ function SystemTab() {
     setLoading(true);
     try {
       const res = await serviceApi.list();
-      const all = res.data?.data || [];
-      // 排除面板托管服务（easyserver-* 前缀）
-      setServices(all.filter(s => !s.name.startsWith('easyserver-')));
+      // 排除面板托管服务（managed=true）
+      setServices((res.data?.data || []).filter(s => !s.managed));
     } catch {
       // ignore
     } finally {

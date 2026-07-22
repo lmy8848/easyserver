@@ -143,11 +143,23 @@ export const serviceApi = {
   list: () =>
     api.get<ApiResponse<Service[]>>('/services'),
 
+  // 创建托管服务（生成 easyserver-* unit）
+  create: (data: ManagedServiceSpec) =>
+    api.post<ApiResponse>('/services', data),
+
   getDetails: (names: string[]) =>
     api.post<ApiResponse<Service[]>>('/services/details', { names }),
 
   get: (name: string) =>
     api.get<ApiResponse<Service>>(`/services/${name}`),
+
+  // 更新托管服务（:name 须为完整名 easyserver-foo）
+  update: (name: string, data: ManagedServiceSpec) =>
+    api.put<ApiResponse>(`/services/${name}`, data),
+
+  // 删除托管服务（:name 须为完整名 easyserver-foo）
+  delete: (name: string) =>
+    api.delete<ApiResponse>(`/services/${name}`),
 
   start: (name: string) =>
     api.post<ApiResponse>(`/services/${name}/start`),
@@ -166,22 +178,6 @@ export const serviceApi = {
 
   getLogs: (name: string, tail?: number) =>
     api.get<ApiResponse<{ lines: Array<{ time: string; message: string; priority: string }> }>>(`/services/${name}/logs`, { params: { tail } }),
-
-  // Managed service CRUD（面板托管服务）
-  listManaged: () =>
-    api.get<ApiResponse<Service[]>>('/services/managed'),
-
-  createManaged: (data: ManagedServiceSpec) =>
-    api.post<ApiResponse>('/services/managed', data),
-
-  getManaged: (name: string) =>
-    api.get<ApiResponse<Service>>(`/services/managed/${name}`),
-
-  updateManaged: (name: string, data: ManagedServiceSpec) =>
-    api.put<ApiResponse>(`/services/managed/${name}`, data),
-
-  deleteManaged: (name: string) =>
-    api.delete<ApiResponse>(`/services/managed/${name}`),
 };
 
 // File API

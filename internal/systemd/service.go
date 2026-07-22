@@ -63,6 +63,7 @@ func NewServiceManager(exec executor.CommandExecutor) *ServiceManager {
 }
 
 // List returns all systemd services with basic info (name, state, description).
+// 对 easyserver-* 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
 	if err != nil || exitCode != 0 {
@@ -88,14 +89,22 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			continue
 		}
 
+		name := strings.TrimSuffix(fields[0], ".service")
 		svc := ServiceInfo{
-			Name:     strings.TrimSuffix(fields[0], ".service"),
+			Name:     name,
 			State:    fields[2],
 			SubState: fields[3],
 		}
 
 		if len(fields) > 4 {
 			svc.Description = strings.Join(fields[4:], " ")
+		}
+
+		// 托管服务：读 unit 文件补元数据（本地 IO，不调 systemctl）
+		if shortName := UnitName(fields[0]); shortName != "" {
+			if content, _ := readUnitFile(shortName); content != "" {
+				ParseUnitMeta(content, &svc)
+			}
 		}
 
 		services = append(services, svc)
@@ -258,6 +267,13 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 		case "UnitFileState":
 			svc.UnitFileState = value
 			svc.Enabled = value == "enabled"
+		}
+	}
+
+	// 托管服务：读 unit 文件补元数据
+	if shortName := UnitName(name + ".service"); shortName != "" {
+		if content, _ := readUnitFile(shortName); content != "" {
+			ParseUnitMeta(content, svc)
 		}
 	}
 
@@ -559,85 +575,6 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 		return fmt.Errorf("删除 unit 文件失败: %w", err)
 	}
 	return m.daemonReload(ctx)
-}
-
-// ListManaged 列出所有面板托管服务（easyserver-* 前缀的 unit）。
-// 返回 ServiceInfo，托管元数据字段已填充。
-func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error) {
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units",
-		managedUnitPrefix+"*"+managedUnitSuffix,
-		"--type=service", "--all", "--no-pager", "--plain", "--full")
-	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("列出托管服务失败: %w", err)
-	}
-
-	var result []ServiceInfo
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "UNIT") || strings.HasPrefix(line, "LOAD") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-		unitFile := fields[0]
-		name := UnitName(unitFile)
-		if name == "" {
-			continue
-		}
-
-		info := ServiceInfo{
-			Name:     name,
-			State:    fields[2],
-			SubState: fields[3],
-		}
-
-		// 读 unit 文件解析托管元数据注释
-		content, _ := readUnitFile(name)
-		if content != "" {
-			ParseUnitMeta(content, &info)
-		}
-
-		// 补 enabled + pid
-		fullName := managedUnitPrefix + name
-		if d, err := m.Get(ctx, fullName); err == nil {
-			info.Enabled = d.Enabled
-			info.PID = d.PID
-		}
-
-		result = append(result, info)
-	}
-
-	return result, nil
-}
-
-// GetManaged 返回单个托管服务详情（ServiceInfo + 托管元数据）。
-func (m *ServiceManager) GetManaged(ctx context.Context, name string) (*ServiceInfo, error) {
-	if err := ValidateManagedName(name); err != nil {
-		return nil, err
-	}
-	if !m.managedUnitExists(name) {
-		return nil, fmt.Errorf("托管服务 %s 不存在", name)
-	}
-
-	content, err := readUnitFile(name)
-	if err != nil {
-		return nil, fmt.Errorf("读 unit 文件失败: %w", err)
-	}
-
-	fullName := managedUnitPrefix + name
-	d, err := m.Get(ctx, fullName)
-	if err != nil {
-		return nil, err
-	}
-
-	// 解析元数据注释覆盖到 d（Get 返回的 Description 是 systemd 解析的，
-	// ParseUnitMeta 会还原去掉 "easyserver-managed: " 前缀的显示名）
-	d.Name = name
-	ParseUnitMeta(content, d)
-	return d, nil
 }
 
 // --- managed helpers ---
