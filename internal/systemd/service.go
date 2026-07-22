@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -444,6 +445,252 @@ func (m *ServiceManager) serviceExists(ctx context.Context, name string) bool {
 func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) error {
 	if !m.serviceExists(ctx, name) {
 		return fmt.Errorf("service %s does not exist", name)
+	}
+	return nil
+}
+
+// ============================================================
+// Managed unit CRUD（面板托管服务）
+// ============================================================
+
+// ManagedServiceInfo 是 ListManaged 返回的单条记录：unit 元数据 + 运行时状态。
+type ManagedServiceInfo struct {
+	ManagedUnitMeta
+	State    string `json:"state"`     // active/inactive/failed
+	SubState string `json:"sub_state"` // running/dead
+	Enabled  bool   `json:"enabled"`
+	PID      int    `json:"pid"`
+}
+
+// CreateManaged 生成 unit 文件、daemon-reload、按需 enable/start。
+// 已存在同名 unit 返回错误。
+func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
+	if err := ValidateManagedName(spec.Name); err != nil {
+		return err
+	}
+	if m.managedUnitExists(spec.Name) {
+		return fmt.Errorf("托管服务 %s 已存在", spec.Name)
+	}
+
+	content, err := RenderUnit(spec)
+	if err != nil {
+		return fmt.Errorf("生成 unit 文件失败: %w", err)
+	}
+	if err := writeUnitFile(spec.Name, content); err != nil {
+		return fmt.Errorf("写 unit 文件失败: %w", err)
+	}
+	if err := m.daemonReload(ctx); err != nil {
+		return err
+	}
+	if spec.AutoStart {
+		if err := m.enableManaged(ctx, spec.Name); err != nil {
+			return err
+		}
+		if err := m.startManaged(ctx, spec.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateManaged 重写 unit 文件 + daemon-reload。
+// 运行中则重启使新配置生效；enabled 状态保持不变。
+func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
+	if err := ValidateManagedName(spec.Name); err != nil {
+		return err
+	}
+	if !m.managedUnitExists(spec.Name) {
+		return fmt.Errorf("托管服务 %s 不存在", spec.Name)
+	}
+
+	content, err := RenderUnit(spec)
+	if err != nil {
+		return fmt.Errorf("生成 unit 文件失败: %w", err)
+	}
+	if err := writeUnitFile(spec.Name, content); err != nil {
+		return fmt.Errorf("写 unit 文件失败: %w", err)
+	}
+	if err := m.daemonReload(ctx); err != nil {
+		return err
+	}
+
+	// AutoStart 状态切换
+	wasEnabled := m.isEnabled(ctx, managedUnitPrefix+spec.Name)
+	if spec.AutoStart && !wasEnabled {
+		if err := m.enableManaged(ctx, spec.Name); err != nil {
+			return err
+		}
+	} else if !spec.AutoStart && wasEnabled {
+		if err := m.disableManaged(ctx, spec.Name); err != nil {
+			return err
+		}
+	}
+
+	// 运行中则重启使新配置生效
+	info, err := m.Get(ctx, managedUnitPrefix+spec.Name)
+	if err == nil && info.State == "active" {
+		if err := m.startManaged(ctx, spec.Name); err != nil {
+			// restart 失败不回滚 unit 文件，让用户看到错误后手动处理
+			return fmt.Errorf("unit 已更新但重启失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteManaged 停止 + disable + 删 unit 文件 + daemon-reload。
+func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
+	if err := ValidateManagedName(name); err != nil {
+		return err
+	}
+	if !m.managedUnitExists(name) {
+		return fmt.Errorf("托管服务 %s 不存在", name)
+	}
+
+	fullName := managedUnitPrefix + name
+	// 停止（best-effort，可能本来就 inactive）
+	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "stop", fullName+managedUnitSuffix); err != nil {
+		// 记录但继续，确保 unit 文件能删掉
+		log.Printf("systemd: stop %s during delete: %v", fullName, err)
+	}
+	// disable（best-effort）
+	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "disable", fullName+managedUnitSuffix); err != nil {
+		log.Printf("systemd: disable %s during delete: %v", fullName, err)
+	}
+	if err := removeUnitFile(name); err != nil {
+		return fmt.Errorf("删除 unit 文件失败: %w", err)
+	}
+	return m.daemonReload(ctx)
+}
+
+// ListManaged 列出所有面板托管服务（easyserver-* 前缀的 unit）。
+// 用 list-units glob 初筛 + 读 unit 文件解析元数据。
+func (m *ServiceManager) ListManaged(ctx context.Context) ([]ManagedServiceInfo, error) {
+	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units",
+		managedUnitPrefix+"*"+managedUnitSuffix,
+		"--type=service", "--all", "--no-pager", "--plain", "--full")
+	if err != nil || exitCode != 0 {
+		return nil, fmt.Errorf("列出托管服务失败: %w", err)
+	}
+
+	var result []ManagedServiceInfo
+	lines := strings.Split(stdout, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "UNIT") || strings.HasPrefix(line, "LOAD") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		unitFile := fields[0]
+		name := UnitName(unitFile)
+		if name == "" {
+			continue
+		}
+
+		info := ManagedServiceInfo{
+			ManagedUnitMeta: ManagedUnitMeta{Name: name},
+			State:           fields[2],
+			SubState:        fields[3],
+		}
+
+		// 读 unit 文件解析元数据注释
+		content, _ := readUnitFile(name)
+		if content != "" {
+			meta := ParseUnitMeta(content)
+			meta.Name = name
+			info.ManagedUnitMeta = meta
+		}
+
+		// 补 enabled + pid（批量查太慢，逐个 Get 仅在需要时；这里先用 list-units 的 state）
+		fullName := managedUnitPrefix + name
+		if d, err := m.Get(ctx, fullName); err == nil {
+			info.Enabled = d.Enabled
+			info.PID = d.PID
+		}
+
+		result = append(result, info)
+	}
+
+	return result, nil
+}
+
+// GetManaged 返回单个托管服务的详情（元数据 + 运行时状态）。
+func (m *ServiceManager) GetManaged(ctx context.Context, name string) (*ManagedServiceInfo, error) {
+	if err := ValidateManagedName(name); err != nil {
+		return nil, err
+	}
+	if !m.managedUnitExists(name) {
+		return nil, fmt.Errorf("托管服务 %s 不存在", name)
+	}
+
+	content, err := readUnitFile(name)
+	if err != nil {
+		return nil, fmt.Errorf("读 unit 文件失败: %w", err)
+	}
+	meta := ParseUnitMeta(content)
+	meta.Name = name
+
+	fullName := managedUnitPrefix + name
+	d, err := m.Get(ctx, fullName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ManagedServiceInfo{
+		ManagedUnitMeta: meta,
+		State:           d.State,
+		SubState:        d.SubState,
+		Enabled:         d.Enabled,
+		PID:             d.PID,
+	}, nil
+}
+
+// --- managed helpers ---
+
+func (m *ServiceManager) managedUnitExists(name string) bool {
+	path := UnitFilePath(name)
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func (m *ServiceManager) daemonReload(ctx context.Context) error {
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "daemon-reload")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("daemon-reload 失败: %s", output)
+	}
+	return nil
+}
+
+func (m *ServiceManager) enableManaged(ctx context.Context, name string) error {
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "enable",
+		managedUnitPrefix+name+managedUnitSuffix)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("enable 失败: %s", output)
+	}
+	return nil
+}
+
+func (m *ServiceManager) disableManaged(ctx context.Context, name string) error {
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "disable",
+		managedUnitPrefix+name+managedUnitSuffix)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("disable 失败: %s", output)
+	}
+	return nil
+}
+
+// startManaged 启动托管服务。已 active 视为成功（幂等）。
+func (m *ServiceManager) startManaged(ctx context.Context, name string) error {
+	fullName := managedUnitPrefix + name + managedUnitSuffix
+	info, err := m.Get(ctx, managedUnitPrefix+name)
+	if err == nil && info.State == "active" {
+		return nil
+	}
+	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "start", fullName)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("start 失败: %s", output)
 	}
 	return nil
 }
