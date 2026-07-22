@@ -160,7 +160,9 @@ function buildServiceColumns(props: ColumnProps) {
           )}
           {managed && onDelete && (
             <Popconfirm title="确定删除此服务？" okText="删除" cancelText="取消" onConfirm={() => onDelete(r.name)}>
-              <Button icon={<DeleteOutlined />} size="small" danger disabled={isRunning} />
+              <Tooltip title="删除">
+                <Button icon={<DeleteOutlined />} size="small" danger disabled={isRunning} />
+              </Tooltip>
             </Popconfirm>
           )}
         </Space>
