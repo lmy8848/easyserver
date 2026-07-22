@@ -220,8 +220,19 @@ function ManagedTab() {
     setLoading(true);
     try {
       const res = await serviceApi.list();
-      // 只展示托管服务（managed=true）
-      setServices((res.data?.data || []).filter(s => s.managed));
+      const managed = (res.data?.data || []).filter(s => s.managed);
+      // 托管服务通常很少，直接全部补详情（PID/内存/enabled）
+      if (managed.length > 0) {
+        try {
+          const detailRes = await serviceApi.getDetails(managed.map(s => s.name));
+          const detailMap = new Map((detailRes.data?.data || []).map(d => [d.name, d]));
+          setServices(managed.map(s => ({ ...s, ...detailMap.get(s.name) })));
+        } catch {
+          setServices(managed);
+        }
+      } else {
+        setServices([]);
+      }
     } catch {
       message.error('获取托管服务列表失败');
     } finally {
