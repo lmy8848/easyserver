@@ -54,8 +54,9 @@ func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.Com
 
 // isProtectedService checks if a service is protected
 func (h *ServiceHandler) isProtectedService(name string) bool {
+	baseName := strings.TrimSuffix(name, ".service")
 	for _, svc := range h.protectedServices {
-		if svc == name {
+		if svc == name || svc == baseName {
 			return true
 		}
 	}

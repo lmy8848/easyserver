@@ -548,16 +548,18 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 	}
 	if spec.AutoStart {
 		if err := m.enableManaged(ctx, spec.Name); err != nil {
-			// enable 失败：回滚 unit 文件 + reload。
+			// enable 失败：回滚 unit 文件 + reload + reset-failed。
 			_ = removeUnitFile(spec.Name)
 			_ = m.daemonReload(ctx)
+			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix)
 			return fmt.Errorf("enable 失败（已回滚）: %w", err)
 		}
 		if err := m.startManaged(ctx, spec.Name); err != nil {
-			// start 失败：disable + 回滚 unit 文件 + reload。
+			// start 失败：disable + 回滚 unit 文件 + reload + reset-failed。
 			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "disable", managedUnitPrefix+spec.Name+managedUnitSuffix)
 			_ = removeUnitFile(spec.Name)
 			_ = m.daemonReload(ctx)
+			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix)
 			return fmt.Errorf("start 失败（已回滚）: %w", err)
 		}
 	}
@@ -621,7 +623,13 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
 		output, exitCode, rerr := m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
 		if rerr != nil || exitCode != 0 {
-			return fmt.Errorf("unit 已更新但重启失败: %s", output)
+			// 重启失败：自动恢复旧配置并重新 restart
+			if oldContent != "" {
+				_ = writeUnitFile(spec.Name, oldContent)
+				_ = m.daemonReload(ctx)
+				_, _, _ = m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
+			}
+			return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %s", output)
 		}
 	}
 	return nil

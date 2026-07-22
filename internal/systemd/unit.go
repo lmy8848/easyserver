@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -76,11 +77,18 @@ func ValidateManagedName(name string) error {
 	return nil
 }
 
+// sanitizeUnitValue 清理 unit 文件字段中的换行与末尾反斜杠，
+// 防止 systemd 将末尾 \ 当作跨行连接符（Line Continuation Injection）拼接指令或注释。
+func sanitizeUnitValue(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	for strings.HasSuffix(s, "\\") {
+		s = strings.TrimSuffix(s, "\\")
+	}
+	return s
+}
+
 // RenderUnit 生成 unit 文件内容。纯函数，无副作用，便于测试。
-//
-// 安全性：command/args/dir/env 的值由调用方保证可信（前端表单 + 后端再校验），
-// 这里不做 shell 转义——systemd 的 ExecStart/Environment 本身是声明式解析，
-// 不经过 shell，不存在注入。但会拒绝包含换行的值，防止破坏 unit 文件结构。
 func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return "", err
@@ -94,7 +102,7 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	if strings.ContainsAny(spec.Dir, "\n\r") {
 		return "", fmt.Errorf("dir 不能包含换行")
 	}
-	// 防御纵深：runtime 字段也不能含换行，否则可注入 unit 指令。
+	// 防御纵深：runtime 字段也不能含换行
 	if strings.ContainsAny(spec.RuntimeLang, "\n\r") {
 		return "", fmt.Errorf("runtime_lang 不能包含换行")
 	}
@@ -107,6 +115,12 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 			return "", fmt.Errorf("env key %q 非法（只允许字母数字下划线，不以数字开头）", k)
 		}
 	}
+
+	spec.Description = sanitizeUnitValue(spec.Description)
+	spec.ExecStart = sanitizeUnitValue(spec.ExecStart)
+	spec.Dir = sanitizeUnitValue(spec.Dir)
+	spec.RuntimeLang = sanitizeUnitValue(spec.RuntimeLang)
+	spec.RuntimeExact = sanitizeUnitValue(spec.RuntimeExact)
 
 	execStart := buildExecStart(spec)
 	envLines := buildEnvLines(spec.Env)
@@ -137,7 +151,7 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	var b strings.Builder
 	// [Unit] 段：注释放最前面，作为元数据标记 + 反查锚点。
 	fmt.Fprintf(&b, "[Unit]\n")
-	fmt.Fprintf(&b, "Description=easyserver-managed: %s\n", escapeUnitValue(desc))
+	fmt.Fprintf(&b, "Description=easyserver-managed: %s\n", desc)
 	fmt.Fprintf(&b, "# %s=%s\n", managedMarkerKey, managedMarkerValue)
 	if spec.RuntimeVersionID > 0 {
 		fmt.Fprintf(&b, "# RuntimeVersionID=%d\n", spec.RuntimeVersionID)
@@ -155,7 +169,11 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	fmt.Fprintf(&b, "Type=simple\n")
 	fmt.Fprintf(&b, "ExecStart=%s\n", execStart)
 	if spec.Dir != "" {
-		fmt.Fprintf(&b, "WorkingDirectory=%s\n", spec.Dir)
+		dir := spec.Dir
+		if strings.Contains(dir, " ") && !strings.HasPrefix(dir, `"`) {
+			dir = `"` + dir + `"`
+		}
+		fmt.Fprintf(&b, "WorkingDirectory=%s\n", dir)
 	}
 	for _, line := range envLines {
 		fmt.Fprintf(&b, "Environment=%s\n", line)
@@ -188,19 +206,28 @@ func buildExecStart(spec *ManagedUnitSpec) string {
 
 // buildEnvLines 把 env map 转成 systemd Environment= 行。
 // key 已在 RenderUnit 中用 envKeyRegex 校验；value 含换行跳过，
-// 含空格/制表/引号时用双引号包裹并转义（systemd Environment= 语义）。
+// % 转义为 %% 防止 systemd Specifier 展开。
+// 含空格/制表/引号/反斜杠时用双引号包裹并转义。
 func buildEnvLines(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil
 	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	lines := make([]string, 0, len(env))
-	for k, v := range env {
+	for _, k := range keys {
+		v := env[k]
 		if strings.ContainsAny(v, "\n\r") {
 			continue // 跳过非法值，不阻断整体生成
 		}
+		// 转义 systemd Specifier
+		v = strings.ReplaceAll(v, "%", "%%")
 		if strings.ContainsAny(v, " \t\"'\\") {
 			// systemd Environment= 双引号语义：内部双引号和反斜杠转义。
-			// 与 Go %q 不同（Go 转义不可见字符），这里只转义 " 和 \。
 			v = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
 		}
 		lines = append(lines, fmt.Sprintf("%s=%s", k, v))
@@ -256,12 +283,15 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 			case strings.HasPrefix(trimmed, "ExecStart="):
 				info.ExecStart = strings.TrimPrefix(trimmed, "ExecStart=")
 				// 若绑定了 runtime，去掉 mise 包裹前缀，还原用户原始命令。
-				// mise 前缀格式固定：/usr/local/bin/mise exec <lang>@<exact> --
 				if info.RuntimeVersionID > 0 {
 					info.ExecStart = stripMisePrefix(info.ExecStart)
 				}
 			case strings.HasPrefix(trimmed, "WorkingDirectory="):
-				info.Dir = strings.TrimPrefix(trimmed, "WorkingDirectory=")
+				dir := strings.TrimPrefix(trimmed, "WorkingDirectory=")
+				if len(dir) >= 2 && dir[0] == '"' && dir[len(dir)-1] == '"' {
+					dir = dir[1 : len(dir)-1]
+				}
+				info.Dir = dir
 			case strings.HasPrefix(trimmed, "Environment="):
 				k, v := parseEnvLine(strings.TrimPrefix(trimmed, "Environment="))
 				if k != "" {
@@ -306,19 +336,45 @@ func parseEnvLine(line string) (key, val string) {
 	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
 		val = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(val[1 : len(val)-1])
 	}
+	// 还原 % 转义
+	val = strings.ReplaceAll(val, "%%", "%")
 	return key, val
 }
 
-// escapeUnitValue 转义 unit 文件值里的换行（防御性，正常已在 RenderUnit 前拦截）。
-func escapeUnitValue(s string) string {
-	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
-}
-
-// writeUnitFile 写 unit 文件到磁盘（0644 权限，systemd 标准）。
-// 调用方需保证已 root 或对目标目录有写权限。
+// writeUnitFile 原子写入 unit 文件到磁盘（0644 权限，原子 rename 模式，防并发读到空文件）。
 func writeUnitFile(name, content string) error {
 	path := UnitFilePath(name)
-	return os.WriteFile(path, []byte(content), 0644)
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, managedUnitPrefix+name+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("创建临时 unit 文件失败: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write([]byte(content)); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("写入临时 unit 文件失败: %w", err)
+	}
+	if err := tmpFile.Chmod(0644); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("设置 unit 文件权限失败: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("sync 临时 unit 文件失败: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("关闭临时 unit 文件失败: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("重命名 unit 文件失败: %w", err)
+	}
+	return nil
 }
 
 // readUnitFile 读 unit 文件内容。文件不存在返回空串 + nil error（视为无元数据）。

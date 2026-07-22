@@ -242,12 +242,6 @@ function ManagedTab() {
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  // 自动刷新
-  useEffect(() => {
-    const t = setInterval(fetch, 5000);
-    return () => clearInterval(t);
-  }, [fetch]);
-
   const handleCreate = () => {
     setEditing(null);
     form.resetFields();
