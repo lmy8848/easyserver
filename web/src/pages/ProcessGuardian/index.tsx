@@ -218,7 +218,20 @@ function ManagedTab() {
         try {
           const detailRes = await serviceApi.getDetails(managed.map(s => s.name));
           const detailMap = new Map((detailRes.data?.data || []).map(d => [d.name, d]));
-          setServices(managed.map(s => ({ ...s, ...detailMap.get(s.name) })));
+          setServices(managed.map(s => {
+            const detail = detailMap.get(s.name);
+            return detail ? {
+              ...s,
+              pid: detail.pid,
+              memory_bytes: detail.memory_bytes,
+              cpu_percent: detail.cpu_percent,
+              uptime_seconds: detail.uptime_seconds,
+              enabled: detail.enabled,
+              state: detail.state || s.state,
+              sub_state: detail.sub_state || s.sub_state,
+              unit_file_state: detail.unit_file_state || s.unit_file_state,
+            } : s;
+          }));
         } catch {
           setServices(managed);
         }

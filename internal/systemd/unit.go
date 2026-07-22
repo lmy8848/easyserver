@@ -145,7 +145,7 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	var b strings.Builder
 	// [Unit] 段：注释放最前面，作为元数据标记 + 反查锚点；StartLimit* 指令属于 [Unit]
 	fmt.Fprintf(&b, "[Unit]\n")
-	fmt.Fprintf(&b, "Description=easyserver-managed: %s\n", desc)
+	fmt.Fprintf(&b, "Description=%s\n", desc)
 	fmt.Fprintf(&b, "# %s=%s\n", managedMarkerKey, managedMarkerValue)
 	if spec.RuntimeVersionID > 0 {
 		fmt.Fprintf(&b, "# RuntimeVersionID=%d\n", spec.RuntimeVersionID)

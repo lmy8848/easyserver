@@ -46,7 +46,7 @@ func TestRenderUnit_Minimal(t *testing.T) {
 	}
 
 	mustContain(t, content, "[Unit]")
-	mustContain(t, content, "Description=easyserver-managed: my-app")
+	mustContain(t, content, "Description=my-app")
 	mustContain(t, content, "# ManagedBy=easyserver")
 	mustContain(t, content, "ExecStart=node /app/server.js")
 	mustContain(t, content, "Type=simple")
@@ -83,7 +83,7 @@ func TestRenderUnit_FullWithRuntime(t *testing.T) {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
 
-	mustContain(t, content, "Description=easyserver-managed: 我的应用")
+	mustContain(t, content, "Description=我的应用")
 	mustContain(t, content, "# RuntimeVersionID=7")
 	mustContain(t, content, "# RuntimeLang=node")
 	mustContain(t, content, "# RuntimeExact=20.10.0")
@@ -320,7 +320,7 @@ func TestRenderUnit_TmpTestScript(t *testing.T) {
 
 	mustContain(t, content, "ExecStart=/tmp/test-service.sh")
 	mustContain(t, content, "WorkingDirectory=/tmp")
-	mustContain(t, content, "Description=easyserver-managed: TMP Test Script Service")
+	mustContain(t, content, "Description=TMP Test Script Service")
 
 	info := &ServiceInfo{}
 	ParseUnitMeta(content, info)
