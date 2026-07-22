@@ -219,7 +219,7 @@ function ManagedTab() {
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await serviceApi.listManaged();
+      const res = await serviceApi.list({ managed: true });
       const managed = res.data?.data || [];
       // 托管服务通常很少，直接全部补详情（PID/内存/enabled）
       if (managed.length > 0) {

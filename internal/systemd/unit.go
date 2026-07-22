@@ -77,15 +77,9 @@ func ValidateManagedName(name string) error {
 	return nil
 }
 
-// sanitizeUnitValue 清理 unit 文件字段中的换行与末尾反斜杠，
-// 防止 systemd 将末尾 \ 当作跨行连接符（Line Continuation Injection）拼接指令或注释。
-func sanitizeUnitValue(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	for strings.HasSuffix(s, "\\") {
-		s = strings.TrimSuffix(s, "\\")
-	}
-	return s
+// cleanUnitValue 清理 unit 文件字段中的换行，替换为空格。
+func cleanUnitValue(s string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
 }
 
 // RenderUnit 生成 unit 文件内容。纯函数，无副作用，便于测试。
@@ -116,11 +110,11 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 		}
 	}
 
-	spec.Description = sanitizeUnitValue(spec.Description)
-	spec.ExecStart = sanitizeUnitValue(spec.ExecStart)
-	spec.Dir = sanitizeUnitValue(spec.Dir)
-	spec.RuntimeLang = sanitizeUnitValue(spec.RuntimeLang)
-	spec.RuntimeExact = sanitizeUnitValue(spec.RuntimeExact)
+	spec.Description = cleanUnitValue(spec.Description)
+	spec.ExecStart = cleanUnitValue(spec.ExecStart)
+	spec.Dir = cleanUnitValue(spec.Dir)
+	spec.RuntimeLang = cleanUnitValue(spec.RuntimeLang)
+	spec.RuntimeExact = cleanUnitValue(spec.RuntimeExact)
 
 	execStart := buildExecStart(spec)
 	envLines := buildEnvLines(spec.Env)
@@ -170,8 +164,8 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	fmt.Fprintf(&b, "ExecStart=%s\n", execStart)
 	if spec.Dir != "" {
 		dir := spec.Dir
-		if strings.Contains(dir, " ") && !strings.HasPrefix(dir, `"`) {
-			dir = `"` + dir + `"`
+		if strings.ContainsAny(dir, " \t\"'\\") {
+			dir = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(dir) + `"`
 		}
 		fmt.Fprintf(&b, "WorkingDirectory=%s\n", dir)
 	}
@@ -205,8 +199,7 @@ func buildExecStart(spec *ManagedUnitSpec) string {
 }
 
 // buildEnvLines 把 env map 转成 systemd Environment= 行。
-// key 已在 RenderUnit 中用 envKeyRegex 校验；value 含换行跳过，
-// % 转义为 %% 防止 systemd Specifier 展开。
+// key 已在 RenderUnit 中用 envKeyRegex 校验；value 含换行跳过。
 // 含空格/制表/引号/反斜杠时用双引号包裹并转义。
 func buildEnvLines(env map[string]string) []string {
 	if len(env) == 0 {
@@ -224,8 +217,6 @@ func buildEnvLines(env map[string]string) []string {
 		if strings.ContainsAny(v, "\n\r") {
 			continue // 跳过非法值，不阻断整体生成
 		}
-		// 转义 systemd Specifier
-		v = strings.ReplaceAll(v, "%", "%%")
 		if strings.ContainsAny(v, " \t\"'\\") {
 			// systemd Environment= 双引号语义：内部双引号和反斜杠转义。
 			v = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
@@ -236,7 +227,7 @@ func buildEnvLines(env map[string]string) []string {
 }
 
 // ParseUnitMeta 从 unit 文件内容解析元数据，填入 info 的托管字段。
-// [Unit] 段：注释（ManagedBy/Runtime*/Command/Args）+ Description
+// [Unit] 段：注释（ManagedBy/Runtime*）+ Description
 // [Service] 段：WorkingDirectory/Environment/Restart（systemd 原生指令，直接读）
 // 调用方负责设置 info.Name（不含前缀）。
 func ParseUnitMeta(content string, info *ServiceInfo) {
@@ -281,15 +272,16 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 		if section == "[Service]" {
 			switch {
 			case strings.HasPrefix(trimmed, "ExecStart="):
-				info.ExecStart = strings.TrimPrefix(trimmed, "ExecStart=")
+				execStart := strings.TrimPrefix(trimmed, "ExecStart=")
 				// 若绑定了 runtime，去掉 mise 包裹前缀，还原用户原始命令。
 				if info.RuntimeVersionID > 0 {
-					info.ExecStart = stripMisePrefix(info.ExecStart)
+					execStart = stripMisePrefix(execStart)
 				}
+				info.ExecStart = execStart
 			case strings.HasPrefix(trimmed, "WorkingDirectory="):
 				dir := strings.TrimPrefix(trimmed, "WorkingDirectory=")
 				if len(dir) >= 2 && dir[0] == '"' && dir[len(dir)-1] == '"' {
-					dir = dir[1 : len(dir)-1]
+					dir = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(dir[1 : len(dir)-1])
 				}
 				info.Dir = dir
 			case strings.HasPrefix(trimmed, "Environment="):

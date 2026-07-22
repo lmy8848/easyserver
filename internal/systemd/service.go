@@ -587,8 +587,28 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		return fmt.Errorf("托管服务 %s 不存在", spec.Name)
 	}
 
-	// 读取旧 unit 文件配置，便于失败时回滚
+	// 读取旧 unit 文件配置、运行状态与开机自启状态，便于任一后续步骤失败时平滑回滚
 	oldContent, _ := readUnitFile(spec.Name)
+	oldInfo, _ := m.Get(ctx, managedUnitPrefix+spec.Name)
+	wasActive := oldInfo != nil && oldInfo.State == "active"
+	wasEnabled := m.isEnabled(ctx, managedUnitPrefix+spec.Name)
+
+	rollback := func() {
+		if oldContent != "" {
+			_ = writeUnitFile(spec.Name, oldContent)
+			_ = m.daemonReload(ctx)
+			nowEnabled := m.isEnabled(ctx, managedUnitPrefix+spec.Name)
+			if wasEnabled && !nowEnabled {
+				_ = m.enableManaged(ctx, spec.Name)
+			} else if !wasEnabled && nowEnabled {
+				_ = m.disableManaged(ctx, spec.Name)
+			}
+			if wasActive {
+				fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
+				_, _, _ = m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
+			}
+		}
+	}
 
 	content, err := RenderUnit(spec)
 	if err != nil {
@@ -598,22 +618,20 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		return fmt.Errorf("写 unit 文件失败: %w", err)
 	}
 	if err := m.daemonReload(ctx); err != nil {
-		if oldContent != "" {
-			_ = writeUnitFile(spec.Name, oldContent)
-			_ = m.daemonReload(ctx)
-		}
+		rollback()
 		return fmt.Errorf("daemon-reload 失败（已回滚旧配置）: %w", err)
 	}
 
 	// AutoStart 状态切换
-	wasEnabled := m.isEnabled(ctx, managedUnitPrefix+spec.Name)
 	if spec.AutoStart && !wasEnabled {
 		if err := m.enableManaged(ctx, spec.Name); err != nil {
-			return err
+			rollback()
+			return fmt.Errorf("设置开机自启失败（已回滚旧配置）: %w", err)
 		}
 	} else if !spec.AutoStart && wasEnabled {
 		if err := m.disableManaged(ctx, spec.Name); err != nil {
-			return err
+			rollback()
+			return fmt.Errorf("取消开机自启失败（已回滚旧配置）: %w", err)
 		}
 	}
 
@@ -623,12 +641,7 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
 		output, exitCode, rerr := m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
 		if rerr != nil || exitCode != 0 {
-			// 重启失败：自动恢复旧配置并重新 restart
-			if oldContent != "" {
-				_ = writeUnitFile(spec.Name, oldContent)
-				_ = m.daemonReload(ctx)
-				_, _, _ = m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
-			}
+			rollback()
 			return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %s", output)
 		}
 	}
