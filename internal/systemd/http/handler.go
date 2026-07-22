@@ -54,17 +54,24 @@ func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.Com
 
 // isProtectedService checks if a service is protected
 func (h *ServiceHandler) isProtectedService(name string) bool {
+	baseName := strings.TrimSuffix(name, ".service")
 	for _, svc := range h.protectedServices {
-		if svc == name {
+		if svc == name || svc == baseName {
 			return true
 		}
 	}
 	return false
 }
 
-// List returns all services
+// List returns all services (or managed services only if ?managed=true)
 func (h *ServiceHandler) List(c *gin.Context) {
-	services, err := h.serviceManager.List(c.Request.Context())
+	var services []systemd.ServiceInfo
+	var err error
+	if c.Query("managed") == "true" {
+		services, err = h.serviceManager.ListManaged(c.Request.Context())
+	} else {
+		services, err = h.serviceManager.List(c.Request.Context())
+	}
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -396,12 +403,89 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	}
 }
 
+// ============================================================
+// 托管服务 CRUD（生成/更新/删除 unit 文件，只对 easyserver-* 前缀有效）
+// ============================================================
+
+// Create 创建托管服务（生成 unit + 按需 enable/start）。
+// 只生成 easyserver-<name>.service，不支持创建系统服务的 unit。
+func (h *ServiceHandler) Create(c *gin.Context) {
+	var spec systemd.ManagedUnitSpec
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
+		return
+	}
+	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-")
+	middleware.AuditSummary(c, "创建托管服务 "+spec.Name)
+	if err := h.serviceManager.CreateManaged(c.Request.Context(), &spec); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "创建成功"})
+}
+
+// Update 更新托管服务（重写 unit + 运行中则重启）。
+// :name 须为完整 unit 名（easyserver-foo），非托管前缀返回错误。
+func (h *ServiceHandler) Update(c *gin.Context) {
+	name := c.Param("name")
+	shortName, err := requireManagedName(name)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var spec systemd.ManagedUnitSpec
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
+		return
+	}
+	spec.Name = shortName
+	middleware.AuditSummary(c, "更新托管服务 "+shortName)
+	if err := h.serviceManager.UpdateManaged(c.Request.Context(), &spec); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "更新成功"})
+}
+
+// Delete 删除托管服务（stop + disable + rm unit）。
+// :name 须为完整 unit 名（easyserver-foo），非托管前缀返回错误。
+func (h *ServiceHandler) Delete(c *gin.Context) {
+	name := c.Param("name")
+	shortName, err := requireManagedName(name)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	middleware.AuditSummary(c, "删除托管服务 "+shortName)
+	if err := h.serviceManager.DeleteManaged(c.Request.Context(), shortName); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "删除成功"})
+}
+
+// requireManagedName 校验 :name 是 easyserver- 前缀的托管服务，
+// 返回去掉前缀的短名。非托管前缀返回错误（系统服务不允许 CRUD）。
+func requireManagedName(fullName string) (string, error) {
+	if fullName == "" {
+		return "", apperror.ErrBadRequest.WithMessage("缺少服务名称")
+	}
+	shortName := systemd.UnitName(fullName + ".service")
+	if shortName == "" {
+		return "", apperror.ErrBadRequest.WithMessage("只有 easyserver-* 托管服务支持此操作")
+	}
+	return shortName, nil
+}
+
 // RegisterRoutes registers service management routes
 func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
 	handler := NewServiceHandler(serviceManager, exec, jwtSecret, auditService, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
+	protected.POST("/services", handler.Create)
 	protected.POST("/services/details", handler.GetDetails)
 	protected.GET("/services/:name", handler.Get)
+	protected.PUT("/services/:name", handler.Update)
+	protected.DELETE("/services/:name", handler.Delete)
 	protected.GET("/services/:name/logs", handler.GetLogs)
 	protected.POST("/services/:name/start", handler.Start)
 	protected.POST("/services/:name/stop", handler.Stop)

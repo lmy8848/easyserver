@@ -12,8 +12,10 @@ interface RuntimeVersionOption {
 }
 
 interface RuntimeVersionSelectProps {
-  value?: number;
-  onChange?: (v: number | undefined) => void;
+  /** 受控值：{id, lang, exact} 三字段，Form 用。undefined 表示未选。 */
+  value?: { id: number; lang: string; exact: string };
+  /** 回传完整对象，表单存 runtime_version_id / runtime_lang / runtime_exact 三字段。 */
+  onChange?: (v: { id: number; lang: string; exact: string } | undefined) => void;
   /** Show non-installed rows as disabled options so users see why they can't pick them. */
   showDisabled?: boolean;
 }
@@ -21,8 +23,11 @@ interface RuntimeVersionSelectProps {
 // RuntimeVersionSelect lists every runtime_version row from GET /runtime;
 // only status='installed' rows are selectable. AC3 wants installing/failed
 // to be visible-but-disabled so the user can tell "node 22 is missing"
-// from "node 22 doesn't exist yet". Fetch is one-shot per mount — the
+// from "node 22 doesn't exist yet". Fetch is one-shot per mount - the
 // list is tiny (≤ ~20 rows) and the parent Modal mounts on each open.
+//
+// value/onChange 用对象而非裸 id：后端 fillRuntime 虽然会按 id 查 DB 补 lang/exact，
+// 但前端传完整对象能避免一次 DB 查询往返，且编辑时表单回显更直接。
 export default function RuntimeVersionSelect({ value, onChange, showDisabled = true }: RuntimeVersionSelectProps) {
   const [envs, setEnvs] = useState<RuntimeVersionOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,7 +48,7 @@ export default function RuntimeVersionSelect({ value, onChange, showDisabled = t
     uninstall_failed: { color: 'red', label: '卸载失败' },
   };
 
-  // Hide 'uninstalled' terminal rows — they're not actionable here, just
+  // Hide 'uninstalled' terminal rows - they're not actionable here, just
   // clutter from the runtime list page. installing/failed stay (greyed out)
   // because seeing "node 22 is still installing" tells a different story
   // from "node 22 doesn't exist yet".
@@ -67,8 +72,21 @@ export default function RuntimeVersionSelect({ value, onChange, showDisabled = t
 
   return (
     <Select
-      value={value}
-      onChange={onChange}
+      allowClear
+      value={value?.id}
+      onChange={(id) => {
+        // 根据选中的 id 找到对应 env，回传完整 {id, lang, exact}
+        if (!id) {
+          onChange?.(undefined);
+          return;
+        }
+        const env = visible.find(e => e.id === id);
+        if (env) {
+          onChange?.({ id: env.id, lang: env.name, exact: env.version });
+        } else {
+          onChange?.(undefined);
+        }
+      }}
       loading={loading}
       placeholder="选择已安装的运行时版本"
       options={options}

@@ -11,7 +11,6 @@ import { useAuthStore } from './store/useAuthStore';
 
 // Lazy load pages for code splitting
 const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Services = lazy(() => import('./pages/Services'));
 const Terminal = lazy(() => import('./pages/Terminal'));
 const FileManager = lazy(() => import('./pages/FileManager'));
 const Cloud = lazy(() => import('./pages/Cloud'));
@@ -29,6 +28,7 @@ const SecuritySettings = lazy(() => import('./pages/SecuritySettings'));
 const SSH = lazy(() => import('./pages/SSH'));
 const Container = lazy(() => import('./pages/Container'));
 const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
+const SystemMonitor = lazy(() => import('./pages/SystemMonitor'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const FileShares = lazy(() => import('./pages/FileShares'));
 const PortMonitor = lazy(() => import('./pages/PortMonitor'));
@@ -76,7 +76,6 @@ function App() {
                 }
               >
                 <Route index element={<Dashboard />} />
-                <Route path="services" element={<Services />} />
                 <Route path="terminal" element={<Terminal />} />
                 <Route path="files" element={<FileManager />} />
                 <Route path="cloud" element={<Cloud />} />
@@ -94,6 +93,7 @@ function App() {
                 <Route path="ssh" element={<SSH />} />
                 <Route path="containers" element={<Container />} />
                 <Route path="processes" element={<ProcessGuardian />} />
+                <Route path="system-monitor" element={<SystemMonitor />} />
                 <Route path="ports" element={<PortMonitor />} />
                 <Route path="notifications" element={<Notifications />} />
                 <Route path="file-shares" element={<FileShares />} />

@@ -41,8 +41,6 @@ import (
 	"easyserver/internal/notification"
 	notificationhttp "easyserver/internal/notification/http"
 	"easyserver/internal/notify"
-	"easyserver/internal/process"
-	processhttp "easyserver/internal/process/http"
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	runtimeenvhttp "easyserver/internal/runtimeenv/http"
@@ -73,7 +71,6 @@ type RouterDeps struct {
 	AuditService         *audit.Service
 	SessionService       *auth.SessionService
 	AuditRepo            audit.Repository
-	ProcessManager       *process.Service
 	SystemProcessService *systemprocess.Service
 	NotificationService  *notification.Service
 	ServiceManager       *systemd.ServiceManager
@@ -238,13 +235,12 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DeployService)
 	runtimeenvhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.RuntimeService, deps.PackageManagerService)
 	envconfighttp.RegisterRoutes(protected, deps.EnvConfigService)
-	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.WebServerService, deps.WebsiteService, deps.ProcessManager)
+	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.WebServerService, deps.WebsiteService)
 	dbserverhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DBServerService, deps.DatabaseMgmtService)
 	cronhttp.RegisterRoutes(protected, deps.CronService, deps.Executor)
 	firewallhttp.RegisterRoutes(protected, deps.FirewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, deps.SSHConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
-	processhttp.RegisterRoutes(protected, deps.ProcessManager)
 	systemprocesshttp.RegisterSystemProcessRoutes(protected, deps.SystemProcessService)
 	notificationhttp.RegisterRoutes(protected, deps.NotificationService)
 	filesharehttp.RegisterRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)

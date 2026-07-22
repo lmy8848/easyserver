@@ -15,6 +15,10 @@ type Repository interface {
 	// to a runtime_version row that isn't 'installed', mirroring process.
 	GetRuntimeVersionStatus(ctx context.Context, runtimeVersionID int64) (string, error)
 
+	// GetRuntime 返回 runtime_version 行的 lang/exact/status。
+	// 供 systemd 包的 ServiceManager.fillRuntime 调用，补全托管 unit 的 mise 包裹参数。
+	GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error)
+
 	// Task status management
 	ListEnabledTasks(ctx context.Context) ([]CronTask, error)
 	EnableTask(ctx context.Context, id int64) error

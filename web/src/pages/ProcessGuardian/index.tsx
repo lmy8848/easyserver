@@ -1,106 +1,277 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Input, InputNumber,
-  Select, Switch, message, Popconfirm, Table, Empty, Tooltip, Tabs,
-  Typography, Badge, Row, Col, Statistic,
+  Card, Button, Space, Modal, Form, Input, InputNumber,
+  Switch, message, Popconfirm, Table, Empty, Tooltip, Tabs,
+  Typography, Badge, Row, Col, Statistic, Drawer, Descriptions,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
   CaretRightOutlined, PauseOutlined, RedoOutlined,
-  FileTextOutlined, ExportOutlined, ImportOutlined,
-  ThunderboltOutlined, AppstoreOutlined, ClusterOutlined,
-  DashboardOutlined,
+  AppstoreOutlined, ClusterOutlined,
+  ThunderboltOutlined, CloudServerOutlined, SettingOutlined,
+  FileTextOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
-import type { ProcessWithStatus, ProcessLog, ProcessGroup } from '../../types';
-import { processApi } from '../../services/api';
-import SystemProcesses from './SystemProcesses';
+import type { Service, ManagedServiceSpec } from '../../types';
+import { serviceApi } from '../../services/api';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
-const MODAL_TOP_OFFSET = 40; // px from viewport top
+const MODAL_TOP_OFFSET = 40;
+
+// 表单中间类型：env 是 JSON 字符串（TextArea），runtime 是 {id,lang,exact} 对象。
+// 提交时 handleSubmit 再转成 ManagedServiceSpec（env -> object, runtime -> 三字段）。
+type ManagedServiceForm = Omit<ManagedServiceSpec, 'env' | 'runtime_version_id' | 'runtime_lang' | 'runtime_exact'> & {
+  env: string;
+  runtime?: { id: number; lang: string; exact: string };
+};
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  running: { color: 'green', label: '运行中' },
-  stopped: { color: 'default', label: '已停止' },
-  error: { color: 'red', label: '错误' },
-  starting: { color: 'processing', label: '启动中' },
-  stopping: { color: 'warning', label: '停止中' },
+  active: { color: 'success', label: '运行中' },
+  inactive: { color: 'default', label: '已停止' },
+  exited: { color: 'default', label: '已退出' },
+  failed: { color: 'error', label: '失败' },
+  activating: { color: 'processing', label: '启动中' },
+  deactivating: { color: 'warning', label: '停止中' },
+  reloading: { color: 'processing', label: '重载中' },
 };
+
+// formatBytes 把字节数格式化为人类可读（如 1.5 MB）。
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+// formatUptime 把秒数格式化为人类可读（如 2d 3h 10m）。
+function formatUptime(sec: number): string {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// ============================================================
+// 共用表格列构造：面板托管和系统服务复用，差异通过参数控制
+// ============================================================
+
+type ServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable';
+
+interface ColumnProps {
+  operating: string;                       // 操作中状态标记
+  managed: boolean;                        // 托管 Tab 传 true，系统 Tab 传 false
+  onAction: (name: string, action: ServiceAction) => void;
+  onEdit?: (s: Service) => void;           // 托管才有
+  onDelete?: (name: string) => void;       // 托管才有
+  onLogs: (name: string) => void;
+  onDetail: (s: Service) => void;
+}
+
+function buildServiceColumns(props: ColumnProps) {
+  const { operating, managed, onAction, onEdit, onDelete, onLogs, onDetail } = props;
+
+  const cols: object[] = [
+    {
+      title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 220,
+      render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t}</Text>,
+    },
+    {
+      title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
+      render: (t: string) => t ? <Text type="secondary" style={{ fontSize: 12 }}>{t}</Text> : null,
+    },
+    {
+      title: '状态', key: 'status', width: 140,
+      render: (_: unknown, r: Service) => {
+        const cfg = STATUS_CONFIG[r.state] || { color: 'default', label: r.state };
+        // 只在 sub_state 有额外信息量时才拼接（exited/dead/running 等常见值不拼）
+        const informativeSub = r.sub_state && r.sub_state !== r.state
+          && !['exited', 'dead', 'running'].includes(r.sub_state);
+        const text = informativeSub ? `${cfg.label} (${r.sub_state})` : cfg.label;
+        return <Badge status={cfg.color as any} text={text} />;
+      },
+    },
+    {
+      title: 'PID', dataIndex: 'pid', key: 'pid', width: 70,
+      render: (pid: number) => pid > 0 ? pid : '-',
+    },
+    {
+      title: '内存', dataIndex: 'memory_bytes', key: 'memory', width: 85,
+      render: (m: number) => m > 0 ? formatBytes(m) : '-',
+    },
+  ];
+
+  cols.push({
+    title: '自启', key: 'enabled', width: 70,
+    render: (_: unknown, r: Service) => (
+      <Switch size="small" checked={r.enabled}
+        loading={operating === `enable-${r.name}` || operating === `disable-${r.name}`}
+        disabled={!managed && r.name === 'easyserver'}
+        onChange={(checked) => onAction(r.name, checked ? 'enable' : 'disable')} />
+    ),
+  });
+
+  cols.push({
+    title: '操作', key: 'action', width: managed ? 260 : 220, fixed: 'right' as const,
+    render: (_: unknown, r: Service) => {
+      // active 且 sub_state=exited 表示 oneshot 服务执行完已退出，可重新启动
+      const isRunning = r.state === 'active' && r.sub_state !== 'exited';
+      const isBusy = r.state === 'activating' || r.state === 'deactivating';
+      const isSelf = !managed && r.name === 'easyserver';
+      const busy = (key: string) => operating === `${key}-${r.name}`;
+      const disabledAny = isBusy || isSelf || operating.startsWith(`start-${r.name}`)
+        || operating.startsWith(`stop-${r.name}`) || operating.startsWith(`restart-${r.name}`);
+
+      return (
+        <Space wrap>
+          {/* 启动/停止互斥：只显示可操作的那个 */}
+          {isRunning ? (
+            <>
+              <Button icon={<PauseOutlined />} size="small"
+                loading={busy('stop')} disabled={disabledAny}
+                onClick={() => onAction(r.name, 'stop')}>停止</Button>
+              <Button icon={<RedoOutlined />} size="small"
+                loading={busy('restart')} disabled={disabledAny}
+                onClick={() => onAction(r.name, 'restart')}>重启</Button>
+            </>
+          ) : (
+            <Button icon={<CaretRightOutlined />} size="small"
+              loading={busy('start')} disabled={disabledAny}
+              onClick={() => onAction(r.name, 'start')}>启动</Button>
+          )}
+          {/* 辅助操作：纯图标 + Tooltip */}
+          <Tooltip title="日志">
+            <Button icon={<FileTextOutlined />} size="small" onClick={() => onLogs(r.name)} />
+          </Tooltip>
+          <Tooltip title="详情">
+            <Button icon={<InfoCircleOutlined />} size="small" onClick={() => onDetail(r)} />
+          </Tooltip>
+          {managed && onEdit && (
+            <Tooltip title="编辑">
+              <Button icon={<EditOutlined />} size="small" onClick={() => onEdit(r)} />
+            </Tooltip>
+          )}
+          {managed && onDelete && (
+            <Popconfirm title="确定删除此服务？" okText="删除" cancelText="取消" onConfirm={() => onDelete(r.name)}>
+              <Tooltip title="删除">
+                <Button icon={<DeleteOutlined />} size="small" danger disabled={isRunning} />
+              </Tooltip>
+            </Popconfirm>
+          )}
+        </Space>
+      );
+    },
+  });
+
+  return cols;
+}
 
 export default function ProcessGuardian() {
   const [activeTab, setActiveTab] = useState<'managed' | 'system'>('managed');
-  const [processes, setProcesses] = useState<ProcessWithStatus[]>([]);
+
+  return (
+    <>
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as 'managed' | 'system')}
+        items={[
+          {
+            key: 'managed',
+            label: <span><ClusterOutlined /> 面板托管</span>,
+          },
+          {
+            key: 'system',
+            label: <span><CloudServerOutlined /> 系统服务</span>,
+          },
+        ]}
+        style={{ marginBottom: 16 }}
+      />
+      {activeTab === 'managed' ? <ManagedTab /> : <SystemTab />}
+    </>
+  );
+}
+
+// ============================================================
+// 面板托管 Tab
+// ============================================================
+
+function ManagedTab() {
+  const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [operating, setOperating] = useState<string>('');
 
-  // Modal state
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingProcess, setEditingProcess] = useState<ProcessWithStatus | null>(null);
-  const [form] = Form.useForm();
+  const [editing, setEditing] = useState<Service | null>(null);
+  const [form] = Form.useForm<ManagedServiceForm>();
 
-  // Logs state
-  const [logsVisible, setLogsVisible] = useState(false);
-  const [logsProcess, setLogsProcess] = useState<ProcessWithStatus | null>(null);
-  const [logs, setLogs] = useState<ProcessLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-
-  // Groups state
-  const [groups, setGroups] = useState<ProcessGroup[]>([]);
-  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
-
-  const fetchProcesses = useCallback(async () => {
+  const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await processApi.list();
-      setProcesses(res.data?.data || []);
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '获取进程列表失败'));
+      const res = await serviceApi.list({ managed: true });
+      const managed = res.data?.data || [];
+      // 托管服务通常很少，直接全部补详情（PID/内存/enabled）
+      if (managed.length > 0) {
+        try {
+          const detailRes = await serviceApi.getDetails(managed.map(s => s.name));
+          const detailMap = new Map((detailRes.data?.data || []).map(d => [d.name, d]));
+          setServices(managed.map(s => {
+            const detail = detailMap.get(s.name);
+            return detail ? {
+              ...s,
+              pid: detail.pid,
+              memory_bytes: detail.memory_bytes,
+              cpu_percent: detail.cpu_percent,
+              uptime_seconds: detail.uptime_seconds,
+              enabled: detail.enabled,
+              state: detail.state || s.state,
+              sub_state: detail.sub_state || s.sub_state,
+              unit_file_state: detail.unit_file_state || s.unit_file_state,
+            } : s;
+          }));
+        } catch {
+          setServices(managed);
+        }
+      } else {
+        setServices([]);
+      }
+    } catch {
+      message.error('获取托管服务列表失败');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const fetchGroups = useCallback(async () => {
-    try {
-      const res = await processApi.listGroups();
-      setGroups(res.data?.data || []);
-    } catch { /* silent */ }
-  }, []);
-
-  useEffect(() => { fetchProcesses(); fetchGroups(); }, [fetchProcesses, fetchGroups]);
-
-  // Auto-refresh every 5s
-  useEffect(() => {
-    const timer = setInterval(fetchProcesses, 5000);
-    return () => clearInterval(timer);
-  }, [fetchProcesses]);
+  useEffect(() => { fetch(); }, [fetch]);
 
   const handleCreate = () => {
-    setEditingProcess(null);
+    setEditing(null);
     form.resetFields();
-    form.setFieldsValue({ auto_restart: true, max_restarts: 10, restart_delay: 5, stop_timeout: 10, startup_timeout: 30 });
+    form.setFieldsValue({ auto_restart: true, max_restarts: 10, restart_delay: 5, stop_timeout: 10, auto_start: false, env: '' });
     setModalVisible(true);
   };
 
-  const handleEdit = (p: ProcessWithStatus) => {
-    setEditingProcess(p);
+  const handleEdit = (s: Service) => {
+    setEditing(s);
+    // 后端 ParseUnitMeta 已从 unit 文件回填所有字段，去处 easyserver- 前缀展示短名。
+    const shortName = s.name.replace(/^easyserver-/, '');
     form.setFieldsValue({
-      name: p.name,
-      command: p.command,
-      args: p.args,
-      dir: p.dir,
-      env: p.env,
-      auto_restart: p.auto_restart,
-      max_restarts: p.max_restarts,
-      restart_delay: p.restart_delay,
-      stop_timeout: p.stop_timeout,
-      startup_timeout: p.startup_timeout,
-      auto_start: p.auto_start,
-      log_file: p.log_file,
-      group_id: p.group_id || undefined,
-      runtime_version_id: p.runtime_version_id || undefined,
+      name: shortName,
+      description: s.description || '',
+      exec_start: s.exec_start || '',
+      dir: s.dir || '',
+      env: s.env && Object.keys(s.env).length > 0 ? JSON.stringify(s.env, null, 2) : '',
+      auto_restart: s.auto_restart ?? true,
+      max_restarts: s.max_restarts ?? 10,
+      restart_delay: s.restart_delay ?? 5,
+      stop_timeout: s.stop_timeout ?? 10,
+      auto_start: s.enabled,
+      runtime: (s.runtime_version_id && s.runtime_lang && s.runtime_exact)
+        ? { id: s.runtime_version_id, lang: s.runtime_lang, exact: s.runtime_exact }
+        : undefined,
     });
     setModalVisible(true);
   };
@@ -108,439 +279,494 @@ export default function ProcessGuardian() {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (editingProcess) {
-        await processApi.update(editingProcess.id, values);
+      // env 表单是 TextArea（JSON 字符串），parse 成 object 给后端。
+      let env: Record<string, string> = {};
+      if (typeof values.env === 'string' && values.env.trim()) {
+        try {
+          env = JSON.parse(values.env);
+        } catch {
+          message.error('环境变量不是合法的 JSON');
+          return;
+        }
+      }
+      setSubmitting(true);
+      // runtime 表单存的是 {id,lang,exact} 对象，拆成三字段给后端。
+      const rt = values.runtime as { id: number; lang: string; exact: string } | undefined;
+      const shortName = values.name.replace(/^easyserver-/, '');
+      const spec: ManagedServiceSpec = {
+        name: shortName,
+        description: values.description,
+        exec_start: values.exec_start,
+        dir: values.dir || '',
+        env,
+        auto_restart: values.auto_restart,
+        max_restarts: values.max_restarts,
+        restart_delay: values.restart_delay,
+        stop_timeout: values.stop_timeout,
+        auto_start: values.auto_start,
+        runtime_version_id: rt?.id || 0,
+        runtime_lang: rt?.lang || '',
+        runtime_exact: rt?.exact || '',
+      };
+      if (editing) {
+        await serviceApi.update(editing.name, spec);
         message.success('更新成功');
       } else {
-        await processApi.create(values);
+        await serviceApi.create(spec);
         message.success('创建成功');
       }
       setModalVisible(false);
-      fetchProcesses();
-    } catch (error: unknown) {
-      const formErr = error as { errorFields?: unknown };
-      if (formErr.errorFields) return; // form validation error
-      message.error((error instanceof Error ? error.message : '操作失败'));
+      fetch();
+    } catch (e: any) {
+      if (e?.errorFields) return;
+      message.error(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (name: string) => {
     try {
-      await processApi.delete(id);
+      await serviceApi.delete(name);
       message.success('已删除');
-      fetchProcesses();
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '删除失败'));
+      fetch();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '删除失败');
     }
   };
 
-  const handleAction = async (id: number, action: 'start' | 'stop' | 'restart') => {
-    const key = `${action}-${id}`;
-    setOperating(key);
+  const handleAction = async (name: string, action: ServiceAction) => {
+    const fn = action === 'start' ? serviceApi.start
+      : action === 'stop' ? serviceApi.stop
+      : action === 'restart' ? serviceApi.restart
+      : action === 'enable' ? serviceApi.enable : serviceApi.disable;
+    setOperating(`${action}-${name}`);
     try {
-      await processApi[action](id);
-      message.success(`${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
-      fetchProcesses();
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '操作失败'));
+      await fn(name);
+      const label = action === 'start' ? '启动' : action === 'stop' ? '停止'
+        : action === 'restart' ? '重启' : action === 'enable' ? '设置开机自启' : '取消开机自启';
+      message.success(`${label}成功`);
+      fetch();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败');
     } finally {
       setOperating('');
     }
   };
 
-  const handleBatchAction = async (action: 'start' | 'stop' | 'restart') => {
-    if (selectedRowKeys.length === 0) {
-      message.warning('请先选择进程');
-      return;
-    }
-    try {
-      const fn = action === 'start' ? processApi.batchStart :
-        action === 'stop' ? processApi.batchStop : processApi.batchRestart;
-      await fn(selectedRowKeys);
-      message.success(`批量${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}完成`);
-      setSelectedRowKeys([]);
-      fetchProcesses();
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '操作失败'));
-    }
-  };
+  // 日志 Drawer
+  const [logService, setLogService] = useState<string | null>(null);
+  const [logs, setLogs] = useState<Array<{ time: string; message: string; priority: string }>>([]);
+  const [logLoading, setLogLoading] = useState(false);
 
-  const handleViewLogs = async (p: ProcessWithStatus) => {
-    setLogsProcess(p);
-    setLogsVisible(true);
-    setLogsLoading(true);
+  const fetchLogs = useCallback(async (name: string) => {
+    setLogLoading(true);
     try {
-      const res = await processApi.getLogs(p.id, 100);
-      const data = res.data?.data;
-      setLogs(Array.isArray(data) ? data : data?.items || []);
+      const res = await serviceApi.getLogs(name, 200);
+      setLogs(res.data?.data?.lines || []);
     } catch {
-      message.error('获取日志失败');
+      setLogs([]);
     } finally {
-      setLogsLoading(false);
+      setLogLoading(false);
     }
+  }, []);
+
+  const openLogs = (name: string) => {
+    setLogService(name);
+    fetchLogs(name);
   };
 
-  const handleExport = async () => {
-    try {
-      const res = await processApi.export();
-      const data = JSON.stringify(res.data?.data || [], null, 2);
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'processes-export.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      message.success('导出成功');
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '导出失败'));
-    }
-  };
+  // 详情 Drawer
+  const [detailService, setDetailService] = useState<Service | null>(null);
 
-  const handleImport = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e: any) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      try {
-        const text = await file.text();
-        const processes = JSON.parse(text);
-        await processApi.import(processes);
-        message.success('导入成功');
-        fetchProcesses();
-      } catch (error: unknown) {
-        message.error((error instanceof Error ? error.message : '导入失败'));
-      }
-    };
-    input.click();
-  };
+  const columns = buildServiceColumns({
+    operating,
+    managed: true,
+    onAction: handleAction,
+    onEdit: handleEdit,
+    onDelete: handleDelete,
+    onLogs: openLogs,
+    onDetail: setDetailService,
+  });
 
-  const columns = [
-    {
-      title: '名称',
-      dataIndex: 'name',
-      key: 'name',
-      render: (text: string) => <Text strong>{text}</Text>,
-    },
-    {
-      title: '命令',
-      dataIndex: 'command',
-      key: 'command',
-      ellipsis: true,
-      render: (text: string, record: ProcessWithStatus) => (
-        <Tooltip title={`${text} ${record.args || ''}`}>
-          <Text code style={{ fontSize: 12 }}>{text}</Text>
-        </Tooltip>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: ['status', 'status'],
-      key: 'status',
-      width: 100,
-      render: (_: unknown, record: ProcessWithStatus) => {
-        const st = record.status?.status || 'stopped';
-        const cfg = STATUS_CONFIG[st] || STATUS_CONFIG['stopped']!;
-        return <Badge status={cfg.color as any} text={cfg.label} />;
-      },
-    },
-    {
-      title: 'PID',
-      dataIndex: ['status', 'pid'],
-      key: 'pid',
-      width: 70,
-      render: (pid: number) => pid > 0 ? pid : '-',
-    },
-    {
-      title: 'CPU',
-      dataIndex: ['status', 'cpu_percent'],
-      key: 'cpu',
-      width: 80,
-      render: (v: number) => v > 0 ? `${v.toFixed(1)}%` : '-',
-    },
-    {
-      title: '内存',
-      dataIndex: ['status', 'memory_mb'],
-      key: 'memory',
-      width: 80,
-      render: (v: number) => v > 0 ? `${v.toFixed(1)}MB` : '-',
-    },
-    {
-      title: '重启',
-      dataIndex: ['status', 'restarts'],
-      key: 'restarts',
-      width: 60,
-      render: (v: number) => v || 0,
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 240,
-      render: (_: unknown, record: ProcessWithStatus) => {
-        const isRunning = record.status?.status === 'running';
-        const isBusy = record.status?.status === 'starting' || record.status?.status === 'stopping';
-        const opKey = `start-${record.id}`;
-        const spKey = `stop-${record.id}`;
-        const rsKey = `restart-${record.id}`;
-        return (
-          <Space size="small">
-            {!isRunning && (
-              <Tooltip title="启动">
-                <Button type="link" size="small" icon={<CaretRightOutlined />}
-                  loading={operating === opKey} disabled={isBusy}
-                  onClick={() => handleAction(record.id, 'start')} />
-              </Tooltip>
-            )}
-            {isRunning && (
-              <Tooltip title="停止">
-                <Button type="link" size="small" icon={<PauseOutlined />}
-                  loading={operating === spKey} disabled={isBusy}
-                  onClick={() => handleAction(record.id, 'stop')} />
-              </Tooltip>
-            )}
-            <Tooltip title="重启">
-              <Button type="link" size="small" icon={<RedoOutlined />}
-                loading={operating === rsKey} disabled={isBusy}
-                onClick={() => handleAction(record.id, 'restart')} />
-            </Tooltip>
-            <Tooltip title="日志">
-              <Button type="link" size="small" icon={<FileTextOutlined />}
-                onClick={() => handleViewLogs(record)} />
-            </Tooltip>
-            <Tooltip title="编辑">
-              <Button type="link" size="small" icon={<EditOutlined />}
-                onClick={() => handleEdit(record)} />
-            </Tooltip>
-            <Popconfirm title="确定删除?" onConfirm={() => handleDelete(record.id)}>
-              <Tooltip title="删除">
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}
-                  disabled={isRunning} />
-              </Tooltip>
-            </Popconfirm>
-          </Space>
-        );
-      },
-    },
-  ];
-
-  const runningCount = processes.filter(p => p.status?.status === 'running').length;
-  const stoppedCount = processes.filter(p => p.status?.status === 'stopped').length;
-  const errorCount = processes.filter(p => p.status?.status === 'error').length;
+  const runningCount = services.filter(s => s.state === 'active').length;
+  const stoppedCount = services.filter(s => s.state === 'inactive').length;
+  const failedCount = services.filter(s => s.state === 'failed').length;
 
   return (
-    <div>
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'managed' | 'system')}
-        items={[
-          {
-            key: 'managed',
-            label: (
-              <span>
-                <ClusterOutlined />
-                托管进程
-              </span>
-            ),
-          },
-          {
-            key: 'system',
-            label: (
-              <span>
-                <DashboardOutlined />
-                系统进程
-              </span>
-            ),
-          },
-        ]}
-        style={{ marginBottom: 16 }}
-      />
-
-      {activeTab === 'managed' && (
-        <>
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={6}>
-              <Card size="small">
-                <Statistic title="进程总数" value={processes.length} prefix={<AppstoreOutlined />} />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card size="small">
-                <Statistic title="运行中" value={runningCount} styles={{ content: { color: '#3f8600' } }}
-                  prefix={<CaretRightOutlined />} />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card size="small">
-                <Statistic title="已停止" value={stoppedCount} prefix={<PauseOutlined />} />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card size="small">
-                <Statistic title="异常" value={errorCount} styles={{ content: { color: '#cf1322' } }}
-                  prefix={<ThunderboltOutlined />} />
-              </Card>
-            </Col>
-          </Row>
+    <>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small"><Statistic title="托管总数" value={services.length} prefix={<AppstoreOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="运行中" value={runningCount} styles={{ content: { color: '#3f8600' } }} prefix={<CaretRightOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="已停止" value={stoppedCount} prefix={<PauseOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="异常" value={failedCount} styles={{ content: { color: '#cf1322' } }} prefix={<ThunderboltOutlined />} /></Card>
+        </Col>
+      </Row>
 
       <Card
-        title={<Space><ClusterOutlined />进程守护</Space>}
+        title={<Space><ClusterOutlined />面板托管服务</Space>}
         extra={
           <Space>
-            <Button size="small" icon={<CaretRightOutlined />}
-              onClick={() => handleBatchAction('start')} disabled={selectedRowKeys.length === 0}>
-              批量启动
-            </Button>
-            <Button size="small" icon={<PauseOutlined />}
-              onClick={() => handleBatchAction('stop')} disabled={selectedRowKeys.length === 0}>
-              批量停止
-            </Button>
-            <Button size="small" icon={<RedoOutlined />}
-              onClick={() => handleBatchAction('restart')} disabled={selectedRowKeys.length === 0}>
-              批量重启
-            </Button>
-            <Button size="small" icon={<ExportOutlined />} onClick={handleExport}>导出</Button>
-            <Button size="small" icon={<ImportOutlined />} onClick={handleImport}>导入</Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={fetchProcesses}>刷新</Button>
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-              添加进程
-            </Button>
+            <Button size="small" icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加服务</Button>
           </Space>
         }
       >
         <Table
-          rowKey="id"
+          rowKey="name"
           columns={columns}
-          dataSource={processes}
+          dataSource={services}
           loading={loading}
           size="small"
-          rowSelection={{
-            selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys as number[]),
-          }}
           pagination={false}
-          locale={{ emptyText: <Empty description={'暂无进程配置，点击「添加进程」开始'} /> }}
+          scroll={{ x: 700 }}
+          locale={{ emptyText: <Empty description="暂无托管服务，点击「添加服务」开始" /> }}
         />
       </Card>
 
-      {/* Add/Edit Modal */}
-      <Modal
-        title={editingProcess ? '编辑进程' : '添加进程'}
-        open={modalVisible}
+      <ManagedServiceModal
+        visible={modalVisible}
+        confirmLoading={submitting}
+        editing={editing}
+        form={form}
         onOk={handleSubmit}
         onCancel={() => setModalVisible(false)}
-        width={600}
-        destroyOnHidden
-        style={{ top: MODAL_TOP_OFFSET }}
+      />
+
+      {/* 日志 Drawer */}
+      <Drawer
+        title={<Space><FileTextOutlined />{logService} 日志</Space>}
+        open={!!logService}
+        onClose={() => setLogService(null)}
+        width={720}
+        extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
+          onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item name="name" label="进程名称" rules={[{ required: true, message: '请输入进程名称' }]}>
-            <Input placeholder="例如: my-app" />
-          </Form.Item>
-          <Form.Item name="command" label="启动命令" rules={[{ required: true, message: '请输入启动命令' }]}>
-            <Input placeholder="例如: node /app/server.js" />
-          </Form.Item>
-          <Form.Item
-            name="runtime_version_id"
-            label="运行时版本"
-            rules={[{ required: true, message: '请选择已安装的运行时版本' }]}
-            extra="启动命令会自动通过 mise exec <lang>@<exact> 包裹"
-          >
-            <RuntimeVersionSelect />
-          </Form.Item>
-          <Form.Item name="args" label="参数">
-            <Input placeholder="命令行参数" />
-          </Form.Item>
-          <Form.Item name="dir" label="工作目录">
-            <Input placeholder="例如: /app" />
-          </Form.Item>
-          <Form.Item name="env" label="环境变量 (JSON)">
-            <TextArea rows={3} placeholder='例如: {"NODE_ENV": "production", "PORT": "3000"}' />
-          </Form.Item>
-          <Row gutter={16}>
-            <Col span={6}>
-              <Form.Item name="auto_restart" label="自动重启" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="max_restarts" label="最大重启次数">
-                <InputNumber min={0} max={100} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="restart_delay" label="重启延迟(秒)">
-                <InputNumber min={1} max={300} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="stop_timeout" label="停止超时(秒)">
-                <InputNumber min={1} max={60} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="startup_timeout" label="启动超时(秒)">
-                <InputNumber min={5} max={300} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="auto_start" label="开机自启" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="group_id" label="分组">
-                <Select allowClear placeholder="无分组">
-                  {groups.map(g => (
-                    <Select.Option key={g.id} value={g.id}>{g.name}</Select.Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="log_file" label="日志文件路径">
-            <Input placeholder="留空则自动捕获 stdout/stderr" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        <pre style={{ fontSize: 12, lineHeight: 1.6, maxHeight: 'calc(100vh - 160px)', overflow: 'auto', margin: 0, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+          {logs.length === 0
+            ? (logLoading ? '加载中...' : '暂无日志')
+            : logs.map((l) => `[${l.time}] ${l.message}`).join('\n')}
+        </pre>
+      </Drawer>
 
-      {/* Logs Modal */}
-      <Modal
-        title={`${logsProcess?.name || ''} - 日志`}
-        open={logsVisible}
-        onCancel={() => setLogsVisible(false)}
-        footer={null}
-        width={800}
+      {/* 详情 Drawer */}
+      <Drawer
+        title={<Space><InfoCircleOutlined />{detailService?.name} 详情</Space>}
+        open={!!detailService}
+        onClose={() => setDetailService(null)}
+        width={560}
       >
-        <div style={{ maxHeight: 500, overflow: 'auto', background: '#1e1e1e', borderRadius: 6, padding: 12 }}>
-          {logsLoading ? (
-            <Text style={{ color: '#888' }}>加载中...</Text>
-          ) : logs.length === 0 ? (
-            <Text style={{ color: '#888' }}>暂无日志</Text>
-          ) : (
-            logs.map((log, i) => (
-              <div key={i} style={{ marginBottom: 4, fontFamily: 'monospace', fontSize: 12 }}>
-                <Text style={{ color: '#666' }}>{log.created_at} </Text>
-                <Tag color={log.type === 'stderr' ? 'red' : log.type === 'system' ? 'blue' : 'default'}
-                  style={{ fontSize: 10, lineHeight: '16px', marginRight: 4 }}>
-                  {log.type}
-                </Tag>
-                <Text style={{ color: log.type === 'stderr' ? '#ff6b6b' : '#d4d4d4' }}>
-                  {log.content}
-                </Text>
-              </div>
-            ))
-          )}
-        </div>
-      </Modal>
+        {detailService && (
+          <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }}>
+            <Descriptions.Item label="状态">
+              <Badge status={(STATUS_CONFIG[detailService.state]?.color) as any}
+                text={`${STATUS_CONFIG[detailService.state]?.label || detailService.state} (${detailService.sub_state})`} />
+            </Descriptions.Item>
+            <Descriptions.Item label="描述">{detailService.description || '-'}</Descriptions.Item>
+            <Descriptions.Item label="PID">{detailService.pid > 0 ? detailService.pid : '-'}</Descriptions.Item>
+            <Descriptions.Item label="内存">{detailService.memory_bytes > 0 ? formatBytes(detailService.memory_bytes) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="CPU">{detailService.cpu_percent > 0 ? `${detailService.cpu_percent.toFixed(1)}%` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="运行时长">{detailService.uptime_seconds > 0 ? formatUptime(detailService.uptime_seconds) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="开机自启">{detailService.enabled ? '是' : '否'}</Descriptions.Item>
+            {detailService.managed && <>
+              <Descriptions.Item label="启动命令">
+                <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{detailService.exec_start || '-'}</Text>
+              </Descriptions.Item>
+              {detailService.dir && <Descriptions.Item label="工作目录">{detailService.dir}</Descriptions.Item>}
+              {detailService.runtime_version_id > 0 && (
+                <Descriptions.Item label="运行时">{detailService.runtime_lang}@{detailService.runtime_exact}</Descriptions.Item>
+              )}
+              {detailService.env && Object.keys(detailService.env).length > 0 && (
+                <Descriptions.Item label="环境变量">
+                  <pre style={{ margin: 0, fontSize: 12 }}>
+                    {Object.entries(detailService.env).map(([k, v]) => `${k}=${v}`).join('\n')}
+                  </pre>
+                </Descriptions.Item>
+              )}
+            </>}
+          </Descriptions>
+        )}
+      </Drawer>
+    </>
+  );
+}
 
-      </>
-      )}
+function ManagedServiceModal({ visible, confirmLoading, editing, form, onOk, onCancel }: {
+  visible: boolean;
+  confirmLoading: boolean;
+  editing: Service | null;
+  form: ReturnType<typeof Form.useForm<ManagedServiceForm>>[0];
+  onOk: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal
+      title={editing ? '编辑托管服务' : '添加托管服务'}
+      open={visible}
+      confirmLoading={confirmLoading}
+      onOk={onOk}
+      onCancel={onCancel}
+      width={600}
+      destroyOnHidden
+      style={{ top: MODAL_TOP_OFFSET }}
+    >
+      <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        <Form.Item name="name" label="服务名称" rules={[
+          { required: true, message: '请输入服务名称' },
+          { pattern: /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/, message: '只能包含小写字母、数字、连字符，不能以连字符开头/结尾' },
+        ]} extra="生成 unit: easyserver-<名称>.service">
+          <Input placeholder="例如: my-app" disabled={!!editing} />
+        </Form.Item>
+        <Form.Item name="description" label="描述">
+          <Input placeholder="可选，显示用" />
+        </Form.Item>
+        <Form.Item name="exec_start" label="启动命令" rules={[{ required: true, message: '请输入启动命令' }]}
+          extra="完整命令，如 node /app/server.js --port 3000（绑定运行时后自动前置 mise exec）">
+          <Input placeholder="例如: node /app/server.js --port 3000" />
+        </Form.Item>
+        <Form.Item
+          name="runtime"
+          label="运行环境"
+          extra="启动命令会自动通过 mise exec <lang>@<exact> 包裹"
+        >
+          <RuntimeVersionSelect />
+        </Form.Item>
+        <Form.Item name="dir" label="工作目录">
+          <Input placeholder="例如: /app" />
+        </Form.Item>
+        <Form.Item name="env" label="环境变量 (JSON)">
+          <TextArea rows={3} placeholder='例如: {"NODE_ENV": "production", "PORT": "3000"}' />
+        </Form.Item>
+        <Row gutter={16}>
+          <Col span={4}>
+            <Form.Item name="auto_start" label="开机自启" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </Col>
+          <Col span={4}>
+            <Form.Item name="auto_restart" label="自动重启" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </Col>
+          <Col span={5}>
+            <Form.Item name="max_restarts" label="最大重启次数">
+              <InputNumber min={0} max={100} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={5}>
+            <Form.Item name="restart_delay" label="重启延迟(秒)">
+              <InputNumber min={1} max={300} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name="stop_timeout" label="停止超时(秒)">
+              <InputNumber min={1} max={60} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+        </Row>
+      </Form>
+    </Modal>
+  );
+}
 
-      {activeTab === 'system' && <SystemProcesses />}
-    </div>
+// ============================================================
+// 系统服务 Tab（排除 easyserver-* 托管服务）
+// ============================================================
+
+function SystemTab() {
+  const [services, setServices] = useState<Service[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [operating, setOperating] = useState<string>('');
+  const [searchText, setSearchText] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // 日志 Drawer
+  const [logService, setLogService] = useState<string | null>(null);
+  const [logs, setLogs] = useState<Array<{ time: string; message: string; priority: string }>>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  // 详情 Drawer
+  const [detailService, setDetailService] = useState<Service | null>(null);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await serviceApi.list();
+      // 排除面板托管服务（managed=true）
+      setServices((res.data?.data || []).filter(s => !s.managed));
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  // 当前页服务变化时补详情（PID/内存/enabled），只查当前页的 pageSize 个，快
+  const filtered = useMemo(
+    () => services.filter(s =>
+      !searchText || s.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      s.description?.toLowerCase().includes(searchText.toLowerCase())
+    ),
+    [services, searchText],
+  );
+  const currentPageNames = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize).map(s => s.name),
+    [filtered, page, pageSize],
+  );
+  useEffect(() => {
+    if (currentPageNames.length === 0) return;
+    serviceApi.getDetails(currentPageNames)
+      .then(res => {
+        const detailMap = new Map((res.data?.data || []).map(d => [d.name, d]));
+        setServices(prev => prev.map(s => {
+          const d = detailMap.get(s.name);
+          return d ? { ...s, ...d } : s;
+        }));
+      })
+      .catch(() => {});
+  }, [currentPageNames.join(',')]);
+
+  // 搜索时回到第一页
+  useEffect(() => { setPage(1); }, [searchText]);
+
+  const fetchLogs = useCallback(async (name: string) => {
+    setLogLoading(true);
+    try {
+      const res = await serviceApi.getLogs(name, 200);
+      setLogs(res.data?.data?.lines || []);
+    } catch {
+      setLogs([]);
+    } finally {
+      setLogLoading(false);
+    }
+  }, []);
+
+  const openLogs = (name: string) => {
+    setLogService(name);
+    fetchLogs(name);
+  };
+
+  const handleAction = async (name: string, action: ServiceAction) => {
+    setOperating(`${action}-${name}`);
+    try {
+      const fn = action === 'start' ? serviceApi.start
+        : action === 'stop' ? serviceApi.stop
+        : action === 'restart' ? serviceApi.restart
+        : action === 'enable' ? serviceApi.enable
+        : serviceApi.disable;
+      await fn(name);
+      const label = action === 'start' ? '启动' : action === 'stop' ? '停止'
+        : action === 'restart' ? '重启' : action === 'enable' ? '设置开机自启' : '取消开机自启';
+      message.success(`${label}成功`);
+      fetch();
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setOperating('');
+    }
+  };
+
+  const columns = buildServiceColumns({
+    operating,
+    managed: false,
+    onAction: handleAction,
+    onLogs: openLogs,
+    onDetail: setDetailService,
+  });
+
+  const runningCount = services.filter(s => s.state === 'active').length;
+  const stoppedCount = services.filter(s => s.state === 'inactive').length;
+  const failedCount = services.filter(s => s.state === 'failed').length;
+
+  return (
+    <>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small"><Statistic title="系统服务总数" value={services.length} prefix={<SettingOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="运行中" value={runningCount} styles={{ content: { color: '#3f8600' } }} prefix={<CaretRightOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="已停止" value={stoppedCount} prefix={<PauseOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="异常" value={failedCount} styles={{ content: { color: '#cf1322' } }} prefix={<ThunderboltOutlined />} /></Card>
+        </Col>
+      </Row>
+
+      <Card
+        title={<Space><CloudServerOutlined />系统服务</Space>}
+        extra={
+          <Space>
+            <Input.Search placeholder="搜索服务名" allowClear size="small"
+              style={{ width: 200 }} value={searchText} onChange={e => setSearchText(e.target.value)} />
+            <Button size="small" icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
+          </Space>
+        }
+      >
+        <Table
+          rowKey="name"
+          columns={columns}
+          dataSource={filtered}
+          loading={loading}
+          size="small"
+          scroll={{ x: 800 }}
+          pagination={{
+            current: page, pageSize, showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个服务`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
+        />
+      </Card>
+
+      {/* 日志 Drawer */}
+      <Drawer
+        title={<Space><FileTextOutlined />{logService} 日志</Space>}
+        open={!!logService}
+        onClose={() => setLogService(null)}
+        width={720}
+        extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
+          onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
+      >
+        <pre style={{ fontSize: 12, lineHeight: 1.6, maxHeight: 'calc(100vh - 160px)', overflow: 'auto', margin: 0, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+          {logs.length === 0
+            ? (logLoading ? '加载中...' : '暂无日志')
+            : logs.map((l) => `[${l.time}] ${l.message}`).join('\n')}
+        </pre>
+      </Drawer>
+
+      {/* 详情 Drawer */}
+      <Drawer
+        title={<Space><InfoCircleOutlined />{detailService?.name} 详情</Space>}
+        open={!!detailService}
+        onClose={() => setDetailService(null)}
+        width={560}
+      >
+        {detailService && (
+          <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }}>
+            <Descriptions.Item label="状态">
+              <Badge status={(STATUS_CONFIG[detailService.state]?.color) as any}
+                text={`${STATUS_CONFIG[detailService.state]?.label || detailService.state} (${detailService.sub_state})`} />
+            </Descriptions.Item>
+            <Descriptions.Item label="描述">{detailService.description || '-'}</Descriptions.Item>
+            <Descriptions.Item label="PID">{detailService.pid > 0 ? detailService.pid : '-'}</Descriptions.Item>
+            <Descriptions.Item label="内存">{detailService.memory_bytes > 0 ? formatBytes(detailService.memory_bytes) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="CPU">{detailService.cpu_percent > 0 ? `${detailService.cpu_percent.toFixed(1)}%` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="运行时长">{detailService.uptime_seconds > 0 ? formatUptime(detailService.uptime_seconds) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="开机自启">{detailService.enabled ? '是' : '否'}</Descriptions.Item>
+          </Descriptions>
+        )}
+      </Drawer>
+    </>
   );
 }

@@ -14,13 +14,13 @@ const MENU_GROUPS = [
     items: [
       { key: '/', icon: 'dashboard', label: '系统概览' },
       { key: '/processes', icon: 'cluster', label: '进程守护' },
+      { key: '/system-monitor', icon: 'monitor', label: '系统监控' },
       { key: '/ports', icon: 'api', label: '端口监控' },
     ],
   },
   {
     label: '管理',
     items: [
-      { key: '/services', icon: 'settings', label: '服务管理' },
       { key: '/terminal', icon: 'terminal', label: '终端访问' },
       { key: '/files', icon: 'folder', label: '文件管理' },
       { key: '/file-shares', icon: 'link', label: '文件外链' },
@@ -94,8 +94,8 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 const PAGE_TITLES: Record<string, string> = {
   '/': '系统概览',
   '/processes': '进程守护',
+  '/system-monitor': '系统监控',
   '/ports': '端口监控',
-  '/services': '服务管理',
   '/terminal': '终端访问',
   '/files': '文件管理',
   '/file-shares': '文件外链',

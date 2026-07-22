@@ -103,6 +103,19 @@ export interface Service {
   memory_bytes: number;
   cpu_percent: number;
   uptime_seconds: number;
+  // 托管服务元数据（系统服务为零值）
+  managed: boolean;
+  runtime_version_id: number;
+  runtime_lang: string;
+  runtime_exact: string;
+  // 托管服务配置回显（解析 [Unit]/[Service] 段，编辑表单用）
+  exec_start: string;
+  dir: string;
+  env: Record<string, string>;
+  auto_restart: boolean;
+  max_restarts?: number;
+  restart_delay?: number;
+  stop_timeout?: number;
 }
 
 // File types
@@ -381,69 +394,21 @@ export interface FirewallLogEntry {
 }
 
 // Process Guardian types
-export interface ManagedProcess {
-  id: number;
+// Managed service spec（创建/更新托管服务的请求体，对应后端 ManagedUnitSpec）
+export interface ManagedServiceSpec {
   name: string;
-  command: string;
-  args: string;
+  description: string;
+  exec_start: string;
   dir: string;
-  env: string;
+  env: Record<string, string>;
   auto_restart: boolean;
   max_restarts: number;
   restart_delay: number;
   stop_timeout: number;
-  startup_timeout: number;
   auto_start: boolean;
-  log_file: string;
-  group_id: number;
   runtime_version_id: number;
   runtime_lang: string;
   runtime_exact: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ProcessStatus {
-  id: number;
-  process_id: number;
-  status: 'running' | 'stopped' | 'error' | 'starting' | 'stopping';
-  pid: number;
-  uptime: number;
-  restarts: number;
-  cpu_percent: number;
-  memory_mb: number;
-  exit_code: number;
-  last_start: string;
-  last_error: string;
-  updated_at: string;
-}
-
-export interface ProcessLog {
-  id: number;
-  process_id: number;
-  type: 'stdout' | 'stderr' | 'system';
-  content: string;
-  created_at: string;
-}
-
-export interface ProcessGroup {
-  id: number;
-  name: string;
-  description: string;
-  created_at: string;
-}
-
-export interface ProcessWithStatus extends ManagedProcess {
-  status: ProcessStatus | null;
-  group: ProcessGroup | null;
-}
-
-export interface ProcessStats {
-  cpu_percent: number;
-  memory_mb: number;
-  pid: number;
-  uptime: number;
-  restarts: number;
 }
 
 // System Process types
