@@ -36,7 +36,6 @@ import (
 	"easyserver/internal/monitor"
 	"easyserver/internal/notification"
 	"easyserver/internal/notify"
-	"easyserver/internal/process"
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
@@ -335,12 +334,6 @@ func (a *App) wire() error {
 	// Package-level rate limiters
 	a.onCleanup(middleware.StopRateLimiter)
 	a.onCleanup(middleware.StopSessionHeartbeatLimiter)
-
-	// Process guardian
-	processRepo := process.NewSQLiteRepository(db)
-	processMgr := process.NewService(processRepo, cmdExec)
-	a.ProcessManager = processMgr
-	a.onCleanup(func() { processMgr.Shutdown() })
 
 	// System process service
 	a.SystemProcessService = systemprocess.NewService()
