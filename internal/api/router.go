@@ -238,7 +238,7 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DeployService)
 	runtimeenvhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.RuntimeService, deps.PackageManagerService)
 	envconfighttp.RegisterRoutes(protected, deps.EnvConfigService)
-	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.WebServerService, deps.WebsiteService, deps.ProcessManager)
+	webhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.WebServerService, deps.WebsiteService)
 	dbserverhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DBServerService, deps.DatabaseMgmtService)
 	cronhttp.RegisterRoutes(protected, deps.CronService, deps.Executor)
 	firewallhttp.RegisterRoutes(protected, deps.FirewallService, cfg.Server.Port)
