@@ -53,6 +53,135 @@ function formatUptime(sec: number): string {
   return `${m}m`;
 }
 
+// ============================================================
+// 共用表格列构造：面板托管和系统服务复用，差异通过参数控制
+// ============================================================
+
+type ServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable';
+
+interface ColumnProps {
+  operating: string;                       // 操作中状态标记
+  managed: boolean;                        // 托管 Tab 传 true，系统 Tab 传 false
+  onAction: (name: string, action: ServiceAction) => void;
+  onEdit?: (s: Service) => void;           // 托管才有
+  onDelete?: (name: string) => void;       // 托管才有
+  onLogs: (name: string) => void;
+  onDetail: (s: Service) => void;
+}
+
+function buildServiceColumns(props: ColumnProps) {
+  const { operating, managed, onAction, onEdit, onDelete, onLogs, onDetail } = props;
+
+  const cols: object[] = [
+    {
+      title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 180,
+      render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t}</Text>,
+    },
+    {
+      title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, width: 160,
+      render: (t: string) => t ? <Text type="secondary" style={{ fontSize: 12 }}>{t}</Text> : null,
+    },
+    {
+      title: '状态', key: 'status', width: 120,
+      render: (_: unknown, r: Service) => {
+        const cfg = STATUS_CONFIG[r.state] || { color: 'default', label: r.state };
+        const text = r.sub_state && r.sub_state !== r.state
+          ? `${cfg.label} (${r.sub_state})` : cfg.label;
+        return <Badge status={cfg.color as any} text={text} />;
+      },
+    },
+    {
+      title: 'PID', dataIndex: 'pid', key: 'pid', width: 70,
+      render: (pid: number) => pid > 0 ? pid : '-',
+    },
+    {
+      title: '内存', dataIndex: 'memory_bytes', key: 'memory', width: 85,
+      render: (m: number) => m > 0 ? formatBytes(m) : '-',
+    },
+  ];
+
+  // 系统服务 Tab：自启开关放列里（托管的在编辑表单里配）
+  if (!managed) {
+    cols.push({
+      title: '自启', key: 'enabled', width: 70,
+      render: (_: unknown, r: Service) => (
+        <Switch size="small" checked={r.enabled}
+          loading={operating === `enable-${r.name}` || operating === `disable-${r.name}`}
+          disabled={r.name === 'easyserver'}
+          onChange={(checked) => onAction(r.name, checked ? 'enable' : 'disable')} />
+      ),
+    });
+  } else {
+    // 托管 Tab：自启用 Tag 展示
+    cols.push({
+      title: '自启', dataIndex: 'enabled', key: 'enabled', width: 70,
+      render: (en: boolean) => en ? <Tag color="blue" style={{ margin: 0 }}>是</Tag> : <Tag style={{ margin: 0 }}>否</Tag>,
+    });
+  }
+
+  cols.push({
+    title: '操作', key: 'action', width: managed ? 200 : 220, fixed: 'right' as const,
+    render: (_: unknown, r: Service) => {
+      const isRunning = r.state === 'active';
+      const isBusy = r.state === 'activating' || r.state === 'deactivating';
+      // 系统服务 Tab 保护面板自身服务
+      const isSelf = !managed && r.name === 'easyserver';
+
+      return (
+        <Space size="small">
+          {/* 启动/停止互斥：只显示可操作的那个 */}
+          {isRunning ? (
+            <Tooltip title="停止">
+              <Button type="link" size="small" icon={<PauseOutlined />}
+                loading={operating === `stop-${r.name}`} disabled={isBusy || isSelf}
+                onClick={() => onAction(r.name, 'stop')} />
+            </Tooltip>
+          ) : (
+            <Tooltip title="启动">
+              <Button type="link" size="small" icon={<CaretRightOutlined />}
+                loading={operating === `start-${r.name}`} disabled={isBusy || isSelf}
+                onClick={() => onAction(r.name, 'start')} />
+            </Tooltip>
+          )}
+          {/* 重启：运行中才显示（停了没必要重启） */}
+          {isRunning && (
+            <Tooltip title="重启">
+              <Button type="link" size="small" icon={<RedoOutlined />}
+                loading={operating === `restart-${r.name}`} disabled={isBusy || isSelf}
+                onClick={() => onAction(r.name, 'restart')} />
+            </Tooltip>
+          )}
+          <Tooltip title="日志">
+            <Button type="link" size="small" icon={<FileTextOutlined />}
+              onClick={() => onLogs(r.name)} />
+          </Tooltip>
+          <Tooltip title="详情">
+            <Button type="link" size="small" icon={<InfoCircleOutlined />}
+              onClick={() => onDetail(r)} />
+          </Tooltip>
+          {/* 托管才有编辑/删除 */}
+          {managed && onEdit && (
+            <Tooltip title="编辑">
+              <Button type="link" size="small" icon={<EditOutlined />}
+                onClick={() => onEdit(r)} />
+            </Tooltip>
+          )}
+          {managed && onDelete && (
+            <Popconfirm title="确定删除?" onConfirm={() => onDelete(r.name)}>
+              <Tooltip title="删除">
+                <Button type="link" size="small" danger icon={<DeleteOutlined />}
+                  disabled={isRunning} />
+              </Tooltip>
+            </Popconfirm>
+          )}
+        </Space>
+      );
+    },
+  });
+
+  return cols;
+}
+
 export default function ProcessGuardian() {
   const [activeTab, setActiveTab] = useState<'managed' | 'system'>('managed');
 
@@ -196,13 +325,17 @@ function ManagedTab() {
     }
   };
 
-  const handleAction = async (name: string, action: 'start' | 'stop' | 'restart') => {
+  const handleAction = async (name: string, action: ServiceAction) => {
     const fn = action === 'start' ? serviceApi.start
-      : action === 'stop' ? serviceApi.stop : serviceApi.restart;
+      : action === 'stop' ? serviceApi.stop
+      : action === 'restart' ? serviceApi.restart
+      : action === 'enable' ? serviceApi.enable : serviceApi.disable;
     setOperating(`${action}-${name}`);
     try {
       await fn(name);
-      message.success(`${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}成功`);
+      const label = action === 'start' ? '启动' : action === 'stop' ? '停止'
+        : action === 'restart' ? '重启' : action === 'enable' ? '设置开机自启' : '取消开机自启';
+      message.success(`${label}成功`);
       fetch();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败');
@@ -236,83 +369,15 @@ function ManagedTab() {
   // 详情 Drawer
   const [detailService, setDetailService] = useState<Service | null>(null);
 
-  const columns = [
-    {
-      title: '名称', dataIndex: 'name', key: 'name', ellipsis: true,
-      render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t}</Text>,
-    },
-    {
-      title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, width: 140,
-      render: (t: string) => t ? <Text type="secondary" style={{ fontSize: 12 }}>{t}</Text> : null,
-    },
-    {
-      title: '状态', key: 'status', width: 110,
-      render: (_: unknown, r: Service) => {
-        const cfg = STATUS_CONFIG[r.state] || STATUS_CONFIG['inactive']!;
-        return <Badge status={cfg.color as any} text={`${cfg.label}${r.sub_state && r.sub_state !== r.state ? ` (${r.sub_state})` : ''}`} />;
-      },
-    },
-    {
-      title: 'PID', dataIndex: 'pid', key: 'pid', width: 65,
-      render: (pid: number) => pid > 0 ? pid : '-',
-    },
-    {
-      title: '内存', dataIndex: 'memory_bytes', key: 'memory', width: 80,
-      render: (m: number) => m > 0 ? formatBytes(m) : '-',
-    },
-    {
-      title: '自启', dataIndex: 'enabled', key: 'enabled', width: 70,
-      render: (en: boolean) => en ? <Tag color="blue" style={{ margin: 0 }}>是</Tag> : <Tag style={{ margin: 0 }}>否</Tag>,
-    },
-    {
-      title: '操作', key: 'action', width: 200, fixed: 'right' as const,
-      render: (_: unknown, r: Service) => {
-        const isRunning = r.state === 'active';
-        const isBusy = r.state === 'activating' || r.state === 'deactivating';
-        return (
-          <Space size="small" style={{ flexWrap: 'wrap' }}>
-            {!isRunning && (
-              <Tooltip title="启动">
-                <Button type="link" size="small" icon={<CaretRightOutlined />}
-                  loading={operating === `start-${r.name}`} disabled={isBusy}
-                  onClick={() => handleAction(r.name, 'start')} />
-              </Tooltip>
-            )}
-            {isRunning && (
-              <Tooltip title="停止">
-                <Button type="link" size="small" icon={<PauseOutlined />}
-                  loading={operating === `stop-${r.name}`} disabled={isBusy}
-                  onClick={() => handleAction(r.name, 'stop')} />
-              </Tooltip>
-            )}
-            <Tooltip title="重启">
-              <Button type="link" size="small" icon={<RedoOutlined />}
-                loading={operating === `restart-${r.name}`} disabled={isBusy}
-                onClick={() => handleAction(r.name, 'restart')} />
-            </Tooltip>
-            <Tooltip title="日志">
-              <Button type="link" size="small" icon={<FileTextOutlined />}
-                onClick={() => openLogs(r.name)} />
-            </Tooltip>
-            <Tooltip title="详情">
-              <Button type="link" size="small" icon={<InfoCircleOutlined />}
-                onClick={() => setDetailService(r)} />
-            </Tooltip>
-            <Tooltip title="编辑">
-              <Button type="link" size="small" icon={<EditOutlined />}
-                onClick={() => handleEdit(r)} />
-            </Tooltip>
-            <Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.name)}>
-              <Tooltip title="删除">
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}
-                  disabled={isRunning} />
-              </Tooltip>
-            </Popconfirm>
-          </Space>
-        );
-      },
-    },
-  ];
+  const columns = buildServiceColumns({
+    operating,
+    managed: true,
+    onAction: handleAction,
+    onEdit: handleEdit,
+    onDelete: handleDelete,
+    onLogs: openLogs,
+    onDetail: setDetailService,
+  });
 
   const runningCount = services.filter(s => s.state === 'active').length;
   const stoppedCount = services.filter(s => s.state === 'inactive').length;
@@ -503,9 +568,15 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
 function SystemTab() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actingService, setActingService] = useState<string | null>(null);
+  const [operating, setOperating] = useState<string>('');
   const [searchText, setSearchText] = useState('');
-  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+
+  // 日志 Drawer
+  const [logService, setLogService] = useState<string | null>(null);
+  const [logs, setLogs] = useState<Array<{ time: string; message: string; priority: string }>>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  // 详情 Drawer
+  const [detailService, setDetailService] = useState<Service | null>(null);
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -522,21 +593,40 @@ function SystemTab() {
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  const handleAction = async (name: string, action: string) => {
-    setActingService(name);
+  const fetchLogs = useCallback(async (name: string) => {
+    setLogLoading(true);
     try {
-      const fn = (action === 'start' ? serviceApi.start
+      const res = await serviceApi.getLogs(name, 200);
+      setLogs(res.data?.data?.lines || []);
+    } catch {
+      setLogs([]);
+    } finally {
+      setLogLoading(false);
+    }
+  }, []);
+
+  const openLogs = (name: string) => {
+    setLogService(name);
+    fetchLogs(name);
+  };
+
+  const handleAction = async (name: string, action: ServiceAction) => {
+    setOperating(`${action}-${name}`);
+    try {
+      const fn = action === 'start' ? serviceApi.start
         : action === 'stop' ? serviceApi.stop
         : action === 'restart' ? serviceApi.restart
         : action === 'enable' ? serviceApi.enable
-        : serviceApi.disable);
+        : serviceApi.disable;
       await fn(name);
-      message.success(`服务 ${name} 已${action === 'start' ? '启动' : action === 'stop' ? '停止' : action === 'restart' ? '重启' : action === 'enable' ? '设置开机自启' : '取消开机自启'}`);
+      const label = action === 'start' ? '启动' : action === 'stop' ? '停止'
+        : action === 'restart' ? '重启' : action === 'enable' ? '设置开机自启' : '取消开机自启';
+      message.success(`${label}成功`);
       fetch();
     } catch (e) {
       message.error(e instanceof Error ? e.message : '操作失败');
     } finally {
-      setActingService(null);
+      setOperating('');
     }
   };
 
@@ -545,50 +635,13 @@ function SystemTab() {
     s.description?.toLowerCase().includes(searchText.toLowerCase())
   );
 
-  const columns = [
-    {
-      title: '名称', dataIndex: 'name', key: 'name',
-      render: (t: string) => <Text strong>{t}</Text>,
-    },
-    {
-      title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
-      render: (t: string) => <Text type="secondary">{t}</Text>,
-    },
-    {
-      title: '状态', key: 'state', width: 100,
-      render: (_: unknown, r: Service) => {
-        const cfg = STATUS_CONFIG[r.state] || { color: 'default', label: r.state };
-        return <Badge status={cfg.color as any} text={cfg.label} />;
-      },
-    },
-    {
-      title: '开机自启', dataIndex: 'enabled', key: 'enabled', width: 100,
-      render: (en: boolean, r: Service) => (
-        <Switch size="small" checked={en} loading={actingService === r.name}
-          onChange={(checked) => handleAction(r.name, checked ? 'enable' : 'disable')} />
-      ),
-    },
-    {
-      title: '操作', key: 'action', width: 180,
-      render: (_: unknown, r: Service) => {
-        // 保护面板自身服务，禁止操作避免锁死自己
-        const isSelf = r.name === 'easyserver';
-        return (
-          <Space size="small">
-            <Button size="small" icon={<CaretRightOutlined />}
-              disabled={isSelf || r.state === 'active'} loading={actingService === r.name}
-              onClick={() => handleAction(r.name, 'start')}>启动</Button>
-            <Button size="small" icon={<PauseOutlined />}
-              disabled={isSelf || r.state === 'inactive'} loading={actingService === r.name}
-              onClick={() => handleAction(r.name, 'stop')}>停止</Button>
-            <Button size="small" icon={<RedoOutlined />}
-              disabled={isSelf} loading={actingService === r.name}
-              onClick={() => handleAction(r.name, 'restart')}>重启</Button>
-          </Space>
-        );
-      },
-    },
-  ];
+  const columns = buildServiceColumns({
+    operating,
+    managed: false,
+    onAction: handleAction,
+    onLogs: openLogs,
+    onDetail: setDetailService,
+  });
 
   const activeCount = services.filter(s => s.state === 'active').length;
   const failedCount = services.filter(s => s.state === 'failed').length;
@@ -617,10 +670,49 @@ function SystemTab() {
           dataSource={filtered}
           loading={loading}
           size="small"
-          rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys as string[]) }}
+          scroll={{ x: 800 }}
           pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 个服务` }}
         />
       </Card>
+
+      {/* 日志 Drawer */}
+      <Drawer
+        title={<Space><FileTextOutlined />{logService} 日志</Space>}
+        open={!!logService}
+        onClose={() => setLogService(null)}
+        width={720}
+        extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
+          onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
+      >
+        <pre style={{ fontSize: 12, lineHeight: 1.6, maxHeight: 'calc(100vh - 160px)', overflow: 'auto', margin: 0, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+          {logs.length === 0
+            ? (logLoading ? '加载中...' : '暂无日志')
+            : logs.map((l) => `[${l.time}] ${l.message}`).join('\n')}
+        </pre>
+      </Drawer>
+
+      {/* 详情 Drawer */}
+      <Drawer
+        title={<Space><InfoCircleOutlined />{detailService?.name} 详情</Space>}
+        open={!!detailService}
+        onClose={() => setDetailService(null)}
+        width={560}
+      >
+        {detailService && (
+          <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }}>
+            <Descriptions.Item label="状态">
+              <Badge status={(STATUS_CONFIG[detailService.state]?.color) as any}
+                text={`${STATUS_CONFIG[detailService.state]?.label || detailService.state} (${detailService.sub_state})`} />
+            </Descriptions.Item>
+            <Descriptions.Item label="描述">{detailService.description || '-'}</Descriptions.Item>
+            <Descriptions.Item label="PID">{detailService.pid > 0 ? detailService.pid : '-'}</Descriptions.Item>
+            <Descriptions.Item label="内存">{detailService.memory_bytes > 0 ? formatBytes(detailService.memory_bytes) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="CPU">{detailService.cpu_percent > 0 ? `${detailService.cpu_percent.toFixed(1)}%` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="运行时长">{detailService.uptime_seconds > 0 ? formatUptime(detailService.uptime_seconds) : '-'}</Descriptions.Item>
+            <Descriptions.Item label="开机自启">{detailService.enabled ? '是' : '否'}</Descriptions.Item>
+          </Descriptions>
+        )}
+      </Drawer>
     </>
   );
 }
