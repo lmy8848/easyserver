@@ -67,6 +67,9 @@ func ValidateManagedName(name string) error {
 	if len(name) > 60 {
 		return fmt.Errorf("name 过长（最多 60 字符）")
 	}
+	if strings.HasPrefix(name, managedUnitPrefix) {
+		return fmt.Errorf("name 不能以 %s 前缀开头", managedUnitPrefix)
+	}
 	if !unitNameRegex.MatchString(name) {
 		return fmt.Errorf("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
 	}
@@ -195,7 +198,7 @@ func buildEnvLines(env map[string]string) []string {
 		if strings.ContainsAny(v, "\n\r") {
 			continue // 跳过非法值，不阻断整体生成
 		}
-		if strings.ContainsAny(v, " \t\"'") {
+		if strings.ContainsAny(v, " \t\"'\\") {
 			// systemd Environment= 双引号语义：内部双引号和反斜杠转义。
 			// 与 Go %q 不同（Go 转义不可见字符），这里只转义 " 和 \。
 			v = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`

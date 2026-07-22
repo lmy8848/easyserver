@@ -14,6 +14,7 @@ func TestValidateManagedName(t *testing.T) {
 		{"website-foo-com", true},
 		{"a", true},
 		{"123", true},
+		{"easyserver-foo", false}, // 包含托管前缀
 		{"", false},
 		{"My-App", false},                // 大写
 		{"-foo", false},                  // 连字符开头
@@ -188,20 +189,22 @@ func TestUnitName(t *testing.T) {
 
 func TestBuildEnvLines_SpecialChars(t *testing.T) {
 	env := map[string]string{
-		"SIMPLE":  "value",
-		"SPACED":  "hello world",
-		"QUOTE":   `it's "fine"`,
-		"NEWLINE": "a\nb", // 应被跳过
+		"SIMPLE":    "value",
+		"SPACED":    "hello world",
+		"QUOTE":     `it's "fine"`,
+		"BACKSLASH": `C:\app`,
+		"NEWLINE":   "a\nb", // 应被跳过
 	}
 	lines := buildEnvLines(env)
-	// NEWLINE 被跳过，剩 3 条
-	if len(lines) != 3 {
-		t.Fatalf("期望 3 条 Environment 行，实际 %d: %v", len(lines), lines)
+	// NEWLINE 被跳过，剩 4 条
+	if len(lines) != 4 {
+		t.Fatalf("期望 4 条 Environment 行，实际 %d: %v", len(lines), lines)
 	}
 	joined := strings.Join(lines, "\n")
 	mustContain(t, joined, "SIMPLE=value")
 	// 含空格的值应被引号包裹
 	mustContain(t, joined, `"hello world"`)
+	mustContain(t, joined, `"C:\\app"`)
 }
 
 // 防御 env key 注入：key 含换行应被 RenderUnit 拒绝，

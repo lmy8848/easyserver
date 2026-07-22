@@ -219,8 +219,8 @@ function ManagedTab() {
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await serviceApi.list();
-      const managed = (res.data?.data || []).filter(s => s.managed);
+      const res = await serviceApi.listManaged();
+      const managed = res.data?.data || [];
       // 托管服务通常很少，直接全部补详情（PID/内存/enabled）
       if (managed.length > 0) {
         try {
@@ -258,9 +258,10 @@ function ManagedTab() {
   const handleEdit = (s: Service) => {
     setEditing(s);
     // 后端 ParseUnitMeta 已从 [Service] 段回填 exec_start/dir/env/auto_restart，
-    // 编辑时直接用。
+    // 编辑时直接用。去处 easyserver- 前缀展示短名。
+    const shortName = s.name.replace(/^easyserver-/, '');
     form.setFieldsValue({
-      name: s.name,
+      name: shortName,
       description: s.description,
       exec_start: s.exec_start || '',
       dir: s.dir || '',
@@ -292,8 +293,9 @@ function ManagedTab() {
       }
       // runtime 表单存的是 {id,lang,exact} 对象，拆成三字段给后端。
       const rt = values.runtime as { id: number; lang: string; exact: string } | undefined;
+      const shortName = values.name.replace(/^easyserver-/, '');
       const spec: ManagedServiceSpec = {
-        name: values.name,
+        name: shortName,
         description: values.description,
         exec_start: values.exec_start,
         dir: values.dir || '',
@@ -677,15 +679,25 @@ function SystemTab() {
     onDetail: setDetailService,
   });
 
-  const activeCount = services.filter(s => s.state === 'active').length;
+  const runningCount = services.filter(s => s.state === 'active').length;
+  const stoppedCount = services.filter(s => s.state === 'inactive').length;
   const failedCount = services.filter(s => s.state === 'failed').length;
 
   return (
     <>
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}><Card size="small"><Statistic title="系统服务总数" value={services.length} prefix={<SettingOutlined />} /></Card></Col>
-        <Col span={8}><Card size="small"><Statistic title="运行中" value={activeCount} styles={{ content: { color: '#3f8600' } }} prefix={<CaretRightOutlined />} /></Card></Col>
-        <Col span={8}><Card size="small"><Statistic title="失败" value={failedCount} styles={{ content: { color: '#cf1322' } }} prefix={<ThunderboltOutlined />} /></Card></Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="系统服务总数" value={services.length} prefix={<SettingOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="运行中" value={runningCount} styles={{ content: { color: '#3f8600' } }} prefix={<CaretRightOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="已停止" value={stoppedCount} prefix={<PauseOutlined />} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="异常" value={failedCount} styles={{ content: { color: '#cf1322' } }} prefix={<ThunderboltOutlined />} /></Card>
+        </Col>
       </Row>
 
       <Card

@@ -72,9 +72,14 @@ export default function RuntimeVersionSelect({ value, onChange, showDisabled = t
 
   return (
     <Select
+      allowClear
       value={value?.id}
       onChange={(id) => {
         // 根据选中的 id 找到对应 env，回传完整 {id, lang, exact}
+        if (!id) {
+          onChange?.(undefined);
+          return;
+        }
         const env = visible.find(e => e.id === id);
         if (env) {
           onChange?.({ id: env.id, lang: env.name, exact: env.version });

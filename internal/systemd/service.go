@@ -495,6 +495,21 @@ func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) 
 	return nil
 }
 
+// ListManaged returns info for managed services only (easyserver-* prefix).
+func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	managed := make([]ServiceInfo, 0, len(all))
+	for _, s := range all {
+		if s.Managed {
+			managed = append(managed, s)
+		}
+	}
+	return managed, nil
+}
+
 // ============================================================
 // Managed unit CRUD（面板托管服务）
 // ============================================================
@@ -502,6 +517,7 @@ func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) 
 // CreateManaged 生成 unit 文件、daemon-reload、按需 enable/start。
 // 已存在同名 unit 返回错误。全程持 m.mu 防并发创建同名。
 func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
+	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), managedUnitPrefix)
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return err
 	}
@@ -552,6 +568,7 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 // 运行中则 restart 使新配置生效；enabled 状态按 AutoStart 切换。
 // 全程持 m.mu 防并发更新/删除。
 func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
+	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), managedUnitPrefix)
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return err
 	}
@@ -568,6 +585,9 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		return fmt.Errorf("托管服务 %s 不存在", spec.Name)
 	}
 
+	// 读取旧 unit 文件配置，便于失败时回滚
+	oldContent, _ := readUnitFile(spec.Name)
+
 	content, err := RenderUnit(spec)
 	if err != nil {
 		return fmt.Errorf("生成 unit 文件失败: %w", err)
@@ -576,7 +596,11 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		return fmt.Errorf("写 unit 文件失败: %w", err)
 	}
 	if err := m.daemonReload(ctx); err != nil {
-		return err
+		if oldContent != "" {
+			_ = writeUnitFile(spec.Name, oldContent)
+			_ = m.daemonReload(ctx)
+		}
+		return fmt.Errorf("daemon-reload 失败（已回滚旧配置）: %w", err)
 	}
 
 	// AutoStart 状态切换

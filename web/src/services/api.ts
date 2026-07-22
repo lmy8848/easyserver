@@ -143,6 +143,9 @@ export const serviceApi = {
   list: () =>
     api.get<ApiResponse<Service[]>>('/services'),
 
+  listManaged: () =>
+    api.get<ApiResponse<Service[]>>('/services/managed'),
+
   // 创建托管服务（生成 easyserver-* unit）
   create: (data: ManagedServiceSpec) =>
     api.post<ApiResponse>('/services', data),

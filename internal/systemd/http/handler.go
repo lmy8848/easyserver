@@ -402,12 +402,25 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 
 // Create 创建托管服务（生成 unit + 按需 enable/start）。
 // 只生成 easyserver-<name>.service，不支持创建系统服务的 unit。
+// ListManaged returns managed services only
+func (h *ServiceHandler) ListManaged(c *gin.Context) {
+	services, err := h.serviceManager.ListManaged(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, services)
+}
+
+// Create 创建托管服务（生成 unit + 按需 enable/start）。
+// 只生成 easyserver-<name>.service，不支持创建系统服务的 unit。
 func (h *ServiceHandler) Create(c *gin.Context) {
 	var spec systemd.ManagedUnitSpec
 	if err := c.ShouldBindJSON(&spec); err != nil {
 		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
+	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-")
 	middleware.AuditSummary(c, "创建托管服务 "+spec.Name)
 	if err := h.serviceManager.CreateManaged(c.Request.Context(), &spec); err != nil {
 		c.Error(apperror.WrapError(err))
@@ -473,6 +486,7 @@ func requireManagedName(fullName string) (string, error) {
 func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
 	handler := NewServiceHandler(serviceManager, exec, jwtSecret, auditService, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
+	protected.GET("/services/managed", handler.ListManaged)
 	protected.POST("/services", handler.Create)
 	protected.POST("/services/details", handler.GetDetails)
 	protected.GET("/services/:name", handler.Get)
