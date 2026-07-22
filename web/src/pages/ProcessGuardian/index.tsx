@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Input, InputNumber,
+  Card, Button, Space, Modal, Form, Input, InputNumber,
   Switch, message, Popconfirm, Table, Empty, Tooltip, Tabs,
   Typography, Badge, Row, Col, Statistic, Drawer, Descriptions,
 } from 'antd';
@@ -104,24 +104,15 @@ function buildServiceColumns(props: ColumnProps) {
     },
   ];
 
-  // 系统服务 Tab：自启开关放列里（托管的在编辑表单里配）
-  if (!managed) {
-    cols.push({
-      title: '自启', key: 'enabled', width: 70,
-      render: (_: unknown, r: Service) => (
-        <Switch size="small" checked={r.enabled}
-          loading={operating === `enable-${r.name}` || operating === `disable-${r.name}`}
-          disabled={r.name === 'easyserver'}
-          onChange={(checked) => onAction(r.name, checked ? 'enable' : 'disable')} />
-      ),
-    });
-  } else {
-    // 托管 Tab：自启用 Tag 展示
-    cols.push({
-      title: '自启', dataIndex: 'enabled', key: 'enabled', width: 70,
-      render: (en: boolean) => en ? <Tag color="blue" style={{ margin: 0 }}>是</Tag> : <Tag style={{ margin: 0 }}>否</Tag>,
-    });
-  }
+  cols.push({
+    title: '自启', key: 'enabled', width: 70,
+    render: (_: unknown, r: Service) => (
+      <Switch size="small" checked={r.enabled}
+        loading={operating === `enable-${r.name}` || operating === `disable-${r.name}`}
+        disabled={!managed && r.name === 'easyserver'}
+        onChange={(checked) => onAction(r.name, checked ? 'enable' : 'disable')} />
+    ),
+  });
 
   cols.push({
     title: '操作', key: 'action', width: managed ? 260 : 220, fixed: 'right' as const,
@@ -210,6 +201,7 @@ export default function ProcessGuardian() {
 function ManagedTab() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [operating, setOperating] = useState<string>('');
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -251,19 +243,18 @@ function ManagedTab() {
 
   const handleEdit = (s: Service) => {
     setEditing(s);
-    // 后端 ParseUnitMeta 已从 [Service] 段回填 exec_start/dir/env/auto_restart，
-    // 编辑时直接用。去处 easyserver- 前缀展示短名。
+    // 后端 ParseUnitMeta 已从 unit 文件回填所有字段，去处 easyserver- 前缀展示短名。
     const shortName = s.name.replace(/^easyserver-/, '');
     form.setFieldsValue({
       name: shortName,
-      description: s.description,
+      description: s.description || '',
       exec_start: s.exec_start || '',
       dir: s.dir || '',
       env: s.env && Object.keys(s.env).length > 0 ? JSON.stringify(s.env, null, 2) : '',
-      auto_restart: s.auto_restart,
-      max_restarts: 10,
-      restart_delay: 5,
-      stop_timeout: 10,
+      auto_restart: s.auto_restart ?? true,
+      max_restarts: s.max_restarts ?? 10,
+      restart_delay: s.restart_delay ?? 5,
+      stop_timeout: s.stop_timeout ?? 10,
       auto_start: s.enabled,
       runtime: (s.runtime_version_id && s.runtime_lang && s.runtime_exact)
         ? { id: s.runtime_version_id, lang: s.runtime_lang, exact: s.runtime_exact }
@@ -285,6 +276,7 @@ function ManagedTab() {
           return;
         }
       }
+      setSubmitting(true);
       // runtime 表单存的是 {id,lang,exact} 对象，拆成三字段给后端。
       const rt = values.runtime as { id: number; lang: string; exact: string } | undefined;
       const shortName = values.name.replace(/^easyserver-/, '');
@@ -315,6 +307,8 @@ function ManagedTab() {
     } catch (e: any) {
       if (e?.errorFields) return;
       message.error(e instanceof Error ? e.message : '操作失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -426,6 +420,7 @@ function ManagedTab() {
 
       <ManagedServiceModal
         visible={modalVisible}
+        confirmLoading={submitting}
         editing={editing}
         form={form}
         onOk={handleSubmit}
@@ -490,8 +485,9 @@ function ManagedTab() {
   );
 }
 
-function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
+function ManagedServiceModal({ visible, confirmLoading, editing, form, onOk, onCancel }: {
   visible: boolean;
+  confirmLoading: boolean;
   editing: Service | null;
   form: ReturnType<typeof Form.useForm<ManagedServiceForm>>[0];
   onOk: () => void;
@@ -501,6 +497,7 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
     <Modal
       title={editing ? '编辑托管服务' : '添加托管服务'}
       open={visible}
+      confirmLoading={confirmLoading}
       onOk={onOk}
       onCancel={onCancel}
       width={600}

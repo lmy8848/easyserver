@@ -143,7 +143,7 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	}
 
 	var b strings.Builder
-	// [Unit] 段：注释放最前面，作为元数据标记 + 反查锚点。
+	// [Unit] 段：注释放最前面，作为元数据标记 + 反查锚点；StartLimit* 指令属于 [Unit]
 	fmt.Fprintf(&b, "[Unit]\n")
 	fmt.Fprintf(&b, "Description=easyserver-managed: %s\n", desc)
 	fmt.Fprintf(&b, "# %s=%s\n", managedMarkerKey, managedMarkerValue)
@@ -156,6 +156,8 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	if spec.RuntimeExact != "" {
 		fmt.Fprintf(&b, "# RuntimeExact=%s\n", spec.RuntimeExact)
 	}
+	fmt.Fprintf(&b, "StartLimitBurst=%d\n", maxRestarts)
+	fmt.Fprintf(&b, "StartLimitIntervalSec=300\n")
 	fmt.Fprintf(&b, "After=network.target\n\n")
 
 	// [Service] 段
@@ -176,9 +178,7 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 		fmt.Fprintf(&b, "%s\n", restartLine)
 	}
 	fmt.Fprintf(&b, "RestartSec=%d\n", restartDelay)
-	fmt.Fprintf(&b, "TimeoutStopSec=%d\n", stopTimeout)
-	fmt.Fprintf(&b, "StartLimitBurst=%d\n", maxRestarts)
-	fmt.Fprintf(&b, "StartLimitIntervalSec=300\n\n")
+	fmt.Fprintf(&b, "TimeoutStopSec=%d\n\n", stopTimeout)
 
 	// [Install] 段：AutoStart=true 时 systemctl enable 才会生效。
 	fmt.Fprintf(&b, "[Install]\n")
@@ -227,10 +227,14 @@ func buildEnvLines(env map[string]string) []string {
 }
 
 // ParseUnitMeta 从 unit 文件内容解析元数据，填入 info 的托管字段。
-// [Unit] 段：注释（ManagedBy/Runtime*）+ Description
-// [Service] 段：WorkingDirectory/Environment/Restart（systemd 原生指令，直接读）
+// [Unit] 段：注释（ManagedBy/Runtime*）+ Description + StartLimitBurst
+// [Service] 段：WorkingDirectory/Environment/Restart/RestartSec/TimeoutStopSec
 // 调用方负责设置 info.Name（不含前缀）。
 func ParseUnitMeta(content string, info *ServiceInfo) {
+	info.MaxRestarts = 10
+	info.RestartDelay = 5
+	info.StopTimeout = 10
+
 	scanner := strings.Split(content, "\n")
 	section := ""
 	for _, line := range scanner {
@@ -240,7 +244,7 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 			continue
 		}
 
-		// [Unit] 段：注释元数据 + Description
+		// [Unit] 段：注释元数据 + Description + StartLimitBurst
 		if section == "[Unit]" {
 			if strings.HasPrefix(trimmed, "# ") {
 				kv := strings.SplitN(strings.TrimPrefix(trimmed, "# "), "=", 2)
@@ -266,9 +270,12 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 				desc = strings.TrimPrefix(desc, "easyserver-managed: ")
 				info.Description = desc
 			}
+			if strings.HasPrefix(trimmed, "StartLimitBurst=") {
+				fmt.Sscanf(strings.TrimPrefix(trimmed, "StartLimitBurst="), "%d", &info.MaxRestarts)
+			}
 		}
 
-		// [Service] 段：从原生指令读回 ExecStart/Dir/Env/AutoRestart
+		// [Service] 段：从原生指令读回 ExecStart/Dir/Env/AutoRestart/RestartSec/TimeoutStopSec
 		if section == "[Service]" {
 			switch {
 			case strings.HasPrefix(trimmed, "ExecStart="):
@@ -294,6 +301,10 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 				}
 			case trimmed == "Restart=on-failure":
 				info.AutoRestart = true
+			case strings.HasPrefix(trimmed, "RestartSec="):
+				fmt.Sscanf(strings.TrimPrefix(trimmed, "RestartSec="), "%d", &info.RestartDelay)
+			case strings.HasPrefix(trimmed, "TimeoutStopSec="):
+				fmt.Sscanf(strings.TrimPrefix(trimmed, "TimeoutStopSec="), "%d", &info.StopTimeout)
 			}
 		}
 	}

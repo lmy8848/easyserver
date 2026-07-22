@@ -34,11 +34,14 @@ type ServiceInfo struct {
 	RuntimeLang      string `json:"runtime_lang"`
 	RuntimeExact     string `json:"runtime_exact"`
 
-	// 托管服务配置回显（解析 [Service] 段得到；编辑表单用）
-	ExecStart   string            `json:"exec_start"`
-	Dir         string            `json:"dir"`
-	Env         map[string]string `json:"env"`
-	AutoRestart bool              `json:"auto_restart"`
+	// 托管服务配置回显（解析 [Unit]/[Service] 段得到；编辑表单用）
+	ExecStart    string            `json:"exec_start"`
+	Dir          string            `json:"dir"`
+	Env          map[string]string `json:"env"`
+	AutoRestart  bool              `json:"auto_restart"`
+	MaxRestarts  int               `json:"max_restarts"`
+	RestartDelay int               `json:"restart_delay"`
+	StopTimeout  int               `json:"stop_timeout"`
 }
 
 // LogLine represents a log line from journalctl.
@@ -496,16 +499,45 @@ func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) 
 }
 
 // ListManaged returns info for managed services only (easyserver-* prefix).
+// 扫描 /etc/systemd/system/ 目录下的 easyserver-*.service 文件，
+// 保证新创建且未启动/未 enable 的服务也能在列表中列出。
 func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error) {
-	all, err := m.List(ctx)
+	entries, err := os.ReadDir(managedUnitDir)
 	if err != nil {
-		return nil, err
-	}
-	managed := make([]ServiceInfo, 0, len(all))
-	for _, s := range all {
-		if s.Managed {
-			managed = append(managed, s)
+		if os.IsNotExist(err) {
+			return []ServiceInfo{}, nil
 		}
+		return nil, fmt.Errorf("读取 unit 目录失败: %w", err)
+	}
+
+	allMap := make(map[string]ServiceInfo)
+	if all, err := m.List(ctx); err == nil {
+		for _, s := range all {
+			allMap[s.Name] = s
+		}
+	}
+
+	managed := make([]ServiceInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		shortName := UnitName(entry.Name())
+		if shortName == "" {
+			continue
+		}
+		fullName := managedUnitPrefix + shortName
+		svc, ok := allMap[fullName]
+		if !ok {
+			svc = ServiceInfo{
+				Name:  fullName,
+				State: "inactive",
+			}
+		}
+		if content, _ := readUnitFile(shortName); content != "" {
+			ParseUnitMeta(content, &svc)
+		}
+		managed = append(managed, svc)
 	}
 	return managed, nil
 }

@@ -302,6 +302,39 @@ func TestParseUnitMeta_ConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRenderUnit_TmpTestScript(t *testing.T) {
+	spec := &ManagedUnitSpec{
+		Name:        "tmp-test-script",
+		ExecStart:   "/tmp/test-service.sh",
+		Dir:         "/tmp",
+		Description: "TMP Test Script Service",
+		AutoRestart: true,
+		Env: map[string]string{
+			"LOG_LEVEL": "info",
+		},
+	}
+	content, err := RenderUnit(spec)
+	if err != nil {
+		t.Fatalf("RenderUnit 失败: %v", err)
+	}
+
+	mustContain(t, content, "ExecStart=/tmp/test-service.sh")
+	mustContain(t, content, "WorkingDirectory=/tmp")
+	mustContain(t, content, "Description=easyserver-managed: TMP Test Script Service")
+
+	info := &ServiceInfo{}
+	ParseUnitMeta(content, info)
+	if info.ExecStart != "/tmp/test-service.sh" {
+		t.Errorf("ExecStart 期望 /tmp/test-service.sh，实际 %q", info.ExecStart)
+	}
+	if info.Dir != "/tmp" {
+		t.Errorf("Dir 期望 /tmp，实际 %q", info.Dir)
+	}
+	if info.Description != "TMP Test Script Service" {
+		t.Errorf("Description 期望 TMP Test Script Service，实际 %q", info.Description)
+	}
+}
+
 // helpers
 
 func mustContain(t *testing.T, content, substr string) {

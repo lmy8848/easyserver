@@ -108,11 +108,14 @@ export interface Service {
   runtime_version_id: number;
   runtime_lang: string;
   runtime_exact: string;
-  // 托管服务配置回显（解析 [Service] 段，编辑表单用）
+  // 托管服务配置回显（解析 [Unit]/[Service] 段，编辑表单用）
   exec_start: string;
   dir: string;
   env: Record<string, string>;
   auto_restart: boolean;
+  max_restarts?: number;
+  restart_delay?: number;
+  stop_timeout?: number;
 }
 
 // File types
