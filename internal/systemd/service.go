@@ -35,8 +35,7 @@ type ServiceInfo struct {
 	RuntimeExact     string `json:"runtime_exact"`
 
 	// 托管服务配置回显（解析 [Service] 段得到；编辑表单用）
-	Command     string            `json:"command"`
-	Args        string            `json:"args"`
+	ExecStart   string            `json:"exec_start"`
 	Dir         string            `json:"dir"`
 	Env         map[string]string `json:"env"`
 	AutoRestart bool              `json:"auto_restart"`

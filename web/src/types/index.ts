@@ -109,8 +109,7 @@ export interface Service {
   runtime_lang: string;
   runtime_exact: string;
   // 托管服务配置回显（解析 [Service] 段，编辑表单用）
-  command: string;
-  args: string;
+  exec_start: string;
   dir: string;
   env: Record<string, string>;
   auto_restart: boolean;
@@ -396,8 +395,7 @@ export interface FirewallLogEntry {
 export interface ManagedServiceSpec {
   name: string;
   description: string;
-  command: string;
-  args: string;
+  exec_start: string;
   dir: string;
   env: Record<string, string>;
   auto_restart: boolean;

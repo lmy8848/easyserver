@@ -102,13 +102,12 @@ function ManagedTab() {
 
   const handleEdit = (s: Service) => {
     setEditing(s);
-    // 后端 ParseUnitMeta 已从 [Service] 段回填 command/args/dir/env/auto_restart，
-    // 编辑时直接用，不再清空。
+    // 后端 ParseUnitMeta 已从 [Service] 段回填 exec_start/dir/env/auto_restart，
+    // 编辑时直接用。
     form.setFieldsValue({
       name: s.name,
       description: s.description,
-      command: s.command || '',
-      args: s.args || '',
+      exec_start: s.exec_start || '',
       dir: s.dir || '',
       env: s.env && Object.keys(s.env).length > 0 ? JSON.stringify(s.env, null, 2) : '',
       auto_restart: s.auto_restart,
@@ -141,8 +140,7 @@ function ManagedTab() {
       const spec: ManagedServiceSpec = {
         name: values.name,
         description: values.description,
-        command: values.command,
-        args: values.args || '',
+        exec_start: values.exec_start,
         dir: values.dir || '',
         env,
         auto_restart: values.auto_restart,
@@ -339,11 +337,9 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
         <Form.Item name="description" label="描述">
           <Input placeholder="可选，显示用" />
         </Form.Item>
-        <Form.Item name="command" label="启动命令" rules={[{ required: true, message: '请输入启动命令' }]}>
-          <Input placeholder="例如: node /app/server.js" />
-        </Form.Item>
-        <Form.Item name="args" label="参数">
-          <Input placeholder="命令行参数（空格分隔）" />
+        <Form.Item name="exec_start" label="启动命令" rules={[{ required: true, message: '请输入启动命令' }]}
+          extra="完整命令，如 node /app/server.js --port 3000（绑定运行时后自动前置 mise exec）">
+          <Input placeholder="例如: node /app/server.js --port 3000" />
         </Form.Item>
         <Form.Item
           name="runtime"

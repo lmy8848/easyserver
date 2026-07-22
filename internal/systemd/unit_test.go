@@ -36,8 +36,8 @@ func TestValidateManagedName(t *testing.T) {
 
 func TestRenderUnit_Minimal(t *testing.T) {
 	spec := &ManagedUnitSpec{
-		Name:    "my-app",
-		Command: "node /app/server.js",
+		Name:      "my-app",
+		ExecStart: "node /app/server.js",
 	}
 	content, err := RenderUnit(spec)
 	if err != nil {
@@ -65,8 +65,7 @@ func TestRenderUnit_FullWithRuntime(t *testing.T) {
 	spec := &ManagedUnitSpec{
 		Name:             "my-app",
 		Description:      "我的应用",
-		Command:          "node",
-		Args:             `/app/server.js --port 3000`,
+		ExecStart:        "node /app/server.js --port 3000",
 		Dir:              "/app",
 		Env:              map[string]string{"NODE_ENV": "production", "PORT": "3000"},
 		AutoRestart:      true,
@@ -103,9 +102,8 @@ func TestRenderUnit_RejectsNewline(t *testing.T) {
 		field string
 		spec  *ManagedUnitSpec
 	}{
-		{"command", &ManagedUnitSpec{Name: "foo", Command: "node\nrm -rf /"}},
-		{"args", &ManagedUnitSpec{Name: "foo", Command: "x", Args: "a\nb"}},
-		{"dir", &ManagedUnitSpec{Name: "foo", Command: "x", Dir: "/app\n/etc"}},
+		{"exec_start", &ManagedUnitSpec{Name: "foo", ExecStart: "node\nrm -rf /"}},
+		{"dir", &ManagedUnitSpec{Name: "foo", ExecStart: "x", Dir: "/app\n/etc"}},
 	}
 	for _, c := range cases {
 		_, err := RenderUnit(c.spec)
@@ -119,7 +117,7 @@ func TestParseUnitMeta_RoundTrip(t *testing.T) {
 	spec := &ManagedUnitSpec{
 		Name:             "my-app",
 		Description:      "测试应用",
-		Command:          "node",
+		ExecStart:        "node",
 		RuntimeVersionID: 42,
 		RuntimeLang:      "node",
 		RuntimeExact:     "20.11.0",
@@ -210,9 +208,9 @@ func TestBuildEnvLines_SpecialChars(t *testing.T) {
 // 否则可注入任意 systemd 指令（如 "FOO\nExecStart=evil"）。
 func TestRenderUnit_RejectsEnvKeyInjection(t *testing.T) {
 	spec := &ManagedUnitSpec{
-		Name:    "foo",
-		Command: "node",
-		Env:     map[string]string{"FOO\nExecStart=/bin/evil": "bar"},
+		Name:      "foo",
+		ExecStart: "node",
+		Env:       map[string]string{"FOO\nExecStart=/bin/evil": "bar"},
 	}
 	_, err := RenderUnit(spec)
 	if err == nil {
@@ -229,9 +227,9 @@ func TestRenderUnit_RejectsInvalidEnvKey(t *testing.T) {
 	}
 	for _, k := range cases {
 		spec := &ManagedUnitSpec{
-			Name:    "foo",
-			Command: "node",
-			Env:     map[string]string{k: "v"},
+			Name:      "foo",
+			ExecStart: "node",
+			Env:       map[string]string{k: "v"},
 		}
 		_, err := RenderUnit(spec)
 		if err == nil {
@@ -246,8 +244,8 @@ func TestRenderUnit_RejectsRuntimeNewline(t *testing.T) {
 		field string
 		spec  *ManagedUnitSpec
 	}{
-		{"runtime_lang", &ManagedUnitSpec{Name: "foo", Command: "x", RuntimeLang: "node\nExecStart=evil"}},
-		{"runtime_exact", &ManagedUnitSpec{Name: "foo", Command: "x", RuntimeExact: "20.0.0\nUser=root"}},
+		{"runtime_lang", &ManagedUnitSpec{Name: "foo", ExecStart: "x", RuntimeLang: "node\nExecStart=evil"}},
+		{"runtime_exact", &ManagedUnitSpec{Name: "foo", ExecStart: "x", RuntimeExact: "20.0.0\nUser=root"}},
 	}
 	for _, c := range cases {
 		_, err := RenderUnit(c.spec)
@@ -257,14 +255,13 @@ func TestRenderUnit_RejectsRuntimeNewline(t *testing.T) {
 	}
 }
 
-// ParseUnitMeta 应从 [Unit] 段注释回填 Command/Args/Dir/Env/AutoRestart，
-// 供编辑表单回显（无损 round-trip，不依赖反解析 ExecStart）。
+// ParseUnitMeta 应从 [Service] 段原生指令回填 ExecStart/Dir/Env/AutoRestart，
+// 供编辑表单回显。ExecStart 去掉 mise 前缀还原用户原始命令。
 func TestParseUnitMeta_ConfigRoundTrip(t *testing.T) {
 	spec := &ManagedUnitSpec{
 		Name:             "my-app",
 		Description:      "测试",
-		Command:          "node",
-		Args:             `/app/server.js --port 3000 --name "hello world"`,
+		ExecStart:        `node /app/server.js --port 3000 --name "hello world"`,
 		Dir:              "/app",
 		Env:              map[string]string{"NODE_ENV": "production", "PORT": "3000", "GREETING": "hello, world"},
 		AutoRestart:      true,
@@ -280,12 +277,9 @@ func TestParseUnitMeta_ConfigRoundTrip(t *testing.T) {
 	info := &ServiceInfo{}
 	ParseUnitMeta(content, info)
 
-	if info.Command != "node" {
-		t.Errorf("Command 期望 node，实际 %q", info.Command)
-	}
-	// args 含双引号应无损还原（注释存储方案不经过 parseArgs，所以引号保留）
-	if info.Args != spec.Args {
-		t.Errorf("Args 期望 %q，实际 %q", spec.Args, info.Args)
+	// ExecStart 应去掉 mise 前缀，还原用户原始命令（含引号无损）
+	if info.ExecStart != spec.ExecStart {
+		t.Errorf("ExecStart 期望 %q，实际 %q", spec.ExecStart, info.ExecStart)
 	}
 	if info.Dir != "/app" {
 		t.Errorf("Dir 期望 /app，实际 %q", info.Dir)
@@ -293,7 +287,7 @@ func TestParseUnitMeta_ConfigRoundTrip(t *testing.T) {
 	if !info.AutoRestart {
 		t.Error("AutoRestart 期望 true")
 	}
-	// env 含逗号应无损还原（序列化时逗号被转义）
+	// env 含逗号应无损还原（从 Environment= 行读取，引号语义由 parseEnvLine 处理）
 	if info.Env["NODE_ENV"] != "production" {
 		t.Errorf("Env[NODE_ENV] 期望 production，实际 %q", info.Env["NODE_ENV"])
 	}

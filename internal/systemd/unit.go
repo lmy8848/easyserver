@@ -31,8 +31,7 @@ var envKeyRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 type ManagedUnitSpec struct {
 	Name             string            `json:"name"`               // 不含前缀，如 "my-app"
 	Description      string            `json:"description"`        // 显示名，写入 Description=
-	Command          string            `json:"command"`            // 启动命令，如 "node /app/server.js"
-	Args             string            `json:"args"`               // 命令参数（空格分隔）
+	ExecStart        string            `json:"exec_start"`         // 完整启动命令，如 "node /app/server.js --port 3000"
 	Dir              string            `json:"dir"`                // WorkingDirectory
 	Env              map[string]string `json:"env"`                // Environment=
 	AutoRestart      bool              `json:"auto_restart"`       // Restart=on-failure
@@ -83,14 +82,11 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return "", err
 	}
-	if spec.Command == "" {
-		return "", fmt.Errorf("command 不能为空")
+	if spec.ExecStart == "" {
+		return "", fmt.Errorf("exec_start 不能为空")
 	}
-	if strings.ContainsAny(spec.Command, "\n\r") {
-		return "", fmt.Errorf("command 不能包含换行")
-	}
-	if strings.ContainsAny(spec.Args, "\n\r") {
-		return "", fmt.Errorf("args 不能包含换行")
+	if strings.ContainsAny(spec.ExecStart, "\n\r") {
+		return "", fmt.Errorf("exec_start 不能包含换行")
 	}
 	if strings.ContainsAny(spec.Dir, "\n\r") {
 		return "", fmt.Errorf("dir 不能包含换行")
@@ -149,14 +145,6 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	if spec.RuntimeExact != "" {
 		fmt.Fprintf(&b, "# RuntimeExact=%s\n", spec.RuntimeExact)
 	}
-	// 只有 Command/Args 需要注释存储：它们被合并成 ExecStart=，
-	// systemd 没有单独的 Args 指令，反解析有损。
-	// Dir/Env/AutoRestart 对应 WorkingDirectory=/Environment=/Restart=，
-	// 是 systemd 原生指令，ParseUnitMeta 直接从 [Service] 段读回，无需冗余注释。
-	fmt.Fprintf(&b, "# Command=%s\n", spec.Command)
-	if spec.Args != "" {
-		fmt.Fprintf(&b, "# Args=%s\n", spec.Args)
-	}
 	fmt.Fprintf(&b, "After=network.target\n\n")
 
 	// [Service] 段
@@ -186,17 +174,13 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 
 // buildExecStart 拼接 ExecStart 值。
 // 绑定 runtime 时前置 mise exec <lang>@<exact> -- 。
+// spec.ExecStart 是用户填的完整命令（如 "node /app/server.js --port 3000"），
+// 后端只在前面补 mise 包裹，不再拆分 command/args。
 func buildExecStart(spec *ManagedUnitSpec) string {
-	parts := []string{}
 	if spec.RuntimeVersionID > 0 && spec.RuntimeLang != "" && spec.RuntimeExact != "" {
-		parts = append(parts, "/usr/local/bin/mise", "exec",
-			spec.RuntimeLang+"@"+spec.RuntimeExact, "--")
+		return "/usr/local/bin/mise exec " + spec.RuntimeLang + "@" + spec.RuntimeExact + " -- " + spec.ExecStart
 	}
-	parts = append(parts, spec.Command)
-	if spec.Args != "" {
-		parts = append(parts, parseArgs(spec.Args)...)
-	}
-	return strings.Join(parts, " ")
+	return spec.ExecStart
 }
 
 // buildEnvLines 把 env map 转成 systemd Environment= 行。
@@ -253,10 +237,6 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 					info.RuntimeLang = val
 				case "RuntimeExact":
 					info.RuntimeExact = val
-				case "Command":
-					info.Command = val
-				case "Args":
-					info.Args = val
 				}
 				continue
 			}
@@ -267,9 +247,16 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 			}
 		}
 
-		// [Service] 段：从原生指令读回 Dir/Env/AutoRestart
+		// [Service] 段：从原生指令读回 ExecStart/Dir/Env/AutoRestart
 		if section == "[Service]" {
 			switch {
+			case strings.HasPrefix(trimmed, "ExecStart="):
+				info.ExecStart = strings.TrimPrefix(trimmed, "ExecStart=")
+				// 若绑定了 runtime，去掉 mise 包裹前缀，还原用户原始命令。
+				// mise 前缀格式固定：/usr/local/bin/mise exec <lang>@<exact> --
+				if info.RuntimeVersionID > 0 {
+					info.ExecStart = stripMisePrefix(info.ExecStart)
+				}
 			case strings.HasPrefix(trimmed, "WorkingDirectory="):
 				info.Dir = strings.TrimPrefix(trimmed, "WorkingDirectory=")
 			case strings.HasPrefix(trimmed, "Environment="):
@@ -285,6 +272,23 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 			}
 		}
 	}
+}
+
+// stripMisePrefix 去掉 mise 包裹前缀，还原用户原始命令。
+// 输入 "/usr/local/bin/mise exec node@20.10.0 -- node /app/server.js"
+// 返回 "node /app/server.js"。非 mise 前缀原样返回。
+func stripMisePrefix(execStart string) string {
+	prefix := "/usr/local/bin/mise exec "
+	if !strings.HasPrefix(execStart, prefix) {
+		return execStart
+	}
+	rest := strings.TrimPrefix(execStart, prefix)
+	// 跳过 "node@20.10.0 -- " 这段
+	dashIdx := strings.Index(rest, " -- ")
+	if dashIdx < 0 {
+		return execStart
+	}
+	return rest[dashIdx+4:]
 }
 
 // parseEnvLine 解析 Environment= 行的 "KEY=VALUE" 或 KEY="quoted value"。
@@ -305,36 +309,6 @@ func parseEnvLine(line string) (key, val string) {
 // escapeUnitValue 转义 unit 文件值里的换行（防御性，正常已在 RenderUnit 前拦截）。
 func escapeUnitValue(s string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
-}
-
-// parseArgs 简单参数切分（支持双引号）。
-// 从 internal/process/service.go 搬来，保持行为一致。
-func parseArgs(args string) []string {
-	if args == "" {
-		return nil
-	}
-	var result []string
-	current := ""
-	inQuote := false
-	for _, c := range args {
-		switch c {
-		case '"':
-			inQuote = !inQuote
-		case ' ':
-			if inQuote {
-				current += string(c)
-			} else if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		default:
-			current += string(c)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
 }
 
 // writeUnitFile 写 unit 文件到磁盘（0644 权限，systemd 标准）。
