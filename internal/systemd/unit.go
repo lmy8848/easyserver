@@ -149,6 +149,14 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	if spec.RuntimeExact != "" {
 		fmt.Fprintf(&b, "# RuntimeExact=%s\n", spec.RuntimeExact)
 	}
+	// 只有 Command/Args 需要注释存储：它们被合并成 ExecStart=，
+	// systemd 没有单独的 Args 指令，反解析有损。
+	// Dir/Env/AutoRestart 对应 WorkingDirectory=/Environment=/Restart=，
+	// 是 systemd 原生指令，ParseUnitMeta 直接从 [Service] 段读回，无需冗余注释。
+	fmt.Fprintf(&b, "# Command=%s\n", spec.Command)
+	if spec.Args != "" {
+		fmt.Fprintf(&b, "# Args=%s\n", spec.Args)
+	}
 	fmt.Fprintf(&b, "After=network.target\n\n")
 
 	// [Service] 段
@@ -213,9 +221,9 @@ func buildEnvLines(env map[string]string) []string {
 	return lines
 }
 
-// ParseUnitMeta 从 unit 文件内容解析元数据注释，填入 info 的托管字段。
-// 读 [Unit] 段注释（ManagedBy/Runtime*）+ Description；
-// 读 [Service] 段 ExecStart/WorkingDirectory/Environment/Restart 回填配置。
+// ParseUnitMeta 从 unit 文件内容解析元数据，填入 info 的托管字段。
+// [Unit] 段：注释（ManagedBy/Runtime*/Command/Args）+ Description
+// [Service] 段：WorkingDirectory/Environment/Restart（systemd 原生指令，直接读）
 // 调用方负责设置 info.Name（不含前缀）。
 func ParseUnitMeta(content string, info *ServiceInfo) {
 	scanner := strings.Split(content, "\n")
@@ -245,6 +253,10 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 					info.RuntimeLang = val
 				case "RuntimeExact":
 					info.RuntimeExact = val
+				case "Command":
+					info.Command = val
+				case "Args":
+					info.Args = val
 				}
 				continue
 			}
@@ -255,21 +267,9 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 			}
 		}
 
-		// [Service] 段：回填配置供编辑表单用
+		// [Service] 段：从原生指令读回 Dir/Env/AutoRestart
 		if section == "[Service]" {
 			switch {
-			case strings.HasPrefix(trimmed, "ExecStart="):
-				execStart := strings.TrimPrefix(trimmed, "ExecStart=")
-				cmd, args, lang, exact := ParseExecStart(execStart)
-				info.Command = cmd
-				info.Args = args
-				// 若 [Unit] 注释里有 runtime 信息则优先，否则从 ExecStart 反解析
-				if info.RuntimeLang == "" {
-					info.RuntimeLang = lang
-				}
-				if info.RuntimeExact == "" {
-					info.RuntimeExact = exact
-				}
 			case strings.HasPrefix(trimmed, "WorkingDirectory="):
 				info.Dir = strings.TrimPrefix(trimmed, "WorkingDirectory=")
 			case strings.HasPrefix(trimmed, "Environment="):
@@ -285,32 +285,6 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 			}
 		}
 	}
-}
-
-// ParseExecStart 反解析 ExecStart 值，拆出 mise 包裹、command、args。
-// 输入如 "/usr/local/bin/mise exec node@20.10.0 -- node /app/server.js --port 3000"
-// 返回 command="node", args="/app/server.js --port 3000", lang="node", exact="20.10.0"。
-// 无 mise 包裹时 lang/exact 为空。
-func ParseExecStart(execStart string) (command, args, lang, exact string) {
-	parts := parseArgs(execStart)
-	idx := 0
-	if len(parts) >= 5 && parts[0] == "/usr/local/bin/mise" && parts[1] == "exec" && parts[3] == "--" {
-		// parts[2] = "node@20.10.0"
-		rv := strings.SplitN(parts[2], "@", 2)
-		if len(rv) == 2 {
-			lang, exact = rv[0], rv[1]
-		}
-		idx = 4
-	}
-	if idx < len(parts) {
-		command = parts[idx]
-		idx++
-	}
-	if idx < len(parts) {
-		// args 用空格重新 join，保持简单文本（与原 parseArgs 可逆）
-		args = strings.Join(parts[idx:], " ")
-	}
-	return command, args, lang, exact
 }
 
 // parseEnvLine 解析 Environment= 行的 "KEY=VALUE" 或 KEY="quoted value"。
