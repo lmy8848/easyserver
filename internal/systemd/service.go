@@ -84,17 +84,13 @@ func (m *ServiceManager) SetRuntimeLookup(r RuntimeLookup) {
 
 // List returns all systemd services with basic info (name, state, description).
 // 对 easyserver-* 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
-// enabled 状态通过一次 list-unit-files 批量获取（比 show 快得多）。
-// PID/内存/uptime 不在此查（对几百个服务调 systemctl show 很慢），
-// 前端用 GetDetails 按需加载当前页的运行时详情。
+// 只调一次 list-units（~16ms），不查 PID/内存/enabled（list-unit-files 要 ~1.8s，
+// systemctl show 全部要更久），前端用 GetDetails 按需加载当前页的运行时详情。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
-
-	// 一次 list-unit-files 获取 enabled 状态（快，不查运行时属性）
-	enabledMap := m.batchGetEnabledStates(ctx)
 
 	var services []ServiceInfo
 	lines := strings.Split(stdout, "\n")
@@ -126,12 +122,6 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 			svc.Description = strings.Join(fields[4:], " ")
 		}
 
-		// 补 enabled 状态
-		if state, ok := enabledMap[name]; ok {
-			svc.UnitFileState = state
-			svc.Enabled = state == "enabled"
-		}
-
 		// 托管服务：读 unit 文件补元数据 + 配置回显（本地 IO，不调 systemctl）
 		if shortName := UnitName(fields[0]); shortName != "" {
 			if content, _ := readUnitFile(shortName); content != "" {
@@ -143,31 +133,6 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	}
 
 	return services, nil
-}
-
-// batchGetEnabledStates 一次 list-unit-files 调用获取所有服务的 enabled 状态。
-// 返回 name -> state（enabled/disabled/static/masked）映射。
-func (m *ServiceManager) batchGetEnabledStates(ctx context.Context) map[string]string {
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-unit-files", "--type=service", "--no-pager", "--plain")
-	if err != nil || exitCode != 0 {
-		return nil
-	}
-
-	result := make(map[string]string)
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "UNIT FILE") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		name := strings.TrimSuffix(fields[0], ".service")
-		result[name] = fields[1]
-	}
-	return result
 }
 
 // GetDetails fetches PID, memory, and enabled status for specific services.

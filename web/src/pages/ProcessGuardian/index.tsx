@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber,
   Switch, message, Popconfirm, Table, Empty, Tooltip, Tabs,
@@ -577,6 +577,8 @@ function SystemTab() {
   const [loading, setLoading] = useState(true);
   const [operating, setOperating] = useState<string>('');
   const [searchText, setSearchText] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   // 日志 Drawer
   const [logService, setLogService] = useState<string | null>(null);
@@ -599,6 +601,34 @@ function SystemTab() {
   }, []);
 
   useEffect(() => { fetch(); }, [fetch]);
+
+  // 当前页服务变化时补详情（PID/内存/enabled），只查当前页的 pageSize 个，快
+  const filtered = useMemo(
+    () => services.filter(s =>
+      !searchText || s.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      s.description?.toLowerCase().includes(searchText.toLowerCase())
+    ),
+    [services, searchText],
+  );
+  const currentPageNames = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize).map(s => s.name),
+    [filtered, page, pageSize],
+  );
+  useEffect(() => {
+    if (currentPageNames.length === 0) return;
+    serviceApi.getDetails(currentPageNames)
+      .then(res => {
+        const detailMap = new Map((res.data?.data || []).map(d => [d.name, d]));
+        setServices(prev => prev.map(s => {
+          const d = detailMap.get(s.name);
+          return d ? { ...s, ...d } : s;
+        }));
+      })
+      .catch(() => {});
+  }, [currentPageNames.join(',')]);
+
+  // 搜索时回到第一页
+  useEffect(() => { setPage(1); }, [searchText]);
 
   const fetchLogs = useCallback(async (name: string) => {
     setLogLoading(true);
@@ -637,11 +667,6 @@ function SystemTab() {
     }
   };
 
-  const filtered = services.filter(s =>
-    !searchText || s.name.toLowerCase().includes(searchText.toLowerCase()) ||
-    s.description?.toLowerCase().includes(searchText.toLowerCase())
-  );
-
   const columns = buildServiceColumns({
     operating,
     managed: false,
@@ -678,7 +703,11 @@ function SystemTab() {
           loading={loading}
           size="small"
           scroll={{ x: 800 }}
-          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 个服务` }}
+          pagination={{
+            current: page, pageSize, showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个服务`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
         />
       </Card>
 
