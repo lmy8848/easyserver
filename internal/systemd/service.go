@@ -14,6 +14,8 @@ import (
 )
 
 // ServiceInfo represents a systemd service.
+// 托管服务（easyserver-* 前缀）会额外填充 Managed/Runtime* 字段；
+// 系统服务这些字段为零值。
 type ServiceInfo struct {
 	Name          string  `json:"name"`
 	Description   string  `json:"description"`
@@ -25,6 +27,12 @@ type ServiceInfo struct {
 	MemoryBytes   uint64  `json:"memory_bytes"`
 	CPUPercent    float64 `json:"cpu_percent"`
 	UptimeSeconds int64   `json:"uptime_seconds"`
+
+	// 托管服务元数据（解析 unit 文件注释得到；系统服务为零值）
+	Managed          bool   `json:"managed"`
+	RuntimeVersionID int64  `json:"runtime_version_id"`
+	RuntimeLang      string `json:"runtime_lang"`
+	RuntimeExact     string `json:"runtime_exact"`
 }
 
 // LogLine represents a log line from journalctl.
@@ -453,15 +461,6 @@ func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) 
 // Managed unit CRUD（面板托管服务）
 // ============================================================
 
-// ManagedServiceInfo 是 ListManaged 返回的单条记录：unit 元数据 + 运行时状态。
-type ManagedServiceInfo struct {
-	ManagedUnitMeta
-	State    string `json:"state"`     // active/inactive/failed
-	SubState string `json:"sub_state"` // running/dead
-	Enabled  bool   `json:"enabled"`
-	PID      int    `json:"pid"`
-}
-
 // CreateManaged 生成 unit 文件、daemon-reload、按需 enable/start。
 // 已存在同名 unit 返回错误。
 func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpec) error {
@@ -563,8 +562,8 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 }
 
 // ListManaged 列出所有面板托管服务（easyserver-* 前缀的 unit）。
-// 用 list-units glob 初筛 + 读 unit 文件解析元数据。
-func (m *ServiceManager) ListManaged(ctx context.Context) ([]ManagedServiceInfo, error) {
+// 返回 ServiceInfo，托管元数据字段已填充。
+func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error) {
 	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units",
 		managedUnitPrefix+"*"+managedUnitSuffix,
 		"--type=service", "--all", "--no-pager", "--plain", "--full")
@@ -572,7 +571,7 @@ func (m *ServiceManager) ListManaged(ctx context.Context) ([]ManagedServiceInfo,
 		return nil, fmt.Errorf("列出托管服务失败: %w", err)
 	}
 
-	var result []ManagedServiceInfo
+	var result []ServiceInfo
 	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -589,21 +588,19 @@ func (m *ServiceManager) ListManaged(ctx context.Context) ([]ManagedServiceInfo,
 			continue
 		}
 
-		info := ManagedServiceInfo{
-			ManagedUnitMeta: ManagedUnitMeta{Name: name},
-			State:           fields[2],
-			SubState:        fields[3],
+		info := ServiceInfo{
+			Name:     name,
+			State:    fields[2],
+			SubState: fields[3],
 		}
 
-		// 读 unit 文件解析元数据注释
+		// 读 unit 文件解析托管元数据注释
 		content, _ := readUnitFile(name)
 		if content != "" {
-			meta := ParseUnitMeta(content)
-			meta.Name = name
-			info.ManagedUnitMeta = meta
+			ParseUnitMeta(content, &info)
 		}
 
-		// 补 enabled + pid（批量查太慢，逐个 Get 仅在需要时；这里先用 list-units 的 state）
+		// 补 enabled + pid
 		fullName := managedUnitPrefix + name
 		if d, err := m.Get(ctx, fullName); err == nil {
 			info.Enabled = d.Enabled
@@ -616,8 +613,8 @@ func (m *ServiceManager) ListManaged(ctx context.Context) ([]ManagedServiceInfo,
 	return result, nil
 }
 
-// GetManaged 返回单个托管服务的详情（元数据 + 运行时状态）。
-func (m *ServiceManager) GetManaged(ctx context.Context, name string) (*ManagedServiceInfo, error) {
+// GetManaged 返回单个托管服务详情（ServiceInfo + 托管元数据）。
+func (m *ServiceManager) GetManaged(ctx context.Context, name string) (*ServiceInfo, error) {
 	if err := ValidateManagedName(name); err != nil {
 		return nil, err
 	}
@@ -629,8 +626,6 @@ func (m *ServiceManager) GetManaged(ctx context.Context, name string) (*ManagedS
 	if err != nil {
 		return nil, fmt.Errorf("读 unit 文件失败: %w", err)
 	}
-	meta := ParseUnitMeta(content)
-	meta.Name = name
 
 	fullName := managedUnitPrefix + name
 	d, err := m.Get(ctx, fullName)
@@ -638,13 +633,11 @@ func (m *ServiceManager) GetManaged(ctx context.Context, name string) (*ManagedS
 		return nil, err
 	}
 
-	return &ManagedServiceInfo{
-		ManagedUnitMeta: meta,
-		State:           d.State,
-		SubState:        d.SubState,
-		Enabled:         d.Enabled,
-		PID:             d.PID,
-	}, nil
+	// 解析元数据注释覆盖到 d（Get 返回的 Description 是 systemd 解析的，
+	// ParseUnitMeta 会还原去掉 "easyserver-managed: " 前缀的显示名）
+	d.Name = name
+	ParseUnitMeta(content, d)
+	return d, nil
 }
 
 // --- managed helpers ---

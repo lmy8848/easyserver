@@ -396,6 +396,86 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	}
 }
 
+// ============================================================
+// Managed service CRUD（面板托管服务）
+// ============================================================
+
+// ListManaged 列出所有面板托管服务
+func (h *ServiceHandler) ListManaged(c *gin.Context) {
+	services, err := h.serviceManager.ListManaged(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, services)
+}
+
+// CreateManaged 创建托管服务（生成 unit + 按需 enable/start）
+func (h *ServiceHandler) CreateManaged(c *gin.Context) {
+	var spec systemd.ManagedUnitSpec
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
+		return
+	}
+	middleware.AuditSummary(c, "创建托管服务 "+spec.Name)
+	if err := h.serviceManager.CreateManaged(c.Request.Context(), &spec); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "创建成功"})
+}
+
+// GetManaged 返回单个托管服务详情
+func (h *ServiceHandler) GetManaged(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少服务名称"))
+		return
+	}
+	info, err := h.serviceManager.GetManaged(c.Request.Context(), name)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, info)
+}
+
+// UpdateManaged 更新托管服务（重写 unit + 运行中则重启）
+func (h *ServiceHandler) UpdateManaged(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少服务名称"))
+		return
+	}
+	var spec systemd.ManagedUnitSpec
+	if err := c.ShouldBindJSON(&spec); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
+		return
+	}
+	spec.Name = name // 路径参数为准，防止 body 内 name 不一致
+	middleware.AuditSummary(c, "更新托管服务 "+name)
+	if err := h.serviceManager.UpdateManaged(c.Request.Context(), &spec); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "更新成功"})
+}
+
+// DeleteManaged 删除托管服务（stop + disable + rm unit）
+func (h *ServiceHandler) DeleteManaged(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少服务名称"))
+		return
+	}
+	middleware.AuditSummary(c, "删除托管服务 "+name)
+	if err := h.serviceManager.DeleteManaged(c.Request.Context(), name); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "删除成功"})
+}
+
 // RegisterRoutes registers service management routes
 func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
 	handler := NewServiceHandler(serviceManager, exec, jwtSecret, auditService, allowedOrigins, devMode)
@@ -409,4 +489,11 @@ func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, servic
 	protected.POST("/services/:name/enable", handler.Enable)
 	protected.POST("/services/:name/disable", handler.Disable)
 	wsGroup.GET("/services/:name/logs", handler.HandleLogsWebSocket)
+
+	// Managed service CRUD（面板托管服务：生成/更新/删除 unit 文件）
+	protected.GET("/services/managed", handler.ListManaged)
+	protected.POST("/services/managed", handler.CreateManaged)
+	protected.GET("/services/managed/:name", handler.GetManaged)
+	protected.PUT("/services/managed/:name", handler.UpdateManaged)
+	protected.DELETE("/services/managed/:name", handler.DeleteManaged)
 }

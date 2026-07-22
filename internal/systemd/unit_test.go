@@ -129,21 +129,22 @@ func TestParseUnitMeta_RoundTrip(t *testing.T) {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
 
-	meta := ParseUnitMeta(content)
-	if !meta.HasMarker {
-		t.Error("HasMarker 应为 true")
+	info := &ServiceInfo{}
+	ParseUnitMeta(content, info)
+	if !info.Managed {
+		t.Error("Managed 应为 true")
 	}
-	if meta.Description != "测试应用" {
-		t.Errorf("Description 期望「测试应用」，实际 %q", meta.Description)
+	if info.Description != "测试应用" {
+		t.Errorf("Description 期望「测试应用」，实际 %q", info.Description)
 	}
-	if meta.RuntimeVersionID != 42 {
-		t.Errorf("RuntimeVersionID 期望 42，实际 %d", meta.RuntimeVersionID)
+	if info.RuntimeVersionID != 42 {
+		t.Errorf("RuntimeVersionID 期望 42，实际 %d", info.RuntimeVersionID)
 	}
-	if meta.RuntimeLang != "node" {
-		t.Errorf("RuntimeLang 期望 node，实际 %q", meta.RuntimeLang)
+	if info.RuntimeLang != "node" {
+		t.Errorf("RuntimeLang 期望 node，实际 %q", info.RuntimeLang)
 	}
-	if meta.RuntimeExact != "20.11.0" {
-		t.Errorf("RuntimeExact 期望 20.11.0，实际 %q", meta.RuntimeExact)
+	if info.RuntimeExact != "20.11.0" {
+		t.Errorf("RuntimeExact 期望 20.11.0，实际 %q", info.RuntimeExact)
 	}
 }
 
@@ -160,9 +161,10 @@ ExecStart=/usr/sbin/nginx
 [Install]
 WantedBy=multi-user.target
 `
-	meta := ParseUnitMeta(content)
-	if meta.HasMarker {
-		t.Error("无 ManagedBy 注释时 HasMarker 应为 false")
+	info := &ServiceInfo{}
+	ParseUnitMeta(content, info)
+	if info.Managed {
+		t.Error("无 ManagedBy 注释时 Managed 应为 false")
 	}
 }
 

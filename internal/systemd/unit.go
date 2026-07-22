@@ -41,17 +41,6 @@ type ManagedUnitSpec struct {
 	RuntimeExact     string            `json:"runtime_exact"`      // mise 版本，如 "20.10.0"
 }
 
-// ManagedUnitMeta 是从已存在的 unit 文件解析出来的元数据。
-// ListManaged 返回它，前端用于还原表单。读不到的注释字段为零值，不阻断显示。
-type ManagedUnitMeta struct {
-	Name             string `json:"name"` // 不含前缀
-	Description      string `json:"description"`
-	RuntimeVersionID int64  `json:"runtime_version_id"`
-	RuntimeLang      string `json:"runtime_lang"`
-	RuntimeExact     string `json:"runtime_exact"`
-	HasMarker        bool   `json:"has_marker"` // ManagedBy=easyserver 注释是否存在
-}
-
 // UnitFilePath 返回托管 unit 的绝对路径。
 func UnitFilePath(name string) string {
 	return filepath.Join(managedUnitDir, managedUnitPrefix+name+managedUnitSuffix)
@@ -204,10 +193,10 @@ func buildEnvLines(env map[string]string) []string {
 	return lines
 }
 
-// ParseUnitMeta 从 unit 文件内容解析元数据注释。
-// 只读 [Unit] 段前的注释，不依赖文件存在。
-func ParseUnitMeta(content string) ManagedUnitMeta {
-	meta := ManagedUnitMeta{}
+// ParseUnitMeta 从 unit 文件内容解析元数据注释，填入 info 的托管字段。
+// 只读 [Unit] 段的注释和 Description，不依赖文件存在。
+// 调用方负责设置 info.Name（不含前缀）。
+func ParseUnitMeta(content string, info *ServiceInfo) {
 	scanner := strings.Split(content, "\n")
 	inUnitSection := false
 	for _, line := range scanner {
@@ -229,13 +218,13 @@ func ParseUnitMeta(content string) ManagedUnitMeta {
 			val := strings.TrimSpace(kv[1])
 			switch key {
 			case managedMarkerKey:
-				meta.HasMarker = val == managedMarkerValue
+				info.Managed = val == managedMarkerValue
 			case "RuntimeVersionID":
-				fmt.Sscanf(val, "%d", &meta.RuntimeVersionID)
+				fmt.Sscanf(val, "%d", &info.RuntimeVersionID)
 			case "RuntimeLang":
-				meta.RuntimeLang = val
+				info.RuntimeLang = val
 			case "RuntimeExact":
-				meta.RuntimeExact = val
+				info.RuntimeExact = val
 			}
 			continue
 		}
@@ -244,10 +233,9 @@ func ParseUnitMeta(content string) ManagedUnitMeta {
 			desc := strings.TrimPrefix(trimmed, "Description=")
 			// 去掉 "easyserver-managed: " 前缀还原显示名
 			desc = strings.TrimPrefix(desc, "easyserver-managed: ")
-			meta.Description = desc
+			info.Description = desc
 		}
 	}
-	return meta
 }
 
 // escapeUnitValue 转义 unit 文件值里的换行（防御性，正常已在 RenderUnit 前拦截）。
