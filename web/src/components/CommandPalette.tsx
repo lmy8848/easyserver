@@ -23,7 +23,7 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     // Navigation
     { id: 'nav-overview', label: '系统概览', hint: '/', group: '导航', action: () => onSelect('/') },
     { id: 'nav-processes', label: '进程守护', hint: '/processes', group: '导航', action: () => onSelect('/processes') },
-    { id: 'nav-services', label: '服务管理', hint: '/services', group: '导航', action: () => onSelect('/services') },
+    { id: 'nav-system-monitor', label: '系统监控', hint: '/system-monitor', group: '导航', action: () => onSelect('/system-monitor') },
     { id: 'nav-terminal', label: '终端访问', hint: '/terminal', group: '导航', action: () => onSelect('/terminal') },
     { id: 'nav-files', label: '文件管理', hint: '/files', group: '导航', action: () => onSelect('/files') },
     { id: 'nav-deploy', label: '部署同步', hint: '/deploy', group: '导航', action: () => onSelect('/deploy') },

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
   message, Popconfirm, Tooltip, Row, Col,
@@ -86,9 +86,6 @@ export default function WebsiteList({
   const [buildOutput, setBuildOutput] = useState('');
   const [buildSuccess, setBuildSuccess] = useState<boolean | null>(null);
   const [buildLoading, setBuildLoading] = useState(false);
-
-  // Process status tracking
-  const [processStatuses, setProcessStatuses] = useState<Record<number, { status: string; managed: boolean }>>({});
 
   // Runtime versions for process linking
   const [runtimeEnvs, setRuntimeEnvs] = useState<RuntimeEnvironment[]>([]);
@@ -345,51 +342,6 @@ export default function WebsiteList({
     }
   };
 
-  const handleStartProcess = async (site: Website) => {
-    try {
-      await websiteApi.startProcess(selectedServer.id, site.id);
-      message.success('进程启动请求已发送');
-      // 多次轮询，应对 npm start 等慢启动（进程守护启动后状态需要时间同步）
-      setTimeout(fetchProcessStatuses, 2000);
-      setTimeout(fetchProcessStatuses, 5000);
-      setTimeout(fetchProcessStatuses, 9000);
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '启动失败'));
-    }
-  };
-
-  const handleStopProcess = async (site: Website) => {
-    try {
-      await websiteApi.stopProcess(selectedServer.id, site.id);
-      message.success('进程已停止');
-      setTimeout(fetchProcessStatuses, 2000);
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '停止失败'));
-    }
-  };
-
-  const fetchProcessStatuses = async () => {
-    const statuses: Record<number, { status: string; managed: boolean }> = {};
-    for (const site of websites) {
-      if (!site.build_command && !site.start_command) continue;
-      try {
-        const res = await websiteApi.getProcessStatus(selectedServer.id, site.id);
-        const data = res.data.data;
-        if (data) {
-          statuses[site.id] = { status: data.status || 'stopped', managed: data.managed };
-        }
-      } catch {
-        // ignore
-      }
-    }
-    setProcessStatuses(statuses);
-  };
-
-  useEffect(() => {
-    if (websites.length > 0) {
-      fetchProcessStatuses();
-    }
-  }, [websites.length]);
 
   // Site table columns
   const siteColumns = [
@@ -427,20 +379,7 @@ export default function WebsiteList({
         const siteTag = r.status === 'active'
           ? <Tag color="success">网站:启用</Tag>
           : <Tag color="error">网站:禁用</Tag>;
-        let procTag: ReactNode = null;
-        if (r.build_command || r.start_command) {
-          const ps = processStatuses[r.id];
-          if (!ps) {
-            procTag = <Tag color="default">进程:查询中</Tag>;
-          } else {
-            const inner = ps.status === 'running'
-              ? <Tag color="success">进程:运行中</Tag>
-              : ps.status === 'starting' ? <Tag color="processing">进程:启动中</Tag>
-              : <Tag color="error">进程:已停止</Tag>;
-            procTag = ps.managed ? inner : <Tooltip title="未关联进程守护，仅检测端口">{inner}</Tooltip>;
-          }
-        }
-        return <Space size={4} wrap>{siteTag}{procTag}</Space>;
+        return <Space size={4} wrap>{siteTag}</Space>;
       },
     },
     {
@@ -457,16 +396,6 @@ export default function WebsiteList({
             <Tooltip title="编译">
               <Button type="link" size="small" icon={<CodeOutlined />} onClick={() => handleBuild(record)} />
             </Tooltip>
-          )}
-          {record.start_command && (
-            <>
-              <Tooltip title="启动进程">
-                <Button type="link" size="small" icon={<PlayCircleOutlined />} onClick={() => handleStartProcess(record)} />
-              </Tooltip>
-              <Tooltip title="停止进程">
-                <Button type="link" size="small" icon={<StopOutlined />} onClick={() => handleStopProcess(record)} />
-              </Tooltip>
-            </>
           )}
           <Tooltip title="访问日志">
             <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => showLogs(record, 'access')} />

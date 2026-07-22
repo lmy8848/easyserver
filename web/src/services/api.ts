@@ -5,8 +5,8 @@ import type {
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
-  ManagedProcess, ProcessWithStatus, ProcessLog, ProcessGroup, ProcessStats, PaginatedData,
   SystemProcess, FileShare, ShareInfo,
+  ManagedServiceSpec,
   Notification, SSHLogin, SSHConfig, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
 } from '../types';
@@ -166,6 +166,22 @@ export const serviceApi = {
 
   getLogs: (name: string, tail?: number) =>
     api.get<ApiResponse<{ lines: Array<{ time: string; message: string; priority: string }> }>>(`/services/${name}/logs`, { params: { tail } }),
+
+  // Managed service CRUD（面板托管服务）
+  listManaged: () =>
+    api.get<ApiResponse<Service[]>>('/services/managed'),
+
+  createManaged: (data: ManagedServiceSpec) =>
+    api.post<ApiResponse>('/services/managed', data),
+
+  getManaged: (name: string) =>
+    api.get<ApiResponse<Service>>(`/services/managed/${name}`),
+
+  updateManaged: (name: string, data: ManagedServiceSpec) =>
+    api.put<ApiResponse>(`/services/managed/${name}`, data),
+
+  deleteManaged: (name: string) =>
+    api.delete<ApiResponse>(`/services/managed/${name}`),
 };
 
 // File API
@@ -498,15 +514,6 @@ export const websiteApi = {
 
   build: (serverId: number, id: number) =>
     api.post<ApiResponse<{ success: boolean; output: string }>>(`/web-servers/${serverId}/websites/${id}/build`),
-
-  startProcess: (serverId: number, id: number) =>
-    api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/process/start`),
-
-  stopProcess: (serverId: number, id: number) =>
-    api.post<ApiResponse>(`/web-servers/${serverId}/websites/${id}/process/stop`),
-
-  getProcessStatus: (serverId: number, id: number) =>
-    api.get<ApiResponse<{ process_id: number; status: string; managed: boolean; process?: any }>>(`/web-servers/${serverId}/websites/${id}/process`),
 };
 
 // Database Server API
@@ -833,65 +840,6 @@ export const settingsApi = {
 };
 
 // Process Guardian API
-export const processApi = {
-  list: () =>
-    api.get<ApiResponse<ProcessWithStatus[]>>('/processes'),
-
-  get: (id: number) =>
-    api.get<ApiResponse<ProcessWithStatus>>(`/processes/${id}`),
-
-  create: (data: Partial<ManagedProcess>) =>
-    api.post<ApiResponse>('/processes', data),
-
-  update: (id: number, data: Partial<ManagedProcess>) =>
-    api.put<ApiResponse>(`/processes/${id}`, data),
-
-  delete: (id: number) =>
-    api.delete<ApiResponse>(`/processes/${id}`),
-
-  start: (id: number) =>
-    api.post<ApiResponse>(`/processes/${id}/start`),
-
-  stop: (id: number) =>
-    api.post<ApiResponse>(`/processes/${id}/stop`),
-
-  restart: (id: number) =>
-    api.post<ApiResponse>(`/processes/${id}/restart`),
-
-  getLogs: (id: number, limit = 50, offset = 0) =>
-    api.get<ApiResponse<PaginatedData<ProcessLog>>>(`/processes/${id}/logs`, { params: { limit, offset } }),
-
-  getStats: (id: number) =>
-    api.get<ApiResponse<ProcessStats>>(`/processes/${id}/stats`),
-
-  batchStart: (ids: number[]) =>
-    api.post<ApiResponse>('/processes/batch/start', { ids }),
-
-  batchStop: (ids: number[]) =>
-    api.post<ApiResponse>('/processes/batch/stop', { ids }),
-
-  batchRestart: (ids: number[]) =>
-    api.post<ApiResponse>('/processes/batch/restart', { ids }),
-
-  listGroups: () =>
-    api.get<ApiResponse<ProcessGroup[]>>('/process-groups'),
-
-  createGroup: (data: { name: string; description?: string }) =>
-    api.post<ApiResponse>('/process-groups', data),
-
-  updateGroup: (id: number, data: { name?: string; description?: string }) =>
-    api.put<ApiResponse>(`/process-groups/${id}`, data),
-
-  deleteGroup: (id: number) =>
-    api.delete<ApiResponse>(`/process-groups/${id}`),
-
-  export: () =>
-    api.get<ApiResponse<ManagedProcess[]>>('/processes/export'),
-
-  import: (processes: ManagedProcess[]) =>
-    api.post<ApiResponse>('/processes/import', processes),
-};
-
 // System Process API
 export const systemProcessApi = {
   listProcesses: (params?: { sort_by?: string; order?: string; search?: string; limit?: number }) =>
