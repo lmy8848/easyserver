@@ -28,9 +28,9 @@ type ManagedServiceForm = Omit<ManagedServiceSpec, 'env' | 'runtime_version_id' 
 };
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  active: { color: 'green', label: '运行中' },
+  active: { color: 'success', label: '运行中' },
   inactive: { color: 'default', label: '已停止' },
-  failed: { color: 'red', label: '失败' },
+  failed: { color: 'error', label: '失败' },
   activating: { color: 'processing', label: '启动中' },
   deactivating: { color: 'warning', label: '停止中' },
 };
@@ -78,7 +78,7 @@ function buildServiceColumns(props: ColumnProps) {
       render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t}</Text>,
     },
     {
-      title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, width: 160,
+      title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
       render: (t: string) => t ? <Text type="secondary" style={{ fontSize: 12 }}>{t}</Text> : null,
     },
     {
