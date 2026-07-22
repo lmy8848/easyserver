@@ -120,58 +120,47 @@ function buildServiceColumns(props: ColumnProps) {
   }
 
   cols.push({
-    title: '操作', key: 'action', width: managed ? 200 : 220, fixed: 'right' as const,
+    title: '操作', key: 'action', width: managed ? 260 : 220, fixed: 'right' as const,
     render: (_: unknown, r: Service) => {
       const isRunning = r.state === 'active';
       const isBusy = r.state === 'activating' || r.state === 'deactivating';
-      // 系统服务 Tab 保护面板自身服务
       const isSelf = !managed && r.name === 'easyserver';
+      const busy = (key: string) => operating === `${key}-${r.name}`;
+      const disabledAny = isBusy || isSelf || operating.startsWith(`start-${r.name}`)
+        || operating.startsWith(`stop-${r.name}`) || operating.startsWith(`restart-${r.name}`);
 
       return (
-        <Space size="small">
+        <Space wrap>
           {/* 启动/停止互斥：只显示可操作的那个 */}
           {isRunning ? (
-            <Tooltip title="停止">
-              <Button type="link" size="small" icon={<PauseOutlined />}
-                loading={operating === `stop-${r.name}`} disabled={isBusy || isSelf}
-                onClick={() => onAction(r.name, 'stop')} />
-            </Tooltip>
+            <>
+              <Button icon={<PauseOutlined />} size="small"
+                loading={busy('stop')} disabled={disabledAny}
+                onClick={() => onAction(r.name, 'stop')}>停止</Button>
+              <Button icon={<RedoOutlined />} size="small"
+                loading={busy('restart')} disabled={disabledAny}
+                onClick={() => onAction(r.name, 'restart')}>重启</Button>
+            </>
           ) : (
-            <Tooltip title="启动">
-              <Button type="link" size="small" icon={<CaretRightOutlined />}
-                loading={operating === `start-${r.name}`} disabled={isBusy || isSelf}
-                onClick={() => onAction(r.name, 'start')} />
-            </Tooltip>
+            <Button icon={<CaretRightOutlined />} size="small"
+              loading={busy('start')} disabled={disabledAny}
+              onClick={() => onAction(r.name, 'start')}>启动</Button>
           )}
-          {/* 重启：运行中才显示（停了没必要重启） */}
-          {isRunning && (
-            <Tooltip title="重启">
-              <Button type="link" size="small" icon={<RedoOutlined />}
-                loading={operating === `restart-${r.name}`} disabled={isBusy || isSelf}
-                onClick={() => onAction(r.name, 'restart')} />
-            </Tooltip>
-          )}
+          {/* 辅助操作：纯图标 + Tooltip */}
           <Tooltip title="日志">
-            <Button type="link" size="small" icon={<FileTextOutlined />}
-              onClick={() => onLogs(r.name)} />
+            <Button icon={<FileTextOutlined />} size="small" onClick={() => onLogs(r.name)} />
           </Tooltip>
           <Tooltip title="详情">
-            <Button type="link" size="small" icon={<InfoCircleOutlined />}
-              onClick={() => onDetail(r)} />
+            <Button icon={<InfoCircleOutlined />} size="small" onClick={() => onDetail(r)} />
           </Tooltip>
-          {/* 托管才有编辑/删除 */}
           {managed && onEdit && (
             <Tooltip title="编辑">
-              <Button type="link" size="small" icon={<EditOutlined />}
-                onClick={() => onEdit(r)} />
+              <Button icon={<EditOutlined />} size="small" onClick={() => onEdit(r)} />
             </Tooltip>
           )}
           {managed && onDelete && (
-            <Popconfirm title="确定删除?" onConfirm={() => onDelete(r.name)}>
-              <Tooltip title="删除">
-                <Button type="link" size="small" danger icon={<DeleteOutlined />}
-                  disabled={isRunning} />
-              </Tooltip>
+            <Popconfirm title="确定删除此服务？" okText="删除" cancelText="取消" onConfirm={() => onDelete(r.name)}>
+              <Button icon={<DeleteOutlined />} size="small" danger disabled={isRunning} />
             </Popconfirm>
           )}
         </Space>
