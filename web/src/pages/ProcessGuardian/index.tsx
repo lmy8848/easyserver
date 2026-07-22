@@ -527,7 +527,7 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
         </Form.Item>
         <Form.Item
           name="runtime"
-          label="运行时版本"
+          label="运行环境"
           extra="启动命令会自动通过 mise exec <lang>@<exact> 包裹"
         >
           <RuntimeVersionSelect />
@@ -539,17 +539,22 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
           <TextArea rows={3} placeholder='例如: {"NODE_ENV": "production", "PORT": "3000"}' />
         </Form.Item>
         <Row gutter={16}>
-          <Col span={6}>
+          <Col span={4}>
+            <Form.Item name="auto_start" label="开机自启" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </Col>
+          <Col span={4}>
             <Form.Item name="auto_restart" label="自动重启" valuePropName="checked">
               <Switch />
             </Form.Item>
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Form.Item name="max_restarts" label="最大重启次数">
               <InputNumber min={0} max={100} style={{ width: '100%' }} />
             </Form.Item>
           </Col>
-          <Col span={6}>
+          <Col span={5}>
             <Form.Item name="restart_delay" label="重启延迟(秒)">
               <InputNumber min={1} max={300} style={{ width: '100%' }} />
             </Form.Item>
@@ -560,9 +565,6 @@ function ManagedServiceModal({ visible, editing, form, onOk, onCancel }: {
             </Form.Item>
           </Col>
         </Row>
-        <Form.Item name="auto_start" label="开机自启" valuePropName="checked">
-          <Switch />
-        </Form.Item>
       </Form>
     </Modal>
   );
