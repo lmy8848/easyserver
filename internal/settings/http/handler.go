@@ -935,25 +935,7 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req) // optional body, ignore parse errors
 	force := req.Force != nil && *req.Force
 
-	// Validate TLS configuration before restart
-	if h.cfg.Server.TLS.Enabled {
-		if h.cfg.Server.TLS.CertFile == "" || h.cfg.Server.TLS.KeyFile == "" {
-			c.Error(apperror.ErrBadRequest.WithMessage("TLS 已启用但未配置证书/密钥文件"))
-			return
-		}
-		// Verify cert file exists
-		if _, err := os.Stat(h.cfg.Server.TLS.CertFile); os.IsNotExist(err) {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("TLS 证书文件不存在: %s", h.cfg.Server.TLS.CertFile)))
-			return
-		}
-		// Verify key file exists
-		if _, err := os.Stat(h.cfg.Server.TLS.KeyFile); os.IsNotExist(err) {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("TLS 密钥文件不存在: %s", h.cfg.Server.TLS.KeyFile)))
-			return
-		}
-	}
-
-	// Return success first, then restart
+	// Return success first, then restart.
 	infra.Go(func() {
 		time.Sleep(1 * time.Second)
 		h.sig.Request(infra.RestartOpts{

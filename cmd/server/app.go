@@ -192,15 +192,20 @@ func (a *App) hotRestart(opts infra.RestartOpts) {
 	}
 
 	if opts.Force {
-		a.ln.Close()
-		if _, err := os.StartProcess(execPath, args, &os.ProcAttr{
+		// Fork child BEFORE closing the listener: if fork fails, the old
+		// listener stays open and the service continues serving on the
+		// previous address instead of going down with no recovery path.
+		// The child does not inherit the FD and calls net.Listen fresh.
+		child, err := os.StartProcess(execPath, args, &os.ProcAttr{
 			Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 			Env:   os.Environ(),
-		}); err != nil {
+		})
+		if err != nil {
 			log.Printf("app: restart failed: fork (force): %v", err)
 			return
 		}
-		log.Printf("app: forked child (force restart, new listener), exiting parent")
+		log.Printf("app: forked child PID %d (force restart), exiting parent", child.Pid)
+		a.shutdown(10 * time.Second)
 		os.Exit(0)
 	}
 

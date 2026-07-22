@@ -1,8 +1,13 @@
 package config
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
@@ -100,6 +105,53 @@ func Validate(cfg *Config, devMode bool) error {
 		}
 	}
 
+	// TLS: when enabled, verify the cert/key pair is loadable and not expired.
+	// dev mode degrades to a warning; production rejects startup/restart.
+	if cfg.Server.TLS.Enabled {
+		if cfg.Server.TLS.CertFile == "" || cfg.Server.TLS.KeyFile == "" {
+			if err := rejectOrWarn(devMode, true,
+				"TLS 已启用但未配置证书/密钥文件"); err != nil {
+				return err
+			}
+		} else if err := ValidateTLSCert(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil {
+			if err := rejectOrWarn(devMode, true, err.Error()); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateTLSCert loads and validates a TLS certificate/key pair:
+//   - both files are readable
+//   - PEM parses correctly
+//   - cert and key match (tls.LoadX509KeyPair)
+//   - cert has not expired
+//
+// Returns nil if valid, a descriptive error otherwise. Shared by startup
+// (config.Validate) and hot-restart (settings handler) so both paths enforce
+// the same level of checking.
+func ValidateTLSCert(certFile, keyFile string) error {
+	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
+		return fmt.Errorf("TLS 证书/密钥无效: %w", err)
+	}
+	// LoadX509KeyPair does not check expiry; parse the leaf cert explicitly.
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return fmt.Errorf("读取 TLS 证书失败: %w", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return errors.New("TLS 证书不是有效的 PEM 格式")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("解析 TLS 证书失败: %w", err)
+	}
+	if time.Now().After(cert.NotAfter) {
+		return fmt.Errorf("TLS 证书已于 %s 过期", cert.NotAfter.Format("2006-01-02"))
+	}
 	return nil
 }
 
