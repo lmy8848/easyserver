@@ -30,9 +30,11 @@ type ManagedServiceForm = Omit<ManagedServiceSpec, 'env' | 'runtime_version_id' 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   active: { color: 'success', label: '运行中' },
   inactive: { color: 'default', label: '已停止' },
+  exited: { color: 'default', label: '已退出' },
   failed: { color: 'error', label: '失败' },
   activating: { color: 'processing', label: '启动中' },
   deactivating: { color: 'warning', label: '停止中' },
+  reloading: { color: 'processing', label: '重载中' },
 };
 
 // formatBytes 把字节数格式化为人类可读（如 1.5 MB）。
@@ -74,7 +76,7 @@ function buildServiceColumns(props: ColumnProps) {
 
   const cols: object[] = [
     {
-      title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 180,
+      title: '名称', dataIndex: 'name', key: 'name', ellipsis: true, width: 220,
       render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t}</Text>,
     },
     {
@@ -82,11 +84,13 @@ function buildServiceColumns(props: ColumnProps) {
       render: (t: string) => t ? <Text type="secondary" style={{ fontSize: 12 }}>{t}</Text> : null,
     },
     {
-      title: '状态', key: 'status', width: 120,
+      title: '状态', key: 'status', width: 140,
       render: (_: unknown, r: Service) => {
         const cfg = STATUS_CONFIG[r.state] || { color: 'default', label: r.state };
-        const text = r.sub_state && r.sub_state !== r.state
-          ? `${cfg.label} (${r.sub_state})` : cfg.label;
+        // 只在 sub_state 有额外信息量时才拼接（exited/dead/running 等常见值不拼）
+        const informativeSub = r.sub_state && r.sub_state !== r.state
+          && !['exited', 'dead', 'running'].includes(r.sub_state);
+        const text = informativeSub ? `${cfg.label} (${r.sub_state})` : cfg.label;
         return <Badge status={cfg.color as any} text={text} />;
       },
     },
@@ -122,7 +126,8 @@ function buildServiceColumns(props: ColumnProps) {
   cols.push({
     title: '操作', key: 'action', width: managed ? 260 : 220, fixed: 'right' as const,
     render: (_: unknown, r: Service) => {
-      const isRunning = r.state === 'active';
+      // active 且 sub_state=exited 表示 oneshot 服务执行完已退出，可重新启动
+      const isRunning = r.state === 'active' && r.sub_state !== 'exited';
       const isBusy = r.state === 'activating' || r.state === 'deactivating';
       const isSelf = !managed && r.name === 'easyserver';
       const busy = (key: string) => operating === `${key}-${r.name}`;
