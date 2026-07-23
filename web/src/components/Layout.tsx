@@ -15,7 +15,6 @@ const MENU_GROUPS = [
       { key: '/', icon: 'dashboard', label: '系统概览' },
       { key: '/processes', icon: 'cluster', label: '进程守护' },
       { key: '/system-monitor', icon: 'monitor', label: '系统监控' },
-      { key: '/ports', icon: 'api', label: '端口监控' },
     ],
   },
   {
@@ -95,7 +94,6 @@ const PAGE_TITLES: Record<string, string> = {
   '/': '系统概览',
   '/processes': '进程守护',
   '/system-monitor': '系统监控',
-  '/ports': '端口监控',
   '/terminal': '终端访问',
   '/files': '文件管理',
   '/file-shares': '文件外链',

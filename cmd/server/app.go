@@ -40,7 +40,7 @@ import (
 	"easyserver/internal/runtimeenv"
 	"easyserver/internal/ssh"
 	"easyserver/internal/systemd"
-	"easyserver/internal/systemprocess"
+
 	"easyserver/internal/terminal"
 	"easyserver/internal/web"
 )
@@ -332,9 +332,6 @@ func (a *App) wire() error {
 	// Package-level rate limiters
 	a.onCleanup(middleware.StopRateLimiter)
 	a.onCleanup(middleware.StopSessionHeartbeatLimiter)
-
-	// System process service
-	a.SystemProcessService = systemprocess.NewService()
 
 	// Notification
 	notificationRepo := notification.NewSQLiteRepository(db)

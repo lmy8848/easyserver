@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,6 +97,15 @@ type MonitorService struct {
 	ringHead   int
 	ringCount  int
 	ringMu     sync.Mutex
+
+	// 进程监控：CPU 采样
+	cpuSamples map[int]*cpuSample // pid -> last sample
+	cpuMu      sync.RWMutex
+
+	// UID -> 用户名缓存（惰性按 /etc/passwd mtime 刷新）
+	passwdMap   map[string]string
+	passwdMtime time.Time
+	passwdMu    sync.RWMutex
 }
 
 func NewMonitorService(monitorRepo Repository, interval, retention time.Duration) *MonitorService {
@@ -106,6 +116,7 @@ func NewMonitorService(monitorRepo Repository, interval, retention time.Duration
 		intervalUpdateCh: make(chan time.Duration, 1),
 		ringBuffer:       make([]*MonitorPoint, 60), // 60 points buffer
 		ringSize:         60,
+		cpuSamples:       make(map[int]*cpuSample),
 	}
 	s.interval.Store(int64(interval))
 	s.retention.Store(int64(retention))
@@ -664,4 +675,316 @@ func (s *MonitorService) readPartitions() []DiskPartition {
 	}
 
 	return partitions
+}
+
+// ============================================================
+// Process monitoring
+// ============================================================
+
+const (
+	procDir          = "/proc"
+	statFile         = "/proc/stat"
+	defaultProcLimit = 100
+)
+
+// cpuSample stores a single CPU measurement for a process
+type cpuSample struct {
+	utime    int64
+	stime    int64
+	sampleAt time.Time
+}
+
+// procWithCPU holds process data plus raw CPU ticks for delta calculation.
+type procWithCPU struct {
+	SystemProcess
+	utime int64
+	stime int64
+}
+
+// ListSystemProcesses reads processes from /proc and calculates instantaneous CPU usage.
+func (s *MonitorService) ListSystemProcesses(sortBy, order, search string, limit int) ([]SystemProcess, error) {
+	if limit <= 0 || limit > defaultProcLimit {
+		limit = defaultProcLimit
+	}
+
+	entries, err := os.ReadDir(procDir)
+	if err != nil {
+		return nil, fmt.Errorf("read /proc: %w", err)
+	}
+
+	now := time.Now()
+	search = strings.ToLower(search)
+
+	var rawProcs []procWithCPU
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+
+		proc, utime, stime, err := readProcStatusWithTicks(pid, s)
+		if err != nil {
+			continue
+		}
+
+		// Apply search filter
+		if search != "" && !strings.Contains(strings.ToLower(proc.Name), search) &&
+			!strings.Contains(strings.ToLower(proc.Command), search) {
+			continue
+		}
+
+		rawProcs = append(rawProcs, procWithCPU{proc, utime, stime})
+	}
+
+	// Calculate instantaneous CPU using delta with previous samples
+	s.cpuMu.Lock()
+	newSamples := make(map[int]*cpuSample)
+	for i := range rawProcs {
+		pid := rawProcs[i].PID
+		totalTicks := rawProcs[i].utime + rawProcs[i].stime
+
+		if prev, ok := s.cpuSamples[pid]; ok {
+			deltaTicks := totalTicks - (prev.utime + prev.stime)
+			deltaTime := now.Sub(prev.sampleAt).Seconds()
+			if deltaTime > 0 && deltaTicks >= 0 {
+				rawProcs[i].CPUPercent = float64(deltaTicks) / (deltaTime * float64(100)) * 100.0
+				if rawProcs[i].CPUPercent > 100.0 {
+					rawProcs[i].CPUPercent = 100.0
+				}
+			}
+		}
+
+		newSamples[pid] = &cpuSample{
+			utime:    rawProcs[i].utime,
+			stime:    rawProcs[i].stime,
+			sampleAt: now,
+		}
+	}
+	s.cpuSamples = newSamples
+	s.cpuMu.Unlock()
+
+	// Convert to result
+	processes := make([]SystemProcess, 0, len(rawProcs))
+	for _, rp := range rawProcs {
+		processes = append(processes, rp.SystemProcess)
+	}
+
+	// Sort
+	sortProcesses(processes, sortBy, order)
+
+	// Limit
+	if len(processes) > limit {
+		processes = processes[:limit]
+	}
+
+	return processes, nil
+}
+
+// GetSystemProcess returns details for a specific process by PID.
+func (s *MonitorService) GetSystemProcess(pid int) (*SystemProcess, error) {
+	proc, err := readProcStatus(pid, s)
+	if err != nil {
+		return nil, err
+	}
+	return &proc, nil
+}
+
+// --- /proc parsing helpers ---
+
+func readProcStatus(pid int, s *MonitorService) (SystemProcess, error) {
+	proc, _, _, err := readProcStatusWithTicks(pid, s)
+	return proc, err
+}
+
+// readProcStatusWithTicks returns the process info plus raw utime/stime for CPU delta calculation.
+func readProcStatusWithTicks(pid int, s *MonitorService) (SystemProcess, int64, int64, error) {
+	var utime, stime int64
+	proc := SystemProcess{PID: pid}
+
+	// Read /proc/[pid]/status
+	statusFile := fmt.Sprintf("%s/%d/status", procDir, pid)
+	f, err := os.Open(statusFile)
+	if err != nil {
+		return proc, 0, 0, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		switch key {
+		case "Name":
+			proc.Name = val
+		case "State":
+			if len(val) > 0 {
+				proc.State = string(val[0]) // R, S, D, Z, T
+			}
+		case "PPid":
+			proc.PPID, _ = strconv.Atoi(val)
+		case "Uid":
+			uid := strings.Fields(val)[0]
+			proc.User = s.getUserFromUID(uid)
+		case "Threads":
+			proc.Threads, _ = strconv.Atoi(val)
+		}
+	}
+
+	// Read command line
+	cmdFile := fmt.Sprintf("%s/%d/cmdline", procDir, pid)
+	cmdBytes, err := os.ReadFile(cmdFile)
+	if err == nil {
+		cmd := strings.ReplaceAll(string(cmdBytes), "\x00", " ")
+		proc.Command = strings.TrimSpace(cmd)
+	}
+
+	// Read memory from /proc/[pid]/statm
+	statmFile := fmt.Sprintf("%s/%d/statm", procDir, pid)
+	statmBytes, err := os.ReadFile(statmFile)
+	if err == nil {
+		fields := strings.Fields(string(statmBytes))
+		if len(fields) >= 2 {
+			rssPages, _ := strconv.ParseInt(fields[1], 10, 64)
+			proc.MemoryMB = float64(rssPages) * 4 / 1024 // pages to MB (4KB per page)
+		}
+	}
+
+	// Read CPU ticks from /proc/[pid]/stat
+	statPidFile := fmt.Sprintf("%s/%d/stat", procDir, pid)
+	statBytes, err := os.ReadFile(statPidFile)
+	if err == nil {
+		fields := strings.Fields(string(statBytes))
+		if len(fields) >= 22 {
+			utime, _ = strconv.ParseInt(fields[13], 10, 64)
+			stime, _ = strconv.ParseInt(fields[14], 10, 64)
+			starttime, _ := strconv.ParseInt(fields[21], 10, 64)
+
+			// Calculate start time
+			clkTck := int64(100) // sysconf(_SC_CLK_TCK), typically 100 on Linux
+			bootTime := getBootTime()
+			startSec := starttime/clkTck + bootTime
+			proc.StartTime = time.Unix(startSec, 0).Format("01-02 15:04")
+		}
+	}
+
+	return proc, utime, stime, nil
+}
+
+// getUserFromUID resolves a UID to a username via /etc/passwd.
+// The passwd file is cached and lazily reloaded when its mtime changes,
+// so a full /proc scan reads /etc/passwd at most once per request (not once per PID).
+func (s *MonitorService) getUserFromUID(uid string) string {
+	// Fast path: read-mostly, no reload needed
+	s.passwdMu.RLock()
+	if s.passwdMap != nil {
+		if name, ok := s.passwdMap[uid]; ok {
+			s.passwdMu.RUnlock()
+			return name
+		}
+		s.passwdMu.RUnlock()
+		return uid
+	}
+	s.passwdMu.RUnlock()
+
+	// Slow path: load (or reload) passwd map
+	s.loadPasswd()
+
+	s.passwdMu.RLock()
+	defer s.passwdMu.RUnlock()
+	if s.passwdMap != nil {
+		if name, ok := s.passwdMap[uid]; ok {
+			return name
+		}
+	}
+	return uid
+}
+
+// loadPasswd parses /etc/passwd into the cache, reloading only if mtime changed.
+func (s *MonitorService) loadPasswd() {
+	s.passwdMu.Lock()
+	defer s.passwdMu.Unlock()
+
+	fi, err := os.Stat("/etc/passwd")
+	if err != nil {
+		return
+	}
+	// Already loaded and unchanged: keep current map
+	if s.passwdMap != nil && fi.ModTime().Equal(s.passwdMtime) {
+		return
+	}
+
+	data, err := os.ReadFile("/etc/passwd")
+	if err != nil {
+		return
+	}
+	m := make(map[string]string, 64)
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.Split(line, ":")
+		if len(parts) >= 3 {
+			m[parts[2]] = parts[0] // uid -> username
+		}
+	}
+	s.passwdMap = m
+	s.passwdMtime = fi.ModTime()
+}
+
+func getBootTime() int64 {
+	f, err := os.Open(statFile)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "btime ") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				t, _ := strconv.ParseInt(fields[1], 10, 64)
+				return t
+			}
+		}
+	}
+	return 0
+}
+
+func sortProcesses(procs []SystemProcess, sortBy, order string) {
+	asc := order != "desc"
+	sort.Slice(procs, func(i, j int) bool {
+		switch sortBy {
+		case "cpu":
+			if asc {
+				return procs[i].CPUPercent < procs[j].CPUPercent
+			}
+			return procs[i].CPUPercent > procs[j].CPUPercent
+		case "memory":
+			if asc {
+				return procs[i].MemoryMB < procs[j].MemoryMB
+			}
+			return procs[i].MemoryMB > procs[j].MemoryMB
+		case "pid":
+			if asc {
+				return procs[i].PID < procs[j].PID
+			}
+			return procs[i].PID > procs[j].PID
+		case "name":
+			if asc {
+				return procs[i].Name < procs[j].Name
+			}
+			return procs[i].Name > procs[j].Name
+		default:
+			// Default: sort by memory desc
+			return procs[i].MemoryMB > procs[j].MemoryMB
+		}
+	})
 }

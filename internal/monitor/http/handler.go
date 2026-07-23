@@ -2,8 +2,10 @@ package http
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
 
 	"github.com/gin-gonic/gin"
@@ -33,13 +36,15 @@ const (
 
 type MonitorHandler struct {
 	monitorService *monitor.MonitorService
+	executor       executor.CommandExecutor
 	jwtSecret      string
 	upgrader       gorillaWs.Upgrader
 }
 
-func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
+func NewMonitorHandler(monitorService *monitor.MonitorService, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
 	return &MonitorHandler{
 		monitorService: monitorService,
+		executor:       exec,
 		jwtSecret:      jwtSecret,
 		upgrader:       httpx.CreateUpgrader(),
 	}
@@ -159,11 +164,19 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 }
 
 // RegisterRoutes registers monitor related routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) {
-	handler := NewMonitorHandler(monitorService, jwtSecret, allowedOrigins, devMode)
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *monitor.MonitorService, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
+	handler := NewMonitorHandler(monitorService, exec, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/monitor/stats", handler.HandleStats)
 	protected.GET("/monitor/history", handler.HandleHistory)
 	wsGroup.GET("/monitor", handler.HandleWebSocket)
+
+	// Processes
+	protected.GET("/monitor/processes", handler.ListSystemProcesses)
+	protected.GET("/monitor/processes/:pid", handler.GetSystemProcess)
+
+	// Ports (listening ports list + availability check)
+	protected.GET("/monitor/ports", handler.GetListeningPorts)
+	protected.GET("/monitor/check-port", handler.CheckPort)
 }
 
 // PortInfo represents a single listening port entry.
@@ -177,11 +190,8 @@ type PortInfo struct {
 	User        string `json:"user"`         // owning user
 }
 
-// PortMonitorHandler serves port usage data.
-type PortMonitorHandler struct{}
-
 // GetListeningPorts returns all TCP/UDP listening ports.
-func (h *PortMonitorHandler) GetListeningPorts(c *gin.Context) {
+func (h *MonitorHandler) GetListeningPorts(c *gin.Context) {
 	ports := getListeningPorts()
 	httpx.Success(c, gin.H{"ports": ports, "total": len(ports)})
 }
@@ -365,4 +375,128 @@ func uidToName(uid string) string {
 		}
 	}
 	return uid
+}
+
+// ============================================================
+// System process monitoring - MonitorHandler methods
+// ============================================================
+
+func (h *MonitorHandler) ListSystemProcesses(c *gin.Context) {
+	sortBy := c.DefaultQuery("sort_by", "memory")
+	order := c.DefaultQuery("order", "desc")
+	search := c.Query("search")
+	limitStr := c.DefaultQuery("limit", "100")
+	limit, _ := strconv.Atoi(limitStr)
+
+	processes, err := h.monitorService.ListSystemProcesses(sortBy, order, search, limit)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, processes)
+}
+
+func (h *MonitorHandler) GetSystemProcess(c *gin.Context) {
+	pidStr := c.Param("pid")
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的PID"))
+		return
+	}
+
+	proc, err := h.monitorService.GetSystemProcess(pid)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage(fmt.Sprintf("进程 %d 不存在", pid)))
+		return
+	}
+	httpx.Success(c, proc)
+}
+
+// ============================================================
+// Port availability check
+// ============================================================
+
+// CheckPort checks if a port is available (try to listen) and reports the
+// occupying process when it is in use.
+func (h *MonitorHandler) CheckPort(c *gin.Context) {
+	portStr := c.Query("port")
+	if portStr == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("端口不能为空"))
+		return
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的端口号 (1-65535)"))
+		return
+	}
+
+	addr := fmt.Sprintf(":%d", port)
+	listener, listenErr := safeListen(addr)
+	if listenErr != nil {
+		processInfo := h.getPortProcess(c.Request.Context(), port)
+		httpx.Success(c, gin.H{
+			"available": false,
+			"port":      port,
+			"process":   processInfo,
+			"message":   fmt.Sprintf("端口 %d 已被占用", port),
+		})
+		return
+	}
+	if listener != nil {
+		listener.Close()
+	}
+
+	httpx.Success(c, gin.H{
+		"available": true,
+		"port":      port,
+		"message":   fmt.Sprintf("端口 %d 可用", port),
+	})
+}
+
+// safeListen wraps net.Listen with panic recovery.
+func safeListen(addr string) (net.Listener, error) {
+	var listener net.Listener
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("listen panic: %v", r)
+			}
+		}()
+		listener, err = net.Listen("tcp", addr)
+	}()
+	return listener, err
+}
+
+// getPortProcess finds the process using a given port via ss/netstat.
+func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
+	defer func() {
+		if r := recover(); r != nil {
+			// Silently recover from any parsing panics
+		}
+	}()
+
+	out, _, err := h.executor.RunCombined(ctx, "ss", "-tlnp", fmt.Sprintf("sport = :%d", port))
+	if err == nil && strings.TrimSpace(out) != "" {
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if len(lines) > 1 {
+			for _, line := range lines[1:] {
+				if strings.Contains(line, fmt.Sprintf(":%d", port)) {
+					return strings.TrimSpace(line)
+				}
+			}
+		}
+	}
+
+	out, _, err = h.executor.RunCombined(ctx, "netstat", "-tlnp")
+	if err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, fmt.Sprintf(":%d ", port)) || strings.Contains(line, fmt.Sprintf(":%d\t", port)) {
+				return strings.TrimSpace(line)
+			}
+		}
+	}
+
+	return "unknown"
 }

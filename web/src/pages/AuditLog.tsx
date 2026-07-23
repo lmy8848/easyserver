@@ -9,7 +9,7 @@ import {
   DownloadOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { auditApi, systemApi } from '../services/api';
+import { auditApi, sshApi, type SSHLoginRecord } from '../services/api';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
@@ -71,7 +71,7 @@ export default function AuditLog() {
   const [activeTab, setActiveTab] = useState<string>('operation');
 
   // SSH 登录日志
-  const [sshLogins, setSSHLogins] = useState<any[]>([]);
+  const [sshLogins, setSSHLogins] = useState<SSHLoginRecord[]>([]);
   const [sshLoading, setSSHLoading] = useState(false);
 
   // 筛选条件
@@ -147,8 +147,8 @@ export default function AuditLog() {
   const fetchSSHLogins = async () => {
     setSSHLoading(true);
     try {
-      const res = await systemApi.getSSHLogins(200);
-      setSSHLogins(res.data.data || []);
+      const res = await sshApi.getLogins(200);
+      setSSHLogins(res.data?.data?.records || []);
     } catch (error) {
       console.error('Failed to fetch SSH logins:', error);
     } finally {
@@ -552,23 +552,25 @@ export default function AuditLog() {
             </Space>
             <Table
               dataSource={sshLogins}
-              rowKey={(r, index) => `${r.username}-${r.ip}-${r.time}-${r.terminal}-${index}`}
+              rowKey={(r) => `${r.user}-${r.ip}-${r.time}-${r.port}-${r.method}`}
               loading={sshLoading}
               size="small"
               pagination={{ pageSize: 50 }}
               columns={[
-                { title: '用户名', dataIndex: 'username', width: 100 },
+                { title: '用户名', dataIndex: 'user', width: 100 },
                 { title: 'IP 地址', dataIndex: 'ip', width: 150 },
+                { title: '端口', dataIndex: 'port', width: 80 },
                 { title: '登录时间', dataIndex: 'time', width: 200 },
-                { title: '终端', dataIndex: 'terminal', width: 100 },
+                { title: '终端', dataIndex: 'tty', width: 100 },
+                { title: '认证方式', dataIndex: 'method', width: 100 },
                 {
-                  title: '类型', dataIndex: 'type', width: 100,
+                  title: '状态', dataIndex: 'status', width: 100,
                   render: (v: string) => {
                     const colorMap: Record<string, string> = {
-                      active: 'green', login: 'blue', failed: 'red', console: 'orange',
+                      success: 'blue', failed: 'red',
                     };
                     const labelMap: Record<string, string> = {
-                      active: '在线', login: '登录', failed: '失败', console: '控制台',
+                      success: '成功', failed: '失败',
                     };
                     return <Tag color={colorMap[v] || 'default'}>{labelMap[v] || v}</Tag>;
                   },

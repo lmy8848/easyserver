@@ -449,20 +449,7 @@ export interface UserActivity {
 }
 
 // SSH types
-export interface SSHLogin {
-  username: string;
-  ip: string;
-  time: string;
-  type: string; // login, logout, failed
-  terminal: string;
-}
-
-export interface SSHConfig {
-  port: number;
-  permit_root_login: string;
-  password_auth: string;
-  status: string;
-}
+// (SSHLogin/SSHConfig removed: ssh domain uses LoginRecord shape via sshApi)
 
 // File search
 export interface FileSearchResult {

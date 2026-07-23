@@ -31,7 +31,6 @@ const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
 const SystemMonitor = lazy(() => import('./pages/SystemMonitor'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const FileShares = lazy(() => import('./pages/FileShares'));
-const PortMonitor = lazy(() => import('./pages/PortMonitor'));
 const ShareDownload = lazy(() => import('./pages/ShareDownload'));
 
 const PageLoading = memo(function PageLoading() {
@@ -94,7 +93,6 @@ function App() {
                 <Route path="containers" element={<Container />} />
                 <Route path="processes" element={<ProcessGuardian />} />
                 <Route path="system-monitor" element={<SystemMonitor />} />
-                <Route path="ports" element={<PortMonitor />} />
                 <Route path="notifications" element={<Notifications />} />
                 <Route path="file-shares" element={<FileShares />} />
               </Route>

@@ -49,8 +49,6 @@ import (
 	sshhttp "easyserver/internal/ssh/http"
 	"easyserver/internal/systemd"
 	systemdhttp "easyserver/internal/systemd/http"
-	"easyserver/internal/systemprocess"
-	systemprocesshttp "easyserver/internal/systemprocess/http"
 	"easyserver/internal/terminal"
 	terminalhttp "easyserver/internal/terminal/http"
 	"easyserver/internal/web"
@@ -64,16 +62,15 @@ import (
 // single instance per service so that in-memory caches, background goroutines,
 // and lifecycle hooks (Close, flush) all operate on the same state.
 type RouterDeps struct {
-	DB                   *sql.DB
-	Executor             executor.CommandExecutor
-	AuthService          *auth.AuthService
-	MonitorService       *monitor.MonitorService
-	AuditService         *audit.Service
-	SessionService       *auth.SessionService
-	AuditRepo            audit.Repository
-	SystemProcessService *systemprocess.Service
-	NotificationService  *notification.Service
-	ServiceManager       *systemd.ServiceManager
+	DB                  *sql.DB
+	Executor            executor.CommandExecutor
+	AuthService         *auth.AuthService
+	MonitorService      *monitor.MonitorService
+	AuditService        *audit.Service
+	SessionService      *auth.SessionService
+	AuditRepo           audit.Repository
+	NotificationService *notification.Service
+	ServiceManager      *systemd.ServiceManager
 
 	// Container service
 	ContainerService *container.Service
@@ -223,14 +220,12 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	wsGroup.Use(middleware.WSAuthMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator))
 
 	// Register domain routes
-	monitorhttp.RegisterRoutes(protected, wsGroup, deps.MonitorService, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	monitorhttp.RegisterRoutes(protected, wsGroup, deps.MonitorService, deps.Executor, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	systemdhttp.RegisterRoutes(protected, wsGroup, deps.ServiceManager, deps.Executor, cfg.Auth.JWTSecret, deps.AuditService, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(protected, wsGroup, deps.TerminalManager, cfg.Auth.JWTSecret, deps.AuditService, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, deps.FileManager, maxUploadSize)
 	audithttp.RegisterRoutes(protected, deps.DB, deps.AuditService, deps.AuditRepo)
 	settingshttp.RegisterRoutes(protected, cfg, configPath, deps.AlertService, deps.MonitorService, deps.Executor, deps.Signal)
-	systemprocesshttp.RegisterSystemRoutes(protected, deps.Executor)
-	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	cloudhttp.RegisterRoutes(protected, deps.CloudService, &cfg.TencentCloud, cfg.Server.Port)
 	deployhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.DeployService)
 	runtimeenvhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.RuntimeService, deps.PackageManagerService)
@@ -241,7 +236,6 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	firewallhttp.RegisterRoutes(protected, deps.FirewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(protected, deps.SSHConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
-	systemprocesshttp.RegisterSystemProcessRoutes(protected, deps.SystemProcessService)
 	notificationhttp.RegisterRoutes(protected, deps.NotificationService)
 	filesharehttp.RegisterRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)
 

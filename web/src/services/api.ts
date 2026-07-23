@@ -7,7 +7,7 @@ import type {
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
   SystemProcess, FileShare, ShareInfo,
   ManagedServiceSpec,
-  Notification, SSHLogin, SSHConfig, FileSearchResult,
+  Notification, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
 } from '../types';
 
@@ -316,22 +316,29 @@ export const cloudApi = {
     api.get<ApiResponse<TrafficInfo>>('/cloud/traffic'),
 };
 
-// System API
+// Monitor API (ports + port availability check)
 export const systemApi = {
   getListeningPorts: () =>
-    api.get<ApiResponse<{ ports: Array<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>; total: number }>>('/system/ports'),
-
-  getSSHLogins: (limit?: number) =>
-    api.get<ApiResponse<SSHLogin[]>>('/system/ssh-logins', { params: { limit } }),
-
-  getSSHConfig: () =>
-    api.get<ApiResponse<SSHConfig>>('/system/ssh-config'),
+    api.get<ApiResponse<{ ports: Array<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>; total: number }>>('/monitor/ports'),
 
   checkPort: (port: number) =>
-    api.get<ApiResponse<{ available: boolean; port: number; process?: string; message: string }>>('/system/check-port', { params: { port } }),
+    api.get<ApiResponse<{ available: boolean; port: number; process?: string; message: string }>>('/monitor/check-port', { params: { port } }),
+};
 
-  checkPorts: (ports: number[]) =>
-    api.get<ApiResponse<Array<{ port: number; available: boolean; message: string }>>>('/system/check-ports', { params: { ports: ports.join(',') } }),
+// SSH API
+export interface SSHLoginRecord {
+  time: string;
+  user: string;
+  ip: string;
+  port: number;
+  status: string; // success, failed
+  method: string; // password, publickey
+  tty: string;
+}
+
+export const sshApi = {
+  getLogins: (limit?: number) =>
+    api.get<ApiResponse<{ records: SSHLoginRecord[] }>>('/ssh/logins', { params: { limit } }),
 };
 
 // Audit Log API
@@ -839,10 +846,10 @@ export const settingsApi = {
 // System Process API
 export const systemProcessApi = {
   listProcesses: (params?: { sort_by?: string; order?: string; search?: string; limit?: number }) =>
-    api.get<ApiResponse<SystemProcess[]>>('/system/processes', { params }),
+    api.get<ApiResponse<SystemProcess[]>>('/monitor/processes', { params }),
 
   getProcess: (pid: number) =>
-    api.get<ApiResponse<SystemProcess>>(`/system/processes/${pid}`),
+    api.get<ApiResponse<SystemProcess>>(`/monitor/processes/${pid}`),
 };
 
 // Notification API
