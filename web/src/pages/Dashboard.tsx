@@ -270,7 +270,7 @@ export default function Dashboard() {
     <div>
       {/* 指标卡片 */}
       <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} lg={6}>
+        <Col style={{ flex: '1 1 180px', minWidth: 0 }}>
           <Card>
             <Statistic
               title="CPU 使用率"
@@ -286,7 +286,7 @@ export default function Dashboard() {
           </Card>
         </Col>
 
-        <Col xs={24} sm={12} lg={6}>
+        <Col style={{ flex: '1 1 180px', minWidth: 0 }}>
           <Card>
             <Statistic
               title="内存使用率"
@@ -302,7 +302,25 @@ export default function Dashboard() {
           </Card>
         </Col>
 
-        <Col xs={24} sm={12} lg={6}>
+        <Col style={{ flex: '1 1 180px', minWidth: 0 }}>
+          <Card>
+            <Statistic
+              title="Swap 使用率"
+              value={swap?.usage_percent || 0}
+              precision={1}
+              suffix="%"
+              prefix={<SwapOutlined />}
+              styles={{ content: { color: getPercentColor(swap?.usage_percent || 0) } }}
+            />
+            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+              {(!swap || swap.total_bytes === 0)
+                ? '未配置 Swap'
+                : `${formatBytes(swap.used_bytes || 0)} / ${formatBytes(swap.total_bytes || 0)}`}
+            </div>
+          </Card>
+        </Col>
+
+        <Col style={{ flex: '1 1 180px', minWidth: 0 }}>
           <Card>
             <Statistic
               title="磁盘使用率"
@@ -318,7 +336,7 @@ export default function Dashboard() {
           </Card>
         </Col>
 
-        <Col xs={24} sm={12} lg={6}>
+        <Col style={{ flex: '1 1 180px', minWidth: 0 }}>
           <Card>
             <Statistic
               title="网络流量"
@@ -410,28 +428,6 @@ export default function Dashboard() {
                 },
               ]}
             />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Swap 交换分区 */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col span={24}>
-          <Card title="Swap 交换分区">
-            <Statistic
-              title="使用率"
-              value={swap?.usage_percent || 0}
-              precision={1}
-              suffix="%"
-              prefix={<SwapOutlined />}
-              styles={{ content: { color: getPercentColor(swap?.usage_percent || 0) } }}
-            />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
-              {formatBytes(swap?.used_bytes || 0)} / {formatBytes(swap?.total_bytes || 0)}
-            </div>
-            {(!swap || swap.total_bytes === 0) && (
-              <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>未配置 Swap</div>
-            )}
           </Card>
         </Col>
       </Row>
