@@ -228,7 +228,7 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	terminalhttp.RegisterRoutes(protected, wsGroup, deps.TerminalManager, cfg.Auth.JWTSecret, deps.AuditService, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(protected, fileRoutes, deps.FileManager, maxUploadSize)
 	audithttp.RegisterRoutes(protected, deps.DB, deps.AuditService, deps.AuditRepo)
-	settingshttp.RegisterRoutes(protected, cfg, configPath, deps.AlertService, deps.Executor, deps.Signal)
+	settingshttp.RegisterRoutes(protected, cfg, configPath, deps.AlertService, deps.MonitorService, deps.Executor, deps.Signal)
 	systemprocesshttp.RegisterSystemRoutes(protected, deps.Executor)
 	protected.GET("/system/ports", (&monitorhttp.PortMonitorHandler{}).GetListeningPorts)
 	cloudhttp.RegisterRoutes(protected, deps.CloudService, &cfg.TencentCloud, cfg.Server.Port)

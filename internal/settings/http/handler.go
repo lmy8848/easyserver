@@ -26,13 +26,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type MonitorUpdater interface {
+	SetInterval(interval time.Duration)
+	SetRetention(retention time.Duration)
+}
+
 type SettingsHandler struct {
-	cfg          *config.Config
-	cfgMu        sync.RWMutex
-	configPath   string
-	alertService *alert.Service
-	executor     executor.CommandExecutor
-	sig          *infra.Signal
+	cfg            *config.Config
+	cfgMu          sync.RWMutex
+	configPath     string
+	alertService   *alert.Service
+	monitorService MonitorUpdater
+	executor       executor.CommandExecutor
+	sig            *infra.Signal
 }
 
 func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, sig *infra.Signal) *SettingsHandler {
@@ -43,6 +49,10 @@ func NewSettingsHandler(cfg *config.Config, configPath string, alertService *ale
 		executor:     exec,
 		sig:          sig,
 	}
+}
+
+func (h *SettingsHandler) SetMonitorService(m MonitorUpdater) {
+	h.monitorService = m
 }
 
 // maskWebhookURL partially masks a webhook URL for display, showing only the scheme and host.
@@ -667,6 +677,9 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 			return
 		}
 		h.cfg.Monitor.HistoryRetention = d
+		if h.monitorService != nil {
+			h.monitorService.SetRetention(d)
+		}
 	}
 	if req.CollectInterval != nil {
 		d, err := time.ParseDuration(*req.CollectInterval)
@@ -683,6 +696,9 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 			return
 		}
 		h.cfg.Monitor.CollectInterval = d
+		if h.monitorService != nil {
+			h.monitorService.SetInterval(d)
+		}
 	}
 
 	// Save to config file
@@ -947,8 +963,9 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "面板正在重启..."})
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, sig *infra.Signal) {
+func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, monitorSvc MonitorUpdater, exec executor.CommandExecutor, sig *infra.Signal) {
 	handler := NewSettingsHandler(cfg, configPath, alertService, exec, sig)
+	handler.SetMonitorService(monitorSvc)
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)
 	protected.PUT("/settings/server", handler.UpdateServerConfig)

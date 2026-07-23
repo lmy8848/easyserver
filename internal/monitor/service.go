@@ -91,6 +91,7 @@ type MonitorService struct {
 	prevPktsRecv uint64
 	stopCh       chan struct{}
 	lastCleanup  time.Time
+	ticker       *time.Ticker
 
 	// 性能优化：系统信息缓存
 	cachedSystemInfo *SystemInfo
@@ -138,6 +139,26 @@ func (s *MonitorService) SetAuditService(a SystemEventLogger) {
 	s.auditService = a
 }
 
+// SetInterval updates the collection interval dynamically.
+func (s *MonitorService) SetInterval(interval time.Duration) {
+	if interval < time.Second {
+		interval = time.Second
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.interval = interval
+	if s.ticker != nil {
+		s.ticker.Reset(interval)
+	}
+}
+
+// SetRetention updates the history retention duration dynamically.
+func (s *MonitorService) SetRetention(retention time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retention = retention
+}
+
 func (s *MonitorService) Start() {
 	ctx := context.Background()
 
@@ -148,8 +169,18 @@ func (s *MonitorService) Start() {
 		}
 	})
 
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+	s.mu.Lock()
+	s.ticker = time.NewTicker(s.interval)
+	ticker := s.ticker
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.ticker != nil {
+			s.ticker.Stop()
+			s.ticker = nil
+		}
+		s.mu.Unlock()
+	}()
 
 	// 性能优化：批量写入 ticker（每 10 秒 flush 一次）
 	s.flushTicker = time.NewTicker(10 * time.Second)
