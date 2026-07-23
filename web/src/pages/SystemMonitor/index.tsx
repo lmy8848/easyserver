@@ -8,8 +8,8 @@ const { Text } = Typography;
 const { Search } = Input;
 
 // --- Constants ---
-const PROCESS_REFRESH_MS = 15000;
-const PORT_REFRESH_MS = 10000;
+const PROCESS_REFRESH_MS = 5000;
+const PORT_REFRESH_MS = 5000;
 const SEARCH_DEBOUNCE_MS = 500;
 const PROCESS_PAGE_SIZES = [20, 50, 100, 200] as const;
 const DEFAULT_PROCESS_PAGE_SIZE = 50;
@@ -75,8 +75,8 @@ function ProcessTab() {
 
   const [sortBy, setSortBy] = useState(SORT_OPTIONS[0].value);
 
-  const fetchProcesses = useCallback(async () => {
-    setLoading(true);
+  const fetchProcesses = useCallback(async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const res = await systemProcessApi.listProcesses({
         sort_by: sortBy,
@@ -86,7 +86,7 @@ function ProcessTab() {
       });
       setAllProcesses(res.data?.data || []);
     } catch { /* silent */ }
-    setLoading(false);
+    if (!isBackground) setLoading(false);
   }, [sortBy, debouncedSearch]);
 
   const processes = useMemo(() => {
@@ -101,8 +101,8 @@ function ProcessTab() {
   }
 
   useEffect(() => {
-    fetchProcesses();
-    const timer = setInterval(fetchProcesses, PROCESS_REFRESH_MS);
+    fetchProcesses(false);
+    const timer = setInterval(() => fetchProcesses(true), PROCESS_REFRESH_MS);
     return () => clearInterval(timer);
   }, [fetchProcesses]);
 
@@ -129,7 +129,7 @@ function ProcessTab() {
             {ROW_SIZE_OPTIONS.map(o => <Select.Option key={o.value} value={o.value}>{o.label}</Select.Option>)}
           </Select>
         </Tooltip>
-        <Button icon={<ReloadOutlined />} onClick={fetchProcesses}>刷新</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => fetchProcesses(false)}>刷新</Button>
       </Space>
     }>
       <Table dataSource={processes} rowKey="pid" loading={loading} size={rowSize} pagination={false} columns={[
@@ -174,32 +174,35 @@ function PortTab() {
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
 
-  const fetchPorts = useCallback(async () => {
-    setLoading(true);
+  const fetchPorts = useCallback(async (isBackground = false) => {
+    if (!isBackground) setLoading(true);
     try {
       const res = await systemApi.getListeningPorts();
       setPorts(res.data?.data?.ports || []);
     } catch {
-      message.error('获取端口信息失败');
+      if (!isBackground) message.error('获取端口信息失败');
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchPorts();
-    const timer = setInterval(fetchPorts, PORT_REFRESH_MS);
+    fetchPorts(false);
+    const timer = setInterval(() => fetchPorts(true), PORT_REFRESH_MS);
     return () => clearInterval(timer);
   }, [fetchPorts]);
 
-  const filtered = filter
-    ? ports.filter(p =>
-        String(p.port).includes(filter) ||
-        p.process_name.toLowerCase().includes(filter.toLowerCase()) ||
-        p.user.toLowerCase().includes(filter.toLowerCase()) ||
-        p.protocol.toLowerCase().includes(filter.toLowerCase())
-      )
-    : ports;
+  const filtered = useMemo(() => {
+    const list = filter
+      ? ports.filter(p =>
+          String(p.port).includes(filter) ||
+          p.process_name.toLowerCase().includes(filter.toLowerCase()) ||
+          p.user.toLowerCase().includes(filter.toLowerCase()) ||
+          p.protocol.toLowerCase().includes(filter.toLowerCase())
+        )
+      : ports;
+    return list.map((item, index) => ({ ...item, _uid: `${item.protocol}-${item.port}-${item.local_addr}-${item.pid}-${index}` }));
+  }, [ports, filter]);
 
   const [rowSize, setRowSize] = useState<'large' | 'medium' | 'small'>('small');
 
@@ -220,7 +223,7 @@ function PortTab() {
               {ROW_SIZE_OPTIONS.map(o => <Select.Option key={o.value} value={o.value}>{o.label}</Select.Option>)}
             </Select>
           </Tooltip>
-          <Button icon={<ReloadOutlined />} onClick={fetchPorts}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => fetchPorts(false)}>刷新</Button>
         </Space>
       }
     >
@@ -229,7 +232,7 @@ function PortTab() {
       </Text>
       <Table
         dataSource={filtered}
-        rowKey={(r) => `${r.protocol}-${r.port}-${r.local_addr}`}
+        rowKey="_uid"
         loading={loading}
         size={rowSize}
         pagination={{ pageSize: 50, showTotal: (t) => `共 ${t} 条` }}
