@@ -58,7 +58,23 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <ConfigProvider locale={zhCN} theme={{ algorithm: theme.defaultAlgorithm }}>
+    <ConfigProvider 
+      locale={zhCN} 
+      theme={{ 
+        algorithm: theme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#6366f1',
+          borderRadius: 6,
+          colorBgLayout: '#f0f2f5',
+          colorBorderSecondary: '#e5e7eb',
+        },
+        components: {
+          Table: {
+            headerBg: '#f9fafb',
+          }
+        }
+      }}
+    >
       <BrowserRouter>
         <ErrorBoundary>
           <Suspense fallback={<PageLoading />}>
