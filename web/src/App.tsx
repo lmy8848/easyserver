@@ -26,6 +26,7 @@ const Script = lazy(() => import('./pages/Script'));
 const Firewall = lazy(() => import('./pages/Firewall'));
 const SecuritySettings = lazy(() => import('./pages/SecuritySettings'));
 const Vulnerabilities = lazy(() => import('./pages/Security/Vulnerabilities'));
+const LoginGuard = lazy(() => import('./pages/Security/LoginGuard'));
 const SSH = lazy(() => import('./pages/SSH'));
 const Container = lazy(() => import('./pages/Container'));
 const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
@@ -100,6 +101,7 @@ function App() {
                 <Route path="settings" element={<Settings />} />
                 <Route path="security" element={<SecuritySettings />} />
                 <Route path="vulnerabilities" element={<Vulnerabilities />} />
+                <Route path="login-guard" element={<LoginGuard />} />
                 <Route path="runtime" element={<Runtime />} />
                 <Route path="env-config" element={<EnvConfig />} />
                 <Route path="websites" element={<Website />} />

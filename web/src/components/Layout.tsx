@@ -48,6 +48,7 @@ const MENU_GROUPS = [
       { key: '/settings', icon: 'tool', label: '面板设置' },
       { key: '/security', icon: 'lock', label: '安全设置' },
       { key: '/vulnerabilities', icon: 'alert', label: '漏洞扫描' },
+      { key: '/login-guard', icon: 'shield', label: '登录防护' },
     ],
   },
 ];
@@ -119,6 +120,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/settings': '面板设置',
   '/security': '安全设置',
   '/vulnerabilities': '漏洞扫描',
+  '/login-guard': '登录防护',
 };
 
 const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {
