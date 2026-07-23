@@ -268,12 +268,10 @@ export default function CronTasks({
       <Card
         title={<Space><ClockCircleOutlined /> 计划任务</Space>}
         extra={
-          <div style={STYLES.header}>
-            <Space>
-              <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>刷新</Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>创建任务</Button>
-            </Space>
-          </div>
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>刷新</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>创建任务</Button>
+          </Space>
         }
       >
         <Table

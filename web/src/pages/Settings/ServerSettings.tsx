@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Descriptions, Tag, Alert, Form, Input, Select, Switch, Button, Space, message,
-  InputNumber, Modal, Divider, Typography,
+  InputNumber, Modal, Divider, Typography, Upload,
 } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { settingsApi } from '../../services/api';
 import type { Settings, SystemInfo, TLSCertInfo } from './types';
@@ -395,19 +396,6 @@ function TLSCard({ tls, onSaved, onRestart }: TLSCardProps) {
     }
   };
 
-  const handleFileUpload = (type: 'cert' | 'key') => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const content = ev.target?.result as string;
-      if (type === 'cert') setCertContent(content);
-      else setKeyContent(content);
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
   const isExpiringSoon = tls.cert_info?.expires_at
     ? dayjs(tls.cert_info.expires_at).isBefore(dayjs().add(30, 'day'))
     : false;
@@ -474,7 +462,7 @@ function TLSCard({ tls, onSaved, onRestart }: TLSCardProps) {
         <>
           <Divider />
           <Paragraph strong>证书内容 (PEM 格式)</Paragraph>
-          <Space direction="vertical" style={{ width: '100%' }} size={8}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={8}>
             <div>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 证书文件或粘贴内容（-----BEGIN CERTIFICATE----- 开头）
@@ -486,12 +474,18 @@ function TLSCard({ tls, onSaved, onRestart }: TLSCardProps) {
                 rows={5}
                 style={{ fontFamily: 'monospace', fontSize: 12 }}
               />
-              <input
-                type="file"
+              <Upload
                 accept=".pem,.crt,.cer"
-                onChange={handleFileUpload('cert')}
-                style={{ marginTop: 4, fontSize: 12 }}
-              />
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => setCertContent(ev.target?.result as string);
+                  reader.readAsText(file);
+                  return false;
+                }}
+              >
+                <Button size="small" icon={<UploadOutlined />} style={{ marginTop: 8 }}>选择证书文件</Button>
+              </Upload>
             </div>
 
             <div>
@@ -505,12 +499,18 @@ function TLSCard({ tls, onSaved, onRestart }: TLSCardProps) {
                 rows={5}
                 style={{ fontFamily: 'monospace', fontSize: 12 }}
               />
-              <input
-                type="file"
+              <Upload
                 accept=".pem,.key"
-                onChange={handleFileUpload('key')}
-                style={{ marginTop: 4, fontSize: 12 }}
-              />
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => setKeyContent(ev.target?.result as string);
+                  reader.readAsText(file);
+                  return false;
+                }}
+              >
+                <Button size="small" icon={<UploadOutlined />} style={{ marginTop: 8 }}>选择私钥文件</Button>
+              </Upload>
             </div>
 
             <div style={{ marginTop: 8 }}>

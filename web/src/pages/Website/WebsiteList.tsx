@@ -643,7 +643,7 @@ export default function WebsiteList({
             </Select>
           </Form.Item>
           <Form.Item label="Nginx 配置选项" extra="按需开启，保存后自动生成配置">
-            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="small" style={{ width: '100%' }}>
               <Space>
                 <Switch checked={parseConfigOptions(configOptionsText).websocket} onChange={v => setConfigOptionsText(JSON.stringify({ ...parseConfigOptions(configOptionsText), websocket: v }))} /> WebSocket
                 <Switch checked={parseConfigOptions(configOptionsText).gzip} onChange={v => setConfigOptionsText(JSON.stringify({ ...parseConfigOptions(configOptionsText), gzip: v }))} /> Gzip 压缩

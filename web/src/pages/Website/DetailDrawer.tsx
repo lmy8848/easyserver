@@ -110,7 +110,7 @@ function SSLTab({ base }: { base: string }) {
   if (!data?.enabled) return <Alert title="该网站未启用 SSL" type="info" showIcon />;
   const dr = data.days_remaining;
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       <Alert title={`证书剩余 ${dr} 天`} type={dr < 0 ? 'error' : dr < 7 ? 'error' : dr < 30 ? 'warning' : 'success'} showIcon
         action={<Button size="small" icon={<ReloadOutlined />} onClick={reload}>刷新</Button>} />
       <Descriptions column={1} bordered size="small">
@@ -135,7 +135,7 @@ function ProcessTab({ base }: { base: string }) {
   if (loading) return <Spin />;
   if (!data) return <Alert title="未关联进程守护" type="info" showIcon />;
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       <Row gutter={16}>
         <Col span={6}><Statistic title="状态" value={data.status} valueStyle={{ color: data.status === 'running' ? '#52c41a' : '#ff4d4f' }} /></Col>
         <Col span={6}><Statistic title="PID" value={data.pid || '-'} /></Col>
@@ -174,7 +174,7 @@ function StatsTab({ base }: { base: string }) {
   if (loading) return <Spin />;
   if (!data) return <Empty />;
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       <Alert title={`统计窗口：${data.window}`} type="info" showIcon />
       <Row gutter={16}>
         <Col span={6}><Statistic title="总请求" value={data.total_requests} /></Col>
@@ -208,7 +208,7 @@ function HealthTab({ base, defaultPort }: { base: string; defaultPort: number })
   }, [base, port]);
   useEffect(() => { probe(); }, [probe]);
   return (
-    <Space direction="vertical" style={{ width: '100%' }}>
+    <Space orientation="vertical" style={{ width: '100%' }}>
       <Space>
         <span>探活端口：</span>
         <InputNumber min={1} max={65535} value={port} onChange={(v) => setPort(v || defaultPort)} style={{ width: 120 }} />

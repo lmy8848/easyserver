@@ -30,7 +30,6 @@ const SORT_OPTIONS = [
 ] as const;
 const SEARCH_WIDTH = 200;
 const SORT_WIDTH = 100;
-const PAGE_SIZE_WIDTH = 80;
 
 const STATE_MAP: Record<string, { color: string; label: string }> = {
   R: { color: 'green', label: '运行' },
@@ -92,11 +91,6 @@ function ProcessTab() {
     if (!isBackground) setLoading(false);
   }, [sortBy, debouncedSearch]);
 
-  const processes = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return allProcesses.slice(start, start + pageSize);
-  }, [allProcesses, currentPage, pageSize]);
-
   const [prevFilters, setPrevFilters] = useState({ debouncedSearch, sortBy });
   if (prevFilters.debouncedSearch !== debouncedSearch || prevFilters.sortBy !== sortBy) {
     setPrevFilters({ debouncedSearch, sortBy });
@@ -114,7 +108,7 @@ function ProcessTab() {
     return `${mb.toFixed(1)}MB`;
   };
 
-  const totalPages = Math.ceil(allProcesses.length / pageSize);
+
 
   const [rowSize, setRowSize] = useState<'large' | 'medium' | 'small'>('small');
 
@@ -135,7 +129,14 @@ function ProcessTab() {
         <Button icon={<ReloadOutlined />} onClick={() => fetchProcesses(false)}>刷新</Button>
       </Space>
     }>
-      <Table dataSource={processes} rowKey="pid" loading={loading} size={rowSize} pagination={false} columns={[
+      <Table dataSource={allProcesses} rowKey="pid" loading={loading} size={rowSize} pagination={{
+        current: currentPage,
+        pageSize,
+        showSizeChanger: true,
+        pageSizeOptions: PROCESS_PAGE_SIZES.map(String),
+        showTotal: (t) => `共 ${t} 条`,
+        onChange: (p, ps) => { setCurrentPage(p); setPageSize(ps); },
+      }} columns={[
         { title: 'PID', dataIndex: 'pid', width: 70 },
         { title: 'PPID', dataIndex: 'ppid', width: 70 },
         { title: '名称', dataIndex: 'name', ellipsis: true },
@@ -147,23 +148,6 @@ function ProcessTab() {
         { title: '启动时间', dataIndex: 'start_time', width: 100 },
         { title: '命令', dataIndex: 'command', ellipsis: true, render: (c: string) => <Tooltip title={c}><Text code>{c}</Text></Tooltip> },
       ]} />
-      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Space>
-          <Text type="secondary">每页</Text>
-          <Select value={pageSize} onChange={(s) => { setPageSize(s); setCurrentPage(1); }} style={{ width: PAGE_SIZE_WIDTH }}>
-            {PROCESS_PAGE_SIZES.map(n => <Select.Option key={n} value={n}>{n}</Select.Option>)}
-          </Select>
-          <Text type="secondary">条</Text>
-          <Text type="secondary">共 {allProcesses.length} 条</Text>
-        </Space>
-        {totalPages > 1 && (
-          <Space>
-            <Button disabled={currentPage <= 1} onClick={() => setCurrentPage(currentPage - 1)}>上一页</Button>
-            <Text>{currentPage}/{totalPages}</Text>
-            <Button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(currentPage + 1)}>下一页</Button>
-          </Space>
-        )}
-      </div>
     </Card>
   );
 }

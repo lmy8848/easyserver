@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Row, Col, Card, Statistic, Spin, Descriptions, Table, Segmented } from 'antd';
 import {
-  DesktopOutlined,
-  HddOutlined,
-  WifiOutlined,
-  SwapOutlined,
-} from '@ant-design/icons';
+  Cpu,
+  MemoryStick,
+  ArrowRightLeft,
+  HardDrive,
+  ArrowDownUp,
+} from 'lucide-react';
 import ReactECharts from 'echarts-for-react';
 import { monitorApi } from '../services/api';
 import type { MonitorSnapshot, HistoryPoint } from '../types';
@@ -283,7 +284,7 @@ export default function Dashboard() {
               value={stats?.cpu.usage_percent || 0}
               precision={1}
               suffix="%"
-              prefix={<DesktopOutlined />}
+              prefix={<Cpu size={20} />}
               styles={{ content: { color: getPercentColor(stats?.cpu.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
@@ -299,7 +300,7 @@ export default function Dashboard() {
               value={stats?.memory.usage_percent || 0}
               precision={1}
               suffix="%"
-              prefix={<HddOutlined />}
+              prefix={<MemoryStick size={20} />}
               styles={{ content: { color: getPercentColor(stats?.memory.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
@@ -315,7 +316,7 @@ export default function Dashboard() {
               value={swap?.usage_percent || 0}
               precision={1}
               suffix="%"
-              prefix={<SwapOutlined />}
+              prefix={<ArrowRightLeft size={20} />}
               styles={{ content: { color: getPercentColor(swap?.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
@@ -333,7 +334,7 @@ export default function Dashboard() {
               value={stats?.disk?.usage_percent || 0}
               precision={1}
               suffix="%"
-              prefix={<HddOutlined />}
+              prefix={<HardDrive size={20} />}
               styles={{ content: { color: getPercentColor(stats?.disk?.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
@@ -347,7 +348,7 @@ export default function Dashboard() {
             <Statistic
               title="网络流量"
               value={formatBytes((stats?.network.bytes_sent || 0) + (stats?.network.bytes_recv || 0))}
-              prefix={<WifiOutlined />}
+              prefix={<ArrowDownUp size={20} />}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
               ↑ {formatBytes(stats?.network.bytes_sent || 0)} / ↓ {formatBytes(stats?.network.bytes_recv || 0)}

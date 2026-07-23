@@ -263,7 +263,7 @@ export default function ScriptPage() {
                       onClick={() => handleSelectTemplate(template)}
                       style={{ cursor: 'pointer' }}
                     >
-                      <Space direction="vertical" style={{ width: '100%' }}>
+                      <Space orientation="vertical" style={{ width: '100%' }}>
                         <Space>
                           <Tag color={LANG_COLORS[template.language || ''] || 'default'}>
                             {template.language || 'unknown'}

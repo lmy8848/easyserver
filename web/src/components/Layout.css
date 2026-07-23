@@ -16,7 +16,7 @@
   --danger: #ef4444;
   --glass-bg: rgba(255,255,255,0.85);
   --glass-border: rgba(0,0,0,0.06);
-  --sidebar-width: 220px;
+  --sidebar-width: 200px;
   --sidebar-collapsed-width: 64px;
   --header-height: 56px;
 }
@@ -82,7 +82,7 @@
 
 .nav-group { margin-bottom: 8px; }
 .nav-group-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: #94a3b8;
   text-transform: uppercase;
@@ -99,7 +99,7 @@
   color: #475569;
   cursor: pointer;
   transition: all 0.15s;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   position: relative;
   white-space: nowrap;
@@ -132,21 +132,8 @@
   border-top: 1px solid var(--border);
 }
 .sidebar-collapse-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 100%;
-  padding: 8px;
   border-radius: 8px;
-  color: #94a3b8;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
-  background: none;
-}
-.sidebar-collapse-btn:hover {
-  background: #f3f4f6;
-  color: #1e293b;
 }
 
 /* --- Main Area --- */
@@ -220,18 +207,8 @@
 .header-btn {
   width: 36px;
   height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border-radius: 8px;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.15s;
-  border: none;
-  background: none;
-  position: relative;
 }
-.header-btn:hover { background: #f3f4f6; color: #1e293b; }
 .header-divider { width: 1px; height: 24px; background: #e5e7eb; }
 .user-info { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .user-role { font-size: 12px; color: #94a3b8; }
@@ -260,23 +237,6 @@
 
 /* --- Notification Dropdown --- */
 .notif-wrapper { position: relative; }
-.notif-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 16px;
-  height: 16px;
-  background: #ef4444;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 4px;
-  line-height: 1;
-}
 .notif-dropdown {
   position: absolute;
   top: calc(100% + 8px);

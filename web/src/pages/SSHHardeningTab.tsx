@@ -119,7 +119,7 @@ export default function SSHHardeningTab() {
   };
 
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Card title={<span><ThunderboltOutlined /> 一键加固</span>}>
         <Alert
           message="一键应用推荐安全配置：禁用 root 登录、禁用密码登录（仅密钥）、MaxAuthTries=5"
@@ -157,7 +157,7 @@ export default function SSHHardeningTab() {
             ) },
           ]}
         />
-        <Space style={{ marginTop: 16, width: '100%' }} direction="vertical">
+        <Space style={{ marginTop: 16, width: '100%' }} orientation="vertical">
           <Input.TextArea
             rows={2} placeholder="粘贴公钥（ssh-ed25519 AAAA... comment）"
             value={addKey} onChange={(e) => setAddKey(e.target.value)}

@@ -28,7 +28,7 @@ function getStatusTag(status: string, record: RuntimeEnvironment) {
       return <Tag color="green">已安装</Tag>;
     case 'installing':
       return (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Tag color="blue" icon={<SyncOutlined spin />}>安装中</Tag>
           {record.progress > 0 && (
             <Progress percent={record.progress} size="small" style={{ width: 100 }} />
@@ -38,14 +38,14 @@ function getStatusTag(status: string, record: RuntimeEnvironment) {
       );
     case 'uninstalling':
       return (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Tag color="orange" icon={<SyncOutlined spin />}>卸载中</Tag>
           {record.progress_step && <span style={{ fontSize: 12, color: '#999' }}>{record.progress_step}</span>}
         </Space>
       );
     case 'failed':
       return (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Tag color="red">安装失败</Tag>
           {record.error_message && <span style={{ fontSize: 12, color: '#ff4d4f' }}>{record.error_message}</span>}
         </Space>
