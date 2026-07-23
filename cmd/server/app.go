@@ -304,9 +304,7 @@ func (a *App) wire() error {
 		auditSvc.Close()
 	})
 
-	systemMonitor := monitor.NewEventMonitor(auditSvc, cmdExec)
-	systemMonitor.Start()
-	a.onCleanup(func() { systemMonitor.Stop() })
+	monitorSvc.SetAuditService(auditSvc)
 
 	// Session service + cleanup goroutine
 	sessionSvc := auth.NewSessionService(sessionRepo)

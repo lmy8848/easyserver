@@ -22,6 +22,11 @@ type Evaluator interface {
 	Evaluate(point *MonitorPoint)
 }
 
+// SystemEventLogger logs system-level audit events.
+type SystemEventLogger interface {
+	LogSystemEvent(ctx context.Context, summary string)
+}
+
 type MonitorClient struct {
 	Send chan []byte
 }
@@ -85,8 +90,10 @@ type MonitorService struct {
 	cachedSwap       *SwapInfo
 	swapExpire       time.Time
 
-	// 告警评估
-	alertService Evaluator
+	// 告警与审计评估
+	alertService    Evaluator
+	auditService    SystemEventLogger
+	lastAuditAlerts map[string]time.Time
 
 	// 性能优化：环形缓冲 + 批量写入
 	ringBuffer  []*MonitorPoint
@@ -116,6 +123,11 @@ func (s *MonitorService) Hub() *MonitorHub {
 // SetAlertService sets the alert evaluation service
 func (s *MonitorService) SetAlertService(e Evaluator) {
 	s.alertService = e
+}
+
+// SetAuditService sets the audit event logger service.
+func (s *MonitorService) SetAuditService(a SystemEventLogger) {
+	s.auditService = a
 }
 
 func (s *MonitorService) Start() {
@@ -182,6 +194,11 @@ func (s *MonitorService) collect() {
 		s.alertService.Evaluate(point)
 	}
 
+	// 审计日志触发（内存/磁盘使用率 ≥ 90%）
+	if s.auditService != nil {
+		s.checkAuditThresholds(snapshot)
+	}
+
 	data, err := json.Marshal(map[string]interface{}{
 		"type": "stats",
 		"data": snapshot,
@@ -192,6 +209,53 @@ func (s *MonitorService) collect() {
 	}
 
 	s.hub.Broadcast(data)
+}
+
+func (s *MonitorService) checkAuditThresholds(snapshot *MonitorSnapshot) {
+	if s.auditService == nil {
+		return
+	}
+	now := time.Now()
+	const cooldown = 5 * time.Minute
+
+	s.mu.Lock()
+	if s.lastAuditAlerts == nil {
+		s.lastAuditAlerts = make(map[string]time.Time)
+	}
+	s.mu.Unlock()
+
+	// 内存使用率 ≥ 90% 检查
+	if snapshot.Memory.UsagePercent >= 90 {
+		s.mu.Lock()
+		last, exists := s.lastAuditAlerts["memory"]
+		shouldAlert := !exists || now.Sub(last) >= cooldown
+		if shouldAlert {
+			s.lastAuditAlerts["memory"] = now
+		}
+		s.mu.Unlock()
+
+		if shouldAlert {
+			s.auditService.LogSystemEvent(context.Background(), fmt.Sprintf("内存使用率告警：%.1f%%", snapshot.Memory.UsagePercent))
+		}
+	}
+
+	// 磁盘分区使用率 ≥ 90% 检查
+	for _, p := range snapshot.Partitions {
+		if p.UsagePercent >= 90 {
+			key := "disk:" + p.MountPoint
+			s.mu.Lock()
+			last, exists := s.lastAuditAlerts[key]
+			shouldAlert := !exists || now.Sub(last) >= cooldown
+			if shouldAlert {
+				s.lastAuditAlerts[key] = now
+			}
+			s.mu.Unlock()
+
+			if shouldAlert {
+				s.auditService.LogSystemEvent(context.Background(), fmt.Sprintf("磁盘使用率告警：%s %.1f%%", p.MountPoint, p.UsagePercent))
+			}
+		}
+	}
 }
 
 // readSystemInfoCached 带缓存的系统信息读取（cacheExpiry 刷新）
