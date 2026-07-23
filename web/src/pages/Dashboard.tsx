@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Row, Col, Card, Statistic, Spin, Descriptions, Table, Tag, Segmented } from 'antd';
+import { Row, Col, Card, Statistic, Spin, Descriptions, Table, Segmented } from 'antd';
 import {
   DesktopOutlined,
   HddOutlined,
@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { monitorApi } from '../services/api';
-import type { MonitorSnapshot, HistoryPoint, ProcessInfo } from '../types';
+import type { MonitorSnapshot, HistoryPoint } from '../types';
 import { formatBytes, formatUptime } from '../utils/format';
 import { getPercentColor } from '../utils/status';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -262,48 +262,9 @@ export default function Dashboard() {
     );
   }
 
-  const processColumns = [
-    { title: 'PID', dataIndex: 'pid', key: 'pid', width: 70 },
-    { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true },
-    { title: '用户', dataIndex: 'user', key: 'user', width: 80 },
-    {
-      title: '内存',
-      dataIndex: 'mem_percent',
-      key: 'mem_percent',
-      width: 100,
-      render: (v: number) => `${v.toFixed(1)}%`,
-      sorter: (a: ProcessInfo, b: ProcessInfo) => a.mem_percent - b.mem_percent,
-    },
-    {
-      title: '内存用量',
-      dataIndex: 'mem_bytes',
-      key: 'mem_bytes',
-      width: 100,
-      render: (v: number) => formatBytes(v),
-    },
-    {
-      title: '状态',
-      dataIndex: 'state',
-      key: 'state',
-      width: 70,
-      render: (v: string) => {
-        const stateMap: Record<string, { text: string; color: string }> = {
-          R: { text: '运行', color: 'green' },
-          S: { text: '睡眠', color: 'blue' },
-          D: { text: '等待', color: 'orange' },
-          Z: { text: '僵尸', color: 'red' },
-          T: { text: '停止', color: 'default' },
-        };
-        const s = stateMap[v] || { text: v, color: 'default' };
-        return <Tag color={s.color}>{s.text}</Tag>;
-      },
-    },
-  ];
-
   const sys = stats?.system;
   const swap = stats?.swap;
   const partitions = stats?.partitions || [];
-  const topProcesses = stats?.top_process || [];
 
   return (
     <div>
@@ -453,9 +414,9 @@ export default function Dashboard() {
         </Col>
       </Row>
 
-      {/* Swap + Top 进程 */}
+      {/* Swap 交换分区 */}
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={8}>
+        <Col span={24}>
           <Card title="Swap 交换分区">
             <Statistic
               title="使用率"
@@ -471,19 +432,6 @@ export default function Dashboard() {
             {(!swap || swap.total_bytes === 0) && (
               <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>未配置 Swap</div>
             )}
-          </Card>
-        </Col>
-
-        <Col xs={24} lg={16}>
-          <Card title="Top 进程 (按内存排序)">
-            <Table
-              dataSource={topProcesses}
-              columns={processColumns}
-              rowKey="pid"
-              size="small"
-              pagination={false}
-              scroll={{ y: 240 }}
-            />
           </Card>
         </Col>
       </Row>

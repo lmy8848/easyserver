@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	processCollectInterval = 5 * time.Second  // 进程采集间隔
-	cacheExpiry            = 60 * time.Second // 系统信息/Swap 缓存有效期
-	maxHistoryPoints       = 360              // 历史数据最大点数
+	cacheExpiry      = 60 * time.Second // 系统信息/Swap 缓存有效期
+	maxHistoryPoints = 360              // 历史数据最大点数
 )
 
 // Evaluator evaluates monitor points for alerts.
@@ -80,20 +79,11 @@ type MonitorService struct {
 	stopCh       chan struct{}
 	lastCleanup  time.Time
 
-	// 性能优化：进程采集降频
-	processInterval    time.Duration
-	lastProcessCollect time.Time
-	cachedProcesses    []ProcessInfo
-	processMu          sync.RWMutex
-
 	// 性能优化：系统信息缓存
 	cachedSystemInfo *SystemInfo
 	sysInfoExpire    time.Time
 	cachedSwap       *SwapInfo
 	swapExpire       time.Time
-
-	// 性能优化：uid→username 缓存
-	uidCache map[string]string
 
 	// 告警评估
 	alertService Evaluator
@@ -109,15 +99,13 @@ type MonitorService struct {
 
 func NewMonitorService(monitorRepo Repository, interval, retention time.Duration) *MonitorService {
 	return &MonitorService{
-		monitorRepo:     monitorRepo,
-		interval:        interval,
-		retention:       retention,
-		hub:             NewMonitorHub(),
-		stopCh:          make(chan struct{}),
-		processInterval: processCollectInterval,
-		uidCache:        make(map[string]string),
-		ringBuffer:      make([]*MonitorPoint, 60), // 60 points buffer
-		ringSize:        60,
+		monitorRepo: monitorRepo,
+		interval:    interval,
+		retention:   retention,
+		hub:         NewMonitorHub(),
+		stopCh:      make(chan struct{}),
+		ringBuffer:  make([]*MonitorPoint, 60), // 60 points buffer
+		ringSize:    60,
 	}
 }
 
@@ -194,17 +182,6 @@ func (s *MonitorService) collect() {
 		s.alertService.Evaluate(point)
 	}
 
-	// 性能优化：进程数据降频（5秒采集一次，其余时间用缓存）
-	s.processMu.RLock()
-	snapshot.TopProcess = s.cachedProcesses
-	needRefresh := time.Since(s.lastProcessCollect) >= s.processInterval
-	s.processMu.RUnlock()
-
-	// 异步刷新进程数据（不阻塞主采集循环）
-	if needRefresh {
-		go s.refreshProcesses()
-	}
-
 	data, err := json.Marshal(map[string]interface{}{
 		"type": "stats",
 		"data": snapshot,
@@ -215,15 +192,6 @@ func (s *MonitorService) collect() {
 	}
 
 	s.hub.Broadcast(data)
-}
-
-// refreshProcesses 异步刷新进程缓存
-func (s *MonitorService) refreshProcesses() {
-	processes := s.readTopProcesses()
-	s.processMu.Lock()
-	s.cachedProcesses = processes
-	s.lastProcessCollect = time.Now()
-	s.processMu.Unlock()
 }
 
 // readSystemInfoCached 带缓存的系统信息读取（cacheExpiry 刷新）
@@ -358,9 +326,6 @@ func (s *MonitorService) GetCurrentStats(ctx context.Context) (*MonitorSnapshot,
 	snapshot.System = s.readSystemInfoCached()
 	snapshot.Swap = s.readSwapCached()
 	snapshot.Partitions = s.readPartitions()
-	s.processMu.RLock()
-	snapshot.TopProcess = s.cachedProcesses
-	s.processMu.RUnlock()
 	return snapshot, nil
 }
 

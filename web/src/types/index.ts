@@ -85,7 +85,6 @@ export interface MonitorSnapshot {
     bytes_recv: number;
   };
   system?: SystemInfo;
-  top_process?: ProcessInfo[];
   timestamp: string;
 }
 

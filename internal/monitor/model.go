@@ -43,17 +43,6 @@ type SwapInfo struct {
 	UsagePercent float64 `json:"usage_percent"`
 }
 
-// ProcessInfo represents a top process
-type ProcessInfo struct {
-	PID        int     `json:"pid"`
-	Name       string  `json:"name"`
-	User       string  `json:"user"`
-	CPUPercent float64 `json:"cpu_percent"`
-	MemPercent float64 `json:"mem_percent"`
-	MemBytes   uint64  `json:"mem_bytes"`
-	State      string  `json:"state"`
-}
-
 // SystemInfo holds static system information
 type SystemInfo struct {
 	Hostname      string `json:"hostname"`
@@ -89,9 +78,8 @@ type MonitorSnapshot struct {
 		BytesSent uint64 `json:"bytes_sent"`
 		BytesRecv uint64 `json:"bytes_recv"`
 	} `json:"network"`
-	System     *SystemInfo   `json:"system,omitempty"`
-	TopProcess []ProcessInfo `json:"top_process,omitempty"`
-	Timestamp  string        `json:"timestamp"`
+	System    *SystemInfo `json:"system,omitempty"`
+	Timestamp string      `json:"timestamp"`
 }
 
 // ToSnapshot converts MonitorPoint to API response format
