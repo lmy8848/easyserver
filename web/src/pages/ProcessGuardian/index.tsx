@@ -445,7 +445,7 @@ function ManagedTab() {
         title={<Space><FileTextOutlined />{logService} 日志</Space>}
         open={!!logService}
         onClose={() => setLogService(null)}
-        width={720}
+        size={720}
         extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
           onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
       >
@@ -461,7 +461,7 @@ function ManagedTab() {
         title={<Space><InfoCircleOutlined />{detailService?.name} 详情</Space>}
         open={!!detailService}
         onClose={() => setDetailService(null)}
-        width={560}
+        size={560}
       >
         {detailService && (
           <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }}>
@@ -734,7 +734,7 @@ function SystemTab() {
         title={<Space><FileTextOutlined />{logService} 日志</Space>}
         open={!!logService}
         onClose={() => setLogService(null)}
-        width={720}
+        size={720}
         extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
           onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
       >
@@ -750,7 +750,7 @@ function SystemTab() {
         title={<Space><InfoCircleOutlined />{detailService?.name} 详情</Space>}
         open={!!detailService}
         onClose={() => setDetailService(null)}
-        width={560}
+        size={560}
       >
         {detailService && (
           <Descriptions column={1} bordered size="small" labelStyle={{ width: 120 }}>

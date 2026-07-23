@@ -18,7 +18,7 @@ export default function CronDocs({ visible, docs, loading, onClose }: CronDocsPr
       title={<span><QuestionCircleOutlined /> Cron 表达式手册</span>}
       open={visible}
       onClose={onClose}
-      width={600}
+      size={600}
     >
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
