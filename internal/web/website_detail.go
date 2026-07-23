@@ -148,7 +148,10 @@ func (s *WebsiteService) GetStats(ctx context.Context, webServerID, id int64) (*
 }
 
 // ProbeHealth performs an HTTP probe against the website and returns the result.
-func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64) (*HealthResult, error) {
+// port<=0 means use the website's configured nginx listen port; a positive port
+// overrides it (use 443/80 for CDN/proxy-fronted sites whose public port differs
+// from the nginx listen port).
+func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64, port int) (*HealthResult, error) {
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return nil, apperror.WrapError(err)
@@ -156,13 +159,14 @@ func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64)
 	if w == nil {
 		return nil, apperror.ErrNotFound.WithMessage("网站不存在")
 	}
+	if port <= 0 {
+		port = w.Port
+	}
 	scheme := "http"
 	if w.SSLEnabled {
 		scheme = "https"
 	}
-	// 探活走对外标准端口（80/443），不用 nginx 监听端口：经 CDN/反代代理的网站
-	// 对外端口与 nginx 监听端口通常不同（如 nginx 听 8080，CDN 对外 443）。
-	url := fmt.Sprintf("%s://%s", scheme, w.Domain)
+	url := fmt.Sprintf("%s://%s:%d", scheme, w.Domain, port)
 	start := time.Now()
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)

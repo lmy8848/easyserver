@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Drawer, Tabs, Table, Descriptions, Button, Space, Tag, message, Spin,
-  Alert, Statistic, Row, Col, Typography, Empty,
+  Alert, Statistic, Row, Col, Typography, Empty, InputNumber,
 } from 'antd';
 import {
   ReloadOutlined, ThunderboltOutlined, SafetyOutlined, CloudServerOutlined,
@@ -44,7 +44,7 @@ export default function DetailDrawer({ webServerId, website, open, onClose }: Pr
         { key: 'process', label: '进程', children: tab === 'process' && <ProcessTab base={base} /> },
         { key: 'config', label: 'Nginx 配置', children: tab === 'config' && <ConfigTab base={base} /> },
         { key: 'stats', label: '访问统计', children: tab === 'stats' && <StatsTab base={base} /> },
-        { key: 'health', label: '健康探活', children: tab === 'health' && <HealthTab base={base} /> },
+        { key: 'health', label: '健康探活', children: tab === 'health' && <HealthTab base={base} defaultPort={website.port} /> },
       ]} />
     </Drawer>
   );
@@ -198,17 +198,23 @@ function StatsTab({ base }: { base: string }) {
   );
 }
 
-function HealthTab({ base }: { base: string }) {
+function HealthTab({ base, defaultPort }: { base: string; defaultPort: number }) {
   const [res, setRes] = useState<HealthResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [port, setPort] = useState(defaultPort);
   const probe = useCallback(() => {
     setLoading(true);
-    api.post(`${base}/health/probe`).then(r => setRes(r.data.data)).catch(e => message.error(e.response?.data?.message || '探活失败')).finally(() => setLoading(false));
-  }, [base]);
+    api.post(`${base}/health/probe`, null, { params: { port } }).then(r => setRes(r.data.data)).catch(e => message.error(e.response?.data?.message || '探活失败')).finally(() => setLoading(false));
+  }, [base, port]);
   useEffect(() => { probe(); }, [probe]);
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
-      <Button type="primary" icon={<SafetyOutlined />} onClick={probe} loading={loading}>立即探活</Button>
+      <Space>
+        <span>探活端口：</span>
+        <InputNumber min={1} max={65535} value={port} onChange={(v) => setPort(v || defaultPort)} style={{ width: 120 }} />
+        <Button type="primary" icon={<SafetyOutlined />} onClick={probe} loading={loading}>立即探活</Button>
+      </Space>
+      <Alert message="默认用网站监听端口；经 CDN/反代代理的网站填对外端口（如 443）" type="info" showIcon />
       {res && (
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="结果">{res.ok ? <Tag color="green">正常</Tag> : <Tag color="red">异常</Tag>}</Descriptions.Item>

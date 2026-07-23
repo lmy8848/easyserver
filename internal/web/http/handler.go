@@ -954,7 +954,8 @@ func (h *WebServerHandler) ProbeWebsiteHealth(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
-	res, err := h.websiteService.ProbeHealth(c.Request.Context(), sid, id)
+	port, _ := strconv.Atoi(c.DefaultQuery("port", "0"))
+	res, err := h.websiteService.ProbeHealth(c.Request.Context(), sid, id, port)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
