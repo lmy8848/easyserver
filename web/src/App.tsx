@@ -25,6 +25,7 @@ const Cron = lazy(() => import('./pages/Cron'));
 const Script = lazy(() => import('./pages/Script'));
 const Firewall = lazy(() => import('./pages/Firewall'));
 const SecuritySettings = lazy(() => import('./pages/SecuritySettings'));
+const Vulnerabilities = lazy(() => import('./pages/Security/Vulnerabilities'));
 const SSH = lazy(() => import('./pages/SSH'));
 const Container = lazy(() => import('./pages/Container'));
 const ProcessGuardian = lazy(() => import('./pages/ProcessGuardian'));
@@ -98,6 +99,7 @@ function App() {
                 <Route path="audit" element={<AuditLog />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="security" element={<SecuritySettings />} />
+                <Route path="vulnerabilities" element={<Vulnerabilities />} />
                 <Route path="runtime" element={<Runtime />} />
                 <Route path="env-config" element={<EnvConfig />} />
                 <Route path="websites" element={<Website />} />

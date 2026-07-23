@@ -44,6 +44,8 @@ import (
 	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	runtimeenvhttp "easyserver/internal/runtimeenv/http"
+	"easyserver/internal/security"
+	securityhttp "easyserver/internal/security/http"
 	settingshttp "easyserver/internal/settings/http"
 	"easyserver/internal/ssh"
 	sshhttp "easyserver/internal/ssh/http"
@@ -237,6 +239,7 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	sshhttp.RegisterRoutes(protected, deps.SSHConfigService)
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
 	notificationhttp.RegisterRoutes(protected, deps.NotificationService)
+	securityhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(deps.Executor))
 	filesharehttp.RegisterRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)
 
 	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
