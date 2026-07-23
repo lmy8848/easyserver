@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"strings"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,16 +20,12 @@ func CORSMiddleware(allowedOrigins []string, devMode bool) gin.HandlerFunc {
 
 		// Check if origin is allowed
 		allowed := false
-		if devMode {
-			// In dev mode, allow localhost (exact host check to prevent spoofing)
-			if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
-				allowed = true
-			}
-		}
-
-		if !allowed {
+		if devMode || hasWildcard {
+			// 在开发模式下，或者配置了通配符，允许任意域名的跨域请求
+			allowed = true
+		} else {
 			for _, o := range allowedOrigins {
-				if o == "*" || o == origin {
+				if o == origin {
 					allowed = true
 					break
 				}

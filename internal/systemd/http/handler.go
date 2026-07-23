@@ -47,7 +47,7 @@ func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.Com
 		executor:          exec,
 		jwtSecret:         jwtSecret,
 		auditService:      auditService,
-		upgrader:          httpx.CreateUpgrader(allowedOrigins, devMode),
+		upgrader:          httpx.CreateUpgrader(),
 		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
 }

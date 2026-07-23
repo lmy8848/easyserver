@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
         '/ws': {
           target: wsTarget,
           ws: true,
-          changeOrigin: true,
+          changeOrigin: false,
           // WebSocket 保活配置
           configure: (proxy) => {
             proxy.on('error', (err, _req, res) => {

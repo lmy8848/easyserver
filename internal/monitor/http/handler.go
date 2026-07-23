@@ -43,7 +43,7 @@ func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string,
 	return &MonitorHandler{
 		monitorService: monitorService,
 		jwtSecret:      jwtSecret,
-		upgrader:       httpx.CreateUpgrader(allowedOrigins, devMode),
+		upgrader:       httpx.CreateUpgrader(),
 	}
 }
 

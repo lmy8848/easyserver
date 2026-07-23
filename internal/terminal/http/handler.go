@@ -57,7 +57,7 @@ func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, aud
 		terminalManager: terminalManager,
 		auditService:    auditService,
 		jwtSecret:       jwtSecret,
-		upgrader:        httpx.CreateUpgrader(allowedOrigins, devMode),
+		upgrader:        httpx.CreateUpgrader(),
 	}
 }
 
