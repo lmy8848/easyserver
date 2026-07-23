@@ -494,7 +494,7 @@ export default function WebsiteList({
               <Col>
                 <Space>
                   <span style={{ color: '#999', fontSize: 12 }}>每 10 秒自动刷新</span>
-                  <Button size="small" icon={<ReloadOutlined />} onClick={() => onRefreshServer(selectedServer.id)}>
+                  <Button icon={<ReloadOutlined />} onClick={() => onRefreshServer(selectedServer.id)}>
                     刷新
                   </Button>
                 </Space>

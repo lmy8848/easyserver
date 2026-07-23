@@ -414,8 +414,8 @@ function ManagedTab() {
         title={<Space><ClusterOutlined />面板托管服务</Space>}
         extra={
           <Space>
-            <Button size="small" icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加服务</Button>
+            <Button icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加服务</Button>
           </Space>
         }
       >
@@ -708,9 +708,9 @@ function SystemTab() {
         title={<Space><CloudServerOutlined />系统服务</Space>}
         extra={
           <Space>
-            <Input.Search placeholder="搜索服务名" allowClear size="small"
+            <Input.Search placeholder="搜索服务名" allowClear
               style={{ width: 200 }} value={searchText} onChange={e => setSearchText(e.target.value)} />
-            <Button size="small" icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={fetch}>刷新</Button>
           </Space>
         }
       >
