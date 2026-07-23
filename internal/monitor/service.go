@@ -65,8 +65,6 @@ func (h *MonitorHub) Unregister(c *MonitorClient) {
 }
 
 func (h *MonitorHub) Broadcast(data []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
 	for c := range h.clients {
 		select {
 		case c.Send <- data:
@@ -97,12 +95,11 @@ type MonitorService struct {
 	lastAuditAlerts map[string]time.Time
 
 	// 性能优化：环形缓冲 + 批量写入
-	ringBuffer  []*MonitorPoint
-	ringSize    int
-	ringHead    int
-	ringCount   int
-	ringMu      sync.Mutex
-	flushTicker *time.Ticker
+	ringBuffer []*MonitorPoint
+	ringSize   int
+	ringHead   int
+	ringCount  int
+	ringMu     sync.Mutex
 }
 
 func NewMonitorService(monitorRepo Repository, interval, retention time.Duration) *MonitorService {
@@ -161,22 +158,29 @@ func (s *MonitorService) Start() {
 		}
 	})
 
-	s.mu.Lock()
 	s.ticker = time.NewTicker(s.interval)
-	// 性能优化：批量写入 ticker（每 10 秒 flush 一次）
-	s.flushTicker = time.NewTicker(10 * time.Second)
 	ticker := s.ticker
-	s.mu.Unlock()
 	defer func() {
-		s.mu.Lock()
 		if s.ticker != nil {
 			s.ticker.Stop()
 		}
-		if s.flushTicker != nil {
-			s.flushTicker.Stop()
-		}
-		s.mu.Unlock()
 	}()
+
+	// 启动后台专用的刷写协程
+	infra.Go(func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				s.flushBuffer()
+			case <-s.stopCh:
+				s.flushBuffer() // Final flush before stop
+				return
+			}
+		}
+	})
 
 	// First collection
 	s.collect()
@@ -185,10 +189,7 @@ func (s *MonitorService) Start() {
 		select {
 		case <-ticker.C:
 			s.collect()
-		case <-s.flushTicker.C:
-			go s.flushBuffer() // 异步 flush，不阻塞采集循环
 		case <-s.stopCh:
-			s.flushBuffer() // Final flush before stop
 			return
 		}
 	}
