@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Descriptions, Spin, Tabs, Alert,
+  Card, Spin, Tabs, Alert,
 } from 'antd';
 import {
-  SettingOutlined, SafetyOutlined, DatabaseOutlined,
+  SettingOutlined, SafetyOutlined,
   CloudOutlined, MonitorOutlined, InfoCircleOutlined,
   AlertOutlined,
 } from '@ant-design/icons';
@@ -90,17 +90,6 @@ export default function SettingsPage() {
             ),
           },
           {
-            key: 'database',
-            label: <span><DatabaseOutlined /> 数据库</span>,
-            children: (
-              <Card>
-                <Descriptions bordered column={1}>
-                  <Descriptions.Item label="数据库路径">{settings.database.path}</Descriptions.Item>
-                </Descriptions>
-              </Card>
-            ),
-          },
-          {
             key: 'audit',
             label: <span><InfoCircleOutlined /> 审计日志</span>,
             children: (
@@ -126,7 +115,7 @@ export default function SettingsPage() {
             children: (
               <Card title="监控告警规则">
                 <Alert
-                  message="告警规则配置"
+                  title="告警规则配置"
                   description="配置监控指标阈值，超过阈值持续指定时间后发送 Webhook 通知。需要先在「通知」标签页配置 Webhook URL。"
                   type="info"
                   showIcon

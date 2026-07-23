@@ -107,11 +107,11 @@ function SSLTab({ base }: { base: string }) {
     return res.data.data as SSLCertInfo;
   }, []);
   if (loading) return <Spin />;
-  if (!data?.enabled) return <Alert message="该网站未启用 SSL" type="info" showIcon />;
+  if (!data?.enabled) return <Alert title="该网站未启用 SSL" type="info" showIcon />;
   const dr = data.days_remaining;
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
-      <Alert message={`证书剩余 ${dr} 天`} type={dr < 0 ? 'error' : dr < 7 ? 'error' : dr < 30 ? 'warning' : 'success'} showIcon
+      <Alert title={`证书剩余 ${dr} 天`} type={dr < 0 ? 'error' : dr < 7 ? 'error' : dr < 30 ? 'warning' : 'success'} showIcon
         action={<Button size="small" icon={<ReloadOutlined />} onClick={reload}>刷新</Button>} />
       <Descriptions column={1} bordered size="small">
         <Descriptions.Item label="Subject">{data.subject}</Descriptions.Item>
@@ -133,7 +133,7 @@ function ProcessTab({ base }: { base: string }) {
     return res.data.data as ProcessStatus | null;
   }, []);
   if (loading) return <Spin />;
-  if (!data) return <Alert message="未关联进程守护" type="info" showIcon />;
+  if (!data) return <Alert title="未关联进程守护" type="info" showIcon />;
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Row gutter={16}>
@@ -175,7 +175,7 @@ function StatsTab({ base }: { base: string }) {
   if (!data) return <Empty />;
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
-      <Alert message={`统计窗口：${data.window}`} type="info" showIcon />
+      <Alert title={`统计窗口：${data.window}`} type="info" showIcon />
       <Row gutter={16}>
         <Col span={6}><Statistic title="总请求" value={data.total_requests} /></Col>
         <Col span={6}><Statistic title="总流量(MB)" value={(data.total_bytes / 1048576).toFixed(2)} /></Col>

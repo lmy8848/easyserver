@@ -310,7 +310,7 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
 
       {requiresRestart && (
         <Alert
-          message="需要重启"
+          title="需要重启"
           description="服务器配置已修改，需要重启面板才能生效。"
           type="warning"
           showIcon

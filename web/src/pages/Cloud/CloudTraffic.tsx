@@ -78,7 +78,7 @@ export default function CloudTraffic({ selectedInstance }: Props) {
           </Col>
           {trafficInfo.package_expired_at && (
             <Col span={24} style={{ marginTop: 16 }}>
-              <Alert message={`流量包过期时间: ${trafficInfo.package_expired_at}`} type="info" />
+              <Alert title={`流量包过期时间: ${trafficInfo.package_expired_at}`} type="info" />
             </Col>
           )}
         </Row>

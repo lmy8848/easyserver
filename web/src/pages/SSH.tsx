@@ -190,7 +190,7 @@ export default function SSH() {
             children: (
               <Card title="SSH 服务器配置">
                 <Alert
-                  message="修改配置后需要点击「保存」并「重载服务」才能生效"
+                  title="修改配置后需要点击「保存」并「重载服务」才能生效"
                   type="info"
                   showIcon
                   style={{ marginBottom: 16 }}

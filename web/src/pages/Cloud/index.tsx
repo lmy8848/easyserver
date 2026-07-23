@@ -94,7 +94,7 @@ export default function Cloud() {
     <div>
       {error && (
         <Alert
-          message={error.includes('未配置') ? '提示' : '错误'}
+          title={error.includes('未配置') ? '提示' : '错误'}
           description={error}
           type={error.includes('未配置') ? 'info' : 'error'}
           closable

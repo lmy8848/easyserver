@@ -132,7 +132,7 @@ export default function VersionList({
     >
       {selectedRuntime === 'php' && (
         <Alert
-          message="源码编译提醒"
+          title="源码编译提醒"
           description={
             <span>
               该环境需要从源码编译安装。系统将自动为你安装编译所需的系统依赖。<br/>

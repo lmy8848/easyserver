@@ -147,7 +147,7 @@ export default function TableExplorer({
                         <Input.TextArea value={sqlResult.output} readOnly rows={15}
                           style={{ fontFamily: 'monospace', fontSize: 12, background: '#f6ffed' }} />
                       ) : (
-                        <Alert type="error" message={sqlResult.error} />
+                        <Alert type="error" title={sqlResult.error} />
                       )}
                     </div>
                   )}

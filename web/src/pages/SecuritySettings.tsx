@@ -200,7 +200,7 @@ export default function SecuritySettings() {
 
         {totpEnabled && (
           <Alert
-            message="2FA 已启用"
+            title="2FA 已启用"
             description="您的账户已启用双因素认证。登录时需要输入验证器应用中的验证码。"
             type="success"
             showIcon
@@ -270,7 +270,7 @@ export default function SecuritySettings() {
         {setupStep === 'backup' && (
           <div>
             <Alert
-              message="请保存备份码"
+              title="请保存备份码"
               description="这些备份码可以在您无法使用验证器应用时用于登录。每个备份码只能使用一次。"
               type="warning"
               showIcon
@@ -317,7 +317,7 @@ export default function SecuritySettings() {
         footer={null}
       >
         <Alert
-          message="确定要禁用 2FA？"
+          title="确定要禁用 2FA？"
           description="禁用后，登录时将不再需要验证码。这会降低您的账户安全性。"
           type="warning"
           showIcon

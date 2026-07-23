@@ -124,7 +124,7 @@ export default function SSHHardeningTab() {
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Card title={<span><ThunderboltOutlined /> 一键加固</span>}>
         <Alert
-          message="加固会自动备份配置、用 sshd -t 测试、失败自动回滚，避免锁死"
+          title="加固会自动备份配置、用 sshd -t 测试、失败自动回滚，避免锁死"
           type="info" showIcon style={{ marginBottom: 16 }}
         />
         <Form form={form} layout="vertical" initialValues={{ port: 0, max_auth_tries: 5, disable_root_login: false, disable_password_auth: false }}>
@@ -214,7 +214,7 @@ export default function SSHHardeningTab() {
               </>
             ) : (
               <Space>
-                <Alert message="fail2ban 未安装" type="warning" showIcon />
+                <Alert title="fail2ban 未安装" type="warning" showIcon />
                 <Button type="primary" onClick={onInstallFail2ban}>一键安装并启用 sshd 防护</Button>
               </Space>
             )}

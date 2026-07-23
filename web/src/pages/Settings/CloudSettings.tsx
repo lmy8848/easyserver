@@ -71,7 +71,7 @@ export default function CloudSettings({ settings, onRefresh }: CloudSettingsProp
   return (
     <div>
       <Alert
-        message="腾讯云轻量应用服务器管理"
+        title="腾讯云轻量应用服务器管理"
         description={
           <div>
             <p>配置腾讯云 API 凭据后，可以在「腾讯云」页面管理您的轻量应用服务器实例。</p>
@@ -162,7 +162,7 @@ export default function CloudSettings({ settings, onRefresh }: CloudSettingsProp
 
           {testResult && (
             <Alert
-              message={testResult.success ? '连接成功' : '连接失败'}
+              title={testResult.success ? '连接成功' : '连接失败'}
               description={testResult.message}
               type={testResult.success ? 'success' : 'error'}
               showIcon
