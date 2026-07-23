@@ -78,6 +78,7 @@ const ICONS: Record<string, string> = {
   'menu-fold': '<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>',
   'menu-unfold': '<polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
   'chevron-down': '<polyline points="6 9 12 15 18 9"/>',
   'log-out': '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',

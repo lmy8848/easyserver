@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Card, Form, InputNumber, Switch, Button, Space, message, Table, Input,
+  Card, Button, Space, message, Table, Input,
   Tag, Popconfirm, Alert, Descriptions, Statistic, Row, Col,
 } from 'antd';
 import {
@@ -13,7 +13,6 @@ interface Jail { name: string; failed: number; banned: number; }
 interface Fail2banStatus { installed: boolean; active: boolean; enabled: boolean; jails: Jail[]; }
 
 export default function SSHHardeningTab() {
-  const [form] = Form.useForm();
   const [hardening, setHardening] = useState(false);
   const [keys, setKeys] = useState<AuthorizedKey[]>([]);
   const [keysLoading, setKeysLoading] = useState(false);
@@ -44,15 +43,14 @@ export default function SSHHardeningTab() {
   useEffect(() => { loadKeys(); loadFail2ban(); }, []);
 
   const onHarden = async () => {
-    const v = await form.validateFields();
     setHardening(true);
     try {
       await api.post('/ssh/harden', {
-        port: v.port || 0,
-        disable_root_login: v.disable_root_login || false,
-        disable_password_auth: v.disable_password_auth || false,
-        max_auth_tries: v.max_auth_tries || 0,
-        allow_users: v.allow_users || '',
+        port: 0,
+        disable_root_login: true,
+        disable_password_auth: true,
+        max_auth_tries: 5,
+        allow_users: '',
       });
       message.success('SSH 加固成功，配置已应用并重载');
     } catch (e: unknown) {
@@ -124,37 +122,21 @@ export default function SSHHardeningTab() {
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Card title={<span><ThunderboltOutlined /> 一键加固</span>}>
         <Alert
-          title="加固会自动备份配置、用 sshd -t 测试、失败自动回滚，避免锁死"
+          message="一键应用推荐安全配置：禁用 root 登录、禁用密码登录（仅密钥）、MaxAuthTries=5"
+          description="自动备份配置 + sshd -t 测试 + 失败回滚，避免锁死。"
           type="info" showIcon style={{ marginBottom: 16 }}
         />
-        <Form form={form} layout="vertical" initialValues={{ port: 0, max_auth_tries: 5, disable_root_login: false, disable_password_auth: false }}>
-          <Row gutter={16}>
-            <Col span={6}>
-              <Form.Item name="port" label="监听端口（0=不改）" extra="改端口前确保新端口空闲且防火墙放行">
-                <InputNumber min={0} max={65535} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="max_auth_tries" label="最大认证尝试">
-                <InputNumber min={1} max={20} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="allow_users" label="允许登录用户（空=全部，逗号分隔）">
-                <Input placeholder="如 admin,deploy" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="disable_root_login" valuePropName="checked" label="禁止 root 登录">
-            <Switch />
-          </Form.Item>
-          <Form.Item name="disable_password_auth" valuePropName="checked" label="禁用密码登录（仅密钥，需先配置公钥）">
-            <Switch />
-          </Form.Item>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={onHarden} loading={hardening}>
-            应用加固
-          </Button>
-        </Form>
+        <Alert
+          message="禁用密码登录前需先在下方「SSH 公钥管理」配置至少一个公钥，否则将无法登录"
+          type="warning" showIcon style={{ marginBottom: 16 }}
+        />
+        <Alert
+          message="自定义端口 / AllowUsers / 其他 sshd 参数请用「配置」Tab"
+          type="info" showIcon style={{ marginBottom: 16 }}
+        />
+        <Button type="primary" icon={<ThunderboltOutlined />} onClick={onHarden} loading={hardening}>
+          一键应用加固
+        </Button>
       </Card>
 
       <Card title="SSH 公钥管理" extra={<Button icon={<ReloadOutlined />} onClick={loadKeys} loading={keysLoading}>刷新</Button>}>
