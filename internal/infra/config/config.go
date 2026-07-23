@@ -163,8 +163,8 @@ func Load(path string) (*Config, error) {
 			MobileDeviceBinding:    true,
 		},
 		Monitor: MonitorConfig{
-			HistoryRetention: 24 * time.Hour,
-			CollectInterval:  time.Second,
+			HistoryRetention: 168 * time.Hour,
+			CollectInterval:  3 * time.Second,
 		},
 		Database: DatabaseConfig{
 			Path: "./data/easyserver.db",
@@ -212,6 +212,12 @@ func (c *Config) mergeDefaults() {
 	}
 	if c.Auth.SessionCleanupInterval == 0 {
 		c.Auth.SessionCleanupInterval = 5 * time.Minute
+	}
+	if c.Monitor.CollectInterval == 0 {
+		c.Monitor.CollectInterval = 3 * time.Second
+	}
+	if c.Monitor.HistoryRetention == 0 {
+		c.Monitor.HistoryRetention = 7 * 24 * time.Hour
 	}
 }
 

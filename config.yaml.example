@@ -28,8 +28,8 @@ auth:
   session_cleanup_interval: 5m  # 过期会话清理间隔
 
 monitor:
-  history_retention: 24h
-  collect_interval: 1s
+  history_retention: 168h
+  collect_interval: 3s
 
 database:
   path: "./data/easyserver.db"

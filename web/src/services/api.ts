@@ -804,10 +804,10 @@ export const settingsApi = {
   updateTLS: (data: { enabled: boolean; cert_content?: string; key_content?: string }) =>
     api.put<ApiResponse<{ requires_restart: boolean; cert_info: { domain: string; issuer: string; expires_at: string } | null }>>('/settings/tls', data),
 
-  updateAuth: (data: { session_timeout?: string; idle_timeout?: string; max_login_attempts?: number; lockout_duration?: string; rate_limit?: number; rate_interval?: string; login_rate_limit?: number; login_rate_interval?: string; allow_multi_session?: boolean; mobile_device_binding?: boolean }) =>
+  updateAuth: (data: { session_timeout?: number; idle_timeout?: number; max_login_attempts?: number; lockout_duration?: number; rate_limit?: number; rate_interval?: number; login_rate_limit?: number; login_rate_interval?: number; allow_multi_session?: boolean; mobile_device_binding?: boolean }) =>
     api.put<ApiResponse>('/settings/auth', data),
 
-  updateMonitor: (data: { history_retention?: string; collect_interval?: string }) =>
+  updateMonitor: (data: { history_retention?: number; collect_interval?: number }) =>
     api.put<ApiResponse>('/settings/monitor', data),
 
   updateAudit: (data: { enabled?: boolean }) =>

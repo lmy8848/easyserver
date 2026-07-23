@@ -116,20 +116,20 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 			},
 		},
 		"auth": gin.H{
-			"session_timeout":       h.cfg.Auth.SessionTimeout.String(),
-			"idle_timeout":          h.cfg.Auth.IdleTimeout.String(),
+			"session_timeout":       int(h.cfg.Auth.SessionTimeout.Seconds()),
+			"idle_timeout":          int(h.cfg.Auth.IdleTimeout.Seconds()),
 			"max_login_attempts":    h.cfg.Auth.MaxLoginAttempts,
-			"lockout_duration":      h.cfg.Auth.LockoutDuration.String(),
+			"lockout_duration":      int(h.cfg.Auth.LockoutDuration.Seconds()),
 			"rate_limit":            h.cfg.Auth.RateLimit,
-			"rate_interval":         h.cfg.Auth.RateInterval.String(),
+			"rate_interval":         int(h.cfg.Auth.RateInterval.Seconds()),
 			"login_rate_limit":      h.cfg.Auth.LoginRateLimit,
-			"login_rate_interval":   h.cfg.Auth.LoginRateInterval.String(),
+			"login_rate_interval":   int(h.cfg.Auth.LoginRateInterval.Seconds()),
 			"allow_multi_session":   h.cfg.Auth.AllowMultiSession,
 			"mobile_device_binding": h.cfg.Auth.MobileDeviceBinding,
 		},
 		"monitor": gin.H{
-			"history_retention": h.cfg.Monitor.HistoryRetention.String(),
-			"collect_interval":  h.cfg.Monitor.CollectInterval.String(),
+			"history_retention": int(h.cfg.Monitor.HistoryRetention.Hours()),
+			"collect_interval":  int(h.cfg.Monitor.CollectInterval.Seconds()),
 		},
 		"database": gin.H{
 			"path": dbPath,
@@ -511,16 +511,16 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	h.cfgMu.Lock()
 	defer h.cfgMu.Unlock()
 	var req struct {
-		SessionTimeout      *string `json:"session_timeout"`
-		IdleTimeout         *string `json:"idle_timeout"`
-		MaxLoginAttempts    *int    `json:"max_login_attempts"`
-		LockoutDuration     *string `json:"lockout_duration"`
-		RateLimit           *int    `json:"rate_limit"`
-		RateInterval        *string `json:"rate_interval"`
-		LoginRateLimit      *int    `json:"login_rate_limit"`
-		LoginRateInterval   *string `json:"login_rate_interval"`
-		AllowMultiSession   *bool   `json:"allow_multi_session"`
-		MobileDeviceBinding *bool   `json:"mobile_device_binding"`
+		SessionTimeout      *int  `json:"session_timeout"`
+		IdleTimeout         *int  `json:"idle_timeout"`
+		MaxLoginAttempts    *int  `json:"max_login_attempts"`
+		LockoutDuration     *int  `json:"lockout_duration"`
+		RateLimit           *int  `json:"rate_limit"`
+		RateInterval        *int  `json:"rate_interval"`
+		LoginRateLimit      *int  `json:"login_rate_limit"`
+		LoginRateInterval   *int  `json:"login_rate_interval"`
+		AllowMultiSession   *bool `json:"allow_multi_session"`
+		MobileDeviceBinding *bool `json:"mobile_device_binding"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
@@ -530,30 +530,18 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 	middleware.AuditSummary(c, "更新认证配置")
 
 	if req.SessionTimeout != nil {
-		d, err := time.ParseDuration(*req.SessionTimeout)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 session_timeout: %v", err)))
+		if *req.SessionTimeout < 300 {
+			c.Error(apperror.ErrBadRequest.WithMessage("session_timeout 至少为 300 秒（5分钟）"))
 			return
 		}
-		// Minimum 5 minutes to prevent lockout
-		if d < 5*time.Minute {
-			c.Error(apperror.ErrBadRequest.WithMessage("session_timeout 至少为 5 分钟"))
-			return
-		}
-		h.cfg.Auth.SessionTimeout = d
+		h.cfg.Auth.SessionTimeout = time.Duration(*req.SessionTimeout) * time.Second
 	}
 	if req.IdleTimeout != nil {
-		d, err := time.ParseDuration(*req.IdleTimeout)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 idle_timeout: %v", err)))
+		if *req.IdleTimeout < 60 {
+			c.Error(apperror.ErrBadRequest.WithMessage("idle_timeout 至少为 60 秒（1分钟）"))
 			return
 		}
-		// Minimum 1 minute to prevent lockout
-		if d < 1*time.Minute {
-			c.Error(apperror.ErrBadRequest.WithMessage("idle_timeout 至少为 1 分钟"))
-			return
-		}
-		h.cfg.Auth.IdleTimeout = d
+		h.cfg.Auth.IdleTimeout = time.Duration(*req.IdleTimeout) * time.Second
 	}
 	if req.MaxLoginAttempts != nil {
 		if *req.MaxLoginAttempts < 3 || *req.MaxLoginAttempts > 100 {
@@ -563,21 +551,11 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		h.cfg.Auth.MaxLoginAttempts = *req.MaxLoginAttempts
 	}
 	if req.LockoutDuration != nil {
-		d, err := time.ParseDuration(*req.LockoutDuration)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 lockout_duration: %v", err)))
+		if *req.LockoutDuration < 60 || *req.LockoutDuration > 86400 {
+			c.Error(apperror.ErrBadRequest.WithMessage("lockout_duration 必须在 60 秒到 86400 秒之间"))
 			return
 		}
-		// Minimum 1 minute, maximum 24 hours
-		if d < 1*time.Minute {
-			c.Error(apperror.ErrBadRequest.WithMessage("lockout_duration 至少为 1 分钟"))
-			return
-		}
-		if d > 24*time.Hour {
-			c.Error(apperror.ErrBadRequest.WithMessage("lockout_duration 不能超过 24 小时"))
-			return
-		}
-		h.cfg.Auth.LockoutDuration = d
+		h.cfg.Auth.LockoutDuration = time.Duration(*req.LockoutDuration) * time.Second
 	}
 	if req.RateLimit != nil {
 		if *req.RateLimit < 10 {
@@ -587,16 +565,11 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		h.cfg.Auth.RateLimit = *req.RateLimit
 	}
 	if req.RateInterval != nil {
-		d, err := time.ParseDuration(*req.RateInterval)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 rate_interval: %v", err)))
-			return
-		}
-		if d < 1*time.Second {
+		if *req.RateInterval < 1 {
 			c.Error(apperror.ErrBadRequest.WithMessage("rate_interval 至少为 1 秒"))
 			return
 		}
-		h.cfg.Auth.RateInterval = d
+		h.cfg.Auth.RateInterval = time.Duration(*req.RateInterval) * time.Second
 	}
 
 	if req.LoginRateLimit != nil {
@@ -607,16 +580,11 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		h.cfg.Auth.LoginRateLimit = *req.LoginRateLimit
 	}
 	if req.LoginRateInterval != nil {
-		d, err := time.ParseDuration(*req.LoginRateInterval)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 login_rate_interval: %v", err)))
+		if *req.LoginRateInterval < 1 || *req.LoginRateInterval > 3600 {
+			c.Error(apperror.ErrBadRequest.WithMessage("login_rate_interval 必须在 1 秒到 3600 秒之间"))
 			return
 		}
-		if d < 1*time.Second || d > 1*time.Hour {
-			c.Error(apperror.ErrBadRequest.WithMessage("login_rate_interval 必须在 1s 到 1h 之间"))
-			return
-		}
-		h.cfg.Auth.LoginRateInterval = d
+		h.cfg.Auth.LoginRateInterval = time.Duration(*req.LoginRateInterval) * time.Second
 	}
 	if req.AllowMultiSession != nil {
 		h.cfg.Auth.AllowMultiSession = *req.AllowMultiSession
@@ -652,8 +620,8 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 	h.cfgMu.Lock()
 	defer h.cfgMu.Unlock()
 	var req struct {
-		HistoryRetention *string `json:"history_retention"`
-		CollectInterval  *string `json:"collect_interval"`
+		HistoryRetention *int `json:"history_retention"`
+		CollectInterval  *int `json:"collect_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
@@ -663,38 +631,23 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 	middleware.AuditSummary(c, "更新监控配置")
 
 	if req.HistoryRetention != nil {
-		d, err := time.ParseDuration(*req.HistoryRetention)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 history_retention: %v", err)))
+		if *req.HistoryRetention < 24 || *req.HistoryRetention > 8760 {
+			c.Error(apperror.ErrBadRequest.WithMessage("history_retention 必须在 24 小时到 8760 小时（1年）之间"))
 			return
 		}
-		if d < 1*time.Minute {
-			c.Error(apperror.ErrBadRequest.WithMessage("history_retention 至少为 1 分钟"))
-			return
-		}
-		if d > 8760*time.Hour {
-			c.Error(apperror.ErrBadRequest.WithMessage("history_retention 不能超过 1 年"))
-			return
-		}
+		d := time.Duration(*req.HistoryRetention) * time.Hour
 		h.cfg.Monitor.HistoryRetention = d
 		if h.monitorService != nil {
 			h.monitorService.SetRetention(d)
 		}
 	}
+
 	if req.CollectInterval != nil {
-		d, err := time.ParseDuration(*req.CollectInterval)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 collect_interval: %v", err)))
+		if *req.CollectInterval < 1 || *req.CollectInterval > 300 {
+			c.Error(apperror.ErrBadRequest.WithMessage("collect_interval 必须在 1 秒到 300 秒（5分钟）之间"))
 			return
 		}
-		if d < 1*time.Second {
-			c.Error(apperror.ErrBadRequest.WithMessage("collect_interval 至少为 1 秒"))
-			return
-		}
-		if d > 1*time.Hour {
-			c.Error(apperror.ErrBadRequest.WithMessage("collect_interval 不能超过 1 小时"))
-			return
-		}
+		d := time.Duration(*req.CollectInterval) * time.Second
 		h.cfg.Monitor.CollectInterval = d
 		if h.monitorService != nil {
 			h.monitorService.SetInterval(d)

@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  Card, Form, Input, Button, message,
-} from 'antd';
+import { Card, Form, InputNumber, Button, message } from 'antd';
 import { settingsApi } from '../../services/api';
 import type { Settings } from './types';
 
@@ -16,9 +14,15 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
 
   useEffect(() => {
     if (settings?.monitor) {
+      // Backend returns history_retention in hours (e.g., 168 = 7 days)
+      const hours = Number(settings.monitor.history_retention) || 168;
+      const days = Math.max(1, Math.round(hours / 24));
+      // Backend returns collect_interval in seconds (e.g., 3)
+      const secs = Number(settings.monitor.collect_interval) || 3;
+
       form.setFieldsValue({
-        history_retention: settings.monitor.history_retention,
-        collect_interval: settings.monitor.collect_interval,
+        history_retention: days,
+        collect_interval: secs,
       });
     }
   }, [settings, form]);
@@ -27,7 +31,14 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
     try {
       const values = await form.validateFields();
       setSaving(true);
-      await settingsApi.updateMonitor(values);
+      const days = Number(values.history_retention) || 7;
+      const secs = Number(values.collect_interval) || 3;
+
+      // Backend API receives history_retention in hours (days * 24), collect_interval in seconds
+      await settingsApi.updateMonitor({
+        history_retention: days * 24,
+        collect_interval: secs,
+      });
       message.success('监控配置已保存');
       onRefresh();
     } catch (error: unknown) {
@@ -45,24 +56,38 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
         form={form}
         layout="vertical"
         initialValues={{
-          history_retention: '24h',
-          collect_interval: '1s',
+          history_retention: 7,
+          collect_interval: 3,
         }}
       >
         <Form.Item
           name="history_retention"
           label="历史数据保留时间"
-          extra="监控数据保留的时长，如 24h、168h（7天）"
+          extra="历史监控记录在数据库中保留的天数（1 ~ 365 天，默认 7 天）"
+          rules={[{ required: true, message: '请输入保留天数' }]}
         >
-          <Input placeholder="24h" />
+          <InputNumber
+            min={1}
+            max={365}
+            addonAfter="天"
+            style={{ width: '100%' }}
+            placeholder="7"
+          />
         </Form.Item>
 
         <Form.Item
           name="collect_interval"
           label="数据采集间隔"
-          extra="监控数据采集的间隔，如 1s、5s"
+          extra="监控指标采集与推送到前端的时间间隔（1 ~ 300 秒，默认 3 秒）"
+          rules={[{ required: true, message: '请输入采集间隔秒数' }]}
         >
-          <Input placeholder="1s" />
+          <InputNumber
+            min={1}
+            max={300}
+            addonAfter="秒"
+            style={{ width: '100%' }}
+            placeholder="3"
+          />
         </Form.Item>
 
         <Form.Item>

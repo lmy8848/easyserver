@@ -25,20 +25,20 @@ export interface Settings {
     };
   };
   auth: {
-    session_timeout: string;
-    idle_timeout: string;
+    session_timeout: number;
+    idle_timeout: number;
     max_login_attempts: number;
-    lockout_duration: string;
+    lockout_duration: number;
     rate_limit: number;
-    rate_interval: string;
+    rate_interval: number;
     login_rate_limit: number;
-    login_rate_interval: string;
+    login_rate_interval: number;
     allow_multi_session: boolean;
     mobile_device_binding: boolean;
   };
   monitor: {
-    history_retention: string;
-    collect_interval: string;
+    history_retention: number;
+    collect_interval: number;
   };
   database: {
     path: string;
