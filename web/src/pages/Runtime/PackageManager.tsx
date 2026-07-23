@@ -177,7 +177,7 @@ export default function PackageManager({
                   loading={packageVersionsLoading}
                   allowClear
                   showSearch
-                  onDropdownVisibleChange={(open) => {
+                  onOpenChange={(open) => {
                     if (open) {
                       const currentName = packageForm.getFieldValue('name');
                       if (currentName) {

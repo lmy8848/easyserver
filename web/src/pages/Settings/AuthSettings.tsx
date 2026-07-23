@@ -71,7 +71,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="用户会话的有效持续时间（秒，默认 86400 秒 = 24 小时）"
           rules={[{ required: true, message: '请输入会话超时秒数' }]}
         >
-          <InputNumber min={300} addonAfter="秒" style={{ width: '100%' }} placeholder="86400" />
+          <InputNumber min={300} suffix="秒" style={{ width: 200 }} placeholder="86400" />
         </Form.Item>
 
         <Form.Item
@@ -80,7 +80,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="用户无操作后自动登出的时间（秒，默认 1800 秒 = 30 分钟）"
           rules={[{ required: true, message: '请输入空闲超时秒数' }]}
         >
-          <InputNumber min={60} addonAfter="秒" style={{ width: '100%' }} placeholder="1800" />
+          <InputNumber min={60} suffix="秒" style={{ width: 200 }} placeholder="1800" />
         </Form.Item>
 
         <Form.Item
@@ -89,7 +89,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="登录失败多少次后锁定账户"
           rules={[{ required: true, message: '请输入最大次数' }]}
         >
-          <InputNumber min={3} max={100} style={{ width: '100%' }} />
+          <InputNumber min={3} max={100} style={{ width: 200 }} />
         </Form.Item>
 
         <Form.Item
@@ -98,7 +98,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="账户锁定的持续时间（秒，默认 900 秒 = 15 分钟）"
           rules={[{ required: true, message: '请输入锁定时长秒数' }]}
         >
-          <InputNumber min={60} max={86400} addonAfter="秒" style={{ width: '100%' }} placeholder="900" />
+          <InputNumber min={60} max={86400} suffix="秒" style={{ width: 200 }} placeholder="900" />
         </Form.Item>
 
         <Form.Item
@@ -107,7 +107,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="每个时间窗口内允许的最大请求数"
           rules={[{ required: true, message: '请输入速率限制' }]}
         >
-          <InputNumber min={10} style={{ width: '100%' }} />
+          <InputNumber min={10} style={{ width: 200 }} />
         </Form.Item>
 
         <Form.Item
@@ -116,7 +116,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="通用 API 速率限制的时间窗口（秒，默认 60 秒 = 1 分钟）"
           rules={[{ required: true, message: '请输入时间窗口秒数' }]}
         >
-          <InputNumber min={1} addonAfter="秒" style={{ width: '100%' }} placeholder="60" />
+          <InputNumber min={1} suffix="秒" style={{ width: 200 }} placeholder="60" />
         </Form.Item>
 
         <Form.Item
@@ -125,7 +125,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="每个时间窗口内登录接口允许的最大请求数"
           rules={[{ required: true, message: '请输入登录速率限制' }]}
         >
-          <InputNumber min={1} max={100} style={{ width: '100%' }} />
+          <InputNumber min={1} max={100} style={{ width: 200 }} />
         </Form.Item>
 
         <Form.Item
@@ -134,7 +134,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="登录速率限制的时间窗口（秒，默认 60 秒 = 1 分钟）"
           rules={[{ required: true, message: '请输入登录限流时间窗口秒数' }]}
         >
-          <InputNumber min={1} max={3600} addonAfter="秒" style={{ width: '100%' }} placeholder="60" />
+          <InputNumber min={1} max={3600} suffix="秒" style={{ width: 200 }} placeholder="60" />
         </Form.Item>
 
         <Form.Item

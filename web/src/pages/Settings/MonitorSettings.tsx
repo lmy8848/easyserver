@@ -69,8 +69,8 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
           <InputNumber
             min={1}
             max={365}
-            addonAfter="天"
-            style={{ width: '100%' }}
+            suffix="天"
+            style={{ width: 200 }}
             placeholder="7"
           />
         </Form.Item>
@@ -84,8 +84,8 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
           <InputNumber
             min={1}
             max={300}
-            addonAfter="秒"
-            style={{ width: '100%' }}
+            suffix="秒"
+            style={{ width: 200 }}
             placeholder="3"
           />
         </Form.Item>

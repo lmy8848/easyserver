@@ -252,7 +252,7 @@ export default function ContainerTab() {
       </Card>
 
       {/* Create Modal */}
-      <Modal title="创建容器" open={createVisible} onOk={handleCreate} onCancel={() => setCreateVisible(false)} width={600} destroyOnClose confirmLoading={createLoading}>
+      <Modal title="创建容器" open={createVisible} onOk={handleCreate} onCancel={() => setCreateVisible(false)} width={600} destroyOnHidden confirmLoading={createLoading}>
         <Form form={createForm} layout="vertical">
           <Form.Item name="name" label="容器名称"><Input placeholder="my-container" /></Form.Item>
           <Form.Item name="image" label="镜像" rules={[{ required: true }]}><Input placeholder="nginx:latest" /></Form.Item>
@@ -269,21 +269,21 @@ export default function ContainerTab() {
       </Modal>
 
       {/* Exec Modal */}
-      <Modal title="在容器中执行命令" open={execVisible} onOk={handleExec} onCancel={() => setExecVisible(false)} destroyOnClose>
+      <Modal title="在容器中执行命令" open={execVisible} onOk={handleExec} onCancel={() => setExecVisible(false)} destroyOnHidden>
         <Form form={execForm} layout="vertical">
           <Form.Item name="command" label="命令" rules={[{ required: true }]}><Input placeholder="ls -la" /></Form.Item>
         </Form>
       </Modal>
 
       {/* Logs Modal */}
-      <Modal title={`容器日志 - ${selectedContainer}`} open={logsVisible} onCancel={() => setLogsVisible(false)} footer={null} width={800} destroyOnClose>
+      <Modal title={`容器日志 - ${selectedContainer}`} open={logsVisible} onCancel={() => setLogsVisible(false)} footer={null} width={800} destroyOnHidden>
         <pre style={{ maxHeight: 500, overflow: 'auto', background: '#f5f5f5', padding: 16, fontSize: 12, whiteSpace: 'pre-wrap' }}>
           {logs || '暂无日志'}
         </pre>
       </Modal>
 
       {/* Stats Modal */}
-      <Modal title={`资源监控 - ${selectedContainer}`} open={statsVisible} onCancel={() => setStatsVisible(false)} footer={null} width={600} destroyOnClose>
+      <Modal title={`资源监控 - ${selectedContainer}`} open={statsVisible} onCancel={() => setStatsVisible(false)} footer={null} width={600} destroyOnHidden>
         {stats && (
           <Descriptions column={2} bordered size="small">
             <Descriptions.Item label="CPU 使用率">{stats.cpu_percent.toFixed(2)}%</Descriptions.Item>

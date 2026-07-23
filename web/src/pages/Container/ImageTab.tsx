@@ -99,11 +99,11 @@ export default function ImageTab() {
         onCancel={() => setPullVisible(false)}
         confirmLoading={pulling}
         cancelButtonProps={{ disabled: pulling }}
-        maskClosable={!pulling}
+        mask={{ closable: !pulling }}
         closable={!pulling}
         keyboard={!pulling}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={pullForm} layout="vertical">
           <Form.Item name="image" label="镜像名称" rules={[{ required: true }]}>
