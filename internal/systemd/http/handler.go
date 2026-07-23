@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"easyserver/internal/audit"
@@ -268,23 +267,16 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// Write mutex ensures only one goroutine writes to the connection at a time
-	writeMu := &sync.Mutex{}
-
 	// Start journalctl -f to follow logs
 	proc, err := h.executor.Start(context.Background(), executor.StartOptions{}, "journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
 	if err != nil {
-		writeMu.Lock()
 		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"启动日志流失败"}`))
-		writeMu.Unlock()
 		return
 	}
 	stdout, err := proc.StdoutPipe()
 	if err != nil {
 		proc.Kill()
-		writeMu.Lock()
 		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"获取日志流失败"}`))
-		writeMu.Unlock()
 		return
 	}
 	defer proc.Kill()
@@ -380,23 +372,17 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 	for {
 		select {
 		case msg := <-msgCh:
-			writeMu.Lock()
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
-				writeMu.Unlock()
 				return
 			}
-			writeMu.Unlock()
 		case <-errCh:
 			return
 		case <-ticker.C:
-			writeMu.Lock()
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
-				writeMu.Unlock()
 				return
 			}
-			writeMu.Unlock()
 		case <-done:
 			return
 		}

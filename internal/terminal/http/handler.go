@@ -189,11 +189,7 @@ func (h *TerminalHandler) writePump(conn *gorillaWs.Conn, wsWrite <-chan []byte)
 	ticker := time.NewTicker(TermWSPingInterval)
 	defer ticker.Stop()
 
-	writeMu := &sync.Mutex{}
-
 	writeMsg := func(msgType int, data []byte) bool {
-		writeMu.Lock()
-		defer writeMu.Unlock()
 		conn.SetWriteDeadline(time.Now().Add(TermWSWriteDeadline))
 		if err := conn.WriteMessage(msgType, data); err != nil {
 			return false

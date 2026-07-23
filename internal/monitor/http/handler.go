@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"easyserver/internal/httpx"
@@ -121,9 +120,6 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 		conn.Close()
 	}()
 
-	// Write mutex ensures only one goroutine writes to the connection at a time
-	writeMu := &sync.Mutex{}
-
 	infra.Go(func() {
 		ticker := time.NewTicker(MonitorWSPingInterval)
 		defer ticker.Stop()
@@ -132,26 +128,18 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 			select {
 			case msg, ok := <-client.Send:
 				if !ok {
-					writeMu.Lock()
 					conn.WriteMessage(gorillaWs.CloseMessage, []byte{})
-					writeMu.Unlock()
 					return
 				}
-				writeMu.Lock()
 				conn.SetWriteDeadline(time.Now().Add(MonitorWSWriteDeadline))
 				if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
-					writeMu.Unlock()
 					return
 				}
-				writeMu.Unlock()
 			case <-ticker.C:
-				writeMu.Lock()
 				conn.SetWriteDeadline(time.Now().Add(MonitorWSWriteDeadline))
 				if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
-					writeMu.Unlock()
 					return
 				}
-				writeMu.Unlock()
 			}
 		}
 	})
