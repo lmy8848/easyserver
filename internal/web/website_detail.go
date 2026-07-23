@@ -160,7 +160,9 @@ func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64)
 	if w.SSLEnabled {
 		scheme = "https"
 	}
-	url := fmt.Sprintf("%s://%s:%d", scheme, w.Domain, w.Port)
+	// 探活走对外标准端口（80/443），不用 nginx 监听端口：经 CDN/反代代理的网站
+	// 对外端口与 nginx 监听端口通常不同（如 nginx 听 8080，CDN 对外 443）。
+	url := fmt.Sprintf("%s://%s", scheme, w.Domain)
 	start := time.Now()
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
