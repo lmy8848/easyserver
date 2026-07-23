@@ -5,9 +5,10 @@ import {
 } from 'antd';
 import {
   SettingOutlined, TeamOutlined, HistoryOutlined,
-  ReloadOutlined, SaveOutlined, DeleteOutlined,
+  ReloadOutlined, SaveOutlined, DeleteOutlined, SafetyOutlined,
 } from '@ant-design/icons';
 import api from '../services/api';
+import SSHHardeningTab from './SSHHardeningTab';
 
 interface SSHSession {
   pid: number;
@@ -312,6 +313,11 @@ export default function SSH() {
                 />
               </Card>
             ),
+          },
+          {
+            key: 'hardening',
+            label: <span><SafetyOutlined /> 加固向导</span>,
+            children: <SSHHardeningTab />,
           },
         ]}
       />

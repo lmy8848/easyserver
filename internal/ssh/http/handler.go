@@ -198,6 +198,104 @@ func (h *SSHHandler) GetLoginHistory(c *gin.Context) {
 	httpx.Success(c, gin.H{"records": records})
 }
 
+// Harden applies SSH hardening options (backup + test + reload, rollback on failure).
+func (h *SSHHandler) Harden(c *gin.Context) {
+	var req ssh.HardenOptions
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	cfg, err := h.sshService.Harden(c.Request.Context(), req)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, cfg)
+}
+
+// ListAuthorizedKeys returns ~/.ssh/authorized_keys entries.
+func (h *SSHHandler) ListAuthorizedKeys(c *gin.Context) {
+	keys, err := h.sshService.ListAuthorizedKeys()
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"keys": keys})
+}
+
+// AddAuthorizedKey appends a public key.
+func (h *SSHHandler) AddAuthorizedKey(c *gin.Context) {
+	var req struct {
+		Key string `json:"key" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	if err := h.sshService.AddAuthorizedKey(req.Key); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "公钥已添加"})
+}
+
+// RemoveAuthorizedKey removes a key by comment (query ?comment=).
+func (h *SSHHandler) RemoveAuthorizedKey(c *gin.Context) {
+	comment := c.Query("comment")
+	if comment == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少 comment 参数"))
+		return
+	}
+	if err := h.sshService.RemoveAuthorizedKey(comment); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "公钥已删除"})
+}
+
+// GenerateKeyPair generates a new key pair, returns private key, auto-authorizes public key.
+func (h *SSHHandler) GenerateKeyPair(c *gin.Context) {
+	var req struct {
+		Name    string `json:"name"`
+		KeyType string `json:"key_type"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	priv, err := h.sshService.GenerateKeyPair(c.Request.Context(), req.Name, req.KeyType)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"private_key": priv})
+}
+
+// Fail2banStatus returns fail2ban install/active state and jails.
+func (h *SSHHandler) Fail2banStatus(c *gin.Context) {
+	st, err := h.sshService.Fail2banStatus(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, st)
+}
+
+// InstallFail2ban installs and enables fail2ban with an sshd jail.
+func (h *SSHHandler) InstallFail2ban(c *gin.Context) {
+	if err := h.sshService.InstallFail2ban(c.Request.Context()); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "fail2ban 已安装并启用"})
+}
+
+// ReloadFail2ban reloads fail2ban config.
+func (h *SSHHandler) ReloadFail2ban(c *gin.Context) {
+	if err := h.sshService.ReloadFail2ban(c.Request.Context()); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "fail2ban 已重载"})
+}
+
 func RegisterRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 	handler := NewSSHHandler(sshService)
 
@@ -213,4 +311,16 @@ func RegisterRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 
 	// SSH Login History
 	protected.GET("/ssh/logins", handler.GetLoginHistory)
+
+	// SSH Hardening
+	protected.POST("/ssh/harden", handler.Harden)
+	protected.GET("/ssh/authorized-keys", handler.ListAuthorizedKeys)
+	protected.POST("/ssh/authorized-keys", handler.AddAuthorizedKey)
+	protected.DELETE("/ssh/authorized-keys", handler.RemoveAuthorizedKey)
+	protected.POST("/ssh/keys/generate", handler.GenerateKeyPair)
+
+	// fail2ban
+	protected.GET("/ssh/fail2ban", handler.Fail2banStatus)
+	protected.POST("/ssh/fail2ban/install", handler.InstallFail2ban)
+	protected.POST("/ssh/fail2ban/reload", handler.ReloadFail2ban)
 }
