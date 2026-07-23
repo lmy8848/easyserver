@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	cacheExpiry      = 60 * time.Second // 系统信息/Swap 缓存有效期
-	maxHistoryPoints = 360              // 历史数据最大点数
+	maxHistoryPoints = 360 // 历史数据最大点数
 )
 
 // Evaluator evaluates monitor points for alerts.
@@ -78,26 +77,19 @@ func (h *MonitorHub) Broadcast(data []byte) {
 }
 
 type MonitorService struct {
-	mu           sync.RWMutex
-	monitorRepo  Repository
-	interval     time.Duration
-	retention    time.Duration
-	hub          *MonitorHub
-	prevIdle     uint64
-	prevTotal    uint64
-	prevSent     uint64
-	prevRecv     uint64
-	prevPktsSent uint64
-	prevPktsRecv uint64
+	mu          sync.RWMutex
+	monitorRepo Repository
+	interval    time.Duration
+	retention   time.Duration
+	hub         *MonitorHub
+	// 差值计算状态缓存
+	lastCpuIdle  uint64
+	lastCpuTotal uint64
+	lastNetSent  uint64
+	lastNetRecv  uint64
 	stopCh       chan struct{}
 	lastCleanup  time.Time
 	ticker       *time.Ticker
-
-	// 性能优化：系统信息缓存
-	cachedSystemInfo *SystemInfo
-	sysInfoExpire    time.Time
-	cachedSwap       *SwapInfo
-	swapExpire       time.Time
 
 	// 告警与审计评估
 	alertService    Evaluator
@@ -171,20 +163,20 @@ func (s *MonitorService) Start() {
 
 	s.mu.Lock()
 	s.ticker = time.NewTicker(s.interval)
+	// 性能优化：批量写入 ticker（每 10 秒 flush 一次）
+	s.flushTicker = time.NewTicker(10 * time.Second)
 	ticker := s.ticker
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		if s.ticker != nil {
 			s.ticker.Stop()
-			s.ticker = nil
+		}
+		if s.flushTicker != nil {
+			s.flushTicker.Stop()
 		}
 		s.mu.Unlock()
 	}()
-
-	// 性能优化：批量写入 ticker（每 10 秒 flush 一次）
-	s.flushTicker = time.NewTicker(10 * time.Second)
-	defer s.flushTicker.Stop()
 
 	// First collection
 	s.collect()
@@ -220,14 +212,6 @@ func (s *MonitorService) collect() {
 
 	snapshot := point.ToSnapshot()
 
-	// 性能优化：系统信息缓存（60秒刷新）
-	snapshot.System = s.readSystemInfoCached()
-
-	// 性能优化：Swap 缓存（复用 meminfo，60秒刷新）
-	snapshot.Swap = s.readSwapCached()
-
-	snapshot.Partitions = s.readPartitions()
-
 	// 告警评估
 	if s.alertService != nil {
 		s.alertService.Evaluate(point)
@@ -257,21 +241,17 @@ func (s *MonitorService) checkAuditThresholds(snapshot *MonitorSnapshot) {
 	now := time.Now()
 	const cooldown = 5 * time.Minute
 
-	s.mu.Lock()
 	if s.lastAuditAlerts == nil {
 		s.lastAuditAlerts = make(map[string]time.Time)
 	}
-	s.mu.Unlock()
 
 	// 内存使用率 ≥ 90% 检查
 	if snapshot.Memory.UsagePercent >= 90 {
-		s.mu.Lock()
 		last, exists := s.lastAuditAlerts["memory"]
 		shouldAlert := !exists || now.Sub(last) >= cooldown
 		if shouldAlert {
 			s.lastAuditAlerts["memory"] = now
 		}
-		s.mu.Unlock()
 
 		if shouldAlert {
 			s.auditService.LogSystemEvent(context.Background(), fmt.Sprintf("内存使用率告警：%.1f%%", snapshot.Memory.UsagePercent))
@@ -282,61 +262,17 @@ func (s *MonitorService) checkAuditThresholds(snapshot *MonitorSnapshot) {
 	for _, p := range snapshot.Partitions {
 		if p.UsagePercent >= 90 {
 			key := "disk:" + p.MountPoint
-			s.mu.Lock()
 			last, exists := s.lastAuditAlerts[key]
 			shouldAlert := !exists || now.Sub(last) >= cooldown
 			if shouldAlert {
 				s.lastAuditAlerts[key] = now
 			}
-			s.mu.Unlock()
 
 			if shouldAlert {
 				s.auditService.LogSystemEvent(context.Background(), fmt.Sprintf("磁盘使用率告警：%s %.1f%%", p.MountPoint, p.UsagePercent))
 			}
 		}
 	}
-}
-
-// readSystemInfoCached 带缓存的系统信息读取（cacheExpiry 刷新）
-func (s *MonitorService) readSystemInfoCached() *SystemInfo {
-	s.mu.RLock()
-	if s.cachedSystemInfo != nil && time.Now().Before(s.sysInfoExpire) {
-		info := s.cachedSystemInfo
-		s.mu.RUnlock()
-		return info
-	}
-	s.mu.RUnlock()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Double-check after acquiring write lock
-	if s.cachedSystemInfo != nil && time.Now().Before(s.sysInfoExpire) {
-		return s.cachedSystemInfo
-	}
-	s.cachedSystemInfo = s.readSystemInfo()
-	s.sysInfoExpire = time.Now().Add(cacheExpiry)
-	return s.cachedSystemInfo
-}
-
-// readSwapCached 带缓存的 Swap 读取（cacheExpiry 刷新）
-func (s *MonitorService) readSwapCached() *SwapInfo {
-	s.mu.RLock()
-	if s.cachedSwap != nil && time.Now().Before(s.swapExpire) {
-		swap := s.cachedSwap
-		s.mu.RUnlock()
-		return swap
-	}
-	s.mu.RUnlock()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Double-check after acquiring write lock
-	if s.cachedSwap != nil && time.Now().Before(s.swapExpire) {
-		return s.cachedSwap
-	}
-	s.cachedSwap = s.readSwap()
-	s.swapExpire = time.Now().Add(cacheExpiry)
-	return s.cachedSwap
 }
 
 func (s *MonitorService) readAll() *MonitorPoint {
@@ -424,8 +360,7 @@ func (s *MonitorService) GetCurrentStats(ctx context.Context) (*MonitorSnapshot,
 		}
 	}
 	snapshot := p.ToSnapshot()
-	snapshot.System = s.readSystemInfoCached()
-	snapshot.Swap = s.readSwapCached()
+	snapshot.System = s.readSystemInfo()
 	snapshot.Partitions = s.readPartitions()
 	return snapshot, nil
 }
@@ -480,16 +415,16 @@ func (s *MonitorService) readCPU(p *MonitorPoint) {
 
 		idle, _ := strconv.ParseUint(fields[4], 10, 64)
 
-		if s.prevTotal > 0 {
-			diffTotal := total - s.prevTotal
-			diffIdle := idle - s.prevIdle
+		if s.lastCpuTotal > 0 {
+			diffTotal := total - s.lastCpuTotal
+			diffIdle := idle - s.lastCpuIdle
 			if diffTotal > 0 {
 				p.CPUPercent = math.Round((1-float64(diffIdle)/float64(diffTotal))*100*100) / 100
 			}
 		}
 
-		s.prevIdle = idle
-		s.prevTotal = total
+		s.lastCpuIdle = idle
+		s.lastCpuTotal = total
 		return
 	}
 }
@@ -535,7 +470,12 @@ func (s *MonitorService) readMemory(p *MonitorPoint) {
 	}
 
 	p.MemTotal = mem["MemTotal"]
-	p.MemAvailable = mem["MemAvailable"]
+
+	p.SwapTotal = mem["SwapTotal"]
+	swapFree := mem["SwapFree"]
+	if p.SwapTotal > swapFree {
+		p.SwapUsed = p.SwapTotal - swapFree
+	}
 	if p.MemTotal > 0 {
 		used := mem["MemFree"] + mem["Buffers"] + mem["Cached"]
 		p.MemUsed = deltaU64(p.MemTotal, used)
@@ -551,8 +491,7 @@ func (s *MonitorService) readDisk(p *MonitorPoint) {
 	}
 
 	p.DiskTotal = stat.Blocks * uint64(stat.Bsize)
-	p.DiskFree = stat.Bfree * uint64(stat.Bsize)
-	p.DiskUsed = p.DiskTotal - p.DiskFree
+	p.DiskUsed = p.DiskTotal - (stat.Bfree * uint64(stat.Bsize))
 	if p.DiskTotal > 0 {
 		p.DiskPercent = math.Round(float64(p.DiskUsed)/float64(p.DiskTotal)*100*100) / 100
 	}
@@ -565,7 +504,7 @@ func (s *MonitorService) readNetwork(p *MonitorPoint) {
 		return
 	}
 
-	var totalSent, totalRecv, totalPktsSent, totalPktsRecv uint64
+	var totalSent, totalRecv uint64
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -587,27 +526,19 @@ func (s *MonitorService) readNetwork(p *MonitorPoint) {
 		}
 
 		recvBytes, _ := strconv.ParseUint(fields[0], 10, 64)
-		recvPkts, _ := strconv.ParseUint(fields[1], 10, 64)
 		sentBytes, _ := strconv.ParseUint(fields[8], 10, 64)
-		sentPkts, _ := strconv.ParseUint(fields[9], 10, 64)
 
 		totalSent += sentBytes
 		totalRecv += recvBytes
-		totalPktsSent += sentPkts
-		totalPktsRecv += recvPkts
 	}
 
-	if s.prevSent > 0 {
-		p.NetBytesSent = deltaU64(totalSent, s.prevSent)
-		p.NetBytesRecv = deltaU64(totalRecv, s.prevRecv)
-		p.NetPktsSent = deltaU64(totalPktsSent, s.prevPktsSent)
-		p.NetPktsRecv = deltaU64(totalPktsRecv, s.prevPktsRecv)
+	if s.lastNetSent > 0 || s.lastNetRecv > 0 {
+		p.NetBytesSent = deltaU64(totalSent, s.lastNetSent)
+		p.NetBytesRecv = deltaU64(totalRecv, s.lastNetRecv)
 	}
 
-	s.prevSent = totalSent
-	s.prevRecv = totalRecv
-	s.prevPktsSent = totalPktsSent
-	s.prevPktsRecv = totalPktsRecv
+	s.lastNetSent = totalSent
+	s.lastNetRecv = totalRecv
 }
 
 func deltaU64(cur, prev uint64) uint64 {
@@ -661,41 +592,6 @@ func (s *MonitorService) readSystemInfo() *SystemInfo {
 	}
 
 	return info
-}
-
-// readSwap reads swap memory info from /proc/meminfo
-func (s *MonitorService) readSwap() *SwapInfo {
-	data, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return nil
-	}
-
-	mem := make(map[string]uint64)
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		valStr := strings.TrimSpace(parts[1])
-		valStr = strings.TrimSuffix(valStr, " kB")
-		valStr = strings.TrimSpace(valStr)
-		val, _ := strconv.ParseUint(valStr, 10, 64)
-		mem[key] = val * 1024
-	}
-
-	swap := &SwapInfo{
-		TotalBytes: mem["SwapTotal"],
-		FreeBytes:  mem["SwapFree"],
-	}
-	swap.UsedBytes = swap.TotalBytes - swap.FreeBytes
-	if swap.TotalBytes > 0 {
-		swap.UsagePercent = math.Round(float64(swap.UsedBytes)/float64(swap.TotalBytes)*100*100) / 100
-	}
-
-	return swap
 }
 
 // readPartitions reads all physical/logical disk partitions using sysfs and /proc/mounts
@@ -754,22 +650,21 @@ func (s *MonitorService) readPartitions() []DiskPartition {
 			continue
 		}
 
-		total := stat.Blocks * uint64(stat.Bsize)
-		free := stat.Bfree * uint64(stat.Bsize)
-		used := total - free
-		var percent float64
-		if total > 0 {
-			percent = math.Round(float64(used)/float64(total)*100*100) / 100
+		totalBytes := stat.Blocks * uint64(stat.Bsize)
+		freeBytes := stat.Bfree * uint64(stat.Bsize)
+		usedBytes := totalBytes - freeBytes
+		var usagePercent float64
+		if totalBytes > 0 {
+			usagePercent = math.Round(float64(usedBytes)/float64(totalBytes)*100*100) / 100
 		}
 
 		partitions = append(partitions, DiskPartition{
 			MountPoint:   mountPoint,
 			Device:       device,
 			FSType:       fsType,
-			TotalBytes:   total,
-			UsedBytes:    used,
-			FreeBytes:    free,
-			UsagePercent: percent,
+			TotalBytes:   totalBytes,
+			UsedBytes:    usedBytes,
+			UsagePercent: usagePercent,
 		})
 	}
 

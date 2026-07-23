@@ -1,6 +1,8 @@
 package monitor
 
-import "time"
+import (
+	"math"
+)
 
 // MonitorPoint represents a single monitoring data point
 type MonitorPoint struct {
@@ -11,16 +13,14 @@ type MonitorPoint struct {
 	CPULoad15m   float64 `json:"cpu_load_15m" db:"cpu_load_15m"`
 	MemTotal     uint64  `json:"mem_total" db:"mem_total"`
 	MemUsed      uint64  `json:"mem_used" db:"mem_used"`
-	MemAvailable uint64  `json:"mem_available" db:"mem_available"`
 	MemPercent   float64 `json:"mem_percent" db:"mem_usage"`
 	DiskTotal    uint64  `json:"disk_total" db:"disk_total"`
 	DiskUsed     uint64  `json:"disk_used" db:"disk_used"`
-	DiskFree     uint64  `json:"disk_free" db:"disk_free"`
 	DiskPercent  float64 `json:"disk_percent" db:"disk_usage"`
 	NetBytesSent uint64  `json:"net_bytes_sent" db:"net_bytes_sent"`
 	NetBytesRecv uint64  `json:"net_bytes_recv" db:"net_bytes_recv"`
-	NetPktsSent  uint64  `json:"net_packets_sent" db:"net_packets_sent"`
-	NetPktsRecv  uint64  `json:"net_packets_recv" db:"net_packets_recv"`
+	SwapTotal    uint64  `json:"-" db:"-"`
+	SwapUsed     uint64  `json:"-" db:"-"`
 	Timestamp    string  `json:"timestamp" db:"timestamp"`
 }
 
@@ -31,15 +31,6 @@ type DiskPartition struct {
 	FSType       string  `json:"fs_type"`
 	TotalBytes   uint64  `json:"total_bytes"`
 	UsedBytes    uint64  `json:"used_bytes"`
-	FreeBytes    uint64  `json:"free_bytes"`
-	UsagePercent float64 `json:"usage_percent"`
-}
-
-// SwapInfo represents swap memory info
-type SwapInfo struct {
-	TotalBytes   uint64  `json:"total_bytes"`
-	UsedBytes    uint64  `json:"used_bytes"`
-	FreeBytes    uint64  `json:"free_bytes"`
 	UsagePercent float64 `json:"usage_percent"`
 }
 
@@ -66,20 +57,24 @@ type MonitorSnapshot struct {
 		UsedBytes    uint64  `json:"used_bytes"`
 		UsagePercent float64 `json:"usage_percent"`
 	} `json:"memory"`
-	Swap *SwapInfo `json:"swap,omitempty"`
-	Disk []struct {
+	Swap struct {
+		TotalBytes   uint64  `json:"total_bytes"`
+		UsedBytes    uint64  `json:"used_bytes"`
+		UsagePercent float64 `json:"usage_percent"`
+	} `json:"swap,omitempty"`
+	Disk struct {
 		MountPoint   string  `json:"mount_point"`
 		TotalBytes   uint64  `json:"total_bytes"`
 		UsedBytes    uint64  `json:"used_bytes"`
 		UsagePercent float64 `json:"usage_percent"`
 	} `json:"disk"`
-	Partitions []DiskPartition `json:"partitions,omitempty"`
-	Network    struct {
+	Network struct {
 		BytesSent uint64 `json:"bytes_sent"`
 		BytesRecv uint64 `json:"bytes_recv"`
 	} `json:"network"`
-	System    *SystemInfo `json:"system,omitempty"`
-	Timestamp string      `json:"timestamp"`
+	Partitions []DiskPartition `json:"partitions,omitempty"`
+	System     *SystemInfo     `json:"system,omitempty"`
+	Timestamp  string          `json:"timestamp"`
 }
 
 // ToSnapshot converts MonitorPoint to API response format
@@ -97,53 +92,33 @@ func (p *MonitorPoint) ToSnapshot() *MonitorSnapshot {
 	s.Memory.UsedBytes = p.MemUsed
 	s.Memory.UsagePercent = p.MemPercent
 
-	s.Disk = []struct {
+	if p.SwapTotal > 0 {
+
+		s.Swap = struct {
+			TotalBytes   uint64  `json:"total_bytes"`
+			UsedBytes    uint64  `json:"used_bytes"`
+			UsagePercent float64 `json:"usage_percent"`
+		}{
+			TotalBytes:   p.SwapTotal,
+			UsedBytes:    p.SwapUsed,
+			UsagePercent: math.Round(float64(p.SwapUsed)/float64(p.SwapTotal)*100*100) / 100,
+		}
+	}
+
+	s.Disk = struct {
 		MountPoint   string  `json:"mount_point"`
 		TotalBytes   uint64  `json:"total_bytes"`
 		UsedBytes    uint64  `json:"used_bytes"`
 		UsagePercent float64 `json:"usage_percent"`
 	}{
-		{
-			MountPoint:   "/",
-			TotalBytes:   p.DiskTotal,
-			UsedBytes:    p.DiskUsed,
-			UsagePercent: p.DiskPercent,
-		},
+		MountPoint:   "/",
+		TotalBytes:   p.DiskTotal,
+		UsedBytes:    p.DiskUsed,
+		UsagePercent: p.DiskPercent,
 	}
 
 	s.Network.BytesSent = p.NetBytesSent
 	s.Network.BytesRecv = p.NetBytesRecv
 
 	return s
-}
-
-// MonitorData is the legacy format (keep for compatibility)
-type MonitorData struct {
-	ID        int64     `json:"id" db:"id"`
-	CPU       float64   `json:"cpu" db:"cpu"`
-	Memory    MemInfo   `json:"memory"`
-	Disk      DiskInfo  `json:"disk"`
-	Network   NetInfo   `json:"network"`
-	Timestamp time.Time `json:"timestamp" db:"timestamp"`
-}
-
-type MemInfo struct {
-	Total     uint64  `json:"total"`
-	Used      uint64  `json:"used"`
-	Available uint64  `json:"available"`
-	Usage     float64 `json:"usage"`
-}
-
-type DiskInfo struct {
-	Total uint64  `json:"total"`
-	Used  uint64  `json:"used"`
-	Free  uint64  `json:"free"`
-	Usage float64 `json:"usage"`
-}
-
-type NetInfo struct {
-	BytesSent   uint64 `json:"bytes_sent"`
-	BytesRecv   uint64 `json:"bytes_recv"`
-	PacketsSent uint64 `json:"packets_sent"`
-	PacketsRecv uint64 `json:"packets_recv"`
 }

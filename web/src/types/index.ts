@@ -73,12 +73,12 @@ export interface MonitorSnapshot {
     usage_percent: number;
   };
   swap?: SwapInfo;
-  disk: Array<{
+  disk: {
     mount_point: string;
     total_bytes: number;
     used_bytes: number;
     usage_percent: number;
-  }>;
+  };
   partitions?: DiskPartition[];
   network: {
     bytes_sent: number;

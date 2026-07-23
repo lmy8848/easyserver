@@ -3,7 +3,6 @@ import { Row, Col, Card, Statistic, Spin, Descriptions, Table, Segmented } from 
 import {
   DesktopOutlined,
   HddOutlined,
-  CloudServerOutlined,
   WifiOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
@@ -68,7 +67,14 @@ export default function Dashboard() {
     path: '/ws/monitor',
     onMessage: (msg) => {
       if (msg.type === 'stats' && msg.data) {
-        setStats(msg.data);
+        setStats(prev => {
+          if (!prev) return msg.data;
+          return {
+            ...msg.data,
+            system: msg.data.system || prev.system,
+            partitions: msg.data.partitions || prev.partitions,
+          };
+        });
         appendToHistory(msg.data);
       }
     },
@@ -324,14 +330,14 @@ export default function Dashboard() {
           <Card>
             <Statistic
               title="磁盘使用率"
-              value={stats?.disk?.[0]?.usage_percent || 0}
+              value={stats?.disk?.usage_percent || 0}
               precision={1}
               suffix="%"
-              prefix={<CloudServerOutlined />}
-              styles={{ content: { color: getPercentColor(stats?.disk?.[0]?.usage_percent || 0) } }}
+              prefix={<HddOutlined />}
+              styles={{ content: { color: getPercentColor(stats?.disk?.usage_percent || 0) } }}
             />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
-              {formatBytes(stats?.disk?.[0]?.used_bytes || 0)} / {formatBytes(stats?.disk?.[0]?.total_bytes || 0)}
+              已用: {formatBytes(stats?.disk?.used_bytes || 0)} / {formatBytes(stats?.disk?.total_bytes || 0)}
             </div>
           </Card>
         </Col>
