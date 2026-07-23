@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Card, Table, Tag, Space, Input, Select, Button, Tooltip, Typography, Tabs, message } from 'antd';
+import { Card, Table, Tag, Space, Input, Select, Button, Tooltip, Typography, Tabs, message, DatePicker, Row, Col } from 'antd';
+import ReactECharts from 'echarts-for-react';
 import { ReloadOutlined } from '@ant-design/icons';
-import type { SystemProcess } from '../../types';
-import { systemProcessApi, systemApi } from '../../services/api';
+import type { SystemProcess, MonitorSnapshot } from '../../types';
+import { systemProcessApi, systemApi, monitorApi } from '../../services/api';
+import { formatBytes } from '../../utils/format';
+import dayjs from 'dayjs';
 
 const { Text } = Typography;
 const { Search } = Input;
@@ -257,16 +260,183 @@ function PortTab() {
 }
 
 // ============================================================
-// SystemMonitor - unified monitoring page (processes + ports)
+// History tab
+// ============================================================
+
+const { RangePicker } = DatePicker;
+
+const formatChartTime = (ts: string | number) => {
+  return dayjs(ts).format('MM-DD HH:mm');
+};
+
+const baseChartOption = {
+  animation: false,
+  tooltip: { trigger: 'axis' as const },
+  grid: { top: 40, right: 20, bottom: 30, left: 50 },
+  xAxis: {
+    type: 'time' as const,
+    axisLabel: { fontSize: 11, hideOverlap: true, formatter: (v: number) => formatChartTime(v) },
+  },
+  dataZoom: [{ type: 'inside' as const }],
+};
+
+function HistoryTab() {
+  const [history, setHistory] = useState<MonitorSnapshot[]>([]);
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>([dayjs().subtract(1, 'hour'), dayjs()]);
+  const [cpuCores, setCpuCores] = useState<number>(1);
+
+  useEffect(() => {
+    monitorApi.getStats()
+      .then(res => setCpuCores(res.data?.data?.system?.cpu_cores || 1))
+      .catch(() => {});
+  }, []);
+
+  const rangePresets: { label: string; value: [dayjs.Dayjs, dayjs.Dayjs] }[] = [
+    { label: '最近 1 小时', value: [dayjs().subtract(1, 'hour'), dayjs()] },
+    { label: '最近 1 天', value: [dayjs().subtract(1, 'day'), dayjs()] },
+    { label: '最近 7 天', value: [dayjs().subtract(7, 'day'), dayjs()] },
+    { label: '最近 30 天', value: [dayjs().subtract(30, 'day'), dayjs()] },
+  ];
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      const start = dateRange?.[0] ? dateRange[0].toISOString() : undefined;
+      const end = dateRange?.[1] ? dateRange[1].toISOString() : undefined;
+      const res = await monitorApi.getHistory(start, end);
+      setHistory(res.data?.data?.points || []);
+    } catch {
+      message.error('获取历史监控数据失败');
+    }
+  }, [dateRange]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  const cpuChartOption = useMemo(() => ({
+    ...baseChartOption,
+    title: { text: 'CPU 使用率 (%)', left: 'center', textStyle: { fontSize: 14 } },
+    yAxis: { type: 'value' as const, min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+    series: [{
+      name: 'CPU', type: 'line', smooth: true, areaStyle: { opacity: 0.3 },
+      showSymbol: false, sampling: 'lttb' as const,
+      data: history.map(p => [p.timestamp, p.cpu.usage_percent]),
+    }]
+  }), [history]);
+
+  const memChartOption = useMemo(() => ({
+    ...baseChartOption,
+    title: { text: '内存使用率 (%)', left: 'center', textStyle: { fontSize: 14 } },
+    yAxis: { type: 'value' as const, min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: (params: any[]) => {
+        const p = params[0];
+        if (!p) return '';
+        const point = history[p.dataIndex];
+        if (!point) return '';
+        const time = formatChartTime(point.timestamp);
+        const used = formatBytes(point.memory.used_bytes);
+        const total = formatBytes(point.memory.total_bytes);
+        const percent = point.memory.usage_percent.toFixed(1);
+        return `<div>${time}</div>
+                <div>${p.marker} 内存使用率: ${percent}%</div>
+                <div style="font-size:12px;color:#888;margin-top:4px;">已用: ${used} / 总量: ${total}</div>`;
+      }
+    },
+    series: [{
+      name: '内存', type: 'line', smooth: true, areaStyle: { opacity: 0.3 }, itemStyle: { color: '#52c41a' },
+      showSymbol: false, sampling: 'lttb' as const,
+      data: history.map(p => [p.timestamp, p.memory.usage_percent]),
+    }]
+  }), [history]);
+
+  const diskChartOption = useMemo(() => ({
+    ...baseChartOption,
+    title: { text: '磁盘使用率 (%)', left: 'center', textStyle: { fontSize: 14 } },
+    yAxis: { type: 'value' as const, min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+    series: [{
+      name: '磁盘', type: 'line', smooth: true, areaStyle: { opacity: 0.3 }, itemStyle: { color: '#fa8c16' },
+      showSymbol: false, sampling: 'lttb' as const,
+      data: history.map(p => [p.timestamp, p.disk.usage_percent]),
+    }]
+  }), [history]);
+
+  const loadChartOption = useMemo(() => ({
+    ...baseChartOption,
+    title: { text: '系统负载', left: 'center', textStyle: { fontSize: 14 } },
+    yAxis: { type: 'value' as const },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: (params: any[]) => {
+        const p = params[0];
+        if (!p) return '';
+        const point = history[p.dataIndex];
+        if (!point) return '';
+        const time = formatChartTime(point.timestamp);
+        
+        let html = `<div>${time}</div>`;
+        params.forEach(param => {
+          html += `<div>${param.marker} ${param.seriesName}: ${param.value[1].toFixed(2)}</div>`;
+        });
+        html += `<div style="font-size:12px;color:#888;margin-top:4px;">物理核心数: ${cpuCores} (负载 > 核心数即为高负载)</div>`;
+        
+        return html;
+      }
+    },
+    series: [
+      { name: '1分钟', type: 'line', smooth: true, showSymbol: false, sampling: 'lttb' as const, data: history.map(p => [p.timestamp, p.cpu.load_1m]) },
+      { name: '5分钟', type: 'line', smooth: true, showSymbol: false, sampling: 'lttb' as const, data: history.map(p => [p.timestamp, p.cpu.load_5m]) },
+      { name: '15分钟', type: 'line', smooth: true, showSymbol: false, sampling: 'lttb' as const, data: history.map(p => [p.timestamp, p.cpu.load_15m]) },
+    ]
+  }), [history, cpuCores]);
+
+  return (
+    <Card
+      title="监控数据"
+      extra={
+        <Space>
+          <RangePicker
+            showTime
+            presets={rangePresets}
+            value={dateRange}
+            onChange={(dates) => setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+            onOk={fetchHistory}
+          />
+          <Button icon={<ReloadOutlined />} onClick={fetchHistory}>刷新</Button>
+        </Space>
+      }
+    >
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <ReactECharts option={cpuChartOption} style={{ height: 300 }} />
+        </Col>
+        <Col xs={24} lg={12}>
+          <ReactECharts option={memChartOption} style={{ height: 300 }} />
+        </Col>
+        <Col xs={24} lg={12}>
+          <ReactECharts option={diskChartOption} style={{ height: 300 }} />
+        </Col>
+        <Col xs={24} lg={12}>
+          <ReactECharts option={loadChartOption} style={{ height: 300 }} />
+        </Col>
+      </Row>
+    </Card>
+  );
+}
+
+// ============================================================
+// SystemMonitor - unified monitoring page (processes + ports + history)
 // ============================================================
 
 export default function SystemMonitor() {
   return (
     <Tabs
-      defaultActiveKey="processes"
+      defaultActiveKey="history"
       items={[
-        { key: 'processes', label: '进程', children: <ProcessTab /> },
-        { key: 'ports', label: '端口', children: <PortTab /> },
+        { key: 'history', label: '监控数据', children: <HistoryTab /> },
+        { key: 'processes', label: '系统进程', children: <ProcessTab /> },
+        { key: 'ports', label: '端口占用', children: <PortTab /> },
       ]}
     />
   );
