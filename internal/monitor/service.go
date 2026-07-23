@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -39,47 +40,43 @@ type MonitorClient struct {
 }
 
 type MonitorHub struct {
-	mu      sync.RWMutex
-	clients map[*MonitorClient]struct{}
+	clients sync.Map // map[*MonitorClient]struct{}
 }
 
 func NewMonitorHub() *MonitorHub {
-	return &MonitorHub{
-		clients: make(map[*MonitorClient]struct{}),
-	}
+	return &MonitorHub{}
 }
 
 func (h *MonitorHub) Register(c *MonitorClient) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.clients[c] = struct{}{}
+	h.clients.Store(c, struct{}{})
 }
 
 func (h *MonitorHub) Unregister(c *MonitorClient) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.clients[c]; ok {
-		delete(h.clients, c)
+	if _, ok := h.clients.Load(c); ok {
+		h.clients.Delete(c)
 		close(c.Send)
 	}
 }
 
 func (h *MonitorHub) Broadcast(data []byte) {
-	for c := range h.clients {
+	h.clients.Range(func(key, value any) bool {
+		c := key.(*MonitorClient)
 		select {
 		case c.Send <- data:
 		default:
 			// Skip slow clients
 		}
-	}
+		return true
+	})
 }
 
 type MonitorService struct {
-	mu          sync.RWMutex
 	monitorRepo Repository
-	interval    time.Duration
-	retention   time.Duration
+	interval    atomic.Int64
+	retention   atomic.Int64
 	hub         *MonitorHub
+
+	intervalUpdateCh chan time.Duration
 	// 差值计算状态缓存
 	lastCpuIdle  uint64
 	lastCpuTotal uint64
@@ -87,7 +84,6 @@ type MonitorService struct {
 	lastNetRecv  uint64
 	stopCh       chan struct{}
 	lastCleanup  time.Time
-	ticker       *time.Ticker
 
 	// 告警与审计评估
 	alertService    Evaluator
@@ -103,15 +99,17 @@ type MonitorService struct {
 }
 
 func NewMonitorService(monitorRepo Repository, interval, retention time.Duration) *MonitorService {
-	return &MonitorService{
-		monitorRepo: monitorRepo,
-		interval:    interval,
-		retention:   retention,
-		hub:         NewMonitorHub(),
-		stopCh:      make(chan struct{}),
-		ringBuffer:  make([]*MonitorPoint, 60), // 60 points buffer
-		ringSize:    60,
+	s := &MonitorService{
+		monitorRepo:      monitorRepo,
+		hub:              NewMonitorHub(),
+		stopCh:           make(chan struct{}),
+		intervalUpdateCh: make(chan time.Duration, 1),
+		ringBuffer:       make([]*MonitorPoint, 60), // 60 points buffer
+		ringSize:         60,
 	}
+	s.interval.Store(int64(interval))
+	s.retention.Store(int64(retention))
+	return s
 }
 
 func (s *MonitorService) Hub() *MonitorHub {
@@ -133,19 +131,17 @@ func (s *MonitorService) SetInterval(interval time.Duration) {
 	if interval < time.Second {
 		interval = time.Second
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.interval = interval
-	if s.ticker != nil {
-		s.ticker.Reset(interval)
+	s.interval.Store(int64(interval))
+	// 优雅地非阻塞通知主循环去 Reset Ticker
+	select {
+	case s.intervalUpdateCh <- interval:
+	default:
 	}
 }
 
 // SetRetention updates the history retention duration dynamically.
 func (s *MonitorService) SetRetention(retention time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.retention = retention
+	s.retention.Store(int64(retention))
 }
 
 func (s *MonitorService) Start() {
@@ -158,13 +154,9 @@ func (s *MonitorService) Start() {
 		}
 	})
 
-	s.ticker = time.NewTicker(s.interval)
-	ticker := s.ticker
-	defer func() {
-		if s.ticker != nil {
-			s.ticker.Stop()
-		}
-	}()
+	// Ticker 现在是主循环专属的本地变量，彻底告别锁
+	ticker := time.NewTicker(time.Duration(s.interval.Load()))
+	defer ticker.Stop()
 
 	// 启动后台专用的刷写协程
 	infra.Go(func() {
@@ -189,6 +181,8 @@ func (s *MonitorService) Start() {
 		select {
 		case <-ticker.C:
 			s.collect()
+		case newInterval := <-s.intervalUpdateCh:
+			ticker.Reset(newInterval)
 		case <-s.stopCh:
 			return
 		}
@@ -335,7 +329,7 @@ func (s *MonitorService) GetLatestPoint() *MonitorPoint {
 
 func (s *MonitorService) cleanup() {
 	ctx := context.Background()
-	since := time.Now().UTC().Add(-s.retention)
+	since := time.Now().UTC().Add(-time.Duration(s.retention.Load()))
 	rows, err := s.monitorRepo.Clean(ctx, since)
 	if err != nil {
 		log.Printf("monitor: cleanup error: %v", err)
