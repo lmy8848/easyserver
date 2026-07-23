@@ -2,7 +2,6 @@ package http
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -164,22 +163,9 @@ func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
 	})
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		_, _, err := conn.ReadMessage()
 		if err != nil {
 			break
-		}
-
-		var req map[string]interface{}
-		if err := json.Unmarshal(msg, &req); err != nil {
-			continue
-		}
-
-		if req["type"] == "ping" {
-			// Send pong through channel to avoid concurrent write
-			select {
-			case client.Send <- []byte(`{"type":"pong"}`):
-			default:
-			}
 		}
 	}
 }

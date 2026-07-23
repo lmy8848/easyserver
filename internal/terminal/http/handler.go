@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -59,12 +58,6 @@ func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, aud
 		jwtSecret:       jwtSecret,
 		upgrader:        httpx.CreateUpgrader(),
 	}
-}
-
-// wsMessage represents a WebSocket message from the client
-type wsMessage struct {
-	Type string `json:"type"`
-	Data string `json:"data"`
 }
 
 // HandleWebSocket handles terminal WebSocket connections
@@ -243,22 +236,6 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 				log.Printf("terminal: websocket read error: %v", err)
 			}
 			break
-		}
-
-		// Parse message type
-		var msgType wsMessage
-		if err := json.Unmarshal(msg, &msgType); err != nil {
-			continue
-		}
-
-		// Handle ping/pong
-		if msgType.Type == "ping" {
-			// Route pong through wsWrite to ensure serialized writes
-			select {
-			case wsWrite <- []byte(`{"type":"pong"}`):
-			default:
-			}
-			continue
 		}
 
 		// Handle terminal input

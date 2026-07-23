@@ -21,10 +21,7 @@ interface UseWebSocketOptions {
   maxReconnectAttempts?: number;
   /** Base reconnect delay in ms (default: 3000) */
   reconnectDelay?: number;
-  /** Ping interval in ms (default: 30000, 0 to disable) */
-  pingInterval?: number;
-  /** Custom ping message (default: { type: 'ping' }) */
-  pingMessage?: string;
+
   /** Whether to connect immediately (default: true) */
   enabled?: boolean;
 }
@@ -57,15 +54,12 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     autoReconnect = true,
     maxReconnectAttempts = 10,
     reconnectDelay = 3000,
-    pingInterval = 30000,
-    pingMessage = JSON.stringify({ type: 'ping' }),
     enabled = true,
   } = options;
 
   const wsRef = useRef<WebSocket | null>(null);
   const [ws, setWs] = useState<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const [status, setStatus] = useState<WSStatus>('disconnected');
   const disposedRef = useRef(false);
@@ -94,10 +88,6 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
-    }
-    if (pingTimerRef.current) {
-      clearInterval(pingTimerRef.current);
-      pingTimerRef.current = null;
     }
   }, []);
 
@@ -129,15 +119,6 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     ws.onopen = () => {
       reconnectAttemptsRef.current = 0;
       setStatusInternal('connected');
-
-      // Start ping interval
-      if (pingInterval > 0) {
-        pingTimerRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(pingMessage);
-          }
-        }, pingInterval);
-      }
 
       onOpenRef.current?.(ws);
     };
@@ -187,7 +168,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       setStatusInternal('reconnecting');
       reconnectTimerRef.current = setTimeout(() => connectRef.current(), delay);
     };
-  }, [path, autoReconnect, maxReconnectAttempts, reconnectDelay, pingInterval, pingMessage, cleanupTimers, setStatusInternal]);
+  }, [path, autoReconnect, maxReconnectAttempts, reconnectDelay, cleanupTimers, setStatusInternal]);
 
   useEffect(() => {
     connectRef.current = connect;
