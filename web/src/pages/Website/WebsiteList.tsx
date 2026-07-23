@@ -10,9 +10,10 @@ import {
   FileTextOutlined, ArrowLeftOutlined, CloudServerOutlined,
   StopOutlined, ReloadOutlined, DownloadOutlined,
   UndoOutlined, CodeOutlined, ToolOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, FolderOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, FolderOutlined, ProfileOutlined,
 } from '@ant-design/icons';
 import api, { webServerApi, websiteApi } from '../../services/api';
+import DetailDrawer from './DetailDrawer';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';
 import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './types';
@@ -65,6 +66,7 @@ export default function WebsiteList({
   // Create/Edit modal
   const [modalVisible, setModalVisible] = useState(false);
   const [editingSite, setEditingSite] = useState<Website | null>(null);
+  const [detailSite, setDetailSite] = useState<Website | null>(null);
   const [form] = Form.useForm();
 
   // Log modal
@@ -386,6 +388,9 @@ export default function WebsiteList({
       title: '操作', key: 'action', width: 380,
       render: (_: unknown, record: Website) => (
         <Space size="small" wrap>
+          <Tooltip title="详情">
+            <Button type="link" size="small" icon={<ProfileOutlined />} onClick={() => setDetailSite(record)} />
+          </Tooltip>
           <Tooltip title="编辑">
             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSite(record)} />
           </Tooltip>
@@ -864,6 +869,7 @@ export default function WebsiteList({
           )}
         </div>
       </Modal>
+      <DetailDrawer webServerId={selectedServer.id} website={detailSite} open={!!detailSite} onClose={() => setDetailSite(null)} />
     </div>
   );
 }

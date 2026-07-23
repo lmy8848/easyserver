@@ -857,6 +857,111 @@ func detectProjectType(dir string) string {
 	return ""
 }
 
+// GetWebsiteSSL returns parsed SSL certificate detail.
+func (h *WebServerHandler) GetWebsiteSSL(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	info, err := h.websiteService.GetSSL(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, info)
+}
+
+// GetWebsiteConfig returns the generated nginx config file content.
+func (h *WebServerHandler) GetWebsiteConfig(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	cfg, err := h.websiteService.GetConfig(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"config": cfg})
+}
+
+// GetWebsiteParsedLogs returns structured access/error log entries.
+func (h *WebServerHandler) GetWebsiteParsedLogs(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	logType := c.DefaultQuery("type", "access")
+	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "500"))
+	if lines <= 0 {
+		lines = 500
+	}
+	entries, err := h.websiteService.GetParsedLogs(c.Request.Context(), sid, id, logType, lines)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"entries": entries, "type": logType})
+}
+
+// GetWebsiteStats returns access-log statistics.
+func (h *WebServerHandler) GetWebsiteStats(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	stats, err := h.websiteService.GetStats(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, stats)
+}
+
+// ProbeWebsiteHealth performs an HTTP health probe.
+func (h *WebServerHandler) ProbeWebsiteHealth(c *gin.Context) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+		return
+	}
+	res, err := h.websiteService.ProbeHealth(c.Request.Context(), sid, id)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, res)
+}
+
 // RegisterRoutes registers web server and website management routes
 func RegisterRoutes(protected *gin.RouterGroup, webServerService *web.Service, websiteService *web.WebsiteService) {
 	handler := NewWebServerHandler(webServerService, websiteService)
@@ -899,4 +1004,11 @@ func RegisterRoutes(protected *gin.RouterGroup, webServerService *web.Service, w
 
 	// Website build
 	protected.POST("/web-servers/:id/websites/:wid/build", handler.BuildWebsite)
+
+	// Website detail (Drawer)
+	protected.GET("/web-servers/:id/websites/:wid/ssl", handler.GetWebsiteSSL)
+	protected.GET("/web-servers/:id/websites/:wid/config", handler.GetWebsiteConfig)
+	protected.GET("/web-servers/:id/websites/:wid/logs/parse", handler.GetWebsiteParsedLogs)
+	protected.GET("/web-servers/:id/websites/:wid/stats", handler.GetWebsiteStats)
+	protected.POST("/web-servers/:id/websites/:wid/health/probe", handler.ProbeWebsiteHealth)
 }
