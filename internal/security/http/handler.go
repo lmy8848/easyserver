@@ -140,6 +140,58 @@ func (h *Handler) UnbanIP(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "已解封"})
 }
 
+// ScanBaseline builds the file integrity baseline.
+func (h *Handler) ScanBaseline(c *gin.Context) {
+	middleware.AuditSummary(c, "FIM 建立基线")
+	if err := h.svc.ScanBaseline(c.Request.Context()); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "基线已建立"})
+}
+
+// CheckChanges checks for file changes against baseline.
+func (h *Handler) CheckChanges(c *gin.Context) {
+	middleware.AuditSummary(c, "FIM 检测变更")
+	changes, err := h.svc.CheckChanges(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"changes": changes, "count": len(changes)})
+}
+
+// ListBaseline returns the FIM baseline.
+func (h *Handler) ListBaseline(c *gin.Context) {
+	bl, err := h.svc.ListBaseline(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"baseline": bl})
+}
+
+// ListChanges returns recent FIM changes.
+func (h *Handler) ListChanges(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	changes, err := h.svc.ListChanges(c.Request.Context(), limit)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"changes": changes})
+}
+
+// ResetBaseline resets the FIM baseline.
+func (h *Handler) ResetBaseline(c *gin.Context) {
+	middleware.AuditSummary(c, "FIM 重置基线")
+	if err := h.svc.ResetBaseline(c.Request.Context()); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "基线已重置"})
+}
+
 // RegisterRoutes registers security-audit routes.
 func RegisterRoutes(protected *gin.RouterGroup, svc *security.Service) {
 	h := NewHandler(svc)
@@ -153,4 +205,10 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *security.Service) {
 	protected.GET("/security/login/banned", h.ListBannedIPs)
 	protected.POST("/security/login/ban", h.BanIP)
 	protected.POST("/security/login/unban", h.UnbanIP)
+
+	protected.POST("/security/fim/scan", h.ScanBaseline)
+	protected.POST("/security/fim/check", h.CheckChanges)
+	protected.GET("/security/fim/baseline", h.ListBaseline)
+	protected.GET("/security/fim/changes", h.ListChanges)
+	protected.POST("/security/fim/reset", h.ResetBaseline)
 }

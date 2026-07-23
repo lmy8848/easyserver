@@ -49,6 +49,7 @@ const MENU_GROUPS = [
       { key: '/security', icon: 'lock', label: '安全设置' },
       { key: '/vulnerabilities', icon: 'alert', label: '漏洞扫描' },
       { key: '/login-guard', icon: 'shield', label: '登录防护' },
+      { key: '/fim', icon: 'check', label: '文件完整性' },
     ],
   },
 ];
@@ -121,6 +122,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/security': '安全设置',
   '/vulnerabilities': '漏洞扫描',
   '/login-guard': '登录防护',
+  '/fim': '文件完整性',
 };
 
 const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {

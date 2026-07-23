@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,16 +16,17 @@ import (
 )
 
 // Service provides security-audit operations (CVE scanning, kernel status,
-// login anomaly detection).
+// login anomaly detection, file integrity monitoring).
 type Service struct {
 	exec     executor.CommandExecutor
 	firewall *firewall.Service
 	auth     *auth.AuthService
+	db       *sql.DB
 }
 
 // NewService creates a security Service.
-func NewService(exec executor.CommandExecutor, firewallSvc *firewall.Service, authSvc *auth.AuthService) *Service {
-	return &Service{exec: exec, firewall: firewallSvc, auth: authSvc}
+func NewService(exec executor.CommandExecutor, firewallSvc *firewall.Service, authSvc *auth.AuthService, db *sql.DB) *Service {
+	return &Service{exec: exec, firewall: firewallSvc, auth: authSvc, db: db}
 }
 
 // Vulnerability is one installed package with known CVEs.
