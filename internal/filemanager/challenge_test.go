@@ -298,3 +298,59 @@ func TestChallenge_Upload_IntermediateSymlinkRejected(t *testing.T) {
 		}
 	}
 }
+
+// PoC-12: ResolveShareSubpath — the public share list/download endpoints anchor a
+// user-supplied subpath under a shared directory. The old code used a bare
+// strings.HasPrefix(Join(root, cleanSub), root) check, which never resolves
+// symlinks. An attacker who can create a symlink inside the share (e.g. an
+// upload is NOT required — any share of a dir containing a pre-existing symlink,
+// or a share of a dir the attacker can write into) points it at /etc/passwd or a
+// sandbox sibling the owner never shared, then requests
+//
+//	/api/shares/public/<token>/list?ticket=..&subpath=link
+//
+// and reads the outside file. Confirm ResolveShareSubpath blocks it.
+func TestChallenge_ResolveShareSubpath_SymlinkEscape(t *testing.T) {
+	base := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "loot.txt")
+	os.WriteFile(outside, []byte("LOOT"), 0644)
+
+	// shared directory contains a symlink pointing outside the sandbox
+	shareRoot := filepath.Join(base, "share")
+	os.MkdirAll(shareRoot, 0755)
+	os.Symlink(outside, filepath.Join(shareRoot, "link"))
+
+	m, _ := NewManager(base)
+	validRoot, err := m.ValidatePath("/share")
+	if err != nil {
+		t.Fatalf("ValidatePath /share: %v", err)
+	}
+	if _, err := m.ResolveShareSubpath(validRoot, "link"); err == nil {
+		data, _ := os.ReadFile(outside)
+		t.Errorf("VULN: ResolveShareSubpath followed symlink out, would leak: %q", data)
+	}
+}
+
+// PoC-13: ".." traversal in subpath. Clean+Join("/", "..") => "/" => "" => root.
+// Any relative traversal that survives must resolve under shareRoot; confirm it
+// can never escape to basePath root or a sibling.
+func TestChallenge_ResolveShareSubpath_Traversal(t *testing.T) {
+	base := t.TempDir()
+	// sibling dir the owner never shared
+	os.MkdirAll(filepath.Join(base, "secret"), 0755)
+	os.WriteFile(filepath.Join(base, "secret", "x.txt"), []byte("SECRET"), 0644)
+	shareRoot := filepath.Join(base, "share")
+	os.MkdirAll(shareRoot, 0755)
+
+	m, _ := NewManager(base)
+	validRoot, err := m.ValidatePath("/share")
+	if err != nil {
+		t.Fatalf("ValidatePath /share: %v", err)
+	}
+	for _, sub := range []string{"../secret/x.txt", "../../secret/x.txt", "..%2f..%2fsecret"} {
+		if _, err := m.ResolveShareSubpath(validRoot, sub); err == nil {
+			data, _ := os.ReadFile(filepath.Join(base, "secret", "x.txt"))
+			t.Errorf("VULN: subpath %q escaped share root, would leak: %q", sub, data)
+		}
+	}
+}

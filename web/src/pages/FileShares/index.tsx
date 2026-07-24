@@ -17,7 +17,6 @@ export default function FileShares() {
   const [editingShare, setEditingShare] = useState<FileShare | null>(null);
   const [editForm] = Form.useForm();
   const [editLoading, setEditLoading] = useState(false);
-  const [editClearPwd, setEditClearPwd] = useState(false);
   const [editClearExpiry, setEditClearExpiry] = useState(false);
 
   const fetchShares = async () => {
@@ -101,8 +100,8 @@ export default function FileShares() {
         writeClipboard(`${window.location.origin}/share/${token}`);
         return;
       }
-      // 直达 /download 端点，浏览器直接触发下载
-      writeClipboard(`${window.location.origin}/share/${token}/download?password=${encodeURIComponent(pwd)}`);
+      // 复制带有 password 参数的前端页面链接，前端页面会自动读取并填入密码
+      writeClipboard(`${window.location.origin}/share/${token}?password=${encodeURIComponent(pwd)}`);
     } catch (error: unknown) {
       message.error(error instanceof Error ? error.message : '获取外链信息失败');
     }
@@ -112,9 +111,8 @@ export default function FileShares() {
     copyToClipboard(text, '链接已复制');
   };
 
-  const handleEdit = (share: FileShare) => {
+  const handleEdit = async (share: FileShare) => {
     setEditingShare(share);
-    setEditClearPwd(false);
     setEditClearExpiry(false);
     editForm.resetFields();
     editForm.setFieldsValue({
@@ -122,6 +120,16 @@ export default function FileShares() {
       expires_at: share.expires_at || '',
     });
     setEditVisible(true);
+    
+    // Fetch full info to echo password
+    try {
+      const res = await fileShareApi.get(share.id);
+      editForm.setFieldsValue({
+        password: res.data.data?.password || '',
+      });
+    } catch (error) {
+      console.error('Failed to fetch share password', error);
+    }
   };
 
   const handleEditSubmit = async () => {
@@ -135,13 +143,8 @@ export default function FileShares() {
         expires_at?: string;
         max_downloads: number;
         clear_expiry?: boolean;
-      } = { max_downloads: v.max_downloads ?? 0 };
-      // 密码：勾选清除 -> ""；输入新值 -> 替换；否则不传(保持不变)
-      if (editClearPwd) {
-        payload.password = '';
-      } else if (v.password) {
-        payload.password = v.password;
-      }
+      } = { max_downloads: v.max_downloads ?? 0, password: v.password || '' };
+      
       // 过期时间：勾选永久 -> clear_expiry；输入新值 -> 替换；否则不传
       if (editClearExpiry) {
         payload.clear_expiry = true;
@@ -178,51 +181,43 @@ export default function FileShares() {
   };
 
   const columns = [
-    { title: '文件名', dataIndex: 'file_name', key: 'file_name', ellipsis: true, width: 200 },
+    { title: '文件名', dataIndex: 'file_name', key: 'file_name', ellipsis: true },
+    { 
+      title: '类型', key: 'type', width: 80, 
+      render: (_: unknown, record: FileShare) => record.is_dir ? '文件夹' : '文件' 
+    },
     {
-      title: '源文件', key: 'source', width: 100,
+      title: '文件状态', key: 'file_status', width: 90,
       render: (_: unknown, record: FileShare) => record.file_exists === false
-        ? <Tag color="error">已不存在</Tag>
-        : record.current_size !== undefined && record.current_size !== record.file_size
-          ? <Tooltip title={`创建时 ${formatSize(record.file_size)}，当前 ${formatSize(record.current_size)}`}>
-              <Tag color="warning">已变更</Tag>
-            </Tooltip>
-          : <Tag color="success">正常</Tag>,
+        ? <Tag color="error" style={{ margin: 0 }}>已丢失</Tag>
+        : <Tag color="success" style={{ margin: 0 }}>正常</Tag>,
     },
     {
-      title: '创建时大小', dataIndex: 'file_size', key: 'file_size', width: 100,
-      render: (size: number) => formatSize(size),
+      title: '大小', key: 'file_size', width: 100,
+      render: (_: unknown, record: FileShare) => record.is_dir ? '-' : formatSize(record.current_size !== undefined ? record.current_size : record.file_size),
     },
     {
-      title: '当前大小', key: 'current_size', width: 100,
-      render: (_: unknown, record: FileShare) => record.current_size !== undefined
-        ? <span style={{ color: record.current_size !== record.file_size ? '#faad14' : undefined }}>
-            {formatSize(record.current_size)}
-          </span>
-        : '-',
-    },
-    {
-      title: '下载次数', key: 'downloads', width: 120,
+      title: '下载次数', key: 'downloads', width: 90,
       render: (_: unknown, record: FileShare) => (
         <span>{record.download_count}{record.max_downloads > 0 ? ` / ${record.max_downloads}` : ''}</span>
       ),
     },
     {
-      title: '密码', key: 'password', width: 80, align: 'center' as const,
+      title: '密码', key: 'password', width: 70, align: 'center' as const,
       render: (_: unknown, record: FileShare) => record.has_password
         ? <Tooltip title="已设置访问密码"><Tag color="orange" style={{ margin: 0 }}><LockOutlined /> 已设</Tag></Tooltip>
         : <Tag color="default" style={{ margin: 0 }}>无</Tag>,
     },
     {
-      title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 200,
+      title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 150,
       render: (t: string) => formatExpiry(t),
     },
     {
-      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180,
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 150,
       render: (t: string) => new Date(t).toLocaleString(),
     },
     {
-      title: '操作', key: 'action', width: 260,
+      title: '操作', key: 'action', width: 280,
       render: (_: unknown, record: FileShare) => (
         <Space size="small" wrap>
           <Tooltip title="复制链接（下载页，需输入密码）">
@@ -257,7 +252,7 @@ export default function FileShares() {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchShares}>刷新</Button>
-            <Button onClick={handleCleanup}>清理过期</Button>
+            <Button onClick={handleCleanup}>清理</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>生成外链</Button>
           </Space>
         }
@@ -269,6 +264,7 @@ export default function FileShares() {
           loading={loading}
           pagination={{ defaultPageSize: 20, showTotal: (t) => `共 ${t} 个外链` }}
           size="small"
+          scroll={{ x: 1000 }}
         />
       </Card>
 
@@ -286,8 +282,8 @@ export default function FileShares() {
           <Form.Item name="file_path" label="文件路径" rules={[{ required: true, message: '请输入文件路径' }]}>
             <Input placeholder="如：/var/www/html/file.zip" />
           </Form.Item>
-          <Form.Item name="expires_at" label="过期时间" extra="留空为永久有效。支持：1h, 1d, 7d 或具体时间 2026-07-01 12:00:00">
-            <Input placeholder="留空、1h、7d 或 2026-07-01 12:00:00" />
+          <Form.Item name="expires_at" label="过期时间" extra="留空为永久有效。支持：30m, 1h, 1d, 7d 或具体时间 2026-07-01 12:00:00">
+            <Input placeholder="留空、30m、1h、7d 或 2026-07-01 12:00:00" />
           </Form.Item>
           <Form.Item name="max_downloads" label="最大下载次数" extra="0 表示不限制">
             <InputNumber min={0} max={100000} style={{ width: '100%' }} />
@@ -312,14 +308,11 @@ export default function FileShares() {
           <Form.Item label="文件路径">
             <Input value={editingShare?.file_path} disabled />
           </Form.Item>
-          <Form.Item label="访问密码" extra="留空不修改；勾选下方清除可去掉密码">
-            <Input.Password placeholder={editingShare?.has_password ? '已设置密码，输入新值替换' : '未设置密码'} disabled={editClearPwd} />
+          <Form.Item name="password" label="访问密码" extra="留空可清除密码">
+            <Input.Password placeholder="未设置密码" />
           </Form.Item>
-          <Form.Item style={{ marginBottom: 16 }}>
-            <Checkbox checked={editClearPwd} onChange={(e) => setEditClearPwd(e.target.checked)}>清除密码</Checkbox>
-          </Form.Item>
-          <Form.Item name="expires_at" label="过期时间" extra="留空不修改；支持 1h, 7d 或 2026-07-01 12:00:00">
-            <Input placeholder="留空不修改、1h、7d 或 2026-07-01 12:00:00" disabled={editClearExpiry} />
+          <Form.Item name="expires_at" label="过期时间" extra="留空不修改；支持 30m, 1h, 7d 或 2026-07-01 12:00:00">
+            <Input placeholder="留空不修改、30m、1h、7d 或 2026-07-01 12:00:00" disabled={editClearExpiry} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 16 }}>
             <Checkbox checked={editClearExpiry} onChange={(e) => setEditClearExpiry(e.target.checked)}>设为永久有效</Checkbox>

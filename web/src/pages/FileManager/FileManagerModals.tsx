@@ -8,7 +8,7 @@ import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 
 // Use local monaco-editor bundle (no CDN)
-loader.config({ monaco });
+loader.config({ monaco: monaco as any });
 
 // Monaco workers: return a no-op worker stub so Monaco doesn't crash.
 // Monaco runs language services in main thread (fine for preview).

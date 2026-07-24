@@ -27,8 +27,7 @@ import (
 	envconfighttp "easyserver/internal/envconfig/http"
 	"easyserver/internal/filemanager"
 	filemanagerhttp "easyserver/internal/filemanager/http"
-	"easyserver/internal/fileshare"
-	filesharehttp "easyserver/internal/fileshare/http"
+
 	"easyserver/internal/firewall"
 	firewallhttp "easyserver/internal/firewall/http"
 	"easyserver/internal/httpx"
@@ -115,7 +114,7 @@ type RouterDeps struct {
 	FileManager *filemanager.Manager
 
 	// File share repository
-	FileShareRepo fileshare.Repository
+	FileShareRepo filemanager.ShareRepository
 
 	// QR login service (scan-to-login)
 	QRLoginService *qrlogin.Service
@@ -240,11 +239,10 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
 	notificationhttp.RegisterRoutes(protected, deps.NotificationService)
 	securityhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(deps.Executor, deps.FirewallService, deps.AuthService, deps.DB))
-	filesharehttp.RegisterRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)
+	filemanagerhttp.RegisterShareRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)
 
-	// Public file share routes (no auth): /share/:token/info + /share/:token/download.
-	// /share/:token itself is NOT registered so it falls through to the SPA fallback.
-	filesharehttp.RegisterPublicShareRoute(e, deps.FileShareRepo, deps.FileManager, cfg.Auth.RateLimit, cfg.Auth.RateInterval, cfg)
+	// Public file share routes (no auth)
+	filemanagerhttp.RegisterPublicShareRoute(api, deps.FileShareRepo, deps.FileManager, cfg.Auth.RateLimit, cfg.Auth.RateInterval, cfg)
 
 	// Tier 1: static assets limiter (applied to all frontend routes including SPA fallback)
 	if cfg.Server.ServeFrontend {

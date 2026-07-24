@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 // Use local monaco-editor bundle (no CDN)
-loader.config({ monaco });
+loader.config({ monaco: monaco as any });
 
 // Monaco workers: return a no-op worker stub so Monaco doesn't crash.
 (self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {

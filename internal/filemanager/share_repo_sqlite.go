@@ -1,4 +1,4 @@
-package fileshare
+package filemanager
 
 import (
 	"context"
@@ -11,7 +11,7 @@ type sqliteShareRepo struct {
 	db *sql.DB
 }
 
-func NewSQLiteShareRepository(db *sql.DB) Repository {
+func NewSQLiteShareRepository(db *sql.DB) ShareRepository {
 	return &sqliteShareRepo{db: db}
 }
 

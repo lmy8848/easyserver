@@ -1,4 +1,4 @@
-package fileshare
+package filemanager
 
 // FileShare represents an external file share link
 type FileShare struct {

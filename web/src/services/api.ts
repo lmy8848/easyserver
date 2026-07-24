@@ -5,7 +5,7 @@ import type {
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
-  SystemProcess, FileShare, ShareInfo,
+  SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
@@ -390,13 +390,13 @@ export const auditApi = {
 // File Share API
 export const fileShareApi = {
   create: (data: { file_path: string; password?: string; expires_at?: string; max_downloads?: number }) =>
-    api.post<ApiResponse<FileShare>>('/file-shares', data),
+    api.post<ApiResponse<FileShare>>('/shares', data),
 
   list: () =>
-    api.get<ApiResponse<FileShare[]>>('/file-shares'),
+    api.get<ApiResponse<FileShare[]>>('/shares'),
 
   get: (id: number) =>
-    api.get<ApiResponse<FileShare>>(`/file-shares/${id}`),
+    api.get<ApiResponse<FileShare>>(`/shares/${id}`),
 
   update: (id: number, data: {
     password?: string | null;
@@ -404,23 +404,24 @@ export const fileShareApi = {
     max_downloads?: number;
     clear_expiry?: boolean;
   }) =>
-    api.put<ApiResponse<FileShare>>(`/file-shares/${id}`, data),
+    api.put<ApiResponse<FileShare>>(`/shares/${id}`, data),
 
   delete: (id: number) =>
-    api.delete<ApiResponse>(`/file-shares/${id}`),
+    api.delete<ApiResponse>(`/shares/${id}`),
 
   cleanupExpired: () =>
-    api.post<ApiResponse<{ deleted: number }>>('/file-shares/cleanup'),
+    api.post<ApiResponse<{ deleted: number }>>('/shares/cleanup'),
 };
 
-// Public share endpoints live at the root (/share/:token/...), NOT under /api,
-// and may be accessed without auth (share recipients). Use a bare axios call.
+// Public share endpoints are now under /api/shares/public/...
+// They may be accessed without auth (share recipients).
 export const publicShareApi = {
-  getInfo: (token: string) =>
-    axios.get<ApiResponse<ShareInfo>>(`/share/${token}/info`),
-
-  verify: (token: string, password: string) =>
-    axios.post<ApiResponse<{ ok: boolean }>>(`/share/${token}/verify`, { password }),
+  getShareInfo: (token: string) =>
+    axios.get<ApiResponse<ShareInfo>>(`/api/shares/public/${token}/info`),
+  getDownloadTicket: (token: string, password?: string) =>
+    axios.post<ApiResponse<{ ticket: string }>>(`/api/shares/public/${token}/ticket`, { password }),
+  listShareFiles: (token: string, ticket: string, subpath: string = '') =>
+    axios.get<ApiResponse<ShareFileEntry[]>>(`/api/shares/public/${token}/list`, { params: { ticket, subpath } }),
 };
 
 // Web Server API

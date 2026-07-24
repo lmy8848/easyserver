@@ -834,11 +834,6 @@ export default function FileManager() {
             复制
           </Button>
         </Space.Compact>
-        {shareLink.includes('?password=') && (
-          <p style={{ color: '#faad14', fontSize: 13, marginTop: 8 }}>
-            ⚠ 该外链设置了密码，分享时请将完整链接（含 ?password=xxx）发送给对方
-          </p>
-        )}
       </Modal>
 
       <MkdirModal
