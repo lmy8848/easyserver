@@ -59,7 +59,7 @@ func parseExpiresAt(s string) (string, error) {
 	if s == "" {
 		return "", nil
 	}
-	if strings.HasSuffix(s, "h") || strings.HasSuffix(s, "d") {
+	if strings.HasSuffix(s, "m") || strings.HasSuffix(s, "h") || strings.HasSuffix(s, "d") {
 		var duration time.Duration
 		if strings.HasSuffix(s, "d") {
 			val, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
@@ -67,17 +67,23 @@ func parseExpiresAt(s string) (string, error) {
 				return "", fmt.Errorf("无效的过期时间: %s", s)
 			}
 			duration = time.Duration(val) * 24 * time.Hour
-		} else {
+		} else if strings.HasSuffix(s, "h") {
 			val, err := strconv.Atoi(strings.TrimSuffix(s, "h"))
 			if err != nil || val <= 0 {
 				return "", fmt.Errorf("无效的过期时间: %s", s)
 			}
 			duration = time.Duration(val) * time.Hour
+		} else {
+			val, err := strconv.Atoi(strings.TrimSuffix(s, "m"))
+			if err != nil || val <= 0 {
+				return "", fmt.Errorf("无效的过期时间: %s", s)
+			}
+			duration = time.Duration(val) * time.Minute
 		}
 		return time.Now().Add(duration).Format("2006-01-02 15:04:05"), nil
 	}
 	if _, err := time.Parse("2006-01-02 15:04:05", s); err != nil {
-		return "", fmt.Errorf("过期时间格式无效，支持 1h、7d 或 2026-07-01 12:00:00")
+		return "", fmt.Errorf("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
 	}
 	return s, nil
 }
