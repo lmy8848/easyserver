@@ -178,9 +178,9 @@ export default function FileShares() {
   };
 
   const columns = [
-    { title: '文件名', dataIndex: 'file_name', key: 'file_name', ellipsis: true, width: 200 },
+    { title: '文件名', dataIndex: 'file_name', key: 'file_name', ellipsis: true },
     {
-      title: '源文件', key: 'source', width: 100,
+      title: '源文件', key: 'source', width: 80,
       render: (_: unknown, record: FileShare) => record.file_exists === false
         ? <Tag color="error">已不存在</Tag>
         : record.current_size !== undefined && record.current_size !== record.file_size
@@ -190,11 +190,11 @@ export default function FileShares() {
           : <Tag color="success">正常</Tag>,
     },
     {
-      title: '创建时大小', dataIndex: 'file_size', key: 'file_size', width: 100,
+      title: '创建时大小', dataIndex: 'file_size', key: 'file_size', width: 90,
       render: (size: number) => formatSize(size),
     },
     {
-      title: '当前大小', key: 'current_size', width: 100,
+      title: '当前大小', key: 'current_size', width: 90,
       render: (_: unknown, record: FileShare) => record.current_size !== undefined
         ? <span style={{ color: record.current_size !== record.file_size ? '#faad14' : undefined }}>
             {formatSize(record.current_size)}
@@ -202,27 +202,27 @@ export default function FileShares() {
         : '-',
     },
     {
-      title: '下载次数', key: 'downloads', width: 120,
+      title: '下载次数', key: 'downloads', width: 90,
       render: (_: unknown, record: FileShare) => (
         <span>{record.download_count}{record.max_downloads > 0 ? ` / ${record.max_downloads}` : ''}</span>
       ),
     },
     {
-      title: '密码', key: 'password', width: 80, align: 'center' as const,
+      title: '密码', key: 'password', width: 70, align: 'center' as const,
       render: (_: unknown, record: FileShare) => record.has_password
         ? <Tooltip title="已设置访问密码"><Tag color="orange" style={{ margin: 0 }}><LockOutlined /> 已设</Tag></Tooltip>
         : <Tag color="default" style={{ margin: 0 }}>无</Tag>,
     },
     {
-      title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 200,
+      title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 150,
       render: (t: string) => formatExpiry(t),
     },
     {
-      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180,
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 150,
       render: (t: string) => new Date(t).toLocaleString(),
     },
     {
-      title: '操作', key: 'action', width: 260,
+      title: '操作', key: 'action', width: 200,
       render: (_: unknown, record: FileShare) => (
         <Space size="small" wrap>
           <Tooltip title="复制链接（下载页，需输入密码）">
@@ -269,6 +269,7 @@ export default function FileShares() {
           loading={loading}
           pagination={{ defaultPageSize: 20, showTotal: (t) => `共 ${t} 个外链` }}
           size="small"
+          scroll={{ x: 1000 }}
         />
       </Card>
 

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"easyserver/internal/filemanager"
-	"easyserver/internal/fileshare"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
@@ -23,105 +22,16 @@ import (
 )
 
 type FileShareHandler struct {
-	shareRepo   fileshare.Repository
+	shareRepo   filemanager.ShareRepository
 	fileManager *filemanager.Manager
 	cfg         *config.Config
 }
 
-func NewFileShareHandler(shareRepo fileshare.Repository, fm *filemanager.Manager, cfg *config.Config) *FileShareHandler {
+func NewFileShareHandler(shareRepo filemanager.ShareRepository, fm *filemanager.Manager, cfg *config.Config) *FileShareHandler {
 	return &FileShareHandler{shareRepo: shareRepo, fileManager: fm, cfg: cfg}
 }
 
-// detectContentType returns a MIME type based on file extension.
-// Embedded images, PDFs and text files render inline in the browser;
-// everything else forces a download.
-func detectContentType(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".png":
-		return "image/png"
-	case ".gif":
-		return "image/gif"
-	case ".webp":
-		return "image/webp"
-	case ".svg":
-		return "image/svg+xml"
-	case ".bmp":
-		return "image/bmp"
-	case ".ico":
-		return "image/x-icon"
-	case ".avif":
-		return "image/avif"
-	case ".pdf":
-		return "application/pdf"
-	case ".txt":
-		return "text/plain; charset=utf-8"
-	case ".md":
-		return "text/markdown; charset=utf-8"
-	case ".html", ".htm":
-		return "text/html; charset=utf-8"
-	case ".json":
-		return "application/json"
-	case ".xml":
-		return "application/xml"
-	case ".csv":
-		return "text/csv; charset=utf-8"
-	case ".yaml", ".yml":
-		return "text/yaml; charset=utf-8"
-	case ".toml":
-		return "text/toml; charset=utf-8"
-	case ".css":
-		return "text/css; charset=utf-8"
-	case ".js":
-		return "text/javascript; charset=utf-8"
-	case ".ts":
-		return "text/typescript; charset=utf-8"
-	case ".go":
-		return "text/x-go; charset=utf-8"
-	case ".py":
-		return "text/x-python; charset=utf-8"
-	case ".sh":
-		return "text/x-shellscript; charset=utf-8"
-	case ".zip":
-		return "application/zip"
-	case ".gz", ".gzip":
-		return "application/gzip"
-	case ".tar":
-		return "application/x-tar"
-	case ".bz2":
-		return "application/x-bzip2"
-	case ".xz":
-		return "application/x-xz"
-	case ".7z":
-		return "application/x-7z-compressed"
-	case ".rar":
-		return "application/vnd.rar"
-	case ".mp4":
-		return "video/mp4"
-	case ".mp3":
-		return "audio/mpeg"
-	case ".webm":
-		return "video/webm"
-	case ".avi":
-		return "video/x-msvideo"
-	case ".mov":
-		return "video/quicktime"
-	case ".wav":
-		return "audio/wav"
-	case ".flac":
-		return "audio/flac"
-	case ".ogg":
-		return "audio/ogg"
-	case ".woff", ".woff2":
-		return "font/woff2"
-	case ".ttf":
-		return "font/ttf"
-	default:
-		return "application/octet-stream"
-	}
-}
+// (detectContentType removed to reuse filemanager.GetMimeType)
 
 // fileShareTokenBytes is the number of random bytes for share tokens (64 hex chars).
 const fileShareTokenBytes = 32
@@ -171,7 +81,7 @@ func parseExpiresAt(s string) (string, error) {
 
 // CreateShare creates a new file share link
 func (h *FileShareHandler) CreateShare(c *gin.Context) {
-	var req fileshare.CreateShareRequest
+	var req filemanager.CreateShareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -219,7 +129,7 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 		return
 	}
 
-	share := &fileshare.FileShare{
+	share := &filemanager.FileShare{
 		FilePath:      req.FilePath,
 		FileName:      info.Name(),
 		FileSize:      info.Size(),
@@ -244,7 +154,7 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 
 // ShareListItem is an enriched share record with current file status.
 type ShareListItem struct {
-	fileshare.FileShare
+	filemanager.FileShare
 	FileExists  bool  `json:"file_exists"`
 	CurrentSize int64 `json:"current_size"`
 	HasPassword bool  `json:"has_password"`
@@ -313,7 +223,7 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 		return
 	}
 
-	var req fileshare.UpdateShareRequest
+	var req filemanager.UpdateShareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -459,56 +369,6 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 	httpx.Success(c, resp)
 }
 
-// VerifyShare checks password/expiry/download-cap without serving the file or
-// incrementing the download counter. Lets the download page validate a typed
-// password before navigating to /download (which would otherwise render raw
-// JSON on mismatch). No auth required.
-func (h *FileShareHandler) VerifyShare(c *gin.Context) {
-	token := c.Param("token")
-	if token == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
-		return
-	}
-
-	var body struct {
-		Password string `json:"password"`
-	}
-	_ = c.ShouldBindJSON(&body)
-
-	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
-	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
-	}
-	if share == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接不存在或已失效"))
-		return
-	}
-
-	if share.Password != "" && subtle.ConstantTimeCompare([]byte(body.Password), []byte(share.Password)) != 1 {
-		c.Error(apperror.ErrForbidden.WithMessage("密码错误"))
-		return
-	}
-	if share.ExpiresAt != "" {
-		if expires, perr := time.Parse("2006-01-02 15:04:05", share.ExpiresAt); perr == nil && time.Now().After(expires) {
-			c.Error(apperror.ErrNotFound.WithMessage("分享链接已过期"))
-			return
-		}
-	}
-	if share.MaxDownloads > 0 && share.DownloadCount >= share.MaxDownloads {
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
-		return
-	}
-	if validPath, verr := h.fileManager.ValidatePath(share.FilePath); verr == nil {
-		if info, serr := os.Stat(validPath); serr != nil || info.IsDir() {
-			c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
-			return
-		}
-	}
-
-	httpx.Success(c, gin.H{"ok": true})
-}
-
 // PublicDownload handles public file download via share token (no auth required).
 // Turnstile is NOT checked here: the download endpoint is already protected by
 // IP rate limiting, password verification, and download-count caps. The SPA
@@ -599,7 +459,10 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	}
 	defer f.Close()
 
-	contentType := detectContentType(validPath)
+	contentType, _ := h.fileManager.GetMimeType(share.FilePath)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
 	extraHeaders := map[string]string{
 		"Content-Disposition": fmt.Sprintf("inline; filename=%q", filepath.Base(validPath)),
 	}
@@ -611,30 +474,24 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 }
 
 // RegisterRoutes registers file share management routes (protected)
-func RegisterRoutes(protected *gin.RouterGroup, shareRepo fileshare.Repository, fileManager *filemanager.Manager, cfg *config.Config) {
+func RegisterShareRoutes(protected *gin.RouterGroup, shareRepo filemanager.ShareRepository, fileManager *filemanager.Manager, cfg *config.Config) {
 	handler := NewFileShareHandler(shareRepo, fileManager, cfg)
 
-	protected.POST("/file-shares", handler.CreateShare)
-	protected.GET("/file-shares", handler.ListShares)
-	protected.GET("/file-shares/:id", handler.GetShare)
-	protected.PUT("/file-shares/:id", handler.UpdateShare)
-	protected.DELETE("/file-shares/:id", handler.DeleteShare)
-	protected.POST("/file-shares/cleanup", handler.CleanupExpired)
+	protected.POST("/shares", handler.CreateShare)
+	protected.GET("/shares", handler.ListShares)
+	protected.GET("/shares/:id", handler.GetShare)
+	protected.PUT("/shares/:id", handler.UpdateShare)
+	protected.DELETE("/shares/:id", handler.DeleteShare)
+	protected.POST("/shares/cleanup", handler.CleanupExpired)
 }
 
 // RegisterPublicShareRoute registers the public share routes (no auth).
-// /share/:token is intentionally NOT registered here so it falls through to
-// the SPA fallback (NoRoute) and renders the React download page; the info
-// and download sub-paths are explicit and take precedence over NoRoute.
-func RegisterPublicShareRoute(e *gin.Engine, shareRepo fileshare.Repository, fileManager *filemanager.Manager, rateLimit int, rateInterval time.Duration, cfg *config.Config) {
+func RegisterPublicShareRoute(public *gin.RouterGroup, shareRepo filemanager.ShareRepository, fileManager *filemanager.Manager, rateLimit int, rateInterval time.Duration, cfg *config.Config) {
 	handler := NewFileShareHandler(shareRepo, fileManager, cfg)
-	// Public share endpoints are unauthenticated, so rate-limit by IP to blunt
-	// password brute-force on /verify and download abuse on /download.
-	g := e.Group("/share")
+	g := public.Group("/shares/public")
 	if rateLimit > 0 {
 		g.Use(middleware.RateLimitMiddleware("share", rateLimit, rateInterval))
 	}
 	g.GET("/:token/info", handler.ShareInfo)
-	g.POST("/:token/verify", handler.VerifyShare)
 	g.GET("/:token/download", handler.PublicDownload)
 }

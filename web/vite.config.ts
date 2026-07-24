@@ -60,6 +60,7 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
+
       },
     },
     build: {
