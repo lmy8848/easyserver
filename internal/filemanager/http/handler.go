@@ -198,6 +198,13 @@ func (h *FileManagerHandler) Download(c *gin.Context) {
 	if mt, ok := inlineMIME(base); ok {
 		c.Header("Content-Type", mt)
 		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", base))
+		// PDF 预览通过 <iframe> 嵌入此接口返回的内容；SecurityMiddleware 默认的
+		// frame-ancestors 'none' / X-Frame-Options: DENY 会阻止同源页面嵌入，
+		// 这里放宽为同源可嵌入。<img>/<video>/<audio> 不受 frame 头约束，
+		// 所以此覆盖实际上只作用于 PDF 的 iframe 渲染。文件响应非 HTML，
+		// CSP 的其余指令对它无意义，故只保留 frame-ancestors。
+		c.Header("Content-Security-Policy", "frame-ancestors 'self'")
+		c.Header("X-Frame-Options", "SAMEORIGIN")
 		http.ServeContent(c.Writer, c.Request, base, info.ModTime(), f)
 		return
 	}
