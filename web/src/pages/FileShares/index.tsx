@@ -225,7 +225,7 @@ export default function FileShares() {
       render: (t: string) => new Date(t).toLocaleString(),
     },
     {
-      title: '操作', key: 'action', width: 200,
+      title: '操作', key: 'action', width: 280,
       render: (_: unknown, record: FileShare) => (
         <Space size="small" wrap>
           <Tooltip title="复制链接（下载页，需输入密码）">
