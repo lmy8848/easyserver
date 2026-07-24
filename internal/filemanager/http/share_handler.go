@@ -1,7 +1,9 @@
 package http
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -369,17 +372,35 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 	httpx.Success(c, resp)
 }
 
-// PublicDownload handles public file download via share token (no auth required).
-// Turnstile is NOT checked here: the download endpoint is already protected by
-// IP rate limiting, password verification, and download-count caps. The SPA
-// download page (/share/:token) can optionally enforce Turnstile before
-// redirecting users here.
-func (h *FileShareHandler) PublicDownload(c *gin.Context) {
+var (
+	ticketSecret []byte
+	ticketInit   sync.Once
+)
+
+func getTicketSecret() []byte {
+	ticketInit.Do(func() {
+		ticketSecret = make([]byte, 32)
+		rand.Read(ticketSecret)
+	})
+	return ticketSecret
+}
+
+type TicketRequest struct {
+	Password string `json:"password"`
+}
+
+// GetTicket verifies access and issues a stateless download ticket.
+// This is the ONLY place where download counts are incremented, preventing
+// double counting from browser retries or multi-threaded download managers.
+func (h *FileShareHandler) GetTicket(c *gin.Context) {
 	token := c.Param("token")
 	if token == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
 		return
 	}
+
+	var req TicketRequest
+	c.ShouldBindJSON(&req) // ignore error, password might be empty
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
@@ -391,14 +412,13 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		return
 	}
 
-	// Check password (constant-time to avoid timing oracle)
+	// Check password
 	if share.Password != "" {
-		password := c.Query("password")
-		if password == "" {
-			c.Error(apperror.ErrForbidden.WithMessage("需要密码访问，请在链接后添加 ?password=xxx"))
+		if req.Password == "" {
+			c.Error(apperror.ErrForbidden.WithMessage("需要输入密码"))
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(password), []byte(share.Password)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(share.Password)) != 1 {
 			c.Error(apperror.ErrForbidden.WithMessage("密码错误"))
 			return
 		}
@@ -408,11 +428,93 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	if share.ExpiresAt != "" {
 		expires, err := time.Parse("2006-01-02 15:04:05", share.ExpiresAt)
 		if err == nil && time.Now().After(expires) {
-			// Auto-cleanup expired share
 			h.shareRepo.Delete(c.Request.Context(), share.ID)
 			c.Error(apperror.ErrNotFound.WithMessage("分享链接已过期"))
 			return
 		}
+	}
+
+	// Validate file exists
+	validPath, err := h.fileManager.ValidatePath(share.FilePath)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
+		return
+	}
+	info, err := os.Stat(validPath)
+	if err != nil || info.IsDir() {
+		h.shareRepo.Delete(c.Request.Context(), share.ID)
+		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
+		return
+	}
+
+	// Atomically increment count
+	allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
+	if err != nil {
+		c.Error(apperror.ErrInternal.Wrap(err))
+		return
+	}
+	if !allowed {
+		h.shareRepo.Delete(c.Request.Context(), share.ID)
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
+		return
+	}
+
+	// Issue stateless ticket valid for 6 hours
+	exp := time.Now().Add(6 * time.Hour).Unix()
+	msg := fmt.Sprintf("%d.%d", share.ID, exp)
+	mac := hmac.New(sha256.New, getTicketSecret())
+	mac.Write([]byte(msg))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	httpx.Success(c, gin.H{"ticket": fmt.Sprintf("%s.%s", msg, sig)})
+}
+
+// PublicDownload handles public file download via a stateless ticket.
+// Turnstile is NOT checked here: the download endpoint is already protected by
+// IP rate limiting, password verification, and download-count caps. The SPA
+// download page (/share/:token) can optionally enforce Turnstile before
+// redirecting users here.
+func (h *FileShareHandler) PublicDownload(c *gin.Context) {
+	token := c.Param("token")
+	ticket := c.Query("ticket")
+	if token == "" || ticket == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少令牌或凭证"))
+		return
+	}
+
+	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
+	if err != nil {
+		c.Error(apperror.ErrInternal.Wrap(err))
+		return
+	}
+	if share == nil {
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接已失效"))
+		return
+	}
+
+	// Verify stateless ticket
+	parts := strings.Split(ticket, ".")
+	if len(parts) != 3 {
+		c.Error(apperror.ErrForbidden.WithMessage("无效的下载凭证"))
+		return
+	}
+	if parts[0] != strconv.FormatInt(share.ID, 10) {
+		c.Error(apperror.ErrForbidden.WithMessage("凭证不匹配"))
+		return
+	}
+	exp, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		c.Error(apperror.ErrForbidden.WithMessage("凭证已过期，请刷新页面重新获取"))
+		return
+	}
+
+	msg := parts[0] + "." + parts[1]
+	mac := hmac.New(sha256.New, getTicketSecret())
+	mac.Write([]byte(msg))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(parts[2]), []byte(expectedSig)) != 1 {
+		c.Error(apperror.ErrForbidden.WithMessage("凭证签名无效"))
+		return
 	}
 
 	// Validate file path
@@ -421,45 +523,12 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 		return
 	}
-
-	// Check file still exists
 	info, err := os.Stat(validPath)
-	if err != nil {
-		// File was moved/deleted - remove share
-		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
+	if err != nil || info.IsDir() {
+		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
 		return
 	}
 
-	if info.IsDir() {
-		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(apperror.ErrBadRequest.WithMessage("文件类型无效"))
-		return
-	}
-
-	if c.Request.Method == "GET" {
-		// Use a short-lived cookie to prevent double counting when the browser
-		// sends multiple requests (e.g. cancels the first and sends a second,
-		// or uses range requests).
-		cookieName := fmt.Sprintf("dl_%s", share.Token)
-		if _, err := c.Cookie(cookieName); err != nil {
-			// Atomically increment download count, refusing if the cap is reached.
-			allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
-			if err != nil {
-				c.Error(apperror.ErrInternal.Wrap(err))
-				return
-			}
-			if !allowed {
-				h.shareRepo.Delete(c.Request.Context(), share.ID)
-				c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
-				return
-			}
-			// Set a cookie for 1 hour to deduplicate
-			c.SetCookie(cookieName, "1", 3600, "/", "", false, true)
-		}
-	}
-
-	// Serve file
 	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		c.Error(apperror.ErrInternal.Wrap(err))
@@ -501,5 +570,6 @@ func RegisterPublicShareRoute(public *gin.RouterGroup, shareRepo filemanager.Sha
 		g.Use(middleware.RateLimitMiddleware("share", rateLimit, rateInterval))
 	}
 	g.GET("/:token/info", handler.ShareInfo)
+	g.POST("/:token/ticket", handler.GetTicket)
 	g.GET("/:token/download", handler.PublicDownload)
 }
