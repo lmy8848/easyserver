@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import {
-  Modal, Input, Table, Button, Space, Tag, Row, Col,
+  Modal, Input, Table, Button, Space, Tag, Row, Col, Image, Card,
 } from 'antd';
 import {
   FolderOutlined, FileOutlined, SearchOutlined,
@@ -296,10 +297,40 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
   const token = localStorage.getItem('token') || '';
   const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}&access_token=${encodeURIComponent(token)}`;
 
+  // 视频原始分辨率，加载 metadata 后用于按比例调整弹窗大小
+  const [videoMeta, setVideoMeta] = useState<{ w: number; h: number } | null>(null);
+
+  // 图片用 antd Image 内置预览层（全屏放大/缩放/旋转），不套外层 Modal。
+  if (type === 'image') {
+    return (
+      <Image
+        src={downloadUrl}
+        alt="preview"
+        style={{ display: 'none' }}
+        preview={{
+          open: visible,
+          onOpenChange: (v) => { if (!v) onClose(); },
+        }}
+      />
+    );
+  }
+
   // Parse archive entries from content (JSON string)
   let archiveEntries: Array<{ name: string; size: number; is_dir: boolean }> = [];
   if (type === 'archive' && content) {
     try { archiveEntries = JSON.parse(content); } catch { archiveEntries = []; }
+  }
+
+  // 视频按分辨率计算弹窗宽度：高度上限 70vh、宽度上限 90vw，保持宽高比。
+  // 未加载时用默认 800，metadata 加载后跟随分辨率（+48 容纳 body padding）。
+  let modalWidth = type === 'video' ? 800 : 900;
+  if (type === 'video' && videoMeta) {
+    const maxH = window.innerHeight * 0.7;
+    const maxW = window.innerWidth * 0.9;
+    const aspect = videoMeta.w / videoMeta.h;
+    // 按高度上限算宽，再约束宽度上限
+    const w = Math.min(Math.min(videoMeta.h, maxH) * aspect, maxW);
+    modalWidth = Math.ceil(w) + 48;
   }
 
   return (
@@ -308,20 +339,21 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
       open={visible}
       onCancel={onClose}
       footer={null}
-      width={type === 'image' || type === 'video' ? 800 : 900}
+      width={modalWidth}
     >
-      {type === 'image' && (
-        <img
-          src={downloadUrl}
-          alt="preview"
-          style={{ maxWidth: '100%', maxHeight: '70vh' }}
-        />
-      )}
       {type === 'audio' && (
         <audio controls src={downloadUrl} style={{ width: '100%' }} />
       )}
       {type === 'video' && (
-        <video controls src={downloadUrl} style={{ maxWidth: '100%', maxHeight: '70vh' }} />
+        <video
+          controls
+          src={downloadUrl}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (v.videoWidth && v.videoHeight) setVideoMeta({ w: v.videoWidth, h: v.videoHeight });
+          }}
+          style={{ width: '100%', maxHeight: '70vh', display: 'block' }}
+        />
       )}
       {type === 'pdf' && (
         <iframe
@@ -330,24 +362,26 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
         />
       )}
       {type === 'text' && (
-        <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
-          <Editor
-            value={content}
-            language={detectLanguage(path)}
-            theme="vs-dark"
-            options={{
-              readOnly: true,
-              minimap: { enabled: false },
-              fontSize: 13,
-              fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-              lineNumbers: 'on',
-              wordWrap: 'on',
-              scrollBeyondLastLine: false,
-              renderWhitespace: 'selection',
-              automaticLayout: true,
-            }}
-          />
-        </div>
+        <Card size="small" styles={{ body: { padding: 0 } }} style={{ overflow: 'hidden' }}>
+          <div style={{ height: '70vh' }}>
+            <Editor
+              value={content}
+              language={detectLanguage(path)}
+              theme="vs-dark"
+              options={{
+                readOnly: true,
+                minimap: { enabled: false },
+                fontSize: 13,
+                fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                lineNumbers: 'on',
+                wordWrap: 'on',
+                scrollBeyondLastLine: false,
+                renderWhitespace: 'selection',
+                automaticLayout: true,
+              }}
+            />
+          </div>
+        </Card>
       )}
       {type === 'archive' && (
         <Table

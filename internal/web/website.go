@@ -730,7 +730,7 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    %s%s
+    %s
     include /etc/nginx/conf.d/banned_ips.conf;
     error_log %s;
 }
@@ -763,6 +763,7 @@ func nginxProxyTemplate(w *Website, rateLimitBlock string) string {
 		httpsRedirect = fmt.Sprintf("    error_page 497 =301 https://%s$request_uri;\n", sanitizeNginxValue(w.Domain))
 	}
 	return fmt.Sprintf(`# EasyServer - %s proxy: %s
+%s
 server {
     listen %d%s;
     server_name %s;
