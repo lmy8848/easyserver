@@ -923,7 +923,8 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 // GetSystemInfo returns system information
 func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
 	httpx.Success(c, gin.H{
-		"version": infra.Version,
+		"version":  infra.DisplayVersion(),
+		"build_id": infra.BuildID,
 	})
 }
 

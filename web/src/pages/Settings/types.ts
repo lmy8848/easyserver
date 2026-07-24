@@ -66,6 +66,7 @@ export interface Settings {
 
 export interface SystemInfo {
   version: string;
+  build_id?: string;
 }
 
 export interface AlertRule {
