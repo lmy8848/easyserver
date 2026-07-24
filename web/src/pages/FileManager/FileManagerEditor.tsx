@@ -7,7 +7,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 // Use local monaco-editor bundle (no CDN)
-// @ts-expect-error type incompatibility in upstream package
 loader.config({ monaco });
 
 // Monaco workers: return a no-op worker stub so Monaco doesn't crash.

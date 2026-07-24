@@ -94,8 +94,8 @@ export default function FileManager() {
   const [previewContent, setPreviewContent] = useState('');
 
   // 排序
-  const [sortField, setSortField] = useState<string>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [sortField, setSortField] = useState<string>('');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | ''>('');
 
   // 批量选择
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
@@ -626,6 +626,7 @@ export default function FileManager() {
   // 排序
   const sortedFiles = [...files].sort((a, b) => {
     if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+    if (!sortField || !sortOrder) return 0;
 
     let cmp = 0;
     switch (sortField) {
@@ -745,15 +746,11 @@ export default function FileManager() {
         currentPath={currentPath}
         canManageFiles={true}
         selectedKeys={selectedKeys}
-        sortField={sortField}
-        sortOrder={sortOrder}
         onNavigate={handleNavigate}
         onSearch={() => setSearchVisible(true)}
         onMkdir={() => setMkdirVisible(true)}
         onUpload={handleUpload}
         onBatchDelete={handleBatchDelete}
-        onSortFieldChange={setSortField}
-        onSortOrderChange={setSortOrder}
         onRefresh={() => { setLoading(true); fetchFiles(currentPath); }}
       >
         <FileManagerTable
@@ -761,6 +758,12 @@ export default function FileManager() {
           loading={loading}
           selectedKeys={selectedKeys}
           canManageFiles={true}
+          sortField={sortField}
+          sortOrder={sortOrder}
+          onSortChange={(field, order) => {
+            setSortField(field);
+            setSortOrder(order);
+          }}
           onClick={handleClick}
           onEdit={openFile}
           onRename={showRename}

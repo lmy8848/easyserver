@@ -4,7 +4,7 @@ import {
 } from 'antd';
 import {
   HomeOutlined, SearchOutlined, UploadOutlined,
-  DeleteOutlined, ReloadOutlined, SortAscendingOutlined,
+  DeleteOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 
 interface FileManagerHeaderProps {
@@ -12,15 +12,11 @@ interface FileManagerHeaderProps {
   currentPath: string;
   canManageFiles: boolean;
   selectedKeys: string[];
-  sortField: string;
-  sortOrder: 'asc' | 'desc';
   onNavigate: (path: string) => void;
   onSearch: () => void;
   onMkdir: () => void;
   onUpload: (file: File) => Promise<void>;
   onBatchDelete: () => void;
-  onSortFieldChange: (field: string) => void;
-  onSortOrderChange: (order: 'asc' | 'desc') => void;
   onRefresh: () => void;
   children?: ReactNode;
 }
@@ -35,8 +31,6 @@ export default function FileManagerHeader({
   onMkdir,
   onUpload,
   onBatchDelete,
-  onSortFieldChange,
-  onSortOrderChange,
   onRefresh,
   children,
 }: FileManagerHeaderProps) {
@@ -140,19 +134,51 @@ export default function FileManagerHeader({
           {canManageFiles && (
             <>
               <Button onClick={onMkdir}>新建文件夹</Button>
-              <Upload
-                showUploadList={false}
-                customRequest={async ({ file, onSuccess, onError }) => {
-                  try {
-                    await onUpload(file as File);
-                    onSuccess?.({});
-                  } catch (error) {
-                    onError?.(error as Error);
-                  }
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'file',
+                      label: (
+                        <Upload
+                          showUploadList={false}
+                          customRequest={async ({ file, onSuccess, onError }) => {
+                            try {
+                              await onUpload(file as File);
+                              onSuccess?.({});
+                            } catch (error) {
+                              onError?.(error as Error);
+                            }
+                          }}
+                        >
+                          <div>上传文件</div>
+                        </Upload>
+                      )
+                    },
+                    {
+                      key: 'folder',
+                      label: (
+                        <Upload
+                          showUploadList={false}
+                          directory
+                          customRequest={async ({ file, onSuccess, onError }) => {
+                            try {
+                              await onUpload(file as File);
+                              onSuccess?.({});
+                            } catch (error) {
+                              onError?.(error as Error);
+                            }
+                          }}
+                        >
+                          <div>上传文件夹</div>
+                        </Upload>
+                      )
+                    }
+                  ]
                 }}
               >
-                <Button icon={<UploadOutlined />}>上传文件</Button>
-              </Upload>
+                <Button icon={<UploadOutlined />}>上传</Button>
+              </Dropdown>
               {selectedKeys.length > 0 && (
                 <Button danger icon={<DeleteOutlined />} onClick={onBatchDelete}>
                   删除选中 ({selectedKeys.length})
@@ -160,20 +186,6 @@ export default function FileManagerHeader({
               )}
             </>
           )}
-          <Dropdown
-            menu={{
-              items: [
-                { key: 'name', label: '按名称', onClick: () => onSortFieldChange('name') },
-                { key: 'size', label: '按大小', onClick: () => onSortFieldChange('size') },
-                { key: 'modified', label: '按时间', onClick: () => onSortFieldChange('modified') },
-                { type: 'divider' as const },
-                { key: 'asc', label: '升序', onClick: () => onSortOrderChange('asc') },
-                { key: 'desc', label: '降序', onClick: () => onSortOrderChange('desc') },
-              ],
-            }}
-          >
-            <Button icon={<SortAscendingOutlined />}>排序</Button>
-          </Dropdown>
           <Button icon={<ReloadOutlined />} onClick={onRefresh}>刷新</Button>
         </Space>
       }

@@ -27,6 +27,9 @@ interface FileManagerTableProps {
   onExtract: (path: string) => void;
   onShare: (path: string) => void;
   onSelectedKeysChange: (keys: string[]) => void;
+  sortField: string;
+  sortOrder: 'asc' | 'desc' | '';
+  onSortChange: (field: string, order: 'asc' | 'desc' | '') => void;
 }
 
 export default function FileManagerTable({
@@ -46,6 +49,9 @@ export default function FileManagerTable({
   onExtract,
   onShare,
   onSelectedKeysChange,
+  sortField,
+  sortOrder,
+  onSortChange,
 }: FileManagerTableProps) {
   const getActionMenu = (record: FileEntry) => ({
     items: [
@@ -127,6 +133,7 @@ export default function FileManagerTable({
       title: '名称',
       key: 'name',
       sorter: true,
+      sortOrder: (sortField === 'name' && sortOrder ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as 'ascend' | 'descend' | undefined,
       render: (_: unknown, record: FileEntry) => (
         <Space style={{ cursor: 'pointer' }} onClick={() => onClick(record)}>
           {record.is_dir ? (
@@ -147,6 +154,7 @@ export default function FileManagerTable({
       key: 'size',
       width: 100,
       sorter: true,
+      sortOrder: (sortField === 'size' && sortOrder ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as 'ascend' | 'descend' | undefined,
       render: (size: number, record: FileEntry) => {
         if (record.is_dir) return '-';
         return formatFileSize(size);
@@ -164,6 +172,7 @@ export default function FileManagerTable({
       key: 'modified_at',
       width: 180,
       sorter: true,
+      sortOrder: (sortField === 'modified' && sortOrder ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as 'ascend' | 'descend' | undefined,
       render: (time: string) => new Date(time).toLocaleString(),
     },
     {
@@ -189,6 +198,16 @@ export default function FileManagerTable({
       rowSelection={{
         selectedRowKeys: selectedKeys,
         onChange: (keys) => onSelectedKeysChange(keys as string[]),
+      }}
+      onChange={(_pagination, _filters, sorter: any) => {
+        if (!sorter || !sorter.order) {
+          onSortChange('', '');
+        } else if (sorter.columnKey || sorter.field) {
+          const key = sorter.columnKey || sorter.field;
+          const field = key === 'modified_at' ? 'modified' : key;
+          const order = sorter.order === 'descend' ? 'desc' : 'asc';
+          onSortChange(field, order);
+        }
       }}
     />
   );
