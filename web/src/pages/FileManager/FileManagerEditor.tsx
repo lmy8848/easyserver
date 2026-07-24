@@ -10,8 +10,9 @@ import remarkGfm from 'remark-gfm';
 // @ts-expect-error type incompatibility in upstream package
 loader.config({ monaco });
 
-(self as unknown as { MonacoEnvironment: { getWorker: () => null } }).MonacoEnvironment = {
-  getWorker: () => null,
+// Monaco workers: return a no-op worker stub so Monaco doesn't crash.
+(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
+  getWorker: () => new Worker('data:text/javascript;base64,', { name: 'monaco-dummy' }),
 };
 
 // detectLanguage maps file extensions to Monaco language IDs.

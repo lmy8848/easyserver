@@ -11,10 +11,10 @@ import * as monaco from 'monaco-editor';
 // @ts-expect-error type incompatibility in upstream package
 loader.config({ monaco });
 
-// Monaco workers: run in main thread (no separate worker bundle needed).
-// Fine for file preview (not heavy editing).
-(self as unknown as { MonacoEnvironment: { getWorker: () => null } }).MonacoEnvironment = {
-  getWorker: () => null,
+// Monaco workers: return a no-op worker stub so Monaco doesn't crash.
+// Monaco runs language services in main thread (fine for preview).
+(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
+  getWorker: () => new Worker('data:text/javascript;base64,', { name: 'monaco-dummy' }),
 };
 
 // ==================== Mkdir Modal ====================
