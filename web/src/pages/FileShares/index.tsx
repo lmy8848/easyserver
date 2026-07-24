@@ -183,26 +183,15 @@ export default function FileShares() {
   const columns = [
     { title: '文件名', dataIndex: 'file_name', key: 'file_name', ellipsis: true },
     {
-      title: '源文件', key: 'source', width: 80,
+      title: '文件状态', key: 'file_status', width: 90,
       render: (_: unknown, record: FileShare) => record.file_exists === false
-        ? <Tag color="error">已不存在</Tag>
-        : record.current_size !== undefined && record.current_size !== record.file_size
-          ? <Tooltip title={`创建时 ${formatSize(record.file_size)}，当前 ${formatSize(record.current_size)}`}>
-              <Tag color="warning">已变更</Tag>
-            </Tooltip>
-          : <Tag color="success">正常</Tag>,
+        ? <Tag color="error" style={{ margin: 0 }}>已丢失</Tag>
+        : <Tag color="success" style={{ margin: 0 }}>正常</Tag>,
     },
     {
-      title: '创建时大小', dataIndex: 'file_size', key: 'file_size', width: 90,
-      render: (size: number) => formatSize(size),
-    },
-    {
-      title: '当前大小', key: 'current_size', width: 90,
-      render: (_: unknown, record: FileShare) => record.current_size !== undefined
-        ? <span style={{ color: record.current_size !== record.file_size ? '#faad14' : undefined }}>
-            {formatSize(record.current_size)}
-          </span>
-        : '-',
+      title: '文件大小', key: 'file_size', width: 100,
+      render: (_: unknown, record: FileShare) => 
+        formatSize(record.current_size !== undefined ? record.current_size : record.file_size),
     },
     {
       title: '下载次数', key: 'downloads', width: 90,
