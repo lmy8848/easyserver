@@ -4,6 +4,7 @@ import {
 import {
   FolderOutlined, FileOutlined, SearchOutlined,
 } from '@ant-design/icons';
+import Editor from '@monaco-editor/react';
 
 // ==================== Mkdir Modal ====================
 interface MkdirModalProps {
@@ -229,6 +230,45 @@ export function DetailsModal({ visible, data, onClose }: DetailsModalProps) {
 }
 
 // ==================== Preview Modal ====================
+
+// detectLanguage maps file extensions to Monaco language IDs for syntax highlighting.
+function detectLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', tsx: 'typescript',
+    json: 'json',
+    html: 'html', htm: 'html', xml: 'xml', svg: 'xml',
+    css: 'css', scss: 'scss', less: 'less',
+    py: 'python',
+    go: 'go',
+    java: 'java',
+    c: 'c', h: 'c',
+    cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
+    rs: 'rust',
+    rb: 'ruby',
+    php: 'php',
+    sh: 'shell', bash: 'shell', zsh: 'shell',
+    yml: 'yaml', yaml: 'yaml',
+    toml: 'ini', ini: 'ini', conf: 'ini', cfg: 'ini',
+    sql: 'sql',
+    md: 'markdown', markdown: 'markdown',
+    dart: 'dart',
+    dockerfile: 'dockerfile',
+    txt: 'plaintext',
+    log: 'plaintext',
+    env: 'plaintext',
+    csv: 'plaintext',
+    bat: 'bat',
+    ps1: 'powershell',
+  };
+  // Special: Dockerfile has no extension
+  const basename = path.split('/').pop()?.toLowerCase() || '';
+  if (basename === 'dockerfile' || basename === 'dockerfile.dev') return 'dockerfile';
+  if (basename === 'makefile' || basename === 'gnumakefile') return 'makefile';
+  return map[ext] || 'plaintext';
+}
+
 interface PreviewModalProps {
   visible: boolean;
   path: string;
@@ -274,17 +314,24 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
         />
       )}
       {type === 'text' && (
-        <pre style={{
-          background: '#f5f5f5',
-          padding: 16,
-          borderRadius: 4,
-          maxHeight: '70vh',
-          overflow: 'auto',
-          fontSize: 12,
-          fontFamily: 'Consolas, Monaco, monospace',
-        }}>
-          {content}
-        </pre>
+        <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
+          <Editor
+            value={content}
+            language={detectLanguage(path)}
+            theme="vs-dark"
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              fontSize: 13,
+              fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+              lineNumbers: 'on',
+              wordWrap: 'on',
+              scrollBeyondLastLine: false,
+              renderWhitespace: 'selection',
+              automaticLayout: true,
+            }}
+          />
+        </div>
       )}
       {type === 'archive' && (
         <Table
