@@ -4,7 +4,7 @@ import { Input, Button, message, Spin } from 'antd';
 import {
   FileOutlined, FileImageOutlined, FilePdfOutlined, FileZipOutlined,
   FileTextOutlined, VideoCameraOutlined, AudioOutlined, DownloadOutlined,
-  LockOutlined, CloudServerOutlined,
+  LockOutlined, CloudServerOutlined, WarningOutlined,
 } from '@ant-design/icons';
 import { publicShareApi, authApi } from '../services/api';
 import type { ShareInfo } from '../types';
@@ -63,7 +63,7 @@ export default function ShareDownload() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [password, setPassword] = useState(searchParams.get('password') || '');
-  const [verifying, setVerifying] = useState(false);
+
   const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
   const turnstileEnabled = !!turnstileSiteKey;
@@ -105,33 +105,21 @@ export default function ShareDownload() {
     }
     // No password: go straight to the download endpoint.
     if (!info.needs_password) {
-      window.location.href = `/share/${token}/download`;
+      window.location.href = `/api/shares/public/${token}/download`;
       return;
     }
     if (!password) {
       message.warning('请输入访问密码');
       return;
     }
-    // Password-protected: verify first (no download-count increment) so a wrong
-    // password shows an inline error instead of a raw JSON page.
-    setVerifying(true);
-    try {
-      await publicShareApi.verify(token, password);
-      window.location.href = `/share/${token}/download?password=${encodeURIComponent(password)}`;
-    } catch (err: unknown) {
-      const msg = (err && typeof err === 'object' && 'response' in err)
-        ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message || '')
-        : '';
-      message.error(msg || '密码错误或链接无效');
-    } finally {
-      setVerifying(false);
-    }
+    // Password-protected: go straight to the download endpoint.
+    window.location.href = `/api/shares/public/${token}/download?password=${encodeURIComponent(password)}`;
   };
 
   // Determine a blocking state (expired / exhausted / missing) from the info.
   const blockReason = (): string => {
-    if (!info) return '';
     if (error) return error;
+    if (!info) return '分享链接不存在或已失效';
     if (!info.exists) return '文件不存在或已被移除';
     if (info.expired) return '分享链接已过期';
     if (info.downloads_left === 0) return '下载次数已达上限';
@@ -178,7 +166,9 @@ export default function ShareDownload() {
           </div>
         ) : blocked ? (
           <div style={{ textAlign: 'center', padding: '24px 8px' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>
+              <WarningOutlined style={{ color: '#ff7875' }} />
+            </div>
             <div style={{ color: '#ff7875', fontSize: 16, fontWeight: 500, marginBottom: 8 }}>无法下载</div>
             <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{blocked}</div>
           </div>
@@ -226,7 +216,7 @@ export default function ShareDownload() {
               </div>
             )}
 
-            <Button type="primary" icon={<DownloadOutlined />} block loading={verifying}
+            <Button type="primary" icon={<DownloadOutlined />} block
               onClick={handleDownload}
               style={{ height: 46, borderRadius: 10, fontWeight: 600, fontSize: 15, border: 'none',
                 background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',

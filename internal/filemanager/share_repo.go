@@ -1,9 +1,9 @@
-package fileshare
+package filemanager
 
 import "context"
 
 // Repository defines the interface for file share data access
-type Repository interface {
+type ShareRepository interface {
 	Create(ctx context.Context, share *FileShare) (int64, error)
 	GetByID(ctx context.Context, id int64) (*FileShare, error)
 	GetByToken(ctx context.Context, token string) (*FileShare, error)

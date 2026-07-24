@@ -26,7 +26,7 @@ import (
 	"easyserver/internal/deploy"
 	"easyserver/internal/envconfig"
 	"easyserver/internal/filemanager"
-	"easyserver/internal/fileshare"
+
 	"easyserver/internal/firewall"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
@@ -430,7 +430,7 @@ func (a *App) wire() error {
 	a.FileManager = fileManager
 
 	// File share repository + startup cleanup
-	a.FileShareRepo = fileshare.NewSQLiteShareRepository(db)
+	a.FileShareRepo = filemanager.NewSQLiteShareRepository(db)
 	if deleted, err := a.FileShareRepo.DeleteExpired(ctx); err != nil {
 		log.Printf("ERROR: failed to cleanup expired file shares on startup: %v", err)
 	} else if deleted > 0 {
