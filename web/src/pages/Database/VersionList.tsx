@@ -74,16 +74,38 @@ export default function VersionList({
         <Row gutter={[16, 16]}>
           {versions.length === 0 && !versionsLoading && <Col span={24}><Empty description="暂未安装任何版本" /></Col>}
           {versions.map(v => (
-            <Col xs={24} sm={12} lg={8} key={v.id}>
-              <Card hoverable onClick={() => v.status === 'running' && onEnterVersion(v)}
-                style={{ borderColor: statusColor(v.status), opacity: v.status !== 'running' ? 0.7 : 1 }}>
-                <Card.Meta
-                  title={<Space>{server.display_name} {v.version}{statusTag(v.status)}</Space>}
-                  description={<div>
-                    <p style={{ margin: '4px 0' }}>端口: <strong>{v.port}</strong></p>
-                    <p style={{ margin: '4px 0' }}>服务: <Tag>{v.service_name}</Tag></p>
-                  </div>} />
-                <div style={STYLES.cardActions}>
+            <Col xs={24} sm={12} lg={8} key={v.id} style={{ display: 'flex' }}>
+              <Card
+                hoverable
+                onClick={() => v.status === 'running' && onEnterVersion(v)}
+                style={{
+                  borderColor: statusColor(v.status),
+                  opacity: v.status !== 'running' ? 0.7 : 1,
+                  width: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+                styles={{
+                  body: {
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                  },
+                }}
+              >
+                <div>
+                  <Card.Meta
+                    title={<Space wrap>{server.display_name} {v.version}{statusTag(v.status)}</Space>}
+                    description={
+                      <div>
+                        <p style={{ margin: '4px 0' }}>端口: <strong>{v.port}</strong></p>
+                        <p style={{ margin: '4px 0' }}>服务: <Tag>{v.service_name}</Tag></p>
+                      </div>
+                    }
+                  />
+                </div>
+                <div style={{ ...STYLES.cardActions, marginTop: 'auto' }}>
                   {v.status === 'running' ? (
                     <Button size="small" danger icon={<StopOutlined />} loading={operating === `stop-${v.id}`}
                       onClick={(e) => { e.stopPropagation(); onStopVersion(v); }}>停止</Button>

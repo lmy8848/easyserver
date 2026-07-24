@@ -159,7 +159,7 @@ func PredefinedWebServers() []WebServer {
 		{
 			Name:           "nginx",
 			DisplayName:    "Nginx",
-			Description:    "高性能 HTTP 和反向代理服务器，支持负载均衡、缓存、SSL",
+			Description:    "高性能 HTTP 与反向代理服务器，采用异步事件驱动架构，具备高并发吞吐与负载均衡能力",
 			InstallCmd:     "apt-get install -y nginx",
 			UninstallCmd:   "apt-get remove -y nginx",
 			ConfigPath:     "/etc/nginx",
@@ -174,7 +174,7 @@ func PredefinedWebServers() []WebServer {
 		{
 			Name:           "apache",
 			DisplayName:    "Apache",
-			Description:    "最流行的 Web 服务器，模块丰富，生态成熟",
+			Description:    "历史悠久且功能完备的开源 HTTP 服务器，支持多处理模块（MPM）与动态模块加载",
 			InstallCmd:     "apt-get install -y apache2",
 			UninstallCmd:   "apt-get remove -y apache2",
 			ConfigPath:     "/etc/apache2",
@@ -189,7 +189,7 @@ func PredefinedWebServers() []WebServer {
 		{
 			Name:           "tomcat",
 			DisplayName:    "Tomcat",
-			Description:    "Java Servlet 容器，运行 Java Web 应用",
+			Description:    "开源 Java Servlet 与 JSP 容器，完整实现 Jakarta EE 核心规范，专门用于运行 Java 应用",
 			InstallCmd:     "apt-get install -y tomcat9",
 			UninstallCmd:   "apt-get remove -y tomcat9",
 			ConfigPath:     "/etc/tomcat9",
@@ -204,7 +204,7 @@ func PredefinedWebServers() []WebServer {
 		{
 			Name:           "caddy",
 			DisplayName:    "Caddy",
-			Description:    "自动 HTTPS、零配置的现代 Web 服务器",
+			Description:    "Go 语言编写的现代 Web 服务器，内置自动 HTTPS 证书申请、HTTP/3 支持与极简配置",
 			InstallCmd:     "apt-get install -y caddy",
 			UninstallCmd:   "apt-get remove -y caddy",
 			ConfigPath:     "/etc/caddy",

@@ -7,7 +7,7 @@ import {
 import {
   GlobalOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   PlayCircleOutlined, PauseCircleOutlined, SafetyOutlined,
-  FileTextOutlined, ArrowLeftOutlined, CloudServerOutlined,
+  FileTextOutlined, ArrowLeftOutlined,
   StopOutlined, ReloadOutlined, DownloadOutlined,
   UndoOutlined, CodeOutlined, ToolOutlined,
   CheckCircleOutlined, CloseCircleOutlined, FolderOutlined, ProfileOutlined,
@@ -18,7 +18,21 @@ import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';
 import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './types';
 import type { RuntimeEnvironment } from '../Runtime/types';
-import { getServiceStatusColor, ServiceStatusTag } from '../../utils/status';
+import { ServiceStatusTag } from '../../utils/status';
+import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
+
+function renderServerIcon(name: string, size = 32) {
+  const s = (name || '').toLowerCase();
+  switch (s) {
+    case 'nginx': return <SiNginx size={size} color="#009639" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+    case 'apache':
+    case 'apache2': return <SiApache size={size} color="#D22128" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+    case 'tomcat':
+    case 'tomcat9': return <SiApachetomcat size={size} color="#F89820" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+    case 'caddy': return <SiCaddy size={size} color="#00D7B2" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+    default: return <SiNginx size={size} color="#1890FF" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+  }
+}
 
 interface WebsiteListProps {
   selectedServer: WebServer;
@@ -44,14 +58,6 @@ const projectLabel: Record<string, string> = {
 
 function statusTag(status: string) {
   return <ServiceStatusTag status={status} />;
-}
-
-function statusColor(status: string) {
-  const colorName = getServiceStatusColor(status);
-  const colorMap: Record<string, string> = {
-    success: '#52c41a', error: '#ff4d4f', warning: '#faad14', default: '#999',
-  };
-  return colorMap[colorName] || '#999';
 }
 
 export default function WebsiteList({
@@ -429,7 +435,7 @@ export default function WebsiteList({
           <Col>
             <Space size="middle">
               <Button icon={<ArrowLeftOutlined />} onClick={onGoBack}>返回</Button>
-              <CloudServerOutlined style={{ fontSize: 28, color: statusColor(selectedServer.status) }} />
+              {renderServerIcon(selectedServer.name, 32)}
               <div>
                 <Space>
                   <span style={{ fontSize: 18, fontWeight: 'bold' }}>{selectedServer.display_name}</span>

@@ -34,16 +34,36 @@ export default function ServerList({
       ) : (
         <Row gutter={[16, 16]}>
           {servers.map(server => (
-            <Col xs={24} sm={12} lg={8} key={server.id}>
-              <Card hoverable onClick={() => onEnterServer(server)} style={{ borderColor: statusColor(server.status) }}>
-                <Card.Meta
-                  avatar={<DatabaseOutlined style={{ fontSize: 32, color: statusColor(server.status) }} />}
-                  title={<Space>{server.display_name}{statusTag(server.status)}</Space>}
-                  description={<div>
-                    <p style={{ margin: '8px 0', color: '#666' }}>{server.description}</p>
-                    {server.version && <Tag color="blue">已安装: {server.version}</Tag>}
-                    <Tag>默认端口: {server.default_port}</Tag>
-                  </div>} />
+            <Col xs={24} sm={12} lg={8} key={server.id} style={{ display: 'flex' }}>
+              <Card
+                hoverable
+                onClick={() => onEnterServer(server)}
+                style={{
+                  borderColor: statusColor(server.status),
+                  width: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+                styles={{
+                  body: {
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                  },
+                }}
+              >
+                <div>
+                  <Card.Meta
+                    avatar={<DatabaseOutlined style={{ fontSize: 32, color: statusColor(server.status) }} />}
+                    title={<Space wrap>{server.display_name}{statusTag(server.status)}</Space>}
+                    description={<p style={{ margin: '8px 0', color: '#666' }}>{server.description}</p>}
+                  />
+                </div>
+                <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {server.version && <Tag color="blue">已安装: {server.version}</Tag>}
+                  <Tag>默认端口: {server.default_port}</Tag>
+                </div>
               </Card>
             </Col>
           ))}
