@@ -100,8 +100,8 @@ export default function FileShares() {
         writeClipboard(`${window.location.origin}/share/${token}`);
         return;
       }
-      // 直达 /download 端点，浏览器直接触发下载
-      writeClipboard(`${window.location.origin}/share/${token}/download?password=${encodeURIComponent(pwd)}`);
+      // 复制带有 password 参数的前端页面链接，前端页面会自动读取并填入密码
+      writeClipboard(`${window.location.origin}/share/${token}?password=${encodeURIComponent(pwd)}`);
     } catch (error: unknown) {
       message.error(error instanceof Error ? error.message : '获取外链信息失败');
     }
