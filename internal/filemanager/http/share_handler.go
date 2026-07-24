@@ -437,18 +437,26 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		return
 	}
 
-	// Atomically increment download count, refusing if the cap is reached. This
-	// closes the check-then-increment race where concurrent requests could push
-	// DownloadCount past MaxDownloads.
-	allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
-	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
-	}
-	if !allowed {
-		h.shareRepo.Delete(c.Request.Context(), share.ID)
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
-		return
+	if c.Request.Method == "GET" {
+		// Use a short-lived cookie to prevent double counting when the browser
+		// sends multiple requests (e.g. cancels the first and sends a second,
+		// or uses range requests).
+		cookieName := fmt.Sprintf("dl_%s", share.Token)
+		if _, err := c.Cookie(cookieName); err != nil {
+			// Atomically increment download count, refusing if the cap is reached.
+			allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
+			if err != nil {
+				c.Error(apperror.ErrInternal.Wrap(err))
+				return
+			}
+			if !allowed {
+				h.shareRepo.Delete(c.Request.Context(), share.ID)
+				c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
+				return
+			}
+			// Set a cookie for 1 hour to deduplicate
+			c.SetCookie(cookieName, "1", 3600, "/", "", false, true)
+		}
 	}
 
 	// Serve file
