@@ -25,6 +25,9 @@ func runCLI(subcommand, configPath string) {
 	case "help":
 		printUsage()
 		return
+	case "healthcheck":
+		healthcheckCmd(configPath)
+		return
 	case "reset-password", "unlock", "reset-totp", "show-admin":
 		// valid, continue
 	default:
@@ -75,6 +78,7 @@ func printUsage() {
 	fmt.Println("  unlock           Unlock admin account")
 	fmt.Println("  reset-totp       Disable TOTP 2FA for admin")
 	fmt.Println("  show-admin       Show admin account status")
+	fmt.Println("  healthcheck      Probe local /health endpoint (exit 0 if healthy)")
 	fmt.Println("  help             Show this help message")
 }
 

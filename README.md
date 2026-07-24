@@ -33,20 +33,6 @@
 
 ## 快速开始
 
-### Docker 部署（推荐）
-
-```bash
-docker run -d \
-  --name easyserver \
-  -p 8080:8080 \
-  -v /opt/easyserver/data:/app/data \
-  -e EASYSERVER_JWT_SECRET="$(openssl rand -base64 32)" \
-  -e EASYSERVER_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-  lmy8848/easyserver:latest
-```
-
-访问 `http://your-server:8080`，首次启动自动生成管理员账号（密码显示在控制台）。
-
 ### 二进制部署
 
 ```bash
@@ -80,7 +66,7 @@ EOF
 |------|------|
 | 后端 | Go 1.25 + Gin + SQLite (WAL) + WebSocket + JWT |
 | 前端 | React 19 + TypeScript + Ant Design 6 + Vite 8 |
-| 部署 | Docker 多阶段构建 + systemd |
+| 部署 | 二进制 + systemd |
 
 ---
 

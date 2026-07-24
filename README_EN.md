@@ -33,20 +33,6 @@
 
 ## Quick Start
 
-### Docker Deployment (Recommended)
-
-```bash
-docker run -d \
-  --name easyserver \
-  -p 8080:8080 \
-  -v /opt/easyserver/data:/app/data \
-  -e EASYSERVER_JWT_SECRET="$(openssl rand -base64 32)" \
-  -e EASYSERVER_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-  lmy8848/easyserver:latest
-```
-
-Access `http://your-server:8080`. The admin password is displayed on the console on first start.
-
 ### Binary Deployment
 
 ```bash
