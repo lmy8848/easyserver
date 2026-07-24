@@ -103,17 +103,21 @@ export default function ShareDownload() {
       message.warning('请先完成人机验证');
       return;
     }
-    // No password: go straight to the download endpoint.
-    if (!info.needs_password) {
-      window.location.href = `/api/shares/public/${token}/download`;
-      return;
-    }
-    if (!password) {
+    if (info.needs_password && !password) {
       message.warning('请输入访问密码');
       return;
     }
-    // Password-protected: go straight to the download endpoint.
-    window.location.href = `/api/shares/public/${token}/download?password=${encodeURIComponent(password)}`;
+
+    try {
+      const res = await publicShareApi.getDownloadTicket(token, password);
+      const ticket = res.data.data.ticket;
+      window.location.href = `/api/shares/public/${token}/download?ticket=${encodeURIComponent(ticket)}`;
+    } catch (err: unknown) {
+      const msg = (err && typeof err === 'object' && 'response' in err)
+        ? String((err as { response?: { data?: { message?: string } } }).response?.data?.message || '')
+        : '';
+      message.error(msg || '获取下载凭证失败，可能是密码错误或次数超限');
+    }
   };
 
   // Determine a blocking state (expired / exhausted / missing) from the info.

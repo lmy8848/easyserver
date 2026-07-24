@@ -418,6 +418,8 @@ export const fileShareApi = {
 export const publicShareApi = {
   getInfo: (token: string) =>
     axios.get<ApiResponse<ShareInfo>>(`/api/shares/public/${token}/info`),
+  getDownloadTicket: (token: string, password?: string) =>
+    axios.post<ApiResponse<{ ticket: string }>>(`/api/shares/public/${token}/ticket`, { password }),
 };
 
 // Web Server API
