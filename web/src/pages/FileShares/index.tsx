@@ -279,8 +279,8 @@ export default function FileShares() {
           <Form.Item name="file_path" label="文件路径" rules={[{ required: true, message: '请输入文件路径' }]}>
             <Input placeholder="如：/var/www/html/file.zip" />
           </Form.Item>
-          <Form.Item name="expires_at" label="过期时间" extra="留空为永久有效。支持：1h, 1d, 7d 或具体时间 2026-07-01 12:00:00">
-            <Input placeholder="留空、1h、7d 或 2026-07-01 12:00:00" />
+          <Form.Item name="expires_at" label="过期时间" extra="留空为永久有效。支持：30m, 1h, 1d, 7d 或具体时间 2026-07-01 12:00:00">
+            <Input placeholder="留空、30m、1h、7d 或 2026-07-01 12:00:00" />
           </Form.Item>
           <Form.Item name="max_downloads" label="最大下载次数" extra="0 表示不限制">
             <InputNumber min={0} max={100000} style={{ width: '100%' }} />
@@ -308,8 +308,8 @@ export default function FileShares() {
           <Form.Item name="password" label="访问密码" extra="留空可清除密码">
             <Input.Password placeholder="未设置密码" />
           </Form.Item>
-          <Form.Item name="expires_at" label="过期时间" extra="留空不修改；支持 1h, 7d 或 2026-07-01 12:00:00">
-            <Input placeholder="留空不修改、1h、7d 或 2026-07-01 12:00:00" disabled={editClearExpiry} />
+          <Form.Item name="expires_at" label="过期时间" extra="留空不修改；支持 30m, 1h, 7d 或 2026-07-01 12:00:00">
+            <Input placeholder="留空不修改、30m、1h、7d 或 2026-07-01 12:00:00" disabled={editClearExpiry} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 16 }}>
             <Checkbox checked={editClearExpiry} onChange={(e) => setEditClearExpiry(e.target.checked)}>设为永久有效</Checkbox>
