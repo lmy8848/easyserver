@@ -9,6 +9,7 @@ import {
 import { webServerApi } from '../../services/api';
 import type { WebServer } from '../../types';
 import type { ConfigTestResult } from './types';
+import { copyToClipboard } from '../../utils/clipboard';
 
 export interface ConfigEditorRef {
   showConfig: () => void;
@@ -186,8 +187,7 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
                     size="small"
                     icon={<CopyOutlined />}
                     onClick={() => {
-                      navigator.clipboard.writeText(svcLogContent);
-                      message.success('日志已复制到剪贴板');
+                      copyToClipboard(svcLogContent, '日志已复制到剪贴板');
                     }}
                   >
                     复制

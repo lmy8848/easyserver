@@ -10,6 +10,7 @@ import {
 import type { Script } from '../types';
 import { cronApi } from '../services/api';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
+import { copyToClipboard } from '../utils/clipboard';
 
 const LANG_OPTIONS = [
   { label: 'Shell', value: 'sh' },
@@ -109,9 +110,7 @@ export default function ScriptPage() {
   };
 
   const handleCopyContent = (content: string) => {
-    navigator.clipboard.writeText(content).then(() => {
-      message.success('已复制到剪贴板');
-    });
+    copyToClipboard(content, '已复制到剪贴板');
   };
 
   const columns = [

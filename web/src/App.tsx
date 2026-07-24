@@ -1,6 +1,6 @@
-import { lazy, Suspense, memo } from 'react';
+import { lazy, Suspense, memo, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider, Spin, theme } from 'antd';
+import { ConfigProvider, Spin, theme, App as AntdApp, message, Modal, notification } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -59,6 +59,32 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function StaticContextInjector() {
+  const app = AntdApp.useApp();
+  
+  useEffect(() => {
+    message.success = app.message.success;
+    message.error = app.message.error;
+    message.warning = app.message.warning;
+    message.info = app.message.info;
+    message.loading = app.message.loading;
+    message.destroy = app.message.destroy;
+
+    Modal.confirm = app.modal.confirm;
+    Modal.info = app.modal.info;
+    Modal.success = app.modal.success;
+    Modal.error = app.modal.error;
+    Modal.warning = app.modal.warning;
+
+    notification.success = app.notification.success;
+    notification.error = app.notification.error;
+    notification.info = app.notification.info;
+    notification.warning = app.notification.warning;
+  }, [app]);
+  
+  return null;
+}
+
 function App() {
   return (
     <ConfigProvider 
@@ -78,7 +104,9 @@ function App() {
         }
       }}
     >
-      <BrowserRouter>
+      <AntdApp>
+        <StaticContextInjector />
+        <BrowserRouter>
         <ErrorBoundary>
           <Suspense fallback={<PageLoading />}>
             <Routes>
@@ -124,6 +152,7 @@ function App() {
           </Suspense>
         </ErrorBoundary>
       </BrowserRouter>
+      </AntdApp>
     </ConfigProvider>
   );
 }

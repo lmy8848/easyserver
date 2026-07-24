@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Modal, message, Input, Form, InputNumber, Progress, Spin, Button } from 'antd';
+import { Modal, message, Input, Form, InputNumber, Progress, Spin, Button, Space } from 'antd';
 import { fileApi, fileShareApi } from '../../services/api';
 import type { FileEntry } from '../../types';
 import { isValidPath } from './types';
@@ -10,6 +10,7 @@ import {
   MkdirModal, RenameModal, CopyMoveModal, SearchModal,
   ChmodModal, DetailsModal, PreviewModal,
 } from './FileManagerModals';
+import { copyToClipboard } from '../../utils/clipboard';
 
 export default function FileManager() {
   const [basePath, setBasePath] = useState<string>('');
@@ -820,31 +821,16 @@ export default function FileManager() {
         width={500}
       >
         <p>文件分享链接已生成，复制链接发送给他人即可下载：</p>
-        <Input
-          value={shareLink}
-          readOnly
-          style={{ fontFamily: 'monospace', marginBottom: 12 }}
-          addonAfter={
-            <span
-              style={{ cursor: 'pointer', color: '#1890ff' }}
-              onClick={() => {
-                navigator.clipboard.writeText(shareLink).then(() => {
-                  message.success('已复制');
-                }).catch(() => {
-                  const ta = document.createElement('textarea');
-                  ta.value = shareLink;
-                  document.body.appendChild(ta);
-                  ta.select();
-                  document.execCommand('copy');
-                  document.body.removeChild(ta);
-                  message.success('已复制');
-                });
-              }}
-            >
-              复制
-            </span>
-          }
-        />
+        <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+          <Input
+            value={shareLink}
+            readOnly
+            style={{ fontFamily: 'monospace' }}
+          />
+          <Button type="primary" onClick={() => copyToClipboard(shareLink)}>
+            复制
+          </Button>
+        </Space.Compact>
         {shareLink.includes('?password=') && (
           <p style={{ color: '#faad14', fontSize: 13, marginTop: 8 }}>
             ⚠ 该外链设置了密码，分享时请将完整链接（含 ?password=xxx）发送给对方

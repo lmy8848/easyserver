@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, Button, Switch, Modal, Input, message, Typography, Space, List, Alert, Table, Popconfirm, Tag } from 'antd';
 import { SafetyOutlined, KeyOutlined, CopyOutlined, DownloadOutlined, LockOutlined, DesktopOutlined, DeleteOutlined, LogoutOutlined, ReloadOutlined } from '@ant-design/icons';
 import { authApi } from '../services/api';
+import { copyToClipboard } from '../utils/clipboard';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -139,11 +140,7 @@ export default function SecuritySettings() {
 
   const copyBackupCodes = () => {
     const text = backupCodes.join('\n');
-    navigator.clipboard.writeText(text).then(() => {
-      message.success('备份码已复制到剪贴板');
-    }).catch(() => {
-      message.error('复制失败，请手动复制');
-    });
+    copyToClipboard(text, '备份码已复制到剪贴板');
   };
 
   const downloadBackupCodes = () => {

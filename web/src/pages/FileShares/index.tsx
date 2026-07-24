@@ -3,6 +3,7 @@ import { Card, Table, Button, Space, Tag, Modal, Form, Input, InputNumber, messa
 import { LinkOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, CopyOutlined, EditOutlined, LockOutlined } from '@ant-design/icons';
 import { fileShareApi } from '../../services/api';
 import type { FileShare } from '../../types';
+import { copyToClipboard } from '../../utils/clipboard';
 
 export default function FileShares() {
   const [shares, setShares] = useState<FileShare[]>([]);
@@ -108,17 +109,7 @@ export default function FileShares() {
   };
 
   const writeClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      message.success('链接已复制');
-    }).catch(() => {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      message.success('链接已复制');
-    });
+    copyToClipboard(text, '链接已复制');
   };
 
   const handleEdit = (share: FileShare) => {
