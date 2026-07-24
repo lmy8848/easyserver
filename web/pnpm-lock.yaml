@@ -38,15 +38,12 @@ importers:
       echarts-for-react:
         specifier: ^3.0.6
         version: 3.0.6(echarts@6.1.0)(react@19.2.7)
-<<<<<<< Updated upstream
       lucide-react:
         specifier: ^1.25.0
         version: 1.25.0(react@19.2.7)
-=======
       monaco-editor:
         specifier: ^0.56.0
         version: 0.56.0
->>>>>>> Stashed changes
       react:
         specifier: ^19.2.6
         version: 19.2.7

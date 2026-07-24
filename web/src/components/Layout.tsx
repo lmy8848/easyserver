@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { notificationApi } from '../services/api';
+import { notificationApi, settingsApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
@@ -138,7 +138,6 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [sysVersion, setSysVersion] = useState<string>('');
   const [features, setFeatures] = useState({ login_guard: false, fim: false, file_preview: false });
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -148,14 +147,11 @@ export default function Layout() {
 
   useEffect(() => { loadUser(); }, [loadUser]);
 
-  // Fetch version + features
+  // Fetch features
   useEffect(() => {
     let mounted = true;
-    settingsApi.getSystem().then(res => {
-      if (mounted) setSysVersion(res.data?.data?.version || 'dev');
-    }).catch(err => console.debug('Failed to fetch system version:', err));
-    settingsApi.get().then(res => {
-      if (mounted) setFeatures(res.data?.data?.features || { login_guard: false, fim: false, file_preview: false });
+    settingsApi.get().then((res: { data?: { data?: { features?: { login_guard: boolean; fim: boolean; file_preview: boolean } } } }) => {
+      if (mounted && res.data?.data?.features) setFeatures(res.data.data.features);
     }).catch(() => {});
     return () => { mounted = false; };
   }, []);
