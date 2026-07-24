@@ -249,7 +249,7 @@ export default function FileShares() {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchShares}>刷新</Button>
-            <Button onClick={handleCleanup}>清理过期</Button>
+            <Button onClick={handleCleanup}>清理</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>生成外链</Button>
           </Space>
         }
