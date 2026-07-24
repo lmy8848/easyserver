@@ -1,12 +1,14 @@
 package http
 
 import (
+	archive_zip "archive/zip"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -109,10 +111,6 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 		c.Error(apperror.ErrNotFound.WithMessage("文件不存在"))
 		return
 	}
-	if info.IsDir() {
-		c.Error(apperror.ErrBadRequest.WithMessage("不支持分享目录"))
-		return
-	}
 
 	// Check file size limit (max 500MB)
 	if info.Size() > fileShareMaxSize {
@@ -165,6 +163,7 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 type ShareListItem struct {
 	filemanager.FileShare
 	FileExists  bool  `json:"file_exists"`
+	IsDir       bool  `json:"is_dir"`
 	CurrentSize int64 `json:"current_size"`
 	HasPassword bool  `json:"has_password"`
 }
@@ -187,7 +186,8 @@ func (h *FileShareHandler) ListShares(c *gin.Context) {
 		item := ShareListItem{FileShare: s, HasPassword: hasPwd}
 		validPath, err := h.fileManager.ValidatePath(s.FilePath)
 		if err == nil {
-			if info, err := os.Stat(validPath); err == nil && !info.IsDir() {
+			if info, err := os.Stat(validPath); err == nil {
+				item.IsDir = info.IsDir()
 				item.FileExists = true
 				item.CurrentSize = info.Size()
 			}
@@ -319,6 +319,7 @@ func (h *FileShareHandler) CleanupExpired(c *gin.Context) {
 type ShareInfoResponse struct {
 	FileName      string `json:"file_name"`
 	FileSize      int64  `json:"file_size"`
+	IsDir         bool   `json:"is_dir"`
 	Exists        bool   `json:"exists"`
 	NeedsPassword bool   `json:"needs_password"`
 	Expired       bool   `json:"expired"`
@@ -369,7 +370,8 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 	}
 	// Check current file existence/size without leaking the path.
 	if validPath, verr := h.fileManager.ValidatePath(share.FilePath); verr == nil {
-		if info, serr := os.Stat(validPath); serr == nil && !info.IsDir() {
+		if info, serr := os.Stat(validPath); serr == nil {
+			resp.IsDir = info.IsDir()
 			resp.Exists = true
 			resp.FileSize = info.Size()
 		}
@@ -446,8 +448,8 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 		return
 	}
-	info, err := os.Stat(validPath)
-	if err != nil || info.IsDir() {
+	_, err = os.Stat(validPath)
+	if err != nil {
 		h.shareRepo.Delete(c.Request.Context(), share.ID)
 		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
 		return
@@ -480,9 +482,34 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 // IP rate limiting, password verification, and download-count caps. The SPA
 // download page (/share/:token) can optionally enforce Turnstile before
 // redirecting users here.
-func (h *FileShareHandler) PublicDownload(c *gin.Context) {
+
+func (h *FileShareHandler) validateTicket(share *filemanager.FileShare, ticket string) error {
+	parts := strings.Split(ticket, ".")
+	if len(parts) != 3 {
+		return fmt.Errorf("凭证无效")
+	}
+	if parts[0] != strconv.FormatInt(share.ID, 10) {
+		return fmt.Errorf("凭证无效")
+	}
+	exp, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return fmt.Errorf("凭证已过期")
+	}
+
+	msg := parts[0] + "." + parts[1]
+	mac := hmac.New(sha256.New, getTicketSecret())
+	mac.Write([]byte(msg))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(parts[2]), []byte(expectedSig)) != 1 {
+		return fmt.Errorf("凭证无效")
+	}
+	return nil
+}
+
+func (h *FileShareHandler) PublicList(c *gin.Context) {
 	token := c.Param("token")
 	ticket := c.Query("ticket")
+	subpath := c.Query("subpath")
 	if token == "" || ticket == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("缺少令牌或凭证"))
 		return
@@ -498,62 +525,170 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		return
 	}
 
-	// Verify stateless ticket
-	parts := strings.Split(ticket, ".")
-	if len(parts) != 3 {
-		c.Error(apperror.ErrForbidden.WithMessage("无效的下载凭证"))
-		return
-	}
-	if parts[0] != strconv.FormatInt(share.ID, 10) {
-		c.Error(apperror.ErrForbidden.WithMessage("凭证不匹配"))
-		return
-	}
-	exp, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || time.Now().Unix() > exp {
-		c.Error(apperror.ErrForbidden.WithMessage("凭证已过期，请刷新页面重新获取"))
+	if err := h.validateTicket(share, ticket); err != nil {
+		c.Error(apperror.ErrForbidden.WithMessage(err.Error()))
 		return
 	}
 
-	msg := parts[0] + "." + parts[1]
-	mac := hmac.New(sha256.New, getTicketSecret())
-	mac.Write([]byte(msg))
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(parts[2]), []byte(expectedSig)) != 1 {
-		c.Error(apperror.ErrForbidden.WithMessage("凭证签名无效"))
+	validPath, err := h.fileManager.ValidatePath(share.FilePath)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 		return
 	}
 
-	// Validate file path
+	info, err := os.Stat(validPath)
+	if err != nil || !info.IsDir() {
+		c.Error(apperror.ErrBadRequest.WithMessage("该分享不是一个文件夹"))
+		return
+	}
+
+	targetDir, err := h.fileManager.ResolveShareSubpath(validPath, subpath)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("非法路径"))
+		return
+	}
+
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		c.Error(apperror.ErrInternal.Wrap(err))
+		return
+	}
+
+	type Entry struct {
+		Name  string `json:"name"`
+		Size  int64  `json:"size"`
+		IsDir bool   `json:"is_dir"`
+	}
+	var res []Entry
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		res = append(res, Entry{
+			Name:  e.Name(),
+			Size:  info.Size(),
+			IsDir: e.IsDir(),
+		})
+	}
+	httpx.Success(c, res)
+}
+
+func (h *FileShareHandler) PublicDownload(c *gin.Context) {
+	token := c.Param("token")
+	ticket := c.Query("ticket")
+	subpath := c.Query("subpath")
+
+	if token == "" || ticket == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少令牌或凭证"))
+		return
+	}
+
+	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
+	if err != nil {
+		c.Error(apperror.ErrInternal.Wrap(err))
+		return
+	}
+	if share == nil {
+		c.Error(apperror.ErrNotFound.WithMessage("分享链接已失效"))
+		return
+	}
+
+	if err := h.validateTicket(share, ticket); err != nil {
+		c.Error(apperror.ErrForbidden.WithMessage(err.Error()))
+		return
+	}
+
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
 		return
 	}
 	info, err := os.Stat(validPath)
-	if err != nil || info.IsDir() {
+	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
 		return
 	}
 
-	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	targetPath := validPath
+	if info.IsDir() && subpath != "" {
+		resolved, err := h.fileManager.ResolveShareSubpath(validPath, subpath)
+		if err != nil {
+			c.Error(apperror.ErrBadRequest.WithMessage("非法路径"))
+			return
+		}
+		targetPath = resolved
+	}
+
+	targetInfo, err := os.Stat(targetPath)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
+		return
+	}
+
+	if targetInfo.IsDir() {
+		// Zip and stream the directory
+		c.Header("Content-Type", "application/zip")
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(targetPath)+".zip"))
+		c.Writer.WriteHeader(200)
+
+		zw := archive_zip.NewWriter(c.Writer)
+		defer zw.Close()
+
+		filepath.Walk(targetPath, func(path string, winfo os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if winfo.IsDir() {
+				return nil
+			}
+			// validateRealPath: refuse to read through a symlink planted inside the
+			// shared tree whose target points outside (TOCTOU + symlink-escape guard).
+			if vErr := h.fileManager.ValidateWalkPath(path); vErr != nil {
+				return nil
+			}
+			rel, err := filepath.Rel(targetPath, path)
+			if err != nil {
+				return err
+			}
+			f, err := zw.Create(rel)
+			if err != nil {
+				return err
+			}
+			// O_NOFOLLOW: don't pack the contents of a symlink — the entry itself
+			// could be a symlink whose target is outside the sandbox.
+			sf, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+			if err != nil {
+				return nil
+			}
+			defer sf.Close()
+			_, err = io.Copy(f, sf)
+			return err
+		})
+		return
+	}
+
+	// Serve single file — O_NOFOLLOW guards the TOCTOU window between
+	// ResolveShareSubpath's EvalSymlinks and the actual read.
+	f, err := os.OpenFile(targetPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		c.Error(apperror.ErrInternal.Wrap(err))
 		return
 	}
 	defer f.Close()
 
-	contentType, _ := h.fileManager.GetMimeType(share.FilePath)
+	contentType, _ := h.fileManager.GetMimeType(targetPath)
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	extraHeaders := map[string]string{
-		"Content-Disposition": fmt.Sprintf("inline; filename=%q", filepath.Base(validPath)),
+		"Content-Disposition": fmt.Sprintf("inline; filename=%q", filepath.Base(targetPath)),
 	}
 	if contentType == "application/octet-stream" {
-		extraHeaders["Content-Disposition"] = fmt.Sprintf("attachment; filename=%q", filepath.Base(validPath))
+		extraHeaders["Content-Disposition"] = fmt.Sprintf("attachment; filename=%q", filepath.Base(targetPath))
 	}
 
-	c.DataFromReader(200, info.Size(), contentType, f, extraHeaders)
+	c.DataFromReader(200, targetInfo.Size(), contentType, f, extraHeaders)
 }
 
 // RegisterRoutes registers file share management routes (protected)
@@ -578,4 +713,5 @@ func RegisterPublicShareRoute(public *gin.RouterGroup, shareRepo filemanager.Sha
 	g.GET("/:token/info", handler.ShareInfo)
 	g.POST("/:token/ticket", handler.GetTicket)
 	g.GET("/:token/download", handler.PublicDownload)
+	g.GET("/:token/list", handler.PublicList)
 }

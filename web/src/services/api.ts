@@ -5,7 +5,7 @@ import type {
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBServer, DBVersion, Database, DBUser,
-  SystemProcess, FileShare, ShareInfo,
+  SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
   ConfigSection, ParamMeta, AppSettings,
@@ -416,10 +416,12 @@ export const fileShareApi = {
 // Public share endpoints are now under /api/shares/public/...
 // They may be accessed without auth (share recipients).
 export const publicShareApi = {
-  getInfo: (token: string) =>
+  getShareInfo: (token: string) =>
     axios.get<ApiResponse<ShareInfo>>(`/api/shares/public/${token}/info`),
   getDownloadTicket: (token: string, password?: string) =>
     axios.post<ApiResponse<{ ticket: string }>>(`/api/shares/public/${token}/ticket`, { password }),
+  listShareFiles: (token: string, ticket: string, subpath: string = '') =>
+    axios.get<ApiResponse<ShareFileEntry[]>>(`/api/shares/public/${token}/list`, { params: { ticket, subpath } }),
 };
 
 // Web Server API
