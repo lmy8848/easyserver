@@ -17,7 +17,6 @@ export default function FileShares() {
   const [editingShare, setEditingShare] = useState<FileShare | null>(null);
   const [editForm] = Form.useForm();
   const [editLoading, setEditLoading] = useState(false);
-  const [editClearPwd, setEditClearPwd] = useState(false);
   const [editClearExpiry, setEditClearExpiry] = useState(false);
 
   const fetchShares = async () => {
@@ -112,9 +111,8 @@ export default function FileShares() {
     copyToClipboard(text, '链接已复制');
   };
 
-  const handleEdit = (share: FileShare) => {
+  const handleEdit = async (share: FileShare) => {
     setEditingShare(share);
-    setEditClearPwd(false);
     setEditClearExpiry(false);
     editForm.resetFields();
     editForm.setFieldsValue({
@@ -122,6 +120,16 @@ export default function FileShares() {
       expires_at: share.expires_at || '',
     });
     setEditVisible(true);
+    
+    // Fetch full info to echo password
+    try {
+      const res = await fileShareApi.get(share.id);
+      editForm.setFieldsValue({
+        password: res.data.data?.password || '',
+      });
+    } catch (error) {
+      console.error('Failed to fetch share password', error);
+    }
   };
 
   const handleEditSubmit = async () => {
@@ -135,13 +143,8 @@ export default function FileShares() {
         expires_at?: string;
         max_downloads: number;
         clear_expiry?: boolean;
-      } = { max_downloads: v.max_downloads ?? 0 };
-      // 密码：勾选清除 -> ""；输入新值 -> 替换；否则不传(保持不变)
-      if (editClearPwd) {
-        payload.password = '';
-      } else if (v.password) {
-        payload.password = v.password;
-      }
+      } = { max_downloads: v.max_downloads ?? 0, password: v.password || '' };
+      
       // 过期时间：勾选永久 -> clear_expiry；输入新值 -> 替换；否则不传
       if (editClearExpiry) {
         payload.clear_expiry = true;
@@ -313,11 +316,8 @@ export default function FileShares() {
           <Form.Item label="文件路径">
             <Input value={editingShare?.file_path} disabled />
           </Form.Item>
-          <Form.Item label="访问密码" extra="留空不修改；勾选下方清除可去掉密码">
-            <Input.Password placeholder={editingShare?.has_password ? '已设置密码，输入新值替换' : '未设置密码'} disabled={editClearPwd} />
-          </Form.Item>
-          <Form.Item style={{ marginBottom: 16 }}>
-            <Checkbox checked={editClearPwd} onChange={(e) => setEditClearPwd(e.target.checked)}>清除密码</Checkbox>
+          <Form.Item name="password" label="访问密码" extra="留空可清除密码">
+            <Input.Password placeholder="未设置密码" />
           </Form.Item>
           <Form.Item name="expires_at" label="过期时间" extra="留空不修改；支持 1h, 7d 或 2026-07-01 12:00:00">
             <Input placeholder="留空不修改、1h、7d 或 2026-07-01 12:00:00" disabled={editClearExpiry} />
