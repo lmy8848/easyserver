@@ -16,8 +16,10 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-// EnsureIndexes creates necessary indexes for monitor data
+// EnsureIndexes creates necessary indexes and columns for monitor data
 func (r *sqliteRepo) EnsureIndexes(ctx context.Context) error {
+	_, _ = r.db.ExecContext(ctx, "ALTER TABLE monitor_data ADD COLUMN disk_read_bytes INTEGER DEFAULT 0")
+	_, _ = r.db.ExecContext(ctx, "ALTER TABLE monitor_data ADD COLUMN disk_write_bytes INTEGER DEFAULT 0")
 	_, err := r.db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_monitor_data_timestamp ON monitor_data(timestamp)")
 	return err
 }
@@ -28,12 +30,12 @@ func (r *sqliteRepo) Save(ctx context.Context, point *MonitorPoint) error {
 		`INSERT INTO monitor_data
 		(cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
 		 mem_total, mem_used, mem_usage,
-		 disk_total, disk_used, disk_usage,
+		 disk_total, disk_used, disk_usage, disk_read_bytes, disk_write_bytes,
 		 net_bytes_sent, net_bytes_recv, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		point.CPUPercent, point.CPULoad1m, point.CPULoad5m, point.CPULoad15m,
 		point.MemTotal, point.MemUsed, point.MemPercent,
-		point.DiskTotal, point.DiskUsed, point.DiskPercent,
+		point.DiskTotal, point.DiskUsed, point.DiskPercent, point.DiskReadBytes, point.DiskWriteBytes,
 		point.NetBytesSent, point.NetBytesRecv, point.Timestamp,
 	)
 	return err
@@ -51,9 +53,9 @@ func (r *sqliteRepo) SaveBatch(ctx context.Context, points []*MonitorPoint) erro
 		`INSERT INTO monitor_data
 		(cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
 		 mem_total, mem_used, mem_usage,
-		 disk_total, disk_used, disk_usage,
+		 disk_total, disk_used, disk_usage, disk_read_bytes, disk_write_bytes,
 		 net_bytes_sent, net_bytes_recv, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -63,7 +65,7 @@ func (r *sqliteRepo) SaveBatch(ctx context.Context, points []*MonitorPoint) erro
 		if _, err := stmt.ExecContext(ctx,
 			point.CPUPercent, point.CPULoad1m, point.CPULoad5m, point.CPULoad15m,
 			point.MemTotal, point.MemUsed, point.MemPercent,
-			point.DiskTotal, point.DiskUsed, point.DiskPercent,
+			point.DiskTotal, point.DiskUsed, point.DiskPercent, point.DiskReadBytes, point.DiskWriteBytes,
 			point.NetBytesSent, point.NetBytesRecv, point.Timestamp,
 		); err != nil {
 			return err
@@ -80,12 +82,14 @@ func (r *sqliteRepo) GetLatest(ctx context.Context) (*MonitorPoint, error) {
 		`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
 		        mem_total, mem_used, mem_usage,
 		        disk_total, disk_used, disk_usage,
+		        COALESCE(disk_read_bytes, 0), COALESCE(disk_write_bytes, 0),
 		        net_bytes_sent, net_bytes_recv, timestamp
 		 FROM monitor_data ORDER BY id DESC LIMIT 1`,
 	).Scan(
 		&p.CPUPercent, &p.CPULoad1m, &p.CPULoad5m, &p.CPULoad15m,
 		&p.MemTotal, &p.MemUsed, &p.MemPercent,
 		&p.DiskTotal, &p.DiskUsed, &p.DiskPercent,
+		&p.DiskReadBytes, &p.DiskWriteBytes,
 		&p.NetBytesSent, &p.NetBytesRecv, &p.Timestamp,
 	)
 	if err != nil {
@@ -98,16 +102,12 @@ func (r *sqliteRepo) GetLatest(ctx context.Context) (*MonitorPoint, error) {
 }
 
 // GetHistory returns monitor points in the given time range.
-// Caps the SQL fetch at maxHistoryPoints*2 rows so a long-running server
-// (86k+ rows in monitor_data) does NOT load the full table into memory —
-// the original query without this cap was the cause of the slow post-login
-// Dashboard render. The caller (service layer) downsamples the result to
-// maxHistoryPoints with even stride.
 func (r *sqliteRepo) GetHistory(ctx context.Context, start, end time.Time) ([]MonitorPoint, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT cpu, cpu_load_1m, cpu_load_5m, cpu_load_15m,
 		        mem_total, mem_used, mem_usage,
 		        disk_total, disk_used, disk_usage,
+		        COALESCE(disk_read_bytes, 0), COALESCE(disk_write_bytes, 0),
 		        net_bytes_sent, net_bytes_recv, timestamp
 		 FROM monitor_data
 		 WHERE timestamp >= ? AND timestamp <= ?
@@ -126,6 +126,7 @@ func (r *sqliteRepo) GetHistory(ctx context.Context, start, end time.Time) ([]Mo
 			&p.CPUPercent, &p.CPULoad1m, &p.CPULoad5m, &p.CPULoad15m,
 			&p.MemTotal, &p.MemUsed, &p.MemPercent,
 			&p.DiskTotal, &p.DiskUsed, &p.DiskPercent,
+			&p.DiskReadBytes, &p.DiskWriteBytes,
 			&p.NetBytesSent, &p.NetBytesRecv, &p.Timestamp,
 		); err != nil {
 			continue

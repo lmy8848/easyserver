@@ -6,22 +6,24 @@ import (
 
 // MonitorPoint represents a single monitoring data point
 type MonitorPoint struct {
-	ID           int64   `json:"id" db:"id"`
-	CPUPercent   float64 `json:"cpu_percent" db:"cpu"`
-	CPULoad1m    float64 `json:"cpu_load_1m" db:"cpu_load_1m"`
-	CPULoad5m    float64 `json:"cpu_load_5m" db:"cpu_load_5m"`
-	CPULoad15m   float64 `json:"cpu_load_15m" db:"cpu_load_15m"`
-	MemTotal     uint64  `json:"mem_total" db:"mem_total"`
-	MemUsed      uint64  `json:"mem_used" db:"mem_used"`
-	MemPercent   float64 `json:"mem_percent" db:"mem_usage"`
-	DiskTotal    uint64  `json:"disk_total" db:"disk_total"`
-	DiskUsed     uint64  `json:"disk_used" db:"disk_used"`
-	DiskPercent  float64 `json:"disk_percent" db:"disk_usage"`
-	NetBytesSent uint64  `json:"net_bytes_sent" db:"net_bytes_sent"`
-	NetBytesRecv uint64  `json:"net_bytes_recv" db:"net_bytes_recv"`
-	SwapTotal    uint64  `json:"-" db:"-"`
-	SwapUsed     uint64  `json:"-" db:"-"`
-	Timestamp    string  `json:"timestamp" db:"timestamp"`
+	ID             int64   `json:"id" db:"id"`
+	CPUPercent     float64 `json:"cpu_percent" db:"cpu"`
+	CPULoad1m      float64 `json:"cpu_load_1m" db:"cpu_load_1m"`
+	CPULoad5m      float64 `json:"cpu_load_5m" db:"cpu_load_5m"`
+	CPULoad15m     float64 `json:"cpu_load_15m" db:"cpu_load_15m"`
+	MemTotal       uint64  `json:"mem_total" db:"mem_total"`
+	MemUsed        uint64  `json:"mem_used" db:"mem_used"`
+	MemPercent     float64 `json:"mem_percent" db:"mem_usage"`
+	DiskTotal      uint64  `json:"disk_total" db:"disk_total"`
+	DiskUsed       uint64  `json:"disk_used" db:"disk_used"`
+	DiskPercent    float64 `json:"disk_percent" db:"disk_usage"`
+	DiskReadBytes  uint64  `json:"disk_read_bytes" db:"disk_read_bytes"`
+	DiskWriteBytes uint64  `json:"disk_write_bytes" db:"disk_write_bytes"`
+	NetBytesSent   uint64  `json:"net_bytes_sent" db:"net_bytes_sent"`
+	NetBytesRecv   uint64  `json:"net_bytes_recv" db:"net_bytes_recv"`
+	SwapTotal      uint64  `json:"-" db:"-"`
+	SwapUsed       uint64  `json:"-" db:"-"`
+	Timestamp      string  `json:"timestamp" db:"timestamp"`
 }
 
 // DiskPartition represents a single disk partition
@@ -68,6 +70,10 @@ type MonitorSnapshot struct {
 		UsedBytes    uint64  `json:"used_bytes"`
 		UsagePercent float64 `json:"usage_percent"`
 	} `json:"disk"`
+	DiskIO struct {
+		ReadBytes  uint64 `json:"read_bytes"`
+		WriteBytes uint64 `json:"write_bytes"`
+	} `json:"disk_io"`
 	Network struct {
 		BytesSent uint64 `json:"bytes_sent"`
 		BytesRecv uint64 `json:"bytes_recv"`
@@ -116,6 +122,9 @@ func (p *MonitorPoint) ToSnapshot() *MonitorSnapshot {
 		UsedBytes:    p.DiskUsed,
 		UsagePercent: p.DiskPercent,
 	}
+
+	s.DiskIO.ReadBytes = p.DiskReadBytes
+	s.DiskIO.WriteBytes = p.DiskWriteBytes
 
 	s.Network.BytesSent = p.NetBytesSent
 	s.Network.BytesRecv = p.NetBytesRecv

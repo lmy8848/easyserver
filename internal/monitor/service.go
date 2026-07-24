@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,12 +80,14 @@ type MonitorService struct {
 
 	intervalUpdateCh chan time.Duration
 	// 差值计算状态缓存
-	lastCpuIdle  uint64
-	lastCpuTotal uint64
-	lastNetSent  uint64
-	lastNetRecv  uint64
-	stopCh       chan struct{}
-	lastCleanup  time.Time
+	lastCpuIdle   uint64
+	lastCpuTotal  uint64
+	lastNetSent   uint64
+	lastNetRecv   uint64
+	lastDiskRead  uint64
+	lastDiskWrite uint64
+	stopCh        chan struct{}
+	lastCleanup   time.Time
 
 	// 告警与审计评估
 	alertService    Evaluator
@@ -289,6 +292,7 @@ func (s *MonitorService) readAll() *MonitorPoint {
 	s.readLoad(p)
 	s.readMemory(p)
 	s.readDisk(p)
+	s.readDiskIO(p)
 	s.readNetwork(p)
 
 	return p
@@ -501,6 +505,55 @@ func (s *MonitorService) readDisk(p *MonitorPoint) {
 	if p.DiskTotal > 0 {
 		p.DiskPercent = math.Round(float64(p.DiskUsed)/float64(p.DiskTotal)*100*100) / 100
 	}
+}
+
+func isMainDiskDevice(dev string) bool {
+	if strings.HasPrefix(dev, "loop") || strings.HasPrefix(dev, "ram") || strings.HasPrefix(dev, "sr") || strings.HasPrefix(dev, "dm-") {
+		return false
+	}
+	if strings.HasPrefix(dev, "nvme") || strings.HasPrefix(dev, "mmcblk") {
+		return !strings.Contains(dev, "p")
+	}
+	for _, c := range dev {
+		if c >= '0' && c <= '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *MonitorService) readDiskIO(p *MonitorPoint) {
+	data, err := os.ReadFile("/proc/diskstats")
+	if err != nil {
+		return
+	}
+
+	var totalReadSectors, totalWriteSectors uint64
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 14 {
+			continue
+		}
+		devName := fields[2]
+		if isMainDiskDevice(devName) {
+			rSectors, _ := strconv.ParseUint(fields[5], 10, 64)
+			wSectors, _ := strconv.ParseUint(fields[9], 10, 64)
+			totalReadSectors += rSectors
+			totalWriteSectors += wSectors
+		}
+	}
+
+	curReadBytes := totalReadSectors * 512
+	curWriteBytes := totalWriteSectors * 512
+
+	if s.lastDiskRead > 0 || s.lastDiskWrite > 0 {
+		p.DiskReadBytes = deltaU64(curReadBytes, s.lastDiskRead)
+		p.DiskWriteBytes = deltaU64(curWriteBytes, s.lastDiskWrite)
+	}
+
+	s.lastDiskRead = curReadBytes
+	s.lastDiskWrite = curWriteBytes
 }
 
 func (s *MonitorService) readNetwork(p *MonitorPoint) {

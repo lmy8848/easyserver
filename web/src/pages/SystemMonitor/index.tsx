@@ -335,15 +335,40 @@ function HistoryTab() {
     }]
   }), [history]);
 
-  const diskChartOption = useMemo(() => ({
+  const diskIOChartOption = useMemo(() => ({
     ...baseChartOption,
-    title: { text: '磁盘使用率 (%)', left: 'center', textStyle: { fontSize: 14 } },
-    yAxis: { type: 'value' as const, min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
-    series: [{
-      name: '磁盘', type: 'line', smooth: true, areaStyle: { opacity: 0.3 }, itemStyle: { color: '#fa8c16' },
-      showSymbol: false, sampling: 'lttb' as const,
-      data: history.map(p => [p.timestamp, p.disk.usage_percent]),
-    }]
+    title: { text: '磁盘 IO', left: 'center', textStyle: { fontSize: 14 } },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: (params: any[]) => {
+        const p = params[0];
+        if (!p) return '';
+        const time = formatChartTime(p.value[0]);
+        let html = `<div>${time}</div>`;
+        params.forEach(param => {
+          html += `<div>${param.marker} ${param.seriesName}: ${formatBytes(param.value[1])}/s</div>`;
+        });
+        return html;
+      }
+    },
+    legend: { bottom: 0, data: ['读取', '写入'] },
+    grid: { top: 40, right: 20, bottom: 40, left: 60 },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: { formatter: (v: number) => formatBytes(v) + '/s' },
+    },
+    series: [
+      {
+        name: '读取', type: 'line', smooth: true, showSymbol: false, sampling: 'lttb' as const,
+        itemStyle: { color: '#fa8c16' }, areaStyle: { opacity: 0.2 },
+        data: history.map(p => [p.timestamp, p.disk_io?.read_bytes || 0]),
+      },
+      {
+        name: '写入', type: 'line', smooth: true, showSymbol: false, sampling: 'lttb' as const,
+        itemStyle: { color: '#722ed1' }, areaStyle: { opacity: 0.2 },
+        data: history.map(p => [p.timestamp, p.disk_io?.write_bytes || 0]),
+      },
+    ]
   }), [history]);
 
   const loadChartOption = useMemo(() => ({
@@ -399,7 +424,7 @@ function HistoryTab() {
           <ReactECharts option={memChartOption} style={{ height: 300 }} />
         </Col>
         <Col xs={24} lg={12}>
-          <ReactECharts option={diskChartOption} style={{ height: 300 }} />
+          <ReactECharts option={diskIOChartOption} style={{ height: 300 }} />
         </Col>
         <Col xs={24} lg={12}>
           <ReactECharts option={loadChartOption} style={{ height: 300 }} />

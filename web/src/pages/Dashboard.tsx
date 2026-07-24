@@ -169,9 +169,9 @@ export default function Dashboard() {
     }],
   }), [history, formatChartTime]);
 
-  const memChartOption = useMemo(() => ({
+  const diskIOChartOption = useMemo(() => ({
     animation: false,
-    title: { text: '内存使用率', left: 'center', textStyle: { fontSize: 14 } },
+    title: { text: '磁盘 IO', left: 'center', textStyle: { fontSize: 14 } },
     tooltip: {
       trigger: 'axis' as const,
       formatter: (params: Array<{axisValue?: string; seriesName?: string; marker?: string; value?: any}>) => {
@@ -181,32 +181,43 @@ export default function Dashboard() {
         params.forEach((p: any) => {
           const name = sanitizeTooltipText(p.seriesName || '');
           const v = Array.isArray(p.value) ? p.value[1] : p.value;
-          html += `<div>${p.marker} ${name}: ${v}%</div>`;
+          html += `<div>${p.marker} ${name}: ${formatBytes(v)}/s</div>`;
         });
         return html;
       },
     },
-    grid: { top: 40, right: 20, bottom: 30, left: 50 },
+    legend: { bottom: 0, data: ['读取', '写入'] },
+    grid: { top: 40, right: 20, bottom: 40, left: 60 },
     xAxis: {
       type: 'time' as const,
       axisLabel: { fontSize: 11, hideOverlap: true, formatter: (v: number) => formatChartTime(v) },
     },
     yAxis: {
       type: 'value' as const,
-      min: 0,
-      max: 100,
-      axisLabel: { formatter: '{value}%' },
+      axisLabel: { formatter: (v: number) => formatBytes(v) + '/s' },
     },
-    series: [{
-      name: '内存',
-      type: 'line',
-      data: insertNullGaps(history.map(p => [p.timestamp, p.memory.usage_percent])),
-      smooth: true,
-      areaStyle: { opacity: 0.3 },
-      itemStyle: { color: '#52c41a' },
-      showSymbol: false,
-      connectNulls: false,
-    }],
+    series: [
+      {
+        name: '读取',
+        type: 'line',
+        data: insertNullGaps(history.map(p => [p.timestamp, p.disk_io?.read_bytes || 0])),
+        smooth: true,
+        showSymbol: false,
+        connectNulls: false,
+        itemStyle: { color: '#fa8c16' },
+        areaStyle: { opacity: 0.2 },
+      },
+      {
+        name: '写入',
+        type: 'line',
+        data: insertNullGaps(history.map(p => [p.timestamp, p.disk_io?.write_bytes || 0])),
+        smooth: true,
+        showSymbol: false,
+        connectNulls: false,
+        itemStyle: { color: '#722ed1' },
+        areaStyle: { opacity: 0.2 },
+      },
+    ],
   }), [history, formatChartTime]);
 
   const netChartOption = useMemo(() => ({
@@ -330,7 +341,7 @@ export default function Dashboard() {
         <Col style={{ flex: '1 1 180px', minWidth: 0 }}>
           <Card>
             <Statistic
-              title="磁盘使用率"
+              title="磁盘占用"
               value={stats?.disk?.usage_percent || 0}
               precision={1}
               suffix="%"
@@ -379,7 +390,7 @@ export default function Dashboard() {
                 <ReactECharts option={cpuChartOption} style={{ height: 280 }} />
               </Col>
               <Col xs={24} lg={8}>
-                <ReactECharts option={memChartOption} style={{ height: 280 }} />
+                <ReactECharts option={diskIOChartOption} style={{ height: 280 }} />
               </Col>
               <Col xs={24} lg={8}>
                 <ReactECharts option={netChartOption} style={{ height: 280 }} />

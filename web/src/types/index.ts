@@ -79,6 +79,10 @@ export interface MonitorSnapshot {
     used_bytes: number;
     usage_percent: number;
   };
+  disk_io?: {
+    read_bytes: number;
+    write_bytes: number;
+  };
   partitions?: DiskPartition[];
   network: {
     bytes_sent: number;

@@ -187,12 +187,16 @@ export function ChmodModal({ visible, path, mode, onClose, onOk, onModeChange }:
       okText="确定"
       cancelText="取消"
     >
-      <Input
-        placeholder="权限模式 (如 755, 644)"
-        value={mode}
-        onChange={(e) => onModeChange(e.target.value)}
-        addonBefore="chmod"
-      />
+      <Space.Compact style={{ width: '100%' }}>
+        <Button disabled style={{ cursor: 'default', color: 'rgba(0, 0, 0, 0.88)', backgroundColor: '#fafafa' }}>
+          chmod
+        </Button>
+        <Input
+          placeholder="权限模式 (如 755, 644)"
+          value={mode}
+          onChange={(e) => onModeChange(e.target.value)}
+        />
+      </Space.Compact>
       <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
         常用权限：755 (rwxr-xr-x) | 644 (rw-r--r--) | 700 (rwx------)
       </div>
