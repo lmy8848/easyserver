@@ -67,12 +67,12 @@ export default function FileManagerTable({
         label: '下载',
         onClick: () => onDownload(record.path),
       }] : []),
-      ...(!record.is_dir ? [{
+      {
         key: 'share',
         icon: <LinkOutlined />,
         label: '生成外链',
         onClick: () => onShare(record.path),
-      }] : []),
+      },
       {
         key: 'details',
         icon: <FileTextOutlined />,

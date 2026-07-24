@@ -158,6 +158,49 @@ func (m *Manager) validateRealPath(realPath string) error {
 	return nil
 }
 
+// ResolveShareSubpath anchors subpath under shareRoot (a ValidatePath-validated
+// directory) and returns the target path after resolving symlinks and confirming
+// the result stays within BOTH shareRoot and the sandbox.
+//
+// ".." is neutralized by Clean+Join against "/", so the only escape vector is a
+// symlink planted inside the share pointing outside (e.g. to /etc/passwd, or to a
+// sandbox sibling the owner never shared). The previous callers used a bare
+// strings.HasPrefix check, which does not resolve symlinks and followed them out.
+func (m *Manager) ResolveShareSubpath(shareRoot, subpath string) (string, error) {
+	if strings.Contains(subpath, "\x00") {
+		return "", fmt.Errorf("invalid path: contains null byte")
+	}
+	cleanSub := filepath.Clean(filepath.Join("/", subpath))
+	if cleanSub == "/" {
+		cleanSub = ""
+	} else {
+		cleanSub = strings.TrimPrefix(cleanSub, "/")
+	}
+	target := shareRoot
+	if cleanSub != "" {
+		target = filepath.Join(shareRoot, cleanSub)
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", err
+	}
+	if !isSubPath(m.basePath, resolved) {
+		return "", fmt.Errorf("path traversal detected: path escapes base directory")
+	}
+	if !isSubPath(shareRoot, resolved) {
+		return "", fmt.Errorf("path traversal detected: path escapes share root")
+	}
+	return target, nil
+}
+
+// ValidateWalkPath guards a real filesystem path surfaced by filepath.Walk inside
+// a shared directory: it re-resolves symlinks and rejects anything that escapes
+// the sandbox. Callers still open the leaf with O_NOFOLLOW to close the TOCTOU
+// window between this check and the read.
+func (m *Manager) ValidateWalkPath(realPath string) error {
+	return m.validateRealPath(realPath)
+}
+
 // ListRoot returns files in the base directory.
 func (m *Manager) ListRoot() ([]FileEntry, error) {
 	m.mu.RLock()

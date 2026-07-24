@@ -182,6 +182,10 @@ export default function FileShares() {
 
   const columns = [
     { title: '文件名', dataIndex: 'file_name', key: 'file_name', ellipsis: true },
+    { 
+      title: '类型', key: 'type', width: 80, 
+      render: (_: unknown, record: FileShare) => record.is_dir ? '文件夹' : '文件' 
+    },
     {
       title: '文件状态', key: 'file_status', width: 90,
       render: (_: unknown, record: FileShare) => record.file_exists === false
@@ -189,9 +193,8 @@ export default function FileShares() {
         : <Tag color="success" style={{ margin: 0 }}>正常</Tag>,
     },
     {
-      title: '文件大小', key: 'file_size', width: 100,
-      render: (_: unknown, record: FileShare) => 
-        formatSize(record.current_size !== undefined ? record.current_size : record.file_size),
+      title: '大小', key: 'file_size', width: 100,
+      render: (_: unknown, record: FileShare) => record.is_dir ? '-' : formatSize(record.current_size !== undefined ? record.current_size : record.file_size),
     },
     {
       title: '下载次数', key: 'downloads', width: 90,
