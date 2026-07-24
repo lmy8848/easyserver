@@ -15,6 +15,7 @@ import MonitorSettings from './MonitorSettings';
 import AuditSettings from './AuditSettings';
 import NotifySettings from './NotifySettings';
 import CloudSettings from './CloudSettings';
+import FeatureSettings from './FeatureSettings';
 import AlertRulesForm from './AlertRulesForm';
 
 export default function SettingsPage() {
@@ -130,6 +131,16 @@ export default function SettingsPage() {
             label: <span><CloudOutlined /> 腾讯云</span>,
             children: (
               <CloudSettings
+                settings={settings}
+                onRefresh={fetchSettings}
+              />
+            ),
+          },
+          {
+            key: 'features',
+            label: '功能开关',
+            children: (
+              <FeatureSettings
                 settings={settings}
                 onRefresh={fetchSettings}
               />

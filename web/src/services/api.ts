@@ -267,6 +267,9 @@ export const fileApi = {
   extract: (source: string, dest: string) =>
     api.post<ApiResponse>('/files/extract', { source, dest }),
 
+  archiveList: (path: string) =>
+    api.get<ApiResponse<{ entries: Array<{ name: string; size: number; is_dir: boolean }> }>>('/files/archive-list', { params: { path } }),
+
   chmod: (path: string, mode: string) =>
     api.put<ApiResponse>('/files/chmod', { path, mode }),
 
@@ -831,6 +834,9 @@ export const settingsApi = {
 
   updateNotify: (data: { enabled?: boolean; webhook_url?: string }) =>
     api.put<ApiResponse>('/settings/notify', data),
+
+  updateFeatures: (data: { file_preview?: boolean; login_guard?: boolean; fim?: boolean }) =>
+    api.put<ApiResponse>('/settings/features', data),
 
   testWebhook: () =>
     api.post<ApiResponse>('/settings/notify/test'),

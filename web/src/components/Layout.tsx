@@ -138,7 +138,8 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-
+  const [sysVersion, setSysVersion] = useState<string>('');
+  const [features, setFeatures] = useState({ login_guard: false, fim: false, file_preview: false });
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -147,7 +148,17 @@ export default function Layout() {
 
   useEffect(() => { loadUser(); }, [loadUser]);
 
-
+  // Fetch version + features
+  useEffect(() => {
+    let mounted = true;
+    settingsApi.getSystem().then(res => {
+      if (mounted) setSysVersion(res.data?.data?.version || 'dev');
+    }).catch(err => console.debug('Failed to fetch system version:', err));
+    settingsApi.get().then(res => {
+      if (mounted) setFeatures(res.data?.data?.features || { login_guard: false, fim: false, file_preview: false });
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
@@ -243,10 +254,17 @@ export default function Layout() {
           {!collapsed && <span className="logo-text">EasyServer</span>}
         </div>
         <nav className="sidebar-nav">
-          {MENU_GROUPS.map(group => (
+          {MENU_GROUPS.map(group => {
+            const filteredItems = group.items.filter(item => {
+              if (item.key === '/login-guard' && !features.login_guard) return false;
+              if (item.key === '/fim' && !features.fim) return false;
+              return true;
+            });
+            if (filteredItems.length === 0) return null;
+            return (
             <div key={group.label} className="nav-group">
               {!collapsed && <div className="nav-group-label">{group.label}</div>}
-              {group.items.map(item => (
+              {filteredItems.map(item => (
                 <div
                   key={item.key}
                   className={`nav-item ${location.pathname === item.key ? 'active' : ''}`}
@@ -258,7 +276,8 @@ export default function Layout() {
                 </div>
               ))}
             </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="sidebar-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
           <Button

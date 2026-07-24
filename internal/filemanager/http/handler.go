@@ -399,6 +399,21 @@ func (h *FileManagerHandler) Extract(c *gin.Context) {
 	httpx.Success(c, nil)
 }
 
+// ArchiveList lists entries in an archive file (for preview).
+func (h *FileManagerHandler) ArchiveList(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少 path"))
+		return
+	}
+	entries, err := h.fileManager.ListArchiveEntries(path)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"entries": entries})
+}
+
 // Chmod changes file permissions
 func (h *FileManagerHandler) Chmod(c *gin.Context) {
 	var req struct {
@@ -515,6 +530,7 @@ func RegisterRoutes(protected *gin.RouterGroup, fileRoutesWithLargeBody *gin.Rou
 	protected.PUT("/files/content", handler.SaveContent)
 	protected.POST("/files/compress", handler.Compress)
 	protected.POST("/files/extract", handler.Extract)
+	protected.GET("/files/archive-list", handler.ArchiveList)
 	protected.PUT("/files/chmod", handler.Chmod)
 	protected.PUT("/files/chown", handler.Chown)
 }

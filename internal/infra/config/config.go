@@ -19,6 +19,15 @@ type Config struct {
 	TencentCloud TencentCloudConfig `yaml:"tencentcloud"`
 	Deploy       DeployConfig       `yaml:"deploy"`
 	Notify       NotifyConfig       `yaml:"notify"`
+	Features     FeaturesConfig     `yaml:"features"`
+}
+
+// FeaturesConfig holds optional feature toggles. Disabled by default to save
+// resources; admin enables per-feature from the panel settings.
+type FeaturesConfig struct {
+	FilePreview bool `yaml:"file_preview"` // file preview (image/audio/video/pdf/text/archive)
+	LoginGuard  bool `yaml:"login_guard"`  // login anomaly detection + IP ban
+	FIM         bool `yaml:"fim"`          // file integrity monitoring
 }
 
 type NotifyConfig struct {

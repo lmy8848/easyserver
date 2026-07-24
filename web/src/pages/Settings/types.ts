@@ -57,6 +57,11 @@ export interface Settings {
     instance_id: string;
     has_secret: boolean;
   };
+  features: {
+    file_preview: boolean;
+    login_guard: boolean;
+    fim: boolean;
+  };
 }
 
 export interface SystemInfo {

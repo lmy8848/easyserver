@@ -274,6 +274,79 @@ func (m *Manager) Extract(archivePath, destPath string) error {
 	}
 }
 
+// ArchiveEntry is one entry in an archive file (for preview listing).
+type ArchiveEntry struct {
+	Name  string `json:"name"`
+	Size  int64  `json:"size"`
+	IsDir bool   `json:"is_dir"`
+}
+
+// ListArchiveEntries lists entries in an archive without extracting.
+func (m *Manager) ListArchiveEntries(archivePath string) ([]ArchiveEntry, error) {
+	valid, err := m.ValidatePath(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	var entries []ArchiveEntry
+	if strings.HasSuffix(valid, ".tar.gz") || strings.HasSuffix(valid, ".tgz") {
+		f, err := os.Open(valid)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		tr := tar.NewReader(gz)
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, ArchiveEntry{Name: h.Name, Size: h.Size, IsDir: h.FileInfo().IsDir()})
+		}
+		return entries, nil
+	}
+	ext := strings.ToLower(filepath.Ext(valid))
+	switch ext {
+	case ".zip":
+		r, err := zip.OpenReader(valid)
+		if err != nil {
+			return nil, err
+		}
+		defer r.Close()
+		for _, f := range r.File {
+			entries = append(entries, ArchiveEntry{Name: f.Name, Size: int64(f.UncompressedSize64), IsDir: f.FileInfo().IsDir()})
+		}
+		return entries, nil
+	case ".tar":
+		f, err := os.Open(valid)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		tr := tar.NewReader(f)
+		for {
+			h, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, ArchiveEntry{Name: h.Name, Size: h.Size, IsDir: h.FileInfo().IsDir()})
+		}
+		return entries, nil
+	default:
+		return nil, fmt.Errorf("unsupported archive format: %s", ext)
+	}
+}
+
 func (m *Manager) extractZip(zipPath, destPath string) error {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {

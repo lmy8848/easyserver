@@ -148,7 +148,42 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 			"instance_id": h.cfg.TencentCloud.InstanceID,
 			"has_secret":  h.cfg.TencentCloud.SecretID != "" && h.cfg.TencentCloud.SecretKey != "",
 		},
+		"features": gin.H{
+			"file_preview": h.cfg.Features.FilePreview,
+			"login_guard":  h.cfg.Features.LoginGuard,
+			"fim":          h.cfg.Features.FIM,
+		},
 	})
+}
+
+// UpdateFeaturesConfig updates optional feature toggles.
+func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) {
+	h.cfgMu.Lock()
+	defer h.cfgMu.Unlock()
+	var req struct {
+		FilePreview *bool `json:"file_preview"`
+		LoginGuard  *bool `json:"login_guard"`
+		FIM         *bool `json:"fim"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+	middleware.AuditSummary(c, "更新功能开关")
+	if req.FilePreview != nil {
+		h.cfg.Features.FilePreview = *req.FilePreview
+	}
+	if req.LoginGuard != nil {
+		h.cfg.Features.LoginGuard = *req.LoginGuard
+	}
+	if req.FIM != nil {
+		h.cfg.Features.FIM = *req.FIM
+	}
+	if err := h.saveConfig(); err != nil {
+		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "功能开关已更新"})
 }
 
 // UpdateCloudConfig updates Tencent Cloud configuration
@@ -927,6 +962,7 @@ func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath s
 	protected.PUT("/settings/monitor", handler.UpdateMonitorConfig)
 	protected.PUT("/settings/audit", handler.UpdateAuditConfig)
 	protected.PUT("/settings/notify", handler.UpdateNotifyConfig)
+	protected.PUT("/settings/features", handler.UpdateFeaturesConfig)
 	protected.POST("/settings/notify/test", handler.TestWebhook)
 	protected.GET("/alerts/rules", handler.GetAlertRules)
 	protected.PUT("/alerts/rules", handler.UpdateAlertRules)

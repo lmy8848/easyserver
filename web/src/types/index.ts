@@ -524,4 +524,5 @@ export interface AppSettings {
   audit: { enabled: boolean; log_path: string };
   notify: { enabled: boolean; webhook_url: string };
   tencentcloud: { enabled: boolean; region: string; instance_id: string; has_secret: boolean };
+  features: { file_preview: boolean; login_guard: boolean; fim: boolean };
 }

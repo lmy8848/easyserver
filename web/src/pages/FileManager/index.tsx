@@ -419,22 +419,42 @@ export default function FileManager() {
 
   const showPreview = async (path: string) => {
     const ext = path.split('.').pop()?.toLowerCase() || '';
-    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
-    const textExts = ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf', 'log', 'sh', 'py', 'go', 'js', 'ts', 'html', 'css'];
+    const lowerPath = path.toLowerCase();
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'];
+    const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
+    const videoExts = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'];
+    const textExts = ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf', 'log', 'sh', 'py', 'go', 'js', 'ts', 'html', 'css', 'sql', 'env', 'csv', 'bat', 'ps1'];
+    const isArchive = lowerPath.endsWith('.zip') || lowerPath.endsWith('.tar') || lowerPath.endsWith('.tar.gz') || lowerPath.endsWith('.tgz') || lowerPath.endsWith('.gz');
 
     if (imageExts.includes(ext)) {
       setPreviewType('image');
       setPreviewPath(path);
+    } else if (audioExts.includes(ext)) {
+      setPreviewType('audio');
+      setPreviewPath(path);
+    } else if (videoExts.includes(ext)) {
+      setPreviewType('video');
+      setPreviewPath(path);
     } else if (ext === 'pdf') {
       setPreviewType('pdf');
       setPreviewPath(path);
+    } else if (isArchive) {
+      try {
+        const res = await fileApi.archiveList(path);
+        setPreviewType('archive');
+        setPreviewContent(JSON.stringify(res.data.data?.entries || []));
+        setPreviewPath(path);
+      } catch {
+        message.error('无法读取压缩文件');
+        return;
+      }
     } else if (textExts.includes(ext)) {
       try {
         const res = await fileApi.getContent(path);
         setPreviewType('text');
         setPreviewContent(res.data.data?.content || '');
         setPreviewPath(path);
-      } catch (error) {
+      } catch {
         message.error('无法预览');
         return;
       }

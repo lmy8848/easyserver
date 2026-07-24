@@ -238,24 +238,38 @@ interface PreviewModalProps {
 }
 
 export function PreviewModal({ visible, path, type, content, onClose }: PreviewModalProps) {
+  const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
+
+  // Parse archive entries from content (JSON string)
+  let archiveEntries: Array<{ name: string; size: number; is_dir: boolean }> = [];
+  if (type === 'archive' && content) {
+    try { archiveEntries = JSON.parse(content); } catch { archiveEntries = []; }
+  }
+
   return (
     <Modal
       title={`预览: ${path.split('/').pop()}`}
       open={visible}
       onCancel={onClose}
       footer={null}
-      width={type === 'image' ? 800 : 900}
+      width={type === 'image' || type === 'video' ? 800 : 900}
     >
       {type === 'image' && (
         <img
-          src={`/api/files/download?path=${encodeURIComponent(path)}`}
+          src={downloadUrl}
           alt="preview"
           style={{ maxWidth: '100%', maxHeight: '70vh' }}
         />
       )}
+      {type === 'audio' && (
+        <audio controls src={downloadUrl} style={{ width: '100%' }} />
+      )}
+      {type === 'video' && (
+        <video controls src={downloadUrl} style={{ maxWidth: '100%', maxHeight: '70vh' }} />
+      )}
       {type === 'pdf' && (
         <iframe
-          src={`/api/files/download?path=${encodeURIComponent(path)}`}
+          src={downloadUrl}
           style={{ width: '100%', height: '70vh', border: 'none' }}
         />
       )}
@@ -272,6 +286,31 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
           {content}
         </pre>
       )}
+      {type === 'archive' && (
+        <Table
+          size="small"
+          dataSource={archiveEntries}
+          rowKey="name"
+          pagination={{ pageSize: 50 }}
+          style={{ maxHeight: '70vh', overflow: 'auto' }}
+          locale={{ emptyText: '压缩文件为空或无法读取' }}
+          columns={[
+            { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true,
+              render: (name: string, r: { is_dir: boolean }) => r.is_dir ? `📁 ${name}` : name },
+            { title: '大小', dataIndex: 'size', key: 'size', width: 100,
+              render: (s: number, r: { is_dir: boolean }) => r.is_dir ? '-' : formatSize(s) },
+            { title: '类型', dataIndex: 'is_dir', key: 'is_dir', width: 80,
+              render: (d: boolean) => d ? <Tag>目录</Tag> : <Tag color="blue">文件</Tag> },
+          ]}
+        />
+      )}
     </Modal>
   );
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${(bytes / 1073741824).toFixed(1)} GB`;
 }
