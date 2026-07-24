@@ -12,6 +12,30 @@ import {
 } from './FileManagerModals';
 import { copyToClipboard } from '../../utils/clipboard';
 
+// Previewable file extensions. Clicking a media/image/PDF/archive file opens
+// the preview modal instead of the text editor, which would try to read the
+// whole binary file into memory and hit the content-size limit for large files.
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'];
+const AUDIO_EXTS = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];
+const VIDEO_EXTS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'];
+const TEXT_EXTS = ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf', 'log', 'sh', 'py', 'go', 'js', 'ts', 'html', 'css', 'sql', 'env', 'csv', 'bat', 'ps1'];
+
+function fileExt(name: string): string {
+  return name.split('.').pop()?.toLowerCase() || '';
+}
+
+function isArchivePath(path: string): boolean {
+  const p = path.toLowerCase();
+  return p.endsWith('.zip') || p.endsWith('.tar') || p.endsWith('.tar.gz') || p.endsWith('.tgz') || p.endsWith('.gz');
+}
+
+// Media/binary files open in the preview modal on click; text files open in the editor.
+function isMediaOrBinary(path: string): boolean {
+  const ext = fileExt(path);
+  return IMAGE_EXTS.includes(ext) || AUDIO_EXTS.includes(ext) || VIDEO_EXTS.includes(ext)
+    || ext === 'pdf' || isArchivePath(path);
+}
+
 export default function FileManager() {
   const [basePath, setBasePath] = useState<string>('');
   const [currentPath, setCurrentPath] = useState<string>('');
@@ -190,9 +214,14 @@ export default function FileManager() {
   const handleClick = (file: FileEntry) => {
     if (file.is_dir) {
       setCurrentPath(file.path);
-    } else {
-      openFile(file.path);
+      return;
     }
+    // Media/binary files open in the preview modal; text files open in the editor.
+    if (isMediaOrBinary(file.path)) {
+      showPreview(file.path);
+      return;
+    }
+    openFile(file.path);
   };
 
   const openFile = async (path: string) => {
@@ -260,20 +289,20 @@ export default function FileManager() {
     }
   };
 
-  const handleDownload = async (path: string) => {
-    try {
-      const res = await fileApi.download(toRelativePath(path));
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = path.split('/').pop() || 'file';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      message.error('下载失败');
-    }
+  const handleDownload = (path: string) => {
+    // Use a native <a href> download instead of fetching the whole blob into
+    // JS memory first. The browser streams the response straight to disk, so
+    // there is no memory spike and the built-in download progress UI works.
+    // The access_token query param authenticates the request (the download
+    // endpoint accepts it for GET as a fallback for browser media tags).
+    const token = localStorage.getItem('token') || '';
+    const url = `/api/files/download?path=${encodeURIComponent(toRelativePath(path))}&access_token=${encodeURIComponent(token)}`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = path.split('/').pop() || 'file';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   const showRename = (path: string, name: string) => {
@@ -419,21 +448,16 @@ export default function FileManager() {
   };
 
   const showPreview = async (path: string) => {
-    const ext = path.split('.').pop()?.toLowerCase() || '';
-    const lowerPath = path.toLowerCase();
-    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'];
-    const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'];
-    const videoExts = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'];
-    const textExts = ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf', 'log', 'sh', 'py', 'go', 'js', 'ts', 'html', 'css', 'sql', 'env', 'csv', 'bat', 'ps1'];
-    const isArchive = lowerPath.endsWith('.zip') || lowerPath.endsWith('.tar') || lowerPath.endsWith('.tar.gz') || lowerPath.endsWith('.tgz') || lowerPath.endsWith('.gz');
+    const ext = fileExt(path);
+    const isArchive = isArchivePath(path);
 
-    if (imageExts.includes(ext)) {
+    if (IMAGE_EXTS.includes(ext)) {
       setPreviewType('image');
       setPreviewPath(path);
-    } else if (audioExts.includes(ext)) {
+    } else if (AUDIO_EXTS.includes(ext)) {
       setPreviewType('audio');
       setPreviewPath(path);
-    } else if (videoExts.includes(ext)) {
+    } else if (VIDEO_EXTS.includes(ext)) {
       setPreviewType('video');
       setPreviewPath(path);
     } else if (ext === 'pdf') {
@@ -449,7 +473,7 @@ export default function FileManager() {
         message.error('无法读取压缩文件');
         return;
       }
-    } else if (textExts.includes(ext)) {
+    } else if (TEXT_EXTS.includes(ext)) {
       try {
         const res = await fileApi.getContent(path);
         setPreviewType('text');
@@ -489,19 +513,9 @@ export default function FileManager() {
   };
 
   const handleUpload = async (file: File) => {
-    // Check for conflict
-    const existingNames = new Set(files.map(f => f.name));
-    if (existingNames.has(file.name)) {
-      const overwrite = await confirmOverwrite([file.name]);
-      if (!overwrite) {
-        message.info('已跳过重复文件');
-        return;
-      }
-    }
-    await fileApi.upload(file, toRelativePath(currentPath));
-    message.success('上传成功');
-    setLoading(true);
-    fetchFiles(currentPath);
+    // Reuse the drag-drop upload queue so button uploads also show the
+    // top progress bar and per-file status.
+    await uploadFiles([file]);
   };
 
   // Drag-and-drop upload
@@ -689,14 +703,16 @@ export default function FileManager() {
       {showQueue && (
         <div style={{
           position: 'fixed',
-          bottom: 24,
-          right: 24,
+          top: 16,
+          left: '50%',
+          transform: 'translateX(-50%)',
           zIndex: 1010,
           background: '#fff',
           borderRadius: 8,
           boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-          padding: '16px 20px',
-          minWidth: 280,
+          padding: '12px 20px',
+          minWidth: 360,
+          maxWidth: 520,
           maxHeight: 360,
           overflowY: 'auto',
         }}>
@@ -834,6 +850,11 @@ export default function FileManager() {
             复制
           </Button>
         </Space.Compact>
+        {shareLink.includes('?password=') && (
+          <p style={{ color: '#faad14', fontSize: 13, marginTop: 8 }}>
+            ⚠ 该外链设置了密码，分享时请将完整链接（含 ?password=xxx）发送给对方
+          </p>
+        )}
       </Modal>
 
       <MkdirModal

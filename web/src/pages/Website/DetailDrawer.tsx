@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { Website } from '../../types';
+import SecurityTab from './SecurityTab';
 
 const { Paragraph } = Typography;
 
@@ -45,6 +46,7 @@ export default function DetailDrawer({ webServerId, website, open, onClose }: Pr
         { key: 'config', label: 'Nginx 配置', children: tab === 'config' && <ConfigTab base={base} /> },
         { key: 'stats', label: '访问统计', children: tab === 'stats' && <StatsTab base={base} /> },
         { key: 'health', label: '健康探活', children: tab === 'health' && <HealthTab base={base} defaultPort={website.port} /> },
+        { key: 'security', label: '安全', children: tab === 'security' && <SecurityTab websiteId={wid} /> },
       ]} />
     </Drawer>
   );

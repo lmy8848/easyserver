@@ -43,6 +43,7 @@ import (
 
 	"easyserver/internal/terminal"
 	"easyserver/internal/web"
+	websecurity "easyserver/internal/web/security"
 )
 
 // App 是应用运行时容器：持有 HTTP server、TCP listener、重启信号、所有
@@ -394,6 +395,12 @@ func (a *App) wire() error {
 	webServerSvc.SeedPredefinedWebServers(ctx)
 	a.WebServerService = webServerSvc
 	a.WebsiteService = web.NewWebsiteService(websiteRepo, webServerRepo, cmdExec)
+
+	// Website security (rate limit + IP ban), depends on firewall + website service.
+	securityRepo := websecurity.NewSQLiteSecurityRepository(db)
+	securitySvc := websecurity.NewSecurityService(securityRepo, a.FirewallService, cmdExec)
+	a.WebsiteService.SetSecurityRepo(securityRepo)
+	a.SecurityService = securitySvc
 
 	// Notify + alert (wired into auth + monitor)
 	notifyService := notify.NewService(a.cfg.Notify.WebhookURL, a.cfg.Notify.Enabled)

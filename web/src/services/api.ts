@@ -424,6 +424,24 @@ export const publicShareApi = {
     axios.get<ApiResponse<ShareFileEntry[]>>(`/api/shares/public/${token}/list`, { params: { ticket, subpath } }),
 };
 
+// Website Security API (rate limit + IP ban)
+export const websiteSecurityApi = {
+  getConfig: (websiteId: number) =>
+    api.get<ApiResponse<Record<string, unknown>>>(`/websites/${websiteId}/security/config`),
+
+  updateConfig: (websiteId: number, data: Record<string, unknown>) =>
+    api.put<ApiResponse<Record<string, unknown>>>(`/websites/${websiteId}/security/config`, data),
+
+  listBanned: (websiteId: number) =>
+    api.get<ApiResponse<Array<Record<string, unknown>>>>(`/websites/${websiteId}/security/banned`),
+
+  ban: (websiteId: number, ip: string, reason: string, duration: number) =>
+    api.post<ApiResponse>(`/websites/${websiteId}/security/ban`, { ip, reason, duration }),
+
+  unban: (websiteId: number, banId: number) =>
+    api.post<ApiResponse>(`/websites/${websiteId}/security/unban/${banId}`),
+};
+
 // Web Server API
 export const webServerApi = {
   list: () =>

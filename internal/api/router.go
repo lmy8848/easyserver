@@ -54,6 +54,8 @@ import (
 	terminalhttp "easyserver/internal/terminal/http"
 	"easyserver/internal/web"
 	webhttp "easyserver/internal/web/http"
+	websecurity "easyserver/internal/web/security"
+	websecurityhttp "easyserver/internal/web/security/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -102,6 +104,9 @@ type RouterDeps struct {
 	// Web server services
 	WebServerService *web.Service
 	WebsiteService   *web.WebsiteService
+
+	// Website security service (rate limit + IP ban)
+	SecurityService *websecurity.SecurityService
 
 	// Notify + Alert (wired in main.go)
 	NotifyService *notify.Service
@@ -239,6 +244,11 @@ func Setup(cfg *config.Config, configPath string, deps RouterDeps) *gin.Engine {
 	containerhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), deps.ContainerService, deps.AuditService)
 	notificationhttp.RegisterRoutes(protected, deps.NotificationService)
 	securityhttp.RegisterRoutes(protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(deps.Executor, deps.FirewallService, deps.AuthService, deps.DB))
+	// Website security routes (rate limit + IP ban)
+	if deps.SecurityService != nil {
+		secHandler := websecurityhttp.NewSecurityHandler(deps.SecurityService)
+		secHandler.RegisterRoutes(protected.Group("/websites"))
+	}
 	filemanagerhttp.RegisterShareRoutes(protected, deps.FileShareRepo, deps.FileManager, cfg)
 
 	// Public file share routes (no auth)

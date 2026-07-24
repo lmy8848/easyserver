@@ -12,6 +12,7 @@ import (
 
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/web/security"
 )
 
 // WebsiteService manages website deployment and configuration.
@@ -19,10 +20,16 @@ type WebsiteService struct {
 	repo          WebsiteRepository
 	webServerRepo ServerRepository
 	executor      executor.CommandExecutor
+	securityRepo  security.SecurityRepository
 }
 
 func NewWebsiteService(repo WebsiteRepository, webServerRepo ServerRepository, exec executor.CommandExecutor) *WebsiteService {
 	return &WebsiteService{repo: repo, webServerRepo: webServerRepo, executor: exec}
+}
+
+// SetSecurityRepo injects the security repository (optional, for rate-limit + IP ban).
+func (s *WebsiteService) SetSecurityRepo(repo security.SecurityRepository) {
+	s.securityRepo = repo
 }
 
 // List returns websites for a specific web server
@@ -565,15 +572,22 @@ func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) err
 		return os.WriteFile(confPath, []byte(w.CustomConfig), 0644)
 	}
 
+	// Fetch security config for rate limiting (nil-safe if not wired).
+	var secCfg *security.SecurityConfig
+	if s.securityRepo != nil {
+		secCfg, _ = s.securityRepo.GetConfig(context.Background(), w.ID)
+	}
+	rateLimitBlock := nginxRateLimitBlock(secCfg, w.ID)
+
 	// Select template based on project type
 	var config string
 	switch w.ProjectType {
 	case "php":
-		config = nginxPHPTemplate(w)
+		config = nginxPHPTemplate(w, rateLimitBlock)
 	case "nodejs", "python", "java", "proxy":
-		config = nginxProxyTemplate(w)
+		config = nginxProxyTemplate(w, rateLimitBlock)
 	default: // static
-		config = nginxStaticTemplate(w)
+		config = nginxStaticTemplate(w, rateLimitBlock)
 	}
 
 	return os.WriteFile(confPath, []byte(config), 0644)
@@ -669,7 +683,31 @@ func nginxSSLConfig(w *Website) (listenSuffix, sslBlock string) {
 	return " ssl", fmt.Sprintf("    ssl_certificate %s;\n    ssl_certificate_key %s;\n", sanitizeNginxValue(w.SSLCertPath), sanitizeNginxValue(w.SSLKeyPath))
 }
 
-func nginxStaticTemplate(w *Website) string {
+// nginxRateLimitBlock 返回限流配置块（server 块外）。
+func nginxRateLimitBlock(cfg *security.SecurityConfig, websiteID int64) string {
+	if cfg == nil || !cfg.RateLimitEnabled {
+		return ""
+	}
+	rate := cfg.RateLimitRate
+	if rate <= 0 {
+		rate = 10
+	}
+	burst := cfg.RateLimitBurst
+	if burst <= 0 {
+		burst = 20
+	}
+	conn := cfg.LimitConn
+	if conn <= 0 {
+		conn = 100
+	}
+	return fmt.Sprintf(
+		"limit_req_zone $binary_remote_addr zone=perip_%d:10m rate=%dr/s;\nlimit_conn_zone $binary_remote_addr zone=perconn_%d:10m;\n",
+		websiteID, rate, websiteID) +
+		fmt.Sprintf("\n    limit_req zone=perip_%d burst=%d nodelay;\n    limit_conn perconn_%d %d;\n",
+			websiteID, burst, websiteID, conn)
+}
+
+func nginxStaticTemplate(w *Website, rateLimitBlock string) string {
 	opts := ParseConfigOptions(w.ConfigOptions, w.ProjectType)
 	listenSuffix, sslBlock := nginxSSLConfig(w)
 	gzipBlock := ""
@@ -681,6 +719,7 @@ func nginxStaticTemplate(w *Website) string {
 		accessLogLine = "    access_log off;"
 	}
 	return fmt.Sprintf(`# EasyServer - Static site: %s
+%s
 server {
     listen %d%s;
     server_name %s;
@@ -691,17 +730,18 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    %s
+    %s%s
+    include /etc/nginx/conf.d/banned_ips.conf;
     error_log %s;
 }
-`, sanitizeNginxValue(w.Name), w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), sslBlock, gzipBlock, accessLogLine, sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), sslBlock, gzipBlock, accessLogLine, sanitizeNginxValue(w.ErrorLog))
 }
 
-func nginxProxyTemplate(w *Website) string {
+func nginxProxyTemplate(w *Website, rateLimitBlock string) string {
 	// 防御：proxy_pass 为空时回退到 static 模板，避免生成无效的 "proxy_pass ;"
 	// 配置（nginx -t 会失败，导致整站不生效、日志文件不生成）。
 	if strings.TrimSpace(w.ProxyPass) == "" {
-		return nginxStaticTemplate(w)
+		return nginxStaticTemplate(w, rateLimitBlock)
 	}
 	opts := ParseConfigOptions(w.ConfigOptions, w.ProjectType)
 	listenSuffix, sslBlock := nginxSSLConfig(w)
@@ -740,11 +780,12 @@ server {
     %s
     error_log %s;
 }
-`, sanitizeNginxValue(w.ProjectType), sanitizeNginxValue(w.Name), w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sslBlock, gzipBlock, httpsRedirect, sanitizeNginxValue(w.ProxyPass), wsHeaders, accessLogLine, sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.ProjectType), sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sslBlock, gzipBlock, httpsRedirect, sanitizeNginxValue(w.ProxyPass), wsHeaders, accessLogLine, sanitizeNginxValue(w.ErrorLog))
 }
 
-func nginxPHPTemplate(w *Website) string {
+func nginxPHPTemplate(w *Website, rateLimitBlock string) string {
 	return fmt.Sprintf(`# EasyServer - PHP site: %s
+%s
 server {
     listen %d;
     server_name %s;
@@ -767,7 +808,8 @@ server {
     }
 
     access_log %s;
+    include /etc/nginx/conf.d/banned_ips.conf;
     error_log %s;
 }
-`, sanitizeNginxValue(w.Name), w.Port, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), w.AppPort, sanitizeNginxValue(w.AccessLog), sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), w.AppPort, sanitizeNginxValue(w.AccessLog), sanitizeNginxValue(w.ErrorLog))
 }

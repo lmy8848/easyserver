@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -183,9 +184,68 @@ func (h *FileManagerHandler) Download(c *gin.Context) {
 	}
 	defer f.Close()
 
+	base := filepath.Base(validPath)
+
+	// Media/image/PDF files are served inline so the browser can preview and
+	// play them in <audio>/<video>/<img>/<iframe>. http.ServeContent handles
+	// Range requests (206 Partial Content, required for streaming & seeking),
+	// conditional requests (304), and Content-Type.
+	//
+	// Content-Type is set explicitly because X-Content-Type-Options: nosniff
+	// forbids sniffing, so "application/octet-stream" would make <audio>/<video>
+	// refuse to decode the file; mime.TypeByExtension often lacks audio entries
+	// (e.g. .m4a) on Linux.
+	if mt, ok := inlineMIME(base); ok {
+		c.Header("Content-Type", mt)
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", base))
+		http.ServeContent(c.Writer, c.Request, base, info.ModTime(), f)
+		return
+	}
+
+	// Regular download: force attachment so the browser saves it to disk.
 	c.DataFromReader(200, info.Size(), "application/octet-stream", f, map[string]string{
-		"Content-Disposition": fmt.Sprintf("attachment; filename=%q", filepath.Base(validPath)),
+		"Content-Disposition": fmt.Sprintf("attachment; filename=%q", base),
 	})
+}
+
+// inlineMIMEByExt maps media/image/PDF extensions to their MIME types so the
+// browser can play/preview them inline. Returns the MIME type and true for
+// known previewable types; ("", false) means serve as a regular download.
+var inlineMIMEByExt = map[string]string{
+	// audio
+	".mp3":  "audio/mpeg",
+	".wav":  "audio/wav",
+	".ogg":  "audio/ogg",
+	".flac": "audio/flac",
+	".m4a":  "audio/mp4",
+	".aac":  "audio/aac",
+	".opus": "audio/ogg",
+	// video
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".mkv":  "video/x-matroska",
+	".mov":  "video/quicktime",
+	".avi":  "video/x-msvideo",
+	".m4v":  "video/mp4",
+	// image
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".bmp":  "image/bmp",
+	".ico":  "image/x-icon",
+	// document
+	".pdf": "application/pdf",
+}
+
+// inlineMIME returns the MIME type for previewable media/image/PDF files.
+// The bool result is false for non-previewable types (served as attachment).
+func inlineMIME(name string) (string, bool) {
+	ext := strings.ToLower(filepath.Ext(name))
+	mt, ok := inlineMIMEByExt[ext]
+	return mt, ok
 }
 
 // Rename renames a file

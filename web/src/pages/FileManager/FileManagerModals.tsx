@@ -8,7 +8,7 @@ import Editor, { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
 
 // Use local monaco-editor bundle (no CDN)
-loader.config({ monaco: monaco as any });
+loader.config({ monaco });
 
 // Monaco workers: return a no-op worker stub so Monaco doesn't crash.
 // Monaco runs language services in main thread (fine for preview).
@@ -288,7 +288,13 @@ interface PreviewModalProps {
 }
 
 export function PreviewModal({ visible, path, type, content, onClose }: PreviewModalProps) {
-  const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
+  // Build a download URL that carries the JWT via the access_token query param.
+  // <audio>/<video>/<img>/<iframe> tags cannot send the Authorization header,
+  // so the token must be in the URL. The backend serves these with
+  // http.ServeContent (Range/206), so playback is streamed/buffered rather
+  // than requiring a full download first.
+  const token = localStorage.getItem('token') || '';
+  const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}&access_token=${encodeURIComponent(token)}`;
 
   // Parse archive entries from content (JSON string)
   let archiveEntries: Array<{ name: string; size: number; is_dir: boolean }> = [];

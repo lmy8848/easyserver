@@ -12,21 +12,33 @@ import (
 
 func JWTMiddleware(secret string, sessionValidator auth.SessionValidator, validators ...auth.TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		// Extract token from the Authorization header (preferred).
+		var tokenString string
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				c.Error(apperror.ErrUnauthorized.WithMessage("invalid authorization format"))
+				c.Abort()
+				return
+			}
+			tokenString = parts[1]
+		}
+
+		// Fallback: allow the token via the access_token query parameter, but
+		// only for safe methods (GET/HEAD). Browser media tags
+		// (<audio>/<video>/<img>/<iframe>) cannot send custom headers, so media
+		// preview/playback needs the token in the URL. Restricting to safe
+		// methods keeps state-changing endpoints (POST/PUT/DELETE) requiring
+		// the header, preserving CSRF protection.
+		if tokenString == "" && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+			tokenString = c.Query("access_token")
+		}
+
+		if tokenString == "" {
 			c.Error(apperror.ErrUnauthorized.WithMessage("missing authorization header"))
 			c.Abort()
 			return
 		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.Error(apperror.ErrUnauthorized.WithMessage("invalid authorization format"))
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
 		claims := &auth.JWTClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
