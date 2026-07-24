@@ -18,12 +18,16 @@
 - **数据库** — MySQL / PostgreSQL / Redis 多版本管理
 - **容器管理** — Docker / Compose / 镜像 / 存储卷 / 网络
 - **防火墙** — iptables / nftables 规则管理
-- **运行环境** — Node.js / Python / Go / Java 运行时管理
+- **运行环境** — Node.js / Python / Go / Java 运行时管理（via mise）
 - **计划任务** — Cron 任务管理，支持脚本和文档
 - **远程部署** — SSH 远程服务器管理，一键部署
-- **通知告警** — Webhook 通知（钉钉 / 飞书 / 企业微信）
+- **通知告警** — Webhook 通知（钉钉 / 飞书 / 企业微信）+ 告警规则
 - **审计日志** — 完整操作审计，支持导出和完整性验证
 - **2FA 认证** — TOTP 双因素认证，支持备用码
+- **扫码登录** — 手机端扫码登录（QR Login）
+- **安全扫描** — CVE 漏洞扫描（osv.dev 查询 + 一键升级）
+- **文件外链** — 安全的文件分享链接，支持密码/过期控制
+- **端口监控** — 实时监听端口查看
 
 ---
 
@@ -85,7 +89,7 @@ EOF
 | 文档 | 说明 |
 |------|------|
 | [文档网站](https://lmy8848.github.io/easyserver/) | 完整使用文档 |
-| [API 文档](docs/api-reference.md) | 337 个接口完整文档 |
+| [API 文档](docs/api-reference.md) | 完整接口文档 |
 | [Linux 部署手册](docs/linux-deploy.md) | 二进制部署 + systemd + Nginx |
 
 ---
@@ -104,14 +108,17 @@ EOF
 ## 开发
 
 ```bash
-# 后端（开发模式）
+# 后端（开发模式，需 air）
+make dev
+
+# 或手动
 go build -tags dev -o easyserver ./cmd/server
 ./easyserver -config config.yaml -dev
 
 # 前端（热更新）
 cd web
-npm install
-npm run dev
+pnpm install
+pnpm dev
 # 访问 http://localhost:5173
 ```
 

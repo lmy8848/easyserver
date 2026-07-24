@@ -4,7 +4,17 @@ import {
 import {
   FolderOutlined, FileOutlined, SearchOutlined,
 } from '@ant-design/icons';
-import Editor from '@monaco-editor/react';
+import Editor, { loader } from '@monaco-editor/react';
+import * as monaco from 'monaco-editor';
+
+// Use local monaco-editor bundle (no CDN)
+loader.config({ monaco });
+
+// Monaco workers: run in main thread (no separate worker bundle needed).
+// Fine for file preview (not heavy editing).
+(self as unknown as { MonacoEnvironment: { getWorker: () => null } }).MonacoEnvironment = {
+  getWorker: () => null,
+};
 
 // ==================== Mkdir Modal ====================
 interface MkdirModalProps {

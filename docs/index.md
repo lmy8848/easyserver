@@ -9,7 +9,7 @@ permalink: /
 
 **一站式 Linux 服务器管理面板** — Go + React 构建，轻量、安全、功能全面。
 
-[快速开始](#快速开始) · [功能特性](#功能特性) · [在线体验](#在线体验) · [部署指南](#部署指南) · [API 文档](api-reference.md)
+[快速开始](#快速开始) · [功能特性](#功能特性) · [部署指南](#部署指南) · [API 文档](api-reference.md)
 
 ---
 
@@ -27,7 +27,7 @@ docker run -d \
   lmy8848/easyserver:latest
 ```
 
-访问 `http://your-server:8080`，首次登录使用默认管理员账号。
+访问 `http://your-server:8080`，首次启动自动生成管理员账号（密码显示在控制台）。
 
 ### 二进制部署
 
@@ -80,23 +80,31 @@ EOF
 
 | 功能 | 说明 |
 |------|------|
-| **运行环境** | Node.js / Python / Go / Java 等运行时管理 |
-| **包管理** | apt / yum 包搜索、安装、更新 |
+| **运行环境** | Node.js / Python / Go / Java 等运行时管理（via mise） |
 | **计划任务** | Cron 任务管理，支持脚本和文档 |
 | **远程部署** | SSH 远程服务器管理，一键部署 |
-| **通知** | Webhook 通知（钉钉 / 飞书 / 企业微信） |
-| **审计日志** | 完整操作审计，支持导出和完整性验证 |
+| **通知** | Webhook 通知（钉钉 / 飞书 / 企业微信）+ 告警规则 |
 
 ### 安全特性
 
 | 功能 | 说明 |
 |------|------|
 | **2FA 认证** | TOTP 双因素认证，支持备用码 |
+| **扫码登录** | 手机端扫码登录（QR Login） |
+| **安全扫描** | CVE 漏洞扫描（osv.dev 查询 + 一键升级） |
 | **JWT + Session** | 安全的令牌管理，支持会话踢出 |
 | **IP 白名单** | 按用户配置 IP 访问限制 |
 | **密码策略** | 强制密码复杂度，登录失败锁定 |
 | **CSP + HSTS** | 完整的安全响应头 |
 | **审计追踪** | 所有操作记录审计日志 |
+
+### 其他
+
+| 功能 | 说明 |
+|------|------|
+| **文件外链** | 安全的文件分享链接，支持密码/过期/下载次数控制 |
+| **端口监控** | 实时监听端口查看，含进程信息 |
+| **腾讯云** | 腾讯云轻量应用服务器集成（实例、防火墙、快照、监控） |
 
 ---
 
@@ -104,20 +112,10 @@ EOF
 
 | 层级 | 技术 |
 |------|------|
-| 后端 | Go 1.25 + Gin + SQLite + WebSocket + JWT |
+| 后端 | Go 1.25 + Gin + SQLite (WAL) + WebSocket + JWT |
 | 前端 | React 19 + TypeScript + Ant Design 6 + Vite 8 |
 | 部署 | Docker 多阶段构建 + systemd |
 | 数据库 | SQLite (WAL 模式) |
-
----
-
-## 在线体验
-
-> 演示环境将在后续版本提供
-
-截图预览：
-
-![EasyServer Dashboard](screenshot.jpg)
 
 ---
 
@@ -127,7 +125,8 @@ EOF
 
 - [Linux 部署手册](linux-deploy.md) — 二进制部署 + systemd + Nginx 反向代理
 - [Docker 部署](#docker-部署推荐) — 容器化部署
-- [API 接口文档](api-reference.md) — 337 个接口完整文档
+- [API 接口文档](api-reference.md) — 完整 API 文档
+- [开发指南](development.md) — 项目结构、Make 命令、开发流程
 
 ### 系统要求
 
@@ -193,12 +192,12 @@ auth:
   idle_timeout: 30m
   max_login_attempts: 5
   lockout_duration: 15m
-  rate_limit: 100
+  rate_limit: 1000
   rate_interval: 1m
 
 monitor:
-  history_retention: 24h
-  collect_interval: 1s
+  history_retention: 168h
+  collect_interval: 3s
 
 database:
   path: "./data/easyserver.db"
@@ -223,6 +222,8 @@ deploy:
 3. **配置 IP 白名单** 限制管理面板访问来源
 4. **定期备份** 数据库和配置文件
 5. **启用审计日志** 记录所有操作
+6. **启用 2FA** 增强登录安全
+7. **配置 Cloudflare Turnstile** 防暴力破解
 
 ---
 
@@ -244,7 +245,7 @@ sudo systemctl restart easyserver   # 重启
 
 ## API 文档
 
-完整的 API 接口文档请参考 [api-reference.md](api-reference.md)，包含 337 个接口（334 HTTP + 3 WebSocket）。
+完整的 API 接口文档请参考 [api-reference.md](api-reference.md)。
 
 ---
 

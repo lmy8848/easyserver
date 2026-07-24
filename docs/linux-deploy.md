@@ -7,7 +7,7 @@ permalink: /deploy
 
 # EasyServer Linux 部署手册
 
-> 版本：v1.0.0 | 更新日期：2026-06-15
+> 版本：v0.1.0-alpha | 更新日期：2026-07-23
 
 ---
 
@@ -15,7 +15,7 @@ permalink: /deploy
 
 | 项目 | 要求 |
 |------|------|
-| 操作系统 | Linux x86_64 (Ubuntu 20.04+, CentOS 7+, Debian 10+) |
+| 操作系统 | Linux x86_64 (Ubuntu 22.04+, Debian 12+, CentOS 7+) |
 | 内存 | ≥ 512MB |
 | 磁盘 | ≥ 1GB |
 | 端口 | 8080 (可配置) |
@@ -87,7 +87,7 @@ sudo vi /etc/systemd/system/easyserver.service
 ```ini
 [Unit]
 Description=EasyServer Management Panel
-Documentation=https://github.com/your-repo/easyserver
+Documentation=https://github.com/lmy8848/easyserver
 After=network.target
 Wants=network-online.target
 
@@ -162,45 +162,94 @@ sudo journalctl -u easyserver -f
 server:
   port: 8080                    # 监听端口
   host: 0.0.0.0                 # 监听地址
+  serve_frontend: true           # 是否提供前端页面
+  dev_mode: false               # 开发模式（生产环境设为 false）
+  allowed_origins:              # 允许的 WebSocket Origin
+    - "https://yourdomain.com"
+  trusted_proxies:              # 可信反向代理 CIDR（默认 127.0.0.1）
+    - "127.0.0.1"
+  assets_rate_limit: 5000       # 静态资源每分钟请求限制
+  assets_rate_interval: 1m
+  max_upload_size: 536870912    # 上传大小限制（bytes, 0=默认 512MB）
   tls:
     enabled: false              # 是否启用 HTTPS
     cert_file: "/path/to/cert.pem"
     key_file: "/path/to/key.pem"
+  turnstile:
+    site_key: ""                # Cloudflare Turnstile Site Key
+    secret_key: ""              # Cloudflare Turnstile Secret Key
+    enable_login: false
+    enable_qr_login: false
+    enable_public_share: false
 
 auth:
-  jwt_secret: "your-random-secret"  # JWT 密钥 (必须修改!)
+  jwt_secret: "your-random-secret-32-bytes!!"  # JWT 密钥（必须修改!）
   session_timeout: 24h              # 会话超时
   idle_timeout: 30m                 # 空闲超时
   max_login_attempts: 5             # 最大登录尝试次数
   lockout_duration: 15m             # 锁定时长
-  rate_limit: 100                   # 速率限制
+  rate_limit: 1000                  # API 速率限制
   rate_interval: 1m                 # 速率限制间隔
-  ip_whitelist: []                  # IP 白名单 (空=允许所有)
+  login_rate_limit: 10              # 登录接口速率限制
+  login_rate_interval: 1m
+  ip_whitelist: []                  # IP 白名单（空=允许所有）
+  session_cleanup_interval: 5m      # 过期会话清理间隔
+  allow_multi_session: false        # 允许多设备同时登录
+  mobile_device_binding: true       # 移动设备绑定（仅 AllowMultiSession 开启时生效）
 
 monitor:
-  history_retention: 24h        # 历史数据保留时长
-  collect_interval: 1s          # 采集间隔
+  history_retention: 168h        # 历史数据保留时长（7天）
+  collect_interval: 3s           # 采集间隔
 
 database:
-  path: "/opt/easyserver/data/easyserver.db"
+  path: "./data/easyserver.db"
 
 audit:
   enabled: true
-  log_path: "/opt/easyserver/data/audit.log"
+  log_path: "./data/audit.log"
+  retention_days: 90
 
 filemanager:
-  base_path: "/"                # 文件管理根目录
+  base_path: "/opt/easyserver/data"      # 文件管理根目录
+
+deploy:
+  encryption_key: "your-32-byte-key"     # 部署加密密钥（必须修改!）
+
+tencentcloud:
+  enabled: false
+  secret_id: ""
+  secret_key: ""
+  region: "ap-guangzhou"
+  instance_id: ""
+
+notify:
+  enabled: false
+  webhook_url: ""  # 钉钉/飞书/企微 Webhook URL
+
+alerts:
+  rules: []
+    # - name: "CPU告警"
+    #   metric: "cpu_percent"
+    #   threshold: 90
+    #   duration: 60
+    #   enabled: true
 ```
 
 ### 5.2 环境变量覆盖
 
-所有配置都可以通过环境变量覆盖：
+所有配置都可以通过 `EASYSERVER_` 前缀的环境变量覆盖：
 
-```bash
-export EASYSERVER_JWT_SECRET="your-secret"
-export EASYSERVER_PORT=8080
-export EASYSERVER_HOST=0.0.0.0
-```
+| 变量名 | 说明 |
+|--------|------|
+| `EASYSERVER_JWT_SECRET` | JWT 密钥 |
+| `EASYSERVER_ENCRYPTION_KEY` | 部署加密密钥 |
+| `EASYSERVER_PORT` | 监听端口 |
+| `EASYSERVER_HOST` | 监听地址 |
+| `EASYSERVER_DB_PATH` | 数据库路径 |
+| `EASYSERVER_TLS_ENABLED` | 启用 HTTPS |
+| `EASYSERVER_TENCENTCLOUD_ENABLED` | 启用腾讯云 |
+| `EASYSERVER_TENCENTCLOUD_SECRET_ID` | 腾讯云 Secret ID |
+| `EASYSERVER_TENCENTCLOUD_SECRET_KEY` | 腾讯云 Secret Key |
 
 ---
 
@@ -231,7 +280,7 @@ server {
     listen 80;
     server_name your-domain.com;
 
-    # HTTP 重定向到 HTTPS (可选)
+    # HTTP 重定向到 HTTPS（可选）
     # return 301 https://$server_name$request_uri;
 
     location / {
@@ -346,9 +395,7 @@ sudo firewall-cmd --reload
 ## 9. 首次访问
 
 1. 访问 `http://your-server-ip:8080` 或配置的域名
-2. 使用默认账号登录：
-   - 用户名：`admin`
-   - 密码：`admin`
+2. **首次启动自动生成管理员账号**，用户名 `admin`，密码显示在控制台输出中
 3. **立即修改默认密码！**
 4. 系统会强制要求修改密码
 
@@ -403,7 +450,7 @@ sudo cp /opt/easyserver/config.yaml /opt/easyserver/config.yaml.bak
 sudo systemctl stop easyserver
 
 # 恢复数据
-sudo tar -xzf easyserver-backup-20260615.tar.gz -C /
+sudo tar -xzf easyserver-backup-20260723.tar.gz -C /
 
 # 启动服务
 sudo systemctl start easyserver
@@ -481,9 +528,7 @@ sudo sysctl -p
 # config.yaml
 monitor:
   collect_interval: 5s  # 降低采集频率
-
-database:
-  path: "/opt/easyserver/data/easyserver.db"
+  history_retention: 168h  # 减少历史数据保留
 ```
 
 ---
@@ -498,60 +543,27 @@ sudo tar -czf easyserver-backup-$(date +%Y%m%d).tar.gz /opt/easyserver/data/
 sudo systemctl stop easyserver
 
 # 3. 替换二进制
-sudo cp /path/to/new/easyserver /opt/easyserver/easyserver
+sudo cp easyserver-linux-amd64 /opt/easyserver/easyserver
 sudo chmod +x /opt/easyserver/easyserver
 
 # 4. 启动服务
 sudo systemctl start easyserver
 
 # 5. 验证
-curl http://localhost:8080/health
+sudo systemctl status easyserver
+curl http://server-ip:8080/health
 ```
 
----
-
-## 15. 监控建议
-
-### 15.1 进程监控
-
-```bash
-# 检查进程
-ps aux | grep easyserver
-
-# 检查资源使用
-top -p $(pgrep easyserver)
-```
-
-### 15.2 日志监控
-
-```bash
-# 实时日志
-sudo journalctl -u easyserver -f
-
-# 错误日志
-sudo journalctl -u easyserver -p err
-```
+> **注意**：升级前务必备份数据，建议先在测试环境验证。
 
 ---
 
-## 16. 安全建议
+## 15. 安全建议
 
-1. **修改默认密码** - 首次登录后立即修改
-2. **修改 JWT Secret** - 使用随机字符串
-3. **启用 HTTPS** - 生产环境必须
-4. **配置 IP 白名单** - 限制访问来源
-5. **定期备份** - 每日备份数据
-6. **更新系统** - 保持系统补丁
-7. **限制文件访问** - 配置 filemanager.base_path
-
----
-
-## 17. 联系支持
-
-- 文档：项目根目录 `docs/`
-- 日志：`journalctl -u easyserver`
-- 问题反馈：GitHub Issues
-
----
-
-**EasyServer v1.0.0 部署完成！** 🎉
+1. **必须修改** `jwt_secret` 和 `encryption_key`，使用 `openssl rand -base64 32` 生成
+2. **生产环境** 启用 HTTPS（通过 Nginx 反向代理或直接配置 TLS）
+3. **配置 IP 白名单** 限制管理面板访问来源
+4. **定期备份** 数据库和配置文件
+5. **启用审计日志** 记录所有操作
+6. **启用 2FA** 增强登录安全
+7. **配置 Cloudflare Turnstile** 防暴力破解

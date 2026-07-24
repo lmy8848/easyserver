@@ -11,6 +11,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // Monaco Editor: use self-managed workers (no CDN)
+    optimizeDeps: {
+      include: ['monaco-editor/esm/vs/editor/editor.worker'],
+    },
     server: {
       host: '0.0.0.0',
       port: 5173,

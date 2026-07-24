@@ -18,12 +18,16 @@
 - **Database** — Multi-version management for MySQL / PostgreSQL / Redis
 - **Container Management** — Docker / Compose / images / volumes / networks
 - **Firewall** — iptables / nftables rule management
-- **Runtime Environment** — Node.js / Python / Go / Java runtime management
+- **Runtime Environment** — Node.js / Python / Go / Java runtime management (via mise)
 - **Scheduled Tasks** — Cron job management with support for scripts and documents
 - **Remote Deployment** — SSH remote server management, one-click deployment
-- **Notifications & Alerts** — Webhook notifications (DingTalk / Feishu / WeCom)
+- **Notifications & Alerts** — Webhook notifications (DingTalk / Feishu / WeCom) + alert rules
 - **Audit Logs** — Complete operation audit with export and integrity verification
 - **2FA Authentication** — TOTP two-factor authentication with backup codes
+- **QR Login** — Scan-to-login from mobile device
+- **Security Scan** — CVE vulnerability scanning (osv.dev query + one-click upgrade)
+- **File Sharing** — Secure file share links with password / expiry control
+- **Port Monitor** — Real-time listening port viewer
 
 ---
 
@@ -85,7 +89,7 @@ EOF
 | Document | Description |
 |----------|-------------|
 | [Documentation Site](https://lmy8848.github.io/easyserver/) | Complete usage documentation |
-| [API Reference](docs/api-reference.md) | Full documentation for 337 API endpoints |
+| [API Reference](docs/api-reference.md) | Full API documentation |
 | [Linux Deployment Guide](docs/linux-deploy.md) | Binary deployment + systemd + Nginx |
 
 ---
@@ -104,14 +108,17 @@ EOF
 ## Development
 
 ```bash
-# Backend (development mode)
+# Backend (development mode, requires air)
+make dev
+
+# Or manually
 go build -tags dev -o easyserver ./cmd/server
 ./easyserver -config config.yaml -dev
 
 # Frontend (hot reload)
 cd web
-npm install
-npm run dev
+pnpm install
+pnpm dev
 # Visit http://localhost:5173
 ```
 

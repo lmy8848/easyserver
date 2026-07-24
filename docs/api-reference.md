@@ -42,6 +42,9 @@ permalink: /api-reference
 - [21. 进程守护](#21-进程守护)
 - [22. 系统进程](#22-系统进程)
 - [23. 通知管理](#23-通知管理)
+- [24. 安全扫描](#24-安全扫描)
+- [25. 文件外链](#25-文件外链)
+- [26. 端口监控](#26-端口监控)
 
 ---
 
@@ -89,9 +92,11 @@ permalink: /api-reference
 | 0 | 200 | 成功 |
 | 40000 | 400 | 请求参数错误 |
 | 40100 | 401 | 未认证/认证失败 |
+| 40101 | 401 | Token 已过期 |
 | 40300 | 403 | 禁止访问 |
 | 40400 | 404 | 资源不存在 |
 | 40900 | 409 | 资源冲突 |
+| 42900 | 429 | 请求过于频繁 |
 | 50000 | 500 | 服务器内部错误 |
 
 ---
@@ -6588,14 +6593,227 @@ Sec-WebSocket-Protocol: token, <jwt-token>
 
 ---
 
+## 24. 安全扫描
+
+### 24.1 `POST /api/security/cve/scan`
+
+**描述**: 扫描已安装 apt 包的 CVE 漏洞（通过 osv.dev API）  
+**认证**: 需要 JWT
+
+**请求参数**: 无
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "vulnerabilities": [
+      {
+        "package": "openssl",
+        "version": "3.0.2-0ubuntu1.15",
+        "vuln_ids": ["CVE-2024-6119"]
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
+---
+
+### 24.2 `POST /api/security/cve/upgrade`
+
+**描述**: 升级指定包以修复 CVE 漏洞  
+**认证**: 需要 JWT
+
+**请求参数 (Request Body)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| packages | string[] | 是 | 要升级的包名列表 |
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "message": "升级完成",
+    "output": "..."
+  }
+}
+```
+
+---
+
+### 24.3 `GET /api/security/cve/kernel`
+
+**描述**: 获取内核版本状态（当前运行 vs 最新已安装）  
+**认证**: 需要 JWT
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "current": "6.8.0-45-generic",
+    "latest": "6.8.0-47-generic",
+    "needs_reboot": true
+  }
+}
+```
+
+---
+
+### 24.4 `GET /api/security/cve/upgradable`
+
+**描述**: 获取可升级包数量  
+**认证**: 需要 JWT
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "count": 12
+  }
+}
+```
+
+---
+
+## 25. 文件外链
+
+### 25.1 `POST /api/file-shares`
+
+**描述**: 创建文件分享链接  
+**认证**: 需要 JWT
+
+**请求参数 (Request Body)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| file_path | string | 是 | 文件路径 |
+| password | string | 否 | 访问密码 |
+| expires_at | string | 否 | 过期时间（ISO 8601） |
+| max_downloads | number | 否 | 最大下载次数（0=无限） |
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "token": "abc123...",
+    "file_path": "/data/report.pdf",
+    "expires_at": "2026-08-01T00:00:00Z",
+    "max_downloads": 5,
+    "download_count": 0,
+    "created_at": "2026-07-23T10:00:00Z"
+  }
+}
+```
+
+---
+
+### 25.2 `GET /api/file-shares`
+
+**描述**: 获取当前用户的所有分享链接  
+**认证**: 需要 JWT
+
+---
+
+### 25.3 `GET /api/file-shares/:id`
+
+**描述**: 获取单个分享详情  
+**认证**: 需要 JWT
+
+---
+
+### 25.4 `PUT /api/file-shares/:id`
+
+**描述**: 更新分享设置（密码、过期时间、下载次数）  
+**认证**: 需要 JWT
+
+---
+
+### 25.5 `DELETE /api/file-shares/:id`
+
+**描述**: 删除分享链接  
+**认证**: 需要 JWT
+
+---
+
+### 25.6 `POST /api/file-shares/cleanup`
+
+**描述**: 清理过期分享  
+**认证**: 需要 JWT
+
+---
+
+### 公开分享接口（无需认证）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/share/:token/info` | 获取分享信息 |
+| POST | `/share/:token/verify` | 验证访问密码 |
+| GET | `/share/:token/download` | 下载文件 |
+
+---
+
+## 26. 端口监控
+
+### 26.1 `GET /api/system/ports`
+
+**描述**: 获取所有监听端口列表  
+**认证**: 需要 JWT
+
+**响应示例**:
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "ports": [
+      {
+        "protocol": "tcp",
+        "port": 8080,
+        "local_addr": "0.0.0.0",
+        "state": "LISTEN",
+        "pid": 1234,
+        "process_name": "easyserver",
+        "user": "root"
+      }
+    ],
+    "total": 1
+  }
+}
+```
+
+---
+
 ## 附录
 
 ### A. 请求频率限制
 
-API 使用滑动窗口限流机制，默认配置：
-- 60 次请求 / 1 分钟
+API 使用滑动窗口限流机制，分三级：
+- 登录接口: 10 次 / 1 分钟
+- 通用 API: 1000 次 / 1 分钟
+- 静态资源: 5000 次 / 1 分钟
 
 超出限制后返回 HTTP 429 状态码。
+
+可通过 `auth.login_rate_limit`、`auth.rate_limit`、`server.assets_rate_limit` 配置。
 
 ### B. CORS 跨域
 
