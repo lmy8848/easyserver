@@ -324,13 +324,6 @@ func hashToken(token string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// HashToken is the exported sha256 hex digest of a token, used for token
-// storage/lookup. Exposed so handlers can compare a presented plaintext token
-// against the stored hash (e.g. marking the current session in GetSessions).
-func HashToken(token string) string {
-	return hashToken(token)
-}
-
 func (s *AuthService) AddTokenToBlacklist(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()

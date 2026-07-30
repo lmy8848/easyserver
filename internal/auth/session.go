@@ -5,23 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 )
 
+// SessionService manages login sessions in memory. Sessions do not survive
+// process restarts — users must re-login after a restart, which is acceptable
+// (and arguably safer) for a server admin panel.
 type SessionService struct {
-	sessionRepo     SessionRepo
-	activeThreshold time.Duration
+	mu          sync.RWMutex
+	sessions    map[string]*Session // raw JWT token → session
+	idleTimeout time.Duration
 	// mobileMu serializes mobile-session create/replace per process so the
 	// single-device binding check + create is atomic (prevents two mobile
 	// logins racing past an empty check). Single-admin panel -> one mutex.
 	mobileMu sync.Mutex
 }
 
-func NewSessionService(ctx context.Context, wg *sync.WaitGroup, sessionRepo SessionRepo, cleanupInterval time.Duration) *SessionService {
+func NewSessionService(ctx context.Context, wg *sync.WaitGroup, idleTimeout, cleanupInterval time.Duration) *SessionService {
 	s := &SessionService{
-		sessionRepo:     sessionRepo,
-		activeThreshold: 5 * time.Minute,
+		sessions:    make(map[string]*Session),
+		idleTimeout: idleTimeout,
 	}
 	wg.Add(1)
 	go func() {
@@ -47,7 +52,9 @@ func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration
 }
 
 func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, username, role, ip, userAgent, clientType, deviceID, deviceInfo string, expiresAt time.Time) error {
-	return s.sessionRepo.Create(ctx, &Session{
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[token] = &Session{
 		UserID:     userID,
 		Username:   username,
 		Role:       role,
@@ -56,9 +63,11 @@ func (s *SessionService) CreateSession(ctx context.Context, token string, userID
 		ClientType: clientType,
 		DeviceID:   deviceID,
 		DeviceInfo: deviceInfo,
+		LoginAt:    time.Now(),
 		ExpiresAt:  expiresAt,
 		Token:      token,
-	})
+	}
+	return nil
 }
 
 // ErrMobileDeviceBound is returned by CreateMobileSessionBound when an active
@@ -80,62 +89,81 @@ func (s *SessionService) CreateMobileSessionBound(ctx context.Context, session *
 	s.mobileMu.Lock()
 	defer s.mobileMu.Unlock()
 
-	existing, err := s.activeMobileSession(ctx, session.UserID)
-	if err != nil {
-		return err
-	}
+	existing := s.activeMobileSessionLocked(session.UserID)
 	if existing != nil {
 		if session.DeviceID != "" && existing.DeviceID == session.DeviceID {
-			// Same device: create new first, then remove the old (avoid lockout on create failure).
-			if err := s.sessionRepo.Create(ctx, session); err != nil {
-				return err
-			}
-			return s.sessionRepo.DeleteMobileByUserIDExcept(ctx, session.UserID, session.Token)
+			// Same device: create new first, then remove the old.
+			s.mu.Lock()
+			s.sessions[session.Token] = session
+			delete(s.sessions, existing.Token)
+			s.mu.Unlock()
+			return nil
 		}
 		return ErrMobileDeviceBound
 	}
-	return s.sessionRepo.Create(ctx, session)
+	s.mu.Lock()
+	s.sessions[session.Token] = session
+	s.mu.Unlock()
+	return nil
 }
 
-// activeMobileSession returns the user's active mobile session, or nil if none.
-func (s *SessionService) activeMobileSession(ctx context.Context, userID int64) (*Session, error) {
-	sessions, err := s.sessionRepo.GetActiveByUserID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range sessions {
-		if sessions[i].ClientType == "mobile" {
-			return &sessions[i], nil
+// activeMobileSessionLocked returns the user's active mobile session, or nil.
+// Caller must hold mobileMu.
+func (s *SessionService) activeMobileSessionLocked(userID int64) *Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now()
+	for _, sess := range s.sessions {
+		if sess.UserID == userID && sess.ClientType == "mobile" && sess.ExpiresAt.After(now) {
+			return sess
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func (s *SessionService) UpdateActivity(ctx context.Context, token string) error {
-	return s.sessionRepo.UpdateActivity(ctx, token)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[token]
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	sess.LoginAt = time.Now()
+	return nil
 }
 
 func (s *SessionService) RemoveSession(ctx context.Context, token string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.DeleteByToken(ctx, token)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, token)
+	return nil
 }
 
 func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.DeleteByUserID(ctx, userID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, sess := range s.sessions {
+		if sess.UserID == userID {
+			delete(s.sessions, token)
+		}
+	}
+	return nil
 }
 
-// RemoveSessionByStoredToken deletes a session by its already-hashed stored
-// token (no re-hashing). Callers pass the value returned by GetSessions.
-func (s *SessionService) RemoveSessionByStoredToken(ctx context.Context, storedToken string) error {
+// RemoveSessionByStoredToken deletes a session by its token. In the in-memory
+// store the token IS the key, so this is identical to RemoveSession. Kept for
+// API compatibility with the handler's kick path.
+func (s *SessionService) RemoveSessionByStoredToken(ctx context.Context, token string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.DeleteByStoredToken(ctx, storedToken)
+	return s.RemoveSession(ctx, token)
 }
 
 // RemoveMobileSessions deletes all mobile sessions for a user. Used by the
@@ -144,70 +172,134 @@ func (s *SessionService) RemoveMobileSessions(ctx context.Context, userID int64)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.DeleteMobileByUserID(ctx, userID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, sess := range s.sessions {
+		if sess.UserID == userID && sess.ClientType == "mobile" {
+			delete(s.sessions, token)
+		}
+	}
+	return nil
 }
 
 func (s *SessionService) GetActiveSessions(ctx context.Context) ([]Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.GetActive(ctx)
+	return s.getActiveSessions(), nil
 }
 
 func (s *SessionService) GetUserSessions(ctx context.Context, userID int64) ([]Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.GetActiveByUserID(ctx, userID)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now()
+	var result []Session
+	for _, sess := range s.sessions {
+		if sess.UserID == userID && sess.ExpiresAt.After(now) {
+			result = append(result, *sess)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LoginAt.After(result[j].LoginAt)
+	})
+	return result, nil
 }
 
 func (s *SessionService) CleanupExpiredSessions(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := s.sessionRepo.DeleteExpired(ctx); err != nil {
-		return err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	inactiveCutoff := now.Add(-1 * time.Hour)
+	for token, sess := range s.sessions {
+		if sess.ExpiresAt.Before(now) {
+			delete(s.sessions, token)
+			continue
+		}
+		if sess.LoginAt.Before(inactiveCutoff) {
+			delete(s.sessions, token)
+		}
 	}
-	return s.sessionRepo.DeleteInactive(ctx, time.Now().Add(-1*time.Hour))
+	return nil
 }
 
 func (s *SessionService) GetSessionCount(ctx context.Context) (int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.Count(ctx)
+	return len(s.getActiveSessions()), nil
 }
 
 func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool, error) {
-	valid, err := s.sessionRepo.IsValid(ctx, token)
-	if err != nil {
-		log.Printf("session: error checking session validity: %v", err)
-		return false, err
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[token]
+	if !ok {
+		return false, nil
 	}
-	return valid, nil
+	now := time.Now()
+	if sess.ExpiresAt.Before(now) {
+		return false, nil
+	}
+	if s.idleTimeout > 0 && sess.LoginAt.Before(now.Add(-s.idleTimeout)) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *SessionService) GetActiveSessionsWithToken(ctx context.Context) ([]Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.GetActive(ctx)
+	return s.getActiveSessions(), nil
 }
 
 func (s *SessionService) RemoveOtherSessions(ctx context.Context, userID int64, currentToken string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return s.sessionRepo.DeleteByUserIDExcept(ctx, userID, currentToken)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, sess := range s.sessions {
+		if sess.UserID == userID && token != currentToken {
+			delete(s.sessions, token)
+		}
+	}
+	return nil
 }
 
 func (s *SessionService) IsSessionValidByToken(ctx context.Context, token string) (*Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	session, err := s.sessionRepo.GetByToken(ctx, token)
-	if err != nil {
-		return nil, fmt.Errorf("session not found: %w", err)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[token]
+	if !ok {
+		return nil, fmt.Errorf("session not found")
 	}
-	return session, nil
+	cp := *sess
+	return &cp, nil
+}
+
+// getActiveSessions returns all non-expired, recently-active sessions.
+func (s *SessionService) getActiveSessions() []Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now()
+	var result []Session
+	for _, sess := range s.sessions {
+		if sess.ExpiresAt.After(now) && sess.LoginAt.After(now.Add(-5*time.Minute)) {
+			result = append(result, *sess)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LoginAt.After(result[j].LoginAt)
+	})
+	return result
 }

@@ -605,10 +605,10 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 		return
 	}
 
-	currentHash := ""
+	currentToken := ""
 	if raw, ok := c.Get("token"); ok {
 		if tokenStr, ok := raw.(string); ok && tokenStr != "" {
-			currentHash = auth.HashToken(tokenStr)
+			currentToken = tokenStr
 		}
 	}
 
@@ -618,7 +618,7 @@ func (h *AuthHandler) GetSessions(c *gin.Context) {
 	}
 	views := make([]sessionView, 0, len(sessions))
 	for _, s := range sessions {
-		views = append(views, sessionView{Session: s, IsCurrent: currentHash != "" && s.Token == currentHash})
+		views = append(views, sessionView{Session: s, IsCurrent: currentToken != "" && s.Token == currentToken})
 	}
 	httpx.Success(c, views)
 }
@@ -641,9 +641,8 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		return
 	}
 
-	// Prevent kicking yourself (req.Token is the stored hash; currentToken is
-	// plaintext, so compare against its hash).
-	if currentToken != "" && req.Token == auth.HashToken(currentToken) {
+	// Prevent kicking yourself (req.Token is the raw token from GetSessions).
+	if currentToken != "" && req.Token == currentToken {
 		c.Error(apperror.ErrBadRequest.WithMessage("不能踢出自己的会话，请使用登出功能"))
 		return
 	}
