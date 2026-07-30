@@ -49,15 +49,14 @@ func runCLI(subcommand, configPath string) {
 
 	userRepo := auth.NewSQLiteUserRepository(db)
 	tokenRepo := auth.NewSQLiteTokenRepository(db)
-	activityRepo := auth.NewSQLiteActivityRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
 	auditRepo := audit.NewSQLiteRepository(db)
 
 	ctx := context.Background()
 	var wg sync.WaitGroup
 
-	authSvc := auth.NewAuthService(ctx, &wg, 5, 15*time.Minute, userRepo, tokenRepo, activityRepo, totpRepo, nil)
 	auditSvc := audit.NewService(ctx, &wg, auditRepo, 30)
+	authSvc := auth.NewAuthService(ctx, &wg, 5, 15*time.Minute, userRepo, tokenRepo, auditSvc, totpRepo, nil)
 
 	switch subcommand {
 	case "reset-password":
@@ -139,7 +138,6 @@ func resetPasswordCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *
 	authSvc.InvalidateAllUserTokens(ctx, user.ID)
 
 	auditSvc.LogSystemEvent(ctx, "CLI 重置用户密码："+user.Username)
-	authSvc.LogUserActivity(ctx, user.ID, user.Username, "CLI_RESET_PASSWORD", "127.0.0.1", "CLI")
 
 	fmt.Printf("✓ Password reset for %q. Must change on next login.\n", user.Username)
 	notifyRestart()
@@ -153,7 +151,6 @@ func unlockCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *audit.S
 	}
 
 	auditSvc.LogSystemEvent(ctx, "CLI 解锁用户："+user.Username)
-	authSvc.LogUserActivity(ctx, user.ID, user.Username, "CLI_UNLOCK_USER", "127.0.0.1", "CLI")
 
 	fmt.Printf("✓ Account %q unlocked.\n", user.Username)
 	notifyRestart()
@@ -184,7 +181,6 @@ func resetTOTPCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *audi
 	authSvc.InvalidateAllUserTokens(ctx, user.ID)
 
 	auditSvc.LogSystemEvent(ctx, "CLI 关闭用户二次验证："+user.Username)
-	authSvc.LogUserActivity(ctx, user.ID, user.Username, "CLI_RESET_TOTP", "127.0.0.1", "CLI")
 
 	fmt.Printf("✓ TOTP disabled for %q. Login with password, then re-enable 2FA in settings.\n", user.Username)
 	notifyRestart()

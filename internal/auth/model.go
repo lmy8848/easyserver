@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"time"
 )
@@ -28,16 +29,6 @@ type User struct {
 	UpdatedAt       time.Time    `json:"updated_at" db:"updated_at"`
 }
 
-type UserActivity struct {
-	ID        int64     `json:"id" db:"id"`
-	UserID    int64     `json:"user_id" db:"user_id"`
-	Username  string    `json:"username" db:"username"`
-	Action    string    `json:"action" db:"action"`
-	IP        string    `json:"ip" db:"ip"`
-	UserAgent string    `json:"user_agent" db:"user_agent"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-}
-
 type Session struct {
 	UserID     int64     `json:"user_id"`
 	Username   string    `json:"username"`
@@ -52,8 +43,10 @@ type Session struct {
 	Token      string    `json:"token,omitempty"`
 }
 
-// LoginEvent represents a login event for notification
+// LoginEvent represents a login event, used by both the audit logger
+// (LoginEventLogger) and the webhook notifier (LoginNotifier).
 type LoginEvent struct {
+	Action    string `json:"action"` // LOGIN_SUCCESS, LOGIN_FAILED, LOGIN_BLOCKED_IP, LOGIN_BLOCKED_EXPIRED
 	Username  string `json:"username"`
 	IP        string `json:"ip"`
 	UserAgent string `json:"user_agent"`
@@ -62,8 +55,13 @@ type LoginEvent struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// LoginNotifier is the interface AuthService uses to send login notifications.
-// *service.NotifyService satisfies this via the LoginEvent type alias.
+// LoginEventLogger records login events for later analysis (e.g. brute-force
+// detection). *audit.Service satisfies this interface implicitly.
+type LoginEventLogger interface {
+	LogLoginEvent(ctx context.Context, event LoginEvent)
+}
+
+// LoginNotifier sends login notifications (webhook).
 type LoginNotifier interface {
 	NotifyLogin(event LoginEvent)
 }

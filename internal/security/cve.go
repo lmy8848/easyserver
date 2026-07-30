@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/auth"
+	"easyserver/internal/audit"
 	"easyserver/internal/firewall"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
@@ -20,13 +20,13 @@ import (
 type Service struct {
 	exec     executor.CommandExecutor
 	firewall *firewall.Service
-	auth     *auth.AuthService
+	audit    *audit.Service
 	db       *sql.DB
 }
 
 // NewService creates a security Service.
-func NewService(exec executor.CommandExecutor, firewallSvc *firewall.Service, authSvc *auth.AuthService, db *sql.DB) *Service {
-	return &Service{exec: exec, firewall: firewallSvc, auth: authSvc, db: db}
+func NewService(exec executor.CommandExecutor, firewallSvc *firewall.Service, auditSvc *audit.Service, db *sql.DB) *Service {
+	return &Service{exec: exec, firewall: firewallSvc, audit: auditSvc, db: db}
 }
 
 // Vulnerability is one installed package with known CVEs.

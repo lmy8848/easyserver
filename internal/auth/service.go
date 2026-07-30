@@ -47,7 +47,7 @@ type tokenCache struct {
 type AuthService struct {
 	userRepo        UserRepo
 	tokenRepo       TokenBlacklistRepo
-	activityRepo    ActivityRepo
+	loginLogger     LoginEventLogger
 	totpRepo        TOTPRepo
 	maxAttempts     int
 	lockoutDuration time.Duration
@@ -55,13 +55,13 @@ type AuthService struct {
 	notifier        LoginNotifier
 }
 
-func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lockoutDuration time.Duration, userRepo UserRepo, tokenRepo TokenBlacklistRepo, activityRepo ActivityRepo, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
+func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lockoutDuration time.Duration, userRepo UserRepo, tokenRepo TokenBlacklistRepo, loginLogger LoginEventLogger, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
 	s := &AuthService{
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
 		userRepo:        userRepo,
 		tokenRepo:       tokenRepo,
-		activityRepo:    activityRepo,
+		loginLogger:     loginLogger,
 		totpRepo:        totpRepo,
 		notifier:        notifier,
 	}
@@ -216,18 +216,14 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	now := time.Now().Format(time.RFC3339)
+
 	user, err := s.Login(ctx, username, password)
 	if err != nil {
-		s.LogUserActivity(ctx, 0, username, "LOGIN_FAILED", ip, userAgent)
+		evt := LoginEvent{Action: "LOGIN_FAILED", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: err.Error(), Time: now}
+		s.loginLogger.LogLoginEvent(ctx, evt)
 		if s.notifier != nil {
-			s.notifier.NotifyLogin(LoginEvent{
-				Username:  username,
-				IP:        ip,
-				UserAgent: userAgent,
-				Time:      time.Now().Format(time.RFC3339),
-				Success:   false,
-				Reason:    err.Error(),
-			})
+			s.notifier.NotifyLogin(evt)
 		}
 		return nil, err
 	}
@@ -237,16 +233,10 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		return nil, err
 	}
 	if !allowed {
-		s.LogUserActivity(ctx, user.ID, username, "LOGIN_BLOCKED_IP", ip, userAgent)
+		evt := LoginEvent{Action: "LOGIN_BLOCKED_IP", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: "IP not in whitelist", Time: now}
+		s.loginLogger.LogLoginEvent(ctx, evt)
 		if s.notifier != nil {
-			s.notifier.NotifyLogin(LoginEvent{
-				Username:  username,
-				IP:        ip,
-				UserAgent: userAgent,
-				Time:      time.Now().Format(time.RFC3339),
-				Success:   false,
-				Reason:    "IP not in whitelist",
-			})
+			s.notifier.NotifyLogin(evt)
 		}
 		return nil, errors.New("login not allowed from this IP")
 	}
@@ -256,22 +246,16 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		return nil, err
 	}
 	if expired {
-		s.LogUserActivity(ctx, user.ID, username, "LOGIN_BLOCKED_EXPIRED", ip, userAgent)
+		s.loginLogger.LogLoginEvent(ctx, LoginEvent{Action: "LOGIN_BLOCKED_EXPIRED", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: "account expired", Time: now})
 		return nil, errors.New("account has expired")
 	}
 
 	s.userRepo.UpdateLastLoginIP(ctx, user.ID, ip)
 
-	s.LogUserActivity(ctx, user.ID, username, "LOGIN_SUCCESS", ip, userAgent)
-
+	evt := LoginEvent{Action: "LOGIN_SUCCESS", Username: username, IP: ip, UserAgent: userAgent, Success: true, Time: now}
+	s.loginLogger.LogLoginEvent(ctx, evt)
 	if s.notifier != nil {
-		s.notifier.NotifyLogin(LoginEvent{
-			Username:  username,
-			IP:        ip,
-			UserAgent: userAgent,
-			Time:      time.Now().Format(time.RFC3339),
-			Success:   true,
-		})
+		s.notifier.NotifyLogin(evt)
 	}
 
 	return user, nil
@@ -435,33 +419,6 @@ func (s *AuthService) ValidatePassword(password string) error {
 	}
 
 	return nil
-}
-
-func (s *AuthService) LogUserActivity(ctx context.Context, userID int64, username, action, ip, userAgent string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.activityRepo.Log(ctx, &UserActivity{
-		UserID:    userID,
-		Username:  username,
-		Action:    action,
-		IP:        ip,
-		UserAgent: userAgent,
-	})
-}
-
-func (s *AuthService) GetUserActivities(ctx context.Context, userID int64, limit int) ([]UserActivity, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.activityRepo.GetByUserID(ctx, userID, limit)
-}
-
-func (s *AuthService) GetAllActivities(ctx context.Context, limit int) ([]UserActivity, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.activityRepo.GetAll(ctx, limit)
 }
 
 func (s *AuthService) SetAccountExpiry(ctx context.Context, userID int64, expiresAt *time.Time) error {

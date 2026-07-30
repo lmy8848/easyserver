@@ -10,7 +10,7 @@ import (
 	"easyserver/internal/infra/apperror"
 )
 
-// LoginEvent is one login-related activity record.
+// LoginEvent is one login-related event from the audit log.
 type LoginEvent struct {
 	Time      string `json:"time"`
 	IP        string `json:"ip"`
@@ -38,32 +38,29 @@ type BannedIP struct {
 
 const banRemarkPrefix = "登录异常封禁"
 
-// GetLoginHistory returns recent login-related activities (LOGIN_* actions).
+// GetLoginHistory returns recent login-related events from the audit log.
 func (s *Service) GetLoginHistory(ctx context.Context, limit int) ([]LoginEvent, error) {
-	if s.auth == nil {
-		return nil, apperror.ErrInternal.WithMessage("auth service 不可用")
+	if s.audit == nil {
+		return nil, apperror.ErrInternal.WithMessage("audit service 不可用")
 	}
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	acts, err := s.auth.GetAllActivities(ctx, limit)
+	records, err := s.audit.GetLoginHistory(ctx, limit)
 	if err != nil {
 		return nil, apperror.WrapError(err)
 	}
 	var events []LoginEvent
-	for _, a := range acts {
-		if !strings.HasPrefix(a.Action, "LOGIN") {
-			continue
-		}
+	for _, r := range records {
 		ev := LoginEvent{
-			Time:      a.CreatedAt.Format("2006-01-02 15:04:05"),
-			IP:        a.IP,
-			Username:  a.Username,
-			Action:    a.Action,
-			UserAgent: a.UserAgent,
+			Time:      r.CreatedAt.Format("2006-01-02 15:04:05"),
+			IP:        r.IP,
+			Username:  r.Username,
+			Action:    r.Action,
+			UserAgent: r.UserAgent,
 		}
 		// Off-hours flag: 0:00-6:00.
-		if a.CreatedAt.Hour() < 6 {
+		if r.CreatedAt.Hour() < 6 {
 			ev.Anomaly = "off-hours"
 		}
 		events = append(events, ev)
@@ -74,8 +71,8 @@ func (s *Service) GetLoginHistory(ctx context.Context, limit int) ([]LoginEvent,
 // GetAnomalies detects brute-force attempts: IPs with >=threshold LOGIN_FAILED
 // in the last window minutes.
 func (s *Service) GetAnomalies(ctx context.Context, windowMinutes, threshold int) ([]Anomaly, error) {
-	if s.auth == nil {
-		return nil, apperror.ErrInternal.WithMessage("auth service 不可用")
+	if s.audit == nil {
+		return nil, apperror.ErrInternal.WithMessage("audit service 不可用")
 	}
 	if windowMinutes <= 0 {
 		windowMinutes = 5
@@ -83,28 +80,15 @@ func (s *Service) GetAnomalies(ctx context.Context, windowMinutes, threshold int
 	if threshold <= 0 {
 		threshold = 10
 	}
-	acts, err := s.auth.GetAllActivities(ctx, 1000)
-	if err != nil {
-		return nil, apperror.WrapError(err)
-	}
 	cutoff := time.Now().Add(-time.Duration(windowMinutes) * time.Minute)
-	ipFails := map[string]*Anomaly{}
-	for _, a := range acts {
-		if a.Action != "LOGIN_FAILED" || a.IP == "" || a.CreatedAt.Before(cutoff) {
-			continue
-		}
-		if ipFails[a.IP] == nil {
-			ipFails[a.IP] = &Anomaly{IP: a.IP}
-		}
-		ipFails[a.IP].FailedCount++
-		ipFails[a.IP].LastAttempt = a.CreatedAt.Format("2006-01-02 15:04:05")
-	}
+	failedByIP := s.audit.CountFailedLoginsByIP(ctx, cutoff, threshold)
 	var anomalies []Anomaly
-	for _, an := range ipFails {
-		if an.FailedCount >= threshold {
-			an.Reason = fmt.Sprintf("%d 分钟内失败 %d 次", windowMinutes, an.FailedCount)
-			anomalies = append(anomalies, *an)
-		}
+	for ip, count := range failedByIP {
+		anomalies = append(anomalies, Anomaly{
+			IP:          ip,
+			FailedCount: count,
+			Reason:      fmt.Sprintf("%d 分钟内失败 %d 次", windowMinutes, count),
+		})
 	}
 	return anomalies, nil
 }

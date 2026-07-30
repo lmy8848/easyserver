@@ -108,10 +108,9 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	userRepo := auth.NewSQLiteUserRepository(db)
 	tokenRepo := auth.NewSQLiteTokenRepository(db)
-	activityRepo := auth.NewSQLiteActivityRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
 
-	authSvc := auth.NewAuthService(ctx, &wg, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration, userRepo, tokenRepo, activityRepo, totpRepo, notifyService)
+	authSvc := auth.NewAuthService(ctx, &wg, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration, userRepo, tokenRepo, auditSvc, totpRepo, notifyService)
 	if err := authSvc.InitDefaultAdmin(ctx); err != nil {
 		log.Fatalf("init default admin: %v", err)
 	}
@@ -227,7 +226,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService, auditSvc)
 	notificationhttp.RegisterRoutes(g.Protected, notificationService)
-	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(cmdExec, firewallService, authSvc, db))
+	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(cmdExec, firewallService, auditSvc, db))
 	if securitySvc != nil {
 		secHandler := websecurityhttp.NewSecurityHandler(securitySvc)
 		secHandler.RegisterRoutes(g.Protected.Group("/websites"))

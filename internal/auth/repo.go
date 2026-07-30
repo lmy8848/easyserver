@@ -34,12 +34,6 @@ type TokenBlacklistRepo interface {
 	Clean(ctx context.Context) error
 }
 
-type ActivityRepo interface {
-	Log(ctx context.Context, entry *UserActivity) error
-	GetByUserID(ctx context.Context, userID int64, limit int) ([]UserActivity, error)
-	GetAll(ctx context.Context, limit int) ([]UserActivity, error)
-}
-
 // TOTPer is the subset of TOTPRepository that AuthService needs.
 type TOTPer interface {
 	IsTOTPEnabled(ctx context.Context, userID int64) (bool, error)
