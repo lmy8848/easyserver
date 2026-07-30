@@ -107,7 +107,6 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	// ── Auth ──
 
 	userRepo := auth.NewSQLiteUserRepository(db)
-	sessionRepo := auth.NewSQLiteSessionRepository(db, cfg.Auth.IdleTimeout)
 	tokenRepo := auth.NewSQLiteTokenRepository(db)
 	activityRepo := auth.NewSQLiteActivityRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
@@ -117,7 +116,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 		log.Fatalf("init default admin: %v", err)
 	}
 
-	sessionSvc := auth.NewSessionService(ctx, &wg, sessionRepo, cfg.Auth.SessionCleanupInterval)
+	sessionSvc := auth.NewSessionService(ctx, &wg, cfg.Auth.IdleTimeout, cfg.Auth.SessionCleanupInterval)
 
 	qrLoginService := qrlogin.NewService(qrlogin.NewSQLiteRepository(db), cfg.Auth.JWTSecret, cfg.Auth.SessionTimeout, sessionSvc)
 
