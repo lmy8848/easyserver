@@ -53,37 +53,28 @@ type AuthService struct {
 	lockoutDuration time.Duration
 	cache           tokenCache
 	notifier        LoginNotifier
-	done            chan struct{}
 }
 
-func NewAuthService(maxAttempts int, lockoutDuration time.Duration) *AuthService {
+func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lockoutDuration time.Duration, userRepo UserRepo, tokenRepo TokenBlacklistRepo, activityRepo ActivityRepo, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
 	s := &AuthService{
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
-		done:            make(chan struct{}),
+		userRepo:        userRepo,
+		tokenRepo:       tokenRepo,
+		activityRepo:    activityRepo,
+		totpRepo:        totpRepo,
+		notifier:        notifier,
 	}
-	go s.cacheCleanupLoop()
-	go s.tokenBlacklistCleanupLoop()
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		s.cacheCleanupLoop(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		s.tokenBlacklistCleanupLoop(ctx)
+	}()
 	return s
-}
-
-func (s *AuthService) Close() {
-	select {
-	case <-s.done:
-	default:
-		close(s.done)
-	}
-}
-
-func (s *AuthService) SetRepositories(userRepo UserRepo, tokenRepo TokenBlacklistRepo, activityRepo ActivityRepo, totpRepo TOTPRepo) {
-	s.userRepo = userRepo
-	s.tokenRepo = tokenRepo
-	s.activityRepo = activityRepo
-	s.totpRepo = totpRepo
-}
-
-func (s *AuthService) SetNotifyService(notifier LoginNotifier) {
-	s.notifier = notifier
 }
 
 // NotifyLogin exposes the login notifier so handlers can emit login events
@@ -95,7 +86,7 @@ func (s *AuthService) NotifyLogin(event LoginEvent) {
 	}
 }
 
-func (s *AuthService) tokenBlacklistCleanupLoop() {
+func (s *AuthService) tokenBlacklistCleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 	for {
@@ -104,13 +95,13 @@ func (s *AuthService) tokenBlacklistCleanupLoop() {
 			if err := s.CleanupExpiredTokens(context.Background()); err != nil {
 				log.Printf("auth: failed to cleanup expired tokens: %v", err)
 			}
-		case <-s.done:
+		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (s *AuthService) cacheCleanupLoop() {
+func (s *AuthService) cacheCleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(CacheCleanupInterval)
 	defer ticker.Stop()
 	for {
@@ -129,7 +120,7 @@ func (s *AuthService) cacheCleanupLoop() {
 				}
 				return true
 			})
-		case <-s.done:
+		case <-ctx.Done():
 			return
 		}
 	}

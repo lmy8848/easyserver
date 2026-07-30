@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"easyserver/internal/audit"
@@ -88,7 +90,7 @@ func newTestService(t *testing.T) (*audit.Service, *sql.DB) {
 	)`); err != nil {
 		t.Fatal(err)
 	}
-	return audit.NewService(db, audit.NewSQLiteRepository(db), 90), db
+	return audit.NewService(context.Background(), &sync.WaitGroup{}, audit.NewSQLiteRepository(db), 90), db
 }
 
 // TestAuditMiddleware_OperationLoggedWhenSummarySet: a POST whose handler sets AuditSummary

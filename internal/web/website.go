@@ -23,13 +23,8 @@ type WebsiteService struct {
 	securityRepo  security.SecurityRepository
 }
 
-func NewWebsiteService(repo WebsiteRepository, webServerRepo ServerRepository, exec executor.CommandExecutor) *WebsiteService {
-	return &WebsiteService{repo: repo, webServerRepo: webServerRepo, executor: exec}
-}
-
-// SetSecurityRepo injects the security repository (optional, for rate-limit + IP ban).
-func (s *WebsiteService) SetSecurityRepo(repo security.SecurityRepository) {
-	s.securityRepo = repo
+func NewWebsiteService(repo WebsiteRepository, webServerRepo ServerRepository, exec executor.CommandExecutor, securityRepo security.SecurityRepository) *WebsiteService {
+	return &WebsiteService{repo: repo, webServerRepo: webServerRepo, executor: exec, securityRepo: securityRepo}
 }
 
 // List returns websites for a specific web server

@@ -18,10 +18,31 @@ type SessionService struct {
 	mobileMu sync.Mutex
 }
 
-func NewSessionService(sessionRepo SessionRepo) *SessionService {
-	return &SessionService{
+func NewSessionService(ctx context.Context, wg *sync.WaitGroup, sessionRepo SessionRepo, cleanupInterval time.Duration) *SessionService {
+	s := &SessionService{
 		sessionRepo:     sessionRepo,
 		activeThreshold: 5 * time.Minute,
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.cleanupLoop(ctx, cleanupInterval)
+	}()
+	return s
+}
+
+func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := s.CleanupExpiredSessions(context.Background()); err != nil {
+				log.Printf("session cleanup error: %v", err)
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

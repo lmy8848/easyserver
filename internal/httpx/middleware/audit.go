@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -9,6 +10,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// RequestLogger is the audit capability needed by the HTTP middleware.
+// *audit.Service satisfies this interface implicitly.
+type RequestLogger interface {
+	LogRequest(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string)
+	LogOperation(ctx context.Context, userID int64, username string, action audit.ActionCategory, resource audit.ResourceCategory, extra map[string]interface{}, ip, userAgent string)
+}
 
 // AuditSummary lets a handler declare the human-readable summary of what it did.
 // When set, the audit middleware records an operation log on top of the request log.
@@ -145,7 +153,7 @@ var deleteSegs = map[string]bool{
 
 // AuditMiddleware logs every non-GET request (request log) and, when the handler
 // declared an AuditSummary, an operation log on top.
-func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
+func AuditMiddleware(logger RequestLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 
@@ -183,7 +191,7 @@ func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
 			"duration_ms": time.Since(start).Milliseconds(),
 			"timestamp":   time.Now().Format(time.RFC3339),
 		})
-		auditService.LogRequest(ctx, uid, uname, c.Request.Method, path, string(reqDetail), ip, ua)
+		logger.LogRequest(ctx, uid, uname, c.Request.Method, path, string(reqDetail), ip, ua)
 
 		// 2. Operation log: only when the handler declared a summary.
 		if summary, ok := c.Get("audit_summary"); ok {
@@ -204,7 +212,7 @@ func AuditMiddleware(auditService *audit.Service) gin.HandlerFunc {
 			}
 			verb := verbFor(c.Request.Method, c.FullPath())
 			// Operation logs do not record IP/user-agent (request-log concern); pass empty.
-			auditService.LogOperation(ctx, uid, uname, verb, categoryFor(path), extra, "", "")
+			logger.LogOperation(ctx, uid, uname, verb, categoryFor(path), extra, "", "")
 		}
 	}
 }

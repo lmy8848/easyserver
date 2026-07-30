@@ -18,8 +18,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"easyserver/internal/infra"
 )
 
 const (
@@ -86,7 +84,6 @@ type MonitorService struct {
 	lastNetRecv   uint64
 	lastDiskRead  uint64
 	lastDiskWrite uint64
-	stopCh        chan struct{}
 	lastCleanup   time.Time
 
 	// 告警与审计评估
@@ -111,33 +108,30 @@ type MonitorService struct {
 	passwdMu    sync.RWMutex
 }
 
-func NewMonitorService(monitorRepo Repository, interval, retention time.Duration) *MonitorService {
+func NewMonitorService(ctx context.Context, wg *sync.WaitGroup, monitorRepo Repository, interval, retention time.Duration, alertSvc Evaluator, auditSvc SystemEventLogger) *MonitorService {
 	s := &MonitorService{
 		monitorRepo:      monitorRepo,
 		hub:              NewMonitorHub(),
-		stopCh:           make(chan struct{}),
 		intervalUpdateCh: make(chan time.Duration, 1),
 		ringBuffer:       make([]*MonitorPoint, 60), // 60 points buffer
 		ringSize:         60,
 		cpuSamples:       make(map[int]*cpuSample),
+		alertService:     alertSvc,
+		auditService:     auditSvc,
 	}
 	s.interval.Store(int64(interval))
 	s.retention.Store(int64(retention))
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.run(ctx)
+	}()
 	return s
 }
 
 func (s *MonitorService) Hub() *MonitorHub {
 	return s.hub
-}
-
-// SetAlertService sets the alert evaluation service
-func (s *MonitorService) SetAlertService(e Evaluator) {
-	s.alertService = e
-}
-
-// SetAuditService sets the audit event logger service.
-func (s *MonitorService) SetAuditService(a SystemEventLogger) {
-	s.auditService = a
 }
 
 // SetInterval updates the collection interval dynamically.
@@ -158,35 +152,32 @@ func (s *MonitorService) SetRetention(retention time.Duration) {
 	s.retention.Store(int64(retention))
 }
 
-func (s *MonitorService) Start() {
-	ctx := context.Background()
-
+// run is the main collection loop, started internally at construction.
+func (s *MonitorService) run(ctx context.Context) {
 	// 性能优化：创建时间戳索引（异步执行，不阻塞启动）
-	infra.Go(func() {
+	go func() {
 		if err := s.monitorRepo.EnsureIndexes(ctx); err != nil {
 			log.Printf("monitor: failed to create index: %v", err)
 		}
-	})
+	}()
 
-	// Ticker 现在是主循环专属的本地变量，彻底告别锁
-	ticker := time.NewTicker(time.Duration(s.interval.Load()))
-	defer ticker.Stop()
-
-	// 启动后台专用的刷写协程
-	infra.Go(func() {
+	// 后台刷写协程
+	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
 				s.flushBuffer()
-			case <-s.stopCh:
+			case <-ctx.Done():
 				s.flushBuffer() // Final flush before stop
 				return
 			}
 		}
-	})
+	}()
+
+	ticker := time.NewTicker(time.Duration(s.interval.Load()))
+	defer ticker.Stop()
 
 	// First collection
 	s.collect()
@@ -197,14 +188,10 @@ func (s *MonitorService) Start() {
 			s.collect()
 		case newInterval := <-s.intervalUpdateCh:
 			ticker.Reset(newInterval)
-		case <-s.stopCh:
+		case <-ctx.Done():
 			return
 		}
 	}
-}
-
-func (s *MonitorService) Stop() {
-	close(s.stopCh)
 }
 
 func (s *MonitorService) collect() {

@@ -76,13 +76,8 @@ type ServiceManager struct {
 }
 
 // NewServiceManager creates a new ServiceManager.
-func NewServiceManager(exec executor.CommandExecutor) *ServiceManager {
-	return &ServiceManager{executor: exec}
-}
-
-// SetRuntimeLookup 注入 runtime 查询依赖（app.go 装配时调用）。
-func (m *ServiceManager) SetRuntimeLookup(r RuntimeLookup) {
-	m.runtime = r
+func NewServiceManager(exec executor.CommandExecutor, runtimeLookup RuntimeLookup) *ServiceManager {
+	return &ServiceManager{executor: exec, runtime: runtimeLookup}
 }
 
 // List returns all systemd services with basic info (name, state, description).

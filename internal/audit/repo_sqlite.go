@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -170,5 +171,11 @@ func (r *sqliteRepo) Clean(ctx context.Context, before time.Time) (int64, error)
 		return 0, err
 	}
 	rows, _ := result.RowsAffected()
+	// Reclaim disk space after bulk deletion.
+	if rows > 100 {
+		if _, err := r.db.ExecContext(ctx, "VACUUM"); err != nil {
+			log.Printf("audit: vacuum error: %v", err)
+		}
+	}
 	return rows, nil
 }

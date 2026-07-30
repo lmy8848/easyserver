@@ -2,9 +2,9 @@ package audit
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -102,25 +102,27 @@ func (w *auditWriter) close() {
 
 // Service provides audit logging.
 type Service struct {
-	db            *sql.DB
 	auditRepo     Repository
 	writer        *auditWriter
 	retentionDays int
 }
 
-// NewService creates a new audit Service. db is reserved for future use.
-func NewService(db *sql.DB, auditRepo Repository, retentionDays int) *Service {
+// NewService creates a new audit Service.
+func NewService(ctx context.Context, wg *sync.WaitGroup, auditRepo Repository, retentionDays int) *Service {
 	if retentionDays <= 0 {
 		retentionDays = 90
 	}
 
 	s := &Service{
-		db:            db,
 		auditRepo:     auditRepo,
 		writer:        newAuditWriter(auditRepo),
 		retentionDays: retentionDays,
 	}
-	go s.cleanupLoop()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.cleanupLoop(ctx)
+	}()
 	return s
 }
 
@@ -128,13 +130,18 @@ func (s *Service) Close() {
 	s.writer.close()
 }
 
-func (s *Service) cleanupLoop() {
+func (s *Service) cleanupLoop(ctx context.Context) {
 	s.cleanupOldRecords()
 
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	for range ticker.C {
-		s.cleanupOldRecords()
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanupOldRecords()
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -147,11 +154,6 @@ func (s *Service) cleanupOldRecords() {
 	}
 	if rows > 0 {
 		log.Printf("audit: cleaned up %d old records (older than %d days)", rows, s.retentionDays)
-		if rows > 100 {
-			if _, err := s.db.Exec("VACUUM"); err != nil {
-				log.Printf("audit: vacuum error: %v", err)
-			}
-		}
 	}
 }
 

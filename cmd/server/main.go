@@ -36,8 +36,5 @@ func main() {
 	}
 
 	app := NewApp(cfg, *configPath, *devMode)
-	if err := app.wire(); err != nil {
-		log.Fatalf("Failed to initialize services: %v", err)
-	}
 	app.Run()
 }
