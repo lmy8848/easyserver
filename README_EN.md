@@ -2,9 +2,9 @@
 
 **All-in-One Linux Server Management Panel** — Built with Go + React, lightweight, secure, and feature-rich.
 
-[中文](README.md) · [Documentation Site](https://lmy8848.github.io/easyserver/) · [API Reference](docs/api-reference.md) · [Deployment Guide](docs/linux-deploy.md)
+[中文](README.md) · [Documentation Site](https://lmy8848.github.io/easyserver/) · [API Reference](https://lmy8848.github.io/easyserver/api-reference) · [Deployment Guide](https://lmy8848.github.io/easyserver/linux-deploy)
 
-![EasyServer Dashboard](docs/screenshot.jpg)
+![EasyServer Dashboard](https://lmy8848.github.io/easyserver/screenshot.jpg)
 
 ---
 
@@ -75,8 +75,8 @@ EOF
 | Document | Description |
 |----------|-------------|
 | [Documentation Site](https://lmy8848.github.io/easyserver/) | Complete usage documentation |
-| [API Reference](docs/api-reference.md) | Full API documentation |
-| [Linux Deployment Guide](docs/linux-deploy.md) | Binary deployment + systemd + Nginx |
+| [API Reference](https://lmy8848.github.io/easyserver/api-reference) | Full API documentation |
+| [Linux Deployment Guide](https://lmy8848.github.io/easyserver/linux-deploy) | Binary deployment + systemd + Nginx |
 
 ---
 

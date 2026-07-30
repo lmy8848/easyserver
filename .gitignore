@@ -4,9 +4,6 @@
 *.so
 *.dylib
 /easyserver
-/easyserver-linux
-/easyserver-linux-arm64
-/server
 
 # Test binary, built with `go test -c`
 *.test
@@ -44,7 +41,6 @@ web/dist/
 web/.vite/
 web/.env.development
 web/.env.production
-web/package-lock.json
 
 # Build artifacts
 dist/
@@ -62,21 +58,11 @@ internal/api/web/
 CLAUDE.md
 
 # Temporary files
-files.txt
-*.bak
 *.tmp
 tmp/
+.tmp/
 
-# Documentation (exclude all docs except GitHub Pages files)
-docs/*
-!docs/index.md
-!docs/_config.yml
-!docs/api-reference.md
-!docs/linux-deploy.md
-!docs/screenshot.jpg
-*.md
-!README.md
-!web/README.md
-!deploy/README.md
-!CHANGELOG.md
-mise-v2026.6.14-linux-x64
+AGENTS.md
+.scratch/
+.qoder/
+docs/

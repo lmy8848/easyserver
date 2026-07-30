@@ -2,9 +2,9 @@
 
 **一站式 Linux 服务器管理面板** — Go + React 构建，轻量、安全、功能全面。
 
-[English](README_EN.md) · [文档网站](https://lmy8848.github.io/easyserver/) · [API 文档](docs/api-reference.md) · [部署指南](docs/linux-deploy.md)
+[English](README_EN.md) · [文档网站](https://lmy8848.github.io/easyserver/) · [API 文档](https://lmy8848.github.io/easyserver/api-reference) · [部署指南](https://lmy8848.github.io/easyserver/linux-deploy)
 
-![EasyServer Dashboard](docs/screenshot.jpg)
+![EasyServer Dashboard](https://lmy8848.github.io/easyserver/screenshot.jpg)
 
 ---
 
@@ -75,8 +75,8 @@ EOF
 | 文档 | 说明 |
 |------|------|
 | [文档网站](https://lmy8848.github.io/easyserver/) | 完整使用文档 |
-| [API 文档](docs/api-reference.md) | 完整接口文档 |
-| [Linux 部署手册](docs/linux-deploy.md) | 二进制部署 + systemd + Nginx |
+| [API 文档](https://lmy8848.github.io/easyserver/api-reference) | 完整接口文档 |
+| [Linux 部署手册](https://lmy8848.github.io/easyserver/linux-deploy) | 二进制部署 + systemd + Nginx |
 
 ---
 

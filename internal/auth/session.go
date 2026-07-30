@@ -51,8 +51,7 @@ var ErrMobileDeviceBound = errors.New("mobile device bound by another session")
 // device_id it returns ErrMobileDeviceBound and creates nothing.
 //
 // device_id is a client-reported soft identifier, not a security boundary; the
-// real control is "one active mobile session + panel-revocable" (see
-// docs/mobile-app-plan.md §4.1.1).
+// real control is "one active mobile session + panel-revocable"
 func (s *SessionService) CreateMobileSessionBound(ctx context.Context, session *Session) error {
 	if ctx == nil {
 		ctx = context.Background()
