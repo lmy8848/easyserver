@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"easyserver/internal/auth"
 	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -14,7 +13,7 @@ import (
 // It supports token from:
 // 1. Sec-WebSocket-Protocol header (preferred)
 // 2. URL query parameter "token" (fallback, deprecated)
-func WSAuthMiddleware(secret string, sessionValidator auth.SessionValidator, validators ...auth.TokenValidator) gin.HandlerFunc {
+func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validators ...TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenString string
 
@@ -39,7 +38,7 @@ func WSAuthMiddleware(secret string, sessionValidator auth.SessionValidator, val
 		}
 
 		// Parse and validate JWT
-		claims := &auth.JWTClaims{}
+		claims := &JWTClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

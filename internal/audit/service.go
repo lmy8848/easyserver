@@ -171,7 +171,7 @@ func (s *Service) enqueue(entry auditEntry) {
 }
 
 // LogOperation logs a server-level operation.
-func (s *Service) LogOperation(ctx context.Context, userID int64, username string, action ActionCategory, resource ResourceCategory, extra map[string]interface{}, ip, userAgent string) {
+func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -183,7 +183,7 @@ func (s *Service) LogOperation(ctx context.Context, userID int64, username strin
 		detailData[k] = v
 	}
 	detailJSON, _ := json.Marshal(detailData)
-	s.enqueue(auditEntry{userID, username, string(action), string(resource), string(detailJSON), ip, userAgent, now, "operation"})
+	s.enqueue(auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"})
 }
 
 // LogRequest logs an HTTP request, written by the global audit middleware.

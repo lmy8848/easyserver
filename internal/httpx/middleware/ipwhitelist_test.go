@@ -1,19 +1,16 @@
 package middleware
 
 import (
-	"easyserver/internal/infra/config"
 	"testing"
 )
 
 func TestIPWhitelist(t *testing.T) {
-	cfg := &config.AuthConfig{
-		IPWhitelist: []string{
-			"192.168.1.0/24",
-			"10.0.0.1",
-		},
+	allowed := []string{
+		"192.168.1.0/24",
+		"10.0.0.1",
 	}
 
-	wl := NewIPWhitelist(cfg)
+	wl := NewIPWhitelist(allowed)
 
 	tests := []struct {
 		ip       string
@@ -36,11 +33,7 @@ func TestIPWhitelist(t *testing.T) {
 }
 
 func TestIPWhitelistDisabled(t *testing.T) {
-	cfg := &config.AuthConfig{
-		IPWhitelist: []string{},
-	}
-
-	wl := NewIPWhitelist(cfg)
+	wl := NewIPWhitelist([]string{})
 
 	// When disabled, all IPs should be allowed
 	if !wl.IsAllowed("192.168.1.1") {

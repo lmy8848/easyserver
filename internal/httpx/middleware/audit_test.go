@@ -2,41 +2,37 @@ package middleware
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
-	"easyserver/internal/audit"
-
 	"github.com/gin-gonic/gin"
-	_ "modernc.org/sqlite"
 )
 
 func TestVerbFor(t *testing.T) {
 	cases := []struct {
 		method   string
 		fullPath string
-		want     audit.ActionCategory
+		want     ActionCategory
 	}{
-		{"POST", "/api/auth/login", audit.ActionAuth},
-		{"POST", "/api/auth/change-password", audit.ActionAuth},
-		{"DELETE", "/api/containers/:id", audit.ActionDelete},
-		{"DELETE", "/api/db-servers/versions/:vid", audit.ActionDelete},
-		{"POST", "/api/runtime/uninstall", audit.ActionDelete},
-		{"POST", "/api/containers/:id/exec", audit.ActionExecute},
-		{"POST", "/api/db-servers/databases/:did/execute", audit.ActionExecute},
-		{"POST", "/api/containers", audit.ActionCreate},           // POST 到无参数集合根
-		{"POST", "/api/runtime/install", audit.ActionCreate},      // install 段
-		{"POST", "/api/images/pull", audit.ActionCreate},          // pull 段
-		{"POST", "/api/containers/:id/start", audit.ActionUpdate}, // 有参数，start 非创建/执行段
-		{"POST", "/api/docker/start", audit.ActionUpdate},         // 无参但 start 是状态变更，非创建
-		{"POST", "/api/compose/down", audit.ActionUpdate},         // down 是状态变更，非创建
-		{"PUT", "/api/containers/:id/update", audit.ActionUpdate},
-		{"PATCH", "/api/firewall/rules/:id", audit.ActionUpdate},
-		{"GET", "/api/containers", audit.ActionOther}, // GET 不参与写审计，分类兜底
+		{"POST", "/api/auth/login", ActionAuth},
+		{"POST", "/api/auth/change-password", ActionAuth},
+		{"DELETE", "/api/containers/:id", ActionDelete},
+		{"DELETE", "/api/db-servers/versions/:vid", ActionDelete},
+		{"POST", "/api/runtime/uninstall", ActionDelete},
+		{"POST", "/api/containers/:id/exec", ActionExecute},
+		{"POST", "/api/db-servers/databases/:did/execute", ActionExecute},
+		{"POST", "/api/containers", ActionCreate},           // POST 到无参数集合根
+		{"POST", "/api/runtime/install", ActionCreate},      // install 段
+		{"POST", "/api/images/pull", ActionCreate},          // pull 段
+		{"POST", "/api/containers/:id/start", ActionUpdate}, // 有参数，start 非创建/执行段
+		{"POST", "/api/docker/start", ActionUpdate},         // 无参但 start 是状态变更，非创建
+		{"POST", "/api/compose/down", ActionUpdate},         // down 是状态变更，非创建
+		{"PUT", "/api/containers/:id/update", ActionUpdate},
+		{"PATCH", "/api/firewall/rules/:id", ActionUpdate},
+		{"GET", "/api/containers", ActionOther}, // GET 不参与写审计，分类兜底
 	}
 	for _, c := range cases {
 		got := verbFor(c.method, c.fullPath)
@@ -49,16 +45,16 @@ func TestVerbFor(t *testing.T) {
 func TestCategoryFor(t *testing.T) {
 	cases := []struct {
 		path string
-		want audit.ResourceCategory
+		want ResourceCategory
 	}{
-		{"/api/db-servers/versions/3", audit.ResourceDatabase},
-		{"/api/runtime/install", audit.ResourceRuntime},
-		{"/api/containers/123/start", audit.ResourceContainer},
-		{"/api/docker/start", audit.ResourceContainer},
-		{"/api/cron/tasks", audit.ResourceCron},
-		{"/api/firewall/rules", audit.ResourceFirewall},
-		{"/api/auth/login", audit.ResourceAuth},
-		{"/api/unknown-thing", audit.ResourceOther},
+		{"/api/db-servers/versions/3", ResourceDatabase},
+		{"/api/runtime/install", ResourceRuntime},
+		{"/api/containers/123/start", ResourceContainer},
+		{"/api/docker/start", ResourceContainer},
+		{"/api/cron/tasks", ResourceCron},
+		{"/api/firewall/rules", ResourceFirewall},
+		{"/api/auth/login", ResourceAuth},
+		{"/api/unknown-thing", ResourceOther},
 	}
 	for _, c := range cases {
 		got := categoryFor(c.path)
@@ -68,44 +64,46 @@ func TestCategoryFor(t *testing.T) {
 	}
 }
 
-// newTestService builds a real audit.Service over an in-memory sqlite audit_logs table.
-func newTestService(t *testing.T) (*audit.Service, *sql.DB) {
-	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`CREATE TABLE audit_logs (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id INTEGER DEFAULT 0,
-		username TEXT NOT NULL,
-		action TEXT NOT NULL,
-		resource TEXT DEFAULT '',
-		detail TEXT DEFAULT '',
-		ip TEXT DEFAULT '',
-		user_agent TEXT DEFAULT '',
-		type TEXT NOT NULL DEFAULT 'operation',
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`); err != nil {
-		t.Fatal(err)
-	}
-	return audit.NewService(context.Background(), &sync.WaitGroup{}, audit.NewSQLiteRepository(db), 90), db
+type mockRequestLogger struct {
+	mu            sync.Mutex
+	requestLogs   []reqLogEntry
+	operationLogs []opLogEntry
 }
 
-// TestAuditMiddleware_OperationLoggedWhenSummarySet: a POST whose handler sets AuditSummary
-// records both a request log and an operation log with the derived verb/category.
+type reqLogEntry struct {
+	userID                                            int64
+	username, action, resource, detail, ip, userAgent string
+}
+
+type opLogEntry struct {
+	userID                     int64
+	username, action, resource string
+	extra                      map[string]any
+	ip, userAgent              string
+}
+
+func (m *mockRequestLogger) LogRequest(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestLogs = append(m.requestLogs, reqLogEntry{userID, username, action, resource, detail, ip, userAgent})
+}
+
+func (m *mockRequestLogger) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.operationLogs = append(m.operationLogs, opLogEntry{userID, username, action, resource, extra, ip, userAgent})
+}
+
 func TestAuditMiddleware_OperationLoggedWhenSummarySet(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	svc, db := newTestService(t)
-	defer db.Close()
+	logger := &mockRequestLogger{}
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", int64(1))
 		c.Set("username", "admin")
 		c.Next()
-	}, AuditMiddleware(svc))
+	}, AuditMiddleware(logger))
 	r.POST("/api/containers/:id", func(c *gin.Context) {
 		AuditSummary(c, "删除容器 nginx-web")
 		c.Status(http.StatusOK)
@@ -113,101 +111,79 @@ func TestAuditMiddleware_OperationLoggedWhenSummarySet(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/containers/5", nil)
 	r.ServeHTTP(httptest.NewRecorder(), req)
-	svc.Close()
 
-	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&n); err != nil {
-		t.Fatal(err)
+	if len(logger.requestLogs) != 1 {
+		t.Fatalf("expected 1 request log, got %d", len(logger.requestLogs))
 	}
-	if n != 2 {
-		t.Fatalf("expected 2 logs (request + operation), got %d", n)
+	if len(logger.operationLogs) != 1 {
+		t.Fatalf("expected 1 operation log, got %d", len(logger.operationLogs))
 	}
 
-	var opAction, opResource, detail string
-	err := db.QueryRow("SELECT action, resource, detail FROM audit_logs WHERE type='operation'").
-		Scan(&opAction, &opResource, &detail)
-	if err != nil {
-		t.Fatal(err)
+	op := logger.operationLogs[0]
+	if op.action != "修改" {
+		t.Errorf("operation action = %q, want 修改", op.action)
 	}
-	// POST /api/containers/:id has a param and no exec/create segment -> 修改
-	if opAction != "修改" {
-		t.Errorf("operation action = %q, want 修改", opAction)
+	if op.resource != "容器" {
+		t.Errorf("operation resource = %q, want 容器", op.resource)
 	}
-	if opResource != "容器" {
-		t.Errorf("operation resource = %q, want 容器", opResource)
+	if op.extra["summary"] != "删除容器 nginx-web" {
+		t.Errorf("summary = %v, want 删除容器 nginx-web", op.extra["summary"])
 	}
-	var d map[string]interface{}
-	if err := json.Unmarshal([]byte(detail), &d); err != nil {
-		t.Fatal(err)
-	}
-	if d["summary"] != "删除容器 nginx-web" {
-		t.Errorf("summary = %v, want 删除容器 nginx-web", d["summary"])
-	}
-	if d["success"] != true {
-		t.Errorf("success = %v, want true", d["success"])
+	if op.extra["success"] != true {
+		t.Errorf("success = %v, want true", op.extra["success"])
 	}
 }
 
-// TestAuditMiddleware_RequestOnlyWhenNoSummary: a POST whose handler sets no summary
-// records only the request log, no operation log.
 func TestAuditMiddleware_RequestOnlyWhenNoSummary(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	svc, db := newTestService(t)
-	defer db.Close()
+	logger := &mockRequestLogger{}
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", int64(1))
 		c.Set("username", "admin")
 		c.Next()
-	}, AuditMiddleware(svc))
+	}, AuditMiddleware(logger))
 	r.POST("/api/containers/:id", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/containers/5", nil)
 	r.ServeHTTP(httptest.NewRecorder(), req)
-	svc.Close()
 
-	var n, opCount int
-	db.QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&n)
-	db.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE type='operation'").Scan(&opCount)
-	if n != 1 {
-		t.Fatalf("expected 1 request log only, got %d", n)
+	if len(logger.requestLogs) != 1 {
+		t.Fatalf("expected 1 request log, got %d", len(logger.requestLogs))
 	}
-	if opCount != 0 {
-		t.Fatalf("expected 0 operation logs, got %d", opCount)
+	if len(logger.operationLogs) != 0 {
+		t.Fatalf("expected 0 operation logs, got %d", len(logger.operationLogs))
 	}
 
-	// request detail must store status at the top level so Stats/alerts
-	// (json_extract(detail,'$.status')) can read it directly — not nested under "detail".
-	var reqStatus int
-	if err := db.QueryRow(`SELECT CAST(json_extract(detail,'$.status') AS INTEGER) FROM audit_logs WHERE type='request'`).Scan(&reqStatus); err != nil {
+	reqDetail := logger.requestLogs[0].detail
+	var d map[string]interface{}
+	if err := json.Unmarshal([]byte(reqDetail), &d); err != nil {
 		t.Fatal(err)
 	}
-	if reqStatus != 200 {
-		t.Errorf("request detail $.status = %d, want 200 (must be top-level)", reqStatus)
+	if d["status"] != float64(200) {
+		t.Errorf("request detail status = %v, want 200", d["status"])
 	}
 }
 
-// TestAuditMiddleware_SkipsGET: GET requests are not audited at all.
 func TestAuditMiddleware_SkipsGET(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	svc, db := newTestService(t)
-	defer db.Close()
+	logger := &mockRequestLogger{}
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", int64(1))
 		c.Next()
-	}, AuditMiddleware(svc))
+	}, AuditMiddleware(logger))
 	r.GET("/api/containers", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/containers", nil)
 	r.ServeHTTP(httptest.NewRecorder(), req)
-	svc.Close()
 
-	var n int
-	db.QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&n)
-	if n != 0 {
-		t.Fatalf("expected 0 logs for GET, got %d", n)
+	if len(logger.requestLogs) != 0 {
+		t.Fatalf("expected 0 request logs for GET, got %d", len(logger.requestLogs))
+	}
+	if len(logger.operationLogs) != 0 {
+		t.Fatalf("expected 0 operation logs for GET, got %d", len(logger.operationLogs))
 	}
 }

@@ -290,7 +290,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.RedirectMode, cfg.Server.WwwHandling),
 		middleware.SecurityMiddleware(cspNonce),
 		middleware.CORSMiddleware(cfg.Server.AllowedOrigins, cfg.Server.DevMode),
-		middleware.IPWhitelistMiddleware(middleware.NewIPWhitelist(&cfg.Auth)),
+		middleware.IPWhitelistMiddleware(middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)),
 	)
 
 	e.GET("/health", func(c *gin.Context) {

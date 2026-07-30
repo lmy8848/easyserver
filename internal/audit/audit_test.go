@@ -54,7 +54,7 @@ func TestLogOperation(t *testing.T) {
 	defer db.Close()
 	svc := newTestAuditService(db)
 
-	svc.LogOperation(context.Background(), 1, "admin", ActionUpdate, ResourceOther, map[string]interface{}{"detail": "test detail"}, "127.0.0.1", "test-agent")
+	svc.LogOperation(context.Background(), 1, "admin", string(ActionUpdate), string(ResourceOther), map[string]interface{}{"detail": "test detail"}, "127.0.0.1", "test-agent")
 	svc.Close() // drain and flush to DB
 
 	var userID int64
@@ -89,7 +89,7 @@ func TestLogOperation_NilContext(t *testing.T) {
 	svc := newTestAuditService(db)
 
 	// Should not panic
-	svc.LogOperation(nil, 1, "admin", ActionOther, ResourceOther, nil, "127.0.0.1", "agent")
+	svc.LogOperation(nil, 1, "admin", string(ActionOther), string(ResourceOther), nil, "127.0.0.1", "agent")
 	svc.Close()
 
 	var count int

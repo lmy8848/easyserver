@@ -109,8 +109,8 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// Log terminal session start
 	sessionStartTime := time.Now()
 	if h.auditService != nil {
-		h.auditService.LogOperation(c.Request.Context(), userID, username, audit.ActionExecute,
-			audit.ResourceTerminal, map[string]interface{}{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
+		h.auditService.LogOperation(c.Request.Context(), userID, username, string(audit.ActionExecute),
+			string(audit.ResourceTerminal), map[string]interface{}{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	// Upgrade to WebSocket
@@ -175,8 +175,8 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	if h.auditService != nil {
 		duration := time.Since(sessionStartTime)
 		durationStr := formatDuration(duration)
-		h.auditService.LogOperation(context.Background(), userID, username, audit.ActionExecute,
-			audit.ResourceTerminal,
+		h.auditService.LogOperation(context.Background(), userID, username, string(audit.ActionExecute),
+			string(audit.ResourceTerminal),
 			map[string]interface{}{"summary": "终端会话已关闭", "duration": durationStr, "session_id": sessionID},
 			c.ClientIP(), c.Request.UserAgent())
 	}
