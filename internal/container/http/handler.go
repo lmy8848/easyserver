@@ -1,7 +1,6 @@
 package http
 
 import (
-	"easyserver/internal/audit"
 	"easyserver/internal/container"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
@@ -13,17 +12,14 @@ import (
 // ContainerHandler handles all container-related requests
 type ContainerHandler struct {
 	containerService *container.Service
-	auditService     *audit.Service
 }
 
 // NewContainerHandler creates a new ContainerHandler
 func NewContainerHandler(
 	containerService *container.Service,
-	auditService *audit.Service,
 ) *ContainerHandler {
 	return &ContainerHandler{
 		containerService: containerService,
-		auditService:     auditService,
 	}
 }
 
@@ -596,8 +592,8 @@ func (h *ContainerHandler) RemoveNetwork(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "网络已删除"})
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Service, auditService *audit.Service) {
-	handler := NewContainerHandler(containerService, auditService)
+func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Service) {
+	handler := NewContainerHandler(containerService)
 
 	// Docker management
 	protected.GET("/docker/status", handler.DetectDocker)

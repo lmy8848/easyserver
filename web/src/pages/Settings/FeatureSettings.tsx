@@ -16,7 +16,6 @@ export default function FeatureSettings({ settings, onRefresh }: FeatureSettings
     if (settings?.features) {
       form.setFieldsValue({
         file_preview: settings.features.file_preview,
-        login_guard: settings.features.login_guard,
         fim: settings.features.fim,
       });
     }
@@ -41,9 +40,6 @@ export default function FeatureSettings({ settings, onRefresh }: FeatureSettings
     <Card title="功能开关">
       <Form form={form} layout="vertical">
         <Form.Item name="file_preview" label="文件预览增强" valuePropName="checked" extra="支持图片/音频/视频/PDF/文本/压缩文件预览。关闭后文件管理不显示预览按钮。">
-          <Switch />
-        </Form.Item>
-        <Form.Item name="login_guard" label="登录防护" valuePropName="checked" extra="登录历史、暴力破解识别、IP 封禁/解封。关闭后侧边栏隐藏「登录防护」菜单。">
           <Switch />
         </Form.Item>
         <Form.Item name="fim" label="文件完整性监控" valuePropName="checked" extra="关键文件 sha256 基线与变更检测。关闭后侧边栏隐藏「文件完整性」菜单。">

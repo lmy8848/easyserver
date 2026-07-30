@@ -854,7 +854,7 @@ export const settingsApi = {
   updateNotify: (data: { enabled?: boolean; webhook_url?: string }) =>
     api.put<ApiResponse>('/settings/notify', data),
 
-  updateFeatures: (data: { file_preview?: boolean; login_guard?: boolean; fim?: boolean }) =>
+  updateFeatures: (data: { file_preview?: boolean; fim?: boolean }) =>
     api.put<ApiResponse>('/settings/features', data),
 
   testWebhook: () =>

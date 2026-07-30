@@ -16,18 +16,13 @@ import (
 )
 
 type AuditHandler struct {
-	db           *sql.DB
-	auditService *audit.Service
-	auditRepo    audit.Repository
-}
-
-func NewAuditHandler(db *sql.DB, auditService *audit.Service) *AuditHandler {
-	return &AuditHandler{db: db, auditService: auditService}
+	db        *sql.DB
+	auditRepo audit.Repository
 }
 
 // NewAuditHandlerWithRepo creates an AuditHandler with repository support
-func NewAuditHandlerWithRepo(db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) *AuditHandler {
-	return &AuditHandler{db: db, auditService: auditService, auditRepo: auditRepo}
+func NewAuditHandlerWithRepo(db *sql.DB, auditRepo audit.Repository) *AuditHandler {
+	return &AuditHandler{db: db, auditRepo: auditRepo}
 }
 
 type AuditLogItem struct {
@@ -508,8 +503,8 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 }
 
 // RegisterRoutes wires audit routes onto the gin router group.
-func RegisterRoutes(protected *gin.RouterGroup, db *sql.DB, auditService *audit.Service, auditRepo audit.Repository) {
-	handler := NewAuditHandlerWithRepo(db, auditService, auditRepo)
+func RegisterRoutes(protected *gin.RouterGroup, db *sql.DB, auditRepo audit.Repository) {
+	handler := NewAuditHandlerWithRepo(db, auditRepo)
 	protected.GET("/audit-logs", handler.List)
 	protected.GET("/audit-logs/actions", handler.GetActions)
 	protected.GET("/audit-logs/stats", handler.Stats)

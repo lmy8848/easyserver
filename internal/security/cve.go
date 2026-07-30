@@ -9,24 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/audit"
-	"easyserver/internal/firewall"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 )
 
 // Service provides security-audit operations (CVE scanning, kernel status,
-// login anomaly detection, file integrity monitoring).
+// file integrity monitoring).
 type Service struct {
-	exec     executor.CommandExecutor
-	firewall *firewall.Service
-	audit    *audit.Service
-	db       *sql.DB
+	exec executor.CommandExecutor
+	db   *sql.DB
 }
 
 // NewService creates a security Service.
-func NewService(exec executor.CommandExecutor, firewallSvc *firewall.Service, auditSvc *audit.Service, db *sql.DB) *Service {
-	return &Service{exec: exec, firewall: firewallSvc, audit: auditSvc, db: db}
+func NewService(exec executor.CommandExecutor, db *sql.DB) *Service {
+	return &Service{exec: exec, db: db}
 }
 
 // Vulnerability is one installed package with known CVEs.

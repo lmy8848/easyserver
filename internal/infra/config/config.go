@@ -26,7 +26,6 @@ type Config struct {
 // resources; admin enables per-feature from the panel settings.
 type FeaturesConfig struct {
 	FilePreview bool `yaml:"file_preview"` // file preview (image/audio/video/pdf/text/archive)
-	LoginGuard  bool `yaml:"login_guard"`  // login anomaly detection + IP ban
 	FIM         bool `yaml:"fim"`          // file integrity monitoring
 }
 

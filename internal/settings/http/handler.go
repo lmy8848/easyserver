@@ -150,7 +150,6 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 		},
 		"features": gin.H{
 			"file_preview": h.cfg.Features.FilePreview,
-			"login_guard":  h.cfg.Features.LoginGuard,
 			"fim":          h.cfg.Features.FIM,
 		},
 	})
@@ -162,7 +161,6 @@ func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) {
 	defer h.cfgMu.Unlock()
 	var req struct {
 		FilePreview *bool `json:"file_preview"`
-		LoginGuard  *bool `json:"login_guard"`
 		FIM         *bool `json:"fim"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -172,9 +170,6 @@ func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) {
 	middleware.AuditSummary(c, "更新功能开关")
 	if req.FilePreview != nil {
 		h.cfg.Features.FilePreview = *req.FilePreview
-	}
-	if req.LoginGuard != nil {
-		h.cfg.Features.LoginGuard = *req.LoginGuard
 	}
 	if req.FIM != nil {
 		h.cfg.Features.FIM = *req.FIM
