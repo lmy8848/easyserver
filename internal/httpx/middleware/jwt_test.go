@@ -11,17 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// testErrorHandler is a simple error handler for tests
-func testErrorHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Next()
-		if !c.Writer.Written() && len(c.Errors) > 0 {
-			// Default to 401 for auth errors
-			c.JSON(http.StatusUnauthorized, gin.H{"error": c.Errors.Last().Error()})
-		}
-	}
-}
-
 func generateTestToken(secret string, userID int64, username, role string, timeout time.Duration) (string, error) {
 	claims := &JWTClaims{
 		UserID:   userID,
@@ -48,7 +37,7 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(testErrorHandler(), JWTMiddleware(secret, nil))
+	router.Use(ErrorHandler(), JWTMiddleware(secret, nil))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user_id": c.GetInt64("user_id")})
 	})
@@ -67,7 +56,7 @@ func TestJWTMiddleware_MissingHeader(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(testErrorHandler(), JWTMiddleware(secret, nil))
+	router.Use(ErrorHandler(), JWTMiddleware(secret, nil))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -85,7 +74,7 @@ func TestJWTMiddleware_InvalidFormat(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(testErrorHandler(), JWTMiddleware(secret, nil))
+	router.Use(ErrorHandler(), JWTMiddleware(secret, nil))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -134,7 +123,7 @@ func TestJWTMiddleware_ExpiredToken(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(testErrorHandler(), JWTMiddleware(secret, nil))
+	router.Use(ErrorHandler(), JWTMiddleware(secret, nil))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -163,7 +152,7 @@ func TestJWTMiddleware_WrongSecret(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	// Validate with different secret
-	router.Use(testErrorHandler(), JWTMiddleware(wrongSecret, nil))
+	router.Use(ErrorHandler(), JWTMiddleware(wrongSecret, nil))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -194,7 +183,7 @@ func TestJWTMiddleware_InvalidatedToken(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(testErrorHandler(), JWTMiddleware(secret, nil, validator))
+	router.Use(ErrorHandler(), JWTMiddleware(secret, nil, validator))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -225,7 +214,7 @@ func TestJWTMiddleware_InvalidSession(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(testErrorHandler(), JWTMiddleware(secret, sessionValidator))
+	router.Use(ErrorHandler(), JWTMiddleware(secret, sessionValidator))
 	router.GET("/test", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

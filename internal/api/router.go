@@ -29,7 +29,6 @@ import (
 	filemanagerhttp "easyserver/internal/filemanager/http"
 	"easyserver/internal/firewall"
 	firewallhttp "easyserver/internal/firewall/http"
-	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
@@ -286,7 +285,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 	cspNonce := InitCSPNonce()
 
 	e.Use(gin.Logger(), gin.Recovery(),
-		httpx.ErrorHandler(),
+		middleware.ErrorHandler(),
 		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.RedirectMode, cfg.Server.WwwHandling),
 		middleware.SecurityMiddleware(cspNonce),
 		middleware.CORSMiddleware(cfg.Server.AllowedOrigins, cfg.Server.DevMode),
