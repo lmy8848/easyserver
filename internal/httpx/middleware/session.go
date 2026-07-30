@@ -1,11 +1,11 @@
 package middleware
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
 
-	"easyserver/internal/auth"
 	"easyserver/internal/infra"
 
 	"github.com/gin-gonic/gin"
@@ -72,12 +72,15 @@ func StopSessionHeartbeatLimiter() {
 	}
 }
 
+// SessionUpdater updates the last-active timestamp for a session token.
+type SessionUpdater func(ctx context.Context, token string) error
+
 // SessionHeartbeatMiddleware updates the session's last_active on every request.
 // Rate-limited to one update per 30 seconds per token to reduce DB writes.
 // A missing session row means the token was revoked; the JWT middleware's
 // sessionValidator already rejects it, so we do NOT recreate it here (that would
 // revive revoked sessions and read a recycled gin.Context - use-after-recycle).
-func SessionHeartbeatMiddleware(sessionService *auth.SessionService, sessionTimeout time.Duration) gin.HandlerFunc {
+func SessionHeartbeatMiddleware(update SessionUpdater, sessionTimeout time.Duration) gin.HandlerFunc {
 	limiter := newSessionHeartbeatLimiter(30*time.Second, 5*time.Minute)
 	globalSessionLimiter = limiter
 	return func(c *gin.Context) {
@@ -92,7 +95,7 @@ func SessionHeartbeatMiddleware(sessionService *auth.SessionService, sessionTime
 			if len(parts) == 2 && parts[0] == "Bearer" {
 				token := parts[1]
 				if limiter.shouldUpdate(token) {
-					_ = sessionService.UpdateActivity(c.Request.Context(), token)
+					_ = update(c.Request.Context(), token)
 				}
 			}
 		}

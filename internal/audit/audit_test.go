@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func setupAuditTestDB(t *testing.T) *sql.DB {
 
 func newTestAuditService(db *sql.DB) *Service {
 	repo := NewSQLiteRepository(db)
-	svc := NewService(db, repo, 90)
+	svc := NewService(context.Background(), &sync.WaitGroup{}, repo, 90)
 	return svc
 }
 

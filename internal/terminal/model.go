@@ -1,11 +1,11 @@
 package terminal
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
-	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 )
 
@@ -48,16 +48,20 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	executor executor.CommandExecutor
-	done     chan struct{} // Channel to signal shutdown
 }
 
-// NewManager creates a new terminal Manager.
-func NewManager(exec executor.CommandExecutor) *Manager {
-	return &Manager{
+// NewManager creates a new terminal Manager and starts the idle timeout checker.
+func NewManager(ctx context.Context, wg *sync.WaitGroup, exec executor.CommandExecutor, idleTimeout time.Duration) *Manager {
+	m := &Manager{
 		sessions: make(map[string]*Session),
 		executor: exec,
-		done:     make(chan struct{}),
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		m.idleTimeoutLoop(ctx, idleTimeout)
+	}()
+	return m
 }
 
 // GetSession returns a terminal session.
@@ -88,47 +92,40 @@ func (m *Manager) CloseSession(id string) error {
 	return nil
 }
 
-// StartIdleTimeout starts idle timeout checker.
-func (m *Manager) StartIdleTimeout(timeout time.Duration) {
-	infra.Go(func() {
-		ticker := time.NewTicker(time.Minute)
-		defer ticker.Stop()
+// idleTimeoutLoop periodically closes sessions that have been idle too long.
+func (m *Manager) idleTimeoutLoop(ctx context.Context, timeout time.Duration) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 
-		for {
-			select {
-			case <-m.done:
-				return
-			case now := <-ticker.C:
-				m.mu.RLock()
-				var toClose []string
-				for id, session := range m.sessions {
-					if !session.IsClosed() {
-						session.mu.Lock()
-						idle := now.Sub(session.LastActivity)
-						session.mu.Unlock()
-						if idle >= timeout {
-							toClose = append(toClose, id)
-						}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			m.mu.RLock()
+			var toClose []string
+			for id, session := range m.sessions {
+				if !session.IsClosed() {
+					session.mu.Lock()
+					idle := now.Sub(session.LastActivity)
+					session.mu.Unlock()
+					if idle >= timeout {
+						toClose = append(toClose, id)
 					}
-				}
-				m.mu.RUnlock()
-
-				if len(toClose) > 0 {
-					m.mu.Lock()
-					for _, id := range toClose {
-						if session, exists := m.sessions[id]; exists {
-							session.Close()
-							delete(m.sessions, id)
-						}
-					}
-					m.mu.Unlock()
 				}
 			}
-		}
-	})
-}
+			m.mu.RUnlock()
 
-// StopIdleTimeout stops the idle timeout checker.
-func (m *Manager) StopIdleTimeout() {
-	close(m.done)
+			if len(toClose) > 0 {
+				m.mu.Lock()
+				for _, id := range toClose {
+					if session, exists := m.sessions[id]; exists {
+						session.Close()
+						delete(m.sessions, id)
+					}
+				}
+				m.mu.Unlock()
+			}
+		}
+	}
 }

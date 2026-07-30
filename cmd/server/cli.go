@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -52,11 +53,11 @@ func runCLI(subcommand, configPath string) {
 	totpRepo := auth.NewTOTPRepository(db)
 	auditRepo := audit.NewSQLiteRepository(db)
 
-	authSvc := auth.NewAuthService(5, 15*time.Minute)
-	authSvc.SetRepositories(userRepo, tokenRepo, activityRepo, totpRepo)
-
-	auditSvc := audit.NewService(db, auditRepo, 30)
 	ctx := context.Background()
+	var wg sync.WaitGroup
+
+	authSvc := auth.NewAuthService(ctx, &wg, 5, 15*time.Minute, userRepo, tokenRepo, activityRepo, totpRepo, nil)
+	auditSvc := audit.NewService(ctx, &wg, auditRepo, 30)
 
 	switch subcommand {
 	case "reset-password":
