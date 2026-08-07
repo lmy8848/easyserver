@@ -3,6 +3,8 @@ package runtimeenv
 import (
 	"path/filepath"
 	"strings"
+
+	"easyserver/internal/infra/mise"
 )
 
 type Runtime struct {
@@ -136,7 +138,7 @@ func miseInstallPath(lang, version string) string {
 	if !ok {
 		return ""
 	}
-	return filepath.Join(miseDataDir, "installs", miseToolDirName(tool), version)
+	return filepath.Join(mise.DataDir, "installs", miseToolDirName(tool), version)
 }
 
 // SupportsGlobalPkgsFor returns true if the specified language supports global package management via the panel.

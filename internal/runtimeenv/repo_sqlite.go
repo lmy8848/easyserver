@@ -274,7 +274,7 @@ func (r *sqliteRepo) SetDefaultByNameAndVersion(ctx context.Context, name, versi
 }
 
 // ListDefaults returns every (lang, exact) pair currently set as global default.
-// Used by GenerateMiseConfig to render the [tools] section of /etc/mise/config.toml.
+// Used by GenerateMiseConfig to render the [tools] section of the panel-private config.toml.
 func (r *sqliteRepo) ListDefaults(ctx context.Context) ([]GlobalDefaultEntry, error) {
 	rows, err := r.db.QueryContext(ctx,
 		"SELECT v.lang, v.exact FROM global_default g JOIN runtime_version v ON g.runtime_version_id = v.id ORDER BY v.lang",
@@ -297,7 +297,7 @@ func (r *sqliteRepo) ListDefaults(ctx context.Context) ([]GlobalDefaultEntry, er
 
 // CleanupGlobalDefaultsByRuntimeID removes any global_default row that pins to
 // a specific runtime_version row. Required before deleting that runtime_version
-// because of the FK constraint, and ensures /etc/mise/config.toml stays in
+// because of the FK constraint, and ensures the panel-private mise config stays in
 // sync after Uninstall regenerates it.
 func (r *sqliteRepo) CleanupGlobalDefaultsByRuntimeID(ctx context.Context, runtimeID int64) (int64, error) {
 	result, err := r.db.ExecContext(ctx, "DELETE FROM global_default WHERE runtime_version_id = ?", runtimeID)

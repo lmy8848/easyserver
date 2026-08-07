@@ -10,7 +10,7 @@ func TestWrapWithMiseExec_BareCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := `MISE_DATA_DIR=/var/lib/easyserver/mise /usr/local/bin/mise exec node@20.11.0 -- node app.js`
+	want := `MISE_DATA_DIR=/opt/easyserver/mise MISE_CONFIG_DIR=/opt/easyserver/mise /opt/easyserver/mise/bin/mise exec node@20.11.0 -- node app.js`
 	if got != want {
 		t.Fatalf("\nwant: %q\n got: %q", want, got)
 	}

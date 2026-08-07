@@ -88,7 +88,7 @@ func TestRenderUnit_FullWithRuntime(t *testing.T) {
 	mustContain(t, content, "# RuntimeLang=node")
 	mustContain(t, content, "# RuntimeExact=20.10.0")
 	// mise 前置包裹
-	mustContain(t, content, "ExecStart=/usr/local/bin/mise exec node@20.10.0 -- node /app/server.js --port 3000")
+	mustContain(t, content, "ExecStart=/opt/easyserver/mise/bin/mise exec node@20.10.0 -- node /app/server.js --port 3000")
 	mustContain(t, content, "WorkingDirectory=/app")
 	mustContain(t, content, "Environment=NODE_ENV=production")
 	mustContain(t, content, "Environment=PORT=3000")

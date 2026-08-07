@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"easyserver/internal/infra/mise"
 )
 
 // 托管 unit 文件统一写到 /etc/systemd/system/，文件名前缀 easyserver-。
@@ -193,7 +195,7 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 // 后端只在前面补 mise 包裹，不再拆分 command/args。
 func buildExecStart(spec *ManagedUnitSpec) string {
 	if spec.RuntimeVersionID > 0 && spec.RuntimeLang != "" && spec.RuntimeExact != "" {
-		return "/usr/local/bin/mise exec " + spec.RuntimeLang + "@" + spec.RuntimeExact + " -- " + spec.ExecStart
+		return mise.BinPath + " exec " + spec.RuntimeLang + "@" + spec.RuntimeExact + " -- " + spec.ExecStart
 	}
 	return spec.ExecStart
 }
@@ -311,10 +313,10 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 }
 
 // stripMisePrefix 去掉 mise 包裹前缀，还原用户原始命令。
-// 输入 "/usr/local/bin/mise exec node@20.10.0 -- node /app/server.js"
+// 输入 "/opt/easyserver/mise/bin/mise exec node@20.10.0 -- node /app/server.js"
 // 返回 "node /app/server.js"。非 mise 前缀原样返回。
 func stripMisePrefix(execStart string) string {
-	prefix := "/usr/local/bin/mise exec "
+	prefix := mise.BinPath + " exec "
 	if !strings.HasPrefix(execStart, prefix) {
 		return execStart
 	}

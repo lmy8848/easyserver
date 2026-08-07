@@ -9,13 +9,13 @@ import (
 	"strings"
 
 	"easyserver/internal/envconfig"
+	"easyserver/internal/infra/mise"
 )
 
-const miseConfigPath = "/etc/mise/config.toml"
-
-// buildMiseConfigContent renders the textual content of /etc/mise/config.toml
-// from the given enabled env configs and global defaults. Pure function — no
-// I/O — so its output can be asserted in tests without filesystem fakes.
+// buildMiseConfigContent renders the textual content of the panel-private
+// mise config.toml (/opt/easyserver/mise/config.toml) from the given enabled
+// env configs and global defaults. Pure function — no I/O — so its output can
+// be asserted in tests without filesystem fakes.
 //
 // Layout:
 //
@@ -65,8 +65,10 @@ func buildMiseConfigContent(envConfigs []envconfig.EnvConfig, defaults []GlobalD
 	return buf.String()
 }
 
-// GenerateMiseConfig regenerates /etc/mise/config.toml from the current DB
-// state of env configs and global defaults. Atomic write: temp file + rename.
+// GenerateMiseConfig regenerates the panel-private mise config.toml from the
+// current DB state of env configs and global defaults. Atomic write: temp file
+// + rename. Written to mise.ConfigDir (面板私有), so it never shadows user or
+// system-wide mise config.
 func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 	envConfigs, err := s.envConfigs.ListEnvConfigs(ctx)
 	if err != nil {
@@ -79,7 +81,7 @@ func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 
 	content := buildMiseConfigContent(envConfigs, defaults)
 
-	dir := filepath.Dir(miseConfigPath)
+	dir := filepath.Dir(mise.ConfigPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -101,5 +103,5 @@ func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 	if err := os.Chmod(tmpName, 0644); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, miseConfigPath)
+	return os.Rename(tmpName, mise.ConfigPath)
 }

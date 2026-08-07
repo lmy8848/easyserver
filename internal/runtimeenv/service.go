@@ -17,6 +17,7 @@ import (
 	"easyserver/internal/envconfig"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/mise"
 )
 
 // EnvConfigProvider provides read access to environment configurations.
@@ -42,7 +43,7 @@ func NewService(repo Repository, exec executor.CommandExecutor, envConfigs EnvCo
 }
 
 // Init performs boot-time initialization: heals interrupted states and
-// regenerates /etc/mise/config.toml from the current env config + defaults.
+// regenerates the panel-private mise config.toml from the current env config + defaults.
 func (s *Service) Init(ctx context.Context) error {
 	if err := s.repo.HealState(ctx); err != nil {
 		log.Printf("runtime: failed to heal state: %v", err)
@@ -131,7 +132,7 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 	}
 
 	// Regenerate once per install so mirror env vars from env_configs are fresh
-	// before `mise latest` / `mise install` read /etc/mise/config.toml.
+	// before `mise latest` / `mise install` read the panel-private config.toml.
 	if err := s.GenerateMiseConfig(ctx); err != nil {
 		return fmt.Errorf("failed to regenerate mise config before install: %w", err)
 	}
@@ -143,8 +144,8 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 	//
 	// 兜底：mise latest 失败或输出为空时，直接采用前端传入的 version。如果
 	// 它确实不是合法 mise 版本，后续 `mise install` 会有明确报错。
-	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "latest", fmt.Sprintf("%s@%s", miseTool, version))
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
+	cmd := s.executor.Command(ctx, executor.StartOptions{}, mise.BinPath, "latest", fmt.Sprintf("%s@%s", miseTool, version))
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR="+mise.DataDir, "MISE_CONFIG_DIR="+mise.ConfigDir, "MISE_YES=1")
 	out, _ := cmd.Output()
 	var exactVersion string
 	if outLines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(outLines) > 0 {
@@ -200,7 +201,7 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version, e
 	}
 
 	target := fmt.Sprintf("%s@%s", miseTool, exactVersion)
-	_, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), "/usr/local/bin/mise", "install", "-y", target)
+	_, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), mise.BinPath, "install", "-y", target)
 
 	if err != nil || exitCode != 0 {
 		log.Printf("runtime: failed to install %s %s: %v", name, exactVersion, err)
@@ -214,7 +215,7 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version, e
 	hasDefault, _ := s.repo.HasDefault(ctx, name)
 	if !hasDefault {
 		// First version installed for this lang → auto-promote to default. Must
-		// go through applyDefault so /etc/mise/config.toml is regenerated; see
+		// go through applyDefault so the mise config is regenerated; see
 		// Issue 07.
 		if err := s.applyDefault(ctx, name, exactVersion); err != nil {
 			log.Printf("runtime: auto-default after install of %s@%s failed: %v", name, exactVersion, err)
@@ -258,7 +259,8 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 	// DEBIAN_FRONTEND=noninteractive 防止 ensureBuildDeps 里的 apt-get install
 	// 撞上 tzdata 这类会忽略 -y 的交互式 postinst 直接挂住。对 mise/npm 无副作用。
 	cmd.Env = append(os.Environ(),
-		"MISE_DATA_DIR=/var/lib/easyserver/mise",
+		"MISE_DATA_DIR="+mise.DataDir,
+		"MISE_CONFIG_DIR="+mise.ConfigDir,
 		"MISE_YES=1",
 		"DEBIAN_FRONTEND=noninteractive",
 	)
@@ -557,7 +559,7 @@ func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment)
 	}
 
 	target := fmt.Sprintf("%s@%s", miseTool, env.Version)
-	_, exitCode, err := s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", target), "/usr/local/bin/mise", "uninstall", "-y", target)
+	_, exitCode, err := s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", target), mise.BinPath, "uninstall", "-y", target)
 
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("卸载失败 (exit %d)，详见日志", exitCode)
@@ -583,8 +585,8 @@ func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string,
 		return nil, fmt.Errorf("unsupported runtime: %s", lang)
 	}
 
-	cmd := s.executor.Command(ctx, executor.StartOptions{}, "/usr/local/bin/mise", "ls-remote", miseTool)
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR=/var/lib/easyserver/mise", "MISE_YES=1")
+	cmd := s.executor.Command(ctx, executor.StartOptions{}, mise.BinPath, "ls-remote", miseTool)
+	cmd.Env = append(os.Environ(), "MISE_DATA_DIR="+mise.DataDir, "MISE_CONFIG_DIR="+mise.ConfigDir, "MISE_YES=1")
 	out, err := cmd.Output()
 	if err != nil {
 		var stderr string
@@ -659,8 +661,8 @@ func (s *Service) SetDefault(ctx context.Context, name, version string) error {
 		return fmt.Errorf("%s %s not found", name, version)
 	}
 	// Refuse to promote a not-ready version to default: writing such a row to
-	// /etc/mise/config.toml [tools] would point SSH users at a binary that
-	// isn't on disk, making the whole runtime unusable for them.
+	// the mise config [tools] would point at a binary that isn't on disk,
+	// making the whole runtime unusable.
 	if env.Status != "installed" {
 		return fmt.Errorf("cannot set %s %s as default: status is %q (must be installed)", name, version, env.Status)
 	}
@@ -669,10 +671,12 @@ func (s *Service) SetDefault(ctx context.Context, name, version string) error {
 }
 
 // applyDefault marks (name, version) as the global default for that lang AND
-// regenerates /etc/mise/config.toml so SSH users / `mise current` immediately
-// see the change. Both effects are required for the API to be truthful — see
-// Issue 07. Three call sites (SetDefault, installRuntime, ImportDetected) all
-// route through here; do NOT bypass to the repo helpers directly.
+// regenerates the panel-private mise config so `mise exec` without a pinned
+// version resolves to it. Recorded in DB and rendered into config.toml; SSH
+// users never read this config (面板私有), so the "SSH 直接 node 用默认版"能力
+// 不再存在——Process/Cron/Systemd 均显式指定版本。See Issue 07. Three call
+// sites (SetDefault, installRuntime, ImportDetected) all route through here;
+// do NOT bypass to the repo helpers directly.
 func (s *Service) applyDefault(ctx context.Context, name, version string) error {
 	if err := s.repo.ResetDefaults(ctx, name); err != nil {
 		return err

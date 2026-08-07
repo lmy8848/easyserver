@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/mise"
 )
 
 // PackageService manages packages installed under a runtime environment.
@@ -101,10 +102,10 @@ func tailLines(s string, n int) string {
 
 // miseReshim 让 mise 重新生成 shims。
 // 通过 corepack enable 或 npm install -g 装上的可执行文件，需要 reshim 才能
-// 出现在 /var/lib/easyserver/mise/shims/ 下被 server 进程的 PATH 找到。
+// 出现在 /opt/easyserver/mise/shims/ 下被 server 进程的 PATH 找到。
 // 失败不阻断流程——如果 shim 仍能从 node bin 目录直接定位也算 OK。
 func (s *PackageService) miseReshim(ctx context.Context) {
-	output, _, err := s.executor.RunCombined(ctx, "mise", "reshim")
+	output, _, err := s.executor.RunCombined(ctx, mise.BinPath, "reshim")
 	if err != nil {
 		log.Printf("package: mise reshim failed (continuing): err=%v, output=%s", err, output)
 	}

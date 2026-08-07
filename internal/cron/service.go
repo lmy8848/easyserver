@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/mise"
 	"easyserver/internal/runtimeenv"
 )
 
 // wrapWithMiseExec composes one shell-parseable line of the form:
 //
-//	MISE_DATA_DIR=/var/lib/easyserver/mise /usr/local/bin/mise exec <miseTool>@<exact> -- <userCmd>
+//	MISE_DATA_DIR=/opt/easyserver/mise MISE_CONFIG_DIR=/opt/easyserver/mise /opt/easyserver/mise/bin/mise exec <miseTool>@<exact> -- <userCmd>
 //
 // Used to build /etc/cron.d/easyserver entries. The trailing <userCmd> is
 // interpreted by /bin/sh (cron invokes it that way), so users can still chain
@@ -32,8 +33,8 @@ func wrapWithMiseExec(lang, exact, userCmd string) (string, error) {
 		return "", fmt.Errorf("unsupported runtime lang %q", lang)
 	}
 	escaped := strings.ReplaceAll(userCmd, "%", `\%`)
-	return fmt.Sprintf("MISE_DATA_DIR=/var/lib/easyserver/mise /usr/local/bin/mise exec %s@%s -- %s",
-		miseTool, exact, escaped), nil
+	return fmt.Sprintf("MISE_DATA_DIR=%s MISE_CONFIG_DIR=%s %s exec %s@%s -- %s",
+		mise.DataDir, mise.ConfigDir, mise.BinPath, miseTool, exact, escaped), nil
 }
 
 // Service manages cron tasks and their execution
@@ -228,7 +229,7 @@ func (s *Service) executeTask(task *CronTask) {
 		if task.EnvVars != "" {
 			opts.Env = parseEnvVars(task.EnvVars)
 		}
-		opts.Env = append(opts.Env, "MISE_DATA_DIR=/var/lib/easyserver/mise")
+		opts.Env = append(opts.Env, "MISE_DATA_DIR="+mise.DataDir, "MISE_CONFIG_DIR="+mise.ConfigDir)
 
 		// Wrap the (possibly multi-line shell) command in `mise exec -- sh -c`
 		// so anything the user wrote — pipes, &&, scripts — resolves binaries
@@ -249,7 +250,7 @@ func (s *Service) executeTask(task *CronTask) {
 		// logged as success. Reuse the outer `runErr` so retries and the final
 		// status check see the same error.
 		outputStr, _, runErr = s.executor.RunWithOptions(runCtx, opts,
-			"/usr/local/bin/mise", "exec",
+			mise.BinPath, "exec",
 			miseTool+"@"+task.RuntimeExact, "--",
 			"sh", "-c", command)
 		output = []byte(outputStr)

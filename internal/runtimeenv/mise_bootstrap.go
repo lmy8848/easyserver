@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"easyserver/internal/infra/mise"
 )
 
 const (
@@ -19,9 +21,6 @@ const (
 	fallbackMiseVersion = "v2026.6.13"
 	targetMiseSha256    = "96ae1ef7b00a6ebbbec23ba1016d6e722f5e904966272f621d15326429e90d53"
 	fallbackMiseSha256  = "d80fa6b4be4d926e7a09fadab1ba777c9ce52f9c22de6d8f6e3cce8d66d281d8"
-	miseBinPath         = "/usr/local/bin/mise"
-	miseDataDir         = "/var/lib/easyserver/mise"
-	miseProfilePath     = "/etc/profile.d/mise.sh"
 )
 
 // BootstrapMise ensures mise is installed and configured correctly
@@ -44,7 +43,7 @@ func BootstrapMise() error {
 }
 
 func checkMiseVersion() error {
-	cmd := exec.Command(miseBinPath, "--version")
+	cmd := exec.Command(mise.BinPath, "--version")
 	out, err := cmd.Output()
 	if err != nil {
 		return err
@@ -67,7 +66,7 @@ func checkMiseVersion() error {
 		}
 	}
 	log.Printf("mise: existing binary at %s reports %q (expected %s or %s); using it as-is",
-		miseBinPath, verStr, target, fallback)
+		mise.BinPath, verStr, target, fallback)
 	return nil
 }
 
@@ -84,8 +83,8 @@ func downloadMise(version, expectedSha256 string) error {
 		// Create tmp file in the SAME directory as the final target so the
 		// atomic rename below stays within one filesystem. Defaulting to
 		// /tmp blows up with "invalid cross-device link" on hosts where
-		// /tmp is tmpfs and /usr/local/bin is on the root fs.
-		tmpFile, err := os.CreateTemp(filepath.Dir(miseBinPath), "mise-download-*.tmp")
+		// /tmp is tmpfs and /opt is on the root fs.
+		tmpFile, err := os.CreateTemp(filepath.Dir(mise.BinPath), "mise-download-*.tmp")
 		if err != nil {
 			return err
 		}
@@ -99,7 +98,7 @@ func downloadMise(version, expectedSha256 string) error {
 			if err := os.Chmod(tmpPath, 0755); err != nil {
 				return err
 			}
-			return os.Rename(tmpPath, miseBinPath)
+			return os.Rename(tmpPath, mise.BinPath)
 		}
 		log.Printf("Download failed from %s: %v", dlUrl, err)
 		lastErr = err
@@ -138,26 +137,37 @@ func downloadFile(filepath string, url string, expectedSha256 string) error {
 }
 
 func setupMiseEnv() error {
-	if err := os.MkdirAll(miseDataDir, 0755); err != nil {
+	// 数据目录与 config 目录（同根，全自包含在 /opt/easyserver/mise）。
+	if err := os.MkdirAll(mise.DataDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(mise.ConfigDir, 0755); err != nil {
+		return err
+	}
+
+	// mise 二进制所在目录需先存在，downloadMise 的临时文件放这里做同文件系统 rename。
+	if err := os.MkdirAll(filepath.Dir(mise.BinPath), 0755); err != nil {
 		return err
 	}
 
 	// Create the shims directory ahead of time if it doesn't exist to prevent PATH warnings
-	shimsDir := filepath.Join(miseDataDir, "shims")
+	shimsDir := filepath.Join(mise.DataDir, "shims")
 	if err := os.MkdirAll(shimsDir, 0755); err != nil {
 		return err
 	}
 
-	content := fmt.Sprintf("export MISE_DATA_DIR=\"%s\"\nexport PATH=\"%s:$PATH\"\n", miseDataDir, shimsDir)
-
-	b, err := os.ReadFile(miseProfilePath)
-	if err == nil && string(b) == content {
-		return nil
+	// 清理旧版本（/var/lib 时代）留在 /etc/profile.d/mise.sh 的系统残留：它会把
+	// 失效路径注入所有用户 shell。仅当内容匹配本面板指纹时删除，避免误删用户自己写的。
+	const oldProfilePath = "/etc/profile.d/mise.sh"
+	if b, err := os.ReadFile(oldProfilePath); err == nil {
+		if strings.Contains(string(b), `MISE_DATA_DIR="/var/lib/easyserver/mise"`) {
+			if err := os.Remove(oldProfilePath); err != nil {
+				log.Printf("mise: failed to remove legacy %s: %v", oldProfilePath, err)
+			} else {
+				log.Printf("mise: removed legacy %s", oldProfilePath)
+			}
+		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(miseProfilePath), 0755); err != nil {
-		return err
-	}
-
-	return os.WriteFile(miseProfilePath, []byte(content), 0644)
+	return nil
 }
