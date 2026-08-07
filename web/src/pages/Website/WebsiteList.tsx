@@ -643,7 +643,7 @@ export default function WebsiteList({
             <Select allowClear placeholder="使用系统 PATH" style={{ width: '100%' }}>
               {runtimeEnvs.filter(e => e.status === 'installed').map(env => (
                 <Select.Option key={env.id} value={env.id}>
-                  {env.name} {env.version}{env.is_default ? ' (默认)' : ''}
+                  {env.name} {env.version}
                 </Select.Option>
               ))}
             </Select>

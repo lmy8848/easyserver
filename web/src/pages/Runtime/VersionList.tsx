@@ -188,7 +188,6 @@ export default function VersionList({
                   <Space>
                     <span>{v.version}</span>
                     {v.installed && <Tag color="green" style={{ fontSize: 10 }}>已安装</Tag>}
-                    {v.is_default && <Tag color="blue" style={{ fontSize: 10 }}>默认</Tag>}
                   </Space>
                 ),
                 value: v.version,

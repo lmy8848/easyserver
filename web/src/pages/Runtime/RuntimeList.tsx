@@ -1,6 +1,5 @@
 import { Table, Button, Space, Tag, Popconfirm, Progress } from 'antd';
 import {
-  CheckCircleOutlined,
   SyncOutlined,
   DeleteOutlined,
   ReloadOutlined,
@@ -14,7 +13,6 @@ interface RuntimeListProps {
   loading: boolean;
   logsLoading: boolean;
   cleanupLoading: boolean;
-  onSetDefault: (name: string, version: string) => void;
   onDeleteRecord: (name: string, version: string) => void;
   onRetry: (name: string, version: string) => void;
   onViewLogs: (id: number) => void;
@@ -64,7 +62,6 @@ export default function RuntimeList({
   loading,
   logsLoading,
   cleanupLoading,
-  onSetDefault,
   onDeleteRecord,
   onRetry,
   onViewLogs,
@@ -86,12 +83,7 @@ export default function RuntimeList({
       title: '版本',
       dataIndex: 'version',
       key: 'version',
-      render: (version: string, record: RuntimeEnvironment) => (
-        <Space>
-          <span>{version}</span>
-          {record.is_default && <Tag color="blue">默认</Tag>}
-        </Space>
-      ),
+      render: (version: string) => <span>{version}</span>,
     },
     {
       title: '状态',
@@ -119,18 +111,6 @@ export default function RuntimeList({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {record.status === 'installed' && (
             <>
-              {!record.is_default ? (
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<CheckCircleOutlined />}
-                  onClick={() => onSetDefault(record.name, record.version)}
-                >
-                  设为默认
-                </Button>
-              ) : (
-                <Tag color="green">当前默认</Tag>
-              )}
               <Button
                 type="link"
                 size="small"

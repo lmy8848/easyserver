@@ -3,7 +3,6 @@ export interface RuntimeEnvironment {
   name: string;
   version: string;
   path: string;
-  is_default: boolean;
   status: string;
   progress: number;
   progress_step: string;
@@ -14,7 +13,6 @@ export interface RuntimeEnvironment {
 export interface VersionInfo {
   version: string;
   installed: boolean;
-  is_default: boolean;
 }
 
 export interface PackageInfo {

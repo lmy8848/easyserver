@@ -195,16 +195,6 @@ export default function Runtime() {
 
   // ==================== Runtime list actions ====================
 
-  const handleSetDefault = async (name: string, version: string) => {
-    try {
-      await api.post('/runtime/set-default', { name, version });
-      message.success('默认版本已设置');
-      fetchEnvironments();
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '设置失败'));
-    }
-  };
-
   const handleDeleteRecord = async (name: string, version: string) => {
     try {
       await api.post('/runtime/uninstall', { name, version });
@@ -245,7 +235,7 @@ export default function Runtime() {
   };
 
   // fetchVersions now hits a single endpoint that calls `mise ls-remote` directly.
-  // We mark installed/is_default by joining against the local environments list
+  // We mark installed by joining against the local environments list
   // — startsWith catches the case where remote lists "20" but local has "20.11.0".
   const fetchVersions = async (runtimeName: string) => {
     setVersionsLoading(true);
@@ -258,7 +248,6 @@ export default function Runtime() {
         return {
           version: v,
           installed: !!match,
-          is_default: !!match?.is_default,
         };
       });
       setAvailableVersions(versions);
@@ -485,7 +474,6 @@ export default function Runtime() {
           loading={loading}
           logsLoading={logsLoading}
           cleanupLoading={cleanupLoading}
-          onSetDefault={handleSetDefault}
           onDeleteRecord={handleDeleteRecord}
           onRetry={handleRetry}
           onViewLogs={handleViewLogs}

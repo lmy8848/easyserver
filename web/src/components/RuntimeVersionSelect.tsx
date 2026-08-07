@@ -8,7 +8,6 @@ interface RuntimeVersionOption {
   name: string;       // lang: node / python / ...
   version: string;    // exact: 20.11.0
   status: string;     // installed / installing / failed / ...
-  is_default: boolean;
 }
 
 interface RuntimeVersionSelectProps {
@@ -63,7 +62,6 @@ export default function RuntimeVersionSelect({ value, onChange, showDisabled = t
         <Space>
           <span>{getRuntimeIcon(e.name)}</span>
           <span>{e.name} {e.version}</span>
-          {e.is_default && <Tag color="blue" style={{ fontSize: 10 }}>默认</Tag>}
           {e.status !== 'installed' && <Tag color={meta.color} style={{ fontSize: 10 }}>{meta.label}</Tag>}
         </Space>
       ),

@@ -42,9 +42,9 @@ type Provider interface {
 	Unwrap(lang, exact, execLine string) string
 	// InstallPath 返回 (lang, exact) 的安装目录（供 UI 展示）。
 	InstallPath(lang, exact string) string
-	// WriteConfig 让实现按 env 与默认版本持久化自身配置（如镜像源、默认版本）。
-	// envs / defaults 的 key 均为底层标识。
-	WriteConfig(ctx context.Context, envs, defaults map[string]string) error
+	// WriteConfig 让实现按 env 持久化自身配置（如镜像源）。
+	// envs 的 key 均为底层标识。
+	WriteConfig(ctx context.Context, envs map[string]string) error
 }
 
 // NewProvider returns the mise-backed Provider.
@@ -217,8 +217,8 @@ func (miseProvider) InstallPath(lang, exact string) string {
 	return filepath.Join(DataDir, "installs", miseToolDirName(tool), exact)
 }
 
-func (miseProvider) WriteConfig(ctx context.Context, envs, defaults map[string]string) error {
-	content := BuildConfigContent(envs, defaults)
+func (miseProvider) WriteConfig(ctx context.Context, envs map[string]string) error {
+	content := BuildConfigContent(envs)
 
 	dir := filepath.Dir(ConfigPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {

@@ -137,31 +137,6 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	})
 }
 
-// SetDefault sets a version as the default for a runtime environment
-func (h *RuntimeHandler) SetDefault(c *gin.Context) {
-	var req runtimeenv.RuntimeSetDefaultRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
-	}
-
-	// Validate runtime name
-	if !runtimeenv.IsSupported(req.Name) {
-		c.Error(apperror.ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
-		return
-	}
-
-	middleware.AuditSummary(c, "设置默认运行环境 "+req.Name+" "+req.Version)
-	if err := h.runtimeService.SetDefault(c.Request.Context(), req.Name, req.Version); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	httpx.Success(c, gin.H{
-		"message": "默认版本设置成功",
-	})
-}
-
 // GetProgress returns the installation progress for a runtime environment
 func (h *RuntimeHandler) GetProgress(c *gin.Context) {
 	idStr := c.Param("id")
@@ -664,7 +639,6 @@ func RegisterRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Servi
 	protected.GET("/runtime/:name/remote-versions", runtimeHandler.GetRemoteVersions)
 	protected.POST("/runtime/install", runtimeHandler.Install)
 	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
-	protected.POST("/runtime/set-default", runtimeHandler.SetDefault)
 	protected.GET("/runtime/progress/:id", runtimeHandler.GetProgress)
 	protected.GET("/runtime/logs/:id", runtimeHandler.GetLogs)
 	protected.GET("/runtime/cleanup/:id", runtimeHandler.GetCleanupInfo)

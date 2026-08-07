@@ -57,14 +57,10 @@ func (s *Service) Init(ctx context.Context) error {
 	return nil
 }
 
-// GenerateMiseConfig 让底层按当前 DB 中的环境变量与默认版本持久化自身配置。
-// 收集纯数据（env map + lang→exact map），具体写入由 provider 负责。
+// GenerateMiseConfig 让底层按当前 DB 中的环境变量持久化自身配置。
+// 收集纯数据（env map），具体写入由 provider 负责。
 func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 	envConfigs, err := s.envConfigs.ListEnvConfigs(ctx)
-	if err != nil {
-		return err
-	}
-	defaults, err := s.repo.ListDefaults(ctx)
 	if err != nil {
 		return err
 	}
@@ -74,11 +70,7 @@ func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 			envs[c.Name] = c.Value
 		}
 	}
-	defs := make(map[string]string, len(defaults))
-	for _, d := range defaults {
-		defs[d.Lang] = d.Exact
-	}
-	return s.provider.WriteConfig(ctx, envs, defs)
+	return s.provider.WriteConfig(ctx, envs)
 }
 
 // ListAll returns all installed runtime environments
@@ -109,19 +101,6 @@ func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnviron
 		envs[i].Path = s.provider.InstallPath(envs[i].Name, envs[i].Version)
 	}
 	return envs, nil
-}
-
-// GetDefault returns the default version of a runtime environment
-func (s *Service) GetDefault(ctx context.Context, name string) (*RuntimeEnvironment, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	env, err := s.repo.GetDefault(ctx, name)
-	if err != nil || env == nil {
-		return env, err
-	}
-	env.Path = s.provider.InstallPath(env.Name, env.Version)
-	return env, nil
 }
 
 // GetByID returns a runtime environment by ID
@@ -214,15 +193,6 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, exactVersi
 	s.appendProgress(ctx, id, 100, "done", "安装完成")
 	s.repo.UpdateStatusToInstalled(ctx, id, "")
 
-	hasDefault, _ := s.repo.HasDefault(ctx, name)
-	if !hasDefault {
-		// First version installed for this lang → auto-promote to default. Must
-		// go through applyDefault so the mise config is regenerated; see
-		// Issue 07.
-		if err := s.applyDefault(ctx, name, exactVersion); err != nil {
-			log.Printf("runtime: auto-default after install of %s@%s failed: %v", name, exactVersion, err)
-		}
-	}
 	log.Printf("runtime: installed %s %s", name, exactVersion)
 }
 
@@ -477,10 +447,6 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 		return fmt.Errorf("operation in progress: currently %s", env.Status)
 	}
 
-	// 默认版本也允许卸载：cleanupRelatedData 会先清掉 global_default 行
-	// （否则 Delete 会触发 FK 冲突），随后 GenerateMiseConfig 会把 [tools]
-	// 里对应条目移除。该 lang 卸载后变为"无默认"，由用户重新指定。
-
 	conflicts, err := s.repo.GetConflictingReferences(ctx, env.ID)
 	if err != nil {
 		return fmt.Errorf("failed to check conflicts: %w", err)
@@ -491,14 +457,8 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	}
 
 	if env.Status == "failed" {
-		s.cleanupRelatedData(ctx, env.ID)
 		if err := s.repo.Delete(ctx, env.ID); err != nil {
 			return err
-		}
-		// Removing a failed default (possible — line 502 lets failed slip past
-		// the IsDefault block) leaves a stale [tools] entry; regenerate.
-		if err := s.GenerateMiseConfig(ctx); err != nil {
-			log.Printf("runtime: failed to regen mise config after uninstall of failed %s@%s: %v", name, version, err)
 		}
 		return nil
 	}
@@ -507,50 +467,18 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
 
-	s.cleanupRelatedData(ctx, env.ID)
-
 	infra.Go(func() {
 		bgCtx := context.Background()
 		uninstallErr := s.uninstallRuntime(bgCtx, env)
 		if uninstallErr != nil {
 			log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, uninstallErr)
 			s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
-			// cleanupRelatedData (called synchronously before this goroutine)
-			// already dropped any global_default row pinning this version. The
-			// runtime_version row sticks around in uninstall_failed status, but
-			// the mise config must reflect the new DB state so SSH users no
-			// longer resolve to a binary mise is about to remove.
-			if err := s.GenerateMiseConfig(bgCtx); err != nil {
-				log.Printf("runtime: failed to regen mise config after failed uninstall of %s@%s: %v", env.Name, env.Version, err)
-			}
 		} else {
 			s.repo.Delete(bgCtx, env.ID)
-			// Mirror the mise config to the new DB state — the just-removed
-			// runtime may have been the global default for its lang.
-			if err := s.GenerateMiseConfig(bgCtx); err != nil {
-				log.Printf("runtime: failed to regen mise config after uninstall of %s@%s: %v", env.Name, env.Version, err)
-			}
 		}
 	})
 
 	return nil
-}
-
-// cleanupRelatedData cleans up any global_default
-// row pinning this runtime_version. The global_default cleanup is required so
-// Delete(runtime_version) won't trip the FK constraint; the caller is expected
-// to GenerateMiseConfig afterwards so the on-disk [tools] section reflects the
-// removal (see Uninstall / uninstallRuntime).
-func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
-	// Drop any global_default row pinning this runtime so the upcoming Delete
-	// won't violate the FK and the next GenerateMiseConfig drops the stale
-	// [tools] entry.
-	rows, err := s.repo.CleanupGlobalDefaultsByRuntimeID(ctx, runtimeID)
-	if err != nil {
-		log.Printf("runtime: failed to cleanup global_default: %v", err)
-	} else if rows > 0 {
-		log.Printf("runtime: cleared %d global_default row(s) for runtime %d", rows, runtimeID)
-	}
 }
 
 // uninstallRuntime performs the actual uninstallation
@@ -601,55 +529,6 @@ func isValidUninstallPath(path string) bool {
 	}
 
 	return false
-}
-
-// SetDefault sets a version as the default for a runtime environment
-func (s *Service) SetDefault(ctx context.Context, name, version string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	// Validate version to prevent command injection
-	if !isValidVersion(version) {
-		return fmt.Errorf("invalid version format: %s", version)
-	}
-
-	// Check if the version exists
-	env, err := s.repo.GetByNameAndVersion(ctx, name, version)
-	if err != nil {
-		return err
-	}
-	if env == nil {
-		return fmt.Errorf("%s %s not found", name, version)
-	}
-	// Refuse to promote a not-ready version to default: writing such a row to
-	// the mise config [tools] would point at a binary that isn't on disk,
-	// making the whole runtime unusable.
-	if env.Status != "installed" {
-		return fmt.Errorf("cannot set %s %s as default: status is %q (must be installed)", name, version, env.Status)
-	}
-
-	return s.applyDefault(ctx, name, version)
-}
-
-// applyDefault marks (name, version) as the global default for that lang AND
-// regenerates the panel-private mise config so `mise exec` without a pinned
-// version resolves to it. Recorded in DB and rendered into config.toml; SSH
-// users never read this config (面板私有), so the "SSH 直接 node 用默认版"能力
-// 不再存在——Process/Cron/Systemd 均显式指定版本。See Issue 07. Three call
-// sites (SetDefault, installRuntime, ImportDetected) all route through here;
-// do NOT bypass to the repo helpers directly.
-func (s *Service) applyDefault(ctx context.Context, name, version string) error {
-	if err := s.repo.ResetDefaults(ctx, name); err != nil {
-		return err
-	}
-	if err := s.repo.SetDefaultByNameAndVersion(ctx, name, version); err != nil {
-		return err
-	}
-	if err := s.GenerateMiseConfig(ctx); err != nil {
-		log.Printf("runtime: failed to regenerate mise config after default %s=%s: %v", name, version, err)
-		return fmt.Errorf("default set in DB but mise config regeneration failed: %w", err)
-	}
-	return nil
 }
 
 // shellEscape escapes a string for safe use in shell commands.

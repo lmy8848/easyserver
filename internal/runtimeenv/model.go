@@ -8,7 +8,6 @@ type RuntimeEnvironment struct {
 	Name         string    `json:"name"`          // java, node, php, python, go
 	Version      string    `json:"version"`       // 17, 18.17.0, 8.2, 3.11, 1.21
 	Path         string    `json:"path"`          // Installation path
-	IsDefault    bool      `json:"is_default"`    // Is this the default version
 	Status       string    `json:"status"`        // installed, installing, failed
 	Progress     int       `json:"progress"`      // Installation progress 0-100
 	ProgressStep string    `json:"progress_step"` // Current step: pending, downloading, compiling, configuring, done
@@ -29,17 +28,4 @@ type RuntimeUninstallRequest struct {
 	Version string `json:"version" binding:"required"` // 17, 18.17.0, 8.2, 3.11, 1.21
 }
 
-// RuntimeSetDefaultRequest represents a request to set default version
-type RuntimeSetDefaultRequest struct {
-	Name    string `json:"name" binding:"required"`    // java, node, php, python, go
-	Version string `json:"version" binding:"required"` // 17, 18.17.0, 8.2, 3.11, 1.21
-}
-
 // RuntimeDetectResult represents detected runtime environments on the system
-
-// GlobalDefaultEntry is one row of the global_default table joined with runtime_version,
-// used by the mise config generator to render the [tools] section.
-type GlobalDefaultEntry struct {
-	Lang  string // node / python / go / java / php
-	Exact string // exact version e.g. 20.11.0
-}
