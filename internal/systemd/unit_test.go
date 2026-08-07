@@ -3,6 +3,8 @@ package systemd
 import (
 	"strings"
 	"testing"
+
+	"easyserver/internal/infra/mise"
 )
 
 func TestValidateManagedName(t *testing.T) {
@@ -40,7 +42,7 @@ func TestRenderUnit_Minimal(t *testing.T) {
 		Name:      "my-app",
 		ExecStart: "node /app/server.js",
 	}
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
@@ -78,7 +80,7 @@ func TestRenderUnit_FullWithRuntime(t *testing.T) {
 		RuntimeLang:      "node",
 		RuntimeExact:     "20.10.0",
 	}
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
@@ -107,7 +109,7 @@ func TestRenderUnit_RejectsNewline(t *testing.T) {
 		{"dir", &ManagedUnitSpec{Name: "foo", ExecStart: "x", Dir: "/app\n/etc"}},
 	}
 	for _, c := range cases {
-		_, err := RenderUnit(c.spec)
+		_, err := RenderUnit(c.spec, mise.NewProvider())
 		if err == nil {
 			t.Errorf("RenderUnit %s 含换行应被拒绝", c.field)
 		}
@@ -123,13 +125,13 @@ func TestParseUnitMeta_RoundTrip(t *testing.T) {
 		RuntimeLang:      "node",
 		RuntimeExact:     "20.11.0",
 	}
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
 
 	info := &ServiceInfo{}
-	ParseUnitMeta(content, info)
+	ParseUnitMeta(mise.NewProvider(), content, info)
 	if !info.Managed {
 		t.Error("Managed 应为 true")
 	}
@@ -161,7 +163,7 @@ ExecStart=/usr/sbin/nginx
 WantedBy=multi-user.target
 `
 	info := &ServiceInfo{}
-	ParseUnitMeta(content, info)
+	ParseUnitMeta(mise.NewProvider(), content, info)
 	if info.Managed {
 		t.Error("无 ManagedBy 注释时 Managed 应为 false")
 	}
@@ -215,7 +217,7 @@ func TestRenderUnit_RejectsEnvKeyInjection(t *testing.T) {
 		ExecStart: "node",
 		Env:       map[string]string{"FOO\nExecStart=/bin/evil": "bar"},
 	}
-	_, err := RenderUnit(spec)
+	_, err := RenderUnit(spec, mise.NewProvider())
 	if err == nil {
 		t.Error("env key 含换行应被拒绝（防 systemd 指令注入）")
 	}
@@ -234,7 +236,7 @@ func TestRenderUnit_RejectsInvalidEnvKey(t *testing.T) {
 			ExecStart: "node",
 			Env:       map[string]string{k: "v"},
 		}
-		_, err := RenderUnit(spec)
+		_, err := RenderUnit(spec, mise.NewProvider())
 		if err == nil {
 			t.Errorf("env key %q 应被拒绝", k)
 		}
@@ -251,7 +253,7 @@ func TestRenderUnit_RejectsRuntimeNewline(t *testing.T) {
 		{"runtime_exact", &ManagedUnitSpec{Name: "foo", ExecStart: "x", RuntimeExact: "20.0.0\nUser=root"}},
 	}
 	for _, c := range cases {
-		_, err := RenderUnit(c.spec)
+		_, err := RenderUnit(c.spec, mise.NewProvider())
 		if err == nil {
 			t.Errorf("RenderUnit %s 含换行应被拒绝", c.field)
 		}
@@ -272,13 +274,13 @@ func TestParseUnitMeta_ConfigRoundTrip(t *testing.T) {
 		RuntimeLang:      "node",
 		RuntimeExact:     "20.10.0",
 	}
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
 
 	info := &ServiceInfo{}
-	ParseUnitMeta(content, info)
+	ParseUnitMeta(mise.NewProvider(), content, info)
 
 	// ExecStart 应去掉 mise 前缀，还原用户原始命令（含引号无损）
 	if info.ExecStart != spec.ExecStart {
@@ -313,7 +315,7 @@ func TestRenderUnit_TmpTestScript(t *testing.T) {
 			"LOG_LEVEL": "info",
 		},
 	}
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
 		t.Fatalf("RenderUnit 失败: %v", err)
 	}
@@ -323,7 +325,7 @@ func TestRenderUnit_TmpTestScript(t *testing.T) {
 	mustContain(t, content, "Description=TMP Test Script Service")
 
 	info := &ServiceInfo{}
-	ParseUnitMeta(content, info)
+	ParseUnitMeta(mise.NewProvider(), content, info)
 	if info.ExecStart != "/tmp/test-service.sh" {
 		t.Errorf("ExecStart 期望 /tmp/test-service.sh，实际 %q", info.ExecStart)
 	}

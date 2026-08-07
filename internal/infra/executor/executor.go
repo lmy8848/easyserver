@@ -5,27 +5,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 	"time"
-
-	"easyserver/internal/infra/mise"
 )
-
-func init() {
-	// 进程级 env 注入：只影响面板自身进程及其子进程，不侵入用户 shell。
-	// service_package 的 npm/pip/pnpm 与 mise reshim 依赖 shims 在 PATH 中。
-	path := os.Getenv("PATH")
-	if !strings.Contains(path, mise.DataDir+"/shims") {
-		os.Setenv("PATH", mise.DataDir+"/shims:"+path)
-	}
-	if os.Getenv("MISE_DATA_DIR") == "" {
-		os.Setenv("MISE_DATA_DIR", mise.DataDir)
-	}
-	if os.Getenv("MISE_CONFIG_DIR") == "" {
-		os.Setenv("MISE_CONFIG_DIR", mise.ConfigDir)
-	}
-}
 
 // CommandExecutor defines the interface for executing system commands.
 type CommandExecutor interface {

@@ -10,42 +10,48 @@ import (
 
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
-	"easyserver/internal/runtimeenv"
 )
 
 // wrapWithMiseExec composes one shell-parseable line of the form:
 //
-//	MISE_DATA_DIR=/opt/easyserver/mise MISE_CONFIG_DIR=/opt/easyserver/mise /opt/easyserver/mise/bin/mise exec <miseTool>@<exact> -- <userCmd>
+//	MISE_DATA_DIR=/opt/easyserver/mise MISE_CONFIG_DIR=/opt/easyserver/mise /opt/easyserver/mise/bin/mise exec <tool>@<exact> -- <userCmd>
 //
 // Used to build /etc/cron.d/easyserver entries. The trailing <userCmd> is
 // interpreted by /bin/sh (cron invokes it that way), so users can still chain
-// with `&&` etc. at the shell level — mise exec runs the immediate next
-// process under the pinned runtime. Returns an error if lang isn't in the
-// catalog so the caller can skip that task instead of writing a broken line.
+// with `&&` etc. at the shell level — the wrapper runs the immediate next
+// process under the pinned runtime. Returns an error if lang isn't supported
+// by the provider so the caller can skip that task instead of writing a broken line.
 //
 // cron(8) reads `%` in the command field as newline-to-stdin (see `man 5
 // crontab`), which silently truncates commands like `date +%Y%m%d`. We escape
 // every `%` to `\%` here because this helper is *only* used for the on-disk
 // crontab; RunNow takes a different code path and shouldn't escape.
-func wrapWithMiseExec(lang, exact, userCmd string) (string, error) {
-	miseTool, ok := runtimeenv.MiseToolFor(lang)
-	if !ok {
-		return "", fmt.Errorf("unsupported runtime lang %q", lang)
-	}
+func wrapWithMiseExec(provider mise.Provider, lang, exact, userCmd string) (string, error) {
 	escaped := strings.ReplaceAll(userCmd, "%", `\%`)
-	return fmt.Sprintf("MISE_DATA_DIR=%s MISE_CONFIG_DIR=%s %s exec %s@%s -- %s",
-		mise.DataDir, mise.ConfigDir, mise.BinPath, miseTool, exact, escaped), nil
+	c, err := provider.Command(lang, exact, escaped)
+	if err != nil {
+		return "", err
+	}
+	// Command.Exec = [bin, exec, tool@exact, --, cmd]，cmd 是最后一项（由 cron 的
+	// /bin/sh 解析，不加引号）。Env 是环境变量前缀。
+	head := c.Exec[:len(c.Exec)-1]
+	line := strings.Join(head, " ") + " " + c.Exec[len(c.Exec)-1]
+	if len(c.Env) > 0 {
+		line = strings.Join(c.Env, " ") + " " + line
+	}
+	return line, nil
 }
 
 // Service manages cron tasks and their execution
 type Service struct {
 	repo     Repository
 	executor executor.CommandExecutor
+	provider mise.Provider
 }
 
 // NewService creates a new cron Service
-func NewService(repo Repository, exec executor.CommandExecutor) *Service {
-	return &Service{repo: repo, executor: exec}
+func NewService(repo Repository, exec executor.CommandExecutor, provider mise.Provider) *Service {
+	return &Service{repo: repo, executor: exec, provider: provider}
 }
 
 // List returns all cron tasks
@@ -229,30 +235,30 @@ func (s *Service) executeTask(task *CronTask) {
 		if task.EnvVars != "" {
 			opts.Env = parseEnvVars(task.EnvVars)
 		}
-		opts.Env = append(opts.Env, "MISE_DATA_DIR="+mise.DataDir, "MISE_CONFIG_DIR="+mise.ConfigDir)
 
-		// Wrap the (possibly multi-line shell) command in `mise exec -- sh -c`
-		// so anything the user wrote — pipes, &&, scripts — resolves binaries
-		// via the runtime version pinned in the DB. See ADR-0002 §4 / Issue 06.
-		miseTool, ok := runtimeenv.MiseToolFor(task.RuntimeLang)
-		if !ok {
+		// Wrap the (possibly multi-line shell) command so anything the user wrote —
+		// pipes, &&, scripts — resolves binaries via the runtime version pinned in
+		// the DB. 底层 Command 提供 Exec/Env，RunNow 用 `sh -c` 包装多行命令。
+		c, err := s.provider.Command(task.RuntimeLang, task.RuntimeExact, command)
+		if err != nil {
 			if cancel != nil {
 				cancel()
 			}
 			output = []byte(fmt.Sprintf("unsupported runtime lang: %s", task.RuntimeLang))
-			runErr = fmt.Errorf("unsupported runtime lang %q", task.RuntimeLang)
+			runErr = err
 			break
 		}
+		opts.Env = append(opts.Env, c.Env...)
+
 		outputStr := ""
 		// Note: use plain `=` here. The original code used `:=` which silently
 		// shadowed the outer `runErr`, so executor failures never reached the
 		// status='failed' branch below and every retry-exhausted task got
 		// logged as success. Reuse the outer `runErr` so retries and the final
 		// status check see the same error.
-		outputStr, _, runErr = s.executor.RunWithOptions(runCtx, opts,
-			mise.BinPath, "exec",
-			miseTool+"@"+task.RuntimeExact, "--",
-			"sh", "-c", command)
+		// Exec = [bin, exec, tool@exact, --, cmd]，此处用 `sh -c` 承接多行命令。
+		runArgs := append(c.Exec[:len(c.Exec)-1], "sh", "-c", command)
+		outputStr, _, runErr = s.executor.RunWithOptions(runCtx, opts, runArgs[0], runArgs[1:]...)
 		output = []byte(outputStr)
 		if cancel != nil {
 			cancel()
@@ -353,7 +359,7 @@ func (s *Service) SyncToSystemCrontab(ctx context.Context) error {
 	var lines []string
 	lines = append(lines, "# EasyServer managed cron tasks - DO NOT EDIT MANUALLY")
 	for _, t := range tasks {
-		wrapped, err := wrapWithMiseExec(t.RuntimeLang, t.RuntimeExact, t.Command)
+		wrapped, err := wrapWithMiseExec(s.provider, t.RuntimeLang, t.RuntimeExact, t.Command)
 		if err != nil {
 			log.Printf("cron: skip task %d (%s): %v", t.ID, t.Name, err)
 			continue

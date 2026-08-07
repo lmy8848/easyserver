@@ -34,6 +34,7 @@ import (
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/mise"
 	"easyserver/internal/monitor"
 	monitorhttp "easyserver/internal/monitor/http"
 	"easyserver/internal/notification"
@@ -68,7 +69,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	// ── Infrastructure ──
 
-	if err := runtimeenv.BootstrapMise(); err != nil {
+	if err := mise.BootstrapMise(); err != nil {
 		log.Printf("ERROR: Failed to bootstrap mise runtime manager: %v", err)
 	}
 
@@ -78,6 +79,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	}
 
 	cmdExec := executor.NewOSExecutor()
+	miseProvider := mise.NewProvider()
 
 	// ── Shared services (depended upon by others) ──
 
@@ -130,12 +132,12 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	// ── Domain services (no background goroutines) ──
 
 	cronRepo := cron.NewSQLiteRepository(db)
-	cronService := cron.NewService(cronRepo, cmdExec)
+	cronService := cron.NewService(cronRepo, cmdExec, miseProvider)
 	if err := cronService.SyncToSystemCrontab(ctx); err != nil {
 		log.Printf("cron: startup sync to system crontab failed: %v", err)
 	}
 
-	serviceManager := systemd.NewServiceManager(cmdExec, cronRepo)
+	serviceManager := systemd.NewServiceManager(cmdExec, cronRepo, miseProvider)
 
 	containerService := container.NewService(cmdExec)
 
@@ -159,11 +161,11 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	firewallService := firewall.NewService(firewallRepo, cmdExec, cfg.Server.Port)
 
 	runtimeRepo := runtimeenv.NewSQLiteRepository(db)
-	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec, envConfigService)
+	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec, envConfigService, miseProvider)
 	if err := runtimeService.Init(ctx); err != nil {
 		log.Printf("ERROR: Failed to init runtime service: %v", err)
 	}
-	packageManagerService := runtimeenv.NewPackageService(cmdExec)
+	packageManagerService := runtimeenv.NewPackageService(cmdExec, miseProvider)
 
 	sshConfigService := ssh.NewService(cmdExec)
 

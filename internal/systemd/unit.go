@@ -85,7 +85,7 @@ func cleanUnitValue(s string) string {
 }
 
 // RenderUnit 生成 unit 文件内容。纯函数，无副作用，便于测试。
-func RenderUnit(spec *ManagedUnitSpec) (string, error) {
+func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 	if err := ValidateManagedName(spec.Name); err != nil {
 		return "", err
 	}
@@ -118,8 +118,8 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	spec.RuntimeLang = cleanUnitValue(spec.RuntimeLang)
 	spec.RuntimeExact = cleanUnitValue(spec.RuntimeExact)
 
-	execStart := buildExecStart(spec)
-	envLines := buildEnvLines(spec.Env)
+	execStart, runtimeEnv := buildExecStart(spec, p)
+	envLines := buildEnvLines(mergeCommandEnv(spec.Env, runtimeEnv))
 
 	restartLine := ""
 	if spec.AutoRestart {
@@ -189,15 +189,36 @@ func RenderUnit(spec *ManagedUnitSpec) (string, error) {
 	return b.String(), nil
 }
 
-// buildExecStart 拼接 ExecStart 值。
-// 绑定 runtime 时前置 mise exec <lang>@<exact> -- 。
+// buildExecStart 拼接 ExecStart 值，并返回底层命令所需的额外环境变量。
+// 绑定 runtime 时前置底层执行包装（如 mise exec <lang>@<exact> --）。
 // spec.ExecStart 是用户填的完整命令（如 "node /app/server.js --port 3000"），
-// 后端只在前面补 mise 包裹，不再拆分 command/args。
-func buildExecStart(spec *ManagedUnitSpec) string {
+// 底层包装不拆分 command/args。
+func buildExecStart(spec *ManagedUnitSpec, p mise.Provider) (string, []string) {
 	if spec.RuntimeVersionID > 0 && spec.RuntimeLang != "" && spec.RuntimeExact != "" {
-		return mise.BinPath + " exec " + spec.RuntimeLang + "@" + spec.RuntimeExact + " -- " + spec.ExecStart
+		if c, err := p.Command(spec.RuntimeLang, spec.RuntimeExact, spec.ExecStart); err == nil {
+			return strings.Join(c.Exec, " "), c.Env
+		}
 	}
-	return spec.ExecStart
+	return spec.ExecStart, nil
+}
+
+// mergeCommandEnv 把底层命令的额外 env（Command.Env，如 MISE_DATA_DIR）并入
+// 用户自定义 env，供 Environment= 段渲染。底层 env 优先（用户无法覆盖）。
+func mergeCommandEnv(user map[string]string, cmdEnv []string) map[string]string {
+	if len(cmdEnv) == 0 {
+		return user
+	}
+	merged := make(map[string]string, len(user)+len(cmdEnv))
+	for k, v := range user {
+		merged[k] = v
+	}
+	for _, e := range cmdEnv {
+		k, v, ok := strings.Cut(e, "=")
+		if ok {
+			merged[k] = v
+		}
+	}
+	return merged
 }
 
 // buildEnvLines 把 env map 转成 systemd Environment= 行。
@@ -232,7 +253,7 @@ func buildEnvLines(env map[string]string) []string {
 // [Unit] 段：注释（ManagedBy/Runtime*）+ Description + StartLimitBurst
 // [Service] 段：WorkingDirectory/Environment/Restart/RestartSec/TimeoutStopSec
 // 调用方负责设置 info.Name（不含前缀）。
-func ParseUnitMeta(content string, info *ServiceInfo) {
+func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 	info.MaxRestarts = 10
 	info.RestartDelay = 5
 	info.StopTimeout = 10
@@ -284,7 +305,7 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 				execStart := strings.TrimPrefix(trimmed, "ExecStart=")
 				// 若绑定了 runtime，去掉 mise 包裹前缀，还原用户原始命令。
 				if info.RuntimeVersionID > 0 {
-					execStart = stripMisePrefix(execStart)
+					execStart = stripMisePrefix(p, info.RuntimeLang, info.RuntimeExact, execStart)
 				}
 				info.ExecStart = execStart
 			case strings.HasPrefix(trimmed, "WorkingDirectory="):
@@ -312,21 +333,11 @@ func ParseUnitMeta(content string, info *ServiceInfo) {
 	}
 }
 
-// stripMisePrefix 去掉 mise 包裹前缀，还原用户原始命令。
+// stripMisePrefix 去掉底层执行包装前缀，还原用户原始命令。
 // 输入 "/opt/easyserver/mise/bin/mise exec node@20.10.0 -- node /app/server.js"
-// 返回 "node /app/server.js"。非 mise 前缀原样返回。
-func stripMisePrefix(execStart string) string {
-	prefix := mise.BinPath + " exec "
-	if !strings.HasPrefix(execStart, prefix) {
-		return execStart
-	}
-	rest := strings.TrimPrefix(execStart, prefix)
-	// 跳过 "node@20.10.0 -- " 这段
-	dashIdx := strings.Index(rest, " -- ")
-	if dashIdx < 0 {
-		return execStart
-	}
-	return rest[dashIdx+4:]
+// 返回 "node /app/server.js"。非该底层包裹原样返回。
+func stripMisePrefix(p mise.Provider, lang, exact, execStart string) string {
+	return p.Unwrap(lang, exact, execStart)
 }
 
 // parseEnvLine 解析 Environment= 行的 "KEY=VALUE" 或 KEY="quoted value"。

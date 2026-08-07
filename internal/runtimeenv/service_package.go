@@ -18,10 +18,11 @@ import (
 // there is no DB cache.
 type PackageService struct {
 	executor executor.CommandExecutor
+	provider mise.Provider
 }
 
-func NewPackageService(exec executor.CommandExecutor) *PackageService {
-	return &PackageService{executor: exec}
+func NewPackageService(exec executor.CommandExecutor, provider mise.Provider) *PackageService {
+	return &PackageService{executor: exec, provider: provider}
 }
 
 // runManagerCmd 运行包管理器命令并按"非零 exit = 失败"的通用约定处理结果。
@@ -104,6 +105,10 @@ func tailLines(s string, n int) string {
 // 通过 corepack enable 或 npm install -g 装上的可执行文件，需要 reshim 才能
 // 出现在 /opt/easyserver/mise/shims/ 下被 server 进程的 PATH 找到。
 // 失败不阻断流程——如果 shim 仍能从 node bin 目录直接定位也算 OK。
+//
+// ponytail: 全局包管理是 mise 执行模型产物（reshim 不入通用 Provider 接口，
+// 换容器/nix 底层时此模块随之更换），此处直接调用 mise 二进制是具体实现的
+// 已知例外。
 func (s *PackageService) miseReshim(ctx context.Context) {
 	output, _, err := s.executor.RunCombined(ctx, mise.BinPath, "reshim")
 	if err != nil {

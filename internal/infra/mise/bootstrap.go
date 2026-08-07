@@ -1,4 +1,4 @@
-package runtimeenv
+package mise
 
 import (
 	"crypto/sha256"
@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"easyserver/internal/infra/mise"
 )
 
 const (
@@ -43,7 +41,7 @@ func BootstrapMise() error {
 }
 
 func checkMiseVersion() error {
-	cmd := exec.Command(mise.BinPath, "--version")
+	cmd := exec.Command(BinPath, "--version")
 	out, err := cmd.Output()
 	if err != nil {
 		return err
@@ -66,7 +64,7 @@ func checkMiseVersion() error {
 		}
 	}
 	log.Printf("mise: existing binary at %s reports %q (expected %s or %s); using it as-is",
-		mise.BinPath, verStr, target, fallback)
+		BinPath, verStr, target, fallback)
 	return nil
 }
 
@@ -84,7 +82,7 @@ func downloadMise(version, expectedSha256 string) error {
 		// atomic rename below stays within one filesystem. Defaulting to
 		// /tmp blows up with "invalid cross-device link" on hosts where
 		// /tmp is tmpfs and /opt is on the root fs.
-		tmpFile, err := os.CreateTemp(filepath.Dir(mise.BinPath), "mise-download-*.tmp")
+		tmpFile, err := os.CreateTemp(filepath.Dir(BinPath), "mise-download-*.tmp")
 		if err != nil {
 			return err
 		}
@@ -98,7 +96,7 @@ func downloadMise(version, expectedSha256 string) error {
 			if err := os.Chmod(tmpPath, 0755); err != nil {
 				return err
 			}
-			return os.Rename(tmpPath, mise.BinPath)
+			return os.Rename(tmpPath, BinPath)
 		}
 		log.Printf("Download failed from %s: %v", dlUrl, err)
 		lastErr = err
@@ -138,22 +136,33 @@ func downloadFile(filepath string, url string, expectedSha256 string) error {
 
 func setupMiseEnv() error {
 	// 数据目录与 config 目录（同根，全自包含在 /opt/easyserver/mise）。
-	if err := os.MkdirAll(mise.DataDir, 0755); err != nil {
+	if err := os.MkdirAll(DataDir, 0755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(mise.ConfigDir, 0755); err != nil {
+	if err := os.MkdirAll(ConfigDir, 0755); err != nil {
 		return err
 	}
 
 	// mise 二进制所在目录需先存在，downloadMise 的临时文件放这里做同文件系统 rename。
-	if err := os.MkdirAll(filepath.Dir(mise.BinPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(BinPath), 0755); err != nil {
 		return err
 	}
 
 	// Create the shims directory ahead of time if it doesn't exist to prevent PATH warnings
-	shimsDir := filepath.Join(mise.DataDir, "shims")
+	shimsDir := filepath.Join(DataDir, "shims")
 	if err := os.MkdirAll(shimsDir, 0755); err != nil {
 		return err
+	}
+
+	// 进程级 env 注入：只影响面板自身进程及其子进程，不侵入用户 shell。
+	if !strings.Contains(os.Getenv("PATH"), shimsDir) {
+		os.Setenv("PATH", shimsDir+":"+os.Getenv("PATH"))
+	}
+	if os.Getenv("MISE_DATA_DIR") == "" {
+		os.Setenv("MISE_DATA_DIR", DataDir)
+	}
+	if os.Getenv("MISE_CONFIG_DIR") == "" {
+		os.Setenv("MISE_CONFIG_DIR", ConfigDir)
 	}
 
 	// 清理旧版本（/var/lib 时代）留在 /etc/profile.d/mise.sh 的系统残留：它会把

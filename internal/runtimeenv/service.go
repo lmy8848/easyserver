@@ -31,14 +31,16 @@ type Service struct {
 	repo         Repository
 	executor     executor.CommandExecutor
 	envConfigs   EnvConfigProvider
+	provider     mise.Provider
 	installLocks sync.Map
 }
 
-func NewService(repo Repository, exec executor.CommandExecutor, envConfigs EnvConfigProvider) *Service {
+func NewService(repo Repository, exec executor.CommandExecutor, envConfigs EnvConfigProvider, provider mise.Provider) *Service {
 	return &Service{
 		repo:       repo,
 		executor:   exec,
 		envConfigs: envConfigs,
+		provider:   provider,
 	}
 }
 
@@ -55,6 +57,30 @@ func (s *Service) Init(ctx context.Context) error {
 	return nil
 }
 
+// GenerateMiseConfig 让底层按当前 DB 中的环境变量与默认版本持久化自身配置。
+// 收集纯数据（env map + lang→exact map），具体写入由 provider 负责。
+func (s *Service) GenerateMiseConfig(ctx context.Context) error {
+	envConfigs, err := s.envConfigs.ListEnvConfigs(ctx)
+	if err != nil {
+		return err
+	}
+	defaults, err := s.repo.ListDefaults(ctx)
+	if err != nil {
+		return err
+	}
+	envs := make(map[string]string, len(envConfigs))
+	for _, c := range envConfigs {
+		if c.Enabled {
+			envs[c.Name] = c.Value
+		}
+	}
+	defs := make(map[string]string, len(defaults))
+	for _, d := range defaults {
+		defs[d.Lang] = d.Exact
+	}
+	return s.provider.WriteConfig(ctx, envs, defs)
+}
+
 // ListAll returns all installed runtime environments
 func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 	if ctx == nil {
@@ -65,7 +91,7 @@ func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 		return nil, err
 	}
 	for i := range envs {
-		envs[i].Path = miseInstallPath(envs[i].Name, envs[i].Version)
+		envs[i].Path = s.provider.InstallPath(envs[i].Name, envs[i].Version)
 	}
 	return envs, nil
 }
@@ -80,7 +106,7 @@ func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnviron
 		return nil, err
 	}
 	for i := range envs {
-		envs[i].Path = miseInstallPath(envs[i].Name, envs[i].Version)
+		envs[i].Path = s.provider.InstallPath(envs[i].Name, envs[i].Version)
 	}
 	return envs, nil
 }
@@ -94,7 +120,7 @@ func (s *Service) GetDefault(ctx context.Context, name string) (*RuntimeEnvironm
 	if err != nil || env == nil {
 		return env, err
 	}
-	env.Path = miseInstallPath(env.Name, env.Version)
+	env.Path = s.provider.InstallPath(env.Name, env.Version)
 	return env, nil
 }
 
@@ -107,7 +133,7 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, e
 	if err != nil || env == nil {
 		return env, err
 	}
-	env.Path = miseInstallPath(env.Name, env.Version)
+	env.Path = s.provider.InstallPath(env.Name, env.Version)
 	return env, nil
 }
 
@@ -120,39 +146,17 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 		return fmt.Errorf("invalid version format: %s", version)
 	}
 
-	var miseTool string
-	for _, r := range GetCatalog() {
-		if r.Lang == name {
-			miseTool = r.MiseTool
-			break
-		}
-	}
-	if miseTool == "" {
-		return fmt.Errorf("unsupported runtime: %s", name)
-	}
-
 	// Regenerate once per install so mirror env vars from env_configs are fresh
-	// before `mise latest` / `mise install` read the panel-private config.toml.
+	// before resolve/install read the panel-private config.
 	if err := s.GenerateMiseConfig(ctx); err != nil {
 		return fmt.Errorf("failed to regenerate mise config before install: %w", err)
 	}
 
-	// `mise latest <tool>@<prefix>` 把"前缀版本"解析成精确版本（如 Node 选
-	// 主版本 20 → 20.11.0）。但对 vfox 插件（PHP / Java）该命令对完整版本
-	// 经常返回空 stdout（vfox 自己实现的 latest 行为不统一），导致这里把
-	// 用户已选好的完整版本当成解析失败。
-	//
-	// 兜底：mise latest 失败或输出为空时，直接采用前端传入的 version。如果
-	// 它确实不是合法 mise 版本，后续 `mise install` 会有明确报错。
-	cmd := s.executor.Command(ctx, executor.StartOptions{}, mise.BinPath, "latest", fmt.Sprintf("%s@%s", miseTool, version))
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR="+mise.DataDir, "MISE_CONFIG_DIR="+mise.ConfigDir, "MISE_YES=1")
-	out, _ := cmd.Output()
-	var exactVersion string
-	if outLines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(outLines) > 0 {
-		exactVersion = strings.TrimSpace(outLines[len(outLines)-1])
-	}
-	if exactVersion == "" {
-		exactVersion = version
+	// 底层把"前缀版本"解析成精确版本（如 Node 选主版本 20 → 20.11.0）。
+	// vfox 插件（PHP/Java）解析可能返回空，底层已兜底用传入的 version。
+	exactVersion, err := s.provider.ResolveVersion(ctx, name, version)
+	if err != nil {
+		return err
 	}
 
 	lockKey := name + "@" + exactVersion
@@ -182,12 +186,12 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 		return err
 	}
 
-	go s.installRuntime(context.Background(), id, name, version, exactVersion, miseTool)
+	go s.installRuntime(context.Background(), id, name, exactVersion)
 	return nil
 }
 
 // installRuntime performs the actual installation
-func (s *Service) installRuntime(ctx context.Context, id int64, name, version, exactVersion, miseTool string) {
+func (s *Service) installRuntime(ctx context.Context, id int64, name, exactVersion string) {
 	defer s.installLocks.Delete(name + "@" + exactVersion)
 
 	// PHP / Python 是源码编译，必须先把 autoconf / libxml2-dev 等系统级
@@ -200,10 +204,8 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version, e
 		return
 	}
 
-	target := fmt.Sprintf("%s@%s", miseTool, exactVersion)
-	_, exitCode, err := s.runStreaming(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", target), mise.BinPath, "install", "-y", target)
-
-	if err != nil || exitCode != 0 {
+	s.appendProgress(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", exactVersion))
+	if err := s.provider.Install(ctx, name, exactVersion, installWriter{s: s, id: id, step: "installing"}); err != nil {
 		log.Printf("runtime: failed to install %s %s: %v", name, exactVersion, err)
 		s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
 		return
@@ -222,6 +224,19 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, version, e
 		}
 	}
 	log.Printf("runtime: installed %s %s", name, exactVersion)
+}
+
+// installWriter 把 provider.Install/Uninstall 的实时输出追加进运行环境日志。
+// 单写者前提（一个 install/uninstall goroutine），由 Install/Uninstall 入口保证。
+type installWriter struct {
+	s    *Service
+	id   int64
+	step string
+}
+
+func (w installWriter) Write(p []byte) (int, error) {
+	w.s.appendProgress(context.Background(), w.id, 30, w.step, string(p))
+	return len(p), nil
 }
 
 // runStreaming runs a command and streams its output to the database.
@@ -257,13 +272,8 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, name, args...)
 	// DEBIAN_FRONTEND=noninteractive 防止 ensureBuildDeps 里的 apt-get install
-	// 撞上 tzdata 这类会忽略 -y 的交互式 postinst 直接挂住。对 mise/npm 无副作用。
-	cmd.Env = append(os.Environ(),
-		"MISE_DATA_DIR="+mise.DataDir,
-		"MISE_CONFIG_DIR="+mise.ConfigDir,
-		"MISE_YES=1",
-		"DEBIAN_FRONTEND=noninteractive",
-	)
+	// 撞上 tzdata 这类会忽略 -y 的交互式 postinst 直接挂住。
+	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -546,71 +556,22 @@ func (s *Service) cleanupRelatedData(ctx context.Context, runtimeID int64) {
 // uninstallRuntime performs the actual uninstallation
 func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) error {
 	s.updateProgress(ctx, env.ID, 0, "uninstalling", "")
+	s.appendProgress(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", env.Version))
 
-	var miseTool string
-	for _, r := range GetCatalog() {
-		if r.Lang == env.Name {
-			miseTool = r.MiseTool
-			break
-		}
-	}
-	if miseTool == "" {
-		return fmt.Errorf("unsupported runtime: %s", env.Name)
-	}
-
-	target := fmt.Sprintf("%s@%s", miseTool, env.Version)
-	_, exitCode, err := s.runStreaming(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", target), mise.BinPath, "uninstall", "-y", target)
-
-	if err != nil || exitCode != 0 {
-		return fmt.Errorf("卸载失败 (exit %d)，详见日志", exitCode)
+	if err := s.provider.Uninstall(ctx, env.Name, env.Version, installWriter{s: s, id: env.ID, step: "uninstalling"}); err != nil {
+		return fmt.Errorf("卸载失败，详见日志: %v", err)
 	}
 
 	log.Printf("runtime: uninstalled %s %s", env.Name, env.Version)
 	return nil
 }
 
-// GetRemoteVersions dynamically fetches available versions using mise ls-remote
+// GetRemoteVersions dynamically fetches available versions via the provider.
 func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var miseTool string
-	for _, r := range GetCatalog() {
-		if r.Lang == lang {
-			miseTool = r.MiseTool
-			break
-		}
-	}
-	if miseTool == "" {
-		return nil, fmt.Errorf("unsupported runtime: %s", lang)
-	}
-
-	cmd := s.executor.Command(ctx, executor.StartOptions{}, mise.BinPath, "ls-remote", miseTool)
-	cmd.Env = append(os.Environ(), "MISE_DATA_DIR="+mise.DataDir, "MISE_CONFIG_DIR="+mise.ConfigDir, "MISE_YES=1")
-	out, err := cmd.Output()
-	if err != nil {
-		var stderr string
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr = string(exitErr.Stderr)
-		}
-		return nil, fmt.Errorf("failed to fetch remote versions: %v, stderr: %s", err, stderr)
-	}
-
-	lines := strings.Split(string(out), "\n")
-	var versions []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && isValidVersion(line) {
-			versions = append(versions, line)
-		}
-	}
-
-	// Reverse to put newest first
-	for i, j := 0, len(versions)-1; i < j; i, j = i+1, j-1 {
-		versions[i], versions[j] = versions[j], versions[i]
-	}
-
-	return versions, nil
+	return s.provider.ListRemoteVersions(ctx, lang)
 }
 
 // isValidUninstallPath checks if the path is safe for deletion

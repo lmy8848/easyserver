@@ -3,10 +3,12 @@ package cron
 import (
 	"strings"
 	"testing"
+
+	"easyserver/internal/infra/mise"
 )
 
 func TestWrapWithMiseExec_BareCommand(t *testing.T) {
-	got, err := wrapWithMiseExec("node", "20.11.0", "node app.js")
+	got, err := wrapWithMiseExec(mise.NewProvider(), "node", "20.11.0", "node app.js")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -19,7 +21,7 @@ func TestWrapWithMiseExec_BareCommand(t *testing.T) {
 func TestWrapWithMiseExec_VfoxTool(t *testing.T) {
 	// Java goes through vfox; tool name has ':' and '/'. cron lines are shell-
 	// parsed, so a bare token with these chars is one argv element — fine.
-	got, err := wrapWithMiseExec("java", "21.0.0", "java -jar app.jar")
+	got, err := wrapWithMiseExec(mise.NewProvider(), "java", "21.0.0", "java -jar app.jar")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +34,7 @@ func TestWrapWithMiseExec_VfoxTool(t *testing.T) {
 }
 
 func TestWrapWithMiseExec_UnsupportedLang(t *testing.T) {
-	_, err := wrapWithMiseExec("rust", "1.80.0", "cargo run")
+	_, err := wrapWithMiseExec(mise.NewProvider(), "rust", "1.80.0", "cargo run")
 	if err == nil {
 		t.Fatal("expected error for unsupported lang, got nil")
 	}
@@ -42,7 +44,7 @@ func TestWrapWithMiseExec_UnsupportedLang(t *testing.T) {
 // User commands containing those substrings are user choice; we only check
 // that wrapWithMiseExec itself does not inject them.
 func TestWrapWithMiseExec_NoLoginShell(t *testing.T) {
-	got, _ := wrapWithMiseExec("node", "20.11.0", "node app.js")
+	got, _ := wrapWithMiseExec(mise.NewProvider(), "node", "20.11.0", "node app.js")
 	for _, badPrefix := range []string{"bash -lc", "bash -l ", "sh -l"} {
 		if strings.HasPrefix(strings.TrimSpace(strings.SplitN(got, " -- ", 2)[0]), badPrefix) {
 			t.Fatalf("wrap injected forbidden login shell %q: %s", badPrefix, got)
@@ -54,7 +56,7 @@ func TestWrapWithMiseExec_NoLoginShell(t *testing.T) {
 // the crontab line as `\%Y\%m\%d`, otherwise cron truncates the command and
 // feeds the tail as stdin.
 func TestWrapWithMiseExec_EscapesPercent(t *testing.T) {
-	got, err := wrapWithMiseExec("node", "20.11.0", `echo $(date +%Y%m%d) >> /tmp/r.log`)
+	got, err := wrapWithMiseExec(mise.NewProvider(), "node", "20.11.0", `echo $(date +%Y%m%d) >> /tmp/r.log`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

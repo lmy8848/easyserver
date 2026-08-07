@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/mise"
 )
 
 // ServiceInfo represents a systemd service.
@@ -73,11 +74,12 @@ type ServiceManager struct {
 	mu       sync.Mutex // 保护 managed CRUD 并发（创建/更新/删除互斥）
 	executor executor.CommandExecutor
 	runtime  RuntimeLookup // 可选，nil 时跳过 runtime 补全
+	provider mise.Provider
 }
 
 // NewServiceManager creates a new ServiceManager.
-func NewServiceManager(exec executor.CommandExecutor, runtimeLookup RuntimeLookup) *ServiceManager {
-	return &ServiceManager{executor: exec, runtime: runtimeLookup}
+func NewServiceManager(exec executor.CommandExecutor, runtimeLookup RuntimeLookup, provider mise.Provider) *ServiceManager {
+	return &ServiceManager{executor: exec, runtime: runtimeLookup, provider: provider}
 }
 
 // List returns all systemd services with basic info (name, state, description).
@@ -123,7 +125,7 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 		// 托管服务：读 unit 文件补元数据 + 配置回显（本地 IO，不调 systemctl）
 		if shortName := UnitName(fields[0]); shortName != "" {
 			if content, _ := readUnitFile(shortName); content != "" {
-				ParseUnitMeta(content, &svc)
+				ParseUnitMeta(m.provider, content, &svc)
 			}
 		}
 
@@ -293,7 +295,7 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 	// 托管服务：读 unit 文件补元数据
 	if shortName := UnitName(name + ".service"); shortName != "" {
 		if content, _ := readUnitFile(shortName); content != "" {
-			ParseUnitMeta(content, svc)
+			ParseUnitMeta(m.provider, content, svc)
 		}
 	}
 
@@ -530,7 +532,7 @@ func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error)
 			}
 		}
 		if content, _ := readUnitFile(shortName); content != "" {
-			ParseUnitMeta(content, &svc)
+			ParseUnitMeta(m.provider, content, &svc)
 		}
 		managed = append(managed, svc)
 	}
@@ -561,7 +563,7 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 		return fmt.Errorf("托管服务 %s 已存在", spec.Name)
 	}
 
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, m.provider)
 	if err != nil {
 		return fmt.Errorf("生成 unit 文件失败: %w", err)
 	}
@@ -637,7 +639,7 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 		}
 	}
 
-	content, err := RenderUnit(spec)
+	content, err := RenderUnit(spec, m.provider)
 	if err != nil {
 		return fmt.Errorf("生成 unit 文件失败: %w", err)
 	}

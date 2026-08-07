@@ -1,10 +1,7 @@
 package runtimeenv
 
 import (
-	"path/filepath"
 	"strings"
-
-	"easyserver/internal/infra/mise"
 )
 
 type Runtime struct {
@@ -103,42 +100,6 @@ func GetCatalog() []Runtime {
 		}
 	}
 	return c
-}
-
-// MiseToolFor returns the mise tool identifier for a given language.
-// e.g. "node" → "node", "java" → "vfox:version-fox/vfox-java".
-// The second return value is false when the lang is not in the catalog.
-func MiseToolFor(lang string) (string, bool) {
-	lang = strings.ToLower(lang)
-	for _, r := range catalog {
-		if r.Lang == lang {
-			return r.MiseTool, true
-		}
-	}
-	return "", false
-}
-
-// miseToolDirName normalizes a mise tool key into the filesystem name mise
-// uses under installs/.  mise replaces ':' and '/' with '-' (see
-// .mise-installs.toml: e.g. "vfox:version-fox/vfox-java" →
-// "vfox-version-fox-vfox-java"). Core plugins like "node"/"go" pass through.
-func miseToolDirName(miseTool string) string {
-	return strings.NewReplacer(":", "-", "/", "-").Replace(miseTool)
-}
-
-// miseInstallPath returns the on-disk install dir mise will use for
-// (lang, version), or "" when lang isn't in the catalog or version is blank.
-// Pure function — does not stat the path, so it returns the *intended*
-// location even when status != installed.
-func miseInstallPath(lang, version string) string {
-	if version == "" {
-		return ""
-	}
-	tool, ok := MiseToolFor(lang)
-	if !ok {
-		return ""
-	}
-	return filepath.Join(mise.DataDir, "installs", miseToolDirName(tool), version)
 }
 
 // SupportsGlobalPkgsFor returns true if the specified language supports global package management via the panel.
