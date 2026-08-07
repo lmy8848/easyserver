@@ -16,6 +16,7 @@ import (
 	"easyserver/internal/api"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/mise"
 )
 
 // App is the process shell: owns the HTTP server, TCP listener, restart signal,
@@ -51,6 +52,12 @@ func NewApp(cfg *config.Config, configPath string, devMode bool) *App {
 // Run builds the application via api.Setup, binds the listener, and enters the
 // event loop (signals, hot restart).
 func (a *App) Run() {
+	// 进程级基础设施初始化：确保运行环境底层（mise）二进制到位。属于进程壳
+	// 而非 HTTP 编排层（api.Setup），故放在这里。失败不阻断启动，留待后续报错。
+	if err := mise.BootstrapMise(); err != nil {
+		log.Printf("ERROR: Failed to bootstrap mise runtime manager: %v", err)
+	}
+
 	handler, shutdown := api.Setup(a.cfg, a.configPath, a.sig)
 	a.shutdown = shutdown
 	a.srv.Handler = handler

@@ -69,10 +69,6 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	// ── Infrastructure ──
 
-	if err := mise.BootstrapMise(); err != nil {
-		log.Printf("ERROR: Failed to bootstrap mise runtime manager: %v", err)
-	}
-
 	db, err := database.Init(cfg.Database.Path)
 	if err != nil {
 		log.Fatalf("init database: %v", err)

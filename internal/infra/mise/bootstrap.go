@@ -165,18 +165,5 @@ func setupMiseEnv() error {
 		os.Setenv("MISE_CONFIG_DIR", ConfigDir)
 	}
 
-	// 清理旧版本（/var/lib 时代）留在 /etc/profile.d/mise.sh 的系统残留：它会把
-	// 失效路径注入所有用户 shell。仅当内容匹配本面板指纹时删除，避免误删用户自己写的。
-	const oldProfilePath = "/etc/profile.d/mise.sh"
-	if b, err := os.ReadFile(oldProfilePath); err == nil {
-		if strings.Contains(string(b), `MISE_DATA_DIR="/var/lib/easyserver/mise"`) {
-			if err := os.Remove(oldProfilePath); err != nil {
-				log.Printf("mise: failed to remove legacy %s: %v", oldProfilePath, err)
-			} else {
-				log.Printf("mise: removed legacy %s", oldProfilePath)
-			}
-		}
-	}
-
 	return nil
 }
