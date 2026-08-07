@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     name: Build and analyze
+    if: false  # 禁用此 workflow，保留文件
     runs-on: ubuntu-latest
 
     steps:
