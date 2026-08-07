@@ -1,6 +1,5 @@
--- EasyServer Initial Schema Migration
--- Generated from codebase: database.go + service/*.go InitTables()
--- 27 tables total
+-- EasyServer Initial Schema
+-- 后续结构变更请新增 00000N_*.up.sql / .down.sql，不要改本文件。
 
 PRAGMA foreign_keys = ON;
 
@@ -27,40 +26,6 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- =============================================
--- 2. Session & auth tables (depend on users)
--- =============================================
-
-CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token TEXT UNIQUE NOT NULL,
-    user_id INTEGER NOT NULL,
-    username TEXT NOT NULL,
-    role TEXT NOT NULL,
-    ip TEXT DEFAULT '',
-    user_agent TEXT DEFAULT '',
-    last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active);
-
-CREATE TABLE IF NOT EXISTS user_activities (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    username TEXT NOT NULL,
-    action TEXT NOT NULL,
-    ip TEXT DEFAULT '',
-    user_agent TEXT DEFAULT '',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_activities_user ON user_activities(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_activities_created ON user_activities(created_at);
-
 CREATE TABLE IF NOT EXISTS token_blacklist (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -81,14 +46,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     detail TEXT,
     ip TEXT,
     user_agent TEXT,
-    signature TEXT DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'operation',  -- operation | request
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON audit_logs(type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 
 -- =============================================
--- 3. System monitoring (no dependencies)
+-- 2. System monitoring (no dependencies)
 -- =============================================
 
 CREATE TABLE IF NOT EXISTS monitor_data (
@@ -115,37 +82,40 @@ CREATE TABLE IF NOT EXISTS monitor_data (
 CREATE INDEX IF NOT EXISTS idx_monitor_timestamp ON monitor_data(timestamp);
 
 -- =============================================
--- 4. Runtime environments (no dependencies)
+-- 3. Notifications (no dependencies)
 -- =============================================
 
-CREATE TABLE IF NOT EXISTS runtime_environments (
+CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    path TEXT NOT NULL,
-    is_default INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'installed',
-    progress INTEGER DEFAULT 0,
-    progress_step TEXT DEFAULT '',
-    logs TEXT DEFAULT '',
-    error_message TEXT DEFAULT '',
+    type TEXT NOT NULL,           -- alert/security/deploy/cron/update/system
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    level TEXT DEFAULT 'info',    -- info/warning/error
+    is_read INTEGER DEFAULT 0,
+    metadata TEXT,                -- JSON: 关联资源ID等
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+
+-- =============================================
+-- 4. Runtime versions (no dependencies)
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS runtime_version (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lang TEXT NOT NULL CHECK(lang IN ('node', 'python', 'go', 'java', 'php')),
+    major TEXT NOT NULL,
+    exact TEXT NOT NULL,
     installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, version)
+    status TEXT DEFAULT 'installed',
+    progress INTEGER NOT NULL DEFAULT 0,
+    progress_step TEXT NOT NULL DEFAULT '',
+    logs TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT ''
 );
-
-CREATE INDEX IF NOT EXISTS idx_runtime_name ON runtime_environments(name);
-
-CREATE TABLE IF NOT EXISTS runtime_versions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    lts INTEGER DEFAULT 0,
-    stable INTEGER DEFAULT 1,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, version)
-);
-
-CREATE INDEX IF NOT EXISTS idx_runtime_versions_name ON runtime_versions(name);
 
 -- =============================================
 -- 5. Environment configs (no dependencies)
@@ -153,41 +123,24 @@ CREATE INDEX IF NOT EXISTS idx_runtime_versions_name ON runtime_versions(name);
 
 CREATE TABLE IF NOT EXISTS env_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
     value TEXT NOT NULL,
-    runtime_id INTEGER DEFAULT 0,
-    is_global INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, runtime_id)
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_env_configs_runtime ON env_configs(runtime_id);
+CREATE INDEX IF NOT EXISTS idx_env_configs_name ON env_configs(name);
 
 CREATE TABLE IF NOT EXISTS path_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    path TEXT NOT NULL,
-    runtime_id INTEGER DEFAULT 0,
-    is_global INTEGER DEFAULT 0,
+    path TEXT NOT NULL UNIQUE,
+    enabled INTEGER DEFAULT 1,
     order_num INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(path, runtime_id)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_path_entries_runtime ON path_entries(runtime_id);
-
-CREATE TABLE IF NOT EXISTS global_configs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category TEXT NOT NULL,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(category, key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_global_configs_category ON global_configs(category);
+CREATE INDEX IF NOT EXISTS idx_path_entries_path ON path_entries(path);
 
 -- =============================================
 -- 6. Deploy tables (server -> tasks -> versions)
@@ -277,6 +230,11 @@ CREATE TABLE IF NOT EXISTS websites (
     access_log TEXT DEFAULT '',
     error_log TEXT DEFAULT '',
     status TEXT DEFAULT 'active',
+    build_command TEXT DEFAULT '',
+    start_command TEXT DEFAULT '',
+    runtime_version_id INTEGER DEFAULT 0,
+    process_id INTEGER DEFAULT 0,
+    config_options TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -356,6 +314,8 @@ CREATE TABLE IF NOT EXISTS db_backups (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX IF NOT EXISTS idx_db_backups_database_id ON db_backups(database_id);
+
 -- =============================================
 -- 9. Firewall rules (no dependencies)
 -- =============================================
@@ -374,6 +334,9 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
     remark TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_firewall_rules_chain ON firewall_rules(chain);
+CREATE INDEX IF NOT EXISTS idx_firewall_rules_enabled ON firewall_rules(enabled);
 
 -- =============================================
 -- 10. Cron & script tables
@@ -395,9 +358,12 @@ CREATE TABLE IF NOT EXISTS cron_tasks (
     max_retry INTEGER DEFAULT 0,
     env_vars TEXT DEFAULT '',
     work_dir TEXT DEFAULT '',
+    runtime_version_id INTEGER NOT NULL REFERENCES runtime_version(id),
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_cron_tasks_enabled ON cron_tasks(enabled);
 
 CREATE TABLE IF NOT EXISTS cron_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -430,18 +396,101 @@ CREATE TABLE IF NOT EXISTS cron_docs (
 );
 
 -- =============================================
--- 11. Package manager (depends on runtime_environments)
+-- 11. QR login (no dependencies)
 -- =============================================
 
-CREATE TABLE IF NOT EXISTS packages (
+CREATE TABLE IF NOT EXISTS qr_login_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    runtime_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    scope TEXT DEFAULT 'global',
-    source TEXT NOT NULL,
-    installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(runtime_id, name, scope)
+    qr_token TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending | confirmed | cancelled
+    user_id INTEGER DEFAULT 0,
+    web_token TEXT DEFAULT '',               -- 签发给 Web 的 JWT，领取后删除
+    user_json TEXT DEFAULT '',               -- {user, must_change_pass} JSON，领取后删除
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    confirmed_at DATETIME
 );
 
-CREATE INDEX IF NOT EXISTS idx_packages_runtime ON packages(runtime_id);
+CREATE INDEX IF NOT EXISTS idx_qr_login_token ON qr_login_sessions(qr_token);
+CREATE INDEX IF NOT EXISTS idx_qr_login_status ON qr_login_sessions(status);
+
+-- =============================================
+-- 12. File sharing (no dependencies)
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS file_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_size INTEGER DEFAULT 0,
+    token TEXT NOT NULL UNIQUE,
+    password TEXT DEFAULT '',
+    expires_at DATETIME,
+    max_downloads INTEGER DEFAULT 0,
+    download_count INTEGER DEFAULT 0,
+    created_by INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_shares_token ON file_shares(token);
+CREATE INDEX IF NOT EXISTS idx_file_shares_created_by ON file_shares(created_by);
+
+-- =============================================
+-- 13. File Integrity Monitoring (no dependencies)
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS fim_baseline (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL UNIQUE,
+    hash TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS fim_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    change_type TEXT NOT NULL,   -- modified / added / deleted
+    old_hash TEXT,
+    new_hash TEXT,
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_fim_changes_path ON fim_changes(path);
+CREATE INDEX IF NOT EXISTS idx_fim_changes_detected ON fim_changes(detected_at);
+
+-- =============================================
+-- 14. Website security (depends on websites)
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS website_security_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    website_id INTEGER NOT NULL UNIQUE,
+    rate_limit_enabled BOOLEAN DEFAULT 0,
+    rate_limit_rate INTEGER DEFAULT 10,
+    rate_limit_burst INTEGER DEFAULT 20,
+    limit_conn INTEGER DEFAULT 100,
+    auto_ban_enabled BOOLEAN DEFAULT 0,
+    auto_ban_threshold INTEGER DEFAULT 100,
+    auto_ban_404_threshold INTEGER DEFAULT 50,
+    auto_ban_duration INTEGER DEFAULT 3600,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (website_id) REFERENCES websites(id)
+);
+
+CREATE TABLE IF NOT EXISTS website_banned_ip (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    website_id INTEGER,
+    ip TEXT NOT NULL,
+    reason TEXT,
+    source TEXT DEFAULT 'auto',
+    expires_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (website_id) REFERENCES websites(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_website_banned_ip_ip ON website_banned_ip(ip);
+CREATE INDEX IF NOT EXISTS idx_website_banned_ip_website ON website_banned_ip(website_id);

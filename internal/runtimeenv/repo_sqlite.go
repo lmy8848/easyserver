@@ -205,13 +205,14 @@ func (r *sqliteRepo) UpdateStatusToInstalled(ctx context.Context, id int64, path
 
 func (r *sqliteRepo) GetConflictingReferences(ctx context.Context, runtimeID int64) ([]string, error) {
 	var conflicts []string
-	rows, err := r.db.QueryContext(ctx, "SELECT name FROM processes WHERE runtime_version_id = ?", runtimeID)
+	// 网站通过 websites.runtime_version_id 引用 runtime（进程守护已迁到 systemd，无 processes 表）。
+	rows, err := r.db.QueryContext(ctx, "SELECT name FROM websites WHERE runtime_version_id = ?", runtimeID)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var pname string
-			if err := rows.Scan(&pname); err == nil {
-				conflicts = append(conflicts, "Process: "+pname)
+			var wname string
+			if err := rows.Scan(&wname); err == nil {
+				conflicts = append(conflicts, "Website: "+wname)
 			}
 		}
 	}

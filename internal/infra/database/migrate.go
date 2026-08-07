@@ -48,8 +48,6 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 	}
 	sort.Strings(upFiles)
 
-	isFreshInstall := len(applied) == 0
-
 	// Run pending migrations
 	for _, name := range upFiles {
 		version := extractVersion(name)
@@ -57,27 +55,8 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 			continue
 		}
 
-		var hook func(*sql.Tx) error
-		if version == 6 && !isFreshInstall {
-			hook = func(tx *sql.Tx) error {
-				return performHardCutoverBackup(tx, db, migrationsDir)
-			}
-		}
-		// Version 19 (website_config_options): add websites.process_id /
-		// config_options idempotently. ALTER TABLE ADD COLUMN is not idempotent
-		// in SQLite, so existing deployments that already have the columns (from
-		// the legacy createTables fallback) must not re-run the ALTER.
-		if version == 19 {
-			hook = ensureWebsitesColumns
-		}
-		// Version 20 (sessions_client_device): add sessions.client_type /
-		// device_id / device_info idempotently for mobile single-device binding.
-		if version == 20 {
-			hook = ensureSessionsColumns
-		}
-
 		log.Printf("migrate: running migration %s", name)
-		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name, hook); err != nil {
+		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name); err != nil {
 			return fmt.Errorf("run migration %s: %w", name, err)
 		}
 		log.Printf("migrate: applied %s", name)
@@ -127,7 +106,7 @@ func stripLeadingComments(stmt string) string {
 }
 
 // runMigration executes a single migration file
-func runMigration(db *sql.DB, path string, version int, name string, preTxHook func(*sql.Tx) error) error {
+func runMigration(db *sql.DB, path string, version int, name string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -141,12 +120,6 @@ func runMigration(db *sql.DB, path string, version int, name string, preTxHook f
 		return err
 	}
 	defer tx.Rollback()
-
-	if preTxHook != nil {
-		if err := preTxHook(tx); err != nil {
-			return err
-		}
-	}
 
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
@@ -169,63 +142,6 @@ func runMigration(db *sql.DB, path string, version int, name string, preTxHook f
 	}
 
 	return tx.Commit()
-}
-
-// ensureWebsitesColumns idempotently adds websites.process_id and
-// websites.config_options. Used as the version-19 pre-migration hook so that
-// deployments which already have the columns (legacy createTables fallback) and
-// fresh installs both converge safely.
-func ensureWebsitesColumns(tx *sql.Tx) error {
-	cols := []struct{ name, def string }{
-		{"process_id", "INTEGER DEFAULT 0"},
-		{"config_options", "TEXT DEFAULT ''"},
-	}
-	for _, c := range cols {
-		var cnt int
-		if err := tx.QueryRow(
-			"SELECT COUNT(*) FROM pragma_table_info('websites') WHERE name = ?", c.name,
-		).Scan(&cnt); err != nil {
-			return fmt.Errorf("check column %s: %w", c.name, err)
-		}
-		if cnt > 0 {
-			continue // column already exists, skip ALTER
-		}
-		if _, err := tx.Exec(
-			fmt.Sprintf("ALTER TABLE websites ADD COLUMN %s %s", c.name, c.def),
-		); err != nil {
-			return fmt.Errorf("add column %s: %w", c.name, err)
-		}
-	}
-	return nil
-}
-
-// ensureSessionsColumns idempotently adds sessions.client_type / device_id /
-// device_info. Used as the version-20 pre-migration hook so that deployments
-// which already have the columns (legacy createTables fallback) and fresh
-// installs both converge safely.
-func ensureSessionsColumns(tx *sql.Tx) error {
-	cols := []struct{ name, def string }{
-		{"client_type", "TEXT NOT NULL DEFAULT 'web'"},
-		{"device_id", "TEXT NOT NULL DEFAULT ''"},
-		{"device_info", "TEXT NOT NULL DEFAULT ''"},
-	}
-	for _, c := range cols {
-		var cnt int
-		if err := tx.QueryRow(
-			"SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = ?", c.name,
-		).Scan(&cnt); err != nil {
-			return fmt.Errorf("check column %s: %w", c.name, err)
-		}
-		if cnt > 0 {
-			continue // column already exists, skip ALTER
-		}
-		if _, err := tx.Exec(
-			fmt.Sprintf("ALTER TABLE sessions ADD COLUMN %s %s", c.name, c.def),
-		); err != nil {
-			return fmt.Errorf("add column %s: %w", c.name, err)
-		}
-	}
-	return nil
 }
 
 // splitStatements splits SQL content by semicolons, respecting quoted strings
