@@ -55,7 +55,8 @@ const LOGIN_ANIM_CSS = `
 /* Segmented 适配深色玻璃 */
 .es-login-card .ant-segmented { background: rgba(255,255,255,0.08); padding: 3px; border-radius: 10px; }
 .es-login-card .ant-segmented .ant-segmented-item { color: rgba(255,255,255,0.55); }
-.es-login-card .ant-segmented .ant-segmented-item-selected { color: #fff; }
+.es-login-card .ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover { color: #fff; }
+.es-login-card .ant-segmented .ant-segmented-item-selected { color: #1f1f1f; }
 .es-login-card .ant-segmented .ant-segmented-thumb { background: rgba(255,255,255,0.14); }
 `;
 
