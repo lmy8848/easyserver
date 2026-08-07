@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/audit"
 	"easyserver/internal/httpx"
+	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/terminal"
@@ -44,17 +44,23 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%d小时%d分", int(d.Hours()), int(d.Minutes())%60)
 }
 
+// OperationLogger records terminal session operations (open/close) for audit.
+// *audit.Service satisfies this interface implicitly.
+type OperationLogger interface {
+	LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string)
+}
+
 type TerminalHandler struct {
 	terminalManager *terminal.Manager
-	auditService    *audit.Service
+	auditLog        OperationLogger
 	jwtSecret       string
 	upgrader        gorillaWs.Upgrader
 }
 
-func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) *TerminalHandler {
+func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, auditLog OperationLogger, allowedOrigins []string, devMode bool) *TerminalHandler {
 	return &TerminalHandler{
 		terminalManager: terminalManager,
-		auditService:    auditService,
+		auditLog:        auditLog,
 		jwtSecret:       jwtSecret,
 		upgrader:        httpx.CreateUpgrader(),
 	}
@@ -108,9 +114,9 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 
 	// Log terminal session start
 	sessionStartTime := time.Now()
-	if h.auditService != nil {
-		h.auditService.LogOperation(c.Request.Context(), userID, username, audit.ActionExecute,
-			audit.ResourceTerminal, map[string]interface{}{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
+	if h.auditLog != nil {
+		h.auditLog.LogOperation(c.Request.Context(), userID, username, string(middleware.ActionExecute),
+			string(middleware.ResourceTerminal), map[string]interface{}{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	// Upgrade to WebSocket
@@ -172,11 +178,11 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	conn.Close()
 
 	// Log terminal session close with duration
-	if h.auditService != nil {
+	if h.auditLog != nil {
 		duration := time.Since(sessionStartTime)
 		durationStr := formatDuration(duration)
-		h.auditService.LogOperation(context.Background(), userID, username, audit.ActionExecute,
-			audit.ResourceTerminal,
+		h.auditLog.LogOperation(context.Background(), userID, username, string(middleware.ActionExecute),
+			string(middleware.ResourceTerminal),
 			map[string]interface{}{"summary": "终端会话已关闭", "duration": durationStr, "session_id": sessionID},
 			c.ClientIP(), c.Request.UserAgent())
 	}
@@ -242,10 +248,10 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 }
 
 // RegisterRoutes registers terminal routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditLog OperationLogger, allowedOrigins []string, devMode bool) {
 	protected.GET("/terminal/:id", func(c *gin.Context) {
 		httpx.Success(c, nil)
 	})
-	handler := NewTerminalHandler(terminalManager, jwtSecret, auditService, allowedOrigins, devMode)
+	handler := NewTerminalHandler(terminalManager, jwtSecret, auditLog, allowedOrigins, devMode)
 	wsGroup.GET("/terminal/:id", handler.HandleWebSocket)
 }

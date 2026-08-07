@@ -1,12 +1,12 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"time"
 
-	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
@@ -18,36 +18,38 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// SecurityEventLogger logs security-relevant events (login, TOTP verification).
+// Used by public auth routes that run outside the AuditMiddleware group.
+type SecurityEventLogger interface {
+	LogSecurityEvent(ctx context.Context, username, summary string)
+}
+
+// AuthAuditLogger combines security event logging (for public auth routes)
+// with request/operation logging (for AuditMiddleware on protected routes).
+// *audit.Service satisfies this interface implicitly.
+type AuthAuditLogger interface {
+	SecurityEventLogger
+	middleware.RequestLogger
+}
+
 type AuthHandler struct {
 	authService    *auth.AuthService
-	auditService   *audit.Service
+	auditLog       AuthAuditLogger
 	sessionService *auth.SessionService
 	jwtSecret      string
 	sessionTimeout time.Duration
 	cfg            *config.Config
 }
 
-func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditService *audit.Service, sessionService *auth.SessionService, sessionTimeout time.Duration, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditLog AuthAuditLogger, sessionService *auth.SessionService, sessionTimeout time.Duration, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
-		auditService:   auditService,
+		auditLog:       auditLog,
 		sessionService: sessionService,
 		jwtSecret:      jwtSecret,
 		sessionTimeout: sessionTimeout,
 		cfg:            cfg,
 	}
-}
-
-// auditSecurity logs a security event for the authenticated user. Auth routes
-// are mounted outside the AuditMiddleware group, so sensitive operations
-// (logout/totp/password) record themselves. summary is a human-readable Chinese description.
-func (h *AuthHandler) auditSecurity(c *gin.Context, summary string) {
-	if h.auditService == nil {
-		return
-	}
-	uname, _ := c.Get("username")
-	unameStr, _ := uname.(string)
-	h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, summary)
 }
 
 type LoginRequest struct {
@@ -152,8 +154,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Also log to audit log
-	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功 (IP: "+ip+")")
+	if h.auditLog != nil {
+		h.auditLog.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功 (IP: "+ip+")")
 	}
 
 	httpx.Success(c, gin.H{
@@ -183,7 +185,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		}
 	}
 
-	h.auditSecurity(c, "退出登录")
+	middleware.AuditSummary(c, "退出登录")
 	httpx.Success(c, nil)
 }
 
@@ -232,7 +234,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		}
 	}
 
-	h.auditSecurity(c, "修改密码")
+	middleware.AuditSummary(c, "修改密码")
 	httpx.Success(c, nil)
 }
 
@@ -344,8 +346,8 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 	}
 
 	// Log successful login
-	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功 (IP: "+c.ClientIP()+")")
+	if h.auditLog != nil {
+		h.auditLog.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功 (IP: "+c.ClientIP()+")")
 	}
 
 	httpx.Success(c, gin.H{
@@ -440,8 +442,8 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 	}
 
 	// Log successful login with backup code
-	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功 (IP: "+c.ClientIP()+")")
+	if h.auditLog != nil {
+		h.auditLog.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功 (IP: "+c.ClientIP()+")")
 	}
 
 	httpx.Success(c, gin.H{
@@ -509,7 +511,7 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) {
 		return
 	}
 
-	h.auditSecurity(c, "开启二次验证")
+	middleware.AuditSummary(c, "开启二次验证")
 	httpx.Success(c, gin.H{
 		"backup_codes": backupCodes,
 	})
@@ -531,7 +533,7 @@ func (h *AuthHandler) DisableTOTP(c *gin.Context) {
 		return
 	}
 
-	h.auditSecurity(c, "关闭二次验证")
+	middleware.AuditSummary(c, "关闭二次验证")
 	httpx.Success(c, nil)
 }
 
@@ -566,8 +568,8 @@ func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Sessio
 		}
 		if err := h.sessionService.CreateMobileSessionBound(c.Request.Context(), sess); err != nil {
 			if errors.Is(err, auth.ErrMobileDeviceBound) {
-				if h.auditService != nil {
-					h.auditService.LogSecurityEvent(c.Request.Context(), sess.Username, "移动端登录被拒(已有其他设备登录)")
+				if h.auditLog != nil {
+					h.auditLog.LogSecurityEvent(c.Request.Context(), sess.Username, "移动端登录被拒(已有其他设备登录)")
 				}
 				if h.authService != nil {
 					h.authService.NotifyLogin(auth.LoginEvent{
@@ -673,14 +675,7 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 		return
 	}
 
-	// Log the action
-	if h.auditService != nil {
-		if uname, ok := c.Get("username"); ok {
-			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "踢出会话")
-			}
-		}
-	}
+	middleware.AuditSummary(c, "踢出会话")
 
 	httpx.Success(c, gin.H{"message": "会话已踢出"})
 }
@@ -699,27 +694,19 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 		return
 	}
 
-	// Log the action
-	if h.auditService != nil {
-		if uname, ok := c.Get("username"); ok {
-			if unameStr, ok := uname.(string); ok {
-				h.auditService.LogSecurityEvent(c.Request.Context(), unameStr, "下线其他设备")
-			}
-		}
-	}
+	middleware.AuditSummary(c, "下线其他设备")
 
 	httpx.Success(c, gin.H{"message": "已踢出所有其他会话"})
 }
 
 type QRLoginHandler struct {
-	qrService    *qrlogin.Service
-	auditService *audit.Service
-	authService  *auth.AuthService
-	cfg          *config.Config
+	qrService   *qrlogin.Service
+	authService *auth.AuthService
+	cfg         *config.Config
 }
 
-func NewQRLoginHandler(qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service, cfg *config.Config) *QRLoginHandler {
-	return &QRLoginHandler{qrService: qrService, authService: authService, auditService: auditService, cfg: cfg}
+func NewQRLoginHandler(qrService *qrlogin.Service, authService *auth.AuthService, cfg *config.Config) *QRLoginHandler {
+	return &QRLoginHandler{qrService: qrService, authService: authService, cfg: cfg}
 }
 
 // CreateQRSession starts a new pending scan-to-login session and returns the QR
@@ -805,9 +792,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) {
 		return
 	}
 
-	if h.auditService != nil {
-		h.auditService.LogSecurityEvent(c.Request.Context(), user.Username, "扫码登录授权 (IP: "+ip+")")
-	}
+	middleware.AuditSummary(c, "扫码登录授权 (IP: "+ip+")")
 	httpx.Success(c, gin.H{"ok": true})
 }
 
@@ -825,8 +810,8 @@ func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) {
 
 // registerQRLoginRoutes wires the scan-to-login endpoints onto the auth groups.
 // publicAuth is the rate-limited public group; authProtected requires a JWT.
-func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, auditService *audit.Service, cfg *config.Config) {
-	h := NewQRLoginHandler(qrService, authService, auditService, cfg)
+func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, cfg *config.Config) {
+	h := NewQRLoginHandler(qrService, authService, cfg)
 	publicAuth.POST("/qr/session", h.CreateQRSession)
 	publicAuth.POST("/qr/status", h.GetQRStatus)
 	publicAuth.POST("/qr/cancel", h.CancelQRLogin)
@@ -837,7 +822,7 @@ func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService
 func RegisterRoutes(
 	api *gin.RouterGroup,
 	authService *auth.AuthService,
-	auditService *audit.Service,
+	auditLog AuthAuditLogger,
 	sessionService *auth.SessionService,
 	qrService *qrlogin.Service,
 	jwtSecret string,
@@ -851,7 +836,7 @@ func RegisterRoutes(
 	// Public auth routes (no JWT required) — Tier 3: strict login limiter
 	auth := api.Group("/auth")
 	auth.Use(middleware.RateLimitMiddleware("login", loginRateLimit, loginRateInterval))
-	authHandler := NewAuthHandler(authService, jwtSecret, auditService, sessionService, sessionTimeout, cfg)
+	authHandler := NewAuthHandler(authService, jwtSecret, auditLog, sessionService, sessionTimeout, cfg)
 	{
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/verify-totp", authHandler.VerifyTOTP)
@@ -869,7 +854,10 @@ func RegisterRoutes(
 
 	// Protected auth routes
 	authProtected := api.Group("/auth")
-	authProtected.Use(middleware.JWTMiddleware(jwtSecret, sessionValidator, tokenValidator))
+	authProtected.Use(
+		middleware.JWTMiddleware(jwtSecret, sessionValidator, tokenValidator),
+		middleware.AuditMiddleware(auditLog),
+	)
 	{
 		authProtected.POST("/logout", authHandler.Logout)
 		authProtected.GET("/me", authHandler.GetProfile)
@@ -885,5 +873,5 @@ func RegisterRoutes(
 	}
 
 	// Scan-to-login: public (rate-limited) session/status/cancel + protected confirm.
-	registerQRLoginRoutes(auth, authProtected, qrService, authService, auditService, cfg)
+	registerQRLoginRoutes(auth, authProtected, qrService, authService, cfg)
 }

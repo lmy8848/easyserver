@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/audit"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
@@ -36,16 +35,14 @@ type ServiceHandler struct {
 	executor          executor.CommandExecutor
 	jwtSecret         string
 	upgrader          gorillaWs.Upgrader
-	auditService      *audit.Service
 	protectedServices []string // Services that cannot be stopped/disabled
 }
 
-func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) *ServiceHandler {
+func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
 	return &ServiceHandler{
 		serviceManager:    serviceManager,
 		executor:          exec,
 		jwtSecret:         jwtSecret,
-		auditService:      auditService,
 		upgrader:          httpx.CreateUpgrader(),
 		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
@@ -464,8 +461,8 @@ func requireManagedName(fullName string) (string, error) {
 }
 
 // RegisterRoutes registers service management routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, auditService *audit.Service, allowedOrigins []string, devMode bool) {
-	handler := NewServiceHandler(serviceManager, exec, jwtSecret, auditService, allowedOrigins, devMode)
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
+	handler := NewServiceHandler(serviceManager, exec, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
 	protected.POST("/services", handler.Create)
 	protected.POST("/services/details", handler.GetDetails)

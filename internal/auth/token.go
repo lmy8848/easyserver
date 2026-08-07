@@ -4,15 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"easyserver/internal/httpx/middleware"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type JWTClaims struct {
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	jwt.RegisteredClaims
-}
+type JWTClaims = middleware.JWTClaims
 
 // TOTPTempClaims is used for temporary tokens during TOTP verification
 type TOTPTempClaims struct {
@@ -22,10 +19,10 @@ type TOTPTempClaims struct {
 }
 
 // TokenValidator is a function type for token validation (e.g., blacklist check)
-type TokenValidator func(userID int64, tokenString string, issuedAt time.Time) (bool, error)
+type TokenValidator = middleware.TokenValidator
 
 // SessionValidator is a function type for session validation
-type SessionValidator func(token string) (bool, error)
+type SessionValidator = middleware.SessionValidator
 
 func GenerateToken(secret string, userID int64, username, role string, sessionTimeout time.Duration) (string, error) {
 	if sessionTimeout <= 0 {

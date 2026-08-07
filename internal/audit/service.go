@@ -3,10 +3,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -171,7 +168,7 @@ func (s *Service) enqueue(entry auditEntry) {
 }
 
 // LogOperation logs a server-level operation.
-func (s *Service) LogOperation(ctx context.Context, userID int64, username string, action ActionCategory, resource ResourceCategory, extra map[string]interface{}, ip, userAgent string) {
+func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -183,7 +180,7 @@ func (s *Service) LogOperation(ctx context.Context, userID int64, username strin
 		detailData[k] = v
 	}
 	detailJSON, _ := json.Marshal(detailData)
-	s.enqueue(auditEntry{userID, username, string(action), string(resource), string(detailJSON), ip, userAgent, now, "operation"})
+	s.enqueue(auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"})
 }
 
 // LogRequest logs an HTTP request, written by the global audit middleware.
@@ -246,81 +243,4 @@ func (s *Service) LogLoginEvent(ctx context.Context, event auth.LoginEvent) {
 	}
 	detailJSON, _ := json.Marshal(detailData)
 	s.enqueue(auditEntry{0, event.Username, string(ActionAuth), string(ResourceAuth), string(detailJSON), event.IP, event.UserAgent, now, "operation"})
-}
-
-// loginRecord is a row returned from the login-events query.
-type loginRecord struct {
-	Username  string
-	Action    string
-	IP        string
-	UserAgent string
-	CreatedAt time.Time
-}
-
-// getLoginRecords queries operation-type audit logs with action=认证.
-func (s *Service) getLoginRecords(ctx context.Context, since time.Time, limit int) ([]loginRecord, error) {
-	_, logs, err := s.auditRepo.Query(ctx, AuditFilter{
-		Type:   "operation",
-		Action: string(ActionAuth),
-		Limit:  limit,
-		Offset: 0,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("query login events: %w", err)
-	}
-	var records []loginRecord
-	for _, l := range logs {
-		if l.CreatedAt.Before(since) {
-			continue
-		}
-		var detail map[string]interface{}
-		if err := json.Unmarshal([]byte(l.Detail), &detail); err != nil {
-			continue
-		}
-		action, _ := detail["action"].(string)
-		if !strings.HasPrefix(action, "LOGIN") {
-			continue
-		}
-		ip, _ := detail["ip"].(string)
-		ua, _ := detail["user_agent"].(string)
-		username, _ := detail["username"].(string)
-		records = append(records, loginRecord{
-			Username:  username,
-			Action:    action,
-			IP:        ip,
-			UserAgent: ua,
-			CreatedAt: l.CreatedAt,
-		})
-	}
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].CreatedAt.After(records[j].CreatedAt)
-	})
-	return records, nil
-}
-
-// GetLoginHistory returns recent login events for the security panel.
-func (s *Service) GetLoginHistory(ctx context.Context, limit int) ([]loginRecord, error) {
-	return s.getLoginRecords(ctx, time.Time{}, limit)
-}
-
-// CountFailedLoginsByIP counts LOGIN_FAILED events per IP since the given
-// time, returning only IPs whose count meets or exceeds threshold.
-func (s *Service) CountFailedLoginsByIP(ctx context.Context, since time.Time, threshold int) map[string]int {
-	records, err := s.getLoginRecords(ctx, since, 10000)
-	if err != nil {
-		log.Printf("audit: count failed logins: %v", err)
-		return nil
-	}
-	counts := map[string]int{}
-	for _, r := range records {
-		if r.Action == "LOGIN_FAILED" && r.IP != "" {
-			counts[r.IP]++
-		}
-	}
-	for ip, c := range counts {
-		if c < threshold {
-			delete(counts, ip)
-		}
-	}
-	return counts
 }

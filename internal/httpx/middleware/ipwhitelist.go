@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 
-	"easyserver/internal/infra/config"
-
 	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 )
@@ -17,30 +15,11 @@ type IPWhitelist struct {
 	enabled bool
 }
 
-func NewIPWhitelist(cfg *config.AuthConfig) *IPWhitelist {
+func NewIPWhitelist(allowedIPs []string) *IPWhitelist {
 	wl := &IPWhitelist{
-		enabled: len(cfg.IPWhitelist) > 0,
+		enabled: len(allowedIPs) > 0,
 	}
-
-	for _, cidr := range cfg.IPWhitelist {
-		_, ipNet, err := net.ParseCIDR(cidr)
-		if err != nil {
-			// Try as single IP
-			ip := net.ParseIP(cidr)
-			if ip != nil {
-				// Create /32 or /128 mask
-				if ip.To4() != nil {
-					_, ipNet, _ = net.ParseCIDR(cidr + "/32")
-				} else {
-					_, ipNet, _ = net.ParseCIDR(cidr + "/128")
-				}
-			}
-		}
-		if ipNet != nil {
-			wl.allowed = append(wl.allowed, ipNet)
-		}
-	}
-
+	wl.Update(allowedIPs)
 	return wl
 }
 

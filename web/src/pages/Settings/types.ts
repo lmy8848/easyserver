@@ -59,7 +59,6 @@ export interface Settings {
   };
   features: {
     file_preview: boolean;
-    login_guard: boolean;
     fim: boolean;
   };
 }

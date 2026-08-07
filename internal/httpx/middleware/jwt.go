@@ -3,14 +3,27 @@ package middleware
 import (
 	"fmt"
 	"strings"
+	"time"
 
-	"easyserver/internal/auth"
 	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func JWTMiddleware(secret string, sessionValidator auth.SessionValidator, validators ...auth.TokenValidator) gin.HandlerFunc {
+type JWTClaims struct {
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+// TokenValidator is a function type for token validation (e.g., blacklist check)
+type TokenValidator func(userID int64, tokenString string, issuedAt time.Time) (bool, error)
+
+// SessionValidator is a function type for session validation
+type SessionValidator func(token string) (bool, error)
+
+func JWTMiddleware(secret string, sessionValidator SessionValidator, validators ...TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Extract token from the Authorization header (preferred).
 		var tokenString string
@@ -39,7 +52,7 @@ func JWTMiddleware(secret string, sessionValidator auth.SessionValidator, valida
 			c.Abort()
 			return
 		}
-		claims := &auth.JWTClaims{}
+		claims := &JWTClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

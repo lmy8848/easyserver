@@ -48,7 +48,6 @@ const MENU_GROUPS = [
       { key: '/settings', icon: 'tool', label: '面板设置' },
       { key: '/security', icon: 'lock', label: '安全设置' },
       { key: '/vulnerabilities', icon: 'alert', label: '漏洞扫描' },
-      { key: '/login-guard', icon: 'shield', label: '登录防护' },
       { key: '/fim', icon: 'check', label: '文件完整性' },
     ],
   },
@@ -121,7 +120,6 @@ const PAGE_TITLES: Record<string, string> = {
   '/settings': '面板设置',
   '/security': '安全设置',
   '/vulnerabilities': '漏洞扫描',
-  '/login-guard': '登录防护',
   '/fim': '文件完整性',
 };
 
@@ -138,7 +136,7 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [features, setFeatures] = useState({ login_guard: false, fim: false, file_preview: false });
+  const [features, setFeatures] = useState({ fim: false, file_preview: false });
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -150,7 +148,7 @@ export default function Layout() {
   // Fetch features
   useEffect(() => {
     let mounted = true;
-    settingsApi.get().then((res: { data?: { data?: { features?: { login_guard: boolean; fim: boolean; file_preview: boolean } } } }) => {
+    settingsApi.get().then((res: { data?: { data?: { features?: { fim: boolean; file_preview: boolean } } } }) => {
       if (mounted && res.data?.data?.features) setFeatures(res.data.data.features);
     }).catch(() => {});
     return () => { mounted = false; };
@@ -252,7 +250,6 @@ export default function Layout() {
         <nav className="sidebar-nav">
           {MENU_GROUPS.map(group => {
             const filteredItems = group.items.filter(item => {
-              if (item.key === '/login-guard' && !features.login_guard) return false;
               if (item.key === '/fim' && !features.fim) return false;
               return true;
             });
