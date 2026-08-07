@@ -23,6 +23,13 @@ const (
 
 // BootstrapMise ensures mise is installed and configured correctly
 func BootstrapMise() error {
+	// 下载前确保二进制所在目录存在（DataDir 根）。downloadMise 的临时文件
+	// 放这里做同文件系统 rename，目录缺失会导致 CreateTemp 报
+	// "no such file or directory"。
+	if err := os.MkdirAll(filepath.Dir(BinPath), 0755); err != nil {
+		return err
+	}
+
 	// 1. Check if already installed and version matches
 	if err := checkMiseVersion(); err == nil {
 		return setupMiseEnv()
@@ -105,7 +112,9 @@ func downloadMise(version, expectedSha256 string) error {
 }
 
 func downloadFile(filepath string, url string, expectedSha256 string) error {
-	client := &http.Client{Timeout: 15 * time.Second}
+	// 总超时 3 分钟：~100MB 的 mise 二进制在慢速链路下 body 读取可能远超
+	// 拨号时间，只约束连接建立会误杀下载；3 分钟对正常下载绰绰有余。
+	client := &http.Client{Timeout: 3 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
@@ -136,15 +145,11 @@ func downloadFile(filepath string, url string, expectedSha256 string) error {
 
 func setupMiseEnv() error {
 	// 数据目录与 config 目录（同根，全自包含在 /opt/easyserver/mise）。
+	// BinPath 直接放 DataDir 根下，故 DataDir 即二进制所在目录。
 	if err := os.MkdirAll(DataDir, 0755); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(ConfigDir, 0755); err != nil {
-		return err
-	}
-
-	// mise 二进制所在目录需先存在，downloadMise 的临时文件放这里做同文件系统 rename。
-	if err := os.MkdirAll(filepath.Dir(BinPath), 0755); err != nil {
 		return err
 	}
 

@@ -8,8 +8,8 @@ package mise
 // 关键机制：MISE_CONFIG_DIR 决定 mise 的 global config 查找根（默认
 // ~/.config/mise）。指向面板私有目录后，面板的 mise 完全不读用户配置。
 const (
-	BinPath    = "/opt/easyserver/mise/bin/mise"
-	DataDir    = "/opt/easyserver/mise" // MISE_DATA_DIR（installs / shims / cache）
-	ConfigDir  = "/opt/easyserver/mise" // MISE_CONFIG_DIR（面板私有 config 根）
+	BinPath    = "/opt/easyserver/mise/mise" // mise 二进制，直接放数据根下，无需额外 bin/ 子目录
+	DataDir    = "/opt/easyserver/mise"      // MISE_DATA_DIR（installs / shims / cache）
+	ConfigDir  = "/opt/easyserver/mise"      // MISE_CONFIG_DIR（面板私有 config 根）
 	ConfigPath = "/opt/easyserver/mise/config.toml"
 )
