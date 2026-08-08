@@ -54,8 +54,8 @@ func (s *Service) RunNow(ctx context.Context, name string) error {
 	return s.tm.RunNow(ctx, name)
 }
 
-func (s *Service) GetLogs(ctx context.Context, name string, tail int) ([]LogLine, error) {
-	return s.tm.GetLogs(ctx, name, tail)
+func (s *Service) GetRuns(ctx context.Context, name string, limit int) ([]CronRun, error) {
+	return s.tm.GetRuns(ctx, name, limit)
 }
 
 func (s *Service) ListScripts(ctx context.Context) ([]Script, error) {

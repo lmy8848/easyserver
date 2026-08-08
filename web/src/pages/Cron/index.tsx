@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
-import type { CronTask, CronLog, Script } from '../../types';
+import type { CronTask, CronRun, Script } from '../../types';
 import { cronApi } from '../../services/api';
 import CronTasks from './CronTasks';
 import CronLogs from './CronLogs';
@@ -15,7 +15,7 @@ export default function CronPage() {
   // Logs modal state
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsTask, setLogsTask] = useState<CronTask | null>(null);
-  const [logs, setLogs] = useState<CronLog[]>([]);
+  const [runs, setRuns] = useState<CronRun[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
 
   // Docs drawer state
@@ -83,18 +83,22 @@ export default function CronPage() {
     }
   };
 
-  const handleViewLogs = async (task: CronTask) => {
+  const fetchRuns = useCallback(async (task: CronTask) => {
     setLogsTask(task);
-    setLogsVisible(true);
     setLogsLoading(true);
     try {
-      const res = await cronApi.getLogs(task.name, 100);
-      setLogs(res.data?.data || []);
+      const res = await cronApi.getRuns(task.name, 100);
+      setRuns(res.data?.data || []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
+  }, []);
+
+  const handleViewLogs = (task: CronTask) => {
+    setLogsVisible(true);
+    fetchRuns(task);
   };
 
   const handleShowHelp = useCallback(() => {
@@ -118,9 +122,10 @@ export default function CronPage() {
       <CronLogs
         visible={logsVisible}
         task={logsTask}
-        logs={logs}
+        runs={runs}
         loading={logsLoading}
         onClose={() => setLogsVisible(false)}
+        onRefresh={fetchRuns}
       />
       <CronDocs
         visible={helpVisible}

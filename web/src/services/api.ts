@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  ApiResponse, CronTask, CronLog, Script,
+  ApiResponse, CronTask, CronRun, Script,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
@@ -702,8 +702,8 @@ export const cronApi = {
   run: (name: string) =>
     api.post<ApiResponse>(`/cron/tasks/${name}/run`),
 
-  getLogs: (name: string, limit?: number) =>
-    api.get<ApiResponse<CronLog[]>>(`/cron/tasks/${name}/logs`, { params: { limit: limit || 100 } }),
+  getRuns: (name: string, limit?: number) =>
+    api.get<ApiResponse<CronRun[]>>(`/cron/tasks/${name}/runs`, { params: { limit: limit || 100 } }),
 
   // Scripts
   listScripts: () =>

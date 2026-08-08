@@ -285,21 +285,21 @@ func (h *CronHandler) RunTask(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "任务已执行"})
 }
 
-// GetTaskLogs returns execution logs for a cron task
-func (h *CronHandler) GetTaskLogs(c *gin.Context) {
+// GetTaskRuns returns execution runs (grouped by invocation) for a cron task
+func (h *CronHandler) GetTaskRuns(c *gin.Context) {
 	name := c.Param("name")
-	tail := 50
+	limit := 50
 	if l := c.Query("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 500 {
-			tail = parsed
+			limit = parsed
 		}
 	}
-	logs, err := h.cronService.GetLogs(c.Request.Context(), name, tail)
+	runs, err := h.cronService.GetRuns(c.Request.Context(), name, limit)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, logs)
+	httpx.Success(c, runs)
 }
 
 // ListScripts returns all scripts
@@ -563,7 +563,7 @@ func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec 
 	protected.POST("/cron/tasks/:name/enable", handler.EnableTask)
 	protected.POST("/cron/tasks/:name/disable", handler.DisableTask)
 	protected.POST("/cron/tasks/:name/run", handler.RunTask)
-	protected.GET("/cron/tasks/:name/logs", handler.GetTaskLogs)
+	protected.GET("/cron/tasks/:name/runs", handler.GetTaskRuns)
 	protected.GET("/cron/scripts", handler.ListScripts)
 	protected.POST("/cron/scripts", handler.CreateScript)
 	protected.GET("/cron/scripts/:id", handler.GetScript)

@@ -296,17 +296,17 @@ func (m *TimerManager) RunNow(ctx context.Context, name string) error {
 	return nil
 }
 
-// GetLogs 返回任务的 journald 日志。
-func (m *TimerManager) GetLogs(ctx context.Context, name string, tail int) ([]LogLine, error) {
+// GetRuns 返回任务的 journald 日志，按 invocation ID 分组为每次执行。
+func (m *TimerManager) GetRuns(ctx context.Context, name string, limit int) ([]CronRun, error) {
 	args := []string{"-u", systemd.CronServiceFileName(name), "--no-pager", "--output=json"}
-	if tail > 0 {
-		args = append(args, "-n", strconv.Itoa(tail))
+	if limit > 0 {
+		args = append(args, "-n", strconv.Itoa(limit))
 	}
 	stdout, _, exitCode, err := m.executor.Run(ctx, "journalctl", args...)
 	if err != nil || exitCode != 0 {
 		return nil, fmt.Errorf("读取日志失败: %w", err)
 	}
-	return parseJournalLines(stdout), nil
+	return parseJournalRuns(stdout), nil
 }
 
 // --- rendering + fill ---
@@ -666,30 +666,73 @@ func (m *TimerManager) rollbackCreate(ctx context.Context, name string) {
 	_ = m.daemonReload(ctx)
 }
 
-// parseJournalLines 解析 journalctl --output=json 输出为日志行。
-func parseJournalLines(stdout string) []LogLine {
-	var logs []LogLine
+// parseJournalRuns 解析 journalctl --output=json 输出，按 invocation ID 分组为每次执行。
+// 子进程日志用 _SYSTEMD_INVOCATION_ID，systemd 自身（pid=1）用 INVOCATION_ID。
+func parseJournalRuns(stdout string) []CronRun {
+	type entry struct {
+		Message           string `json:"MESSAGE"`
+		RealtimeTimestamp string `json:"__REALTIME_TIMESTAMP"`
+		Priority          string `json:"PRIORITY"`
+		Invocation        string `json:"_SYSTEMD_INVOCATION_ID"`
+		InvocationAlt     string `json:"INVOCATION_ID"`
+	}
+	idx := map[string]int{}
+	var runs []CronRun
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		var entry struct {
-			Message           string `json:"MESSAGE"`
-			RealtimeTimestamp string `json:"__REALTIME_TIMESTAMP"`
-			Priority          string `json:"PRIORITY"`
-		}
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			logs = append(logs, LogLine{Message: line})
+		var e entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			continue
 		}
-		logs = append(logs, LogLine{
-			Time:     formatJournalTime(entry.RealtimeTimestamp),
-			Message:  entry.Message,
-			Priority: priorityName(entry.Priority),
+		inv := e.Invocation
+		if inv == "" {
+			inv = e.InvocationAlt
+		}
+		if inv == "" {
+			continue
+		}
+		i, ok := idx[inv]
+		if !ok {
+			i = len(runs)
+			idx[inv] = i
+			runs = append(runs, CronRun{InvocationID: inv})
+		}
+		msg := e.Message
+		// 状态标记：失败优先，其次成功。
+		if strings.Contains(msg, "Failed to start") ||
+			strings.Contains(msg, "Failed with result") ||
+			strings.Contains(msg, "status=") && strings.Contains(msg, "FAILURE") {
+			runs[i].Status = "failed"
+		} else if runs[i].Status != "failed" &&
+			(strings.Contains(msg, "Deactivated successfully") || strings.Contains(msg, "Finished")) {
+			runs[i].Status = "success"
+		}
+		if runs[i].StartedAt == "" {
+			runs[i].StartedAt = formatJournalTime(e.RealtimeTimestamp)
+		}
+		runs[i].Logs = append(runs[i].Logs, LogLine{
+			Time:     formatJournalTime(e.RealtimeTimestamp),
+			Message:  msg,
+			Priority: priorityName(e.Priority),
 		})
 	}
-	return logs
+	// 只有启动无结束标记的为 running。
+	for i := range runs {
+		if runs[i].Status == "" {
+			runs[i].Status = "running"
+		}
+		// journalctl -n 为逆序输出：单次日志恢复为按时间正序（旧 → 新）。
+		logs := runs[i].Logs
+		for a, b := 0, len(logs)-1; a < b; a, b = a+1, b-1 {
+			logs[a], logs[b] = logs[b], logs[a]
+		}
+		runs[i].Logs = logs
+	}
+	// runs 保持 newest-first（执行列表按最新在前）。
+	return runs
 }
 
 // formatJournalTime 把微秒时间戳格式化为 "2006-01-02 15:04:05"。空值返回空串。

@@ -35,7 +35,7 @@ type CreateCronTaskRequest struct {
 	MaxRetry         int    `json:"max_retry"`
 	EnvVars          string `json:"env_vars"`
 	WorkDir          string `json:"work_dir"`
-	RuntimeVersionID int64  `json:"runtime_version_id" binding:"min=1"`
+	RuntimeVersionID int64  `json:"runtime_version_id"` // 0 = 不绑定运行时版本
 }
 
 // UpdateCronTaskRequest 是更新定时任务的请求体（指针字段 = 部分更新）。
@@ -81,4 +81,12 @@ type UpdateScriptRequest struct {
 	Description *string `json:"description"`
 	Content     *string `json:"content"`
 	Language    *string `json:"language"`
+}
+
+// CronRun 表示一次任务执行（按 journald invocation ID 分组）。
+type CronRun struct {
+	InvocationID string    `json:"invocation_id"`
+	StartedAt    string    `json:"started_at"`
+	Status       string    `json:"status"` // success / failed / running
+	Logs         []LogLine `json:"logs"`
 }

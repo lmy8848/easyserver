@@ -325,6 +325,13 @@ export interface CronLog {
   priority: string;
 }
 
+export interface CronRun {
+  invocation_id: string;
+  started_at: string;
+  status: string; // success / failed / running
+  logs: CronLog[];
+}
+
 export interface Script {
   id: number;
   name: string;
