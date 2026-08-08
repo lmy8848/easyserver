@@ -46,6 +46,27 @@ const WEEKDAY_OPTIONS = [
   { value: 'Sun', label: '周日' },
 ];
 
+interface EnvEntry { key: string; value: string; }
+
+// 后端 env_vars 为 "KEY=VALUE\n..." 每行一个，转为表单 KV 列表。
+function parseEnvVars(raw: string): EnvEntry[] {
+  return raw.split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(line => {
+      const i = line.indexOf('=');
+      return i === -1 ? { key: line, value: '' } : { key: line.slice(0, i), value: line.slice(i + 1) };
+    });
+}
+
+// 表单 KV 列表 → 后端字符串，跳过空行。
+function serializeEnvVars(entries: EnvEntry[] | undefined): string {
+  return (entries || [])
+    .filter(e => e.key.trim() || e.value.trim())
+    .map(e => `${e.key.trim()}=${e.value}`)
+    .join('\n');
+}
+
 export default function CronTasks({
   tasks, loading, operating, scripts,
   onRefresh, onDelete, onToggle, onRun, onViewLogs, onShowHelp,
@@ -125,7 +146,7 @@ export default function CronTasks({
   const handleCreate = () => {
     setEditingTask(null);
     form.resetFields();
-    form.setFieldsValue({ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 });
+    form.setFieldsValue({ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1, envs: [{ key: '', value: '' }] });
     setMode('preset');
     setUseType('command');
     setFrequency('daily');
@@ -148,7 +169,7 @@ export default function CronTasks({
       script_id: task.script_id || undefined,
       timeout: task.timeout || 0,
       max_retry: task.max_retry || 0,
-      env_vars: task.env_vars || '',
+      envs: parseEnvVars(task.env_vars || '').length ? parseEnvVars(task.env_vars || '') : [{ key: '', value: '' }],
       work_dir: task.work_dir || '',
       runtime_version_id: task.runtime_version_id || undefined,
     });
@@ -184,7 +205,7 @@ export default function CronTasks({
         script_id: useType === 'script' ? (values.script_id || 0) : 0,
         timeout: values.timeout || 0,
         max_retry: values.max_retry || 0,
-        env_vars: values.env_vars || '',
+        env_vars: serializeEnvVars(values.envs),
         work_dir: values.work_dir || '',
         runtime_version_id: values.runtime_version_id,
       };
@@ -467,8 +488,28 @@ export default function CronTasks({
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="env_vars" label="环境变量">
-            <Input.TextArea rows={4} placeholder={'每行一个\nKEY=VALUE'} style={{ fontFamily: 'monospace' }} />
+          <Form.Item label="环境变量">
+            <Form.List name="envs">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map((field) => (
+                    <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
+                      <Form.Item {...field} name={[field.name, 'key']} rules={[{ required: true, whitespace: true, message: '请填写变量名' }]} noStyle>
+                        <Input placeholder="KEY" style={{ fontFamily: 'monospace', width: 220 }} />
+                      </Form.Item>
+                      <span style={{ color: '#999' }}>=</span>
+                      <Form.Item {...field} name={[field.name, 'value']} noStyle>
+                        <Input placeholder="VALUE" style={{ fontFamily: 'monospace', width: 220 }} />
+                      </Form.Item>
+                      <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)} disabled={fields.length === 1} />
+                    </Space>
+                  ))}
+                  <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                    添加环境变量
+                  </Button>
+                </>
+              )}
+            </Form.List>
           </Form.Item>
         </Form>
       </Modal>
