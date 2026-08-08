@@ -31,16 +31,10 @@ func (s *Service) Get(ctx context.Context, name string) (*CronTask, error) {
 }
 
 func (s *Service) Create(ctx context.Context, task *CronTask) error {
-	if err := s.resolveScriptCommand(ctx, task); err != nil {
-		return err
-	}
 	return s.tm.Create(ctx, task)
 }
 
 func (s *Service) Update(ctx context.Context, task *CronTask) error {
-	if err := s.resolveScriptCommand(ctx, task); err != nil {
-		return err
-	}
 	return s.tm.Update(ctx, task)
 }
 
@@ -62,21 +56,6 @@ func (s *Service) RunNow(ctx context.Context, name string) error {
 
 func (s *Service) GetLogs(ctx context.Context, name string, tail int) ([]LogLine, error) {
 	return s.tm.GetLogs(ctx, name, tail)
-}
-
-// resolveScriptCommand 任务引用脚本时，把 ExecStart 指向脚本落盘文件
-// （脚本文件带语言 shebang，mise exec 提供运行时 PATH 供解释器解析）。
-// 同时提供执行命令与脚本时，执行命令优先，脚本忽略。
-func (s *Service) resolveScriptCommand(ctx context.Context, task *CronTask) error {
-	if task.ScriptID <= 0 || task.Command != "" {
-		return nil
-	}
-	// 校验脚本存在，避免创建指向不存在文件的 unit。
-	if _, err := s.repo.GetScript(ctx, int64(task.ScriptID)); err != nil {
-		return fmt.Errorf("脚本 %d 不存在", task.ScriptID)
-	}
-	task.Command = scriptFilePath(int64(task.ScriptID))
-	return nil
 }
 
 func (s *Service) ListScripts(ctx context.Context) ([]Script, error) {

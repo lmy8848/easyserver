@@ -13,8 +13,7 @@ type CronTask struct {
 	LastRun          string `json:"last_run"`
 	LastResult       string `json:"last_result"`
 	NextRun          string `json:"next_run"`
-	ScriptID         int    `json:"script_id"` // 0 = 无脚本
-	Command          string `json:"command"`   // 用户命令或脚本路径
+	Command          string `json:"command"`   // 执行命令或脚本路径
 	Timeout          int    `json:"timeout"`   // 秒，0 = 不超时
 	MaxRetry         int    `json:"max_retry"` // 0 = 不重试
 	EnvVars          string `json:"env_vars"`  // "KEY=VALUE\n..." 每行一个
@@ -31,7 +30,6 @@ type CreateCronTaskRequest struct {
 	Description      string `json:"description"`
 	Schedule         string `json:"schedule" binding:"required"` // OnCalendar 表达式
 	Persistent       bool   `json:"persistent"`
-	ScriptID         int    `json:"script_id"`
 	Command          string `json:"command"`
 	Timeout          int    `json:"timeout"`
 	MaxRetry         int    `json:"max_retry"`
@@ -47,7 +45,6 @@ type UpdateCronTaskRequest struct {
 	Schedule         *string `json:"schedule"` // OnCalendar 表达式（可选）
 	Persistent       *bool   `json:"persistent"`
 	Enabled          *bool   `json:"enabled"`
-	ScriptID         *int    `json:"script_id"`
 	Command          *string `json:"command"`
 	Timeout          *int    `json:"timeout"`
 	MaxRetry         *int    `json:"max_retry"`

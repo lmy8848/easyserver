@@ -310,7 +310,6 @@ export interface CronTask {
   last_run: string;
   last_result: string;
   next_run: string;
-  script_id: number;
   timeout: number;
   max_retry: number;
   env_vars: string;

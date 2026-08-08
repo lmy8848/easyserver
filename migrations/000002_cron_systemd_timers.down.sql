@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS cron_tasks (
     last_run TEXT DEFAULT '',
     last_result TEXT DEFAULT '',
     next_run TEXT DEFAULT '',
-    script_id INTEGER DEFAULT 0,
     timeout INTEGER DEFAULT 0,
     max_retry INTEGER DEFAULT 0,
     env_vars TEXT DEFAULT '',

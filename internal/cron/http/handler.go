@@ -83,9 +83,9 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	// Validate: either command or script_id must be provided
-	if req.Command == "" && req.ScriptID == 0 {
-		c.Error(apperror.ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
+	// Validate: command must be provided
+	if req.Command == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("必须提供执行命令"))
 		return
 	}
 	// Validate timeout and retry bounds（0 = 不超时 / 不重试）
@@ -105,7 +105,6 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		Description:      req.Description,
 		Persistent:       req.Persistent,
 		Enabled:          true,
-		ScriptID:         req.ScriptID,
 		Timeout:          req.Timeout,
 		MaxRetry:         req.MaxRetry,
 		EnvVars:          req.EnvVars,
@@ -176,9 +175,6 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		}
 		task.Command = *req.Command
 	}
-	if req.ScriptID != nil {
-		task.ScriptID = *req.ScriptID
-	}
 	if req.Timeout != nil {
 		if *req.Timeout < 0 || *req.Timeout > 86400 {
 			c.Error(apperror.ErrBadRequest.WithMessage("超时时间必须在 0 到 86400 秒之间"))
@@ -203,9 +199,9 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		task.RuntimeVersionID = *req.RuntimeVersionID
 	}
 
-	// Validate command/script_id relationship
-	if task.Command == "" && task.ScriptID == 0 {
-		c.Error(apperror.ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
+	// Validate command required
+	if task.Command == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("必须提供执行命令"))
 		return
 	}
 
@@ -486,7 +482,7 @@ func (h *CronHandler) DeleteScript(c *gin.Context) {
 		return
 	}
 	for _, t := range tasks {
-		if int64(t.ScriptID) == id {
+		if t.Command == cron.ScriptPath(id) {
 			c.Error(apperror.ErrConflict.WithMessage(fmt.Sprintf("脚本被任务 '%s' 使用，请先移除引用", t.Name)))
 			return
 		}
