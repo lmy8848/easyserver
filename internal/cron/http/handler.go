@@ -64,10 +64,6 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("名称不允许包含换行符"))
 		return
 	}
-	if strings.ContainsAny(req.Command, "\r\n") {
-		c.Error(apperror.ErrBadRequest.WithMessage("命令不允许包含换行符"))
-		return
-	}
 	if err := checkTaskNameUnique(c.Request.Context(), h.cronService, req.Name, ""); err != nil {
 		c.Error(err)
 		return
@@ -178,10 +174,6 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		task.Schedule = onCalendar
 	}
 	if req.Command != nil {
-		if strings.ContainsAny(*req.Command, "\r\n") {
-			c.Error(apperror.ErrBadRequest.WithMessage("命令不允许包含换行符"))
-			return
-		}
 		task.Command = *req.Command
 	}
 	if req.Timeout != nil {

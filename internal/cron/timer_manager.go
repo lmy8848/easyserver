@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,7 +29,6 @@ type TimerManager struct {
 	executor executor.CommandExecutor
 	provider mise.Provider
 	runtime  RuntimeLookup // 可 nil，绑定 runtime 时必填
-	scripts  ScriptLookup  // 可 nil，引用脚本时必填
 }
 
 // RuntimeLookup 查询 runtime_version 表补 lang/exact/status。
@@ -36,14 +36,9 @@ type RuntimeLookup interface {
 	GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error)
 }
 
-// ScriptLookup 读取脚本元数据（内容已在创建任务时落盘解析为命令）。
-type ScriptLookup interface {
-	GetScript(ctx context.Context, id int64) (*Script, error)
-}
-
 // NewTimerManager 创建 TimerManager。
-func NewTimerManager(exec executor.CommandExecutor, p mise.Provider, runtime RuntimeLookup, scripts ScriptLookup) *TimerManager {
-	return &TimerManager{executor: exec, provider: p, runtime: runtime, scripts: scripts}
+func NewTimerManager(exec executor.CommandExecutor, p mise.Provider, runtime RuntimeLookup) *TimerManager {
+	return &TimerManager{executor: exec, provider: p, runtime: runtime}
 }
 
 // List 返回全部定时任务。扫描 /etc/systemd/system/ 下的 easyserver-cron-*.timer，
@@ -106,6 +101,11 @@ func (m *TimerManager) Create(ctx context.Context, spec *CronTask) error {
 
 	if m.timerUnitExists(spec.Name) {
 		return fmt.Errorf("定时任务 %s 已存在", spec.Name)
+	}
+
+	// 命令先落盘为脚本，unit 的 ExecStart 指其路径。
+	if err := writeTaskCommand(spec.Name, spec.Command); err != nil {
+		return fmt.Errorf("写入命令脚本失败: %w", err)
 	}
 
 	timerContent, err := m.renderTimer(spec)
@@ -177,6 +177,11 @@ func (m *TimerManager) Update(ctx context.Context, spec *CronTask) error {
 		if wasTimerActive {
 			_ = m.restartTimer(ctx, spec.Name)
 		}
+	}
+
+	// 命令落盘为脚本（覆盖旧内容），unit 的 ExecStart 指其路径。
+	if err := writeTaskCommand(spec.Name, spec.Command); err != nil {
+		return fmt.Errorf("写入命令脚本失败: %w", err)
 	}
 
 	timerContent, err := m.renderTimer(spec)
@@ -251,6 +256,7 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 	if err := systemd.RemoveCronUnitFile(svcFull); err != nil {
 		return fmt.Errorf("删除 service unit 失败: %w", err)
 	}
+	_ = removeTaskCommand(name) // 命令脚本一并清理（best-effort）
 	return m.daemonReload(ctx)
 }
 
@@ -318,7 +324,7 @@ func (m *TimerManager) renderService(spec *CronTask) (string, error) {
 	return systemd.RenderCronService(&systemd.TimerSpec{
 		Name:             spec.Name,
 		Description:      spec.Description,
-		ExecStart:        spec.Command,
+		ExecStart:        taskCommandPath(spec.Name), // 命令已统一落盘为脚本，ExecStart 指向路径（单行）
 		Dir:              spec.WorkDir,
 		Env:              parseEnvMap(spec.EnvVars),
 		MaxRetry:         spec.MaxRetry,
@@ -470,7 +476,14 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 			if t.RuntimeVersionID > 0 {
 				execStart = p.Unwrap(t.RuntimeLang, t.RuntimeExact, execStart)
 			}
-			t.Command = execStart
+			// ExecStart 指向任务命令脚本时，读回脚本内容作为命令（支持多行回显）。
+			if execStart == taskCommandPath(t.Name) {
+				if cmd, err := readTaskCommand(t.Name); err == nil {
+					t.Command = cmd
+				}
+			} else {
+				t.Command = execStart
+			}
 		case strings.HasPrefix(line, "WorkingDirectory="):
 			dir := strings.TrimPrefix(line, "WorkingDirectory=")
 			if len(dir) >= 2 && dir[0] == '"' && dir[len(dir)-1] == '"' {
@@ -524,6 +537,68 @@ func parseEnvMap(envStr string) map[string]string {
 		}
 	}
 	return out
+}
+
+// --- 任务命令落盘 ---
+// 所有命令统一写成可执行脚本落盘，ExecStart 指向脚本路径（保持单行），
+// 从而支持多行命令且规避 systemd unit 换行注入。脚本目录与脚本库分离。
+
+const taskCommandDir = "/opt/easyserver/scripts/tasks"
+
+func taskCommandPath(name string) string {
+	return filepath.Join(taskCommandDir, name)
+}
+
+// writeTaskCommand 把命令内容落盘为可执行脚本（shebang + chmod 0755）。
+func writeTaskCommand(name, command string) error {
+	if err := os.MkdirAll(taskCommandDir, 0o755); err != nil {
+		return err
+	}
+	content := "#!/bin/bash\n" + command
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	path := taskCommandPath(name)
+	tmp, err := os.CreateTemp(taskCommandDir, name+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("创建临时命令文件失败: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("写入命令文件失败: %w", err)
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("设置命令文件权限失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("关闭命令文件失败: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("落盘命令文件失败: %w", err)
+	}
+	return nil
+}
+
+func removeTaskCommand(name string) error {
+	return os.Remove(taskCommandPath(name)) // 文件不存在时返回 os.ErrNotExist，调用方按需忽略
+}
+
+// readTaskCommand 读回命令内容，剥离 shebang 首行，供编辑表单回显。
+func readTaskCommand(name string) (string, error) {
+	data, err := os.ReadFile(taskCommandPath(name))
+	if err != nil {
+		return "", err
+	}
+	if i := strings.IndexByte(string(data), '\n'); i >= 0 {
+		return strings.TrimSuffix(string(data[i+1:]), "\n"), nil
+	}
+	return "", nil
 }
 
 // --- systemctl helpers ---
@@ -583,10 +658,11 @@ func (m *TimerManager) timerActive(ctx context.Context, name string) bool {
 	return props["ActiveState"] == "active"
 }
 
-// rollbackCreate 回滚 Create 失败时已写入的 unit 文件。
+// rollbackCreate 回滚 Create 失败时已写入的 unit 与命令脚本文件。
 func (m *TimerManager) rollbackCreate(ctx context.Context, name string) {
 	_ = systemd.RemoveCronUnitFile(systemd.CronTimerFileName(name))
 	_ = systemd.RemoveCronUnitFile(systemd.CronServiceFileName(name))
+	_ = removeTaskCommand(name)
 	_ = m.daemonReload(ctx)
 }
 

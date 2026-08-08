@@ -18,7 +18,7 @@ type Service struct {
 func NewService(repo Repository, exec executor.CommandExecutor, provider mise.Provider) *Service {
 	return &Service{
 		repo: repo,
-		tm:   NewTimerManager(exec, provider, repo, repo),
+		tm:   NewTimerManager(exec, provider, repo),
 	}
 }
 
