@@ -387,18 +387,18 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 }
 
 // ============================================================
-// 托管服务 CRUD（生成/更新/删除 unit 文件，只对 easyserver-* 前缀有效）
+// 托管服务 CRUD（生成/更新/删除 unit 文件，只对 easyserver-svc- 前缀有效）
 // ============================================================
 
 // Create 创建托管服务（生成 unit + 按需 enable/start）。
-// 只生成 easyserver-<name>.service，不支持创建系统服务的 unit。
+// 只生成 easyserver-svc-<name>.service，不支持创建系统服务的 unit。
 func (h *ServiceHandler) Create(c *gin.Context) {
 	var spec systemd.ManagedUnitSpec
 	if err := c.ShouldBindJSON(&spec); err != nil {
 		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
-	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-")
+	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-svc-")
 	middleware.AuditSummary(c, "创建托管服务 "+spec.Name)
 	if err := h.serviceManager.CreateManaged(c.Request.Context(), &spec); err != nil {
 		c.Error(apperror.WrapError(err))
@@ -408,7 +408,7 @@ func (h *ServiceHandler) Create(c *gin.Context) {
 }
 
 // Update 更新托管服务（重写 unit + 运行中则重启）。
-// :name 须为完整 unit 名（easyserver-foo），非托管前缀返回错误。
+// 容易: 须为完整 unit 名（easyserver-svc-<name>），非托管前缀返回错误。
 func (h *ServiceHandler) Update(c *gin.Context) {
 	name := c.Param("name")
 	shortName, err := requireManagedName(name)
@@ -431,7 +431,7 @@ func (h *ServiceHandler) Update(c *gin.Context) {
 }
 
 // Delete 删除托管服务（stop + disable + rm unit）。
-// :name 须为完整 unit 名（easyserver-foo），非托管前缀返回错误。
+// 容易: 须为完整 unit 名（easyserver-svc-<name>），非托管前缀返回错误。
 func (h *ServiceHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 	shortName, err := requireManagedName(name)
@@ -447,7 +447,7 @@ func (h *ServiceHandler) Delete(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "删除成功"})
 }
 
-// requireManagedName 校验 :name 是 easyserver- 前缀的托管服务，
+// requireManagedName 校验 :name 是 easyserver-svc- 前缀的托管服务，
 // 返回去掉前缀的短名。非托管前缀返回错误（系统服务不允许 CRUD）。
 func requireManagedName(fullName string) (string, error) {
 	if fullName == "" {
@@ -455,7 +455,7 @@ func requireManagedName(fullName string) (string, error) {
 	}
 	shortName := systemd.UnitName(fullName + ".service")
 	if shortName == "" {
-		return "", apperror.ErrBadRequest.WithMessage("只有 easyserver-* 托管服务支持此操作")
+		return "", apperror.ErrBadRequest.WithMessage("只有 easyserver-svc- 托管服务支持此操作")
 	}
 	return shortName, nil
 }

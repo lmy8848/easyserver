@@ -97,6 +97,7 @@ export type HistoryPoint = MonitorSnapshot;
 // Service types
 export interface Service {
   name: string;
+  short_name?: string; // 托管服务去前缀短名；系统服务等于 name
   description: string;
   state: string;
   sub_state: string;

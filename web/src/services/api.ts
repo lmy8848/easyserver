@@ -143,7 +143,7 @@ export const serviceApi = {
   list: (params?: { managed?: boolean }) =>
     api.get<ApiResponse<Service[]>>('/services', { params }),
 
-  // 创建托管服务（生成 easyserver-* unit）
+  // 创建托管服务（生成 easyserver-svc-* unit）
   create: (data: ManagedServiceSpec) =>
     api.post<ApiResponse>('/services', data),
 
@@ -153,11 +153,11 @@ export const serviceApi = {
   get: (name: string) =>
     api.get<ApiResponse<Service>>(`/services/${name}`),
 
-  // 更新托管服务（:name 须为完整名 easyserver-foo）
+  // 更新托管服务（:name 须为完整名 easyserver-svc-<name>）
   update: (name: string, data: ManagedServiceSpec) =>
     api.put<ApiResponse>(`/services/${name}`, data),
 
-  // 删除托管服务（:name 须为完整名 easyserver-foo）
+  // 删除托管服务（:name 须为完整名 easyserver-svc-<name>）
   delete: (name: string) =>
     api.delete<ApiResponse>(`/services/${name}`),
 

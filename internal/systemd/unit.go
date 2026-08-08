@@ -11,11 +11,12 @@ import (
 	"easyserver/internal/infra/mise"
 )
 
-// 托管 unit 文件统一写到 /etc/systemd/system/，文件名前缀 easyserver-。
+// 托管 unit 文件统一写到 /usr/local/lib/systemd/system/，文件名前缀 easyserver-svc-。
+// 与定时任务前缀 easyserver-cron- 互不包含（非父子前缀），避免托管服务扫描时误命中 cron。
 // 这一层前缀 + unit 内的 ManagedBy 注释，是 ListManaged 识别托管服务的依据。
 const (
-	managedUnitPrefix  = "easyserver-"
-	managedUnitDir     = "/etc/systemd/system/"
+	managedUnitPrefix  = "easyserver-svc-"
+	managedUnitDir     = "/usr/local/lib/systemd/system/"
 	managedUnitSuffix  = ".service"
 	managedMarkerKey   = "ManagedBy"
 	managedMarkerValue = "easyserver"
@@ -53,7 +54,7 @@ func UnitFilePath(name string) string {
 }
 
 // UnitName 从完整 unit 文件名提取 <name>（去前缀和后缀）。
-// 输入 "easyserver-foo.service" -> "foo"；非托管 unit 返回空串。
+// 输入 "easyserver-svc-foo.service" -> "foo"；非托管 unit 返回空串。
 func UnitName(unitFileName string) string {
 	base := strings.TrimSuffix(unitFileName, managedUnitSuffix)
 	if !strings.HasPrefix(base, managedUnitPrefix) {
@@ -357,10 +358,18 @@ func parseEnvLine(line string) (key, val string) {
 	return key, val
 }
 
+// ensureManagedUnitDir 确保托管 unit 目录存在（Arch 上默认不创建，命名空间需预建）。
+func ensureManagedUnitDir() error {
+	return os.MkdirAll(managedUnitDir, 0o755)
+}
+
 // writeUnitFile 原子写入 unit 文件到磁盘（0644 权限，原子 rename 模式，防并发读到空文件）。
 func writeUnitFile(name, content string) error {
 	path := UnitFilePath(name)
 	dir := filepath.Dir(path)
+	if err := ensureManagedUnitDir(); err != nil {
+		return fmt.Errorf("创建 unit 目录失败: %w", err)
+	}
 	tmpFile, err := os.CreateTemp(dir, managedUnitPrefix+name+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("创建临时 unit 文件失败: %w", err)
