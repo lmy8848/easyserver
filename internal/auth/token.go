@@ -18,9 +18,6 @@ type TOTPTempClaims struct {
 	jwt.RegisteredClaims
 }
 
-// TokenValidator is a function type for token validation (e.g., blacklist check)
-type TokenValidator = middleware.TokenValidator
-
 // SessionValidator is a function type for session validation
 type SessionValidator = middleware.SessionValidator
 

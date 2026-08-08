@@ -12,7 +12,7 @@ import { monitorApi } from '../services/api';
 import type { MonitorSnapshot, HistoryPoint } from '../types';
 import { formatBytes, formatUptime } from '../utils/format';
 import { getPercentColor } from '../utils/status';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useSSE } from '../hooks/useSSE';
 
 const MAX_HISTORY_POINTS = 360;
 
@@ -63,9 +63,9 @@ export default function Dashboard() {
       .catch(console.error);
   }, [timeRange]);
 
-  // WebSocket via shared hook (token passed via Sec-WebSocket-Protocol header)
-  useWebSocket({
-    path: '/ws/monitor',
+  // 监控实时数据走 SSE（EventSource，HttpOnly cookie 同源鉴权）
+  useSSE({
+    path: '/api/monitor',
     onMessage: (msg) => {
       if (msg.type === 'stats' && msg.data) {
         setStats(prev => {
@@ -78,24 +78,6 @@ export default function Dashboard() {
         });
         appendToHistory(msg.data);
       }
-    },
-    onClose: (event) => {
-      if (event.code === 4001 || event.code === 4003 || event.code === 1006) {
-        const currentToken = localStorage.getItem('token');
-        if (currentToken) {
-          fetch('/api/auth/me', {
-            headers: { 'Authorization': `Bearer ${currentToken}` },
-          }).then(res => {
-            if (res.status === 401) {
-              localStorage.removeItem('token');
-              localStorage.removeItem('user');
-              window.location.href = '/login';
-            }
-          }).catch(() => {});
-        }
-        return true; // prevent auto-reconnect on auth failure
-      }
-      return;
     },
   });
 

@@ -16,7 +16,7 @@ func TestValidateManagedName(t *testing.T) {
 		{"website-foo-com", true},
 		{"a", true},
 		{"123", true},
-		{"easyserver-foo", false}, // 包含托管前缀
+		{"easyserver-svc-foo", false}, // 包含托管前缀
 		{"", false},
 		{"My-App", false},                // 大写
 		{"-foo", false},                  // 连字符开头
@@ -174,11 +174,12 @@ func TestUnitName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"easyserver-foo.service", "foo"},
-		{"easyserver-website-bar.service", "website-bar"},
-		{"nginx.service", ""},     // 非托管
-		{"easyserver-foo", "foo"}, // 无后缀也能解析（TrimSuffix 对无后缀串是 no-op）
-		{"easyserver-", ""},       // 空名
+		{"easyserver-svc-foo.service", "foo"},
+		{"easyserver-svc-website-bar.service", "website-bar"},
+		{"nginx.service", ""},          // 非托管
+		{"easyserver-svc-foo", "foo"},  // 无后缀也能解析（TrimSuffix 对无后缀串是 no-op）
+		{"easyserver-svc-", ""},        // 空名
+		{"easyserver-foo.service", ""}, // cron/其他前缀不命中
 		{"", ""},
 	}
 	for _, c := range cases {

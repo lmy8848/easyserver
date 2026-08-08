@@ -1,28 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Input, Select,
+  Card, Button, Space, Modal, Form, Input,
   message, Popconfirm, Table, Empty, Tooltip, Collapse,
+  Drawer, Tag, Spin, Checkbox, Select,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
-  CodeOutlined, CopyOutlined, FileTextOutlined,
+  CodeOutlined, FileTextOutlined, DownloadOutlined,
+  PlayCircleOutlined, StopOutlined, HistoryOutlined,
 } from '@ant-design/icons';
-import type { Script } from '../types';
+import type { Script, ScriptLogLine } from '../types';
 import { cronApi } from '../services/api';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
-import { copyToClipboard } from '../utils/clipboard';
+import { useSSE } from '../hooks/useSSE';
 
-const LANG_OPTIONS = [
-  { label: 'Shell', value: 'sh' },
-  { label: 'Bash', value: 'bash' },
-  { label: 'Python', value: 'python' },
-];
-
-const LANG_COLORS: Record<string, string> = {
-  sh: 'blue',
-  bash: 'green',
-  python: 'orange',
-};
+// 历史日志可选条数
+const HISTORY_LIMITS = [50, 200, 500];
 
 export default function ScriptPage() {
   const [scripts, setScripts] = useState<Script[]>([]);
@@ -31,6 +24,50 @@ export default function ScriptPage() {
   const [templateModalVisible, setTemplateModalVisible] = useState(false);
   const [editingScript, setEditingScript] = useState<Script | null>(null);
   const [form] = Form.useForm();
+
+  // ── 运行中脚本 id（刷新后显示「运行中」标记）──
+  const [runningIds, setRunningIds] = useState<number[]>([]);
+
+  // ── 日志 Drawer（实时 + 历史 合一）──
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [stream, setStream] = useState(false); // 是否连 WS 实时（执行/运行中脚本才连）
+  const [drawerScript, setDrawerScript] = useState<Script | null>(null);
+  const [logs, setLogs] = useState<ScriptLogLine[]>([]);
+  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'exited' | 'stopped'>('idle');
+  const [exitCode, setExitCode] = useState<number | null>(null);
+  const [historyLimit, setHistoryLimit] = useState(200);
+  const [follow, setFollow] = useState(true); // 跟踪（自动滚到底）
+  const startTimeRef = useRef<number>(0);
+  const [elapsed, setElapsed] = useState(0);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  const ssePath = drawerScript ? cronApi.scriptLogsStreamPath(drawerScript.id) : '';
+  const { close } = useSSE({
+    path: ssePath,
+    enabled: drawerVisible && !!drawerScript && stream,
+    autoReconnect: false,
+    onMessage: (msg: { type?: string; data?: ScriptLogLine; code?: number }) => {
+      if (msg.type === 'log' && msg.data) {
+        setLogs((prev) => [...prev, msg.data as ScriptLogLine]);
+      } else if (msg.type === 'exit') {
+        setRunStatus('exited');
+        setExitCode(msg.code ?? -1);
+        setElapsed(Date.now() - startTimeRef.current);
+        setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
+      } else if (msg.type === 'error') {
+        setRunStatus('exited');
+        setExitCode(-1);
+        setElapsed(Date.now() - startTimeRef.current);
+        setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
+      }
+    },
+    onClose: () => {
+      if (runStatus === 'running') {
+        setRunStatus('stopped');
+        setElapsed(Date.now() - startTimeRef.current);
+      }
+    },
+  });
 
   const fetchScripts = useCallback(async () => {
     setLoading(true);
@@ -44,12 +81,23 @@ export default function ScriptPage() {
     }
   }, []);
 
-  useEffect(() => { fetchScripts(); }, [fetchScripts]);
+  const fetchRunning = useCallback(async () => {
+    try {
+      const res = await cronApi.getRunningScripts();
+      setRunningIds(res.data?.data || []);
+    } catch {
+      // 忽略，运行中标记非关键
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchScripts();
+    fetchRunning();
+  }, [fetchScripts, fetchRunning]);
 
   const handleCreate = () => {
     setEditingScript(null);
     form.resetFields();
-    form.setFieldsValue({ language: 'sh' });
     setModalVisible(true);
   };
 
@@ -61,7 +109,6 @@ export default function ScriptPage() {
     setEditingScript(null);
     form.setFieldsValue({
       name: template.name,
-      language: template.language,
       description: template.description,
       content: template.content,
     });
@@ -69,15 +116,24 @@ export default function ScriptPage() {
     setModalVisible(true);
   };
 
-  const handleEdit = (script: Script) => {
+  const handleEdit = async (script: Script) => {
     setEditingScript(script);
+    // 列表不加载文件内容，编辑时需拉取完整脚本内容
     form.setFieldsValue({
       name: script.name,
       description: script.description,
       content: script.content,
-      language: script.language,
     });
     setModalVisible(true);
+    try {
+      const res = await cronApi.getScript(script.id);
+      const full = res.data?.data;
+      if (full) {
+        form.setFieldsValue({ name: full.name, description: full.description, content: full.content });
+      }
+    } catch {
+      // 内容拉取失败时保留列表已有字段（name/description），content 留空提示
+    }
   };
 
   const handleSubmit = async () => {
@@ -109,30 +165,104 @@ export default function ScriptPage() {
     }
   };
 
-  const handleCopyContent = (content: string) => {
-    copyToClipboard(content, '已复制到剪贴板');
+  const handleDownload = async (script: Script) => {
+    try {
+      const res = await cronApi.getScript(script.id);
+      const full = res.data?.data;
+      if (!full?.content) throw new Error('脚本内容为空');
+      const blob = new Blob([full.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = script.name.endsWith('.sh') ? script.name : `${script.name}.sh`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '下载脚本失败');
+    }
   };
+
+  // ── 历史日志拉取（Drawer 打开时作为底，运行中续看时补历史）──
+  const fetchHistory = useCallback(async (script: Script, limit: number) => {
+    try {
+      const res = await cronApi.getScriptLogs(script.id, limit);
+      setLogs(res.data?.data || []);
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '加载历史日志失败'));
+    }
+  }, []);
+
+  // ── 执行脚本：先经 REST 启动，再打开 Drawer 连 WS 订阅实时输出（两步解耦）──
+  const handleRun = async (script: Script) => {
+    try {
+      await cronApi.runScript(script.id); // 独立启动步骤
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '启动脚本失败');
+      return;
+    }
+    setDrawerScript(script);
+    setLogs([]);
+    setRunStatus('running');
+    setExitCode(null);
+    setElapsed(0);
+    startTimeRef.current = Date.now();
+    setFollow(true);
+    setStream(true); // 订阅实时输出（脚本已由上述 REST 启动）
+    setDrawerVisible(true);
+    // 乐观标记运行中：无论新启动还是复用已运行实例，执行后脚本都在跑。
+    setRunningIds((ids) => (ids.includes(script.id) ? ids : [...ids, script.id]));
+  };
+
+  // ── 查看日志（打开同一 Drawer：运行中连 WS 实时续看，否则只看历史）──
+  const handleViewLogs = (script: Script) => {
+    setDrawerScript(script);
+    setLogs([]);
+    setRunStatus('idle');
+    setExitCode(null);
+    startTimeRef.current = Date.now(); // 计时起点：避免退出分支用 Date.now()-0 算出时间戳级耗时
+    setStream(runningIds.includes(script.id)); // 仅运行中才连 WS
+    setDrawerVisible(true);
+    fetchHistory(script, historyLimit);
+  };
+
+  const handleStop = () => {
+    if (!drawerScript) return;
+    cronApi.stopScript(drawerScript.id).catch((error: unknown) => {
+      message.error(error instanceof Error ? error.message : '停止脚本失败');
+    });
+  };
+
+  const handleDrawerClose = () => {
+    close();
+    setDrawerVisible(false);
+    setDrawerScript(null);
+    setLogs([]);
+    setRunStatus('idle');
+    setStream(false);
+    setFollow(true);
+  };
+
+  // 自动滚到底（仅实时流且跟踪开启时）
+  useEffect(() => {
+    if (follow && stream) {
+      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, follow, stream]);
 
   const columns = [
     {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
-      width: 180,
-      render: (name: string) => (
+      width: 220,
+      render: (name: string, record: Script) => (
         <Space>
           <CodeOutlined />
           <span>{name}</span>
+          {runningIds.includes(record.id) && (
+            <Tag color="green">运行中</Tag>
+          )}
         </Space>
-      ),
-    },
-    {
-      title: '语言',
-      dataIndex: 'language',
-      key: 'language',
-      width: 100,
-      render: (lang: string) => (
-        <Tag color={LANG_COLORS[lang] || 'default'}>{lang}</Tag>
       ),
     },
     {
@@ -150,14 +280,42 @@ export default function ScriptPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 150,
+      width: 280,
       render: (_: unknown, record: Script) => (
         <Space>
-          <Tooltip title="复制内容">
+          {runningIds.includes(record.id) ? (
+            <Tooltip title="停止">
+              <Button
+                type="link"
+                danger
+                icon={<StopOutlined />}
+                onClick={async () => {
+                  await cronApi.stopScript(record.id);
+                  fetchRunning();
+                }}
+              />
+            </Tooltip>
+          ) : (
+            <Tooltip title="执行">
+              <Button
+                type="link"
+                icon={<PlayCircleOutlined />}
+                onClick={() => handleRun(record)}
+              />
+            </Tooltip>
+          )}
+          <Tooltip title="日志">
             <Button
               type="link"
-              icon={<CopyOutlined />}
-              onClick={() => handleCopyContent(record.content)}
+              icon={<HistoryOutlined />}
+              onClick={() => handleViewLogs(record)}
+            />
+          </Tooltip>
+          <Tooltip title="下载">
+            <Button
+              type="link"
+              icon={<DownloadOutlined />}
+              onClick={() => handleDownload(record)}
             />
           </Tooltip>
           <Tooltip title="编辑">
@@ -190,7 +348,7 @@ export default function ScriptPage() {
         title={<Space><CodeOutlined /> 脚本库</Space>}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={fetchScripts} loading={loading}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { fetchScripts(); fetchRunning(); }} loading={loading}>刷新</Button>
             <Button icon={<FileTextOutlined />} onClick={handleCreateFromTemplate}>从模板创建</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>创建脚本</Button>
           </Space>
@@ -218,9 +376,6 @@ export default function ScriptPage() {
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="脚本名称" rules={[{ required: true, message: '请输入脚本名称' }]}>
             <Input placeholder="e.g. backup-db" />
-          </Form.Item>
-          <Form.Item name="language" label="语言">
-            <Select options={LANG_OPTIONS} />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="可选描述" />
@@ -263,12 +418,7 @@ export default function ScriptPage() {
                       style={{ cursor: 'pointer' }}
                     >
                       <Space orientation="vertical" style={{ width: '100%' }}>
-                        <Space>
-                          <Tag color={LANG_COLORS[template.language || ''] || 'default'}>
-                            {template.language || 'unknown'}
-                          </Tag>
-                          <span style={{ fontWeight: 500 }}>{template.name}</span>
-                        </Space>
+                        <span style={{ fontWeight: 500 }}>{template.name}</span>
                         <div style={{ color: '#666', fontSize: 13 }}>{template.description}</div>
                       </Space>
                     </Card>
@@ -279,6 +429,78 @@ export default function ScriptPage() {
           />
         )}
       </Modal>
+
+      {/* 日志 Drawer：实时 + 历史 合一（按运行状态决定是否连 WS） */}
+      <Drawer
+        title={
+          <Space>
+            <HistoryOutlined />
+            <span>日志：{drawerScript?.name}</span>
+          </Space>
+        }
+        open={drawerVisible}
+        onClose={handleDrawerClose}
+        size={720}
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+      >
+        {/* 顶部控制栏 */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space>
+            {runStatus === 'running' && <><Spin size="small" /> <span>运行中…</span></>}
+            {runStatus === 'exited' && (
+              <Tag color={exitCode === 0 ? 'green' : 'red'}>退出码 {exitCode}</Tag>
+            )}
+            {runStatus === 'stopped' && <Tag color="orange">已停止</Tag>}
+            {(runStatus === 'exited' || runStatus === 'stopped') && elapsed > 0 && (
+              <span style={{ color: '#999', fontSize: 12 }}>耗时 {(elapsed / 1000).toFixed(1)}s</span>
+            )}
+            <span style={{ color: '#999', fontSize: 12 }}>共 {logs.length} 条</span>
+          </Space>
+          <Space>
+            <Select
+              size="small"
+              value={historyLimit}
+              onChange={(v) => { setHistoryLimit(v); if (drawerScript) fetchHistory(drawerScript, v); }}
+              options={HISTORY_LIMITS.map((n) => ({ value: n, label: `最近 ${n} 条` }))}
+              style={{ width: 110 }}
+            />
+            <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>跟踪</Checkbox>
+            {runStatus === 'running' && (
+              <Button danger size="small" icon={<StopOutlined />} onClick={handleStop}>停止</Button>
+            )}
+          </Space>
+        </div>
+
+        {/* 日志输出区 */}
+        <div
+          style={{
+            flex: 1, overflowY: 'auto', background: '#1e1e1e',
+            padding: '12px 16px', fontFamily: 'monospace', fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          {logs.length === 0 && runStatus === 'running' ? (
+            <span style={{ color: '#aaa' }}>等待输出…</span>
+          ) : logs.length === 0 ? (
+            <span style={{ color: '#aaa' }}>暂无日志</span>
+          ) : (
+            logs.map((log, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: '#666', flexShrink: 0 }}>{log.time}</span>
+                <span
+                  style={{
+                    color: log.stream === 'stderr' ? '#f48771' : '#d4d4d4',
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                  }}
+                >
+                  {log.message}
+                </span>
+              </div>
+            ))
+          )}
+          <div ref={logEndRef} />
+        </div>
+      </Drawer>
     </div>
   );
 }

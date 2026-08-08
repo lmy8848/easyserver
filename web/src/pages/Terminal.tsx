@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Card, Tabs, Button, Space, message, Tooltip, Badge } from 'antd';
+import { Card, Tabs, Button, Space, Tooltip, Badge } from 'antd';
 import {
   PlusOutlined, CloseOutlined,
   ZoomInOutlined, ZoomOutOutlined,
@@ -73,9 +73,6 @@ export default function TerminalPage() {
   const connectWsRef = useRef<(tab: TerminalTab, isReconnect?: boolean) => void>(() => {});
 
   const connectWs = useCallback((tab: TerminalTab, isReconnect = false) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     if (tab.ws) {
       try { tab.ws.close(); } catch (e) { console.debug('WebSocket close error:', e); }
     }
@@ -84,8 +81,8 @@ export default function TerminalPage() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${tab.key.replace('terminal-', '')}`;
-    // Pass token via Sec-WebSocket-Protocol header instead of URL parameter
-    const ws = new WebSocket(wsUrl, ['token', token]);
+    // 同源 WS 握手自动携带 HttpOnly cookie，无需手动传 token
+    const ws = new WebSocket(wsUrl);
     tab.ws = ws;
 
     ws.onopen = () => {
@@ -146,12 +143,6 @@ export default function TerminalPage() {
   }, [connectWs]);
 
   const createTerminal = useCallback((gen: number) => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      message.error('请先登录');
-      return;
-    }
-
     tabCounter.current++;
     const id = tabCounter.current;
     const key = `terminal-${id}`;

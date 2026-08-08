@@ -34,18 +34,14 @@ func CORSMiddleware(allowedOrigins []string, devMode bool) gin.HandlerFunc {
 
 		if allowed && origin != "" {
 			c.Header("Access-Control-Allow-Origin", origin)
-		}
-
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-
-		// SECURITY: Do NOT set Allow-Credentials when wildcard origin is used.
-		// Browsers reject responses with Allow-Origin=* + Allow-Credentials=true,
-		// but reflecting the request origin with credentials enabled allows any
-		// site to make credentialed cross-origin requests (CSRF risk).
-		if !hasWildcard {
+			// Credentials 仅在放行该源时声明，避免对非白名单源虚设。
+			// （Allow-Origin 缺失时浏览器本就拒绝发送，credentials 虚设无实际危害，
+			//  但语义上只对放行的源声明更精确。）
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
+
+		c.Header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == "OPTIONS" {

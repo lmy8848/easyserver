@@ -110,16 +110,14 @@ export default function Login() {
 
   /**
    * Shared login success handler.
-   * must_change_pass is stored on the user object from the server,
-   * not in a separate localStorage key (prevents client tampering).
+   * Web 登录态走 HttpOnly Cookie（后端 Set-Cookie），此处只存 user 供显示。
+   * must_change_pass is stored on the user object from the server.
    */
-  const handleLoginSuccess = useCallback((data: { token: string; user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
+  const handleLoginSuccess = useCallback((data: { user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
     useAuthStore.setState({
       user: { ...data.user, must_change_pass: data.must_change_pass },
-      token: data.token,
       isAuthenticated: true,
     });
-    localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data.user));
 
     message.success('登录成功');
@@ -221,8 +219,9 @@ export default function Login() {
       const res = await authApi.getQRStatus(qrData.qr_token);
       const d = res.data.data;
       if (!d) return;
-      if (d.status === 'confirmed' && d.token && d.user) {
-        handleLoginSuccess({ token: d.token, user: d.user as User, must_change_pass: d.must_change_pass });
+      if (d.status === 'confirmed' && d.user) {
+        // QR 登录的 web token 已由后端 Set-Cookie，响应不再含 token。
+        handleLoginSuccess({ user: d.user as User, must_change_pass: d.must_change_pass });
       } else if (d.status === 'expired' || d.status === 'cancelled') {
         setQrStatus('expired');
         setQrData(null);

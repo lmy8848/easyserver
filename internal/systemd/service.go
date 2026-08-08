@@ -15,10 +15,11 @@ import (
 )
 
 // ServiceInfo represents a systemd service.
-// 托管服务（easyserver-* 前缀）会额外填充 Managed/Runtime* 字段；
+// 托管服务（easyserver-svc- 前缀）会额外填充 Managed/Runtime* 字段；
 // 系统服务这些字段为零值。
 type ServiceInfo struct {
 	Name          string  `json:"name"`
+	ShortName     string  `json:"short_name"` // 托管服务去前缀短名；系统服务等于 name
 	Description   string  `json:"description"`
 	State         string  `json:"state"`
 	SubState      string  `json:"sub_state"`
@@ -83,7 +84,7 @@ func NewServiceManager(exec executor.CommandExecutor, runtimeLookup RuntimeLooku
 }
 
 // List returns all systemd services with basic info (name, state, description).
-// 对 easyserver-* 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
+// 对 easyserver-svc- 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
 // 只调一次 list-units（~16ms），不查 PID/内存/enabled（list-unit-files 要 ~1.8s，
 // systemctl show 全部要更久），前端用 GetDetails 按需加载当前页的运行时详情。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
@@ -113,9 +114,10 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 
 		name := strings.TrimSuffix(fields[0], ".service")
 		svc := ServiceInfo{
-			Name:     name,
-			State:    fields[2],
-			SubState: fields[3],
+			Name:      name,
+			ShortName: strings.TrimPrefix(name, managedUnitPrefix),
+			State:     fields[2],
+			SubState:  fields[3],
 		}
 
 		if len(fields) > 4 {
@@ -495,8 +497,8 @@ func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) 
 	return nil
 }
 
-// ListManaged returns info for managed services only (easyserver-* prefix).
-// 扫描 /etc/systemd/system/ 目录下的 easyserver-*.service 文件，
+// ListManaged returns info for managed services only (easyserver-svc- prefix).
+// 扫描 /usr/local/lib/systemd/system/ 目录下的 easyserver-svc-*.service 文件，
 // 保证新创建且未启动/未 enable 的服务也能在列表中列出。
 func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error) {
 	entries, err := os.ReadDir(managedUnitDir)
@@ -527,8 +529,9 @@ func (m *ServiceManager) ListManaged(ctx context.Context) ([]ServiceInfo, error)
 		svc, ok := allMap[fullName]
 		if !ok {
 			svc = ServiceInfo{
-				Name:  fullName,
-				State: "inactive",
+				Name:      fullName,
+				ShortName: shortName,
+				State:     "inactive",
 			}
 		}
 		if content, _ := readUnitFile(shortName); content != "" {

@@ -2,10 +2,7 @@ package auth
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
-	"fmt"
 	"testing"
 	"time"
 
@@ -81,53 +78,6 @@ func buildPassword(length int, hasUpper, hasLower, hasDigit bool) string {
 
 // --- TestHashToken ---
 
-func TestHashToken(t *testing.T) {
-	tests := []struct {
-		name  string
-		token string
-	}{
-		{"simple token", "abc123"},
-		{"jwt-like token", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"},
-		{"empty string", ""},
-		{"special characters", "!@#$%^&*()"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := hashToken(tt.token)
-
-			// Verify it's a valid hex string
-			if len(result) != 64 { // SHA-256 produces 32 bytes = 64 hex chars
-				t.Errorf("hashToken(%q) length = %d, want 64", tt.token, len(result))
-			}
-
-			// Verify it matches manual SHA-256
-			h := sha256.Sum256([]byte(tt.token))
-			expected := hex.EncodeToString(h[:])
-			if result != expected {
-				t.Errorf("hashToken(%q) = %q, want %q", tt.token, result, expected)
-			}
-		})
-	}
-}
-
-func TestHashToken_Deterministic(t *testing.T) {
-	token := "test-token-123"
-	h1 := hashToken(token)
-	h2 := hashToken(token)
-	if h1 != h2 {
-		t.Errorf("hashToken should be deterministic: %q != %q", h1, h2)
-	}
-}
-
-func TestHashToken_DifferentInputsProduceDifferentHashes(t *testing.T) {
-	h1 := hashToken("token-a")
-	h2 := hashToken("token-b")
-	if h1 == h2 {
-		t.Error("different tokens should produce different hashes")
-	}
-}
-
 // --- helpers for DB-dependent tests ---
 
 func setupTestDB(t *testing.T) *sql.DB {
@@ -155,22 +105,6 @@ func setupTestDB(t *testing.T) *sql.DB {
 			totp_backup_codes TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS token_blacklist (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id INTEGER NOT NULL,
-			token TEXT NOT NULL,
-			expires_at DATETIME NOT NULL,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE IF NOT EXISTS user_activities (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id INTEGER NOT NULL,
-			username TEXT NOT NULL,
-			action TEXT NOT NULL,
-			ip TEXT DEFAULT '',
-			user_agent TEXT DEFAULT '',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 	}
 	for _, q := range queries {
@@ -205,7 +139,6 @@ func createTestUser(t *testing.T, db *sql.DB, username, password string, locked 
 func newTestAuthService(db *sql.DB) *AuthService {
 	return &AuthService{
 		userRepo:        NewSQLiteUserRepository(db),
-		tokenRepo:       NewSQLiteTokenRepository(db),
 		maxAttempts:     5,
 		lockoutDuration: 5 * time.Minute,
 	}
@@ -371,196 +304,4 @@ func TestChangePassword_UserNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent user")
 	}
-}
-
-// --- TestAddTokenToBlacklist / TestIsTokenBlacklisted ---
-
-func TestAddTokenToBlacklist(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	token := "test-jwt-token-abc123"
-	expiresAt := time.Now().Add(1 * time.Hour)
-
-	err := svc.AddTokenToBlacklist(context.Background(), 1, token, expiresAt)
-	if err != nil {
-		t.Fatalf("AddTokenToBlacklist failed: %v", err)
-	}
-
-	// Verify the token hash is stored, not the raw token
-	tokenHash := hashToken(token)
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM token_blacklist WHERE token = ?", tokenHash).Scan(&count)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Errorf("expected 1 blacklisted entry, got %d", count)
-	}
-}
-
-func TestIsTokenBlacklisted_True(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	token := "test-jwt-token-abc123"
-	expiresAt := time.Now().Add(1 * time.Hour)
-
-	err := svc.AddTokenToBlacklist(context.Background(), 1, token, expiresAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blacklisted, err := svc.IsTokenBlacklisted(context.Background(), token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !blacklisted {
-		t.Error("expected token to be blacklisted")
-	}
-}
-
-func TestIsTokenBlacklisted_False(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	blacklisted, err := svc.IsTokenBlacklisted(context.Background(), "unknown-token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if blacklisted {
-		t.Error("expected token to NOT be blacklisted")
-	}
-}
-
-func TestIsTokenBlacklisted_Expired(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	token := "expired-token"
-	expiresAt := time.Now().Add(-1 * time.Hour) // already expired
-
-	err := svc.AddTokenToBlacklist(context.Background(), 1, token, expiresAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blacklisted, err := svc.IsTokenBlacklisted(context.Background(), token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if blacklisted {
-		t.Error("expired token should not be considered blacklisted")
-	}
-}
-
-func TestIsTokenBlacklisted_CacheHit(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	token := "cached-token"
-	expiresAt := time.Now().Add(1 * time.Hour)
-
-	// Add to blacklist (which also caches)
-	err := svc.AddTokenToBlacklist(context.Background(), 1, token, expiresAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Remove from DB to prove cache is being used
-	tokenHash := hashToken(token)
-	_, _ = db.Exec("DELETE FROM token_blacklist WHERE token = ?", tokenHash)
-
-	blacklisted, err := svc.IsTokenBlacklisted(context.Background(), token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !blacklisted {
-		t.Error("expected token to be blacklisted from cache")
-	}
-}
-
-// --- TestInvalidateAllUserTokens ---
-
-func TestInvalidateAllUserTokens(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	userID := createTestUser(t, db, "admin", "Admin123", false)
-
-	err := svc.InvalidateAllUserTokens(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("InvalidateAllUserTokens failed: %v", err)
-	}
-
-	// Verify a marker was created
-	var count int
-	err = db.QueryRow(
-		"SELECT COUNT(*) FROM token_blacklist WHERE user_id = ? AND token = ?",
-		userID, "user_"+int64ToString(userID)+"_all",
-	).Scan(&count)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Errorf("expected 1 invalidation marker, got %d", count)
-	}
-}
-
-func TestInvalidateAllUserTokens_CacheEffect(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-
-	userID := createTestUser(t, db, "admin", "Admin123", false)
-
-	// Record time before invalidation
-	beforeInvalidation := time.Now()
-	time.Sleep(10 * time.Millisecond)
-
-	err := svc.InvalidateAllUserTokens(context.Background(), userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Token issued before invalidation should be detected as invalidated
-	invalidated, err := svc.IsUserTokenInvalidated(context.Background(), userID, beforeInvalidation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !invalidated {
-		t.Error("token issued before invalidation should be detected as invalidated")
-	}
-
-	// Token issued after invalidation should NOT be invalidated
-	invalidated, err = svc.IsUserTokenInvalidated(context.Background(), userID, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if invalidated {
-		t.Error("token issued after invalidation should NOT be invalidated")
-	}
-}
-
-func TestInvalidateAllUserTokens_NilContext(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	svc := newTestAuthService(db)
-	userID := createTestUser(t, db, "admin", "Admin123", false)
-
-	// Should not panic
-	err := svc.InvalidateAllUserTokens(nil, userID)
-	if err != nil {
-		t.Fatalf("InvalidateAllUserTokens with nil context failed: %v", err)
-	}
-}
-
-func int64ToString(n int64) string {
-	return fmt.Sprintf("%d", n)
 }

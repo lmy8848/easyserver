@@ -54,13 +54,12 @@ type UpdateCronTaskRequest struct {
 }
 
 // Script 表示可被 Cron Task 引用的可复用脚本。内容落盘 /opt/easyserver/scripts/，
-// DB 仅存元数据（name/description/language）。Content 仅由 GetService 从文件填充
+// DB 仅存元数据（name/description）。Content 仅由 GetService 从文件填充
 // （List 不加载全部文件内容）。
 type Script struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Language    string `json:"language"` // sh, bash, python
 	Content     string `json:"content,omitempty"`
 	Path        string `json:"path"` // 落盘路径，前端可直接作为执行命令
 	CreatedAt   string `json:"created_at"`
@@ -72,7 +71,6 @@ type CreateScriptRequest struct {
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
 	Content     string `json:"content" binding:"required"`
-	Language    string `json:"language"`
 }
 
 // UpdateScriptRequest 是更新脚本的请求体。
@@ -80,7 +78,13 @@ type UpdateScriptRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
 	Content     *string `json:"content"`
-	Language    *string `json:"language"`
+}
+
+// ScriptLogLine 表示一条脚本执行日志（stdout/stderr），与前端 ScriptLogLine 对齐。
+type ScriptLogLine struct {
+	Stream  string `json:"stream"` // stdout / stderr
+	Message string `json:"message"`
+	Time    string `json:"time"`
 }
 
 // CronRun 表示一次任务执行（按 journald invocation ID 分组）。

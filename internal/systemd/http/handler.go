@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,7 +19,6 @@ import (
 	"easyserver/internal/systemd"
 
 	"github.com/gin-gonic/gin"
-	gorillaWs "github.com/gorilla/websocket"
 )
 
 var serviceNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_@.:%\\-]+$`)
@@ -28,13 +27,10 @@ func validateServiceName(name string) bool {
 	return serviceNameRegex.MatchString(name)
 }
 
-// logsUpgrader is now replaced by h.upgrader in ServiceHandler
-
 type ServiceHandler struct {
 	serviceManager    *systemd.ServiceManager
 	executor          executor.CommandExecutor
 	jwtSecret         string
-	upgrader          gorillaWs.Upgrader
 	protectedServices []string // Services that cannot be stopped/disabled
 }
 
@@ -43,7 +39,6 @@ func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.Com
 		serviceManager:    serviceManager,
 		executor:          exec,
 		jwtSecret:         jwtSecret,
-		upgrader:          httpx.CreateUpgrader(),
 		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
 }
@@ -223,6 +218,15 @@ func (h *ServiceHandler) Disable(c *gin.Context) {
 	httpx.Success(c, gin.H{"name": name, "enabled": false})
 }
 
+// ServiceLogs 是 /services/:name/logs 的总入口：带 ?stream=1 走实时 SSE，否则返回历史日志 REST。
+func (h *ServiceHandler) ServiceLogs(c *gin.Context) {
+	if c.Query("stream") == "1" {
+		h.HandleLogsSSE(c)
+		return
+	}
+	h.GetLogs(c)
+}
+
 // GetLogs returns service logs
 func (h *ServiceHandler) GetLogs(c *gin.Context) {
 	name := c.Param("name")
@@ -248,39 +252,43 @@ func (h *ServiceHandler) GetLogs(c *gin.Context) {
 	httpx.Success(c, gin.H{"lines": logs})
 }
 
-// HandleLogsWebSocket streams service logs via WebSocket
-func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
-	// User info already set by WSAuthMiddleware
+// HandleLogsSSE 通过 Server-Sent Events 单向推送服务日志（journalctl -f 跟随）。
+func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" || !validateServiceName(name) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务名称"))
 		return
 	}
 
-	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
+	// journalctl -f 跟随；进程独立于本请求（Background），避免客户端断开时被 request ctx 杀。
+	// 注意：须先 StdoutPipe 再 Start，否则报 "StdoutPipe after process started"。
+	cmd := h.executor.Command(context.Background(), executor.StartOptions{}, "journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("service logs ws upgrade error: %v", err)
+		c.Error(apperror.ErrInternal.WithMessage("获取日志流失败"))
 		return
 	}
-	defer conn.Close()
+	if err := cmd.Start(); err != nil {
+		c.Error(apperror.ErrInternal.WithMessage("启动日志流失败"))
+		return
+	}
+	defer cmd.Process.Kill()
 
-	// Start journalctl -f to follow logs
-	proc, err := h.executor.Start(context.Background(), executor.StartOptions{}, "journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
-	if err != nil {
-		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"启动日志流失败"}`))
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.Error(apperror.ErrInternal.WithMessage("当前连接不支持流式输出"))
 		return
 	}
-	stdout, err := proc.StdoutPipe()
-	if err != nil {
-		proc.Kill()
-		conn.WriteMessage(gorillaWs.TextMessage, []byte(`{"type":"error","message":"获取日志流失败"}`))
-		return
-	}
-	defer proc.Kill()
+	// 连接建立即 flush 一次，确保客户端立即收到响应头（否则无日志时 header 延迟到心跳）。
+	fmt.Fprint(c.Writer, ": connected\n\n")
+	flusher.Flush()
 
 	scanner := bufio.NewScanner(stdout)
 	msgCh := make(chan []byte, 64)
-	errCh := make(chan error, 1)
 
 	infra.Go(func() {
 		for scanner.Scan() {
@@ -342,63 +350,44 @@ func (h *ServiceHandler) HandleLogsWebSocket(c *gin.Context) {
 			default:
 			}
 		}
-		errCh <- scanner.Err()
 	})
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-
-	done := make(chan struct{})
-	defer close(done)
-
-	// Start read goroutine to detect client disconnect
-	infra.Go(func() {
-		conn.SetReadLimit(512)
-		conn.SetPongHandler(func(string) error {
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-			return nil
-		})
-		for {
-			_, _, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-		}
-	})
 
 	for {
 		select {
 		case msg := <-msgCh:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
+			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", msg); err != nil {
 				return
 			}
-		case <-errCh:
-			return
+			flusher.Flush()
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
+			// 心跳注释行，避免连接被中间层空闲断开。
+			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
 				return
 			}
-		case <-done:
+			flusher.Flush()
+		case <-c.Request.Context().Done():
+			// 客户端断开（fetch abort）时取消 request context。
 			return
 		}
 	}
 }
 
 // ============================================================
-// 托管服务 CRUD（生成/更新/删除 unit 文件，只对 easyserver-* 前缀有效）
+// 托管服务 CRUD（生成/更新/删除 unit 文件，只对 easyserver-svc- 前缀有效）
 // ============================================================
 
 // Create 创建托管服务（生成 unit + 按需 enable/start）。
-// 只生成 easyserver-<name>.service，不支持创建系统服务的 unit。
+// 只生成 easyserver-svc-<name>.service，不支持创建系统服务的 unit。
 func (h *ServiceHandler) Create(c *gin.Context) {
 	var spec systemd.ManagedUnitSpec
 	if err := c.ShouldBindJSON(&spec); err != nil {
 		c.Error(apperror.ErrBadRequest.WithMessage("参数错误: " + err.Error()))
 		return
 	}
-	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-")
+	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-svc-")
 	middleware.AuditSummary(c, "创建托管服务 "+spec.Name)
 	if err := h.serviceManager.CreateManaged(c.Request.Context(), &spec); err != nil {
 		c.Error(apperror.WrapError(err))
@@ -408,7 +397,7 @@ func (h *ServiceHandler) Create(c *gin.Context) {
 }
 
 // Update 更新托管服务（重写 unit + 运行中则重启）。
-// :name 须为完整 unit 名（easyserver-foo），非托管前缀返回错误。
+// 容易: 须为完整 unit 名（easyserver-svc-<name>），非托管前缀返回错误。
 func (h *ServiceHandler) Update(c *gin.Context) {
 	name := c.Param("name")
 	shortName, err := requireManagedName(name)
@@ -431,7 +420,7 @@ func (h *ServiceHandler) Update(c *gin.Context) {
 }
 
 // Delete 删除托管服务（stop + disable + rm unit）。
-// :name 须为完整 unit 名（easyserver-foo），非托管前缀返回错误。
+// 容易: 须为完整 unit 名（easyserver-svc-<name>），非托管前缀返回错误。
 func (h *ServiceHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 	shortName, err := requireManagedName(name)
@@ -447,7 +436,7 @@ func (h *ServiceHandler) Delete(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "删除成功"})
 }
 
-// requireManagedName 校验 :name 是 easyserver- 前缀的托管服务，
+// requireManagedName 校验 :name 是 easyserver-svc- 前缀的托管服务，
 // 返回去掉前缀的短名。非托管前缀返回错误（系统服务不允许 CRUD）。
 func requireManagedName(fullName string) (string, error) {
 	if fullName == "" {
@@ -455,7 +444,7 @@ func requireManagedName(fullName string) (string, error) {
 	}
 	shortName := systemd.UnitName(fullName + ".service")
 	if shortName == "" {
-		return "", apperror.ErrBadRequest.WithMessage("只有 easyserver-* 托管服务支持此操作")
+		return "", apperror.ErrBadRequest.WithMessage("只有 easyserver-svc- 托管服务支持此操作")
 	}
 	return shortName, nil
 }
@@ -469,11 +458,10 @@ func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, servic
 	protected.GET("/services/:name", handler.Get)
 	protected.PUT("/services/:name", handler.Update)
 	protected.DELETE("/services/:name", handler.Delete)
-	protected.GET("/services/:name/logs", handler.GetLogs)
+	protected.GET("/services/:name/logs", handler.ServiceLogs)
 	protected.POST("/services/:name/start", handler.Start)
 	protected.POST("/services/:name/stop", handler.Stop)
 	protected.POST("/services/:name/restart", handler.Restart)
 	protected.POST("/services/:name/enable", handler.Enable)
 	protected.POST("/services/:name/disable", handler.Disable)
-	wsGroup.GET("/services/:name/logs", handler.HandleLogsWebSocket)
 }

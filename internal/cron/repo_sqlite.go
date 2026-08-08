@@ -48,7 +48,7 @@ func (r *sqliteRepo) GetRuntime(ctx context.Context, id int64) (lang, exact, sta
 
 func (r *sqliteRepo) ListScripts(ctx context.Context) ([]Script, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, description, language, created_at, updated_at
+		`SELECT id, name, description, created_at, updated_at
 		 FROM scripts ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (r *sqliteRepo) ListScripts(ctx context.Context) ([]Script, error) {
 	var scripts []Script
 	for rows.Next() {
 		var sc Script
-		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Language, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
+		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan script: %w", err)
 		}
 		sc.Path = scriptFilePath(sc.ID)
@@ -73,9 +73,9 @@ func (r *sqliteRepo) ListScripts(ctx context.Context) ([]Script, error) {
 func (r *sqliteRepo) GetScript(ctx context.Context, id int64) (*Script, error) {
 	var sc Script
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, description, language, created_at, updated_at
+		`SELECT id, name, description, created_at, updated_at
 		 FROM scripts WHERE id = ?`, id,
-	).Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Language, &sc.CreatedAt, &sc.UpdatedAt)
+	).Scan(&sc.ID, &sc.Name, &sc.Description, &sc.CreatedAt, &sc.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +85,8 @@ func (r *sqliteRepo) GetScript(ctx context.Context, id int64) (*Script, error) {
 
 func (r *sqliteRepo) CreateScript(ctx context.Context, script *Script) error {
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO scripts (name, description, language) VALUES (?, ?, ?)`,
-		script.Name, script.Description, script.Language,
+		`INSERT INTO scripts (name, description) VALUES (?, ?)`,
+		script.Name, script.Description,
 	)
 	if err != nil {
 		return err
@@ -100,8 +100,8 @@ func (r *sqliteRepo) CreateScript(ctx context.Context, script *Script) error {
 
 func (r *sqliteRepo) UpdateScript(ctx context.Context, script *Script) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE scripts SET name=?, description=?, language=?, updated_at=datetime('now') WHERE id=?`,
-		script.Name, script.Description, script.Language, script.ID)
+		`UPDATE scripts SET name=?, description=?, updated_at=datetime('now') WHERE id=?`,
+		script.Name, script.Description, script.ID)
 	return err
 }
 

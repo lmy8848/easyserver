@@ -256,8 +256,8 @@ function ManagedTab() {
 
   const handleEdit = (s: Service) => {
     setEditing(s);
-    // 后端 ParseUnitMeta 已从 unit 文件回填所有字段，去处 easyserver- 前缀展示短名。
-    const shortName = s.name.replace(/^easyserver-/, '');
+    // 后端已回填 short_name（托管服务去前缀短名），直接用于表单回显。
+    const shortName = s.short_name || s.name;
     form.setFieldsValue({
       name: shortName,
       description: s.description || '',
@@ -292,9 +292,8 @@ function ManagedTab() {
       setSubmitting(true);
       // runtime 表单存的是 {id,lang,exact} 对象，拆成三字段给后端。
       const rt = values.runtime as { id: number; lang: string; exact: string } | undefined;
-      const shortName = values.name.replace(/^easyserver-/, '');
       const spec: ManagedServiceSpec = {
-        name: shortName,
+        name: values.name, // 后端 Create 会 TrimPrefix 归一化短名
         description: values.description,
         exec_start: values.exec_start,
         dir: values.dir || '',
@@ -521,7 +520,7 @@ function ManagedServiceModal({ visible, confirmLoading, editing, form, onOk, onC
         <Form.Item name="name" label="服务名称" rules={[
           { required: true, message: '请输入服务名称' },
           { pattern: /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/, message: '只能包含小写字母、数字、连字符，不能以连字符开头/结尾' },
-        ]} extra="生成 unit: easyserver-<名称>.service">
+        ]}>
           <Input placeholder="例如: my-app" disabled={!!editing} />
         </Form.Item>
         <Form.Item name="description" label="描述">
@@ -577,7 +576,7 @@ function ManagedServiceModal({ visible, confirmLoading, editing, form, onOk, onC
 }
 
 // ============================================================
-// 系统服务 Tab（排除 easyserver-* 托管服务）
+// 系统服务 Tab（排除 easyserver-svc-* 托管服务）
 // ============================================================
 
 function SystemTab() {

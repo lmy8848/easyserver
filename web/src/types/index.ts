@@ -97,6 +97,7 @@ export type HistoryPoint = MonitorSnapshot;
 // Service types
 export interface Service {
   name: string;
+  short_name?: string; // 托管服务去前缀短名；系统服务等于 name
   description: string;
   state: string;
   sub_state: string;
@@ -337,10 +338,16 @@ export interface Script {
   name: string;
   description: string;
   content: string;
-  language: string;
   path: string;
   created_at: string;
   updated_at: string;
+}
+
+// 脚本执行实时日志行（WS 消息 data 字段）
+export interface ScriptLogLine {
+  stream: 'stdout' | 'stderr';
+  message: string;
+  time: string;
 }
 
 // Firewall types

@@ -293,10 +293,8 @@ export default function FileManager() {
     // Use a native <a href> download instead of fetching the whole blob into
     // JS memory first. The browser streams the response straight to disk, so
     // there is no memory spike and the built-in download progress UI works.
-    // The access_token query param authenticates the request (the download
-    // endpoint accepts it for GET as a fallback for browser media tags).
-    const token = localStorage.getItem('token') || '';
-    const url = `/api/files/download?path=${encodeURIComponent(toRelativePath(path))}&access_token=${encodeURIComponent(token)}`;
+    // 登录态走 HttpOnly cookie，同源自动携带，无需 access_token 参数。
+    const url = `/api/files/download?path=${encodeURIComponent(toRelativePath(path))}`;
     const link = document.createElement('a');
     link.href = url;
     link.download = path.split('/').pop() || 'file';

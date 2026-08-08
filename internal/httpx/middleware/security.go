@@ -7,30 +7,64 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CSRFMiddleware rejects state-changing requests that lack the X-Requested-With
-// header set by the browser for same-origin XMLHttpRequest/fetch calls. This
-// prevents cross-site form submissions and naive CSRF attacks without needing
-// a synchronizer token.
-func CSRFMiddleware() gin.HandlerFunc {
+// CSRFOriginVerify 校验写请求的 Origin 是否可信。浏览器发起跨站请求时强制带
+// Origin 且无法伪造，故「带 Origin 必须白名单、不带 Origin 放行」能卡住跨站请求，
+// 又不误伤 curl / 移动端原生 App（它们不发 Origin，无 CSRF 风险）。
+// 信任源 = 请求自身 origin（同源部署）+ allowedOrigins（反代跨源时并入）。
+func csrfOriginVerify(allowedOrigins []string, devMode bool) gin.HandlerFunc {
+	trusted := map[string]bool{}
+	for _, o := range allowedOrigins {
+		o = strings.TrimSuffix(strings.TrimSpace(o), "/")
+		if o != "" && o != "*" {
+			trusted[o] = true
+		}
+	}
+
 	return func(c *gin.Context) {
-		if c.Request.Method == "GET" || c.Request.Method == "HEAD" || c.Request.Method == "OPTIONS" {
+		// 只拦会改状态的写操作（GET/HEAD/OPTIONS 放行，SSE/预览不受影响）。
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			c.Next()
 			return
 		}
-		if c.GetHeader("X-Requested-With") != "XMLHttpRequest" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":    40300,
-				"message": "CSRF validation failed: missing X-Requested-With header",
-			})
+
+		// 开发模式放行（同源 proxy 下本就无跨站；省去 dev 跨端口调试的误伤）。
+		if devMode {
+			c.Next()
 			return
 		}
-		c.Next()
+
+		origin := strings.TrimSuffix(strings.TrimSpace(c.GetHeader("Origin")), "/")
+		if origin == "" {
+			// 非浏览器客户端（curl / 原生 App），无 CSRF 风险。
+			c.Next()
+			return
+		}
+
+		// 自身 origin：scheme://Host（同源部署的合法来源）。
+		scheme := "http"
+		if c.Request.TLS != nil {
+			scheme = "https"
+		}
+		selfOrigin := scheme + "://" + c.Request.Host
+
+		if origin == selfOrigin || trusted[origin] {
+			c.Next()
+			return
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code":    40300,
+			"message": "CSRF validation failed: untrusted Origin",
+		})
 	}
 }
 
 // SecurityMiddleware adds security headers with a pre-generated CSP nonce.
 // The nonce must be injected into <script> tags at build/startup time.
-func SecurityMiddleware(nonce string) gin.HandlerFunc {
+// 同时内联 CSRF Origin 校验（见 csrfOriginVerify），避免单独挂载的重复。
+func SecurityMiddleware(nonce string, allowedOrigins []string, devMode bool) gin.HandlerFunc {
+	csrf := csrfOriginVerify(allowedOrigins, devMode)
 	return func(c *gin.Context) {
 		// Prevent clickjacking
 		c.Header("X-Frame-Options", "DENY")
@@ -71,6 +105,9 @@ func SecurityMiddleware(nonce string) gin.HandlerFunc {
 		if c.Request.TLS != nil {
 			c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
+
+		// CSRF Origin 校验（写请求，见 csrfOriginVerify）
+		csrf(c)
 
 		c.Next()
 	}

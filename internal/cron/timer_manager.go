@@ -41,7 +41,7 @@ func NewTimerManager(exec executor.CommandExecutor, p mise.Provider, runtime Run
 	return &TimerManager{executor: exec, provider: p, runtime: runtime}
 }
 
-// List 返回全部定时任务。扫描 /etc/systemd/system/ 下的 easyserver-cron-*.timer，
+// List 返回全部定时任务。扫描 /usr/local/lib/systemd/system/ 下的 easyserver-cron-*.timer，
 // 保证新建但未 enable 的任务也能列出。状态用 systemctl show 批量补全。
 func (m *TimerManager) List(ctx context.Context) ([]CronTask, error) {
 	names, err := m.listTimerNames()

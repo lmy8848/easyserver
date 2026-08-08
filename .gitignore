@@ -53,6 +53,9 @@ internal/api/web/
 # CodeGraph index
 .codegraph/
 
+# ZCode local settings
+.zcode/
+
 # Claude Code local settings
 .claude/
 CLAUDE.md

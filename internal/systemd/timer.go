@@ -219,10 +219,13 @@ func buildCronExecStart(spec *TimerSpec, p mise.Provider) (string, []string) {
 	return spec.ExecStart, nil
 }
 
-// WriteCronUnitFile 原子写入 cron unit 文件到 /etc/systemd/system/<fileName>。
+// WriteCronUnitFile 原子写入 cron unit 文件到 managedUnitDir。
 func WriteCronUnitFile(fileName, content string) error {
 	path := filepath.Join(managedUnitDir, fileName)
 	dir := filepath.Dir(path)
+	if err := ensureManagedUnitDir(); err != nil {
+		return fmt.Errorf("创建 unit 目录失败: %w", err)
+	}
 	tmpFile, err := os.CreateTemp(dir, fileName+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("创建临时 unit 文件失败: %w", err)

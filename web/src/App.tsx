@@ -44,7 +44,12 @@ const PageLoading = memo(function PageLoading() {
 });
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, isLoading } = useAuthStore();
+
+  // 启动时先判 cookie 登录态，期间不误跳登录页。
+  if (isLoading) {
+    return <PageLoading />;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -85,6 +90,10 @@ function StaticContextInjector() {
 }
 
 function App() {
+  // 启动即判定 cookie 登录态（HttpOnly，JS 读不到，只能靠 /auth/me）。
+  const loadUser = useAuthStore((s) => s.loadUser);
+  useEffect(() => { loadUser(); }, [loadUser]);
+
   return (
     <ConfigProvider 
       locale={zhCN} 
