@@ -82,6 +82,7 @@ export default function CronTasks({
   const [nextRun, setNextRun] = useState('');
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -181,6 +182,8 @@ export default function CronTasks({
   };
 
   const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       const values = await form.validateFields();
       // 预设频率 → 先转 OnCalendar 表达式，再提交（后端只收表达式）
@@ -223,6 +226,8 @@ export default function CronTasks({
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg) message.error(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -249,7 +254,7 @@ export default function CronTasks({
       ),
     },
     {
-      title: '调度',
+      title: '执行周期',
       dataIndex: 'schedule',
       key: 'schedule',
       width: 170,
@@ -258,29 +263,19 @@ export default function CronTasks({
       ),
     },
     {
-      title: '命令',
-      dataIndex: 'command',
-      key: 'command',
+      title: '工作目录',
+      dataIndex: 'work_dir',
+      key: 'work_dir',
+      width: 140,
       ellipsis: true,
-      render: (command: string, _record: CronTask) => {
-        const script = scripts.find(x => x.path === command);
-        if (script) {
-          return <Tag color="blue">{script.name}</Tag>;
-        }
-        return command;
-      },
+      render: (workDir: string) => workDir || '-',
     },
     {
-      title: '超时/重试',
-      key: 'config',
-      width: 120,
-      render: (_: unknown, record: CronTask) => (
-        <Space size={4}>
-          {record.timeout > 0 && <Tag>{record.timeout}s</Tag>}
-          {record.max_retry > 0 && <Tag color="orange">重试{record.max_retry}</Tag>}
-          {record.timeout === 0 && record.max_retry === 0 && <span style={{ color: '#8c8c8c' }}>-</span>}
-        </Space>
-      ),
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (description: string) => description || '-',
     },
     {
       title: '状态',
@@ -293,15 +288,17 @@ export default function CronTasks({
           onChange={() => onToggle(record)}
           loading={operating === `toggle-${record.name}`}
           size="small"
+          checkedChildren="启用"
+          unCheckedChildren="禁用"
         />
       ),
     },
     {
-      title: '下次执行',
-      dataIndex: 'next_run',
-      key: 'next_run',
+      title: '上次执行时间',
+      dataIndex: 'last_run',
+      key: 'last_run',
       width: 160,
-      render: (nextRun: string) => nextRun || '-',
+      render: (lastRun: string) => lastRun || '-',
     },
     {
       title: '操作',
@@ -380,6 +377,7 @@ export default function CronTasks({
         onCancel={() => setModalVisible(false)}
         onOk={handleSubmit}
         okText={editingTask ? '保存' : '创建'}
+        confirmLoading={submitting}
         cancelText="取消"
         style={STYLES.modal}
         destroyOnHidden
