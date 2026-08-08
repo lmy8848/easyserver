@@ -160,14 +160,6 @@ export default function CronTasks({
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (useType === 'command' && !values.command) {
-        message.error('请填写执行命令');
-        return;
-      }
-      if (useType === 'script' && !values.script_id) {
-        message.error('请选择关联脚本');
-        return;
-      }
       // 预设频率 → 先转 OnCalendar 表达式，再提交（后端只收表达式）
       let schedule = values.schedule?.trim() || '';
       if (mode === 'preset') {
@@ -430,18 +422,21 @@ export default function CronTasks({
               <Radio.Button value="script">关联脚本</Radio.Button>
             </Radio.Group>
           </Form.Item>
-          {useType === 'command' ? (
-            <Form.Item name="command" label="执行命令" extra="任务将在所选运行时环境中执行，支持管道、脚本调用等 Shell 用法">
+          <Form.Item
+            name={useType === 'command' ? 'command' : 'script_id'}
+            label={useType === 'command' ? '执行命令' : '关联脚本'}
+            rules={[{ required: true, message: useType === 'command' ? '请填写执行命令' : '请选择脚本' }]}
+            extra={useType === 'command' ? '任务将在所选运行时环境中执行，支持管道、脚本调用等 Shell 用法' : undefined}
+          >
+            {useType === 'command' ? (
               <Input.TextArea rows={2} placeholder="例：/opt/scripts/backup.sh" />
-            </Form.Item>
-          ) : (
-            <Form.Item name="script_id" label="关联脚本" rules={[{ required: true, message: '请选择脚本' }]}>
+            ) : (
               <Select
                 placeholder="选择脚本"
                 options={scripts.map(s => ({ label: `${s.name} (${s.language})`, value: s.id }))}
               />
-            </Form.Item>
-          )}
+            )}
+          </Form.Item>
           <Form.Item
             name="runtime_version_id"
             label="运行时版本"
