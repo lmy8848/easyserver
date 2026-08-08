@@ -10,39 +10,37 @@ interface CronLogsProps {
   onClose: () => void;
 }
 
+const priorityColor: Record<string, string> = {
+  err: 'error', crit: 'error', emerg: 'error', alert: 'error',
+  warn: 'warning', info: 'default', notice: 'blue', debug: 'default',
+};
+
 export default function CronLogs({ visible, task, logs, loading, onClose }: CronLogsProps) {
   const logColumns = [
     {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
+      title: '级别',
+      dataIndex: 'priority',
+      key: 'priority',
       width: 80,
-      render: (status: string) => (
-        <Tag color={status === 'success' ? 'success' : 'error'}>{status}</Tag>
+      render: (priority: string) => (
+        <Tag color={priorityColor[priority] || 'default'}>{priority || 'info'}</Tag>
       ),
     },
     {
-      title: '耗时',
-      dataIndex: 'duration',
-      key: 'duration',
-      width: 100,
-      render: (ms: number) => `${ms}ms`,
-    },
-    {
-      title: '执行时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
+      title: '时间',
+      dataIndex: 'time',
+      key: 'time',
       width: 180,
     },
     {
-      title: '输出',
-      dataIndex: 'output',
-      key: 'output',
+      title: '日志内容',
+      dataIndex: 'message',
+      key: 'message',
       ellipsis: true,
-      render: (output: string) => (
-        <Tooltip title={output} placement="left">
+      render: (message: string) => (
+        <Tooltip title={message} placement="left">
           <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
-            {output?.substring(0, 100)}{output?.length > 100 ? '...' : ''}
+            {message}
           </span>
         </Tooltip>
       ),
@@ -60,10 +58,10 @@ export default function CronLogs({ visible, task, logs, loading, onClose }: Cron
       <Table
         columns={logColumns}
         dataSource={logs}
-        rowKey="id"
+        rowKey={(r, i) => `${r.time}-${i}`}
         loading={loading}
         size="small"
-        pagination={{ pageSize: 10 }}
+        pagination={{ pageSize: 20 }}
         locale={{ emptyText: <Empty description="暂无执行记录" /> }}
       />
     </Modal>

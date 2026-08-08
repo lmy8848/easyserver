@@ -298,15 +298,25 @@ export interface DBUser {
   created_at: string;
 }
 
-// Cron task types
+// 调度表单（UI 预设频率）→ 后端转 OnCalendar
+export interface ScheduleForm {
+  frequency: 'minutely' | 'hourly' | 'daily' | 'weekly' | 'monthly';
+  every_n?: number;
+  time?: string;
+  weekdays?: string[];
+  day_of_month?: number;
+}
+
+// Cron task types（systemd timer 承载，name 为唯一标识）
 export interface CronTask {
-  id: number;
   name: string;
   command: string;
-  schedule: string;
+  schedule: string; // OnCalendar 表达式
+  schedule_form: ScheduleForm; // UI 编辑回显
   description: string;
+  persistent: boolean;
   enabled: boolean;
-  status: string; // idle, running, success, failed
+  status: string; // active, inactive, failed
   last_run: string;
   last_result: string;
   next_run: string;
@@ -318,17 +328,12 @@ export interface CronTask {
   runtime_version_id: number;
   runtime_lang: string;
   runtime_exact: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface CronLog {
-  id: number;
-  task_id: number;
-  status: string; // success, failed
-  output: string;
-  duration: number;
-  created_at: string;
+  time: string;
+  message: string;
+  priority: string;
 }
 
 export interface Script {

@@ -205,7 +205,8 @@ func (r *sqliteRepo) UpdateStatusToInstalled(ctx context.Context, id int64, path
 
 func (r *sqliteRepo) GetConflictingReferences(ctx context.Context, runtimeID int64) ([]string, error) {
 	var conflicts []string
-	// 网站通过 websites.runtime_version_id 引用 runtime（进程守护已迁到 systemd，无 processes 表）。
+	// 网站通过 websites.runtime_version_id 引用 runtime（进程守护已迁到 systemd，无 processes 表）；
+	// 定时任务已迁到 systemd timer（ADR-0004），不再经 DB 反向引用，此处不查。
 	rows, err := r.db.QueryContext(ctx, "SELECT name FROM websites WHERE runtime_version_id = ?", runtimeID)
 	if err == nil {
 		defer rows.Close()
@@ -213,17 +214,6 @@ func (r *sqliteRepo) GetConflictingReferences(ctx context.Context, runtimeID int
 			var wname string
 			if err := rows.Scan(&wname); err == nil {
 				conflicts = append(conflicts, "Website: "+wname)
-			}
-		}
-	}
-
-	rows, err = r.db.QueryContext(ctx, "SELECT name FROM cron_tasks WHERE runtime_version_id = ?", runtimeID)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var cname string
-			if err := rows.Scan(&cname); err == nil {
-				conflicts = append(conflicts, "Cron: "+cname)
 			}
 		}
 	}

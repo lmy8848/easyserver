@@ -1,69 +1,63 @@
 package cron
 
-import (
-	"strings"
-	"testing"
+import "testing"
 
-	"easyserver/internal/infra/mise"
-)
-
-func TestWrapWithMiseExec_BareCommand(t *testing.T) {
-	got, err := wrapWithMiseExec(mise.NewProvider(), "node", "20.11.0", "node app.js")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestBuildOnCalendar(t *testing.T) {
+	cases := []struct {
+		name string
+		form ScheduleForm
+		want string
+	}{
+		{"minutely", ScheduleForm{Frequency: "minutely", EveryN: 5}, "*:00/5"},
+		{"minutely-1", ScheduleForm{Frequency: "minutely", EveryN: 1}, "*:00/1"},
+		{"hourly", ScheduleForm{Frequency: "hourly", EveryN: 3}, "*-*-* 0/3:00:00"},
+		{"daily", ScheduleForm{Frequency: "daily", Time: "03:30"}, "*-*-* 03:30:00"},
+		{"daily-single-digits", ScheduleForm{Frequency: "daily", Time: "3:5"}, "*-*-* 03:05:00"},
+		{"weekly-one-day", ScheduleForm{Frequency: "weekly", Time: "09:00", Weekdays: []string{"Mon"}}, "Mon *-*-* 09:00:00"},
+		{"weekly-multi", ScheduleForm{Frequency: "weekly", Time: "09:00", Weekdays: []string{"Mon", "Wed", "Fri"}}, "Mon,Wed,Fri *-*-* 09:00:00"},
+		{"weekly-dedup", ScheduleForm{Frequency: "weekly", Time: "09:00", Weekdays: []string{"Mon", "Mon"}}, "Mon *-*-* 09:00:00"},
+		{"monthly", ScheduleForm{Frequency: "monthly", Time: "23:59", DayOfMonth: 1}, "*-*-01 23:59:00"},
 	}
-	want := `MISE_DATA_DIR=/opt/easyserver/mise MISE_CONFIG_DIR=/opt/easyserver/mise /opt/easyserver/mise/mise exec node@20.11.0 -- node app.js`
-	if got != want {
-		t.Fatalf("\nwant: %q\n got: %q", want, got)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := BuildOnCalendar(c.form)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != c.want {
+				t.Fatalf("want %q, got %q", c.want, got)
+			}
+		})
 	}
 }
 
-func TestWrapWithMiseExec_VfoxTool(t *testing.T) {
-	// Java goes through vfox; tool name has ':' and '/'. cron lines are shell-
-	// parsed, so a bare token with these chars is one argv element — fine.
-	got, err := wrapWithMiseExec(mise.NewProvider(), "java", "21.0.0", "java -jar app.jar")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestBuildOnCalendar_Invalid(t *testing.T) {
+	cases := []struct {
+		name string
+		form ScheduleForm
+	}{
+		{"minutely-zero", ScheduleForm{Frequency: "minutely", EveryN: 0}},
+		{"hourly-zero", ScheduleForm{Frequency: "hourly", EveryN: 0}},
+		{"daily-bad-time", ScheduleForm{Frequency: "daily", Time: "25:00"}},
+		{"daily-min", ScheduleForm{Frequency: "daily", Time: "03:60"}},
+		{"weekly-no-days", ScheduleForm{Frequency: "weekly", Time: "09:00"}},
+		{"weekly-bad-day", ScheduleForm{Frequency: "weekly", Time: "09:00", Weekdays: []string{"Funday"}}},
+		{"monthly-day-zero", ScheduleForm{Frequency: "monthly", Time: "09:00", DayOfMonth: 0}},
+		{"monthly-day-32", ScheduleForm{Frequency: "monthly", Time: "09:00", DayOfMonth: 32}},
+		{"unknown-freq", ScheduleForm{Frequency: "yearly"}},
 	}
-	if !strings.Contains(got, "vfox:version-fox/vfox-java@21.0.0") {
-		t.Fatalf("expected vfox tool spec in output, got: %s", got)
-	}
-	if !strings.HasSuffix(got, " -- java -jar app.jar") {
-		t.Fatalf("expected trailing user command, got: %s", got)
-	}
-}
-
-func TestWrapWithMiseExec_UnsupportedLang(t *testing.T) {
-	_, err := wrapWithMiseExec(mise.NewProvider(), "rust", "1.80.0", "cargo run")
-	if err == nil {
-		t.Fatal("expected error for unsupported lang, got nil")
-	}
-}
-
-// AC2 regression: must NOT prepend `bash -lc` or `~/.bashrc` to the line.
-// User commands containing those substrings are user choice; we only check
-// that wrapWithMiseExec itself does not inject them.
-func TestWrapWithMiseExec_NoLoginShell(t *testing.T) {
-	got, _ := wrapWithMiseExec(mise.NewProvider(), "node", "20.11.0", "node app.js")
-	for _, badPrefix := range []string{"bash -lc", "bash -l ", "sh -l"} {
-		if strings.HasPrefix(strings.TrimSpace(strings.SplitN(got, " -- ", 2)[0]), badPrefix) {
-			t.Fatalf("wrap injected forbidden login shell %q: %s", badPrefix, got)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := BuildOnCalendar(c.form); err == nil {
+				t.Fatalf("expected error for %v, got nil", c.form)
+			}
+		})
 	}
 }
 
-// cron(8) `%` regression: user commands like `date +%Y%m%d` must survive into
-// the crontab line as `\%Y\%m\%d`, otherwise cron truncates the command and
-// feeds the tail as stdin.
-func TestWrapWithMiseExec_EscapesPercent(t *testing.T) {
-	got, err := wrapWithMiseExec(mise.NewProvider(), "node", "20.11.0", `echo $(date +%Y%m%d) >> /tmp/r.log`)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(got, "+%Y") {
-		t.Fatalf("bare %% survived into crontab line, cron would truncate:\n%s", got)
-	}
-	if !strings.Contains(got, `+\%Y\%m\%d`) {
-		t.Fatalf("expected escaped \\%% sequences, got:\n%s", got)
+func TestDescribeSchedule(t *testing.T) {
+	got := DescribeSchedule(ScheduleForm{Frequency: "daily", Time: "03:30"})
+	if got != "每天 03:30 执行" {
+		t.Fatalf("unexpected description: %q", got)
 	}
 }

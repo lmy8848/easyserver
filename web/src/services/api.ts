@@ -678,41 +678,38 @@ export const dbServerApi = {
 
 // Cron task management
 export const cronApi = {
-  getPresets: () =>
-    api.get<ApiResponse<Array<{ label: string; value: string; description: string }>>>('/cron/presets'),
+  describeSchedule: (form: ScheduleForm) =>
+    api.post<ApiResponse<{ on_calendar: string; description: string }>>('/cron/describe', form),
 
-  describeSchedule: (schedule: string) =>
-    api.get<ApiResponse<{ description: string }>>('/cron/describe', { params: { schedule } }),
-
-  getNextRuns: (schedule: string) =>
-    api.get<ApiResponse<{ next_runs: string[] }>>('/cron/next-runs', { params: { schedule } }),
+  getNextRun: (onCalendar: string) =>
+    api.get<ApiResponse<{ next_run: string }>>('/cron/next-run', { params: { on_calendar: onCalendar } }),
 
   list: () =>
     api.get<ApiResponse<CronTask[]>>('/cron/tasks'),
 
-  get: (id: number) =>
-    api.get<ApiResponse<CronTask>>(`/cron/tasks/${id}`),
+  get: (name: string) =>
+    api.get<ApiResponse<CronTask>>(`/cron/tasks/${name}`),
 
-  create: (data: { name: string; command?: string; schedule: string; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string }) =>
+  create: (data: { name: string; command?: string; schedule_form: ScheduleForm; persistent?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id: number }) =>
     api.post<ApiResponse<CronTask>>('/cron/tasks', data),
 
-  update: (id: number, data: { name?: string; command?: string; schedule?: string; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string }) =>
-    api.put<ApiResponse<CronTask>>(`/cron/tasks/${id}`, data),
+  update: (name: string, data: { name?: string; command?: string; schedule_form?: ScheduleForm; persistent?: boolean; enabled?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id?: number }) =>
+    api.put<ApiResponse<CronTask>>(`/cron/tasks/${name}`, data),
 
-  delete: (id: number) =>
-    api.delete<ApiResponse>(`/cron/tasks/${id}`),
+  delete: (name: string) =>
+    api.delete<ApiResponse>(`/cron/tasks/${name}`),
 
-  enable: (id: number) =>
-    api.post<ApiResponse>(`/cron/tasks/${id}/enable`),
+  enable: (name: string) =>
+    api.post<ApiResponse>(`/cron/tasks/${name}/enable`),
 
-  disable: (id: number) =>
-    api.post<ApiResponse>(`/cron/tasks/${id}/disable`),
+  disable: (name: string) =>
+    api.post<ApiResponse>(`/cron/tasks/${name}/disable`),
 
-  run: (id: number) =>
-    api.post<ApiResponse>(`/cron/tasks/${id}/run`),
+  run: (name: string) =>
+    api.post<ApiResponse>(`/cron/tasks/${name}/run`),
 
-  getLogs: (id: number, limit?: number) =>
-    api.get<ApiResponse<CronLog[]>>(`/cron/tasks/${id}/logs`, { params: { limit: limit || 50 } }),
+  getLogs: (name: string, limit?: number) =>
+    api.get<ApiResponse<CronLog[]>>(`/cron/tasks/${name}/logs`, { params: { limit: limit || 100 } }),
 
   // Scripts
   listScripts: () =>

@@ -129,9 +129,6 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	cronRepo := cron.NewSQLiteRepository(db)
 	cronService := cron.NewService(cronRepo, cmdExec, miseProvider)
-	if err := cronService.SyncToSystemCrontab(ctx); err != nil {
-		log.Printf("cron: startup sync to system crontab failed: %v", err)
-	}
 
 	serviceManager := systemd.NewServiceManager(cmdExec, cronRepo, miseProvider)
 
