@@ -439,7 +439,14 @@ export default function CronTasks({
               />
             </Form.Item>
           )}
-          <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
+          <Form.Item
+            name="name"
+            label="任务名称"
+            rules={[
+              { required: true, message: '请输入任务名称' },
+              { pattern: /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, message: '名称只能包含小写字母、数字、连字符，且不能以连字符开头/结尾' },
+            ]}
+          >
             <Input placeholder="例：daily-backup（小写字母/数字/连字符）" />
           </Form.Item>
           <Form.Item label="执行内容">

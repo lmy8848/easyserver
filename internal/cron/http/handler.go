@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -95,6 +96,14 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	}
 	if req.MaxRetry < 0 || req.MaxRetry > 10 {
 		c.Error(apperror.ErrBadRequest.WithMessage("最大重试次数必须在 0 到 10 之间"))
+		return
+	}
+	if err := validateEnvVars(req.EnvVars); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+	if err := validateWorkDir(req.WorkDir); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 
@@ -190,9 +199,17 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		task.MaxRetry = *req.MaxRetry
 	}
 	if req.EnvVars != nil {
+		if err := validateEnvVars(*req.EnvVars); err != nil {
+			c.Error(apperror.ErrBadRequest.Wrap(err))
+			return
+		}
 		task.EnvVars = *req.EnvVars
 	}
 	if req.WorkDir != nil {
+		if err := validateWorkDir(*req.WorkDir); err != nil {
+			c.Error(apperror.ErrBadRequest.Wrap(err))
+			return
+		}
 		task.WorkDir = *req.WorkDir
 	}
 	if req.RuntimeVersionID != nil {
@@ -504,6 +521,32 @@ func checkTaskNameUnique(ctx context.Context, svc *cron.Service, name, excludeNa
 		if t.Name == name && t.Name != excludeName {
 			return apperror.ErrBadRequest.WithMessage("任务名称已存在")
 		}
+	}
+	return nil
+}
+
+// validateEnvVars 校验环境变量格式：每行非空须为 KEY=VALUE，且 KEY 非空。
+func validateEnvVars(envStr string) error {
+	for _, line := range strings.Split(envStr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		k, _, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(k) == "" {
+			return fmt.Errorf("环境变量 %q 格式错误，应为 KEY=VALUE", line)
+		}
+	}
+	return nil
+}
+
+// validateWorkDir 校验工作目录：提供时须为绝对路径。
+func validateWorkDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("工作目录必须是绝对路径")
 	}
 	return nil
 }
