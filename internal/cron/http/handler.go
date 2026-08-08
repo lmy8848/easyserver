@@ -572,7 +572,7 @@ func nextRunOf(exec executor.CommandExecutor, expr string) (string, error) {
 func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
 	handler := NewCronHandler(cronService, exec)
 
-	protected.GET("/cron/describe", handler.DescribeSchedule)
+	protected.POST("/cron/describe", handler.DescribeSchedule)
 	protected.GET("/cron/next-run", handler.GetNextRun)
 	protected.GET("/cron/tasks", handler.ListTasks)
 	protected.POST("/cron/tasks", handler.CreateTask)
