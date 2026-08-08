@@ -467,9 +467,6 @@ export default function CronTasks({
           >
             <RuntimeVersionSelect />
           </Form.Item>
-          <Form.Item name="persistent" label="持久化执行" valuePropName="checked" extra="系统关机或休眠期间错过的执行计划，将在下次开机时自动补齐执行">
-            <Switch />
-          </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="任务描述（可选）" />
           </Form.Item>
@@ -488,6 +485,9 @@ export default function CronTasks({
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item name="persistent" label="持久化执行" valuePropName="checked" extra="系统关机或休眠期间错过的执行计划，将在下次开机时自动补齐执行">
+            <Switch />
+          </Form.Item>
           <Form.Item label="环境变量">
             <Form.List name="envs">
               {(fields, { add, remove }) => (
