@@ -6,14 +6,13 @@ import {
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
-  CodeOutlined, CopyOutlined, FileTextOutlined,
+  CodeOutlined, FileTextOutlined, DownloadOutlined,
   PlayCircleOutlined, StopOutlined, HistoryOutlined,
 } from '@ant-design/icons';
 import type { Script, ScriptLogLine } from '../types';
 import { cronApi } from '../services/api';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
-import { copyToClipboard } from '../utils/clipboard';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useSSE } from '../hooks/useSSE';
 
 // 历史日志可选条数
 const HISTORY_LIMITS = [50, 200, 500];
@@ -42,9 +41,9 @@ export default function ScriptPage() {
   const [elapsed, setElapsed] = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  const wsPath = drawerScript ? cronApi.scriptRunWSPath(drawerScript.id) : '';
-  const { send, close } = useWebSocket({
-    path: wsPath,
+  const ssePath = drawerScript ? cronApi.scriptLogsStreamPath(drawerScript.id) : '';
+  const { close } = useSSE({
+    path: ssePath,
     enabled: drawerVisible && !!drawerScript && stream,
     autoReconnect: false,
     onMessage: (msg: { type?: string; data?: ScriptLogLine; code?: number }) => {
@@ -166,8 +165,21 @@ export default function ScriptPage() {
     }
   };
 
-  const handleCopyContent = (content: string) => {
-    copyToClipboard(content, '已复制到剪贴板');
+  const handleDownload = async (script: Script) => {
+    try {
+      const res = await cronApi.getScript(script.id);
+      const full = res.data?.data;
+      if (!full?.content) throw new Error('脚本内容为空');
+      const blob = new Blob([full.content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = script.name.endsWith('.sh') ? script.name : `${script.name}.sh`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '下载脚本失败');
+    }
   };
 
   // ── 历史日志拉取（Drawer 打开时作为底，运行中续看时补历史）──
@@ -214,7 +226,10 @@ export default function ScriptPage() {
   };
 
   const handleStop = () => {
-    send({ type: 'stop' });
+    if (!drawerScript) return;
+    cronApi.stopScript(drawerScript.id).catch((error: unknown) => {
+      message.error(error instanceof Error ? error.message : '停止脚本失败');
+    });
   };
 
   const handleDrawerClose = () => {
@@ -265,7 +280,7 @@ export default function ScriptPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 240,
+      width: 280,
       render: (_: unknown, record: Script) => (
         <Space>
           {runningIds.includes(record.id) ? (
@@ -296,11 +311,11 @@ export default function ScriptPage() {
               onClick={() => handleViewLogs(record)}
             />
           </Tooltip>
-          <Tooltip title="复制内容">
+          <Tooltip title="下载">
             <Button
               type="link"
-              icon={<CopyOutlined />}
-              onClick={() => handleCopyContent(record.content)}
+              icon={<DownloadOutlined />}
+              onClick={() => handleDownload(record)}
             />
           </Tooltip>
           <Tooltip title="编辑">

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,19 +13,16 @@ import (
 	"easyserver/internal/cron"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"
-	gorillaWs "github.com/gorilla/websocket"
 )
 
 // CronHandler handles cron task API requests
 type CronHandler struct {
 	cronService *cron.Service
 	executor    executor.CommandExecutor
-	upgrader    gorillaWs.Upgrader
 	runner      *cron.ScriptRunner
 }
 
@@ -34,7 +31,6 @@ func NewCronHandler(cronService *cron.Service, exec executor.CommandExecutor) *C
 	return &CronHandler{
 		cronService: cronService,
 		executor:    exec,
-		upgrader:    httpx.CreateUpgrader(),
 		runner:      cron.NewScriptRunner(exec),
 	}
 }
@@ -338,6 +334,15 @@ func (h *CronHandler) GetScript(c *gin.Context) {
 	httpx.Success(c, script)
 }
 
+// ScriptLogs 是 /cron/scripts/:id/logs 的总入口：带 ?stream=1 走实时 SSE，否则返回历史日志 REST。
+func (h *CronHandler) ScriptLogs(c *gin.Context) {
+	if c.Query("stream") == "1" {
+		h.RunScriptSSE(c)
+		return
+	}
+	h.GetScriptLogs(c)
+}
+
 // GetScriptLogs 返回脚本的历史执行日志（journald，identifier=easyserver-script-<name>）。
 // 日志按脚本存（跨多次执行），返回最近 limit 条，供刷新后回看。
 func (h *CronHandler) GetScriptLogs(c *gin.Context) {
@@ -538,10 +543,10 @@ func (h *CronHandler) DeleteScript(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "脚本已删除"})
 }
 
-// RunScriptWebSocket 纯订阅运行中脚本的实时 stdout/stderr。
-// 启动已独立为 POST /cron/scripts/:id/run，此处**不**启动脚本 —— WS 连接不产生启动副作用。
-// 脚本未运行时返回错误，前端自行决定是否先调 REST 启动。
-func (h *CronHandler) RunScriptWebSocket(c *gin.Context) {
+// RunScriptSSE 通过 Server-Sent Events 单向推送运行中脚本的实时 stdout/stderr。
+// 启动/停止已独立为 REST（POST /cron/scripts/:id/run、/stop），此处**只订阅、不启动**。
+// 脚本未运行时返回 404，前端自行决定是否先调 REST 启动。
+func (h *CronHandler) RunScriptSSE(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
@@ -551,59 +556,39 @@ func (h *CronHandler) RunScriptWebSocket(c *gin.Context) {
 		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
 		return
 	}
-
-	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("script run ws upgrade error: %v", err)
-		return
-	}
-	defer conn.Close()
-
 	rs, ok := h.runner.Get(id)
 	if !ok {
-		conn.WriteMessage(gorillaWs.TextMessage,
-			[]byte(`{"type":"error","message":"脚本未在运行"}`))
+		c.Error(apperror.ErrNotFound.WithMessage("脚本未在运行"))
 		return
 	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.Error(apperror.ErrInternal.WithMessage("当前连接不支持流式输出"))
+		return
+	}
+	// 连接建立即 flush 一次，确保客户端立即收到响应头。
+	fmt.Fprint(c.Writer, ": connected\n\n")
+	flusher.Flush()
 
 	sub, cancel := rs.Subscribe()
 	defer cancel() // 只注销订阅，不 Kill 进程
 
-	stopCh := make(chan struct{}, 1)
-	doneCh := rs.Done()
-
-	// WS 读 goroutine：检测断开 + 解析 stop 指令。
-	infra.Go(func() {
-		conn.SetReadLimit(512)
-		conn.SetPongHandler(func(string) error {
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-			return nil
-		})
-		for {
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-			var msg map[string]string
-			if json.Unmarshal(data, &msg) == nil && msg["type"] == "stop" {
-				select {
-				case stopCh <- struct{}{}:
-				default:
-				}
-			}
-		}
-	})
-
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
+	doneCh := rs.Done()
 	for {
 		select {
 		case msg := <-sub:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
+			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", msg); err != nil {
 				return
 			}
+			flusher.Flush()
 		case <-doneCh:
 			// 脚本已退出，发退出码。
 			exitCode := 0
@@ -614,17 +599,20 @@ func (h *CronHandler) RunScriptWebSocket(c *gin.Context) {
 				"type": "exit",
 				"code": exitCode,
 			})
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			_ = conn.WriteMessage(gorillaWs.TextMessage, exitMsg)
-			return
-		case <-stopCh:
-			h.runner.Stop(id)
-			// 进程被 Kill，Wait goroutine 收尸后 done 关闭，走 doneCh 正常退出。
-		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
+			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", exitMsg); err != nil {
 				return
 			}
+			flusher.Flush()
+			return
+		case <-ticker.C:
+			// 心跳注释行，避免连接被中间层空闲断开。
+			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-c.Request.Context().Done():
+			// 客户端断开（fetch abort）时取消 request context。
+			return
 		}
 	}
 }
@@ -740,6 +728,5 @@ func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, cronSe
 	protected.DELETE("/cron/scripts/:id", handler.DeleteScript)
 	protected.POST("/cron/scripts/:id/stop", handler.StopScript)
 
-	wsGroup.GET("/scripts/:id/run", handler.RunScriptWebSocket)
-	protected.GET("/cron/scripts/:id/logs", handler.GetScriptLogs)
+	protected.GET("/cron/scripts/:id/logs", handler.ScriptLogs)
 }

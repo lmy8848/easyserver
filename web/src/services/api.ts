@@ -737,8 +737,8 @@ export const cronApi = {
   getScriptLogs: (id: number, limit?: number) =>
     api.get<ApiResponse<ScriptLogLine[]>>(`/cron/scripts/${id}/logs`, { params: { limit: limit || 200 } }),
 
-  // 脚本执行走 WebSocket，返回 WS path 供 useWebSocket hook 使用
-  scriptRunWSPath: (id: number) => `/ws/scripts/${id}/run`,
+  // 脚本实时日志走 SSE（fetch 流式，Bearer 鉴权），返回 SSE 相对路径
+  scriptLogsStreamPath: (id: number) => `/api/cron/scripts/${id}/logs?stream=1`,
 };
 
 // Firewall management

@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
@@ -13,13 +13,11 @@ import (
 	"time"
 
 	"easyserver/internal/httpx"
-	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
 
 	"github.com/gin-gonic/gin"
-	gorillaWs "github.com/gorilla/websocket"
 )
 
 // Monitor WebSocket constants
@@ -38,7 +36,6 @@ type MonitorHandler struct {
 	monitorService *monitor.MonitorService
 	executor       executor.CommandExecutor
 	jwtSecret      string
-	upgrader       gorillaWs.Upgrader
 }
 
 func NewMonitorHandler(monitorService *monitor.MonitorService, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
@@ -46,7 +43,6 @@ func NewMonitorHandler(monitorService *monitor.MonitorService, exec executor.Com
 		monitorService: monitorService,
 		executor:       exec,
 		jwtSecret:      jwtSecret,
-		upgrader:       httpx.CreateUpgrader(),
 	}
 }
 
@@ -106,59 +102,54 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 	})
 }
 
-func (h *MonitorHandler) HandleWebSocket(c *gin.Context) {
-	// User info already set by WSAuthMiddleware
-	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("monitor ws upgrade error: %v", err)
+// MonitorSSEPingInterval 是 SSE 心跳间隔（注释行保持连接活跃）。
+const MonitorSSEPingInterval = 15 * time.Second
+
+// HandleSSE 通过 Server-Sent Events 单向推送系统监控实时数据。
+// 鉴权复用 protected 组（Bearer），前端用 fetch 流式读取（可带 Authorization header）。
+func (h *MonitorHandler) HandleSSE(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.Error(apperror.ErrInternal.WithMessage("当前连接不支持流式输出"))
 		return
 	}
+	// 连接建立即 flush 一次，确保客户端立即收到响应头。
+	fmt.Fprint(c.Writer, ": connected\n\n")
+	flusher.Flush()
 
 	client := &monitor.MonitorClient{
 		Send: make(chan []byte, 16),
 	}
 
 	h.monitorService.Hub().Register(client)
+	defer h.monitorService.Hub().Unregister(client)
 
-	defer func() {
-		h.monitorService.Hub().Unregister(client)
-		conn.Close()
-	}()
-
-	infra.Go(func() {
-		ticker := time.NewTicker(MonitorWSPingInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case msg, ok := <-client.Send:
-				if !ok {
-					conn.WriteMessage(gorillaWs.CloseMessage, []byte{})
-					return
-				}
-				conn.SetWriteDeadline(time.Now().Add(MonitorWSWriteDeadline))
-				if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
-					return
-				}
-			case <-ticker.C:
-				conn.SetWriteDeadline(time.Now().Add(MonitorWSWriteDeadline))
-				if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
-					return
-				}
-			}
-		}
-	})
-
-	conn.SetReadLimit(MonitorWSReadLimit)
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(MonitorWSReadDeadline))
-		return nil
-	})
+	ticker := time.NewTicker(MonitorSSEPingInterval)
+	defer ticker.Stop()
 
 	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
-			break
+		select {
+		case msg, ok := <-client.Send:
+			if !ok {
+				return
+			}
+			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", msg); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-ticker.C:
+			// 心跳注释行：保持连接活跃，事件端忽略之。
+			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-c.Request.Context().Done():
+			// 客户端断开（fetch abort）时取消 request context。
+			return
 		}
 	}
 }
@@ -168,7 +159,7 @@ func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monito
 	handler := NewMonitorHandler(monitorService, exec, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/monitor/stats", handler.HandleStats)
 	protected.GET("/monitor/history", handler.HandleHistory)
-	wsGroup.GET("/monitor", handler.HandleWebSocket)
+	protected.GET("/monitor", handler.HandleSSE)
 
 	// Processes
 	protected.GET("/monitor/processes", handler.ListSystemProcesses)
