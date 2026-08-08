@@ -297,39 +297,6 @@ func (h *CronHandler) GetTaskLogs(c *gin.Context) {
 	httpx.Success(c, logs)
 }
 
-// DescribeSchedule 把调度表单转为 OnCalendar 表达式 + 中文描述。
-func (h *CronHandler) DescribeSchedule(c *gin.Context) {
-	var form cron.ScheduleForm
-	if err := c.ShouldBindJSON(&form); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-	onCalendar, err := cron.BuildOnCalendar(form)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的调度表单: " + err.Error()))
-		return
-	}
-	httpx.Success(c, gin.H{
-		"on_calendar": onCalendar,
-		"description": cron.DescribeSchedule(form),
-	})
-}
-
-// GetNextRun 返回 OnCalendar 表达式的下次执行时间（systemd-analyze 推导）。
-func (h *CronHandler) GetNextRun(c *gin.Context) {
-	onCalendar := c.Query("on_calendar")
-	if onCalendar == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("on_calendar 参数不能为空"))
-		return
-	}
-	next, err := nextRunOf(h.executor, onCalendar)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的调度表达式: " + err.Error()))
-		return
-	}
-	httpx.Success(c, gin.H{"next_run": next})
-}
-
 // ListScripts returns all scripts
 func (h *CronHandler) ListScripts(c *gin.Context) {
 	scripts, err := h.cronService.ListScripts(c.Request.Context())
@@ -554,26 +521,9 @@ func validateOnCalendar(exec executor.CommandExecutor, expr string) error {
 	return nil
 }
 
-// nextRunOf 用 systemd-analyze calendar 推导下次执行时间。
-func nextRunOf(exec executor.CommandExecutor, expr string) (string, error) {
-	stdout, _, exitCode, err := exec.Run(context.Background(), "systemd-analyze", "calendar", expr)
-	if err != nil || exitCode != 0 {
-		return "", fmt.Errorf("systemd 无法解析 %q", expr)
-	}
-	for _, line := range strings.Split(stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Next elapse:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Next elapse:")), nil
-		}
-	}
-	return "", nil
-}
-
 func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
 	handler := NewCronHandler(cronService, exec)
 
-	protected.POST("/cron/describe", handler.DescribeSchedule)
-	protected.GET("/cron/next-run", handler.GetNextRun)
 	protected.GET("/cron/tasks", handler.ListTasks)
 	protected.POST("/cron/tasks", handler.CreateTask)
 	protected.GET("/cron/tasks/:name", handler.GetTask)
