@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
-  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented,
+  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented, Radio,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, PlayCircleOutlined,
@@ -54,6 +54,7 @@ export default function CronTasks({
   const [editingTask, setEditingTask] = useState<CronTask | null>(null);
   const [form] = Form.useForm();
   const [mode, setMode] = useState<'preset' | 'manual'>('preset');
+  const [useType, setUseType] = useState<'command' | 'script'>('command');
   const [frequency, setFrequency] = useState<string>('daily');
   const [formDesc, setFormDesc] = useState('');
   const [descLoading, setDescLoading] = useState(false);
@@ -126,6 +127,7 @@ export default function CronTasks({
     form.resetFields();
     form.setFieldsValue({ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 });
     setMode('preset');
+    setUseType('command');
     setFrequency('daily');
     setFormDesc('');
     setNextRun('');
@@ -136,6 +138,7 @@ export default function CronTasks({
     setEditingTask(task);
     // 后端只存 OnCalendar 表达式，编辑时一律以表达式回显（手动模式）。
     setMode('manual');
+    setUseType(task.script_id > 0 ? 'script' : 'command');
     form.setFieldsValue({
       name: task.name,
       command: task.command,
@@ -157,8 +160,12 @@ export default function CronTasks({
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      if (!values.command && !values.script_id) {
-        message.error('请填写执行命令或选择脚本');
+      if (useType === 'command' && !values.command) {
+        message.error('请填写执行命令');
+        return;
+      }
+      if (useType === 'script' && !values.script_id) {
+        message.error('请选择关联脚本');
         return;
       }
       // 预设频率 → 先转 OnCalendar 表达式，再提交（后端只收表达式）
@@ -178,11 +185,11 @@ export default function CronTasks({
         return;
       }
       const payload = {
-        command: values.command || '',
+        command: useType === 'command' ? (values.command || '') : '',
         schedule,
         persistent: !!values.persistent,
         description: values.description || '',
-        script_id: values.script_id || 0,
+        script_id: useType === 'script' ? (values.script_id || 0) : 0,
         timeout: values.timeout || 0,
         max_retry: values.max_retry || 0,
         env_vars: values.env_vars || '',
@@ -360,6 +367,7 @@ export default function CronTasks({
         cancelText="取消"
         style={STYLES.modal}
         destroyOnHidden
+        zIndex={1000}
       >
         <Form
           form={form}
@@ -416,16 +424,24 @@ export default function CronTasks({
           <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
             <Input placeholder="例：daily-backup（小写字母/数字/连字符）" />
           </Form.Item>
-          <Form.Item name="command" label="执行命令" extra="任务将在所选运行时环境中执行，支持管道、脚本调用等 Shell 用法">
-            <Input.TextArea rows={2} placeholder="例：/opt/scripts/backup.sh（与脚本二选一）" />
+          <Form.Item label="执行内容">
+            <Radio.Group value={useType} onChange={(e) => setUseType(e.target.value)}>
+              <Radio.Button value="command">执行命令</Radio.Button>
+              <Radio.Button value="script">关联脚本</Radio.Button>
+            </Radio.Group>
           </Form.Item>
-          <Form.Item name="script_id" label="关联脚本">
-            <Select
-              placeholder="选择脚本（与命令二选一）"
-              allowClear
-              options={scripts.map(s => ({ label: `${s.name} (${s.language})`, value: s.id }))}
-            />
-          </Form.Item>
+          {useType === 'command' ? (
+            <Form.Item name="command" label="执行命令" extra="任务将在所选运行时环境中执行，支持管道、脚本调用等 Shell 用法">
+              <Input.TextArea rows={2} placeholder="例：/opt/scripts/backup.sh" />
+            </Form.Item>
+          ) : (
+            <Form.Item name="script_id" label="关联脚本" rules={[{ required: true, message: '请选择脚本' }]}>
+              <Select
+                placeholder="选择脚本"
+                options={scripts.map(s => ({ label: `${s.name} (${s.language})`, value: s.id }))}
+              />
+            </Form.Item>
+          )}
           <Form.Item
             name="runtime_version_id"
             label="运行时版本"
@@ -463,6 +479,7 @@ export default function CronTasks({
         onCancel={() => { setPreviewVisible(false); setNextRun(''); }}
         footer={<Button onClick={() => { setPreviewVisible(false); setNextRun(''); }}>关闭</Button>}
         width={400}
+        zIndex={1200}
       >
         {previewLoading ? (
           <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>

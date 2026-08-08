@@ -113,7 +113,7 @@ export default function CronDocs({ visible, onClose }: CronDocsProps) {
       open={visible}
       onClose={onClose}
       size={600}
-      zIndex={1200}
+      zIndex={1100}
     >
       <Collapse
         defaultActiveKey={DOCS.map(d => d.key)}
