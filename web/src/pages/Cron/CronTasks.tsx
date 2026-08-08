@@ -146,7 +146,7 @@ export default function CronTasks({
   const handleCreate = () => {
     setEditingTask(null);
     form.resetFields();
-    form.setFieldsValue({ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1, envs: [{ key: '', value: '' }] });
+    form.setFieldsValue({ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1, envs: [] });
     setMode('preset');
     setUseType('command');
     setFrequency('daily');
@@ -169,7 +169,7 @@ export default function CronTasks({
       script_id: task.script_id || undefined,
       timeout: task.timeout || 0,
       max_retry: task.max_retry || 0,
-      envs: parseEnvVars(task.env_vars || '').length ? parseEnvVars(task.env_vars || '') : [{ key: '', value: '' }],
+      envs: parseEnvVars(task.env_vars || ''),
       work_dir: task.work_dir || '',
       runtime_version_id: task.runtime_version_id || undefined,
     });
@@ -501,7 +501,7 @@ export default function CronTasks({
                       <Form.Item {...field} name={[field.name, 'value']} noStyle>
                         <Input placeholder="VALUE" style={{ fontFamily: 'monospace', width: 220 }} />
                       </Form.Item>
-                      <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)} disabled={fields.length === 1} />
+                      <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
                     </Space>
                   ))}
                   <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
