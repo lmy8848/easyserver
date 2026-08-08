@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  ApiResponse, CronTask, CronLog, Script,
+  ApiResponse, CronTask, CronLog, Script, ScheduleForm,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
@@ -690,10 +690,10 @@ export const cronApi = {
   get: (name: string) =>
     api.get<ApiResponse<CronTask>>(`/cron/tasks/${name}`),
 
-  create: (data: { name: string; command?: string; schedule_form: ScheduleForm; persistent?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id: number }) =>
+  create: (data: { name: string; command?: string; schedule: string; persistent?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id: number }) =>
     api.post<ApiResponse<CronTask>>('/cron/tasks', data),
 
-  update: (name: string, data: { name?: string; command?: string; schedule_form?: ScheduleForm; persistent?: boolean; enabled?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id?: number }) =>
+  update: (name: string, data: { name?: string; command?: string; schedule?: string; persistent?: boolean; enabled?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id?: number }) =>
     api.put<ApiResponse<CronTask>>(`/cron/tasks/${name}`, data),
 
   delete: (name: string) =>

@@ -312,7 +312,6 @@ export interface CronTask {
   name: string;
   command: string;
   schedule: string; // OnCalendar 表达式
-  schedule_form: ScheduleForm; // UI 编辑回显
   description: string;
   persistent: boolean;
   enabled: boolean;

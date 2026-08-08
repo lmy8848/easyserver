@@ -161,9 +161,10 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 	if restartDelay <= 0 {
 		restartDelay = 5
 	}
-	timeout := spec.Timeout
-	if timeout <= 0 {
-		timeout = 3600
+	// 0 = 不超时（infinity）；否则按秒限制单次执行时长。
+	timeoutLine := "TimeoutStartSec=infinity"
+	if spec.Timeout > 0 {
+		timeoutLine = fmt.Sprintf("TimeoutStartSec=%d", spec.Timeout)
 	}
 
 	desc := spec.Description
@@ -203,7 +204,7 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 	}
 	fmt.Fprintf(&b, "Restart=on-failure\n")
 	fmt.Fprintf(&b, "RestartSec=%d\n", restartDelay)
-	fmt.Fprintf(&b, "TimeoutStartSec=%d\n", timeout)
+	fmt.Fprintf(&b, "%s\n", timeoutLine)
 	return b.String(), nil
 }
 

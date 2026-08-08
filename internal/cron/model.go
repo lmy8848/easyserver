@@ -2,58 +2,58 @@ package cron
 
 // CronTask 表示一条定时任务，承载为 systemd 的一对 .timer + .service（ADR-0004）。
 // 任务以 Name（unit 名，不含前缀）为唯一标识，无 DB 记录；状态读 systemctl，
-// 日志走 journald。Schedule 是 OnCalendar 表达式，ScheduleForm 是 UI 编辑回显。
+// 日志走 journald。Schedule 是 OnCalendar 表达式（前端预设频率或手写均转为它）。
 type CronTask struct {
-	Name             string       `json:"name"`
-	Description      string       `json:"description"`
-	Schedule         string       `json:"schedule"`      // OnCalendar 表达式
-	ScheduleForm     ScheduleForm `json:"schedule_form"` // UI 调度表单（编辑回显）
-	Persistent       bool         `json:"persistent"`    // 错过补跑
-	Enabled          bool         `json:"enabled"`
-	Status           string       `json:"status"` // active / inactive / failed
-	LastRun          string       `json:"last_run"`
-	LastResult       string       `json:"last_result"`
-	NextRun          string       `json:"next_run"`
-	ScriptID         int          `json:"script_id"` // 0 = 无脚本
-	Command          string       `json:"command"`   // 用户命令或脚本内容
-	Timeout          int          `json:"timeout"`   // 秒，0 = 默认
-	MaxRetry         int          `json:"max_retry"` // 0 = 不重试
-	EnvVars          string       `json:"env_vars"`  // "KEY=VALUE\n..." 每行一个
-	WorkDir          string       `json:"work_dir"`
-	RuntimeVersionID int64        `json:"runtime_version_id"`
-	RuntimeLang      string       `json:"runtime_lang"`
-	RuntimeExact     string       `json:"runtime_exact"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Schedule         string `json:"schedule"` // OnCalendar 表达式
+	Persistent       bool   `json:"persistent"`
+	Enabled          bool   `json:"enabled"`
+	Status           string `json:"status"` // active / inactive / failed
+	LastRun          string `json:"last_run"`
+	LastResult       string `json:"last_result"`
+	NextRun          string `json:"next_run"`
+	ScriptID         int    `json:"script_id"` // 0 = 无脚本
+	Command          string `json:"command"`   // 用户命令或脚本路径
+	Timeout          int    `json:"timeout"`   // 秒，0 = 不超时
+	MaxRetry         int    `json:"max_retry"` // 0 = 不重试
+	EnvVars          string `json:"env_vars"`  // "KEY=VALUE\n..." 每行一个
+	WorkDir          string `json:"work_dir"`
+	RuntimeVersionID int64  `json:"runtime_version_id"`
+	RuntimeLang      string `json:"runtime_lang"`
+	RuntimeExact     string `json:"runtime_exact"`
 }
 
-// CreateCronTaskRequest 是创建定时任务的请求体。
+// CreateCronTaskRequest 是创建定时任务的请求体。Schedule 为 OnCalendar 表达式
+// （前端预设频率或手写均转为它），后端只负责解析校验。
 type CreateCronTaskRequest struct {
-	Name             string       `json:"name" binding:"required"`
-	Description      string       `json:"description"`
-	ScheduleForm     ScheduleForm `json:"schedule_form"`
-	Persistent       bool         `json:"persistent"`
-	ScriptID         int          `json:"script_id"`
-	Command          string       `json:"command"`
-	Timeout          int          `json:"timeout"`
-	MaxRetry         int          `json:"max_retry"`
-	EnvVars          string       `json:"env_vars"`
-	WorkDir          string       `json:"work_dir"`
-	RuntimeVersionID int64        `json:"runtime_version_id" binding:"required,min=1"`
+	Name             string `json:"name" binding:"required"`
+	Description      string `json:"description"`
+	Schedule         string `json:"schedule" binding:"required"` // OnCalendar 表达式
+	Persistent       bool   `json:"persistent"`
+	ScriptID         int    `json:"script_id"`
+	Command          string `json:"command"`
+	Timeout          int    `json:"timeout"`
+	MaxRetry         int    `json:"max_retry"`
+	EnvVars          string `json:"env_vars"`
+	WorkDir          string `json:"work_dir"`
+	RuntimeVersionID int64  `json:"runtime_version_id" binding:"required,min=1"`
 }
 
 // UpdateCronTaskRequest 是更新定时任务的请求体（指针字段 = 部分更新）。
 type UpdateCronTaskRequest struct {
-	Name             *string       `json:"name"`
-	Description      *string       `json:"description"`
-	ScheduleForm     *ScheduleForm `json:"schedule_form"`
-	Persistent       *bool         `json:"persistent"`
-	Enabled          *bool         `json:"enabled"`
-	ScriptID         *int          `json:"script_id"`
-	Command          *string       `json:"command"`
-	Timeout          *int          `json:"timeout"`
-	MaxRetry         *int          `json:"max_retry"`
-	EnvVars          *string       `json:"env_vars"`
-	WorkDir          *string       `json:"work_dir"`
-	RuntimeVersionID *int64        `json:"runtime_version_id"`
+	Name             *string `json:"name"`
+	Description      *string `json:"description"`
+	Schedule         *string `json:"schedule"` // OnCalendar 表达式（可选）
+	Persistent       *bool   `json:"persistent"`
+	Enabled          *bool   `json:"enabled"`
+	ScriptID         *int    `json:"script_id"`
+	Command          *string `json:"command"`
+	Timeout          *int    `json:"timeout"`
+	MaxRetry         *int    `json:"max_retry"`
+	EnvVars          *string `json:"env_vars"`
+	WorkDir          *string `json:"work_dir"`
+	RuntimeVersionID *int64  `json:"runtime_version_id"`
 }
 
 // Script 表示可被 Cron Task 引用的可复用脚本。内容落盘 /opt/easyserver/scripts/，

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
-  message, Popconfirm, Table, Empty, Spin, Tooltip,
+  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, PlayCircleOutlined,
@@ -45,10 +45,6 @@ const WEEKDAY_OPTIONS = [
   { value: 'Sun', label: '周日' },
 ];
 
-function defaultForm(): ScheduleForm {
-  return { frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 };
-}
-
 export default function CronTasks({
   tasks, loading, operating, scripts,
   onRefresh, onDelete, onToggle, onRun, onViewLogs, onShowHelp,
@@ -56,6 +52,7 @@ export default function CronTasks({
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<CronTask | null>(null);
   const [form] = Form.useForm();
+  const [mode, setMode] = useState<'preset' | 'manual'>('preset');
   const [frequency, setFrequency] = useState<string>('daily');
   const [formDesc, setFormDesc] = useState('');
   const [descLoading, setDescLoading] = useState(false);
@@ -70,8 +67,9 @@ export default function CronTasks({
     };
   }, []);
 
-  // 调度表单变化 → 请求后端转 OnCalendar + 描述
+  // 调度表单变化 → 请求后端转 OnCalendar + 描述（仅预设模式）
   const refreshFormDesc = useCallback(async () => {
+    if (mode === 'manual') return;
     const v = form.getFieldsValue();
     const formData: ScheduleForm = {
       frequency: v.frequency,
@@ -89,7 +87,7 @@ export default function CronTasks({
     } finally {
       setDescLoading(false);
     }
-  }, [form]);
+  }, [form, mode]);
 
   const scheduleChanged = useCallback(() => {
     if (previewTimer.current) clearTimeout(previewTimer.current);
@@ -97,19 +95,28 @@ export default function CronTasks({
   }, [refreshFormDesc]);
 
   const handlePreview = useCallback(async () => {
-    const v = form.getFieldsValue();
-    const formData: ScheduleForm = {
-      frequency: v.frequency,
-      every_n: v.every_n || 5,
-      time: v.time || '03:00',
-      weekdays: v.weekdays?.length ? v.weekdays : ['Mon'],
-      day_of_month: v.day_of_month || 1,
-    };
     setPreviewLoading(true);
     setPreviewVisible(true);
     try {
-      const res = await cronApi.describeSchedule(formData);
-      const onCalendar = res.data?.data?.on_calendar || '';
+      let onCalendar = '';
+      if (mode === 'manual') {
+        onCalendar = form.getFieldValue('schedule')?.trim() || '';
+      } else {
+        const v = form.getFieldsValue();
+        const formData: ScheduleForm = {
+          frequency: v.frequency,
+          every_n: v.every_n || 5,
+          time: v.time || '03:00',
+          weekdays: v.weekdays?.length ? v.weekdays : ['Mon'],
+          day_of_month: v.day_of_month || 1,
+        };
+        const res = await cronApi.describeSchedule(formData);
+        onCalendar = res.data?.data?.on_calendar || '';
+      }
+      if (!onCalendar) {
+        setNextRun('请先填写调度表达式');
+        return;
+      }
       const nres = await cronApi.getNextRun(onCalendar);
       setNextRun(nres.data?.data?.next_run || '');
     } catch {
@@ -117,12 +124,13 @@ export default function CronTasks({
     } finally {
       setPreviewLoading(false);
     }
-  }, [form]);
+  }, [form, mode]);
 
   const handleCreate = () => {
     setEditingTask(null);
     form.resetFields();
     form.setFieldsValue({ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 });
+    setMode('preset');
     setFrequency('daily');
     setFormDesc('');
     setNextRun('');
@@ -131,15 +139,12 @@ export default function CronTasks({
 
   const handleEdit = (task: CronTask) => {
     setEditingTask(task);
-    const sf = task.schedule_form || defaultForm();
+    // 后端只存 OnCalendar 表达式，编辑时一律以表达式回显（手动模式）。
+    setMode('manual');
     form.setFieldsValue({
       name: task.name,
       command: task.command,
-      frequency: sf.frequency,
-      every_n: sf.every_n || 5,
-      time: sf.time || '03:00',
-      weekdays: sf.weekdays,
-      day_of_month: sf.day_of_month || 1,
+      schedule: task.schedule,
       persistent: task.persistent,
       description: task.description,
       script_id: task.script_id || undefined,
@@ -149,7 +154,6 @@ export default function CronTasks({
       work_dir: task.work_dir || '',
       runtime_version_id: task.runtime_version_id || undefined,
     });
-    setFrequency(sf.frequency);
     setFormDesc('');
     setNextRun('');
     setModalVisible(true);
@@ -162,16 +166,26 @@ export default function CronTasks({
         message.error('请填写执行命令或选择脚本');
         return;
       }
-      const formData: ScheduleForm = {
-        frequency: values.frequency,
-        every_n: values.every_n || 5,
-        time: values.time || '03:00',
-        weekdays: values.weekdays?.length ? values.weekdays : ['Mon'],
-        day_of_month: values.day_of_month || 1,
-      };
-      const common = {
+      // 预设频率 → 先转 OnCalendar 表达式，再提交（后端只收表达式）
+      let schedule = values.schedule?.trim() || '';
+      if (mode === 'preset') {
+        const formData: ScheduleForm = {
+          frequency: values.frequency,
+          every_n: values.every_n || 5,
+          time: values.time || '03:00',
+          weekdays: values.weekdays?.length ? values.weekdays : ['Mon'],
+          day_of_month: values.day_of_month || 1,
+        };
+        const res = await cronApi.describeSchedule(formData);
+        schedule = res.data?.data?.on_calendar || '';
+      }
+      if (!schedule) {
+        message.error('请填写调度表达式');
+        return;
+      }
+      const payload = {
         command: values.command || '',
-        schedule_form: formData,
+        schedule,
         persistent: !!values.persistent,
         description: values.description || '',
         script_id: values.script_id || 0,
@@ -182,10 +196,10 @@ export default function CronTasks({
         runtime_version_id: values.runtime_version_id,
       };
       if (editingTask) {
-        await cronApi.update(editingTask.name, { ...common, name: values.name });
+        await cronApi.update(editingTask.name, { ...payload, name: values.name });
         message.success('任务已更新');
       } else {
-        await cronApi.create({ ...common, name: values.name, runtime_version_id: values.runtime_version_id });
+        await cronApi.create({ ...payload, name: values.name, runtime_version_id: values.runtime_version_id });
         message.success('任务已创建');
       }
       setModalVisible(false);
@@ -359,11 +373,35 @@ export default function CronTasks({
           onValuesChange={scheduleChanged}
           initialValues={{ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 }}
         >
-          <RowForm frequency={frequency} setFrequency={(f) => { setFrequency(f); form.setFieldsValue({ frequency: f }); }} />
-          <div style={STYLES.description}>
-            {descLoading ? <Spin size="small" /> : (formDesc || <span style={{ color: '#8c8c8c' }}>选择调度频率后，将自动生成对应的执行计划</span>)}
-            <Button type="link" size="small" icon={<EyeOutlined />} onClick={handlePreview} loading={previewLoading}>预览下次执行</Button>
-          </div>
+          <Form.Item label="调度方式">
+            <Segmented
+              block
+              value={mode}
+              onChange={(v) => setMode(v as 'preset' | 'manual')}
+              options={[
+                { label: '预设频率', value: 'preset' },
+                { label: '自定义表达式', value: 'manual' },
+              ]}
+            />
+          </Form.Item>
+          {mode === 'preset' ? (
+            <>
+              <RowForm frequency={frequency} setFrequency={(f) => { setFrequency(f); form.setFieldsValue({ frequency: f }); }} />
+              <div style={STYLES.description}>
+                {descLoading ? <Spin size="small" /> : (formDesc || <span style={{ color: '#8c8c8c' }}>选择调度频率后，将自动生成对应的执行计划</span>)}
+                <Button type="link" size="small" icon={<EyeOutlined />} onClick={handlePreview} loading={previewLoading}>预览下次执行</Button>
+              </div>
+            </>
+          ) : (
+            <Form.Item
+              name="schedule"
+              label="调度表达式"
+              rules={[{ required: true, message: '请输入调度表达式' }]}
+              extra="例：*-*-* 03:00:00（每天 3 点）、*:00/5（每 5 分钟）、Mon..Fri *-*-* 09:00:00（工作日 9 点）"
+            >
+              <Input placeholder="例：*-*-* 03:00:00" style={{ fontFamily: 'monospace' }} />
+            </Form.Item>
+          )}
           <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
             <Input placeholder="例：daily-backup（小写字母/数字/连字符）" />
           </Form.Item>
@@ -395,7 +433,7 @@ export default function CronTasks({
           <Form.Item name="work_dir" label="工作目录" extra="可选">
             <Input placeholder="例：/opt/app" />
           </Form.Item>
-          <Form.Item name="timeout" label="超时时间（秒）" extra="0 = 默认 3600">
+          <Form.Item name="timeout" label="超时时间（秒）" extra="0 = 不超时">
             <InputNumber style={{ width: '100%' }} placeholder="0" min={0} max={86400} />
           </Form.Item>
           <Form.Item name="max_retry" label="失败重试次数" extra="0 = 不重试">

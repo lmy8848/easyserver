@@ -107,6 +107,24 @@ func TestRenderCronService(t *testing.T) {
 	}
 }
 
+func TestRenderCronService_TimeoutZero(t *testing.T) {
+	// Timeout=0 表示不超时（infinity），而非默认 3600。
+	content, err := RenderCronService(&TimerSpec{
+		Name:      "x",
+		ExecStart: "echo hi",
+		Timeout:   0,
+	}, mise.NewProvider())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "TimeoutStartSec=infinity") {
+		t.Errorf("Timeout=0 应输出不超时，实际:\n%s", content)
+	}
+	if strings.Contains(content, "TimeoutStartSec=3600") {
+		t.Errorf("Timeout=0 不应输出 3600:\n%s", content)
+	}
+}
+
 func TestCronTimerName(t *testing.T) {
 	if got := CronTimerName("easyserver-cron-daily-backup.timer"); got != "daily-backup" {
 		t.Errorf("期望 daily-backup，实际 %q", got)

@@ -72,10 +72,10 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	// 调度表单 → OnCalendar
-	onCalendar, err := cron.BuildOnCalendar(req.ScheduleForm)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的调度表单: " + err.Error()))
+	// 调度表达式（OnCalendar），前端预设频率或手写均转为它
+	onCalendar := strings.TrimSpace(req.Schedule)
+	if onCalendar == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("调度表达式不能为空"))
 		return
 	}
 	if err := validateOnCalendar(h.executor, onCalendar); err != nil {
@@ -88,7 +88,7 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("必须提供命令或脚本ID"))
 		return
 	}
-	// Validate timeout and retry bounds
+	// Validate timeout and retry bounds（0 = 不超时 / 不重试）
 	if req.Timeout < 0 || req.Timeout > 86400 {
 		c.Error(apperror.ErrBadRequest.WithMessage("超时时间必须在 0 到 86400 秒之间"))
 		return
@@ -102,7 +102,6 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		Name:             req.Name,
 		Command:          req.Command,
 		Schedule:         onCalendar,
-		ScheduleForm:     req.ScheduleForm,
 		Description:      req.Description,
 		Persistent:       req.Persistent,
 		Enabled:          true,
@@ -158,10 +157,10 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 	if req.Enabled != nil {
 		task.Enabled = *req.Enabled
 	}
-	if req.ScheduleForm != nil {
-		onCalendar, err := cron.BuildOnCalendar(*req.ScheduleForm)
-		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的调度表单: " + err.Error()))
+	if req.Schedule != nil {
+		onCalendar := strings.TrimSpace(*req.Schedule)
+		if onCalendar == "" {
+			c.Error(apperror.ErrBadRequest.WithMessage("调度表达式不能为空"))
 			return
 		}
 		if err := validateOnCalendar(h.executor, onCalendar); err != nil {
@@ -169,7 +168,6 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 			return
 		}
 		task.Schedule = onCalendar
-		task.ScheduleForm = *req.ScheduleForm
 	}
 	if req.Command != nil {
 		if strings.ContainsAny(*req.Command, "\r\n") {
