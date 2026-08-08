@@ -493,16 +493,16 @@ export default function CronTasks({
               {(fields, { add, remove }) => (
                 <>
                   {fields.map((field) => (
-                    <Space key={field.key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
+                    <div key={field.key} style={{ display: 'flex', gap: 8, marginBottom: 8 }} className="cron-env-row">
                       <Form.Item {...field} name={[field.name, 'key']} rules={[{ required: true, whitespace: true, message: '请填写变量名' }]} noStyle>
-                        <Input placeholder="KEY" style={{ fontFamily: 'monospace', width: 220 }} />
+                        <Input placeholder="KEY" style={{ fontFamily: 'monospace', flex: 1, minWidth: 0 }} />
                       </Form.Item>
-                      <span style={{ color: '#999' }}>=</span>
+                      <span style={{ color: '#999', lineHeight: '32px' }}>=</span>
                       <Form.Item {...field} name={[field.name, 'value']} noStyle>
-                        <Input placeholder="VALUE" style={{ fontFamily: 'monospace', width: 220 }} />
+                        <Input placeholder="VALUE" style={{ fontFamily: 'monospace', flex: 1, minWidth: 0 }} />
                       </Form.Item>
-                      <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                    </Space>
+                      <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                    </div>
                   ))}
                   <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
                     添加环境变量
