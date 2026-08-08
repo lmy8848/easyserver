@@ -380,7 +380,7 @@ export default function CronTasks({
           </Form.Item>
           {mode === 'preset' ? (
             <>
-              <RowForm frequency={frequency} setFrequency={(f) => { setFrequency(f); form.setFieldsValue({ frequency: f }); }} />
+              <RowForm frequency={frequency} setFrequency={(f) => { setFrequency(f); form.setFieldsValue({ frequency: f }); }} onShowHelp={onShowHelp} />
               <div style={STYLES.description}>
                 {descLoading ? <Spin size="small" /> : (formDesc || <span style={{ color: '#8c8c8c' }}>选择调度频率后，将自动生成对应的执行计划</span>)}
                 <Button type="link" size="small" icon={<EyeOutlined />} onClick={handlePreview} loading={previewLoading}>预览下次执行</Button>
@@ -475,10 +475,22 @@ export default function CronTasks({
 }
 
 // 调度表单：频率 + 条件子字段
-function RowForm({ frequency, setFrequency }: { frequency: string; setFrequency: (f: string) => void }) {
+function RowForm({ frequency, setFrequency, onShowHelp }: { frequency: string; setFrequency: (f: string) => void; onShowHelp?: () => void }) {
   return (
     <>
-      <Form.Item name="frequency" label={<Space>调度频率 <Tooltip title="查看使用手册"><Button type="link" size="small" icon={<QuestionCircleOutlined />} /></Tooltip></Space>}>
+      <Form.Item
+        name="frequency"
+        label={
+          <Space>
+            <span>调度频率</span>
+            {onShowHelp && (
+              <Tooltip title="查看使用手册">
+                <Button type="link" size="small" icon={<QuestionCircleOutlined />} onClick={onShowHelp} />
+              </Tooltip>
+            )}
+          </Space>
+        }
+      >
         <Select options={FREQUENCY_OPTIONS} onChange={setFrequency} />
       </Form.Item>
       {(frequency === 'minutely' || frequency === 'hourly') && (
