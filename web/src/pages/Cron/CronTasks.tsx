@@ -452,8 +452,8 @@ export default function CronTasks({
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="任务描述（可选）" />
           </Form.Item>
-          <Form.Item name="work_dir" label="工作目录" extra="可选">
-            <Input placeholder="例：/opt/app" />
+          <Form.Item name="work_dir" label="工作目录">
+            <Input placeholder="例：/opt/app（可选）" />
           </Form.Item>
           <Row gutter={16}>
             <Col xs={24} sm={12}>
