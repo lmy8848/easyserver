@@ -724,14 +724,12 @@ func parseJournalRuns(stdout string) []CronRun {
 		if runs[i].Status == "" {
 			runs[i].Status = "running"
 		}
-		// journalctl -n 为逆序输出：单次日志恢复为按时间正序（旧 → 新）。
-		logs := runs[i].Logs
-		for a, b := 0, len(logs)-1; a < b; a, b = a+1, b-1 {
-			logs[a], logs[b] = logs[b], logs[a]
-		}
-		runs[i].Logs = logs
 	}
-	// runs 保持 newest-first（执行列表按最新在前）。
+	// journalctl 为正序输出（旧 → 新），单次日志已按时间正序，无需处理。
+	// runs 反转为 newest-first（执行列表按最新在前）。
+	for i, j := 0, len(runs)-1; i < j; i, j = i+1, j-1 {
+		runs[i], runs[j] = runs[j], runs[i]
+	}
 	return runs
 }
 

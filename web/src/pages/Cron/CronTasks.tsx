@@ -287,7 +287,6 @@ export default function CronTasks({
           checked={enabled}
           onChange={() => onToggle(record)}
           loading={operating === `toggle-${record.name}`}
-          size="small"
           checkedChildren="启用"
           unCheckedChildren="禁用"
         />
@@ -297,7 +296,7 @@ export default function CronTasks({
       title: '上次执行时间',
       dataIndex: 'last_run',
       key: 'last_run',
-      width: 160,
+      width: 200,
       render: (lastRun: string) => lastRun || '-',
     },
     {
@@ -315,7 +314,7 @@ export default function CronTasks({
               disabled={!record.enabled}
             />
           </Tooltip>
-          <Tooltip title="执行日志">
+          <Tooltip title="执行记录">
             <Button
               type="link"
               icon={<HistoryOutlined />}
@@ -331,7 +330,7 @@ export default function CronTasks({
           </Tooltip>
           <Popconfirm
             title="确定删除此任务？"
-            description="删除后将无法恢复，任务及其执行日志会被一并移除"
+            description="删除后将无法恢复，任务及其执行记录会被一并移除"
             onConfirm={() => onDelete(record)}
             okText="删除"
             cancelText="取消"
