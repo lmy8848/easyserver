@@ -75,12 +75,13 @@ func (s *Service) GetScript(ctx context.Context, id int64) (*Script, error) {
 	return script, nil
 }
 
-// CreateScript 先写元数据行拿 ID，再写带 shebang 的内容文件；文件写失败回滚记录。
+// CreateScript 先写元数据行拿 ID，再原样写内容文件（含用户自带的 shebang，
+// 执行靠文件首行解释器决定，不额外补）；文件写失败回滚记录。
 func (s *Service) CreateScript(ctx context.Context, script *Script) error {
 	if err := s.repo.CreateScript(ctx, script); err != nil {
 		return err
 	}
-	if err := s.repo.WriteScriptFile(script.ID, withShebang(script.Content, script.Language)); err != nil {
+	if err := s.repo.WriteScriptFile(script.ID, script.Content); err != nil {
 		_ = s.repo.DeleteScript(ctx, script.ID)
 		return fmt.Errorf("写脚本文件失败（已回滚记录）: %w", err)
 	}
@@ -88,29 +89,17 @@ func (s *Service) CreateScript(ctx context.Context, script *Script) error {
 	return nil
 }
 
-// UpdateScript 更新元数据；提供新内容则重写带 shebang 的文件。
+// UpdateScript 更新元数据；提供新内容则原样重写文件。
 func (s *Service) UpdateScript(ctx context.Context, script *Script) error {
 	if err := s.repo.UpdateScript(ctx, script); err != nil {
 		return err
 	}
 	if script.Content != "" {
-		if err := s.repo.WriteScriptFile(script.ID, withShebang(script.Content, script.Language)); err != nil {
+		if err := s.repo.WriteScriptFile(script.ID, script.Content); err != nil {
 			return fmt.Errorf("重写脚本文件失败: %w", err)
 		}
 	}
 	return nil
-}
-
-// withShebang 按语言补 shebang 行，使落盘脚本可执行。
-func withShebang(content, language string) string {
-	shebang := map[string]string{
-		"sh":      "#!/bin/sh",
-		"bash":    "#!/bin/bash",
-		"python":  "#!/usr/bin/env python3",
-		"python3": "#!/usr/bin/env python3",
-		"":        "#!/bin/sh",
-	}[language]
-	return shebang + "\n" + content
 }
 
 func (s *Service) DeleteScript(ctx context.Context, id int64) error {

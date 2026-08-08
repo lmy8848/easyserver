@@ -467,7 +467,7 @@ export default function CronTasks({
             ) : (
               <Select
                 placeholder="选择脚本"
-                options={scripts.map(s => ({ label: `${s.name} (${s.language})`, value: s.path }))}
+                options={scripts.map(s => ({ label: s.name, value: s.path }))}
               />
             )}
           </Form.Item>

@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -336,18 +335,6 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "创建脚本 "+req.Name)
-	language := req.Language
-	if language == "" {
-		language = "sh"
-	}
-	if err := validateScriptLanguage(language); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-	if err := h.checkInterpreterInstalled(language); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("language '%s' is not installed: %v", language, err)))
-		return
-	}
 	if strings.TrimSpace(req.Content) == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("脚本内容不能为空"))
 		return
@@ -369,7 +356,6 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 		Name:        req.Name,
 		Description: req.Description,
 		Content:     req.Content,
-		Language:    language,
 	}
 	if err := h.cronService.CreateScript(c.Request.Context(), script); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -380,32 +366,6 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, script)
-}
-
-// validateScriptLanguage checks if the language is supported
-func validateScriptLanguage(language string) error {
-	supported := map[string]bool{
-		"sh":      true,
-		"bash":    true,
-		"python":  true,
-		"python3": true,
-	}
-	if !supported[language] {
-		return fmt.Errorf("unsupported language '%s', supported: sh, bash, python, python3", language)
-	}
-	return nil
-}
-
-// checkInterpreterInstalled verifies the language interpreter exists on the server
-func (h *CronHandler) checkInterpreterInstalled(language string) error {
-	path, err := h.executor.LookPath(language)
-	if err != nil {
-		return fmt.Errorf("interpreter '%s' not found in PATH", language)
-	}
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("interpreter '%s' not accessible: %v", language, err)
-	}
-	return nil
 }
 
 // UpdateScript updates an existing script
@@ -451,17 +411,6 @@ func (h *CronHandler) UpdateScript(c *gin.Context) {
 			return
 		}
 		script.Content = *req.Content
-	}
-	if req.Language != nil {
-		if err := validateScriptLanguage(*req.Language); err != nil {
-			c.Error(apperror.ErrBadRequest.Wrap(err))
-			return
-		}
-		if err := h.checkInterpreterInstalled(*req.Language); err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("language '%s' is not installed: %v", *req.Language, err)))
-			return
-		}
-		script.Language = *req.Language
 	}
 
 	if err := h.cronService.UpdateScript(c.Request.Context(), script); err != nil {

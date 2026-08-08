@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Input, Select,
+  Card, Button, Space, Modal, Form, Input,
   message, Popconfirm, Table, Empty, Tooltip, Collapse,
 } from 'antd';
 import {
@@ -11,18 +11,6 @@ import type { Script } from '../types';
 import { cronApi } from '../services/api';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
 import { copyToClipboard } from '../utils/clipboard';
-
-const LANG_OPTIONS = [
-  { label: 'Shell', value: 'sh' },
-  { label: 'Bash', value: 'bash' },
-  { label: 'Python', value: 'python' },
-];
-
-const LANG_COLORS: Record<string, string> = {
-  sh: 'blue',
-  bash: 'green',
-  python: 'orange',
-};
 
 export default function ScriptPage() {
   const [scripts, setScripts] = useState<Script[]>([]);
@@ -49,7 +37,6 @@ export default function ScriptPage() {
   const handleCreate = () => {
     setEditingScript(null);
     form.resetFields();
-    form.setFieldsValue({ language: 'sh' });
     setModalVisible(true);
   };
 
@@ -61,7 +48,6 @@ export default function ScriptPage() {
     setEditingScript(null);
     form.setFieldsValue({
       name: template.name,
-      language: template.language,
       description: template.description,
       content: template.content,
     });
@@ -75,7 +61,6 @@ export default function ScriptPage() {
       name: script.name,
       description: script.description,
       content: script.content,
-      language: script.language,
     });
     setModalVisible(true);
   };
@@ -124,15 +109,6 @@ export default function ScriptPage() {
           <CodeOutlined />
           <span>{name}</span>
         </Space>
-      ),
-    },
-    {
-      title: '语言',
-      dataIndex: 'language',
-      key: 'language',
-      width: 100,
-      render: (lang: string) => (
-        <Tag color={LANG_COLORS[lang] || 'default'}>{lang}</Tag>
       ),
     },
     {
@@ -219,9 +195,6 @@ export default function ScriptPage() {
           <Form.Item name="name" label="脚本名称" rules={[{ required: true, message: '请输入脚本名称' }]}>
             <Input placeholder="e.g. backup-db" />
           </Form.Item>
-          <Form.Item name="language" label="语言">
-            <Select options={LANG_OPTIONS} />
-          </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="可选描述" />
           </Form.Item>
@@ -263,12 +236,7 @@ export default function ScriptPage() {
                       style={{ cursor: 'pointer' }}
                     >
                       <Space orientation="vertical" style={{ width: '100%' }}>
-                        <Space>
-                          <Tag color={LANG_COLORS[template.language || ''] || 'default'}>
-                            {template.language || 'unknown'}
-                          </Tag>
-                          <span style={{ fontWeight: 500 }}>{template.name}</span>
-                        </Space>
+                        <span style={{ fontWeight: 500 }}>{template.name}</span>
                         <div style={{ color: '#666', fontSize: 13 }}>{template.description}</div>
                       </Space>
                     </Card>
