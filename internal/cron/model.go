@@ -37,7 +37,7 @@ type CreateCronTaskRequest struct {
 	MaxRetry         int    `json:"max_retry"`
 	EnvVars          string `json:"env_vars"`
 	WorkDir          string `json:"work_dir"`
-	RuntimeVersionID int64  `json:"runtime_version_id" binding:"required,min=1"`
+	RuntimeVersionID int64  `json:"runtime_version_id" binding:"min=1"`
 }
 
 // UpdateCronTaskRequest 是更新定时任务的请求体（指针字段 = 部分更新）。

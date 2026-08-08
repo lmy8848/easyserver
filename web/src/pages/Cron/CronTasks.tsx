@@ -463,7 +463,6 @@ export default function CronTasks({
           <Form.Item
             name="runtime_version_id"
             label="运行时版本"
-            rules={[{ required: true, message: '请选择已安装的运行时版本' }]}
             getValueFromEvent={(v?: { id: number }) => v?.id}
             getValueProps={(v: number) => ({ value: v ? { id: v } : undefined })}
           >
