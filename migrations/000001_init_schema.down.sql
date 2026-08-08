@@ -30,7 +30,6 @@ DROP TABLE IF EXISTS runtime_version;
 DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS monitor_data;
 DROP TABLE IF EXISTS audit_logs;
-DROP TABLE IF EXISTS token_blacklist;
 DROP TABLE IF EXISTS users;
 
 PRAGMA foreign_keys = ON;

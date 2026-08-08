@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -89,11 +88,9 @@ func SessionHeartbeatMiddleware(update SessionUpdater, sessionTimeout time.Durat
 			c.Next()
 			return
 		}
-		authHeader := c.GetHeader("Authorization")
-		if authHeader != "" {
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) == 2 && parts[0] == "Bearer" {
-				token := parts[1]
+		// JWT 中间件已把 token（header 或 cookie 来源）归一为 context["token"]。
+		if raw, ok := c.Get("token"); ok {
+			if token, ok := raw.(string); ok && token != "" {
 				if limiter.shouldUpdate(token) {
 					_ = update(c.Request.Context(), token)
 				}

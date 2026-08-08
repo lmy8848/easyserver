@@ -141,9 +141,9 @@ export default function Layout() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout, loadUser } = useAuthStore();
+  const { user, logout } = useAuthStore();
 
-  useEffect(() => { loadUser(); }, [loadUser]);
+  // 登录态判定由 App 顶层负责（loadUser），这里不再重复请求。
 
   // Fetch features
   useEffect(() => {

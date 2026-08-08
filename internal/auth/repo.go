@@ -26,14 +26,6 @@ type UserRepo interface {
 	GetIPWhitelist(ctx context.Context, id int64) (string, error)
 }
 
-type TokenBlacklistRepo interface {
-	Add(ctx context.Context, userID int64, token string, expiresAt time.Time) error
-	IsBlacklisted(ctx context.Context, token string) (bool, error)
-	AddUserInvalidation(ctx context.Context, userID int64) error
-	IsUserInvalidated(ctx context.Context, userID int64, issuedAt time.Time) (bool, error)
-	Clean(ctx context.Context) error
-}
-
 // TOTPer is the subset of TOTPRepository that AuthService needs.
 type TOTPer interface {
 	IsTOTPEnabled(ctx context.Context, userID int64) (bool, error)

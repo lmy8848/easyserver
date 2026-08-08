@@ -13,7 +13,8 @@ import (
 // It supports token from:
 // 1. Sec-WebSocket-Protocol header (preferred)
 // 2. URL query parameter "token" (fallback, deprecated)
-func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validators ...TokenValidator) gin.HandlerFunc {
+// 3. HttpOnly cookie (web, same-origin handshake carries it automatically)
+func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenString string
 
@@ -28,6 +29,13 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validato
 					tokenString = part
 					break
 				}
+			}
+		}
+
+		// Fallback: HttpOnly cookie (web same-origin WS handshake)
+		if tokenString == "" {
+			if cookie, err := c.Cookie(AuthCookieName); err == nil && cookie != "" {
+				tokenString = cookie
 			}
 		}
 
@@ -50,23 +58,6 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator, validato
 			c.Error(apperror.ErrUnauthorized.WithMessage("invalid or expired token"))
 			c.Abort()
 			return
-		}
-
-		// Check token validators (e.g., blacklist)
-		for _, validator := range validators {
-			if validator != nil {
-				invalidated, err := validator(claims.UserID, tokenString, claims.IssuedAt.Time)
-				if err != nil {
-					c.Error(apperror.ErrInternal.WithMessage("token validation error"))
-					c.Abort()
-					return
-				}
-				if invalidated {
-					c.Error(apperror.ErrUnauthorized.WithMessage("token has been revoked"))
-					c.Abort()
-					return
-				}
-			}
 		}
 
 		// Check session validator (single session per user)

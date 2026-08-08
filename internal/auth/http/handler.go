@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
 	"time"
 
 	"easyserver/internal/auth"
@@ -60,6 +61,38 @@ type LoginRequest struct {
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required,min=8"`
+}
+
+// setAuthCookie 把登录态 JWT 写入 HttpOnly cookie。无条件对所有登录设置：
+// 移动端原生 App 忽略 cookie（用响应体 token），无副作用。
+func setAuthCookie(c *gin.Context, token string, maxAge time.Duration) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     middleware.AuthCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   c.Request.TLS != nil, // 按协议动态：http 部署也能用，https 自动加
+		MaxAge:   int(maxAge / time.Second),
+	})
+}
+
+// clearAuthCookie 登出时清除登录态 cookie。
+func clearAuthCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     middleware.AuthCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+}
+
+// isWebClient 判断登录来源：空/mobile 之外的 web 客户端。仅用于决定响应体是否含
+// token（web 不含进 cookie，mobile 含供 App 存 header）。
+func isWebClient(clientType string) bool {
+	return clientType == "" || clientType == "web"
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -158,6 +191,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		h.auditLog.LogSecurityEvent(c.Request.Context(), req.Username, "登录成功 (IP: "+ip+")")
 	}
 
+	// 无条件 Set-Cookie（移动端原生 App 忽略 cookie，用响应体 token）。
+	setAuthCookie(c, token, h.sessionTimeout)
+
+	// 响应体是否含 token 按客户端区分：web 不含（HttpOnly 防已登录 token 进 JS，
+	// 纵深防御为主——伪造 client_type 拿到的也只是登录者自己凭据的 token）；
+	// mobile 含（App 需 header token）。
+	if isWebClient(req.ClientType) {
+		httpx.Success(c, gin.H{
+			"user":             user,
+			"must_change_pass": user.MustChangePass,
+		})
+		return
+	}
 	httpx.Success(c, gin.H{
 		"token":            token,
 		"user":             user,
@@ -166,24 +212,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	token := c.GetHeader("Authorization")
-	if len(token) > 7 && token[:7] == "Bearer " {
-		tokenStr := token[7:]
-
-		// Blacklist the token
-		if h.authService != nil {
-			userID := c.GetInt64("user_id")
-			if userID > 0 {
-				// Blacklist until token would naturally expire
-				h.authService.AddTokenToBlacklist(c.Request.Context(), userID, tokenStr, time.Now().Add(h.sessionTimeout))
-			}
-		}
-
-		// Remove session
-		if h.sessionService != nil {
-			h.sessionService.RemoveSession(c.Request.Context(), tokenStr)
-		}
+	// 中间件已把 token 放进 context（header 或 cookie 来源）。
+	// 登录态吊销由 session 层完成（RemoveSession），单 token 黑名单已移除（死代码）。
+	tokenStr := c.GetString("token")
+	if tokenStr != "" && h.sessionService != nil {
+		// Remove session → sessionValidator 立即拒绝该 token
+		h.sessionService.RemoveSession(c.Request.Context(), tokenStr)
 	}
+
+	// 清除登录态 cookie（幂等，web 登出必走）
+	clearAuthCookie(c)
 
 	middleware.AuditSummary(c, "退出登录")
 	httpx.Success(c, nil)
@@ -220,14 +258,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	// Invalidate all existing tokens for this user after password change
-	// This forces re-authentication on all devices
-	if err := h.authService.InvalidateAllUserTokens(c.Request.Context(), userID); err != nil {
-		log.Printf("auth: failed to invalidate tokens after password change for user %d: %v", userID, err)
-	}
-
-	// Also remove all sessions so sessionValidator rejects old tokens immediately
-	// (token invalidation is fail-closed but sessions are the primary check).
+	// 改密码后删除该用户所有 session，旧 token 立即失效（吊销只靠 session 表）。
 	if h.sessionService != nil {
 		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), userID); err != nil {
 			log.Printf("auth: failed to remove sessions after password change for user %d: %v", userID, err)
@@ -350,6 +381,14 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) {
 		h.auditLog.LogSecurityEvent(c.Request.Context(), user.Username, "两步验证登录成功 (IP: "+c.ClientIP()+")")
 	}
 
+	setAuthCookie(c, token, h.sessionTimeout)
+	if isWebClient(req.ClientType) {
+		httpx.Success(c, gin.H{
+			"user":             user,
+			"must_change_pass": user.MustChangePass,
+		})
+		return
+	}
 	httpx.Success(c, gin.H{
 		"token":            token,
 		"user":             user,
@@ -446,6 +485,14 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) {
 		h.auditLog.LogSecurityEvent(c.Request.Context(), user.Username, "备用码登录成功 (IP: "+c.ClientIP()+")")
 	}
 
+	setAuthCookie(c, token, h.sessionTimeout)
+	if isWebClient(req.ClientType) {
+		httpx.Success(c, gin.H{
+			"user":             user,
+			"must_change_pass": user.MustChangePass,
+		})
+		return
+	}
 	httpx.Success(c, gin.H{
 		"token":            token,
 		"user":             user,
@@ -683,10 +730,7 @@ func (h *AuthHandler) KickSession(c *gin.Context) {
 // KickAllOtherSessions removes all sessions except the current one
 func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) {
 	userID := c.GetInt64("user_id")
-	currentToken := c.GetHeader("Authorization")
-	if len(currentToken) > 7 && currentToken[:7] == "Bearer " {
-		currentToken = currentToken[7:]
-	}
+	currentToken := c.GetString("token")
 
 	// Remove all other sessions
 	if err := h.sessionService.RemoveOtherSessions(c.Request.Context(), userID, currentToken); err != nil {
@@ -739,6 +783,11 @@ func (h *QRLoginHandler) GetQRStatus(c *gin.Context) {
 	if err != nil {
 		c.Error(apperror.ErrInternal.Wrap(err))
 		return
+	}
+	// 确认后：web token 改走 HttpOnly cookie，不再回传 JS（防 XSS 窃取）。
+	if res.Status == qrlogin.StatusConfirmed && res.Token != "" {
+		setAuthCookie(c, res.Token, h.cfg.Auth.SessionTimeout)
+		res.Token = ""
 	}
 	httpx.Success(c, res)
 }
@@ -827,7 +876,6 @@ func RegisterRoutes(
 	qrService *qrlogin.Service,
 	jwtSecret string,
 	sessionValidator func(string) (bool, error),
-	tokenValidator func(int64, string, time.Time) (bool, error),
 	sessionTimeout time.Duration,
 	loginRateLimit int,
 	loginRateInterval time.Duration,
@@ -855,7 +903,7 @@ func RegisterRoutes(
 	// Protected auth routes
 	authProtected := api.Group("/auth")
 	authProtected.Use(
-		middleware.JWTMiddleware(jwtSecret, sessionValidator, tokenValidator),
+		middleware.JWTMiddleware(jwtSecret, sessionValidator),
 		middleware.AuditMiddleware(auditLog),
 	)
 	{

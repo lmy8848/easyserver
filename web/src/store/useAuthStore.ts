@@ -14,7 +14,6 @@ function isValidUser(obj: unknown): obj is User {
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
 
@@ -24,11 +23,8 @@ interface AuthState {
   updateUser: (user: User) => void;
 }
 
-// SECURITY NOTE: Token is stored in localStorage for SPA compatibility.
-// This is acceptable for single-admin panels but exposes token to XSS attacks.
-// For multi-user production systems, consider migrating to httpOnly cookies.
-// Hydrate user from localStorage on init so the must_change_pass guard works
-// on the first frame after a refresh (before loadUser completes).
+// 登录态走 HttpOnly Cookie：JS 拿不到 token，登录态由 /auth/me 判定。
+// user 缓存在 localStorage 仅用于首帧显示（must_change_pass 守卫），非安全边界。
 function hydrateUser(): User | null {
   try {
     const raw = localStorage.getItem('user');
@@ -42,27 +38,25 @@ function hydrateUser(): User | null {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: hydrateUser(),
-  token: localStorage.getItem('token'),
-  isAuthenticated: !!localStorage.getItem('token'),
-  isLoading: false,
+  isAuthenticated: false,
+  // 启动即进入"判断中"：先请求 /auth/me 确认 cookie 登录态，期间不误跳登录页。
+  isLoading: true,
 
   login: async (username: string, password: string) => {
     set({ isLoading: true });
     try {
+      // Web 登录后端通过 Set-Cookie 落地登录态，响应体无 token。
       const res = await authApi.login(username, password);
-      const { token, user, must_change_pass } = res.data.data;
+      const { user, must_change_pass } = res.data.data;
 
       if (!isValidUser(user)) {
         throw new Error('Invalid user data received');
       }
 
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('user', JSON.stringify({ ...user, must_change_pass }));
 
-      // Merge must_change_pass into user object for client-side enforcement
       set({
         user: { ...user, must_change_pass },
-        token,
         isAuthenticated: true,
         isLoading: false,
       });
@@ -73,23 +67,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('token');
+    // 通知后端清 cookie + 黑名单（fire-and-forget，页面照常回登录页）
+    authApi.logout().catch(() => {});
     localStorage.removeItem('user');
-    localStorage.removeItem('must_change_pass'); // legacy cleanup
     set({
       user: null,
-      token: null,
       isAuthenticated: false,
     });
   },
 
   loadUser: async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      set({ isAuthenticated: false });
-      return;
-    }
-
     set({ isLoading: true });
     try {
       const res = await authApi.getProfile();
@@ -103,20 +90,16 @@ export const useAuthStore = create<AuthState>((set) => ({
         isLoading: false,
       });
     } catch (error: unknown) {
-      // Only clear token on 401 (unauthorized), not on 500 (server error).
-      // Business codes live in response.data.code, not on the error object.
+      // 仅 401 视为未登录；500 等保留（不误踢）
       const bizCode = (error as { response?: { data?: { code?: number } } })?.response?.data?.code;
       if (bizCode === 40100 || bizCode === 40101) {
-        localStorage.removeItem('token');
         localStorage.removeItem('user');
         set({
           user: null,
-          token: null,
           isAuthenticated: false,
           isLoading: false,
         });
       } else {
-        // Keep token, just set loading to false
         set({
           isLoading: false,
         });

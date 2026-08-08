@@ -104,10 +104,9 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	// ── Auth ──
 
 	userRepo := auth.NewSQLiteUserRepository(db)
-	tokenRepo := auth.NewSQLiteTokenRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
 
-	authSvc := auth.NewAuthService(ctx, &wg, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration, userRepo, tokenRepo, auditSvc, totpRepo, notifyService)
+	authSvc := auth.NewAuthService(ctx, &wg, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration, userRepo, auditSvc, totpRepo, notifyService)
 	if err := authSvc.InitDefaultAdmin(ctx); err != nil {
 		log.Fatalf("init default admin: %v", err)
 	}
@@ -202,7 +201,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	g := newGroups(e, cfg, authSvc, sessionSvc, auditSvc)
 
 	// Domain route registration
-	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, g.tokenValidator, cfg.Auth.SessionTimeout, cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval, cfg)
+	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout, cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval, cfg)
 	monitorhttp.RegisterRoutes(g.Protected, g.WS, monitorSvc, cmdExec, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cmdExec, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(g.Protected, g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
@@ -258,7 +257,6 @@ type routeGroups struct {
 	WS               *gin.RouterGroup
 	File             *gin.RouterGroup
 	maxUploadSize    int64
-	tokenValidator   func(userID int64, tokenString string, issuedAt time.Time) (bool, error)
 	sessionValidator func(token string) (bool, error)
 }
 
@@ -282,7 +280,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 	e.Use(gin.Logger(), gin.Recovery(),
 		middleware.ErrorHandler(),
 		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.RedirectMode, cfg.Server.WwwHandling),
-		middleware.SecurityMiddleware(cspNonce),
+		middleware.SecurityMiddleware(cspNonce, cfg.Server.AllowedOrigins, cfg.Server.DevMode),
 		middleware.CORSMiddleware(cfg.Server.AllowedOrigins, cfg.Server.DevMode),
 		middleware.IPWhitelistMiddleware(middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)),
 	)
@@ -301,9 +299,6 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 		maxUploadSize = 512 << 20
 	}
 
-	tokenValidator := func(userID int64, tokenString string, issuedAt time.Time) (bool, error) {
-		return authSvc.IsUserTokenInvalidated(context.Background(), userID, issuedAt)
-	}
 	sessionValidator := func(token string) (bool, error) {
 		return sessionSvc.IsSessionValid(context.Background(), token)
 	}
@@ -316,13 +311,12 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 
 	protected := api.Group("")
 	protected.Use(
-		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
+		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
 			return authSvc.GetIPWhitelist(context.Background(), userID)
 		}),
 		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout),
 		middleware.AuditMiddleware(auditSvc),
-		middleware.CSRFMiddleware(),
 	)
 
 	// File upload sub-group
@@ -332,17 +326,16 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 	)
 	fileRoutes.Use(
 		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval),
-		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator),
+		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
 			return authSvc.GetIPWhitelist(context.Background(), userID)
 		}),
 		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout),
 		middleware.AuditMiddleware(auditSvc),
-		middleware.CSRFMiddleware(),
 	)
 
 	wsGroup := e.Group("/ws")
-	wsGroup.Use(middleware.WSAuthMiddleware(cfg.Auth.JWTSecret, sessionValidator, tokenValidator))
+	wsGroup.Use(middleware.WSAuthMiddleware(cfg.Auth.JWTSecret, sessionValidator))
 
 	return &routeGroups{
 		API:              api,
@@ -350,7 +343,6 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 		WS:               wsGroup,
 		File:             fileRoutes,
 		maxUploadSize:    maxUploadSize,
-		tokenValidator:   tokenValidator,
 		sessionValidator: sessionValidator,
 	}
 }

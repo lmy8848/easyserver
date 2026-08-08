@@ -166,37 +166,6 @@ func TestJWTMiddleware_WrongSecret(t *testing.T) {
 	assert.NotEqual(t, http.StatusOK, w.Code)
 }
 
-func TestJWTMiddleware_InvalidatedToken(t *testing.T) {
-	secret := "test-secret-key-at-least-32-bytes-long"
-	userID := int64(1)
-	username := "testuser"
-	role := "admin"
-	timeout := 24 * time.Hour
-
-	token, err := generateTestToken(secret, userID, username, role, timeout)
-	assert.NoError(t, err)
-
-	// Validator that always invalidates
-	validator := func(uid int64, tokenStr string, issuedAt time.Time) (bool, error) {
-		return true, nil
-	}
-
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(ErrorHandler(), JWTMiddleware(secret, nil, validator))
-	router.GET("/test", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	assert.NotEqual(t, http.StatusOK, w.Code)
-}
-
 func TestJWTMiddleware_InvalidSession(t *testing.T) {
 	secret := "test-secret-key-at-least-32-bytes-long"
 	userID := int64(1)

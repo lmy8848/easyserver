@@ -3,7 +3,6 @@ package middleware
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"easyserver/internal/infra/apperror"
 	"github.com/gin-gonic/gin"
@@ -17,15 +16,17 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-// TokenValidator is a function type for token validation (e.g., blacklist check)
-type TokenValidator func(userID int64, tokenString string, issuedAt time.Time) (bool, error)
+// AuthCookieName 是 Web 端登录态 cookie 名（HttpOnly，浏览器自动携带）。
+// Web 走 cookie，移动端仍走 Authorization header（双通道）。
+const AuthCookieName = "easyserver_token"
 
 // SessionValidator is a function type for session validation
 type SessionValidator func(token string) (bool, error)
 
-func JWTMiddleware(secret string, sessionValidator SessionValidator, validators ...TokenValidator) gin.HandlerFunc {
+func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Extract token from the Authorization header (preferred).
+		// Extract token from the Authorization header (preferred, mobile),
+		// or the HttpOnly cookie (web).
 		var tokenString string
 		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
 			parts := strings.SplitN(authHeader, " ", 2)
@@ -35,6 +36,8 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 				return
 			}
 			tokenString = parts[1]
+		} else if cookie, err := c.Cookie(AuthCookieName); err == nil && cookie != "" {
+			tokenString = cookie
 		}
 
 		// Fallback: allow the token via the access_token query parameter, but
@@ -64,23 +67,6 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator, validators 
 			c.Error(apperror.ErrTokenExpired.WithMessage("invalid or expired token"))
 			c.Abort()
 			return
-		}
-
-		// Check token validators (e.g., blacklist)
-		for _, validator := range validators {
-			if validator != nil {
-				invalidated, err := validator(claims.UserID, tokenString, claims.IssuedAt.Time)
-				if err != nil {
-					c.Error(apperror.ErrInternal.WithMessage("token validation error"))
-					c.Abort()
-					return
-				}
-				if invalidated {
-					c.Error(apperror.ErrUnauthorized.WithMessage("token has been revoked"))
-					c.Abort()
-					return
-				}
-			}
 		}
 
 		// Check session validator (single session per user)

@@ -63,7 +63,7 @@ export default function Dashboard() {
       .catch(console.error);
   }, [timeRange]);
 
-  // 监控实时数据走 SSE（fetch 流式 + Bearer 鉴权）
+  // 监控实时数据走 SSE（EventSource，HttpOnly cookie 同源鉴权）
   useSSE({
     path: '/api/monitor',
     onMessage: (msg) => {

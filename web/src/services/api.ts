@@ -14,21 +14,12 @@ import type {
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
-  headers: {
-    'X-Requested-With': 'XMLHttpRequest',
-  },
 });
 
-// Request interceptor - add token
-// SECURITY NOTE: Token is stored in localStorage for SPA compatibility.
-// This is acceptable for single-admin panels but exposes token to XSS attacks.
-// For multi-user production systems, consider migrating to httpOnly cookies.
+// 登录态走 HttpOnly Cookie（浏览自动携带），无需 JS 注入 token。
+// 移动端等 header 场景由客户端自行附加，此处不处理。
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
     return config;
   },
   (error) => {
@@ -46,9 +37,8 @@ api.interceptors.response.use(
       const { status, data } = error.response;
 
       if (status === 401) {
-        // Token expired or invalid - don't redirect if already on login page
+        // Cookie 失效/未登录 - don't redirect if already on login page
         if (!window.location.pathname.startsWith('/login')) {
-          localStorage.removeItem('token');
           localStorage.removeItem('user');
           window.location.href = '/login';
         }
@@ -70,7 +60,7 @@ api.interceptors.response.use(
 // Auth API
 export const authApi = {
   login: (username: string, password: string, turnstileToken?: string) =>
-    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean; requires_totp?: boolean; temp_token?: string }>>('/auth/login', { username, password, turnstile_token: turnstileToken, client_type: 'web' }),
+    api.post<ApiResponse<{ token?: string; user: User; must_change_pass: boolean; requires_totp?: boolean; temp_token?: string }>>('/auth/login', { username, password, turnstile_token: turnstileToken, client_type: 'web' }),
 
   logout: () =>
     api.post<ApiResponse>('/auth/logout'),
@@ -83,10 +73,10 @@ export const authApi = {
 
   // TOTP verification (login step 2)
   verifyTOTP: (tempToken: string, code: string, turnstileToken?: string) =>
-    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean }>>('/auth/verify-totp', { temp_token: tempToken, code, turnstile_token: turnstileToken, client_type: 'web' }),
+    api.post<ApiResponse<{ token?: string; user: User; must_change_pass: boolean }>>('/auth/verify-totp', { temp_token: tempToken, code, turnstile_token: turnstileToken, client_type: 'web' }),
 
   verifyBackupCode: (tempToken: string, backupCode: string, turnstileToken?: string) =>
-    api.post<ApiResponse<{ token: string; user: User; must_change_pass: boolean }>>('/auth/verify-backup', { temp_token: tempToken, backup_code: backupCode, turnstile_token: turnstileToken, client_type: 'web' }),
+    api.post<ApiResponse<{ token?: string; user: User; must_change_pass: boolean }>>('/auth/verify-backup', { temp_token: tempToken, backup_code: backupCode, turnstile_token: turnstileToken, client_type: 'web' }),
 
   // TOTP setup (protected)
   setupTOTP: () =>
@@ -737,7 +727,7 @@ export const cronApi = {
   getScriptLogs: (id: number, limit?: number) =>
     api.get<ApiResponse<ScriptLogLine[]>>(`/cron/scripts/${id}/logs`, { params: { limit: limit || 200 } }),
 
-  // 脚本实时日志走 SSE（fetch 流式，Bearer 鉴权），返回 SSE 相对路径
+  // 脚本实时日志走 SSE（EventSource，HttpOnly cookie 同源鉴权），返回 SSE 相对路径
   scriptLogsStreamPath: (id: number) => `/api/cron/scripts/${id}/logs?stream=1`,
 };
 

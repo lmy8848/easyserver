@@ -23,10 +23,6 @@ import (
 )
 
 const (
-	TokenExpiry          = 24 * time.Hour
-	CacheCleanupInterval = 5 * time.Minute
-	InvalidationExpiry   = 365 * TokenExpiry
-
 	// TOTP settings
 	totpIssuer       = "EasyServer"
 	totpPeriod       = 30 // seconds
@@ -39,41 +35,24 @@ const (
 	backupCodeCount  = 10
 )
 
-type tokenCache struct {
-	blacklisted   sync.Map
-	invalidations sync.Map
-}
-
 type AuthService struct {
 	userRepo        UserRepo
-	tokenRepo       TokenBlacklistRepo
 	loginLogger     LoginEventLogger
 	totpRepo        TOTPRepo
 	maxAttempts     int
 	lockoutDuration time.Duration
-	cache           tokenCache
 	notifier        LoginNotifier
 }
 
-func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lockoutDuration time.Duration, userRepo UserRepo, tokenRepo TokenBlacklistRepo, loginLogger LoginEventLogger, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
+func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lockoutDuration time.Duration, userRepo UserRepo, loginLogger LoginEventLogger, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
 	s := &AuthService{
 		maxAttempts:     maxAttempts,
 		lockoutDuration: lockoutDuration,
 		userRepo:        userRepo,
-		tokenRepo:       tokenRepo,
 		loginLogger:     loginLogger,
 		totpRepo:        totpRepo,
 		notifier:        notifier,
 	}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		s.cacheCleanupLoop(ctx)
-	}()
-	go func() {
-		defer wg.Done()
-		s.tokenBlacklistCleanupLoop(ctx)
-	}()
 	return s
 }
 
@@ -83,46 +62,6 @@ func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lo
 func (s *AuthService) NotifyLogin(event LoginEvent) {
 	if s.notifier != nil {
 		s.notifier.NotifyLogin(event)
-	}
-}
-
-func (s *AuthService) tokenBlacklistCleanupLoop(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if err := s.CleanupExpiredTokens(context.Background()); err != nil {
-				log.Printf("auth: failed to cleanup expired tokens: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *AuthService) cacheCleanupLoop(ctx context.Context) {
-	ticker := time.NewTicker(CacheCleanupInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			now := time.Now()
-			s.cache.blacklisted.Range(func(key, value any) bool {
-				if t, ok := value.(time.Time); ok && t.Before(now) {
-					s.cache.blacklisted.Delete(key)
-				}
-				return true
-			})
-			s.cache.invalidations.Range(func(key, value any) bool {
-				if t, ok := value.(time.Time); ok && t.Add(365*TokenExpiry).Before(now) {
-					s.cache.invalidations.Delete(key)
-				}
-				return true
-			})
-		case <-ctx.Done():
-			return
-		}
 	}
 }
 
@@ -301,70 +240,6 @@ func (s *AuthService) UnlockUser(ctx context.Context, userID int64) error {
 
 func (s *AuthService) ForceDisableTOTP(ctx context.Context, userID int64) error {
 	return s.totpRepo.DisableTOTP(ctx, userID)
-}
-
-func hashToken(token string) string {
-	h := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(h[:])
-}
-
-func (s *AuthService) AddTokenToBlacklist(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	tokenHash := hashToken(token)
-	err := s.tokenRepo.Add(ctx, userID, tokenHash, expiresAt)
-	if err == nil {
-		s.cache.blacklisted.Store(tokenHash, expiresAt)
-	}
-	return err
-}
-
-func (s *AuthService) IsTokenBlacklisted(ctx context.Context, token string) (bool, error) {
-	tokenHash := hashToken(token)
-	if v, ok := s.cache.blacklisted.Load(tokenHash); ok {
-		if t, ok := v.(time.Time); ok && t.After(time.Now()) {
-			return true, nil
-		}
-		s.cache.blacklisted.Delete(tokenHash)
-	}
-	return s.tokenRepo.IsBlacklisted(ctx, tokenHash)
-}
-
-func (s *AuthService) InvalidateAllUserTokens(ctx context.Context, userID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	now := time.Now()
-	if err := s.tokenRepo.AddUserInvalidation(ctx, userID); err != nil {
-		return err
-	}
-	s.cache.invalidations.Store(userID, now)
-	return nil
-}
-
-func (s *AuthService) IsUserTokenInvalidated(ctx context.Context, userID int64, issuedAt time.Time) (bool, error) {
-	if v, ok := s.cache.invalidations.Load(userID); ok {
-		if t, ok := v.(time.Time); ok {
-			if issuedAt.Before(t) {
-				return true, nil
-			}
-		}
-	}
-	invalidated, err := s.tokenRepo.IsUserInvalidated(ctx, userID, issuedAt)
-	if err != nil {
-		// fail-closed: on DB error reject the token rather than risk reviving it.
-		log.Printf("auth: error checking token invalidation: %v", err)
-		return false, err
-	}
-	return invalidated, nil
-}
-
-func (s *AuthService) CleanupExpiredTokens(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.tokenRepo.Clean(ctx)
 }
 
 func (s *AuthService) ResetPassword(ctx context.Context, userID int64, newPassword string) error {

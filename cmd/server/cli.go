@@ -48,7 +48,6 @@ func runCLI(subcommand, configPath string) {
 	defer db.Close()
 
 	userRepo := auth.NewSQLiteUserRepository(db)
-	tokenRepo := auth.NewSQLiteTokenRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
 	auditRepo := audit.NewSQLiteRepository(db)
 
@@ -56,7 +55,7 @@ func runCLI(subcommand, configPath string) {
 	var wg sync.WaitGroup
 
 	auditSvc := audit.NewService(ctx, &wg, auditRepo, 30)
-	authSvc := auth.NewAuthService(ctx, &wg, 5, 15*time.Minute, userRepo, tokenRepo, auditSvc, totpRepo, nil)
+	authSvc := auth.NewAuthService(ctx, &wg, 5, 15*time.Minute, userRepo, auditSvc, totpRepo, nil)
 
 	switch subcommand {
 	case "reset-password":
@@ -135,7 +134,6 @@ func resetPasswordCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *
 	if err := authSvc.ResetPassword(ctx, user.ID, password); err != nil {
 		log.Fatalf("reset password: %v", err)
 	}
-	authSvc.InvalidateAllUserTokens(ctx, user.ID)
 
 	auditSvc.LogSystemEvent(ctx, "CLI 重置用户密码："+user.Username)
 
@@ -178,7 +176,6 @@ func resetTOTPCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *audi
 	if err := authSvc.ForceDisableTOTP(ctx, user.ID); err != nil {
 		log.Fatalf("reset totp: %v", err)
 	}
-	authSvc.InvalidateAllUserTokens(ctx, user.ID)
 
 	auditSvc.LogSystemEvent(ctx, "CLI 关闭用户二次验证："+user.Username)
 

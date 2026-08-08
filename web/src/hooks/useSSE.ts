@@ -1,9 +1,9 @@
-import { useRef, useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type SSEStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
 interface UseSSEOptions {
-  /** SSE 相对路径，如 '/api/monitor/stream' */
+  /** SSE 相对路径，如 '/api/monitor' */
   path: string;
   /** 每个 SSE 事件（data: 行）解析后的回调 */
   onMessage?: (data: any) => void;
@@ -11,42 +11,28 @@ interface UseSSEOptions {
   onClose?: () => void;
   /** 是否连接（默认 true） */
   enabled?: boolean;
-  /** 断线自动重连（默认 true） */
+  /** 断线是否自动重连（默认 true）。EventSource 原生自动重连；false 时断开即 close。 */
   autoReconnect?: boolean;
-  /** 最大重连次数（默认 10） */
-  maxReconnectAttempts?: number;
-  /** 基础重连延迟 ms（默认 3000，指数退避） */
-  reconnectDelay?: number;
 }
 
 interface UseSSEReturn {
   status: SSEStatus;
-  /** 主动关闭连接（清 timer + abort fetch） */
+  /** 主动关闭连接 */
   close: () => void;
 }
 
 /**
- * 基于 fetch + ReadableStream 的 SSE 客户端。
+ * 基于原生 EventSource 的 SSE 客户端。
  *
- * 用 fetch 而非原生 EventSource：EventSource 无法自定义请求头，而本项目鉴权走
- * Authorization: Bearer，token 在 localStorage。fetch 可带 header，且无跨域 cookie 之扰。
- * 每次事件按 "data: <payload>\n\n" 解析，payload 为 JSON 字符串。
+ * 登录态走 HttpOnly Cookie（同源自动携带），EventSource 无需也无法自定义 header，
+ * 因此用二进制 fetch+Bearer 的旧方案整个退役。登录失效由 axios 拦截器/全局
+ * loadUser 处理，SSE 不自行判 401（EventSource 的 onerror 拿不到状态码）。
  */
 export function useSSE(options: UseSSEOptions): UseSSEReturn {
-  const {
-    path,
-    onMessage,
-    onClose,
-    enabled = true,
-    autoReconnect = true,
-    maxReconnectAttempts = 10,
-    reconnectDelay = 3000,
-  } = options;
+  const { path, onMessage, onClose, enabled = true, autoReconnect = true } = options;
 
   const [status, setStatus] = useState<SSEStatus>('disconnected');
-  const ctrlRef = useRef<AbortController | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const attemptRef = useRef(0);
+  const esRef = useRef<EventSource | null>(null);
   const disposedRef = useRef(false);
 
   // Stable callback refs
@@ -57,110 +43,56 @@ export function useSSE(options: UseSSEOptions): UseSSEReturn {
     onCloseRef.current = onClose;
   });
 
-  const stop = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (ctrlRef.current) {
-      ctrlRef.current.abort();
-      ctrlRef.current = null;
-    }
-  }, []);
-
-  const connect = useCallback(() => {
-    if (disposedRef.current) return;
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    stop();
-
-    const isReconnect = attemptRef.current > 0;
-    setStatus(isReconnect ? 'reconnecting' : 'connecting');
-
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const url = `${protocol}//${window.location.host}${path}`;
-    const ctrl = new AbortController();
-    ctrlRef.current = ctrl;
-
-    const handleEnd = () => {
-      setStatus('disconnected');
-      onCloseRef.current?.();
-      if (!autoReconnect) return;
-      if (disposedRef.current) return;
-      if (!localStorage.getItem('token')) return;
-      if (attemptRef.current >= maxReconnectAttempts) {
-        setStatus('disconnected');
-        return;
-      }
-      const delay = reconnectDelay * Math.pow(2, attemptRef.current);
-      attemptRef.current++;
-      setStatus('reconnecting');
-      console.log(`SSE reconnecting in ${delay}ms (attempt ${attemptRef.current}/${maxReconnectAttempts})`);
-      timerRef.current = setTimeout(() => connect(), delay);
-    };
-
-    fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: ctrl.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-        setStatus('connected');
-        attemptRef.current = 0;
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          // 按事件分隔符 \n\n 切分
-          let idx: number;
-          while ((idx = buffer.indexOf('\n\n')) >= 0) {
-            const raw = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
-            const dataLine = raw.split('\n').find((l) => l.startsWith('data:'));
-            if (dataLine) {
-              const payload = dataLine.slice(5).trim();
-              if (payload) {
-                try {
-                  onMessageRef.current?.(JSON.parse(payload));
-                } catch {
-                  onMessageRef.current?.(payload);
-                }
-              }
-            }
-          }
-        }
-        handleEnd();
-      })
-      .catch((err) => {
-        if (err?.name === 'AbortError') return; // 主动关闭
-        handleEnd();
-      });
-  }, [path, autoReconnect, maxReconnectAttempts, reconnectDelay, stop]);
-
-  const connectRef = useRef(connect);
-  useEffect(() => {
-    connectRef.current = connect;
-  }, [connect]);
-
-  const close = useCallback(() => {
-    disposedRef.current = true;
-    stop();
-    setStatus('disconnected');
-  }, [stop]);
-
   useEffect(() => {
     if (!enabled) return;
     disposedRef.current = false;
-    connect();
+    setStatus('connecting');
+
+    // 同源相对路径，cookie 自动携带
+    const es = new EventSource(path);
+    esRef.current = es;
+
+    es.onopen = () => {
+      setStatus('connected');
+    };
+
+    es.onmessage = (e) => {
+      try {
+        onMessageRef.current?.(JSON.parse(e.data));
+      } catch {
+        onMessageRef.current?.(e.data);
+      }
+    };
+
+    es.onerror = () => {
+      if (disposedRef.current) return;
+      if (!autoReconnect) {
+        // 主动断开（如脚本退出后不再续看）
+        es.close();
+        esRef.current = null;
+        setStatus('disconnected');
+        onCloseRef.current?.();
+        return;
+      }
+      // EventSource 会自动重连，仅更新状态
+      setStatus('reconnecting');
+      onCloseRef.current?.();
+    };
+
     return () => {
       disposedRef.current = true;
-      stop();
+      es.close();
+      esRef.current = null;
+      setStatus('disconnected');
     };
-  }, [enabled, connect, stop]);
+  }, [path, enabled, autoReconnect]);
+
+  const close = () => {
+    disposedRef.current = true;
+    esRef.current?.close();
+    esRef.current = null;
+    setStatus('disconnected');
+  };
 
   return { status, close };
 }

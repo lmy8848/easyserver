@@ -295,11 +295,10 @@ interface PreviewModalProps {
 export function PreviewModal({ visible, path, type, content, onClose }: PreviewModalProps) {
   // Build a download URL that carries the JWT via the access_token query param.
   // <audio>/<video>/<img>/<iframe> tags cannot send the Authorization header,
-  // so the token must be in the URL. The backend serves these with
+  // so the cookie must be carried. The backend serves these with
   // http.ServeContent (Range/206), so playback is streamed/buffered rather
-  // than requiring a full download first.
-  const token = localStorage.getItem('token') || '';
-  const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}&access_token=${encodeURIComponent(token)}`;
+  // than requiring a full download first. 登录态走 HttpOnly cookie 同源自动携带。
+  const downloadUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
 
   // 视频原始分辨率，加载 metadata 后用于按比例调整弹窗大小
   const [videoMeta, setVideoMeta] = useState<{ w: number; h: number } | null>(null);
