@@ -80,6 +80,13 @@ type UpdateScriptRequest struct {
 	Content     *string `json:"content"`
 }
 
+// ScriptLogLine 表示一条脚本执行日志（stdout/stderr），与前端 ScriptLogLine 对齐。
+type ScriptLogLine struct {
+	Stream  string `json:"stream"` // stdout / stderr
+	Message string `json:"message"`
+	Time    string `json:"time"`
+}
+
 // CronRun 表示一次任务执行（按 journald invocation ID 分组）。
 type CronRun struct {
 	InvocationID string    `json:"invocation_id"`

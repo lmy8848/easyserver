@@ -215,7 +215,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)
 	dbserverhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbServerService, databaseMgmtService)
-	cronhttp.RegisterRoutes(g.Protected, cronService, cmdExec)
+	cronhttp.RegisterRoutes(g.Protected, g.WS, cronService, cmdExec)
 	firewallhttp.RegisterRoutes(g.Protected, firewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)

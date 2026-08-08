@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  ApiResponse, CronTask, CronRun, Script,
+  ApiResponse, CronTask, CronRun, Script, ScriptLogLine,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
@@ -720,6 +720,25 @@ export const cronApi = {
 
   deleteScript: (id: number) =>
     api.delete<ApiResponse>(`/cron/scripts/${id}`),
+
+  // 运行中脚本 id 列表（刷新后显示「运行中」标记）
+  getRunningScripts: () =>
+    api.get<ApiResponse<number[]>>('/cron/scripts/running'),
+
+  // 启动脚本执行（独立于 WS 订阅；已运行则复用）
+  runScript: (id: number) =>
+    api.post<ApiResponse>(`/cron/scripts/${id}/run`),
+
+  // 停止运行中的脚本（列表「停止」按钮）
+  stopScript: (id: number) =>
+    api.post<ApiResponse>(`/cron/scripts/${id}/stop`),
+
+  // 脚本的历史执行日志（journald，刷新后回看）
+  getScriptLogs: (id: number, limit?: number) =>
+    api.get<ApiResponse<ScriptLogLine[]>>(`/cron/scripts/${id}/logs`, { params: { limit: limit || 200 } }),
+
+  // 脚本执行走 WebSocket，返回 WS path 供 useWebSocket hook 使用
+  scriptRunWSPath: (id: number) => `/ws/scripts/${id}/run`,
 };
 
 // Firewall management

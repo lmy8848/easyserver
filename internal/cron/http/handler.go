@@ -2,29 +2,41 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"easyserver/internal/cron"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"
+	gorillaWs "github.com/gorilla/websocket"
 )
 
 // CronHandler handles cron task API requests
 type CronHandler struct {
 	cronService *cron.Service
 	executor    executor.CommandExecutor
+	upgrader    gorillaWs.Upgrader
+	runner      *cron.ScriptRunner
 }
 
 // NewCronHandler creates a new CronHandler
 func NewCronHandler(cronService *cron.Service, exec executor.CommandExecutor) *CronHandler {
-	return &CronHandler{cronService: cronService, executor: exec}
+	return &CronHandler{
+		cronService: cronService,
+		executor:    exec,
+		upgrader:    httpx.CreateUpgrader(),
+		runner:      cron.NewScriptRunner(exec),
+	}
 }
 
 // ListTasks returns all cron tasks
@@ -326,6 +338,80 @@ func (h *CronHandler) GetScript(c *gin.Context) {
 	httpx.Success(c, script)
 }
 
+// GetScriptLogs 返回脚本的历史执行日志（journald，identifier=easyserver-script-<name>）。
+// 日志按脚本存（跨多次执行），返回最近 limit 条，供刷新后回看。
+func (h *CronHandler) GetScriptLogs(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
+		return
+	}
+	script, err := h.cronService.GetScript(c.Request.Context(), id)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
+		return
+	}
+
+	limit := 200
+	if l := c.Query("limit"); l != "" {
+		if parsed, aErr := strconv.Atoi(l); aErr == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	args := []string{
+		"--identifier=" + "easyserver-script-" + script.Name,
+		"--no-pager",
+		"--output=json",
+		"-n", strconv.Itoa(limit),
+	}
+	stdout, _, exitCode, err := h.executor.Run(c.Request.Context(), "journalctl", args...)
+	if err != nil || exitCode != 0 {
+		c.Error(apperror.ErrInternal.WithMessage("读取历史日志失败: " + stdout))
+		return
+	}
+
+	logs := parseScriptJournalLogs(stdout)
+	httpx.Success(c, logs)
+}
+
+// parseScriptJournalLogs 解析 journalctl JSON 输出为 ScriptLogLine 列表。
+// journald 不区分 stdout/stderr，统一 stream 为 stdout。
+func parseScriptJournalLogs(stdout string) []cron.ScriptLogLine {
+	var logs []cron.ScriptLogLine
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry struct {
+			Message           string `json:"MESSAGE"`
+			RealtimeTimestamp string `json:"__REALTIME_TIMESTAMP"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil || entry.Message == "" {
+			continue
+		}
+		logs = append(logs, cron.ScriptLogLine{
+			Stream:  "stdout",
+			Message: entry.Message,
+			Time:    formatJournalTimestamp(entry.RealtimeTimestamp),
+		})
+	}
+	return logs
+}
+
+// formatJournalTimestamp 把 journald 微秒级 __REALTIME_TIMESTAMP 转成 "2006-01-02 15:04:05"。
+func formatJournalTimestamp(realtime string) string {
+	if realtime == "" {
+		return time.Now().Format("2006-01-02 15:04:05")
+	}
+	var usec int64
+	if _, err := fmt.Sscanf(realtime, "%d", &usec); err != nil {
+		return time.Now().Format("2006-01-02 15:04:05")
+	}
+	return time.Unix(usec/1e6, (usec%1e6)*1000).Format("2006-01-02 15:04:05")
+}
+
 // CreateScript creates a new script
 func (h *CronHandler) CreateScript(c *gin.Context) {
 	var req cron.CreateScriptRequest
@@ -452,6 +538,138 @@ func (h *CronHandler) DeleteScript(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "脚本已删除"})
 }
 
+// RunScriptWebSocket 纯订阅运行中脚本的实时 stdout/stderr。
+// 启动已独立为 POST /cron/scripts/:id/run，此处**不**启动脚本 —— WS 连接不产生启动副作用。
+// 脚本未运行时返回错误，前端自行决定是否先调 REST 启动。
+func (h *CronHandler) RunScriptWebSocket(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
+		return
+	}
+	if _, err := h.cronService.GetScript(c.Request.Context(), id); err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
+		return
+	}
+
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Printf("script run ws upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	rs, ok := h.runner.Get(id)
+	if !ok {
+		conn.WriteMessage(gorillaWs.TextMessage,
+			[]byte(`{"type":"error","message":"脚本未在运行"}`))
+		return
+	}
+
+	sub, cancel := rs.Subscribe()
+	defer cancel() // 只注销订阅，不 Kill 进程
+
+	stopCh := make(chan struct{}, 1)
+	doneCh := rs.Done()
+
+	// WS 读 goroutine：检测断开 + 解析 stop 指令。
+	infra.Go(func() {
+		conn.SetReadLimit(512)
+		conn.SetPongHandler(func(string) error {
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			return nil
+		})
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg map[string]string
+			if json.Unmarshal(data, &msg) == nil && msg["type"] == "stop" {
+				select {
+				case stopCh <- struct{}{}:
+				default:
+				}
+			}
+		}
+	})
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case msg := <-sub:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(gorillaWs.TextMessage, msg); err != nil {
+				return
+			}
+		case <-doneCh:
+			// 脚本已退出，发退出码。
+			exitCode := 0
+			if cmd := rs.Cmd(); cmd != nil && cmd.ProcessState != nil {
+				exitCode = cmd.ProcessState.ExitCode()
+			}
+			exitMsg, _ := json.Marshal(map[string]interface{}{
+				"type": "exit",
+				"code": exitCode,
+			})
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = conn.WriteMessage(gorillaWs.TextMessage, exitMsg)
+			return
+		case <-stopCh:
+			h.runner.Stop(id)
+			// 进程被 Kill，Wait goroutine 收尸后 done 关闭，走 doneCh 正常退出。
+		case <-ticker.C:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(gorillaWs.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// RunScript 启动一个脚本执行（独立于 WS 订阅）。单实例：已运行则复用，不重复启动。
+func (h *CronHandler) RunScript(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
+		return
+	}
+	script, err := h.cronService.GetScript(c.Request.Context(), id)
+	if err != nil {
+		c.Error(apperror.ErrNotFound.WithMessage("脚本不存在"))
+		return
+	}
+	middleware.AuditSummary(c, "执行脚本 "+script.Name)
+	if _, err := h.runner.Start(script); err != nil {
+		c.Error(apperror.ErrInternal.WithMessage("启动脚本失败: " + err.Error()))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "已启动"})
+}
+
+// GetRunningScripts 返回运行中脚本 id 列表，供前端显示「运行中」标记。
+func (h *CronHandler) GetRunningScripts(c *gin.Context) {
+	httpx.Success(c, h.runner.RunningIDs())
+}
+
+// StopScript 停止一个正在运行的脚本（列表上的「停止」按钮调用）。
+func (h *CronHandler) StopScript(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的脚本ID"))
+		return
+	}
+	if _, ok := h.runner.Get(id); !ok {
+		c.Error(apperror.ErrNotFound.WithMessage("脚本未在运行"))
+		return
+	}
+	middleware.AuditSummary(c, "停止脚本执行")
+	h.runner.Stop(id)
+	httpx.Success(c, gin.H{"message": "已停止"})
+}
+
 // checkTaskNameUnique 校验任务名唯一（排除 excludeName，用于编辑场景）。
 func checkTaskNameUnique(ctx context.Context, svc *cron.Service, name, excludeName string) error {
 	existing, err := svc.List(ctx)
@@ -501,7 +719,7 @@ func validateOnCalendar(exec executor.CommandExecutor, expr string) error {
 	return nil
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
 	handler := NewCronHandler(cronService, exec)
 
 	protected.GET("/cron/tasks", handler.ListTasks)
@@ -515,7 +733,13 @@ func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec 
 	protected.GET("/cron/tasks/:name/runs", handler.GetTaskRuns)
 	protected.GET("/cron/scripts", handler.ListScripts)
 	protected.POST("/cron/scripts", handler.CreateScript)
+	protected.GET("/cron/scripts/running", handler.GetRunningScripts)
+	protected.POST("/cron/scripts/:id/run", handler.RunScript)
 	protected.GET("/cron/scripts/:id", handler.GetScript)
 	protected.PUT("/cron/scripts/:id", handler.UpdateScript)
 	protected.DELETE("/cron/scripts/:id", handler.DeleteScript)
+	protected.POST("/cron/scripts/:id/stop", handler.StopScript)
+
+	wsGroup.GET("/scripts/:id/run", handler.RunScriptWebSocket)
+	protected.GET("/cron/scripts/:id/logs", handler.GetScriptLogs)
 }

@@ -343,6 +343,13 @@ export interface Script {
   updated_at: string;
 }
 
+// 脚本执行实时日志行（WS 消息 data 字段）
+export interface ScriptLogLine {
+  stream: 'stdout' | 'stderr';
+  message: string;
+  time: string;
+}
+
 // Firewall types
 export interface FirewallRule {
   id: number;

@@ -176,10 +176,10 @@ func TestUnitName(t *testing.T) {
 	}{
 		{"easyserver-svc-foo.service", "foo"},
 		{"easyserver-svc-website-bar.service", "website-bar"},
-		{"nginx.service", ""},               // 非托管
-		{"easyserver-svc-foo", "foo"},       // 无后缀也能解析（TrimSuffix 对无后缀串是 no-op）
-		{"easyserver-svc-", ""},             // 空名
-		{"easyserver-foo.service", ""},      // cron/其他前缀不命中
+		{"nginx.service", ""},          // 非托管
+		{"easyserver-svc-foo", "foo"},  // 无后缀也能解析（TrimSuffix 对无后缀串是 no-op）
+		{"easyserver-svc-", ""},        // 空名
+		{"easyserver-foo.service", ""}, // cron/其他前缀不命中
 		{"", ""},
 	}
 	for _, c := range cases {
