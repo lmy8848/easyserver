@@ -9,7 +9,6 @@ export const MARKDOWN_STYLES = {
 };
 
 export const STYLES = {
-  scheduleTag: { fontFamily: 'monospace', fontSize: 12 },
   presetSelect: { width: '100%' },
   description: { color: '#8c8c8c', fontSize: 12, marginTop: 4, minHeight: 18 },
   nextRunItem: { fontFamily: 'monospace' as const, fontSize: 12 },

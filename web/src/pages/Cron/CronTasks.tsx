@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
+  Card, Button, Space, Modal, Form, Input, InputNumber, Select, Switch,
   message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented, Radio, Row, Col, ConfigProvider,
 } from 'antd';
 import {
@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import type { CronTask, Script } from '../../types';
 import { cronApi } from '../../services/api';
-import { buildOnCalendar, describeSchedule, computeNextRun, type ScheduleForm } from './schedule';
+import { buildOnCalendar, describeSchedule, computeNextRun, describeOnCalendar, type ScheduleForm } from './schedule';
 import { STYLES } from './types';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
@@ -29,8 +29,10 @@ interface CronTasksProps {
 
 // 频率选项：value 对应后端 ScheduleForm.Frequency
 const FREQUENCY_OPTIONS = [
+  { value: 'secondly', label: '每 N 秒' },
   { value: 'minutely', label: '每 N 分钟' },
   { value: 'hourly', label: '每 N 小时' },
+  { value: 'every_n_days', label: '每 N 天' },
   { value: 'daily', label: '每天固定时间' },
   { value: 'weekly', label: '每周固定几天' },
   { value: 'monthly', label: '每月固定日' },
@@ -259,7 +261,9 @@ export default function CronTasks({
       key: 'schedule',
       width: 170,
       render: (schedule: string) => (
-        <Tag style={STYLES.scheduleTag}>{schedule}</Tag>
+        <Tooltip title={schedule}>
+          <span>{describeOnCalendar(schedule)}</span>
+        </Tooltip>
       ),
     },
     {
@@ -561,14 +565,19 @@ function RowForm({ frequency, setFrequency, onShowHelp }: { frequency: string; s
       >
         <Select options={FREQUENCY_OPTIONS} onChange={setFrequency} />
       </Form.Item>
-      {(frequency === 'minutely' || frequency === 'hourly') && (
-        <Form.Item name="every_n" label={frequency === 'minutely' ? '每 N 分钟' : '每 N 小时'}>
-          <InputNumber min={1} max={60} />
+      {(frequency === 'secondly' || frequency === 'minutely' || frequency === 'hourly') && (
+        <Form.Item name="every_n" label={frequency === 'secondly' ? '每 N 秒' : frequency === 'minutely' ? '每 N 分钟' : '每 N 小时'}>
+          <InputNumber min={1} max={frequency === 'secondly' ? 3600 : 60} />
         </Form.Item>
       )}
-      {(frequency === 'daily' || frequency === 'weekly') && (
+      {(frequency === 'every_n_days' || frequency === 'daily' || frequency === 'weekly') && (
         <Form.Item name="time" label="触发时间（HH:MM）">
           <Input placeholder="例：03:00" />
+        </Form.Item>
+      )}
+      {frequency === 'every_n_days' && (
+        <Form.Item name="every_n" label="每 N 天">
+          <InputNumber min={1} max={30} />
         </Form.Item>
       )}
       {frequency === 'weekly' && (
