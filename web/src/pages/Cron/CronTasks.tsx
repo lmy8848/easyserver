@@ -395,11 +395,28 @@ export default function CronTasks({
           ) : (
             <Form.Item
               name="schedule"
-              label="调度表达式"
+              label={
+                <Space>
+                  <span>调度表达式</span>
+                  {onShowHelp && (
+                    <Tooltip title="查看使用手册">
+                      <Button type="link" size="small" icon={<QuestionCircleOutlined />} onClick={onShowHelp} />
+                    </Tooltip>
+                  )}
+                </Space>
+              }
               rules={[{ required: true, message: '请输入调度表达式' }]}
               extra="例：*-*-* 03:00:00（每天 3 点）、*:00/5（每 5 分钟）、Mon..Fri *-*-* 09:00:00（工作日 9 点）"
             >
-              <Input placeholder="例：*-*-* 03:00:00" style={{ fontFamily: 'monospace' }} />
+              <Input
+                placeholder="例：*-*-* 03:00:00"
+                style={{ fontFamily: 'monospace' }}
+                suffix={
+                  <Tooltip title="预览下次执行">
+                    <Button type="text" size="small" icon={<EyeOutlined />} onClick={handlePreview} loading={previewLoading} />
+                  </Tooltip>
+                }
+              />
             </Form.Item>
           )}
           <Form.Item name="name" label="任务名称" rules={[{ required: true, message: '请输入任务名称' }]}>
