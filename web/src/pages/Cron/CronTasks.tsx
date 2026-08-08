@@ -381,10 +381,12 @@ export default function CronTasks({
         style={STYLES.modal}
         destroyOnHidden
         zIndex={1000}
+        styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingRight: 8 } }}
       >
         <Form
           form={form}
           layout="vertical"
+          size="small"
           onValuesChange={scheduleChanged}
           initialValues={{ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 }}
         >
