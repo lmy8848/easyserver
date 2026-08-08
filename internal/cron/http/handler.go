@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -572,117 +571,7 @@ func nextRunOf(exec executor.CommandExecutor, expr string) (string, error) {
 	return "", nil
 }
 
-// ============================================================
-// Cron documentation handlers
-// ============================================================
-
-func (h *CronHandler) ListDocs(c *gin.Context) {
-	docs, err := h.cronService.ListDocs(c.Request.Context())
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, docs)
-}
-
-func (h *CronHandler) GetDoc(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的文档ID"))
-		return
-	}
-	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文档不存在"))
-		return
-	}
-	httpx.Success(c, doc)
-}
-
-func (h *CronHandler) CreateDoc(c *gin.Context) {
-	var req struct {
-		Title     string `json:"title" binding:"required"`
-		Content   string `json:"content" binding:"required"`
-		SortOrder int    `json:"sort_order"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-	middleware.AuditSummary(c, "创建定时任务文档 "+req.Title)
-	doc := &cron.CronDoc{
-		Title:     req.Title,
-		Content:   req.Content,
-		SortOrder: req.SortOrder,
-	}
-	if err := h.cronService.CreateDoc(c.Request.Context(), doc); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, doc)
-}
-
-func (h *CronHandler) UpdateDoc(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的文档ID"))
-		return
-	}
-	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文档不存在"))
-		return
-	}
-	var req struct {
-		Title     *string `json:"title"`
-		Content   *string `json:"content"`
-		SortOrder *int    `json:"sort_order"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-	middleware.AuditSummary(c, "更新定时任务文档 "+doc.Title)
-	if req.Title != nil {
-		doc.Title = *req.Title
-	}
-	if req.Content != nil {
-		doc.Content = *req.Content
-	}
-	if req.SortOrder != nil {
-		doc.SortOrder = *req.SortOrder
-	}
-	if err := h.cronService.UpdateDoc(c.Request.Context(), doc); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, doc)
-}
-
-func (h *CronHandler) DeleteDoc(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的文档ID"))
-		return
-	}
-	doc, err := h.cronService.GetDoc(c.Request.Context(), id)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文档不存在"))
-		return
-	}
-	middleware.AuditSummary(c, "删除定时任务文档 "+doc.Title)
-	if err := h.cronService.DeleteDoc(c.Request.Context(), id); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, gin.H{"message": "文档已删除"})
-}
-
 func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
-	// Seed default documentation (tables managed by migration system)
-	if err := cronService.SeedDefaultDocs(context.Background()); err != nil {
-		log.Printf("WARNING: seed default cron docs failed: %v", err)
-	}
 	handler := NewCronHandler(cronService, exec)
 
 	protected.GET("/cron/describe", handler.DescribeSchedule)
@@ -701,9 +590,4 @@ func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service, exec 
 	protected.GET("/cron/scripts/:id", handler.GetScript)
 	protected.PUT("/cron/scripts/:id", handler.UpdateScript)
 	protected.DELETE("/cron/scripts/:id", handler.DeleteScript)
-	protected.GET("/cron/docs", handler.ListDocs)
-	protected.POST("/cron/docs", handler.CreateDoc)
-	protected.GET("/cron/docs/:id", handler.GetDoc)
-	protected.PUT("/cron/docs/:id", handler.UpdateDoc)
-	protected.DELETE("/cron/docs/:id", handler.DeleteDoc)
 }

@@ -24,13 +24,4 @@ type Repository interface {
 	ReadScriptFile(id int64) (string, error)
 	WriteScriptFile(id int64, content string) error
 	DeleteScriptFile(id int64) error
-
-	// Documentation
-	ListDocs(ctx context.Context) ([]CronDoc, error)
-	GetDoc(ctx context.Context, id int64) (*CronDoc, error)
-	CreateDoc(ctx context.Context, doc *CronDoc) error
-	UpdateDoc(ctx context.Context, doc *CronDoc) error
-	DeleteDoc(ctx context.Context, id int64) error
-	CountDocs(ctx context.Context) (int, error)
-	BatchCreateDocs(ctx context.Context, docs []CronDoc) error
 }

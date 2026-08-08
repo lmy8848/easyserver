@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  ApiResponse, CronTask, CronLog, Script, CronDoc,
+  ApiResponse, CronTask, CronLog, Script,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
@@ -726,22 +726,6 @@ export const cronApi = {
 
   deleteScript: (id: number) =>
     api.delete<ApiResponse>(`/cron/scripts/${id}`),
-
-  // Docs
-  listDocs: () =>
-    api.get<ApiResponse<CronDoc[]>>('/cron/docs'),
-
-  getDoc: (id: number) =>
-    api.get<ApiResponse<CronDoc>>(`/cron/docs/${id}`),
-
-  createDoc: (data: { title: string; content: string; sort_order?: number }) =>
-    api.post<ApiResponse<CronDoc>>('/cron/docs', data),
-
-  updateDoc: (id: number, data: { title?: string; content?: string; sort_order?: number }) =>
-    api.put<ApiResponse<CronDoc>>(`/cron/docs/${id}`, data),
-
-  deleteDoc: (id: number) =>
-    api.delete<ApiResponse>(`/cron/docs/${id}`),
 };
 
 // Firewall management

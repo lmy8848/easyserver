@@ -35,4 +35,13 @@ CREATE TABLE IF NOT EXISTS cron_logs (
 
 CREATE INDEX IF NOT EXISTS idx_cron_logs_task_id ON cron_logs(task_id);
 
+CREATE TABLE IF NOT EXISTS cron_docs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 ALTER TABLE scripts ADD COLUMN content TEXT NOT NULL DEFAULT '';

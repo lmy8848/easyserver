@@ -84,13 +84,3 @@ type UpdateScriptRequest struct {
 	Content     *string `json:"content"`
 	Language    *string `json:"language"`
 }
-
-// CronDoc 表示定时任务文档的一节。
-type CronDoc struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	SortOrder int    `json:"sort_order"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-}

@@ -346,15 +346,6 @@ export interface Script {
   updated_at: string;
 }
 
-export interface CronDoc {
-  id: number;
-  title: string;
-  content: string;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
 // Firewall types
 export interface FirewallRule {
   id: number;

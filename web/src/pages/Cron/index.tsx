@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
-import type { CronTask, CronLog, Script, CronDoc } from '../../types';
+import type { CronTask, CronLog, Script } from '../../types';
 import { cronApi } from '../../services/api';
 import CronTasks from './CronTasks';
 import CronLogs from './CronLogs';
@@ -20,8 +20,6 @@ export default function CronPage() {
 
   // Docs drawer state
   const [helpVisible, setHelpVisible] = useState(false);
-  const [docs, setDocs] = useState<CronDoc[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -99,24 +97,9 @@ export default function CronPage() {
     }
   };
 
-  const fetchDocs = useCallback(async () => {
-    setDocsLoading(true);
-    try {
-      const res = await cronApi.listDocs();
-      setDocs(res.data?.data || []);
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '获取文档失败'));
-    } finally {
-      setDocsLoading(false);
-    }
-  }, []);
-
   const handleShowHelp = useCallback(() => {
     setHelpVisible(true);
-    if (docs.length === 0) {
-      fetchDocs();
-    }
-  }, [docs.length, fetchDocs]);
+  }, []);
 
   return (
     <div>
@@ -141,8 +124,6 @@ export default function CronPage() {
       />
       <CronDocs
         visible={helpVisible}
-        docs={docs}
-        loading={docsLoading}
         onClose={() => setHelpVisible(false)}
       />
     </div>

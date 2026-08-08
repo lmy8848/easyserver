@@ -9,4 +9,7 @@
 DROP TABLE IF EXISTS cron_tasks;
 DROP TABLE IF EXISTS cron_logs;
 
+-- 帮助手册改为前端内置（无需后端存储），删除 cron_docs 表。
+DROP TABLE IF EXISTS cron_docs;
+
 ALTER TABLE scripts DROP COLUMN content;
