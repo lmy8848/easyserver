@@ -3,551 +3,119 @@ package cron
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
-	"strings"
-	"time"
 
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
 )
 
-// wrapWithMiseExec composes one shell-parseable line of the form:
-//
-//	MISE_DATA_DIR=/opt/easyserver/mise MISE_CONFIG_DIR=/opt/easyserver/mise /opt/easyserver/mise/bin/mise exec <tool>@<exact> -- <userCmd>
-//
-// Used to build /etc/cron.d/easyserver entries. The trailing <userCmd> is
-// interpreted by /bin/sh (cron invokes it that way), so users can still chain
-// with `&&` etc. at the shell level — the wrapper runs the immediate next
-// process under the pinned runtime. Returns an error if lang isn't supported
-// by the provider so the caller can skip that task instead of writing a broken line.
-//
-// cron(8) reads `%` in the command field as newline-to-stdin (see `man 5
-// crontab`), which silently truncates commands like `date +%Y%m%d`. We escape
-// every `%` to `\%` here because this helper is *only* used for the on-disk
-// crontab; RunNow takes a different code path and shouldn't escape.
-func wrapWithMiseExec(provider mise.Provider, lang, exact, userCmd string) (string, error) {
-	escaped := strings.ReplaceAll(userCmd, "%", `\%`)
-	c, err := provider.Command(lang, exact, escaped)
-	if err != nil {
-		return "", err
-	}
-	// Command.Exec = [bin, exec, tool@exact, --, cmd]，cmd 是最后一项（由 cron 的
-	// /bin/sh 解析，不加引号）。Env 是环境变量前缀。
-	head := c.Exec[:len(c.Exec)-1]
-	line := strings.Join(head, " ") + " " + c.Exec[len(c.Exec)-1]
-	if len(c.Env) > 0 {
-		line = strings.Join(c.Env, " ") + " " + line
-	}
-	return line, nil
-}
-
-// Service manages cron tasks and their execution
+// Service 管理定时任务与脚本/文档：任务 CRUD/状态/日志委托给 TimerManager，脚本/文档走 SQLite。
 type Service struct {
-	repo     Repository
-	executor executor.CommandExecutor
-	provider mise.Provider
+	repo Repository
+	tm   *TimerManager
 }
 
-// NewService creates a new cron Service
+// NewService creates a new cron Service.
 func NewService(repo Repository, exec executor.CommandExecutor, provider mise.Provider) *Service {
-	return &Service{repo: repo, executor: exec, provider: provider}
+	return &Service{
+		repo: repo,
+		tm:   NewTimerManager(exec, provider, repo),
+	}
 }
 
-// List returns all cron tasks
 func (s *Service) List(ctx context.Context) ([]CronTask, error) {
-	return s.repo.ListTasks(ctx)
+	return s.tm.List(ctx)
 }
 
-// Get returns a cron task by ID
-func (s *Service) Get(ctx context.Context, id int64) (*CronTask, error) {
-	return s.repo.GetTask(ctx, id)
+func (s *Service) Get(ctx context.Context, name string) (*CronTask, error) {
+	return s.tm.Get(ctx, name)
 }
 
-// Create creates a new cron task. Refuses to bind to a runtime_version that
-// isn't 'installed' — otherwise the task would only fail later at exec time
-// with an opaque mise error.
 func (s *Service) Create(ctx context.Context, task *CronTask) error {
-	status, err := s.repo.GetRuntimeVersionStatus(ctx, task.RuntimeVersionID)
-	if err != nil {
-		return fmt.Errorf("validate runtime_version: %w", err)
-	}
-	if status != "installed" {
-		return fmt.Errorf("runtime_version %d is not installed (status=%s)", task.RuntimeVersionID, status)
-	}
-	if err := s.repo.CreateTask(ctx, task); err != nil {
-		return err
-	}
-	_ = s.SyncToSystemCrontab(ctx)
-	return nil
+	return s.tm.Create(ctx, task)
 }
 
-// Update updates an existing cron task
 func (s *Service) Update(ctx context.Context, task *CronTask) error {
-	// Only validate when the binding changes — matching process.Service.Update.
-	// Editing schedule/desc on a task whose runtime briefly went installing
-	// (e.g. admin force-reinstalls) shouldn't fail; the old binding stays
-	// in place and the FK already guarantees it points at a real row.
-	old, err := s.repo.GetTask(ctx, task.ID)
-	if err != nil {
-		return fmt.Errorf("load existing task: %w", err)
-	}
-	if old != nil && old.RuntimeVersionID != task.RuntimeVersionID {
-		status, err := s.repo.GetRuntimeVersionStatus(ctx, task.RuntimeVersionID)
-		if err != nil {
-			return fmt.Errorf("validate runtime_version: %w", err)
-		}
-		if status != "installed" {
-			return fmt.Errorf("runtime_version %d is not installed (status=%s)", task.RuntimeVersionID, status)
-		}
-	}
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
-		return err
-	}
-	_ = s.SyncToSystemCrontab(ctx)
-	return nil
+	return s.tm.Update(ctx, task)
 }
 
-// Delete deletes a cron task and its logs
-func (s *Service) Delete(ctx context.Context, id int64) error {
-	if err := s.repo.DeleteTask(ctx, id); err != nil {
-		return err
-	}
-	_ = s.SyncToSystemCrontab(ctx)
-	return nil
+func (s *Service) Delete(ctx context.Context, name string) error {
+	return s.tm.Delete(ctx, name)
 }
 
-// Enable enables a cron task
-func (s *Service) Enable(ctx context.Context, id int64) error {
-	if err := s.repo.EnableTask(ctx, id); err != nil {
-		return err
-	}
-	_ = s.SyncToSystemCrontab(ctx)
-	return nil
+func (s *Service) Enable(ctx context.Context, name string) error {
+	return s.tm.Enable(ctx, name)
 }
 
-// Disable disables a cron task
-func (s *Service) Disable(ctx context.Context, id int64) error {
-	if err := s.repo.DisableTask(ctx, id); err != nil {
-		return err
-	}
-	_ = s.SyncToSystemCrontab(ctx)
-	return nil
+func (s *Service) Disable(ctx context.Context, name string) error {
+	return s.tm.Disable(ctx, name)
 }
 
-// RunNow executes a cron task immediately (async)
-func (s *Service) RunNow(ctx context.Context, id int64) error {
-	task, err := s.Get(ctx, id)
-	if err != nil {
-		return fmt.Errorf("task not found: %w", err)
-	}
-
-	ok, err := s.repo.SetTaskRunning(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to update task status: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("task is already running")
-	}
-
-	go s.executeTask(task)
-	return nil
+func (s *Service) RunNow(ctx context.Context, name string) error {
+	return s.tm.RunNow(ctx, name)
 }
 
-func (s *Service) executeTask(task *CronTask) {
-	ctx := context.Background()
-
-	var output []byte
-	var runErr error
-	attempts := 0
-	maxRetry := task.MaxRetry
-	if maxRetry < 0 {
-		maxRetry = 0
-	}
-	if maxRetry > 10 {
-		maxRetry = 10
-	}
-
-	start := time.Now()
-
-	for attempts <= maxRetry {
-		attempts++
-
-		runCtx := ctx
-		var cancel context.CancelFunc
-		if task.Timeout > 0 {
-			timeout := task.Timeout
-			if timeout > 86400 {
-				timeout = 86400
-			}
-			runCtx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-		}
-
-		var command string
-		if task.ScriptID > 0 {
-			script, scriptErr := s.repo.GetScript(ctx, int64(task.ScriptID))
-			if scriptErr != nil {
-				if cancel != nil {
-					cancel()
-				}
-				output = []byte(fmt.Sprintf("script not found: %v", scriptErr))
-				runErr = scriptErr
-				break
-			}
-			if strings.ContainsRune(script.Content, '\x00') {
-				if cancel != nil {
-					cancel()
-				}
-				output = []byte("script content contains null byte")
-				runErr = fmt.Errorf("invalid script content")
-				break
-			}
-			command = script.Content
-		} else {
-			if strings.ContainsRune(task.Command, '\x00') {
-				if cancel != nil {
-					cancel()
-				}
-				output = []byte("command contains null byte")
-				runErr = fmt.Errorf("invalid command")
-				break
-			}
-			const maxCmdLen = 8192
-			if len(task.Command) > maxCmdLen {
-				if cancel != nil {
-					cancel()
-				}
-				output = []byte(fmt.Sprintf("command exceeds maximum length (%d bytes)", maxCmdLen))
-				runErr = fmt.Errorf("command too long")
-				break
-			}
-			command = task.Command
-		}
-
-		opts := executor.CommandOptions{}
-		if task.WorkDir != "" {
-			if _, err := os.Stat(task.WorkDir); err == nil {
-				opts.WorkDir = task.WorkDir
-			} else {
-				log.Printf("cron: work_dir %s does not exist, using default", task.WorkDir)
-			}
-		}
-		if task.EnvVars != "" {
-			opts.Env = parseEnvVars(task.EnvVars)
-		}
-
-		// Wrap the (possibly multi-line shell) command so anything the user wrote —
-		// pipes, &&, scripts — resolves binaries via the runtime version pinned in
-		// the DB. 底层 Command 提供 Exec/Env，RunNow 用 `sh -c` 包装多行命令。
-		c, err := s.provider.Command(task.RuntimeLang, task.RuntimeExact, command)
-		if err != nil {
-			if cancel != nil {
-				cancel()
-			}
-			output = []byte(fmt.Sprintf("unsupported runtime lang: %s", task.RuntimeLang))
-			runErr = err
-			break
-		}
-		opts.Env = append(opts.Env, c.Env...)
-
-		outputStr := ""
-		// Note: use plain `=` here. The original code used `:=` which silently
-		// shadowed the outer `runErr`, so executor failures never reached the
-		// status='failed' branch below and every retry-exhausted task got
-		// logged as success. Reuse the outer `runErr` so retries and the final
-		// status check see the same error.
-		// Exec = [bin, exec, tool@exact, --, cmd]，此处用 `sh -c` 承接多行命令。
-		runArgs := append(c.Exec[:len(c.Exec)-1], "sh", "-c", command)
-		outputStr, _, runErr = s.executor.RunWithOptions(runCtx, opts, runArgs[0], runArgs[1:]...)
-		output = []byte(outputStr)
-		if cancel != nil {
-			cancel()
-		}
-		if runErr == nil {
-			break
-		}
-
-		if attempts <= maxRetry {
-			time.Sleep(time.Second * time.Duration(attempts))
-		}
-	}
-
-	duration := int(time.Since(start).Milliseconds())
-
-	status := "success"
-	if runErr != nil {
-		status = "failed"
-		if len(output) == 0 {
-			output = []byte(runErr.Error())
-		} else {
-			output = append(output, []byte("\n"+runErr.Error())...)
-		}
-	}
-
-	outputStr := string(output)
-	const maxOutputLen = 10000
-	if len(outputStr) > maxOutputLen {
-		outputStr = outputStr[:maxOutputLen] + "\n... (truncated)"
-	}
-
-	if err := s.repo.CreateLog(ctx, task.ID, status, outputStr, duration); err != nil {
-		log.Printf("cron: failed to insert log for task %d: %v", task.ID, err)
-	}
-
-	const maxResultLen = 500
-	if err := s.repo.UpdateTaskResult(ctx, task.ID, status, truncate(outputStr, maxResultLen)); err != nil {
-		log.Printf("cron: failed to update task %d status: %v", task.ID, err)
-	}
-
-	log.Printf("cron: task %d (%s) completed with status=%s in %dms", task.ID, task.Name, status, duration)
+func (s *Service) GetRuns(ctx context.Context, name string, limit int) ([]CronRun, error) {
+	return s.tm.GetRuns(ctx, name, limit)
 }
 
-func parseEnvVars(envStr string) []string {
-	var envs []string
-	for _, line := range strings.Split(envStr, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.ContainsRune(line, '\x00') {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := parts[0]
-		if key == "" {
-			continue
-		}
-		validKey := true
-		for _, ch := range key {
-			if !((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.') {
-				validKey = false
-				break
-			}
-		}
-		if !validKey {
-			log.Printf("cron: skipping env var with invalid key: %q", key)
-			continue
-		}
-		envs = append(envs, line)
-	}
-	return envs
-}
-
-// GetLogs returns execution logs for a cron task
-func (s *Service) GetLogs(ctx context.Context, taskID int64, limit int) ([]CronLog, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	return s.repo.GetLogs(ctx, taskID, limit)
-}
-
-// ListEnabled returns all enabled cron tasks
-func (s *Service) ListEnabled(ctx context.Context) ([]CronTask, error) {
-	return s.repo.ListEnabledTasks(ctx)
-}
-
-// SyncToSystemCrontab writes enabled tasks to the system crontab
-func (s *Service) SyncToSystemCrontab(ctx context.Context) error {
-	tasks, err := s.ListEnabled(ctx)
-	if err != nil {
-		return err
-	}
-
-	var lines []string
-	lines = append(lines, "# EasyServer managed cron tasks - DO NOT EDIT MANUALLY")
-	for _, t := range tasks {
-		wrapped, err := wrapWithMiseExec(s.provider, t.RuntimeLang, t.RuntimeExact, t.Command)
-		if err != nil {
-			log.Printf("cron: skip task %d (%s): %v", t.ID, t.Name, err)
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%s root %s # easycron:%d:%s",
-			t.Schedule, wrapped, t.ID, t.Name))
-	}
-
-	content := strings.Join(lines, "\n") + "\n"
-	crontabPath := "/etc/cron.d/easyserver"
-	if err := os.WriteFile(crontabPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write crontab file: %w", err)
-	}
-	return nil
-}
-
-// RemoveFromSystemCrontab removes a task from the system crontab
-func (s *Service) RemoveFromSystemCrontab(ctx context.Context, taskID int64) error {
-	return s.SyncToSystemCrontab(ctx)
-}
-
-// ListScripts returns all scripts
 func (s *Service) ListScripts(ctx context.Context) ([]Script, error) {
 	return s.repo.ListScripts(ctx)
 }
 
-// GetScript returns a script by ID
 func (s *Service) GetScript(ctx context.Context, id int64) (*Script, error) {
-	return s.repo.GetScript(ctx, id)
-}
-
-// CreateScript creates a new script
-func (s *Service) CreateScript(ctx context.Context, script *Script) error {
-	return s.repo.CreateScript(ctx, script)
-}
-
-// UpdateScript updates an existing script
-func (s *Service) UpdateScript(ctx context.Context, script *Script) error {
-	return s.repo.UpdateScript(ctx, script)
-}
-
-// DeleteScript deletes a script by ID
-func (s *Service) DeleteScript(ctx context.Context, id int64) error {
-	return s.repo.DeleteScript(ctx, id)
-}
-
-// SeedDefaultDocs inserts default documentation if table is empty
-func (s *Service) SeedDefaultDocs(ctx context.Context) error {
-	count, err := s.repo.CountDocs(ctx)
+	script, err := s.repo.GetScript(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	content, err := s.repo.ReadScriptFile(id)
+	if err != nil {
+		return nil, err
+	}
+	script.Content = content
+	return script, nil
+}
+
+// CreateScript 先写元数据行拿 ID，再写带 shebang 的内容文件；文件写失败回滚记录。
+func (s *Service) CreateScript(ctx context.Context, script *Script) error {
+	if err := s.repo.CreateScript(ctx, script); err != nil {
 		return err
 	}
-	if count > 0 {
-		return nil
+	if err := s.repo.WriteScriptFile(script.ID, withShebang(script.Content, script.Language)); err != nil {
+		_ = s.repo.DeleteScript(ctx, script.ID)
+		return fmt.Errorf("写脚本文件失败（已回滚记录）: %w", err)
 	}
+	script.Path = scriptFilePath(script.ID)
+	return nil
+}
 
-	defaultDocs := []CronDoc{
-		{
-			Title:     "Cron 表达式基础",
-			SortOrder: 1,
-			Content: `## Cron 表达式格式
-
-一个 Cron 表达式由 5 个字段组成，用空格分隔：
-
-| 字段 | 含义 | 范围 | 允许的特殊字符 |
-|------|------|------|----------------|
-| 分钟 | 0-59 | * , - / | |
-| 小时 | 0-23 | * , - / | |
-| 日 | 1-31 | * , - / | |
-| 月 | 1-12 | * , - / | |
-| 星期 | 0-7 (0和7都是周日) | * , - / | |
-
-## 特殊字符说明
-
-| 字符 | 含义 | 示例 |
-|------|------|------|
-| * | 任意值 | * * * * * 每分钟 |
-| , | 列举多个值 | 0 9,18 * * * 每天9点和18点 |
-| - | 范围 | 0 9 * * 1-5 工作日9点 |
-| / | 步长 | */5 * * * * 每5分钟 |`,
-		},
-		{
-			Title:     "常用表达式示例",
-			SortOrder: 2,
-			Content: `## 常用 Cron 表达式
-
-| 表达式 | 说明 |
-|--------|------|
-| * * * * * | 每分钟执行 |
-| */5 * * * * | 每 5 分钟执行 |
-| 0 * * * * | 每小时整点执行 |
-| 0 2 * * * | 每天凌晨 2:00 执行 |
-| 0 9 * * 1-5 | 工作日每天 9:00 执行 |
-| 0 0 * * 0 | 每周日午夜执行 |
-| 0 0 1 * * | 每月 1 号午夜执行 |
-| 0 0 1 1 * | 每年 1 月 1 日午夜执行 |
-| 30 4 1,15 * * | 每月 1 号和 15 号 4:30 执行 |
-| 0 */2 * * * | 每 2 小时执行 |
-| 0 8-17 * * 1-5 | 工作日 8:00-17:00 每小时执行 |`,
-		},
-		{
-			Title:     "高级用法",
-			SortOrder: 3,
-			Content: "## 高级 Cron 技巧\n\n" +
-				"### 组合使用\n" +
-				"- 0 9,12,18 * * * — 每天 9:00、12:00、18:00 执行\n" +
-				"- 0 0 * * 1,3,5 — 每周一、三、五午夜执行\n" +
-				"- */10 8-18 * * 1-5 — 工作日 8:00-18:00 每 10 分钟执行\n\n" +
-				"### 常见场景\n" +
-				"- 数据库备份: 0 2 * * * — 每天凌晨 2 点\n" +
-				"- 日志清理: 0 0 * * 0 — 每周日午夜\n" +
-				"- 健康检查: */5 * * * * — 每 5 分钟\n" +
-				"- 报表生成: 0 8 1 * * — 每月 1 号早上 8 点\n" +
-				"- 缓存刷新: 0 */6 * * * — 每 6 小时\n\n" +
-				"### 注意事项\n" +
-				"- 星期几的字段中，0 和 7 都表示周日\n" +
-				"- 避免在整点(:00)执行大量任务，错开几分钟\n" +
-				"- 生产环境建议加上随机偏移，避免同时执行",
-		},
-		{
-			Title:     "Shell 脚本技巧",
-			SortOrder: 4,
-			Content: "## Shell 脚本常用技巧\n\n" +
-				"### 错误处理\n" +
-				"```bash\n" +
-				"#!/bin/bash\n" +
-				"set -e  # 遇到错误立即退出\n" +
-				"set -u  # 使用未定义变量报错\n" +
-				"set -o pipefail  # 管道中任何命令失败都算失败\n" +
-				"```\n\n" +
-				"### 日志记录\n" +
-				"```bash\n" +
-				"LOG_FILE=\"/var/log/myscript.log\"\n" +
-				"log() {\n" +
-				"    echo \"[$(date '+%Y-%m-%d %H:%M:%S')] $1\" | tee -a \"$LOG_FILE\"\n" +
-				"}\n" +
-				"log \"任务开始\"\n" +
-				"# ... 执行任务 ...\n" +
-				"log \"任务完成\"\n" +
-				"```\n\n" +
-				"### 锁机制（防止重复执行）\n" +
-				"```bash\n" +
-				"LOCK_FILE=\"/tmp/myscript.lock\"\n" +
-				"if [ -f \"$LOCK_FILE\" ]; then\n" +
-				"    echo \"脚本正在运行，退出\"\n" +
-				"    exit 1\n" +
-				"fi\n" +
-				"trap \"rm -f $LOCK_FILE\" EXIT\n" +
-				"touch \"$LOCK_FILE\"\n" +
-				"```\n\n" +
-				"### 超时控制\n" +
-				"```bash\n" +
-				"timeout 300 long_running_command  # 5 分钟超时\n" +
-				"```",
-		},
+// UpdateScript 更新元数据；提供新内容则重写带 shebang 的文件。
+func (s *Service) UpdateScript(ctx context.Context, script *Script) error {
+	if err := s.repo.UpdateScript(ctx, script); err != nil {
+		return err
 	}
-
-	return s.repo.BatchCreateDocs(ctx, defaultDocs)
-}
-
-// ListDocs returns all documentation sections
-func (s *Service) ListDocs(ctx context.Context) ([]CronDoc, error) {
-	return s.repo.ListDocs(ctx)
-}
-
-// GetDoc returns a documentation section by ID
-func (s *Service) GetDoc(ctx context.Context, id int64) (*CronDoc, error) {
-	return s.repo.GetDoc(ctx, id)
-}
-
-// UpdateDoc updates a documentation section
-func (s *Service) UpdateDoc(ctx context.Context, doc *CronDoc) error {
-	return s.repo.UpdateDoc(ctx, doc)
-}
-
-// CreateDoc creates a new documentation section
-func (s *Service) CreateDoc(ctx context.Context, doc *CronDoc) error {
-	return s.repo.CreateDoc(ctx, doc)
-}
-
-// DeleteDoc deletes a documentation section
-func (s *Service) DeleteDoc(ctx context.Context, id int64) error {
-	return s.repo.DeleteDoc(ctx, id)
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
+	if script.Content != "" {
+		if err := s.repo.WriteScriptFile(script.ID, withShebang(script.Content, script.Language)); err != nil {
+			return fmt.Errorf("重写脚本文件失败: %w", err)
+		}
 	}
-	return s
+	return nil
+}
+
+// withShebang 按语言补 shebang 行，使落盘脚本可执行。
+func withShebang(content, language string) string {
+	shebang := map[string]string{
+		"sh":      "#!/bin/sh",
+		"bash":    "#!/bin/bash",
+		"python":  "#!/usr/bin/env python3",
+		"python3": "#!/usr/bin/env python3",
+		"":        "#!/bin/sh",
+	}[language]
+	return shebang + "\n" + content
+}
+
+func (s *Service) DeleteScript(ctx context.Context, id int64) error {
+	if err := s.repo.DeleteScript(ctx, id); err != nil {
+		return err
+	}
+	return s.repo.DeleteScriptFile(id)
 }

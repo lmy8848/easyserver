@@ -1,60 +1,51 @@
 package cron
 
-// CronTask represents a scheduled cron job
+// CronTask 表示一条定时任务，承载为 systemd 的一对 .timer + .service（ADR-0004）。
+// 任务以 Name（unit 名，不含前缀）为唯一标识，无 DB 记录；状态读 systemctl，
+// 日志走 journald。Schedule 是 OnCalendar 表达式（前端预设频率或手写均转为它）。
 type CronTask struct {
-	ID               int64  `json:"id"`
 	Name             string `json:"name"`
-	Command          string `json:"command"`
-	Schedule         string `json:"schedule"`
 	Description      string `json:"description"`
+	Schedule         string `json:"schedule"` // OnCalendar 表达式
+	Persistent       bool   `json:"persistent"`
 	Enabled          bool   `json:"enabled"`
-	Status           string `json:"status"` // idle, running, success, failed
+	Status           string `json:"status"` // active / inactive / failed
 	LastRun          string `json:"last_run"`
 	LastResult       string `json:"last_result"`
 	NextRun          string `json:"next_run"`
-	ScriptID         int    `json:"script_id"`          // 0 = no script
-	Timeout          int    `json:"timeout"`            // seconds, 0 = no timeout
-	MaxRetry         int    `json:"max_retry"`          // 0 = no retry
-	EnvVars          string `json:"env_vars"`           // KEY=VALUE format, one per line
-	WorkDir          string `json:"work_dir"`           // working directory
-	RuntimeVersionID int64  `json:"runtime_version_id"` // FK → runtime_version.id; NOT NULL since Issue 02
-	RuntimeLang      string `json:"runtime_lang"`       // joined: runtime_version.lang (read-only)
-	RuntimeExact     string `json:"runtime_exact"`      // joined: runtime_version.exact (read-only)
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	Command          string `json:"command"`   // 执行命令或脚本路径
+	Timeout          int    `json:"timeout"`   // 秒，0 = 不超时
+	MaxRetry         int    `json:"max_retry"` // 0 = 不重试
+	EnvVars          string `json:"env_vars"`  // "KEY=VALUE\n..." 每行一个
+	WorkDir          string `json:"work_dir"`
+	RuntimeVersionID int64  `json:"runtime_version_id"`
+	RuntimeLang      string `json:"runtime_lang"`
+	RuntimeExact     string `json:"runtime_exact"`
 }
 
-// CronLog represents a cron task execution log
-type CronLog struct {
-	ID        int64  `json:"id"`
-	TaskID    int64  `json:"task_id"`
-	Status    string `json:"status"` // success, failed
-	Output    string `json:"output"`
-	Duration  int    `json:"duration"` // milliseconds
-	CreatedAt string `json:"created_at"`
-}
-
-// CreateCronTaskRequest is the request body for creating a cron task
+// CreateCronTaskRequest 是创建定时任务的请求体。Schedule 为 OnCalendar 表达式
+// （前端预设频率或手写均转为它），后端只负责解析校验。
 type CreateCronTaskRequest struct {
 	Name             string `json:"name" binding:"required"`
-	Command          string `json:"command"`
-	Schedule         string `json:"schedule" binding:"required"`
 	Description      string `json:"description"`
-	ScriptID         int    `json:"script_id"`
+	Schedule         string `json:"schedule" binding:"required"` // OnCalendar 表达式
+	Persistent       bool   `json:"persistent"`
+	Command          string `json:"command"`
 	Timeout          int    `json:"timeout"`
 	MaxRetry         int    `json:"max_retry"`
 	EnvVars          string `json:"env_vars"`
 	WorkDir          string `json:"work_dir"`
-	RuntimeVersionID int64  `json:"runtime_version_id" binding:"required,min=1"`
+	RuntimeVersionID int64  `json:"runtime_version_id"` // 0 = 不绑定运行时版本
 }
 
-// UpdateCronTaskRequest is the request body for updating a cron task
+// UpdateCronTaskRequest 是更新定时任务的请求体（指针字段 = 部分更新）。
 type UpdateCronTaskRequest struct {
 	Name             *string `json:"name"`
-	Command          *string `json:"command"`
-	Schedule         *string `json:"schedule"`
 	Description      *string `json:"description"`
-	ScriptID         *int    `json:"script_id"`
+	Schedule         *string `json:"schedule"` // OnCalendar 表达式（可选）
+	Persistent       *bool   `json:"persistent"`
+	Enabled          *bool   `json:"enabled"`
+	Command          *string `json:"command"`
 	Timeout          *int    `json:"timeout"`
 	MaxRetry         *int    `json:"max_retry"`
 	EnvVars          *string `json:"env_vars"`
@@ -62,18 +53,21 @@ type UpdateCronTaskRequest struct {
 	RuntimeVersionID *int64  `json:"runtime_version_id"`
 }
 
-// Script represents a reusable script
+// Script 表示可被 Cron Task 引用的可复用脚本。内容落盘 /opt/easyserver/scripts/，
+// DB 仅存元数据（name/description/language）。Content 仅由 GetService 从文件填充
+// （List 不加载全部文件内容）。
 type Script struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Content     string `json:"content"`
 	Language    string `json:"language"` // sh, bash, python
+	Content     string `json:"content,omitempty"`
+	Path        string `json:"path"` // 落盘路径，前端可直接作为执行命令
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// CreateScriptRequest is the request body for creating a script
+// CreateScriptRequest 是创建脚本的请求体。
 type CreateScriptRequest struct {
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
@@ -81,7 +75,7 @@ type CreateScriptRequest struct {
 	Language    string `json:"language"`
 }
 
-// UpdateScriptRequest is the request body for updating a script
+// UpdateScriptRequest 是更新脚本的请求体。
 type UpdateScriptRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`
@@ -89,12 +83,10 @@ type UpdateScriptRequest struct {
 	Language    *string `json:"language"`
 }
 
-// CronDoc represents a cron documentation section
-type CronDoc struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	SortOrder int    `json:"sort_order"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+// CronRun 表示一次任务执行（按 journald invocation ID 分组）。
+type CronRun struct {
+	InvocationID string    `json:"invocation_id"`
+	StartedAt    string    `json:"started_at"`
+	Status       string    `json:"status"` // success / failed / running
+	Logs         []LogLine `json:"logs"`
 }

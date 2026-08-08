@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
-import type { CronTask, CronLog, Script, CronDoc } from '../../types';
+import type { CronTask, CronRun, Script } from '../../types';
 import { cronApi } from '../../services/api';
-import type { Preset } from './types';
 import CronTasks from './CronTasks';
 import CronLogs from './CronLogs';
 import CronDocs from './CronDocs';
@@ -11,19 +10,16 @@ export default function CronPage() {
   const [tasks, setTasks] = useState<CronTask[]>([]);
   const [loading, setLoading] = useState(false);
   const [operating, setOperating] = useState('');
-  const [presets, setPresets] = useState<Preset[]>([]);
   const [scripts, setScripts] = useState<Script[]>([]);
 
   // Logs modal state
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsTask, setLogsTask] = useState<CronTask | null>(null);
-  const [logs, setLogs] = useState<CronLog[]>([]);
+  const [runs, setRuns] = useState<CronRun[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
 
   // Docs drawer state
   const [helpVisible, setHelpVisible] = useState(false);
-  const [docs, setDocs] = useState<CronDoc[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -39,19 +35,16 @@ export default function CronPage() {
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
-  // Fetch presets and scripts on mount
+  // Fetch scripts on mount
   useEffect(() => {
-    cronApi.getPresets().then(res => {
-      setPresets(res.data?.data || []);
-    }).catch(() => {});
     cronApi.listScripts().then(res => {
       setScripts(res.data?.data || []);
     }).catch(() => {});
   }, []);
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (task: CronTask) => {
     try {
-      await cronApi.delete(id);
+      await cronApi.delete(task.name);
       message.success('任务已删除');
       fetchTasks();
     } catch (error: unknown) {
@@ -60,13 +53,13 @@ export default function CronPage() {
   };
 
   const handleToggle = async (task: CronTask) => {
-    setOperating(`toggle-${task.id}`);
+    setOperating(`toggle-${task.name}`);
     try {
       if (task.enabled) {
-        await cronApi.disable(task.id);
+        await cronApi.disable(task.name);
         message.success('任务已禁用');
       } else {
-        await cronApi.enable(task.id);
+        await cronApi.enable(task.name);
         message.success('任务已启用');
       }
       fetchTasks();
@@ -78,9 +71,9 @@ export default function CronPage() {
   };
 
   const handleRun = async (task: CronTask) => {
-    setOperating(`run-${task.id}`);
+    setOperating(`run-${task.name}`);
     try {
-      await cronApi.run(task.id);
+      await cronApi.run(task.name);
       message.success('任务已执行');
       fetchTasks();
     } catch (error: unknown) {
@@ -90,38 +83,27 @@ export default function CronPage() {
     }
   };
 
-  const handleViewLogs = async (task: CronTask) => {
+  const fetchRuns = useCallback(async (task: CronTask) => {
     setLogsTask(task);
-    setLogsVisible(true);
     setLogsLoading(true);
     try {
-      const res = await cronApi.getLogs(task.id, 50);
-      setLogs(res.data?.data || []);
+      const res = await cronApi.getRuns(task.name, 100);
+      setRuns(res.data?.data || []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
-  };
-
-  const fetchDocs = useCallback(async () => {
-    setDocsLoading(true);
-    try {
-      const res = await cronApi.listDocs();
-      setDocs(res.data?.data || []);
-    } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '获取文档失败'));
-    } finally {
-      setDocsLoading(false);
-    }
   }, []);
+
+  const handleViewLogs = (task: CronTask) => {
+    setLogsVisible(true);
+    fetchRuns(task);
+  };
 
   const handleShowHelp = useCallback(() => {
     setHelpVisible(true);
-    if (docs.length === 0) {
-      fetchDocs();
-    }
-  }, [docs.length, fetchDocs]);
+  }, []);
 
   return (
     <div>
@@ -129,7 +111,6 @@ export default function CronPage() {
         tasks={tasks}
         loading={loading}
         operating={operating}
-        presets={presets}
         scripts={scripts}
         onRefresh={fetchTasks}
         onDelete={handleDelete}
@@ -141,14 +122,13 @@ export default function CronPage() {
       <CronLogs
         visible={logsVisible}
         task={logsTask}
-        logs={logs}
+        runs={runs}
         loading={logsLoading}
         onClose={() => setLogsVisible(false)}
+        onRefresh={fetchRuns}
       />
       <CronDocs
         visible={helpVisible}
-        docs={docs}
-        loading={docsLoading}
         onClose={() => setHelpVisible(false)}
       />
     </div>

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  ApiResponse, CronTask, CronLog, Script, CronDoc,
+  ApiResponse, CronTask, CronRun, Script,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
@@ -678,41 +678,32 @@ export const dbServerApi = {
 
 // Cron task management
 export const cronApi = {
-  getPresets: () =>
-    api.get<ApiResponse<Array<{ label: string; value: string; description: string }>>>('/cron/presets'),
-
-  describeSchedule: (schedule: string) =>
-    api.get<ApiResponse<{ description: string }>>('/cron/describe', { params: { schedule } }),
-
-  getNextRuns: (schedule: string) =>
-    api.get<ApiResponse<{ next_runs: string[] }>>('/cron/next-runs', { params: { schedule } }),
-
   list: () =>
     api.get<ApiResponse<CronTask[]>>('/cron/tasks'),
 
-  get: (id: number) =>
-    api.get<ApiResponse<CronTask>>(`/cron/tasks/${id}`),
+  get: (name: string) =>
+    api.get<ApiResponse<CronTask>>(`/cron/tasks/${name}`),
 
-  create: (data: { name: string; command?: string; schedule: string; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string }) =>
+  create: (data: { name: string; command?: string; schedule: string; persistent?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id: number }) =>
     api.post<ApiResponse<CronTask>>('/cron/tasks', data),
 
-  update: (id: number, data: { name?: string; command?: string; schedule?: string; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string }) =>
-    api.put<ApiResponse<CronTask>>(`/cron/tasks/${id}`, data),
+  update: (name: string, data: { name?: string; command?: string; schedule?: string; persistent?: boolean; enabled?: boolean; description?: string; script_id?: number; timeout?: number; max_retry?: number; env_vars?: string; work_dir?: string; runtime_version_id?: number }) =>
+    api.put<ApiResponse<CronTask>>(`/cron/tasks/${name}`, data),
 
-  delete: (id: number) =>
-    api.delete<ApiResponse>(`/cron/tasks/${id}`),
+  delete: (name: string) =>
+    api.delete<ApiResponse>(`/cron/tasks/${name}`),
 
-  enable: (id: number) =>
-    api.post<ApiResponse>(`/cron/tasks/${id}/enable`),
+  enable: (name: string) =>
+    api.post<ApiResponse>(`/cron/tasks/${name}/enable`),
 
-  disable: (id: number) =>
-    api.post<ApiResponse>(`/cron/tasks/${id}/disable`),
+  disable: (name: string) =>
+    api.post<ApiResponse>(`/cron/tasks/${name}/disable`),
 
-  run: (id: number) =>
-    api.post<ApiResponse>(`/cron/tasks/${id}/run`),
+  run: (name: string) =>
+    api.post<ApiResponse>(`/cron/tasks/${name}/run`),
 
-  getLogs: (id: number, limit?: number) =>
-    api.get<ApiResponse<CronLog[]>>(`/cron/tasks/${id}/logs`, { params: { limit: limit || 50 } }),
+  getRuns: (name: string, limit?: number) =>
+    api.get<ApiResponse<CronRun[]>>(`/cron/tasks/${name}/runs`, { params: { limit: limit || 100 } }),
 
   // Scripts
   listScripts: () =>
@@ -729,22 +720,6 @@ export const cronApi = {
 
   deleteScript: (id: number) =>
     api.delete<ApiResponse>(`/cron/scripts/${id}`),
-
-  // Docs
-  listDocs: () =>
-    api.get<ApiResponse<CronDoc[]>>('/cron/docs'),
-
-  getDoc: (id: number) =>
-    api.get<ApiResponse<CronDoc>>(`/cron/docs/${id}`),
-
-  createDoc: (data: { title: string; content: string; sort_order?: number }) =>
-    api.post<ApiResponse<CronDoc>>('/cron/docs', data),
-
-  updateDoc: (id: number, data: { title?: string; content?: string; sort_order?: number }) =>
-    api.put<ApiResponse<CronDoc>>(`/cron/docs/${id}`, data),
-
-  deleteDoc: (id: number) =>
-    api.delete<ApiResponse>(`/cron/docs/${id}`),
 };
 
 // Firewall management

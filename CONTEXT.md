@@ -27,9 +27,9 @@
 
 ### 定时任务
 
-- **Cron Task** — 一条定时任务定义（命令、cron 表达式、超时、重试次数）。有启用/禁用状态，以及最近一次执行结果。
-- **Cron Script** — 可被 Cron Task 引用的可复用脚本（sh/bash/python）。
-- **Cron Log** — Cron Task 的一次执行日志。
+- **Cron Task** — 一条定时任务定义，承载为 systemd 的一对 `.timer`（OnCalendar 触发）+ `.service`（mise exec 执行）。状态读 `systemctl`，日志走 journald，重试/超时由 systemd 原生处理。任务用 UI 调度表单（预设频率）描述，后端转为 OnCalendar 表达式。
+- **Cron Script** — 可被 Cron Task 引用的可复用脚本（sh/bash/python）。内容落盘 `/opt/easyserver/scripts/`，DB `scripts` 表仅存元数据（名称/语言/描述）。
+_Avoid_: Cron Log（已弃用，日志由 journald 承载）
 
 ### 防火墙
 
@@ -40,7 +40,7 @@
 - **Runtime** — 编程语言运行时（PHP、Node.js、Python 等）。一期纳管：node / python / go / java / php。
 - **Runtime Version** — 由 `mise` 接管安装的精确版本号（如 `20.11.0`）。版本号一旦落库不漂移；"升级到最新补丁"会产生新记录。
 - **Global Default** — 通过 `/etc/mise/config.toml` 写入的系统级默认版本，仅服务 SSH 登录用户与未受面板控制的脚本；面板自身的执行流不依赖。
-- **Execution Shim** — 面板主动发起的执行（Process、Cron）强制包裹为 `mise exec <lang>@<exact> -- <cmd>`，彻底隔离 PATH。Systemd unit 不在此范围内。
+- **Execution Shim** — 面板主动发起的执行（Process、Cron）强制包裹为 `mise exec <lang>@<exact> -- <cmd>`，彻底隔离 PATH。托管 systemd unit（进程守护、定时任务）的 ExecStart 由面板生成时即带有此包裹。
 - **Mirror Profile** — 存于 DB 的镜像 env 表（淘宝 / 华为 / 清华为默认 seed），生效后写入 `/etc/mise/config.toml` 的 `[env]` 段供 mise 读取，UI 可编辑。
 
 ### 容器
