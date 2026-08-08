@@ -65,6 +65,7 @@ type Script struct {
 	Description string `json:"description"`
 	Language    string `json:"language"` // sh, bash, python
 	Content     string `json:"content,omitempty"`
+	Path        string `json:"path"` // 落盘路径，前端可直接作为执行命令
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }

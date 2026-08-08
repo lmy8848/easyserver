@@ -105,6 +105,7 @@ func (s *Service) CreateScript(ctx context.Context, script *Script) error {
 		_ = s.repo.DeleteScript(ctx, script.ID)
 		return fmt.Errorf("写脚本文件失败（已回滚记录）: %w", err)
 	}
+	script.Path = scriptFilePath(script.ID)
 	return nil
 }
 

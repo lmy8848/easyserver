@@ -61,6 +61,7 @@ func (r *sqliteRepo) ListScripts(ctx context.Context) ([]Script, error) {
 		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Language, &sc.CreatedAt, &sc.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan script: %w", err)
 		}
+		sc.Path = scriptFilePath(sc.ID)
 		scripts = append(scripts, sc)
 	}
 	if err := rows.Err(); err != nil {
@@ -78,6 +79,7 @@ func (r *sqliteRepo) GetScript(ctx context.Context, id int64) (*Script, error) {
 	if err != nil {
 		return nil, err
 	}
+	sc.Path = scriptFilePath(id)
 	return &sc, nil
 }
 

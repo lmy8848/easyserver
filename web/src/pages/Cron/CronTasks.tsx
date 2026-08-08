@@ -159,14 +159,16 @@ export default function CronTasks({
     setEditingTask(task);
     // 后端只存 OnCalendar 表达式，编辑时一律以表达式回显（手动模式）。
     setMode('manual');
-    setUseType(task.script_id > 0 ? 'script' : 'command');
+    // 通过脚本路径匹配判断任务是否关联脚本（请求统一为 command）。
+    const script = scripts.find(s => s.path === task.command);
+    setUseType(script ? 'script' : 'command');
     form.setFieldsValue({
       name: task.name,
       command: task.command,
       schedule: task.schedule,
       persistent: task.persistent,
       description: task.description,
-      script_id: task.script_id || undefined,
+      script_exec: script ? script.path : undefined,
       timeout: task.timeout || 0,
       max_retry: task.max_retry || 0,
       envs: parseEnvVars(task.env_vars || ''),
@@ -198,11 +200,11 @@ export default function CronTasks({
         return;
       }
       const payload = {
-        command: useType === 'command' ? (values.command || '') : '',
+        command: useType === 'command' ? (values.command || '') : (values.script_exec || ''),
         schedule,
         persistent: !!values.persistent,
         description: values.description || '',
-        script_id: useType === 'script' ? (values.script_id || 0) : 0,
+        script_id: 0,
         timeout: values.timeout || 0,
         max_retry: values.max_retry || 0,
         env_vars: serializeEnvVars(values.envs),
@@ -260,9 +262,10 @@ export default function CronTasks({
       dataIndex: 'command',
       key: 'command',
       ellipsis: true,
-      render: (command: string, record: CronTask) => {
-        if (record.script_id > 0) {
-          return <Tag color="blue">脚本 #{record.script_id}</Tag>;
+      render: (command: string, _record: CronTask) => {
+        const script = scripts.find(x => x.path === command);
+        if (script) {
+          return <Tag color="blue">{script.name}</Tag>;
         }
         return command;
       },
@@ -446,7 +449,7 @@ export default function CronTasks({
             </Radio.Group>
           </Form.Item>
           <Form.Item
-            name={useType === 'command' ? 'command' : 'script_id'}
+            name={useType === 'command' ? 'command' : 'script_exec'}
             label={useType === 'command' ? '执行命令' : '关联脚本'}
             rules={[{ required: true, message: useType === 'command' ? '请填写执行命令' : '请选择脚本' }]}
             extra={useType === 'command' ? '任务将在所选运行时环境中执行，支持管道、脚本调用等 Shell 用法' : undefined}
@@ -456,7 +459,7 @@ export default function CronTasks({
             ) : (
               <Select
                 placeholder="选择脚本"
-                options={scripts.map(s => ({ label: `${s.name} (${s.language})`, value: s.id }))}
+                options={scripts.map(s => ({ label: `${s.name} (${s.language})`, value: s.path }))}
               />
             )}
           </Form.Item>
