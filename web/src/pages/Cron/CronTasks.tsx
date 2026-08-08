@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
-  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented, Radio,
+  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented, Radio, Row, Col,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, PlayCircleOutlined,
@@ -460,12 +460,18 @@ export default function CronTasks({
           <Form.Item name="work_dir" label="工作目录" extra="可选">
             <Input placeholder="例：/opt/app" />
           </Form.Item>
-          <Form.Item name="timeout" label="超时时间（秒）" extra="0 = 不超时">
-            <InputNumber style={{ width: '100%' }} placeholder="0" min={0} max={86400} />
-          </Form.Item>
-          <Form.Item name="max_retry" label="失败重试次数" extra="0 = 不重试">
-            <InputNumber style={{ width: '100%' }} placeholder="0" min={0} max={10} />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item name="timeout" label="超时时间（秒）" extra="0 = 不超时">
+                <InputNumber style={{ width: '100%' }} placeholder="0" min={0} max={86400} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item name="max_retry" label="失败重试次数" extra="0 = 不重试">
+                <InputNumber style={{ width: '100%' }} placeholder="0" min={0} max={10} />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="env_vars" label="环境变量">
             <Input.TextArea rows={4} placeholder={'每行一个\nKEY=VALUE'} style={{ fontFamily: 'monospace' }} />
           </Form.Item>
