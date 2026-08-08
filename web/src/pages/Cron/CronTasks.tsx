@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
-  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented, Radio, Row, Col,
+  message, Popconfirm, Table, Empty, Spin, Tooltip, Segmented, Radio, Row, Col, ConfigProvider,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, PlayCircleOutlined,
@@ -383,10 +383,10 @@ export default function CronTasks({
         zIndex={1000}
         styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingRight: 8 } }}
       >
+        <ConfigProvider theme={{ components: { Form: { itemMarginBottom: 16 } } }}>
         <Form
           form={form}
           layout="vertical"
-          size="small"
           onValuesChange={scheduleChanged}
           initialValues={{ frequency: 'daily', every_n: 5, time: '03:00', weekdays: ['Mon'], day_of_month: 1 }}
         >
@@ -514,6 +514,7 @@ export default function CronTasks({
             </Form.List>
           </Form.Item>
         </Form>
+        </ConfigProvider>
       </Modal>
 
       {/* Next Run Preview Modal */}
