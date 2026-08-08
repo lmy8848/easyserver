@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  ApiResponse, CronTask, CronLog, Script, ScheduleForm,
+  ApiResponse, CronTask, CronLog, Script,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
@@ -678,12 +678,6 @@ export const dbServerApi = {
 
 // Cron task management
 export const cronApi = {
-  describeSchedule: (form: ScheduleForm) =>
-    api.post<ApiResponse<{ on_calendar: string; description: string }>>('/cron/describe', form),
-
-  getNextRun: (onCalendar: string) =>
-    api.get<ApiResponse<{ next_run: string }>>('/cron/next-run', { params: { on_calendar: onCalendar } }),
-
   list: () =>
     api.get<ApiResponse<CronTask[]>>('/cron/tasks'),
 

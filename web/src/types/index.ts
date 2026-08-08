@@ -298,15 +298,6 @@ export interface DBUser {
   created_at: string;
 }
 
-// 调度表单（UI 预设频率）→ 后端转 OnCalendar
-export interface ScheduleForm {
-  frequency: 'minutely' | 'hourly' | 'daily' | 'weekly' | 'monthly';
-  every_n?: number;
-  time?: string;
-  weekdays?: string[];
-  day_of_month?: number;
-}
-
 // Cron task types（systemd timer 承载，name 为唯一标识）
 export interface CronTask {
   name: string;

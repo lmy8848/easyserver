@@ -8,8 +8,9 @@ import {
   DeleteOutlined, EditOutlined, HistoryOutlined,
   ClockCircleOutlined, EyeOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons';
-import type { CronTask, Script, ScheduleForm } from '../../types';
+import type { CronTask, Script } from '../../types';
 import { cronApi } from '../../services/api';
+import { buildOnCalendar, describeSchedule, computeNextRun, type ScheduleForm } from './schedule';
 import { STYLES } from './types';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
@@ -80,10 +81,8 @@ export default function CronTasks({
     };
     setDescLoading(true);
     try {
-      const res = await cronApi.describeSchedule(formData);
-      setFormDesc(`${res.data?.data?.description || ''}（${res.data?.data?.on_calendar || ''}）`);
-    } catch {
-      setFormDesc('调度表单无效');
+      const { on_calendar, description } = describeSchedule(formData);
+      setFormDesc(`${description}（${on_calendar}）`);
     } finally {
       setDescLoading(false);
     }
@@ -110,17 +109,13 @@ export default function CronTasks({
           weekdays: v.weekdays?.length ? v.weekdays : ['Mon'],
           day_of_month: v.day_of_month || 1,
         };
-        const res = await cronApi.describeSchedule(formData);
-        onCalendar = res.data?.data?.on_calendar || '';
+        onCalendar = buildOnCalendar(formData);
       }
       if (!onCalendar) {
         setNextRun('请先填写调度表达式');
         return;
       }
-      const nres = await cronApi.getNextRun(onCalendar);
-      setNextRun(nres.data?.data?.next_run || '');
-    } catch {
-      setNextRun('无法解析调度');
+      setNextRun(computeNextRun(onCalendar, new Date()) || '无法解析调度');
     } finally {
       setPreviewLoading(false);
     }
@@ -176,8 +171,7 @@ export default function CronTasks({
           weekdays: values.weekdays?.length ? values.weekdays : ['Mon'],
           day_of_month: values.day_of_month || 1,
         };
-        const res = await cronApi.describeSchedule(formData);
-        schedule = res.data?.data?.on_calendar || '';
+        schedule = buildOnCalendar(formData);
       }
       if (!schedule) {
         message.error('请填写调度表达式');
