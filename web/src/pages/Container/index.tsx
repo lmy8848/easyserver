@@ -103,11 +103,8 @@ export default function Container() {
             {!status.installed ? '未安装' : (ready ? '运行中' : '已停止')}
           </Tag>
         )}
-        {status?.installed && (
-          <span style={{ marginLeft: 8, color: '#888', fontSize: 12 }}>
-            {status.version && `v${status.version}`}
-            {status.compose_version && ` · Compose ${status.compose_version}`}
-          </span>
+        {status?.installed && status.version && (
+          <span style={{ marginLeft: 8, color: '#888', fontSize: 12 }}>v{status.version}</span>
         )}
         <Space style={{ marginLeft: 8 }}>
           {!status?.installed ? (

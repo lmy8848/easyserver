@@ -17,7 +17,6 @@ export interface ImageCategory {
 export interface DockerStatus {
   installed: boolean;
   version: string;
-  compose_version: string;
   running: boolean;
   os: string;
   socket_enabled: boolean;

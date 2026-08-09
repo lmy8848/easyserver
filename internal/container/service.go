@@ -776,8 +776,6 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 		}
 	}
 
-	status.ComposeVersion = s.detectComposeVersion(ctx, engine)
-
 	return status, nil
 }
 
@@ -801,23 +799,6 @@ func (s *Service) unitExists(ctx context.Context, unit string) bool {
 func (s *Service) unitActive(ctx context.Context, unit string) bool {
 	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "is-active", "--quiet", unit)
 	return err == nil && exitCode == 0
-}
-
-func (s *Service) detectComposeVersion(ctx context.Context, engine Engine) string {
-	// podman-compose's `version` banner is noisy ("podman version X ..."). The
-	// engine version already shown is enough; skip compose for podman.
-	if isPodmanEngine(engine) {
-		return ""
-	}
-	composeOut, exitCode, err := s.executor.RunCombined(ctx, "docker", "compose", "version", "--short")
-	if err == nil && exitCode == 0 {
-		return strings.TrimSpace(composeOut)
-	}
-	composeOut, exitCode, err = s.executor.RunCombined(ctx, "docker-compose", "version", "--short")
-	if err == nil && exitCode == 0 {
-		return strings.TrimSpace(composeOut)
-	}
-	return ""
 }
 
 // versionRE extracts a semver from `docker --version` / `podman --version`

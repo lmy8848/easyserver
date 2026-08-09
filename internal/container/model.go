@@ -72,11 +72,10 @@ type CreateRequest struct {
 
 // DockerStatus represents a container engine's installation and running status.
 type DockerStatus struct {
-	Installed      bool   `json:"installed"`
-	Version        string `json:"version"`
-	ComposeVersion string `json:"compose_version"`
-	Running        bool   `json:"running"`
-	OS             string `json:"os"`
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	Running   bool   `json:"running"`
+	OS        string `json:"os"`
 	// SocketEnabled is whether the engine's API socket unit is enabled
 	// (podman.socket). Docker-only daemon makes this irrelevant there.
 	SocketEnabled bool `json:"socket_enabled"`
