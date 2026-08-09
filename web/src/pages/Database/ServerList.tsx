@@ -1,12 +1,11 @@
 import {
-  Card, Button, Space, Tag, Modal, Form, Select, InputNumber,
+  Card, Button, Tag, Modal, Form, Select, InputNumber,
   Row, Col, Empty,
 } from 'antd';
 import {
   DatabaseOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import type { ServerListProps } from './types';
-import { getServiceStatusColor, ServiceStatusTag } from '../../utils/status';
 
 export default function ServerList({
   servers, loading, onEnterServer, onRefresh,
@@ -14,16 +13,6 @@ export default function ServerList({
   versionTemplates, installVersionForm, onInstallVersion,
   portCheck, onCheckPort,
 }: ServerListProps) {
-  const statusColor = (status: string) => {
-    const colorName = getServiceStatusColor(status);
-    const colorMap: Record<string, string> = {
-      success: '#52c41a', error: '#ff4d4f', warning: '#faad14', default: '#999',
-    };
-    return colorMap[colorName] || '#999';
-  };
-
-  const statusTag = (status: string) => <ServiceStatusTag status={status} />;
-
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
@@ -38,30 +27,16 @@ export default function ServerList({
               <Card
                 hoverable
                 onClick={() => onEnterServer(server)}
-                style={{
-                  borderColor: statusColor(server.status),
-                  width: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-                styles={{
-                  body: {
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                  },
-                }}
+                style={{ width: '100%' }}
               >
                 <div>
                   <Card.Meta
-                    avatar={<DatabaseOutlined style={{ fontSize: 32, color: statusColor(server.status) }} />}
-                    title={<Space wrap>{server.display_name}{statusTag(server.status)}</Space>}
+                    avatar={<DatabaseOutlined style={{ fontSize: 32, color: '#1677ff' }} />}
+                    title={server.display_name}
                     description={<p style={{ margin: '8px 0', color: '#666' }}>{server.description}</p>}
                   />
                 </div>
                 <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {server.version && <Tag color="blue">已安装: {server.version}</Tag>}
                   <Tag>默认端口: {server.default_port}</Tag>
                 </div>
               </Card>

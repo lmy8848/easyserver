@@ -234,15 +234,13 @@ export interface Website {
 }
 
 // Database Server types
-// Database engine summary — static catalog (db_type/display_name/default_port)
-// plus a status/version aggregate computed from the instance rows on read.
-export interface DBEngineSummary {
+// Database engine catalog entry — static (db_type/display_name/default_port).
+// Instance status lives on the instances; there is no engine-level aggregate.
+export interface DBEngine {
   db_type: string; // mysql, postgresql, redis
   display_name: string;
   description: string;
   default_port: number;
-  status: string; // not_installed, running, stopped, partial
-  version: string; // e.g. "8.0, 8.4"
 }
 
 // Database Backup types

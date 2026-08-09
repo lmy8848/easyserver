@@ -55,28 +55,6 @@ func (r *sqliteRepo) ListInstances(ctx context.Context, dbType DBType) ([]DBInst
 	return instances, nil
 }
 
-func (r *sqliteRepo) ListAllInstances(ctx context.Context) ([]DBInstance, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+instanceColumns+` FROM database_instances ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var instances []DBInstance
-	for rows.Next() {
-		v, err := scanInstance(rows)
-		if err != nil {
-			log.Printf("scan instance row: %v", err)
-			continue
-		}
-		instances = append(instances, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate instances: %w", err)
-	}
-	return instances, nil
-}
-
 func (r *sqliteRepo) GetInstance(ctx context.Context, id int64) (*DBInstance, error) {
 	row := r.db.QueryRowContext(ctx, `SELECT `+instanceColumns+`
 		FROM database_instances WHERE id = ?`, id)

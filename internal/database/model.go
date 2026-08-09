@@ -19,15 +19,6 @@ type DBEngine struct {
 	DefaultPort int    `json:"default_port"`
 }
 
-// EngineSummary is the engine-level aggregate view returned for the instance
-// list page. Status/Version are computed in memory from the instance rows on
-// every read; nothing is persisted at engine level.
-type EngineSummary struct {
-	DBEngine
-	Status  string `json:"status"`  // not_installed, running, stopped, partial
-	Version string `json:"version"` // summary of installed versions
-}
-
 // DBInstance is a container-backed Database Instance — the top-level resource of
 // the database module. The container is addressed by ContainerID only; each
 // instance owns one managed container, one named data volume, an instance-level

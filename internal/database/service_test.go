@@ -71,13 +71,6 @@ func (r *fakeRepo) ListInstances(context.Context, DBType) ([]DBInstance, error) 
 	}
 	return out, nil
 }
-func (r *fakeRepo) ListAllInstances(context.Context) ([]DBInstance, error) {
-	var out []DBInstance
-	for _, v := range r.instances {
-		out = append(out, *v)
-	}
-	return out, nil
-}
 func (r *fakeRepo) GetInstance(_ context.Context, id int64) (*DBInstance, error) {
 	return r.instances[id], nil
 }

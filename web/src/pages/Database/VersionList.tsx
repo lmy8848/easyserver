@@ -58,10 +58,8 @@ export default function VersionList({
       <Card style={{ marginBottom: 16 }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-          <DatabaseOutlined style={{ fontSize: 24, color: statusColor(server.status) }} />
+          <DatabaseOutlined style={{ fontSize: 24, color: '#1677ff' }} />
           <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
-          {statusTag(server.status)}
-          {server.version && <Tag color="blue">已安装: {server.version}</Tag>}
         </Space>
       </Card>
 

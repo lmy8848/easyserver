@@ -10,7 +10,6 @@ import (
 type Repository interface {
 	// Instance operations
 	ListInstances(ctx context.Context, dbType DBType) ([]DBInstance, error)
-	ListAllInstances(ctx context.Context) ([]DBInstance, error)
 	GetInstance(ctx context.Context, id int64) (*DBInstance, error)
 	CountInstancesByDBTypeAndVersion(ctx context.Context, dbType DBType, version string) (int, error)
 	CreateInstance(ctx context.Context, v *DBInstance) (int64, error)

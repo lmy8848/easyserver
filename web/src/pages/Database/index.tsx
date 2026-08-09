@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, message, Modal, Tag } from 'antd';
 import { dbServerApi } from '../../services/api';
-import type { DBEngineSummary, Database, DBUser, DBInstance } from '../../types';
+import type { DBEngine, Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import ServerList from './ServerList';
@@ -13,9 +13,9 @@ import { ENGINE_VERSION_TEMPLATES } from './types';
 
 export default function DatabasePage() {
   // ===== Navigation state =====
-  const [servers, setServers] = useState<DBEngineSummary[]>([]);
+  const [servers, setServers] = useState<DBEngine[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedServer, setSelectedServer] = useState<DBEngineSummary | null>(null);
+  const [selectedServer, setSelectedServer] = useState<DBEngine | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
@@ -121,19 +121,6 @@ export default function DatabasePage() {
     }
   }, [logContent, logFollow]);
 
-  // Re-fetch the engine summaries so the aggregate status/version reflects the
-  // latest instance state (engines have no persisted status of their own).
-  const refreshServer = async (dbType: string) => {
-    try {
-      const res = await dbServerApi.listEngines();
-      const updated = res.data?.data?.find((s) => s.db_type === dbType);
-      if (updated) {
-        setServers(prev => prev.map(s => s.db_type === dbType ? { ...s, ...updated } : s));
-        setSelectedServer(prev => prev && prev.db_type === dbType ? { ...prev, ...updated } : prev);
-      }
-    } catch (error) { console.error('Failed to refresh engine:', error); }
-  };
-
   const fetchInstances = async (dbtype: string) => {
     setVersionsLoading(true);
     try { const res = await dbServerApi.listInstances(dbtype); setVersions(res.data?.data || []); }
@@ -219,7 +206,7 @@ export default function DatabasePage() {
   };
 
   // ===== Navigation handlers =====
-  const enterServer = async (server: DBEngineSummary) => {
+  const enterServer = async (server: DBEngine) => {
     setSelectedServer(server);
     setSelectedVersion(null);
     setSelectedDatabase(null);
@@ -274,7 +261,7 @@ export default function DatabasePage() {
       await dbServerApi.createInstance(server.db_type, values);
       message.success('版本安装成功');
       setInstallVersionVisible(false);
-      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
+      fetchInstances(server.db_type);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
@@ -285,7 +272,7 @@ export default function DatabasePage() {
     try {
       await dbServerApi.startInstance(v.id);
       message.success('已启动');
-      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
+      fetchInstances(server.db_type);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '启动失败')); }
     finally { setOperating(''); }
   };
@@ -297,7 +284,7 @@ export default function DatabasePage() {
     try {
       await dbServerApi.stopInstance(v.id);
       message.success('已停止');
-      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
+      fetchInstances(server.db_type);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '停止失败')); }
     finally { setOperating(''); }
   };
@@ -309,7 +296,7 @@ export default function DatabasePage() {
     try {
       await dbServerApi.restartInstance(v.id);
       message.success('已重启');
-      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
+      fetchInstances(server.db_type);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '重启失败')); }
     finally { setOperating(''); }
   };
@@ -321,7 +308,7 @@ export default function DatabasePage() {
     try {
       await dbServerApi.uninstallInstance(v.id);
       message.success('已卸载');
-      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
+      fetchInstances(server.db_type);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
     finally { setOperating(''); }
   };

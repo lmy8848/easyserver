@@ -71,56 +71,13 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime, encryptionK
 	}
 }
 
-// ListEngines returns the static engine catalog enriched with live aggregate
-// status and installed-version summaries computed from the instance rows.
-func (s *Service) ListEngines(ctx context.Context) ([]EngineSummary, error) {
+// ListEngines returns the static engine catalog. Engine state lives on the
+// instances, not the engine row — the catalog carries no aggregate status.
+func (s *Service) ListEngines(ctx context.Context) []DBEngine {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	instances, err := s.repo.ListAllInstances(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range instances {
-		s.refreshInstanceStatus(ctx, &instances[i])
-	}
-	byType := map[DBType][]DBInstance{}
-	for _, v := range instances {
-		byType[v.DBType] = append(byType[v.DBType], v)
-	}
-
-	engines := DBEngines()
-	summaries := make([]EngineSummary, 0, len(engines))
-	for _, e := range engines {
-		summaries = append(summaries, summarizeEngine(e, byType[e.DBType]))
-	}
-	return summaries, nil
-}
-
-// summarizeEngine computes the engine-level aggregate over its instances.
-func summarizeEngine(engine DBEngine, instances []DBInstance) EngineSummary {
-	summary := EngineSummary{DBEngine: engine, Status: "not_installed"}
-	if len(instances) == 0 {
-		return summary
-	}
-	running := 0
-	var parts []string
-	for _, v := range instances {
-		if v.Status == "running" || v.Status == "active" {
-			running++
-		}
-		parts = append(parts, v.Version)
-	}
-	switch {
-	case running == len(instances):
-		summary.Status = "running"
-	case running > 0:
-		summary.Status = "partial"
-	default:
-		summary.Status = "stopped"
-	}
-	summary.Version = strings.Join(parts, ", ")
-	return summary
+	return DBEngines()
 }
 
 // refreshInstanceStatus queries the container runtime (by container ID) and
@@ -524,17 +481,6 @@ func (s *Service) RefreshStatus(ctx context.Context, dbType DBType) {
 		ctx = context.Background()
 	}
 	instances, _ := s.repo.ListInstances(ctx, dbType)
-	for _, v := range instances {
-		s.refreshInstanceStatus(ctx, &v)
-	}
-}
-
-// RefreshAllStatus refreshes every instance across all engines.
-func (s *Service) RefreshAllStatus(ctx context.Context) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instances, _ := s.repo.ListAllInstances(ctx)
 	for _, v := range instances {
 		s.refreshInstanceStatus(ctx, &v)
 	}

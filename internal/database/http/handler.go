@@ -78,7 +78,8 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
-// EngineHandler serves the engine list with live aggregate summaries.
+// EngineHandler serves the static engine catalog (no aggregate state — instance
+// status lives on the instances and is refreshed by the instance endpoints).
 type EngineHandler struct {
 	svc *database.Service
 }
@@ -88,14 +89,7 @@ func NewEngineHandler(svc *database.Service) *EngineHandler {
 }
 
 func (h *EngineHandler) List(c *gin.Context) {
-	ctx := c.Request.Context()
-	h.svc.RefreshAllStatus(ctx)
-	summaries, err := h.svc.ListEngines(ctx)
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, summaries)
+	httpx.Success(c, h.svc.ListEngines(c.Request.Context()))
 }
 
 // InstanceHandler handles instance lifecycle endpoints, scoped by engine enum.
@@ -130,6 +124,9 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Refresh live container status before returning — instance status is never
+	// persisted as authoritative; the runtime is the source of truth.
+	h.svc.RefreshStatus(c.Request.Context(), engine)
 	instances, err := h.svc.ListInstances(c.Request.Context(), engine)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
