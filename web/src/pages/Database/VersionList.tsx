@@ -72,9 +72,10 @@ export default function VersionList({
   };
 
   // Picking a published tag fills version + image into the install form; the
-  // image is `${base_image}:${tag}` so the backend never invents image names.
+  // image is the fully-qualified `docker.io/<base_image>:<tag>` so the backend
+  // never resolves (or has to resolve) short names.
   const pickDockerTag = (tag: string) => {
-    installVersionForm.setFieldsValue({ version: tag, image: `${server.base_image}:${tag}` });
+    installVersionForm.setFieldsValue({ version: tag, image: `docker.io/${server.base_image}:${tag}` });
     setDockerVisible(false);
   };
 
@@ -231,7 +232,7 @@ export default function VersionList({
                   return;
                 }
                 const t = versionTemplates.find(t => t.version === v);
-                installVersionForm.setFieldsValue({ image: t ? t.image : `${server.base_image}:${v}` });
+                installVersionForm.setFieldsValue({ image: t ? t.image : `docker.io/${server.base_image}:${v}` });
               }}
             >
               {versionTemplates.map(t => (
@@ -279,7 +280,7 @@ export default function VersionList({
               renderItem={(tag) => (
                 <List.Item onClick={() => pickDockerTag(tag)} style={{ cursor: 'pointer' }}>
                   <Space>
-                    <Tag>{server.base_image}:{tag}</Tag>
+                    <Tag>docker.io/{server.base_image}:{tag}</Tag>
                     <span style={{ color: '#999', fontSize: 12 }}>点击选择此版本</span>
                   </Space>
                 </List.Item>

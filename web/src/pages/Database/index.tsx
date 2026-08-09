@@ -257,12 +257,14 @@ export default function DatabasePage() {
       return;
     }
     try {
-      // Port left empty → engine default. image comes from the preset catalogue
-      // or the Docker Hub picker (fallback: version→image mapping by convention).
-      const tpl = server.templates.find(t => t.version === values.version);
+      // Port left empty → engine default. image is always sent fully qualified
+      // (preset/picker already carry `docker.io/`); only as a last resort fall
+      // back to `docker.io/<base_image>:<version>`.
+      const rawImage = (values.image || '').trim();
+      const image = rawImage.includes('/') ? rawImage : `docker.io/${server.base_image}:${values.version}`;
       await dbServerApi.createInstance(server.db_type, {
         ...values,
-        image: values.image || tpl?.image,
+        image,
         port: values.port || server.default_port,
       });
       message.success('版本安装成功');
