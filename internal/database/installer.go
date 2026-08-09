@@ -45,6 +45,7 @@ type installTask struct {
 	log        *installLog
 	done       chan struct{}
 	err        error
+	finishedAt time.Time // set when the install completes; stale tasks are pruned
 }
 
 // InstallTask is the handler-facing view of a task (safe to hand out of the
@@ -84,6 +85,7 @@ func newInstaller() *installer {
 func (in *installer) begin(dbType DBType) error {
 	in.mu.Lock()
 	defer in.mu.Unlock()
+	in.pruneDone(installTaskTTL)
 	if in.busy[dbType] {
 		return fmt.Errorf("该引擎已有安装正在进行，请稍后再试")
 	}
@@ -97,7 +99,9 @@ func (in *installer) end(dbType DBType) {
 	in.busy[dbType] = false
 }
 
-// start registers the task and launches the install goroutine.
+// start registers the task and launches the install goroutine. The task stays
+// in the map after completion so its log stays replayable (the "继续查看日志"
+// flow after refresh/close); only the engine's busy slot is released.
 func (in *installer) start(dbType DBType, instanceID int64, run func(log *installLog) error) *installTask {
 	task := &installTask{
 		instanceID: instanceID,
@@ -111,15 +115,25 @@ func (in *installer) start(dbType DBType, instanceID int64, run func(log *instal
 	go func() {
 		defer close(task.done)
 		defer in.end(dbType)
-		defer func() {
-			in.mu.Lock()
-			delete(in.tasks, instanceID)
-			in.mu.Unlock()
-		}()
 		task.err = run(task.log)
+		in.mu.Lock()
+		task.finishedAt = time.Now()
+		in.mu.Unlock()
 	}()
 
 	return task
+}
+
+// pruneDone drops finished tasks older than ttl. Done tasks are deliberately
+// kept (see start) so their logs stay viewable; installs are rare, so pruning
+// on each new install keeps the map bounded without a background sweeper.
+func (in *installer) pruneDone(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	for id, t := range in.tasks {
+		if !t.finishedAt.IsZero() && t.finishedAt.Before(cutoff) {
+			delete(in.tasks, id)
+		}
+	}
 }
 
 // get returns the task for an instance, if it still exists.

@@ -25,6 +25,10 @@ const (
 	defaultCharset  = "utf8mb4"
 	defaultLogLines = 200
 
+	// installTaskTTL bounds how long a finished install's log stays in memory
+	// (replayable via SSE) before it's pruned on the next install.
+	installTaskTTL = 30 * time.Minute
+
 	DefaultBackupDir = "/var/backups/easyserver/db"
 	MaxBackupsPerDB  = 10
 )

@@ -158,12 +158,12 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 		c.Writer.Flush()
 	}
 
-	// Task may still be alive (installing) or already finished (done/errored).
-	// If it's gone entirely, fall back to whatever the status says — a
-	// provisioning row without a task means the server restarted mid-install.
+	// Task may still be alive (installing) or already finished (done/errored) —
+	// finished tasks are kept so their log stays replayable. If it's gone
+	// entirely, the server restarted mid-install and the in-memory log is lost.
 	task, ok := h.svc.InstallTask(iid)
 	if !ok {
-		send(map[string]string{"type": "done", "error": "安装任务已不存在（服务可能已重启）"})
+		send(map[string]string{"type": "done", "error": "安装日志已丢失（服务可能已重启），无法查看"})
 		return
 	}
 	log := task.Log
