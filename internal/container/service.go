@@ -761,6 +761,7 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 	// state is probed via `info` (differently-shaped template fields).
 	if isPodmanEngine(engine) {
 		status.Running = true
+		status.SocketEnabled = s.socketEnabled(ctx)
 	} else {
 		_, exitCode, err = s.executor.RunCombined(ctx, bin, "info", "--format", "{{.ServerVersion}}")
 		status.Running = err == nil && exitCode == 0
@@ -945,6 +946,12 @@ func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 // enableSocketUnit is the systemd unit for Podman's Docker-compatible API
 // socket. Podman-only; Docker's daemon is via docker.service.
 const enableSocketUnit = "podman.socket"
+
+// socketEnabled reports whether Podman's API socket unit is enabled at boot.
+func (s *Service) socketEnabled(ctx context.Context) bool {
+	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "is-enabled", enableSocketUnit)
+	return err == nil && exitCode == 0
+}
 
 // EnableSocket enables Podman's API socket unit at boot.
 func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {

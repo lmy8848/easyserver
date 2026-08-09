@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs, Select, Tag, Button, Space, message, Result } from 'antd';
+import { Tabs, Select, Tag, Button, Switch, Space, message, Result } from 'antd';
 import {
   CodeOutlined, CloudDownloadOutlined,
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
@@ -110,10 +110,12 @@ export default function Container() {
             <Button icon={<PlayCircleOutlined />} onClick={handleStart}>启动</Button>
           ) : null}
           {status?.installed && engine === 'podman' && (
-            <>
-              <Button size="small" onClick={() => handleSocket('enable')}>启用Socket</Button>
-              <Button size="small" onClick={() => handleSocket('disable')}>禁用Socket</Button>
-            </>
+            <Switch
+              checked={!!status.socket_enabled}
+              checkedChildren="Socket"
+              unCheckedChildren="Socket"
+              onChange={(checked) => handleSocket(checked ? 'enable' : 'disable')}
+            />
           )}
           <Button icon={<ReloadOutlined />} loading={checking} onClick={checkRuntimes}>刷新</Button>
         </Space>

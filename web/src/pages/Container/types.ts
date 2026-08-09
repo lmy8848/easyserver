@@ -20,6 +20,7 @@ export interface DockerStatus {
   compose_version: string;
   running: boolean;
   os: string;
+  socket_enabled: boolean;
 }
 
 export interface Container {
