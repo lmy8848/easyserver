@@ -804,11 +804,9 @@ func (s *Service) unitActive(ctx context.Context, unit string) bool {
 }
 
 func (s *Service) detectComposeVersion(ctx context.Context, engine Engine) string {
+	// podman-compose's `version` banner is noisy ("podman version X ..."). The
+	// engine version already shown is enough; skip compose for podman.
 	if isPodmanEngine(engine) {
-		composeOut, exitCode, err := s.executor.RunCombined(ctx, "podman-compose", "version")
-		if err == nil && exitCode == 0 {
-			return strings.TrimSpace(composeOut)
-		}
 		return ""
 	}
 	composeOut, exitCode, err := s.executor.RunCombined(ctx, "docker", "compose", "version", "--short")
