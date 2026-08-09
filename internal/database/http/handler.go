@@ -8,8 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/database_mgmt"
-	"easyserver/internal/dbserver"
+	"easyserver/internal/database"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
@@ -17,13 +16,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterRoutes registers database management routes
-func RegisterRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Service, dbMgmtService *database_mgmt.Service) {
-	handler := NewDBServerHandler(dbServerService)
-	versionHandler := NewVersionHandler(dbServerService)
-	dbHandler := NewDatabaseHandler(dbMgmtService)
-	userHandler := NewUserHandler(dbMgmtService)
-	backupHandler := NewBackupHandler(dbServerService, dbMgmtService)
+// RegisterRoutes registers database management routes.
+func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
+	handler := NewDBServerHandler(svc)
+	versionHandler := NewVersionHandler(svc)
+	dbHandler := NewDatabaseHandler(svc)
+	userHandler := NewUserHandler(svc)
+	backupHandler := NewBackupHandler(svc)
 	configHandler := NewConfigHandler()
 
 	protected.GET("/db-instances", handler.List)
@@ -82,17 +81,17 @@ func RegisterRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Servic
 // DBServerHandler handles top-level DB server endpoints (list, get).
 // Sub-domain endpoints are delegated to focused sub-handlers.
 type DBServerHandler struct {
-	dbServerService *dbserver.Service
+	svc *database.Service
 }
 
-func NewDBServerHandler(dbServerService *dbserver.Service) *DBServerHandler {
-	return &DBServerHandler{dbServerService: dbServerService}
+func NewDBServerHandler(svc *database.Service) *DBServerHandler {
+	return &DBServerHandler{svc: svc}
 }
 
 func (h *DBServerHandler) List(c *gin.Context) {
 	ctx := c.Request.Context()
-	h.dbServerService.RefreshAllStatus(ctx)
-	servers, err := h.dbServerService.List(ctx)
+	h.svc.RefreshAllStatus(ctx)
+	servers, err := h.svc.List(ctx)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -107,8 +106,8 @@ func (h *DBServerHandler) Get(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
-	h.dbServerService.RefreshStatus(ctx, id)
-	server, err := h.dbServerService.Get(ctx, id)
+	h.svc.RefreshStatus(ctx, id)
+	server, err := h.svc.Get(ctx, id)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -122,11 +121,11 @@ func (h *DBServerHandler) Get(c *gin.Context) {
 
 // VersionHandler handles DB version management endpoints.
 type VersionHandler struct {
-	dbServerService *dbserver.Service
+	svc *database.Service
 }
 
-func NewVersionHandler(dbServerService *dbserver.Service) *VersionHandler {
-	return &VersionHandler{dbServerService: dbServerService}
+func NewVersionHandler(svc *database.Service) *VersionHandler {
+	return &VersionHandler{svc: svc}
 }
 
 func (h *VersionHandler) ListVersions(c *gin.Context) {
@@ -135,7 +134,7 @@ func (h *VersionHandler) ListVersions(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
-	versions, err := h.dbServerService.ListVersions(c.Request.Context(), id)
+	versions, err := h.svc.ListVersions(c.Request.Context(), id)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -149,13 +148,13 @@ func (h *VersionHandler) InstallVersion(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
-	var req dbserver.CreateDBInstanceRequest
+	var req database.CreateDBInstanceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 	middleware.AuditSummary(c, "安装数据库版本 "+req.Version)
-	version, err := h.dbServerService.InstallVersion(c.Request.Context(), id, &req)
+	version, err := h.svc.InstallVersion(c.Request.Context(), id, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -170,7 +169,7 @@ func (h *VersionHandler) UninstallVersion(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "卸载数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.dbServerService.UninstallVersion(c.Request.Context(), vid); err != nil {
+	if err := h.svc.UninstallVersion(c.Request.Context(), vid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -184,7 +183,7 @@ func (h *VersionHandler) DestroyVersion(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "销毁数据库实例数据 #"+strconv.FormatInt(vid, 10))
-	if err := h.dbServerService.DestroyVersion(c.Request.Context(), vid); err != nil {
+	if err := h.svc.DestroyVersion(c.Request.Context(), vid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -197,7 +196,7 @@ func (h *VersionHandler) ResetAdminPassword(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
 		return
 	}
-	password, err := h.dbServerService.ResetAdminPassword(c.Request.Context(), vid)
+	password, err := h.svc.ResetAdminPassword(c.Request.Context(), vid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -212,7 +211,7 @@ func (h *VersionHandler) StartVersion(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "启动数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.dbServerService.StartVersion(c.Request.Context(), vid); err != nil {
+	if err := h.svc.StartVersion(c.Request.Context(), vid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -226,7 +225,7 @@ func (h *VersionHandler) StopVersion(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "停止数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.dbServerService.StopVersion(c.Request.Context(), vid); err != nil {
+	if err := h.svc.StopVersion(c.Request.Context(), vid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -240,7 +239,7 @@ func (h *VersionHandler) RestartVersion(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "重启数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.dbServerService.RestartVersion(c.Request.Context(), vid); err != nil {
+	if err := h.svc.RestartVersion(c.Request.Context(), vid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -261,7 +260,7 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	vInfo, err := h.dbServerService.GetVersion(c.Request.Context(), vid)
+	vInfo, err := h.svc.GetVersion(c.Request.Context(), vid)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库版本不存在"))
 		return
@@ -273,7 +272,7 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 		return
 	}
 
-	if err := h.dbServerService.UpdateVersionPort(c.Request.Context(), vid, req.Port); err != nil {
+	if err := h.svc.UpdateVersionPort(c.Request.Context(), vid, req.Port); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -288,7 +287,7 @@ func (h *VersionHandler) GetVersionLogs(c *gin.Context) {
 		return
 	}
 	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "200"))
-	logs, err := h.dbServerService.GetVersionServiceLogs(c.Request.Context(), vid, lines)
+	logs, err := h.svc.GetVersionServiceLogs(c.Request.Context(), vid, lines)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -302,7 +301,7 @@ func (h *VersionHandler) GetVersionConfig(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
 		return
 	}
-	content, path, err := h.dbServerService.GetVersionConfig(c.Request.Context(), vid)
+	content, path, err := h.svc.GetVersionConfig(c.Request.Context(), vid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -323,7 +322,7 @@ func (h *VersionHandler) SaveVersionConfig(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	if err := h.dbServerService.SaveVersionConfig(c.Request.Context(), vid, req.Content); err != nil {
+	if err := h.svc.SaveVersionConfig(c.Request.Context(), vid, req.Content); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -332,13 +331,12 @@ func (h *VersionHandler) SaveVersionConfig(c *gin.Context) {
 
 // DatabaseHandler handles database CRUD, introspection, and table management endpoints.
 type DatabaseHandler struct {
-	dbMgmtService *database_mgmt.Service
-	sqlService    *database_mgmt.Service
+	svc *database.Service
 }
 
-func NewDatabaseHandler(dbMgmtService *database_mgmt.Service) *DatabaseHandler {
+func NewDatabaseHandler(svc *database.Service) *DatabaseHandler {
 	return &DatabaseHandler{
-		dbMgmtService: dbMgmtService,
+		svc: svc,
 	}
 }
 
@@ -350,7 +348,7 @@ func (h *DatabaseHandler) ListDatabases(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
 		return
 	}
-	dbs, err := h.dbMgmtService.ListDatabases(c.Request.Context(), sid)
+	dbs, err := h.svc.ListDatabases(c.Request.Context(), sid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -364,13 +362,13 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
 		return
 	}
-	var req database_mgmt.CreateDatabaseRequest
+	var req database.CreateDatabaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 	middleware.AuditSummary(c, "创建数据库 "+req.Name)
-	db, err := h.dbMgmtService.CreateDatabase(c.Request.Context(), sid, &req)
+	db, err := h.svc.CreateDatabase(c.Request.Context(), sid, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -389,13 +387,13 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
 		return
 	}
-	dbInfo, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), dbID)
+	dbInfo, err := h.svc.GetDatabaseByID(c.Request.Context(), dbID)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "删除数据库 "+dbInfo.Name)
-	if err := h.dbMgmtService.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
+	if err := h.svc.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -411,7 +409,7 @@ func (h *DatabaseHandler) ListTables(c *gin.Context) {
 		return
 	}
 
-	tables, err := h.dbMgmtService.ListTables(c.Request.Context(), did)
+	tables, err := h.svc.ListTables(c.Request.Context(), did)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -431,12 +429,12 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
-	if !database_mgmt.ValidateTableName(tableName) {
+	if !database.ValidateTableName(tableName) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的表名"))
 		return
 	}
 
-	result, err := h.dbMgmtService.DescribeTable(c.Request.Context(), did, tableName)
+	result, err := h.svc.DescribeTable(c.Request.Context(), did, tableName)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -456,14 +454,14 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
-	if !database_mgmt.ValidateTableName(tableName) {
+	if !database.ValidateTableName(tableName) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的表名"))
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
 
-	result, err := h.dbMgmtService.QueryTable(c.Request.Context(), did, tableName, page, pageSize)
+	result, err := h.svc.QueryTable(c.Request.Context(), did, tableName, page, pageSize)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -492,14 +490,14 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	dbInfo, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	dbInfo, err := h.svc.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "执行SQL (数据库: "+dbInfo.Name+")")
 
-	result, err := h.dbMgmtService.ExecuteSQL(c.Request.Context(), did, req.SQL)
+	result, err := h.svc.ExecuteSQL(c.Request.Context(), did, req.SQL)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.Wrap(err))
 		return
@@ -530,7 +528,7 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "插入记录到表 "+req.Table)
 
-	result, err := h.dbMgmtService.InsertRecord(c.Request.Context(), did, req.Table, req.Data, c.Query("dry_run") == "true")
+	result, err := h.svc.InsertRecord(c.Request.Context(), did, req.Table, req.Data, c.Query("dry_run") == "true")
 	if err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -558,7 +556,7 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "更新表 "+req.Table+" 记录")
 
-	result, err := h.dbMgmtService.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
+	result, err := h.svc.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -585,7 +583,7 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "删除表 "+req.Table+" 记录")
 
-	result, err := h.dbMgmtService.DeleteRecord(c.Request.Context(), did, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
+	result, err := h.svc.DeleteRecord(c.Request.Context(), did, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -619,9 +617,9 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "创建表 "+req.Name)
 
-	var columns []database_mgmt.TableColumn
+	var columns []database.TableColumn
 	for _, col := range req.Columns {
-		columns = append(columns, database_mgmt.TableColumn{
+		columns = append(columns, database.TableColumn{
 			Name:      col.Name,
 			Type:      col.Type,
 			Nullable:  col.Nullable,
@@ -630,7 +628,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 		})
 	}
 
-	if err := h.dbMgmtService.CreateTable(c.Request.Context(), did, req.Name, columns); err != nil {
+	if err := h.svc.CreateTable(c.Request.Context(), did, req.Name, columns); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
 			c.Error(apperror.ErrBadRequest.Wrap(err))
 		} else {
@@ -656,7 +654,7 @@ func (h *DatabaseHandler) DropTable(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "删除表 "+tableName)
 
-	if err := h.dbMgmtService.DropTable(c.Request.Context(), did, tableName); err != nil {
+	if err := h.svc.DropTable(c.Request.Context(), did, tableName); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
 			c.Error(apperror.ErrBadRequest.Wrap(err))
 		} else {
@@ -670,11 +668,11 @@ func (h *DatabaseHandler) DropTable(c *gin.Context) {
 
 // UserHandler handles DB user management endpoints.
 type UserHandler struct {
-	dbMgmtService *database_mgmt.Service
+	svc *database.Service
 }
 
-func NewUserHandler(dbMgmtService *database_mgmt.Service) *UserHandler {
-	return &UserHandler{dbMgmtService: dbMgmtService}
+func NewUserHandler(svc *database.Service) *UserHandler {
+	return &UserHandler{svc: svc}
 }
 
 func (h *UserHandler) ListDBUsers(c *gin.Context) {
@@ -683,7 +681,7 @@ func (h *UserHandler) ListDBUsers(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
 		return
 	}
-	users, err := h.dbMgmtService.ListDBUsers(c.Request.Context(), sid)
+	users, err := h.svc.ListDBUsers(c.Request.Context(), sid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -697,13 +695,13 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
 		return
 	}
-	var req database_mgmt.CreateDBUserRequest
+	var req database.CreateDBUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 	middleware.AuditSummary(c, "创建数据库用户 "+req.Username)
-	user, err := h.dbMgmtService.CreateDBUser(c.Request.Context(), sid, &req)
+	user, err := h.svc.CreateDBUser(c.Request.Context(), sid, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -723,7 +721,7 @@ func (h *UserHandler) DeleteDBUser(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "删除数据库用户 "+strconv.FormatInt(uid, 10))
-	if err := h.dbMgmtService.DeleteDBUser(c.Request.Context(), sid, uid); err != nil {
+	if err := h.svc.DeleteDBUser(c.Request.Context(), sid, uid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -741,13 +739,13 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户ID"))
 		return
 	}
-	var req database_mgmt.GrantRequest
+	var req database.GrantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
 	middleware.AuditSummary(c, "授权数据库用户 "+strconv.FormatInt(uid, 10))
-	if err := h.dbMgmtService.GrantPrivileges(c.Request.Context(), sid, uid, &req); err != nil {
+	if err := h.svc.GrantPrivileges(c.Request.Context(), sid, uid, &req); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -756,16 +754,11 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 
 // BackupHandler handles database backup endpoints.
 type BackupHandler struct {
-	dbServerService *dbserver.Service
-	dbMgmtService   *database_mgmt.Service
-	dbBackupService *database_mgmt.Service
+	svc *database.Service
 }
 
-func NewBackupHandler(dbServerService *dbserver.Service, dbMgmtService *database_mgmt.Service) *BackupHandler {
-	return &BackupHandler{
-		dbServerService: dbServerService,
-		dbMgmtService:   dbMgmtService,
-	}
+func NewBackupHandler(svc *database.Service) *BackupHandler {
+	return &BackupHandler{svc: svc}
 }
 
 func (h *BackupHandler) CreateBackup(c *gin.Context) {
@@ -775,7 +768,7 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 		return
 	}
 	// Get database info
-	db, err := h.dbMgmtService.GetDatabaseByID(c.Request.Context(), did)
+	db, err := h.svc.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
 		return
@@ -783,13 +776,13 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	middleware.AuditSummary(c, "创建数据库备份 "+db.Name)
 
 	// Get db server info to determine type
-	server, err := h.dbServerService.Get(c.Request.Context(), db.DBServerID)
+	server, err := h.svc.Get(c.Request.Context(), db.DBServerID)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库服务器不存在"))
 		return
 	}
 
-	backup, err := h.dbMgmtService.CreateBackup(c.Request.Context(), db.DBServerID, db.DBInstanceID, did, db.Name, server.Name)
+	backup, err := h.svc.CreateBackup(c.Request.Context(), db.DBServerID, db.DBInstanceID, did, db.Name, server.Name)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -805,14 +798,14 @@ func (h *BackupHandler) ListBackups(c *gin.Context) {
 		return
 	}
 
-	backups, err := h.dbMgmtService.ListBackups(c.Request.Context(), did)
+	backups, err := h.svc.ListBackups(c.Request.Context(), did)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 
 	if backups == nil {
-		backups = []database_mgmt.DBBackup{}
+		backups = []database.DBBackup{}
 	}
 
 	httpx.Success(c, backups)
@@ -825,7 +818,7 @@ func (h *BackupHandler) DownloadBackup(c *gin.Context) {
 		return
 	}
 
-	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
+	backup, err := h.svc.GetBackup(c.Request.Context(), bid)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("备份不存在"))
 		return
@@ -860,7 +853,7 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("请确认恢复，设置 {\"confirm\": true}"))
 		return
 	}
-	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
+	backup, err := h.svc.GetBackup(c.Request.Context(), bid)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("备份不存在"))
 		return
@@ -868,13 +861,13 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 	middleware.AuditSummary(c, "恢复数据库备份 "+backup.DatabaseName)
 
 	// Get db server info to determine type
-	server, err := h.dbServerService.Get(c.Request.Context(), backup.DBServerID)
+	server, err := h.svc.Get(c.Request.Context(), backup.DBServerID)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库服务器不存在"))
 		return
 	}
 
-	if err := h.dbMgmtService.RestoreBackup(c.Request.Context(), bid, server.Name); err != nil {
+	if err := h.svc.RestoreBackup(c.Request.Context(), bid, server.Name); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -888,14 +881,14 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的备份ID"))
 		return
 	}
-	backup, err := h.dbMgmtService.GetBackup(c.Request.Context(), bid)
+	backup, err := h.svc.GetBackup(c.Request.Context(), bid)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("备份不存在"))
 		return
 	}
 	middleware.AuditSummary(c, "删除数据库备份 "+backup.DatabaseName)
 
-	if err := h.dbMgmtService.DeleteBackup(c.Request.Context(), bid); err != nil {
+	if err := h.svc.DeleteBackup(c.Request.Context(), bid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -914,13 +907,13 @@ func NewConfigHandler() *ConfigHandler {
 // --- MySQL Config ---
 
 func (h *ConfigHandler) GetMySQLConfig(c *gin.Context) {
-	configPath := database_mgmt.FindMySQLConfig()
+	configPath := database.FindMySQLConfig()
 	if configPath == "" {
 		httpx.Success(c, gin.H{"found": false, "message": "未找到 MySQL 配置文件"})
 		return
 	}
 
-	config, err := database_mgmt.ParseMySQLConfig(configPath)
+	config, err := database.ParseMySQLConfig(configPath)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -936,7 +929,7 @@ func (h *ConfigHandler) GetMySQLConfig(c *gin.Context) {
 	for _, section := range config.Sections {
 		sections[section.Name] = gin.H{
 			"params": section.Params,
-			"meta":   database_mgmt.GetCommonParams(section.Name),
+			"meta":   database.GetCommonParams(section.Name),
 		}
 	}
 
@@ -956,7 +949,7 @@ func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "保存 MySQL 配置")
-	configPath := database_mgmt.FindMySQLConfig()
+	configPath := database.FindMySQLConfig()
 	if configPath == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("未找到 MySQL 配置文件"))
 		return
@@ -972,17 +965,17 @@ func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
 		return
 	}
 
-	config := &database_mgmt.DBConfig{
+	config := &database.DBConfig{
 		FilePath: configPath,
 	}
 	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database_mgmt.ConfigSection{
+		config.Sections = append(config.Sections, database.ConfigSection{
 			Name:   s.Name,
 			Params: s.Params,
 		})
 	}
 
-	if err := database_mgmt.SaveMySQLConfig(config); err != nil {
+	if err := database.SaveMySQLConfig(config); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -992,20 +985,20 @@ func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
 
 func (h *ConfigHandler) GetMySQLCommonParams(c *gin.Context) {
 	section := c.DefaultQuery("section", "mysqld")
-	params := database_mgmt.GetCommonParams(section)
+	params := database.GetCommonParams(section)
 	httpx.Success(c, params)
 }
 
 // --- PostgreSQL Config ---
 
 func (h *ConfigHandler) GetPostgreSQLConfig(c *gin.Context) {
-	configPath := database_mgmt.FindPostgreSQLConfig()
+	configPath := database.FindPostgreSQLConfig()
 	if configPath == "" {
 		httpx.Success(c, gin.H{"found": false, "message": "未找到 PostgreSQL 配置文件"})
 		return
 	}
 
-	config, err := database_mgmt.ParsePostgreSQLConfig(configPath)
+	config, err := database.ParsePostgreSQLConfig(configPath)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -1020,7 +1013,7 @@ func (h *ConfigHandler) GetPostgreSQLConfig(c *gin.Context) {
 	for _, section := range config.Sections {
 		sections[section.Name] = gin.H{
 			"params": section.Params,
-			"meta":   database_mgmt.GetPostgreSQLCommonParams(),
+			"meta":   database.GetPostgreSQLCommonParams(),
 		}
 	}
 
@@ -1040,7 +1033,7 @@ func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "保存 PostgreSQL 配置")
-	configPath := database_mgmt.FindPostgreSQLConfig()
+	configPath := database.FindPostgreSQLConfig()
 	if configPath == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("未找到 PostgreSQL 配置文件"))
 		return
@@ -1056,17 +1049,17 @@ func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
 		return
 	}
 
-	config := &database_mgmt.DBConfig{
+	config := &database.DBConfig{
 		FilePath: configPath,
 	}
 	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database_mgmt.ConfigSection{
+		config.Sections = append(config.Sections, database.ConfigSection{
 			Name:   s.Name,
 			Params: s.Params,
 		})
 	}
 
-	if err := database_mgmt.SavePostgreSQLConfig(config); err != nil {
+	if err := database.SavePostgreSQLConfig(config); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -1075,20 +1068,20 @@ func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
 }
 
 func (h *ConfigHandler) GetPGCommonParams(c *gin.Context) {
-	params := database_mgmt.GetPostgreSQLCommonParams()
+	params := database.GetPostgreSQLCommonParams()
 	httpx.Success(c, params)
 }
 
 // --- Redis Config ---
 
 func (h *ConfigHandler) GetRedisConfig(c *gin.Context) {
-	configPath := database_mgmt.FindRedisConfig()
+	configPath := database.FindRedisConfig()
 	if configPath == "" {
 		httpx.Success(c, gin.H{"found": false, "message": "未找到 Redis 配置文件"})
 		return
 	}
 
-	config, err := database_mgmt.ParseRedisConfig(configPath)
+	config, err := database.ParseRedisConfig(configPath)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -1103,7 +1096,7 @@ func (h *ConfigHandler) GetRedisConfig(c *gin.Context) {
 	for _, section := range config.Sections {
 		sections[section.Name] = gin.H{
 			"params": section.Params,
-			"meta":   database_mgmt.GetRedisCommonParams(),
+			"meta":   database.GetRedisCommonParams(),
 		}
 	}
 
@@ -1123,7 +1116,7 @@ func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "保存 Redis 配置")
-	configPath := database_mgmt.FindRedisConfig()
+	configPath := database.FindRedisConfig()
 	if configPath == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("未找到 Redis 配置文件"))
 		return
@@ -1139,17 +1132,17 @@ func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
 		return
 	}
 
-	config := &database_mgmt.DBConfig{
+	config := &database.DBConfig{
 		FilePath: configPath,
 	}
 	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database_mgmt.ConfigSection{
+		config.Sections = append(config.Sections, database.ConfigSection{
 			Name:   s.Name,
 			Params: s.Params,
 		})
 	}
 
-	if err := database_mgmt.SaveRedisConfig(config); err != nil {
+	if err := database.SaveRedisConfig(config); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -1158,7 +1151,7 @@ func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
 }
 
 func (h *ConfigHandler) GetRedisCommonParams(c *gin.Context) {
-	params := database_mgmt.GetRedisCommonParams()
+	params := database.GetRedisCommonParams()
 	httpx.Success(c, params)
 }
 

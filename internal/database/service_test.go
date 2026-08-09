@@ -1,4 +1,4 @@
-package dbserver
+package database
 
 // Lifecycle tests drive the Service through the DatabaseRuntime seam with a
 // fake runtime, per the PRD (verify create / health-fail / start-stop /
@@ -119,6 +119,32 @@ func (r *fakeRepo) UpdateVersionPassword(_ context.Context, id int64, pw string)
 	return nil
 }
 func (r *fakeRepo) UpdateServerStatus(context.Context, int64, string, string) error { return nil }
+
+// database/user/backup operations (unused by the lifecycle tests, but required
+// by the merged Repository interface).
+func (r *fakeRepo) ListDatabases(context.Context, int64) ([]Database, error) { return nil, nil }
+func (r *fakeRepo) GetDatabase(context.Context, int64, int64) (*Database, error) {
+	return nil, nil
+}
+func (r *fakeRepo) GetDatabaseByID(context.Context, int64) (*Database, error) { return nil, nil }
+func (r *fakeRepo) CreateDatabase(context.Context, int64, int64, string, string, string) (int64, error) {
+	return 0, nil
+}
+func (r *fakeRepo) DeleteDatabase(context.Context, int64, int64) error       { return nil }
+func (r *fakeRepo) ListDBUsers(context.Context, int64) ([]DBUser, error)     { return nil, nil }
+func (r *fakeRepo) GetDBUser(context.Context, int64, int64) (*DBUser, error) { return nil, nil }
+func (r *fakeRepo) CreateDBUser(context.Context, int64, string, string, string) (int64, error) {
+	return 0, nil
+}
+func (r *fakeRepo) DeleteDBUser(context.Context, int64, int64) error            { return nil }
+func (r *fakeRepo) UpdateDBUserPrivileges(context.Context, int64, string) error { return nil }
+func (r *fakeRepo) CreateBackup(context.Context, *DBBackup) (int64, error)      { return 0, nil }
+func (r *fakeRepo) UpdateBackupStatus(context.Context, int64, string, int64, string) error {
+	return nil
+}
+func (r *fakeRepo) ListBackups(context.Context, int64) ([]DBBackup, error) { return nil, nil }
+func (r *fakeRepo) GetBackup(context.Context, int64) (*DBBackup, error)    { return nil, nil }
+func (r *fakeRepo) DeleteBackup(context.Context, int64) error              { return nil }
 
 func mustKey(t *testing.T) []byte {
 	t.Helper()

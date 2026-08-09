@@ -18,9 +18,8 @@ import (
 	containerhttp "easyserver/internal/container/http"
 	"easyserver/internal/cron"
 	cronhttp "easyserver/internal/cron/http"
-	"easyserver/internal/database_mgmt"
-	"easyserver/internal/dbserver"
-	dbserverhttp "easyserver/internal/dbserver/http"
+	dbdomain "easyserver/internal/database"
+	databasehttp "easyserver/internal/database/http"
 	"easyserver/internal/deploy"
 	deployhttp "easyserver/internal/deploy/http"
 	"easyserver/internal/envconfig"
@@ -134,12 +133,9 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	container.SetAuthEnv()
 	containerService := container.NewService(cmdExec)
 
-	dbServerRepo := dbserver.NewSQLiteRepository(db)
-	dbServerService := dbserver.NewServiceWithEncryptionKey(cmdExec, dbServerRepo, cfg.Deploy.EncryptionKey)
-	dbServerService.SeedPredefinedServers(ctx)
-
-	databaseMgmtRepo := database_mgmt.NewSQLiteRepository(db)
-	databaseMgmtService := database_mgmt.NewServiceWithEncryptionKey(databaseMgmtRepo, cmdExec, cfg.Deploy.EncryptionKey)
+	dbRepo := dbdomain.NewSQLiteRepository(db)
+	dbService := dbdomain.NewService(dbRepo, cmdExec, cfg.Deploy.EncryptionKey)
+	dbService.SeedPredefinedServers(ctx)
 
 	deployRepo := deploy.NewSQLiteRepository(db)
 	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)
@@ -214,7 +210,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)
-	dbserverhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbServerService, databaseMgmtService)
+	databasehttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbService)
 	cronhttp.RegisterRoutes(g.Protected, g.WS, cronService, cmdExec)
 	firewallhttp.RegisterRoutes(g.Protected, firewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)

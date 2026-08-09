@@ -1,18 +1,17 @@
-package database_mgmt
+package database
 
 import (
-	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
-	"easyserver/internal/dbserver"
 	"easyserver/internal/deploy"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
@@ -44,29 +43,587 @@ var validPrivileges = map[string]bool{
 	"INDEX": true, "ALTER": true, "EXECUTE": true,
 }
 
-// Service manages databases, users, backups, and SQL queries.
+// Service manages the whole database domain: container-backed instances
+// (lifecycle) and the logical databases, users, backups and SQL inside them.
 type Service struct {
 	repo          Repository
-	executor      executor.CommandExecutor
-	runtime       dbserver.DatabaseRuntime
-	backupDir     string
+	runtime       DatabaseRuntime
 	encryptionKey []byte
+	backupDir     string
 }
 
-// NewService creates a new database management Service.
-func NewServiceWithEncryptionKey(repo Repository, exec executor.CommandExecutor, encryptionKey string) *Service {
+// NewService creates a database Service over the given Repository, driving
+// containers through the CLI Runtime seam.
+func NewService(repo Repository, exec executor.CommandExecutor, encryptionKey string) *Service {
 	return &Service{
 		repo:          repo,
-		executor:      exec,
-		runtime:       dbserver.NewCLIContainerRuntime(exec),
-		backupDir:     DefaultBackupDir,
+		runtime:       NewCLIContainerRuntime(exec),
 		encryptionKey: []byte(encryptionKey),
+		backupDir:     DefaultBackupDir,
 	}
 }
 
-// --- Database CRUD ---
+// NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
+// CLI runtime construction.
+func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime, encryptionKey string) *Service {
+	return &Service{
+		repo:          repo,
+		runtime:       runtime,
+		encryptionKey: []byte(encryptionKey),
+		backupDir:     DefaultBackupDir,
+	}
+}
 
-// ListDatabases returns all databases for a server.
+// SeedPredefinedServers inserts the predefined engine catalog entries if absent.
+func (s *Service) SeedPredefinedServers(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for _, ds := range PredefinedDBServers() {
+		if err := s.repo.SeedServer(ctx, ds.Name, ds.DisplayName, ds.Description, ds.DefaultPort); err != nil {
+			log.Printf("seed server %s: %v", ds.Name, err)
+		}
+	}
+}
+
+// --- Engine catalog ---
+
+func (s *Service) List(ctx context.Context) ([]DBServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.repo.ListServers(ctx)
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (*DBServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.repo.GetServer(ctx, id)
+}
+
+// GetServerByID returns a server by ID (alias used by the mgmt handlers).
+func (s *Service) GetServerByID(ctx context.Context, id int64) (*DBServer, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.repo.GetServer(ctx, id)
+}
+
+// --- Instance lifecycle ---
+
+func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]DBInstance, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ds, err := s.Get(ctx, dbServerID)
+	if err != nil {
+		return nil, fmt.Errorf("get server: %w", err)
+	}
+	if ds == nil {
+		return nil, fmt.Errorf("database server not found")
+	}
+	return s.repo.ListVersions(ctx, dbServerID)
+}
+
+func (s *Service) GetVersion(ctx context.Context, id int64) (*DBInstance, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.repo.GetVersion(ctx, id)
+}
+
+func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *CreateDBInstanceRequest) (*DBInstance, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ds, err := s.Get(ctx, dbServerID)
+	if err != nil || ds == nil {
+		return nil, fmt.Errorf("database server not found")
+	}
+
+	count, err := s.repo.CountVersionsByServerAndVersion(ctx, dbServerID, req.Version)
+	if err != nil {
+		return nil, err
+	}
+	if count > 0 {
+		return nil, fmt.Errorf("version %s is already installed", req.Version)
+	}
+
+	image := ""
+	for _, t := range GetVersionTemplates(ds.Name) {
+		if t.Version == req.Version {
+			image = t.Image
+			break
+		}
+	}
+	if image == "" {
+		return nil, fmt.Errorf("unsupported database image version %s", req.Version)
+	}
+	runtimeName := strings.ToLower(strings.TrimSpace(req.Runtime))
+	if runtimeName == "" {
+		runtimeName = "docker"
+	}
+	if runtimeName != "docker" && runtimeName != "podman" {
+		return nil, fmt.Errorf("unsupported container runtime %q", runtimeName)
+	}
+	port := req.Port
+	if port == 0 {
+		port = ds.DefaultPort
+	}
+	if port < 1 || port > 65535 {
+		return nil, fmt.Errorf("port must be between 1 and 65535")
+	}
+	bindAddress := strings.TrimSpace(req.BindAddress)
+	if bindAddress == "" {
+		bindAddress = "127.0.0.1"
+	}
+	containerName := fmt.Sprintf("easyserver-db-%s-%s", sanitizeName(ds.Name), sanitizeName(req.Version))
+	volumeName := containerName + "-data"
+	password, err := generateAdminPassword()
+	if err != nil {
+		return nil, err
+	}
+	adminUser := "root"
+	if ds.Name == "postgresql" {
+		adminUser = "postgres"
+	}
+	if len(s.encryptionKey) != 32 {
+		return nil, fmt.Errorf("database encryption key must be configured")
+	}
+	encryptedPassword, err := deploy.Encrypt(password, s.encryptionKey)
+	if err != nil {
+		return nil, err
+	}
+
+	spec := containerSpec(ds.Name, runtimeName, req.Version, image, containerName, volumeName, bindAddress, port, adminUser, password)
+	if err := s.runtime.Create(ctx, spec); err != nil {
+		return nil, err
+	}
+	if ds.Name == "redis" {
+		if err := seedRedisConfig(ctx, s.runtime, runtimeName, containerName, password); err != nil {
+			_ = s.runtime.Remove(ctx, runtimeName, containerName)
+			return nil, err
+		}
+	}
+	if err := s.runtime.Start(ctx, runtimeName, containerName); err != nil {
+		_ = s.runtime.Remove(ctx, runtimeName, containerName)
+		return nil, fmt.Errorf("start database container: %w", err)
+	}
+	statusInfo, err := waitForHealthy(ctx, s.runtime, runtimeName, containerName, 2*time.Minute)
+	if err != nil {
+		_ = s.runtime.Remove(ctx, runtimeName, containerName)
+		return nil, err
+	}
+	v := &DBInstance{DBServerID: dbServerID, Version: req.Version, ContainerName: containerName,
+		Port: port, Status: "running", CreatedAt: "", Runtime: runtimeName, Image: image,
+		ContainerID: containerName, VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress,
+		AdminUser: adminUser, AdminPassword: encryptedPassword, AdminPasswordPlain: password, HealthStatus: statusInfo.Health}
+	id, err := s.repo.CreateContainerVersion(ctx, v)
+	if err != nil {
+		_ = s.runtime.Remove(ctx, runtimeName, containerName)
+		return nil, err
+	}
+	v.ID = id
+
+	s.updateServerSummary(ctx, dbServerID)
+	return v, nil
+}
+
+func (s *Service) UninstallVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+
+	dbCount, err := s.repo.CountDatabasesByVersion(ctx, versionID)
+	if err != nil {
+		return err
+	}
+	if dbCount > 0 {
+		return fmt.Errorf("cannot uninstall: %d databases still exist for this version", dbCount)
+	}
+
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("remove database container: %w", err)
+	}
+	s.repo.DeleteVersion(ctx, versionID)
+	s.updateServerSummary(ctx, v.DBServerID)
+	return nil
+}
+
+// DestroyVersion removes the managed container, its data/config volumes and metadata.
+func (s *Service) DestroyVersion(ctx context.Context, versionID int64) error {
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	if count, err := s.repo.CountDatabasesByVersion(ctx, versionID); err != nil {
+		return err
+	} else if count > 0 {
+		return fmt.Errorf("cannot destroy: %d databases still exist for this instance", count)
+	}
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("remove database container: %w", err)
+	}
+	if err := s.runtime.RemoveVolume(ctx, v.Runtime, v.VolumeName); err != nil {
+		return fmt.Errorf("remove database volume: %w", err)
+	}
+	if v.ConfigDir != "" {
+		if err := s.runtime.RemoveVolume(ctx, v.Runtime, v.ContainerName+"-config"); err != nil {
+			return fmt.Errorf("remove database config volume: %w", err)
+		}
+	}
+	if err := s.repo.DeleteVersion(ctx, versionID); err != nil {
+		return err
+	}
+	s.updateServerSummary(ctx, v.DBServerID)
+	return nil
+}
+
+// ResetAdminPassword rotates the administrator password and returns it once.
+func (s *Service) ResetAdminPassword(ctx context.Context, versionID int64) (string, error) {
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return "", fmt.Errorf("version not found")
+	}
+	if v.Runtime == "" || v.ContainerName == "" || len(s.encryptionKey) != 32 {
+		return "", fmt.Errorf("database instance encryption is not configured")
+	}
+	oldPassword, err := s.decryptAdminPassword(v)
+	if err != nil {
+		return "", err
+	}
+	password, err := generateAdminPassword()
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case strings.HasPrefix(strings.ToLower(v.Image), "mysql"):
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "mysql", "-uroot", "-p"+oldPassword, "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+			return "", fmt.Errorf("reset MySQL password: %w", err)
+		}
+	case strings.HasPrefix(strings.ToLower(v.Image), "postgres"):
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "psql", "-U", "postgres", "-c", "ALTER USER postgres WITH PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+			return "", fmt.Errorf("reset PostgreSQL password: %w", err)
+		}
+	case strings.HasPrefix(strings.ToLower(v.Image), "redis"):
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "redis-cli", "-a", oldPassword, "CONFIG", "SET", "requirepass", password); err != nil {
+			return "", fmt.Errorf("reset Redis password: %w", err)
+		}
+	default:
+		return "", fmt.Errorf("password reset is not supported for this database image")
+	}
+	encrypted, err := deploy.Encrypt(password, s.encryptionKey)
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.UpdateVersionPassword(ctx, versionID, encrypted); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+func (s *Service) decryptAdminPassword(v *DBInstance) (string, error) {
+	if len(s.encryptionKey) != 32 {
+		return "", fmt.Errorf("database instance encryption is not configured")
+	}
+	password, err := deploy.Decrypt(v.AdminPassword, s.encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("decrypt administrator password: %w", err)
+	}
+	return password, nil
+}
+
+func (s *Service) StartVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	if err := s.runtime.Start(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("start failed: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ContainerName, 2*time.Minute); err != nil {
+		return err
+	}
+	s.repo.UpdateVersionStatus(ctx, versionID, "running")
+	s.updateServerSummary(ctx, v.DBServerID)
+	return nil
+}
+
+func (s *Service) StopVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	if err := s.runtime.Stop(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("stop failed: %w", err)
+	}
+	s.repo.UpdateVersionStatus(ctx, versionID, "stopped")
+	s.updateServerSummary(ctx, v.DBServerID)
+	return nil
+}
+
+func (s *Service) RestartVersion(ctx context.Context, versionID int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	if err := s.runtime.Restart(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("restart failed: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ContainerName, 2*time.Minute); err != nil {
+		return err
+	}
+	s.repo.UpdateVersionStatus(ctx, versionID, "running")
+	s.updateServerSummary(ctx, v.DBServerID)
+	return nil
+}
+
+// UpdateVersionPort updates the port for an instance.
+func (s *Service) UpdateVersionPort(ctx context.Context, versionID int64, newPort int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+
+	if v.Status == "running" {
+		return fmt.Errorf("cannot change port while service is running. Stop it first")
+	}
+	if newPort < 1 || newPort > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	ds, err := s.Get(ctx, v.DBServerID)
+	if err != nil || ds == nil {
+		return fmt.Errorf("database engine not found")
+	}
+	password, err := s.decryptAdminPassword(v)
+	if err != nil {
+		return err
+	}
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("remove old database container: %w", err)
+	}
+	spec := containerSpec(ds.Name, v.Runtime, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminUser, password)
+	if err := s.runtime.Create(ctx, spec); err != nil {
+		return fmt.Errorf("recreate database container: %w", err)
+	}
+	if err := s.runtime.Start(ctx, v.Runtime, v.ContainerName); err != nil {
+		return fmt.Errorf("start database container: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ContainerName, 2*time.Minute); err != nil {
+		return err
+	}
+	return s.repo.UpdateVersionPort(ctx, versionID, newPort)
+}
+
+func (s *Service) GetVersionServiceLogs(ctx context.Context, versionID int64, lines int) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return "", fmt.Errorf("version not found")
+	}
+	if lines <= 0 {
+		lines = defaultLogLines
+	}
+	if lines > maxLogLines {
+		lines = maxLogLines
+	}
+	return s.runtime.Logs(ctx, v.Runtime, v.ContainerName, lines)
+}
+
+// GetVersionConfig reads the engine configuration from inside its container.
+func (s *Service) GetVersionConfig(ctx context.Context, versionID int64) (string, string, error) {
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return "", "", fmt.Errorf("version not found")
+	}
+	path := configPathForImage(v.Image)
+	out, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "cat", path)
+	return out, path, err
+}
+
+// SaveVersionConfig writes engine configuration inside the managed container.
+func (s *Service) SaveVersionConfig(ctx context.Context, versionID int64, content string) error {
+	if len(content) > 256*1024 {
+		return fmt.Errorf("configuration is too large")
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	path := configPathForImage(v.Image)
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
+		return fmt.Errorf("save configuration: %w", err)
+	}
+	return nil
+}
+
+func configPathForImage(image string) string {
+	image = strings.ToLower(image)
+	switch {
+	case strings.HasPrefix(image, "mysql"):
+		return "/etc/mysql/conf.d/easyserver.cnf"
+	case strings.HasPrefix(image, "postgres"):
+		return "/var/lib/postgresql/data/postgresql.conf"
+	default:
+		return "/usr/local/etc/redis/redis.conf"
+	}
+}
+
+// seedRedisConfig writes an initial redis.conf into the freshly-created config
+// volume so `redis-server <config>` can load it on first start.
+func seedRedisConfig(ctx context.Context, runtime DatabaseRuntime, runtimeName, container, password string) error {
+	content := "requirepass " + password + "\n"
+	tmp, err := os.CreateTemp("", "easyserver-redis-*.conf")
+	if err != nil {
+		return fmt.Errorf("stage redis config: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write staged redis config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close staged redis config: %w", err)
+	}
+	if err := runtime.CopyTo(ctx, runtimeName, container, tmp.Name(), "/usr/local/etc/redis/redis.conf"); err != nil {
+		return fmt.Errorf("seed redis config: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) RefreshStatus(ctx context.Context, dbServerID int64) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	versions, _ := s.ListVersions(ctx, dbServerID)
+	for _, v := range versions {
+		info, err := s.runtime.Status(ctx, v.Runtime, v.ContainerName)
+		status := containerStatus(info, err)
+		s.repo.UpdateVersionStatus(ctx, v.ID, status)
+	}
+	s.updateServerSummary(ctx, dbServerID)
+}
+
+func (s *Service) RefreshAllStatus(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	servers, _ := s.List(ctx)
+	for _, ds := range servers {
+		s.RefreshStatus(ctx, ds.ID)
+	}
+}
+
+func (s *Service) updateServerSummary(ctx context.Context, dbServerID int64) {
+	versions, _ := s.ListVersions(ctx, dbServerID)
+	if len(versions) == 0 {
+		s.repo.UpdateServerStatus(ctx, dbServerID, "not_installed", "")
+		return
+	}
+
+	running := 0
+	var versionParts []string
+	for _, v := range versions {
+		if v.Status == "running" || v.Status == "active" {
+			running++
+		}
+		versionParts = append(versionParts, v.Version)
+	}
+
+	status := "stopped"
+	if running == len(versions) {
+		status = "running"
+	} else if running > 0 {
+		status = "partial"
+	}
+
+	summary := strings.Join(versionParts, ", ")
+	s.repo.UpdateServerStatus(ctx, dbServerID, status, summary)
+}
+
+func sanitizeName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			b.WriteRune(ch)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func generateAdminPassword() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate database password: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func containerSpec(engine, runtimeName, version, image, name, volume, bind string, port int, user, password string) ContainerSpec {
+	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -u"+user+" -p$MYSQL_ROOT_PASSWORD"
+	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
+	command := []string(nil)
+	configVolume, configDir := "", ""
+	switch engine {
+	case "postgresql":
+		// PostgreSQL config lives in its data volume (postgresql.conf), so no
+		// separate config volume is mounted.
+		dataDir = "/var/lib/postgresql/data"
+		env = map[string]string{"POSTGRES_PASSWORD": password}
+		health = "pg_isready -U postgres"
+	case "redis":
+		dataDir = "/data"
+		env = map[string]string{"REDIS_PASSWORD": password}
+		health = "redis-cli -a $REDIS_PASSWORD ping"
+		configVolume, configDir = name+"-config", "/usr/local/etc/redis"
+		command = []string{"redis-server", "--requirepass", password, configDir + "/redis.conf"}
+	default: // mysql
+		configVolume, configDir = name+"-config", "/etc/mysql/conf.d"
+	}
+	return ContainerSpec{Runtime: runtimeName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
+		ConfigVolume: configVolume, ConfigDir: configDir,
+		BindAddress: bind, HostPort: port, ContainerPort: port, Environment: env,
+		Labels: map[string]string{"com.easyserver.engine": engine, "com.easyserver.version": version}, HealthCommand: health, Command: command}
+}
+
+func containerStatus(info ContainerStatus, err error) string {
+	if err != nil {
+		return "stopped"
+	}
+	if info.State == "running" && info.Health == "healthy" {
+		return "running"
+	}
+	if info.State == "running" {
+		return "unhealthy"
+	}
+	return "stopped"
+}
+
+// --- Logical database CRUD ---
+
 func (s *Service) ListDatabases(ctx context.Context, dbServerID int64) ([]Database, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -81,7 +638,6 @@ func (s *Service) ListDatabases(ctx context.Context, dbServerID int64) ([]Databa
 	return s.repo.ListDatabases(ctx, dbServerID)
 }
 
-// GetDatabaseByID returns a database by its ID.
 func (s *Service) GetDatabaseByID(ctx context.Context, id int64) (*Database, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -89,15 +645,6 @@ func (s *Service) GetDatabaseByID(ctx context.Context, id int64) (*Database, err
 	return s.repo.GetDatabaseByID(ctx, id)
 }
 
-// GetServerByID returns a server by its ID.
-func (s *Service) GetServerByID(ctx context.Context, id int64) (*dbserver.DBServer, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.repo.GetServer(ctx, id)
-}
-
-// CreateDatabase creates a new database.
 func (s *Service) CreateDatabase(ctx context.Context, dbServerID int64, req *CreateDatabaseRequest) (*Database, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -168,7 +715,6 @@ func (s *Service) CreateDatabase(ctx context.Context, dbServerID int64, req *Cre
 	}, nil
 }
 
-// DeleteDatabase deletes a database.
 func (s *Service) DeleteDatabase(ctx context.Context, dbServerID, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -218,7 +764,6 @@ func (s *Service) DeleteDatabase(ctx context.Context, dbServerID, id int64) erro
 
 // --- DB User CRUD ---
 
-// ListDBUsers returns all database users for a server.
 func (s *Service) ListDBUsers(ctx context.Context, dbServerID int64) ([]DBUser, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -233,7 +778,6 @@ func (s *Service) ListDBUsers(ctx context.Context, dbServerID int64) ([]DBUser, 
 	return s.repo.ListDBUsers(ctx, dbServerID)
 }
 
-// CreateDBUser creates a new database user.
 func (s *Service) CreateDBUser(ctx context.Context, dbServerID int64, req *CreateDBUserRequest) (*DBUser, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -301,7 +845,6 @@ func (s *Service) CreateDBUser(ctx context.Context, dbServerID int64, req *Creat
 	}, nil
 }
 
-// DeleteDBUser deletes a database user.
 func (s *Service) DeleteDBUser(ctx context.Context, dbServerID, id int64) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -351,7 +894,6 @@ func (s *Service) DeleteDBUser(ctx context.Context, dbServerID, id int64) error 
 	return s.repo.DeleteDBUser(ctx, dbServerID, id)
 }
 
-// GrantPrivileges grants privileges to a database user.
 func (s *Service) GrantPrivileges(ctx context.Context, dbServerID, userID int64, req *GrantRequest) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -428,7 +970,6 @@ func (s *Service) SetBackupDir(dir string) {
 	s.backupDir = dir
 }
 
-// CreateBackup creates a backup of a database.
 func (s *Service) CreateBackup(ctx context.Context, dbServerID, dbVersionID, databaseID int64, dbName, dbType string) (*DBBackup, error) {
 	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
@@ -539,17 +1080,14 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	return s.runtime.CopyFrom(ctx, version.Runtime, version.ContainerName, "/data/dump.rdb", backup.FilePath)
 }
 
-// ListBackups returns all backups for a database.
 func (s *Service) ListBackups(ctx context.Context, databaseID int64) ([]DBBackup, error) {
 	return s.repo.ListBackups(ctx, databaseID)
 }
 
-// GetBackup returns a backup by ID.
 func (s *Service) GetBackup(ctx context.Context, id int64) (*DBBackup, error) {
 	return s.repo.GetBackup(ctx, id)
 }
 
-// DeleteBackup deletes a backup file and record.
 func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
@@ -563,7 +1101,6 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 	return s.repo.DeleteBackup(ctx, id)
 }
 
-// RestoreBackup restores a database from backup.
 func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType string) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
@@ -638,7 +1175,6 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	return nil
 }
 
-// CleanOldBackups removes old backups beyond the limit.
 func (s *Service) CleanOldBackups(ctx context.Context, databaseID int64, maxBackups int) error {
 	if maxBackups <= 0 {
 		maxBackups = MaxBackupsPerDB
@@ -659,9 +1195,9 @@ func (s *Service) CleanOldBackups(ctx context.Context, databaseID int64, maxBack
 	return nil
 }
 
-// --- SQL Query operations ---
+// --- SQL query operations ---
 
-func (s *Service) runInVersion(ctx context.Context, version *dbserver.DBInstance, args ...string) (string, error) {
+func (s *Service) runInVersion(ctx context.Context, version *DBInstance, args ...string) (string, error) {
 	if version == nil || version.Runtime == "" || version.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
@@ -669,7 +1205,7 @@ func (s *Service) runInVersion(ctx context.Context, version *dbserver.DBInstance
 	return s.runtime.Exec(ctx, version.Runtime, version.ContainerName, args...)
 }
 
-func (s *Service) withAdminCredentials(version *dbserver.DBInstance, args []string) []string {
+func (s *Service) withAdminCredentials(version *DBInstance, args []string) []string {
 	if len(args) == 0 || len(s.encryptionKey) != 32 {
 		return args
 	}
@@ -690,8 +1226,7 @@ func (s *Service) withAdminCredentials(version *dbserver.DBInstance, args []stri
 	return args
 }
 
-// lookupDB resolves dbID → database + server + typed DBType.
-func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *dbserver.DBServer, *dbserver.DBInstance, DBType, error) {
+func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *DBServer, *DBInstance, DBType, error) {
 	db, err := s.repo.GetDatabaseByID(ctx, dbID)
 	if err != nil || db == nil {
 		return nil, nil, nil, "", fmt.Errorf("数据库不存在")
@@ -720,7 +1255,7 @@ func getDBTypeFromName(name string) DBType {
 	return DBTypeMySQL
 }
 
-func firstRunningVersion(versions []dbserver.DBInstance) *dbserver.DBInstance {
+func firstRunningVersion(versions []DBInstance) *DBInstance {
 	for i := range versions {
 		if versions[i].Status == "running" {
 			return &versions[i]
@@ -733,7 +1268,7 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func (s *Service) execRaw(ctx context.Context, version *dbserver.DBInstance, dbType DBType, dbName string, sql string) (string, error) {
+func (s *Service) execRaw(ctx context.Context, version *DBInstance, dbType DBType, dbName string, sql string) (string, error) {
 	switch dbType {
 	case DBTypeMySQL:
 		return s.runInVersion(ctx, version, "mysql", dbName, "-e", sql)
@@ -767,7 +1302,6 @@ func ValidateTableName(name string) bool {
 	return name != "" && len(name) <= 64 && tableNameRegexp.MatchString(name)
 }
 
-// ListTables returns all table names in the given database.
 func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]interface{}, error) {
 	db, server, version, _, err := s.lookupDB(ctx, dbID)
 	if err != nil {
@@ -809,7 +1343,6 @@ func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]inte
 	return tables, nil
 }
 
-// DescribeTable returns structured column info for a table.
 func (s *Service) DescribeTable(ctx context.Context, dbID int64, tableName string) (*DescribeResult, error) {
 	if !ValidateTableName(tableName) {
 		return nil, fmt.Errorf("无效的表名")
@@ -849,7 +1382,6 @@ func (s *Service) DescribeTable(ctx context.Context, dbID int64, tableName strin
 	}, nil
 }
 
-// QueryTable returns paginated rows from a table.
 func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, page, pageSize int) (*PagedQueryResult, error) {
 	if !ValidateTableName(tableName) {
 		return nil, fmt.Errorf("无效的表名")
@@ -939,7 +1471,6 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	}, nil
 }
 
-// ExecuteSQL runs raw SQL and returns the result.
 func (s *Service) ExecuteSQL(ctx context.Context, dbID int64, sql string) (*DMLResult, error) {
 	db, server, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
@@ -959,7 +1490,6 @@ func (s *Service) ExecuteSQL(ctx context.Context, dbID int64, sql string) (*DMLR
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
-// InsertRecord inserts a row; dryRun=true returns the SQL without executing.
 func (s *Service) InsertRecord(ctx context.Context, dbID int64, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
@@ -988,7 +1518,6 @@ func (s *Service) InsertRecord(ctx context.Context, dbID int64, table string, da
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
-// UpdateRecord updates a row; dryRun=true returns the SQL without executing.
 func (s *Service) UpdateRecord(ctx context.Context, dbID int64, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
@@ -1017,7 +1546,6 @@ func (s *Service) UpdateRecord(ctx context.Context, dbID int64, table string, da
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
-// DeleteRecord deletes a row; dryRun=true returns the SQL without executing.
 func (s *Service) DeleteRecord(ctx context.Context, dbID int64, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
@@ -1046,7 +1574,6 @@ func (s *Service) DeleteRecord(ctx context.Context, dbID int64, table string, pk
 	return &DMLResult{Success: true}, nil
 }
 
-// CreateTable creates a new table in the given database.
 func (s *Service) CreateTable(ctx context.Context, dbID int64, tableName string, columns []TableColumn) error {
 	if !ValidateTableName(tableName) {
 		return fmt.Errorf("无效的表名")
@@ -1123,7 +1650,6 @@ func (s *Service) CreateTable(ctx context.Context, dbID int64, tableName string,
 	return nil
 }
 
-// DropTable drops a table from the given database.
 func (s *Service) DropTable(ctx context.Context, dbID int64, tableName string) error {
 	if !ValidateTableName(tableName) {
 		return fmt.Errorf("无效的表名")
@@ -1213,445 +1739,4 @@ func escapeMySQLString(s string) string {
 
 func escapePGString(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
-}
-
-// --- Config parsing helpers ---
-
-// GetCommonParams returns metadata for common MySQL configuration parameters.
-func GetCommonParams(section string) []ParamMeta {
-	switch section {
-	case "mysqld":
-		return []ParamMeta{
-			{Key: "port", Label: "监听端口", Description: "MySQL 服务监听的端口号", Type: "number", Default: "3306"},
-			{Key: "datadir", Label: "数据目录", Description: "MySQL 数据文件存储路径", Type: "text", Default: "/var/lib/mysql"},
-			{Key: "socket", Label: "Socket 文件", Description: "Unix Socket 文件路径", Type: "text", Default: "/var/run/mysqld/mysqld.sock"},
-			{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数", Type: "number", Default: "151"},
-			{Key: "innodb_buffer_pool_size", Label: "InnoDB 缓冲池", Description: "InnoDB 缓冲池大小，建议设为内存的 70-80%", Type: "text", Unit: "MB/GB", Default: "128M"},
-			{Key: "character-set-server", Label: "服务器字符集", Description: "默认字符集", Type: "select", Options: []string{"utf8mb4", "utf8", "latin1", "gbk"}, Default: "utf8mb4"},
-			{Key: "collation-server", Label: "排序规则", Description: "默认排序规则", Type: "text", Default: "utf8mb4_general_ci"},
-			{Key: "default-storage-engine", Label: "默认存储引擎", Description: "默认存储引擎", Type: "select", Options: []string{"InnoDB", "MyISAM", "MEMORY"}, Default: "InnoDB"},
-			{Key: "max_allowed_packet", Label: "最大数据包", Description: "单个数据包最大大小", Type: "text", Unit: "MB", Default: "64M"},
-			{Key: "tmp_table_size", Label: "临时表大小", Description: "内存临时表最大大小", Type: "text", Unit: "MB", Default: "64M"},
-			{Key: "max_heap_table_size", Label: "堆表最大大小", Description: "用户创建的内存表最大大小", Type: "text", Unit: "MB", Default: "64M"},
-			{Key: "sort_buffer_size", Label: "排序缓冲区", Description: "每个会话的排序缓冲区大小", Type: "text", Unit: "KB", Default: "256K"},
-			{Key: "read_buffer_size", Label: "读缓冲区", Description: "顺序扫描的读缓冲区大小", Type: "text", Unit: "KB", Default: "256K"},
-			{Key: "join_buffer_size", Label: "JOIN 缓冲区", Description: "JOIN 操作的缓冲区大小", Type: "text", Unit: "KB", Default: "256K"},
-			{Key: "log_error", Label: "错误日志路径", Description: "错误日志文件路径", Type: "text", Default: "/var/log/mysql/error.log"},
-			{Key: "slow_query_log", Label: "慢查询日志", Description: "是否启用慢查询日志", Type: "select", Options: []string{"ON", "OFF"}, Default: "OFF"},
-			{Key: "slow_query_log_file", Label: "慢查询日志路径", Description: "慢查询日志文件路径", Type: "text", Default: "/var/log/mysql/slow.log"},
-			{Key: "long_query_time", Label: "慢查询阈值", Description: "超过此时间的查询记录到慢查询日志", Type: "number", Unit: "秒", Default: "10"},
-			{Key: "wait_timeout", Label: "空闲超时", Description: "非交互连接的空闲超时时间", Type: "number", Unit: "秒", Default: "28800"},
-			{Key: "interactive_timeout", Label: "交互超时", Description: "交互连接的空闲超时时间", Type: "number", Unit: "秒", Default: "28800"},
-		}
-	case "client":
-		return []ParamMeta{
-			{Key: "default-character-set", Label: "默认字符集", Description: "客户端默认字符集", Type: "select", Options: []string{"utf8mb4", "utf8", "latin1", "gbk"}, Default: "utf8mb4"},
-			{Key: "port", Label: "端口", Description: "连接端口", Type: "number", Default: "3306"},
-			{Key: "socket", Label: "Socket", Description: "Unix Socket 文件路径", Type: "text", Default: "/var/run/mysqld/mysqld.sock"},
-		}
-	case "mysql":
-		return []ParamMeta{
-			{Key: "default-character-set", Label: "默认字符集", Description: "mysql 客户端默认字符集", Type: "select", Options: []string{"utf8mb4", "utf8", "latin1", "gbk"}, Default: "utf8mb4"},
-		}
-	case "mysqldump":
-		return []ParamMeta{
-			{Key: "max_allowed_packet", Label: "最大数据包", Description: "导出数据包最大大小", Type: "text", Unit: "MB", Default: "64M"},
-			{Key: "default-character-set", Label: "默认字符集", Description: "导出默认字符集", Type: "select", Options: []string{"utf8mb4", "utf8", "latin1"}, Default: "utf8mb4"},
-		}
-	}
-	return nil
-}
-
-// CommonConfigFilePaths returns common MySQL config file locations.
-func CommonConfigFilePaths() []string {
-	return []string{
-		"/etc/mysql/my.cnf",
-		"/etc/mysql/mysql.conf.d/mysqld.cnf",
-		"/etc/my.cnf",
-		"/usr/etc/my.cnf",
-	}
-}
-
-// FindMySQLConfig finds the active MySQL config file.
-func FindMySQLConfig() string {
-	for _, path := range CommonConfigFilePaths() {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	return ""
-}
-
-// ParseMySQLConfig parses a my.cnf file into structured sections.
-func ParseMySQLConfig(filePath string) (*DBConfig, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open config file: %w", err)
-	}
-	defer file.Close()
-
-	config := &DBConfig{
-		FilePath: filePath,
-		Sections: []ConfigSection{},
-	}
-
-	var currentSection *ConfigSection
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			sectionName := line[1 : len(line)-1]
-			config.Sections = append(config.Sections, ConfigSection{
-				Name:   sectionName,
-				Params: make(map[string]string),
-			})
-			currentSection = &config.Sections[len(config.Sections)-1]
-			continue
-		}
-
-		if currentSection != nil {
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-				if idx := strings.Index(value, " #"); idx != -1 {
-					value = strings.TrimSpace(value[:idx])
-				}
-				if idx := strings.Index(value, " //"); idx != -1 {
-					value = strings.TrimSpace(value[:idx])
-				}
-				currentSection.Params[key] = value
-			}
-		}
-	}
-
-	return config, nil
-}
-
-func backupConfigFile(filePath string) error {
-	backupPath := filePath + ".bak." + time.Now().Format("20060102150405")
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read config for backup: %w", err)
-	}
-	if err := os.WriteFile(backupPath, data, 0644); err != nil {
-		return fmt.Errorf("write backup: %w", err)
-	}
-	return nil
-}
-
-// SaveMySQLConfig saves the structured config back to file.
-func SaveMySQLConfig(config *DBConfig) error {
-	if err := backupConfigFile(config.FilePath); err != nil {
-		return err
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# EasyServer generated MySQL configuration\n")
-	sb.WriteString("# " + time.Now().Format("2006-01-02 15:04:05") + "\n\n")
-
-	for _, section := range config.Sections {
-		sb.WriteString(fmt.Sprintf("[%s]\n", section.Name))
-		keys := make([]string, 0, len(section.Params))
-		for key := range section.Params {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			sb.WriteString(fmt.Sprintf("%s = %s\n", key, section.Params[key]))
-		}
-		sb.WriteString("\n")
-	}
-
-	dir := filepath.Dir(config.FilePath)
-	os.MkdirAll(dir, 0755)
-
-	return os.WriteFile(config.FilePath, []byte(sb.String()), 0644)
-}
-
-// UpdateConfigParam updates a single parameter in a config section.
-func UpdateConfigParam(config *DBConfig, section, key, value string) {
-	for i, s := range config.Sections {
-		if s.Name == section {
-			config.Sections[i].Params[key] = value
-			return
-		}
-	}
-	config.Sections = append(config.Sections, ConfigSection{
-		Name:   section,
-		Params: map[string]string{key: value},
-	})
-}
-
-// FindPostgreSQLConfig finds the active PostgreSQL config file.
-func FindPostgreSQLConfig() string {
-	paths := []string{
-		"/etc/postgresql/16/main/postgresql.conf",
-		"/etc/postgresql/15/main/postgresql.conf",
-		"/etc/postgresql/14/main/postgresql.conf",
-		"/etc/postgresql/13/main/postgresql.conf",
-		"/var/lib/pgsql/data/postgresql.conf",
-		"/var/lib/postgresql/16/main/postgresql.conf",
-		"/var/lib/postgresql/15/main/postgresql.conf",
-		"/var/lib/postgresql/14/main/postgresql.conf",
-		"/var/lib/postgresql/13/main/postgresql.conf",
-	}
-	matches, _ := filepath.Glob("/etc/postgresql/*/main/postgresql.conf")
-	paths = append(matches, paths...)
-	matches, _ = filepath.Glob("/var/lib/postgresql/*/main/postgresql.conf")
-	paths = append(matches, paths...)
-
-	for _, path := range paths {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	return ""
-}
-
-// ParsePostgreSQLConfig parses a postgresql.conf file.
-func ParsePostgreSQLConfig(filePath string) (*DBConfig, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open config file: %w", err)
-	}
-	defer file.Close()
-
-	params := make(map[string]string)
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "include") || strings.HasPrefix(line, "include_if_exists") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			if idx := strings.Index(value, " #"); idx != -1 {
-				value = strings.TrimSpace(value[:idx])
-			}
-			if len(value) >= 2 {
-				if (value[0] == '\'' && value[len(value)-1] == '\'') ||
-					(value[0] == '"' && value[len(value)-1] == '"') {
-					value = value[1 : len(value)-1]
-				}
-			}
-			params[key] = value
-		}
-	}
-
-	return &DBConfig{
-		FilePath: filePath,
-		Sections: []ConfigSection{
-			{Name: "main", Params: params},
-		},
-	}, nil
-}
-
-func pgNeedsQuote(value string) bool {
-	if _, err := fmt.Sscanf(value, "%d", new(int)); err == nil {
-		return false
-	}
-	switch strings.ToLower(value) {
-	case "on", "off", "true", "false", "yes", "no":
-		return false
-	}
-	if len(value) > 0 {
-		lastChar := value[len(value)-1]
-		if lastChar >= 'A' && lastChar <= 'Z' || lastChar >= 'a' && lastChar <= 'z' {
-			numPart := value[:len(value)-1]
-			if _, err := fmt.Sscanf(numPart, "%f", new(float64)); err == nil {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// SavePostgreSQLConfig saves PostgreSQL config back to file.
-func SavePostgreSQLConfig(config *DBConfig) error {
-	if err := backupConfigFile(config.FilePath); err != nil {
-		return err
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# EasyServer generated PostgreSQL configuration\n")
-	sb.WriteString("# " + time.Now().Format("2006-01-02 15:04:05") + "\n\n")
-
-	if len(config.Sections) > 0 {
-		keys := make([]string, 0, len(config.Sections[0].Params))
-		for key := range config.Sections[0].Params {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			value := config.Sections[0].Params[key]
-			if pgNeedsQuote(value) {
-				escaped := strings.ReplaceAll(value, "'", "''")
-				sb.WriteString(fmt.Sprintf("%s = '%s'\n", key, escaped))
-			} else {
-				sb.WriteString(fmt.Sprintf("%s = %s\n", key, value))
-			}
-		}
-	}
-
-	dir := filepath.Dir(config.FilePath)
-	os.MkdirAll(dir, 0755)
-	return os.WriteFile(config.FilePath, []byte(sb.String()), 0644)
-}
-
-// GetPostgreSQLCommonParams returns metadata for common PostgreSQL parameters.
-func GetPostgreSQLCommonParams() []ParamMeta {
-	return []ParamMeta{
-		{Key: "listen_addresses", Label: "监听地址", Description: "监听的 IP 地址，'*' 表示所有", Type: "text", Default: "localhost"},
-		{Key: "port", Label: "端口", Description: "PostgreSQL 服务监听端口", Type: "number", Default: "5432"},
-		{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数", Type: "number", Default: "100"},
-		{Key: "shared_buffers", Label: "共享缓冲区", Description: "共享缓冲区大小，建议设为内存的 25%", Type: "text", Unit: "MB/GB", Default: "128MB"},
-		{Key: "work_mem", Label: "工作内存", Description: "每个排序/哈希操作的内存", Type: "text", Unit: "MB/KB", Default: "4MB"},
-		{Key: "maintenance_work_mem", Label: "维护工作内存", Description: "VACUUM/CREATE INDEX 等维护操作的内存", Type: "text", Unit: "MB/GB", Default: "64MB"},
-		{Key: "wal_level", Label: "WAL 级别", Description: "Write-Ahead 日志级别", Type: "select", Options: []string{"minimal", "replica", "logical"}, Default: "replica"},
-		{Key: "max_wal_size", Label: "最大 WAL 大小", Description: "自动检查点之间的最大 WAL 大小", Type: "text", Unit: "MB/GB", Default: "1GB"},
-		{Key: "min_wal_size", Label: "最小 WAL 大小", Description: "WAL 文件回收的最小大小", Type: "text", Unit: "MB/GB", Default: "80MB"},
-		{Key: "log_destination", Label: "日志目标", Description: "日志输出目标", Type: "select", Options: []string{"stderr", "csvlog", "syslog"}, Default: "stderr"},
-		{Key: "logging_collector", Label: "日志收集器", Description: "是否启用日志收集器", Type: "select", Options: []string{"on", "off"}, Default: "on"},
-		{Key: "log_directory", Label: "日志目录", Description: "日志文件存储目录", Type: "text", Default: "pg_log"},
-		{Key: "log_filename", Label: "日志文件名", Description: "日志文件名模式", Type: "text", Default: "postgresql-%Y-%m-%d_%H%M%S.log"},
-		{Key: "password_encryption", Label: "密码加密", Description: "密码加密方式", Type: "select", Options: []string{"scram-sha-256", "md5"}, Default: "scram-sha-256"},
-		{Key: "ssl", Label: "SSL", Description: "是否启用 SSL", Type: "select", Options: []string{"on", "off"}, Default: "off"},
-	}
-}
-
-// FindRedisConfig finds the active Redis config file.
-func FindRedisConfig() string {
-	paths := []string{
-		"/etc/redis/redis.conf",
-		"/etc/redis.conf",
-		"/opt/redis/redis.conf",
-		"/usr/local/etc/redis.conf",
-	}
-	for _, path := range paths {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	return ""
-}
-
-// ParseRedisConfig parses a redis.conf file.
-func ParseRedisConfig(filePath string) (*DBConfig, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open config file: %w", err)
-	}
-	defer file.Close()
-
-	params := make(map[string]string)
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "include ") {
-			continue
-		}
-		idx := strings.Index(line, " ")
-		if idx == -1 {
-			continue
-		}
-		key := line[:idx]
-		value := strings.TrimSpace(line[idx+1:])
-		if cidx := strings.Index(value, " #"); cidx != -1 {
-			value = strings.TrimSpace(value[:cidx])
-		}
-		if key == "save" {
-			if existing, ok := params["save"]; ok {
-				params["save"] = existing + "\n" + value
-			} else {
-				params["save"] = value
-			}
-		} else {
-			params[key] = value
-		}
-	}
-
-	return &DBConfig{
-		FilePath: filePath,
-		Sections: []ConfigSection{
-			{Name: "main", Params: params},
-		},
-	}, nil
-}
-
-// SaveRedisConfig saves Redis config back to file.
-func SaveRedisConfig(config *DBConfig) error {
-	if err := backupConfigFile(config.FilePath); err != nil {
-		return err
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# EasyServer generated Redis configuration\n")
-	sb.WriteString("# " + time.Now().Format("2006-01-02 15:04:05") + "\n\n")
-
-	if len(config.Sections) > 0 {
-		keys := make([]string, 0, len(config.Sections[0].Params))
-		for key := range config.Sections[0].Params {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			value := config.Sections[0].Params[key]
-			if key == "save" {
-				lines := strings.Split(value, "\n")
-				for _, l := range lines {
-					l = strings.TrimSpace(l)
-					if l != "" {
-						sb.WriteString(fmt.Sprintf("save %s\n", l))
-					}
-				}
-			} else {
-				sb.WriteString(fmt.Sprintf("%s %s\n", key, value))
-			}
-		}
-	}
-
-	dir := filepath.Dir(config.FilePath)
-	os.MkdirAll(dir, 0755)
-	return os.WriteFile(config.FilePath, []byte(sb.String()), 0644)
-}
-
-// GetRedisCommonParams returns metadata for common Redis parameters.
-func GetRedisCommonParams() []ParamMeta {
-	return []ParamMeta{
-		{Key: "bind", Label: "绑定地址", Description: "监听的 IP 地址", Type: "text", Default: "127.0.0.1"},
-		{Key: "port", Label: "端口", Description: "Redis 服务监听端口", Type: "number", Default: "6379"},
-		{Key: "protected-mode", Label: "保护模式", Description: "无密码时禁止外部访问", Type: "select", Options: []string{"yes", "no"}, Default: "yes"},
-		{Key: "requirepass", Label: "访问密码", Description: "Redis 访问密码", Type: "text", Default: ""},
-		{Key: "maxmemory", Label: "最大内存", Description: "Redis 最大内存使用量", Type: "text", Unit: "mb/gb", Default: "256mb"},
-		{Key: "maxmemory-policy", Label: "内存淘汰策略", Description: "内存满时的 key 淘汰策略", Type: "select", Options: []string{"noeviction", "allkeys-lru", "volatile-lru", "allkeys-random", "volatile-random", "volatile-ttl"}, Default: "allkeys-lru"},
-		{Key: "save", Label: "RDB 持久化", Description: "RDB 快照策略（秒 数据变更次数），多个策略用换行分隔", Type: "text", Default: "900 1"},
-		{Key: "appendonly", Label: "AOF 持久化", Description: "是否启用 AOF 持久化", Type: "select", Options: []string{"yes", "no"}, Default: "no"},
-		{Key: "appendfsync", Label: "AOF 同步策略", Description: "AOF 文件同步策略", Type: "select", Options: []string{"always", "everysec", "no"}, Default: "everysec"},
-		{Key: "timeout", Label: "空闲超时", Description: "客户端空闲断开时间（秒），0 表示不断开", Type: "number", Unit: "秒", Default: "0"},
-		{Key: "databases", Label: "数据库数量", Description: "Redis 数据库数量", Type: "number", Default: "16"},
-		{Key: "tcp-backlog", Label: "TCP 积压", Description: "TCP 连接积压队列大小", Type: "number", Default: "511"},
-		{Key: "tcp-keepalive", Label: "TCP 保活", Description: "TCP 保活探测间隔（秒）", Type: "number", Unit: "秒", Default: "300"},
-		{Key: "loglevel", Label: "日志级别", Description: "Redis 日志级别", Type: "select", Options: []string{"debug", "verbose", "notice", "warning"}, Default: "notice"},
-		{Key: "logfile", Label: "日志文件", Description: "日志文件路径，空表示标准输出", Type: "text", Default: ""},
-	}
 }
