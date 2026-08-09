@@ -251,9 +251,11 @@ func isPodmanEngine(engine Engine) bool { return engineBinary(engine) == "podman
 
 // --- Container operations ---
 
-// checkEngine checks if the given engine binary is installed and accessible.
+// checkEngine checks if the given engine CLI is installed and accessible.
+// Uses `--version` (client-only, no daemon) so a stopped Docker daemon is not
+// misreported as "not installed".
 func (s *Service) checkEngine(ctx context.Context, engine Engine) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "version", "--format", "{{.Server.Version}}")
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "--version")
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("%s is not installed or not accessible", engine)
 	}
@@ -749,27 +751,52 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 
 	status.OS = s.detectOS(ctx)
 
-	stdout, exitCode, err := s.executor.RunCombined(ctx, bin, "version", "--format", "{{.Server.Version}}")
-	if err != nil || exitCode != 0 {
-		status.Installed = false
-		return status, nil
-	}
-	status.Installed = true
-	status.Version = strings.TrimSpace(stdout)
-
-	// Podman has no daemon; if the binary works it's usable. Docker's running
-	// state is probed via `info` (differently-shaped template fields).
 	if isPodmanEngine(engine) {
+		// Podman is self-contained (no daemon): CLI present = usable.
+		stdout, exitCode, err := s.executor.RunCombined(ctx, bin, "--version")
+		if err != nil || exitCode != 0 {
+			status.Installed = false
+			return status, nil
+		}
+		status.Installed = true
+		status.Version = extractVersion(stdout)
 		status.Running = true
 		status.SocketEnabled = s.socketEnabled(ctx)
 	} else {
-		_, exitCode, err = s.executor.RunCombined(ctx, bin, "info", "--format", "{{.ServerVersion}}")
-		status.Running = err == nil && exitCode == 0
+		// Docker: CLI and engine (docker.service) are separate packages.
+		// "Installed" means the engine unit exists; "Running" means the
+		// daemon is active.
+		status.Version = s.dockerCLIVersion(ctx)
+		status.Installed = s.unitExists(ctx, "docker.service")
+		if status.Installed {
+			status.Running = s.unitActive(ctx, "docker.service")
+		}
 	}
 
 	status.ComposeVersion = s.detectComposeVersion(ctx, engine)
 
 	return status, nil
+}
+
+// dockerCLIVersion returns the Docker client version (CLI only, no daemon).
+func (s *Service) dockerCLIVersion(ctx context.Context) string {
+	stdout, exitCode, err := s.executor.RunCombined(ctx, engineBinary(EngineDocker), "--version")
+	if err != nil || exitCode != 0 {
+		return ""
+	}
+	return extractVersion(stdout)
+}
+
+// unitExists reports whether a systemd unit file is present.
+func (s *Service) unitExists(ctx context.Context, unit string) bool {
+	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "cat", unit)
+	return err == nil && exitCode == 0
+}
+
+// unitActive reports whether a systemd unit is currently active.
+func (s *Service) unitActive(ctx context.Context, unit string) bool {
+	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "is-active", "--quiet", unit)
+	return err == nil && exitCode == 0
 }
 
 func (s *Service) detectComposeVersion(ctx context.Context, engine Engine) string {
@@ -789,6 +816,17 @@ func (s *Service) detectComposeVersion(ctx context.Context, engine Engine) strin
 		return strings.TrimSpace(composeOut)
 	}
 	return ""
+}
+
+// versionRE extracts a semver from `docker --version` / `podman --version`
+// banner output (e.g. "Docker version 24.0.7, build xxx" → "24.0.7").
+var versionRE = regexp.MustCompile(`([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
+
+func extractVersion(output string) string {
+	if m := versionRE.FindStringSubmatch(output); m != nil {
+		return m[1]
+	}
+	return strings.TrimSpace(output)
 }
 
 func (s *Service) detectOS(ctx context.Context) string {
