@@ -118,19 +118,10 @@ func (r *fakeRepo) ListBackups(context.Context, int64, string) ([]DBBackup, erro
 func (r *fakeRepo) GetBackup(context.Context, int64) (*DBBackup, error) { return nil, nil }
 func (r *fakeRepo) DeleteBackup(context.Context, int64) error           { return nil }
 
-func mustKey(t *testing.T) []byte {
-	t.Helper()
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i + 1)
-	}
-	return key
-}
-
 func TestCreateInstanceHealthy(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
-	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
+	svc := NewServiceWithRuntime(repo, rt)
 
 	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
@@ -155,7 +146,7 @@ func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 	// Container exits before becoming healthy → waitForHealthy fails fast and
 	// CreateInstance must roll back the container.
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
-	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
+	svc := NewServiceWithRuntime(repo, rt)
 
 	if _, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"}); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
@@ -168,7 +159,7 @@ func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
-	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
+	svc := NewServiceWithRuntime(repo, rt)
 
 	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {

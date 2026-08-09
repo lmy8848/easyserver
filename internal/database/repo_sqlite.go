@@ -102,8 +102,8 @@ func (r *sqliteRepo) UpdateInstancePort(ctx context.Context, id int64, port int)
 	return err
 }
 
-func (r *sqliteRepo) UpdateInstancePassword(ctx context.Context, id int64, encryptedPassword string) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE database_instances SET admin_password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", encryptedPassword, id)
+func (r *sqliteRepo) UpdateInstancePassword(ctx context.Context, id int64, password string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE database_instances SET admin_password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", password, id)
 	return err
 }
 

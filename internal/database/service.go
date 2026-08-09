@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/deploy"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 )
@@ -44,41 +43,28 @@ var validPrivileges = map[string]bool{
 // Service manages the whole database domain: container-backed instances
 // (lifecycle) and the logical databases, users, backups and SQL inside them.
 type Service struct {
-	repo          Repository
-	runtime       DatabaseRuntime
-	encryptionKey []byte
-	backupDir     string
-}
-
-// normalizeKey derives the AES key from the configured string. Like the deploy
-// domain, it takes the first 32 bytes of the configured value — config examples
-// ship a 64-char hex string, and 32 bytes is exactly what AES-256 needs.
-func normalizeKey(encryptionKey string) []byte {
-	if len(encryptionKey) >= 32 {
-		return []byte(encryptionKey[:32])
-	}
-	return []byte(encryptionKey)
+	repo      Repository
+	runtime   DatabaseRuntime
+	backupDir string
 }
 
 // NewService creates a database Service over the given Repository, driving
 // containers through the CLI Runtime seam.
-func NewService(repo Repository, exec executor.CommandExecutor, encryptionKey string) *Service {
+func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 	return &Service{
-		repo:          repo,
-		runtime:       NewCLIContainerRuntime(exec),
-		encryptionKey: normalizeKey(encryptionKey),
-		backupDir:     DefaultBackupDir,
+		repo:      repo,
+		runtime:   NewCLIContainerRuntime(exec),
+		backupDir: DefaultBackupDir,
 	}
 }
 
 // NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
 // CLI runtime construction.
-func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime, encryptionKey string) *Service {
+func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 	return &Service{
-		repo:          repo,
-		runtime:       runtime,
-		encryptionKey: normalizeKey(encryptionKey),
-		backupDir:     DefaultBackupDir,
+		repo:      repo,
+		runtime:   runtime,
+		backupDir: DefaultBackupDir,
 	}
 }
 
@@ -150,14 +136,10 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 	containerID := fmt.Sprintf("easyserver-db-%s-%s", sanitizeName(string(dbType)), sanitizeName(req.Version))
 	volumeName := containerID + "-data"
+	// Admin password is stored plainly: SQLite file and container environment
+	// share the host, so a static key encrypts nothing an attacker can't read
+	// next door — encryption would only add a missing-key failure mode.
 	password, err := generateAdminPassword()
-	if err != nil {
-		return nil, err
-	}
-	if len(s.encryptionKey) != 32 {
-		return nil, fmt.Errorf("database encryption key must be configured")
-	}
-	encryptedPassword, err := deploy.Encrypt(password, s.encryptionKey)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +164,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 	v := &DBInstance{DBType: dbType, Version: req.Version, Port: port, Status: "running", ContainerEngine: engineName, Image: req.Image,
 		ContainerID: containerID, VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress,
-		AdminPassword: encryptedPassword}
+		AdminPassword: password}
 	id, err := s.repo.CreateInstance(ctx, v)
 	if err != nil {
 		_ = s.runtime.Remove(ctx, engineName, containerID)
@@ -304,13 +286,10 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 	if err != nil || v == nil {
 		return "", fmt.Errorf("instance not found")
 	}
-	if v.ContainerEngine == "" || v.ContainerID == "" || len(s.encryptionKey) != 32 {
-		return "", fmt.Errorf("database instance encryption is not configured")
+	if v.ContainerEngine == "" || v.ContainerID == "" {
+		return "", fmt.Errorf("database instance is not container-managed")
 	}
-	oldPassword, err := s.decryptAdminPassword(v)
-	if err != nil {
-		return "", err
-	}
+	oldPassword := v.AdminPassword
 	password, err := generateAdminPassword()
 	if err != nil {
 		return "", err
@@ -331,26 +310,15 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 	default:
 		return "", fmt.Errorf("password reset is not supported for this database type")
 	}
-	encrypted, err := deploy.Encrypt(password, s.encryptionKey)
-	if err != nil {
-		return "", err
-	}
-	if err := s.repo.UpdateInstancePassword(ctx, instanceID, encrypted); err != nil {
+	if err := s.repo.UpdateInstancePassword(ctx, instanceID, password); err != nil {
 		return "", err
 	}
 	return password, nil
 }
 
-func (s *Service) decryptAdminPassword(v *DBInstance) (string, error) {
-	if len(s.encryptionKey) != 32 {
-		return "", fmt.Errorf("database instance encryption is not configured")
-	}
-	password, err := deploy.Decrypt(v.AdminPassword, s.encryptionKey)
-	if err != nil {
-		return "", fmt.Errorf("decrypt administrator password: %w", err)
-	}
-	return password, nil
-}
+// ResetAdminPassword rotates the administrator password and returns it once.
+// The password is stored plainly — see the admin-password comment in
+// CreateInstance (same-host SQLite and container env, encryption adds nothing).
 
 func (s *Service) StartInstance(ctx context.Context, instanceID int64) error {
 	if ctx == nil {
@@ -416,14 +384,10 @@ func (s *Service) UpdateInstancePort(ctx context.Context, instanceID int64, newP
 	if newPort < 1 || newPort > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
-	password, err := s.decryptAdminPassword(v)
-	if err != nil {
-		return err
-	}
+	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerID, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerID); err != nil {
 		return fmt.Errorf("remove old database container: %w", err)
 	}
-	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerID, v.VolumeName, v.BindAddress, newPort, password)
 	if err := s.runtime.Create(ctx, spec); err != nil {
 		return fmt.Errorf("recreate database container: %w", err)
 	}
@@ -1183,13 +1147,10 @@ func (s *Service) runInVersion(ctx context.Context, instance *DBInstance, args .
 }
 
 func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []string {
-	if len(args) == 0 || len(s.encryptionKey) != 32 {
+	if len(args) == 0 || instance.AdminPassword == "" {
 		return args
 	}
-	password, err := deploy.Decrypt(instance.AdminPassword, s.encryptionKey)
-	if err != nil || password == "" {
-		return args
-	}
+	password := instance.AdminPassword
 	switch instance.DBType {
 	case DBTypeMySQL:
 		return append([]string{args[0], "-uroot", "-p" + password}, args[1:]...)

@@ -18,7 +18,7 @@ type Repository interface {
 	// Instance status updates
 	UpdateInstanceStatus(ctx context.Context, id int64, status string) error
 	UpdateInstancePort(ctx context.Context, id int64, port int) error
-	UpdateInstancePassword(ctx context.Context, id int64, encryptedPassword string) error
+	UpdateInstancePassword(ctx context.Context, id int64, password string) error
 
 	// Backup operations (scoped by instance + database name)
 	CreateBackup(ctx context.Context, backup *DBBackup) (int64, error)
