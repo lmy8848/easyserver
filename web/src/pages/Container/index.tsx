@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs, Select, Tag, Button, Spin, Space, message, Result } from 'antd';
+import { Tabs, Select, Tag, Button, Space, message, Result } from 'antd';
 import {
   CodeOutlined, CloudDownloadOutlined,
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
@@ -92,37 +92,31 @@ export default function Container() {
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>容器管理</h2>
         <div style={{ flex: 1 }} />
-        {checking ? (
-          <Spin size="small" />
-        ) : (
-          <>
-            <Select
-              value={engine}
-              onChange={setEngine}
-              style={{ width: 140 }}
-              options={ENGINES.map(r => ({ value: r, label: r === 'podman' ? 'Podman' : 'Docker' }))}
-            />
-            {status && (
-              <Tag color={ready ? 'green' : 'red'} style={{ marginLeft: 8 }}>
-                {!status.installed ? '未安装' : (ready ? '运行中' : '已停止')}
-              </Tag>
-            )}
-            <Space style={{ marginLeft: 8 }}>
-              {!status?.installed ? (
-                <Button icon={<RocketOutlined />} loading={installing} onClick={handleInstall}>安装 {engine}</Button>
-              ) : engine === 'docker' && !status.running ? (
-                <Button icon={<PlayCircleOutlined />} onClick={handleStart}>启动</Button>
-              ) : null}
-              {status?.installed && engine === 'podman' && (
-                <>
-                  <Button size="small" onClick={() => handleSocket('enable')}>启用Socket</Button>
-                  <Button size="small" onClick={() => handleSocket('disable')}>禁用Socket</Button>
-                </>
-              )}
-              <Button icon={<ReloadOutlined />} onClick={checkRuntimes}>刷新</Button>
-            </Space>
-          </>
+        <Select
+          value={engine}
+          onChange={setEngine}
+          style={{ width: 140 }}
+          options={ENGINES.map(r => ({ value: r, label: r === 'podman' ? 'Podman' : 'Docker' }))}
+        />
+        {status && (
+          <Tag color={ready ? 'green' : 'red'} style={{ marginLeft: 8 }}>
+            {!status.installed ? '未安装' : (ready ? '运行中' : '已停止')}
+          </Tag>
         )}
+        <Space style={{ marginLeft: 8 }}>
+          {!status?.installed ? (
+            <Button icon={<RocketOutlined />} loading={installing} onClick={handleInstall}>安装 {engine}</Button>
+          ) : engine === 'docker' && !status.running ? (
+            <Button icon={<PlayCircleOutlined />} onClick={handleStart}>启动</Button>
+          ) : null}
+          {status?.installed && engine === 'podman' && (
+            <>
+              <Button size="small" onClick={() => handleSocket('enable')}>启用Socket</Button>
+              <Button size="small" onClick={() => handleSocket('disable')}>禁用Socket</Button>
+            </>
+          )}
+          <Button icon={<ReloadOutlined />} loading={checking} onClick={checkRuntimes}>刷新</Button>
+        </Space>
       </div>
 
       {ready ? (
