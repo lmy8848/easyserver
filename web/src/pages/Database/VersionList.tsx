@@ -110,13 +110,13 @@ export default function VersionList({
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
-        <Space>
+        <Space align="center">
           {(() => {
             const brand = ENGINE_BRAND[server.db_type];
             const Icon = brand?.Icon;
             return Icon
-              ? <Icon size={26} color={brand.color} />
-              : <DatabaseOutlined style={{ fontSize: 24, color: '#1677ff' }} />;
+              ? <Icon size={34} color={brand.color} style={{ display: 'flex' }} />
+              : <DatabaseOutlined style={{ fontSize: 30, color: '#1677ff' }} />;
           })()}
           <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
         </Space>
