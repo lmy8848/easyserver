@@ -29,42 +29,15 @@ type DBInstance struct {
 	AdminPassword string `json:"-"`
 }
 
-// CreateDBInstanceRequest is the request for installing a new database instance
+// CreateDBInstanceRequest is the request for installing a new database instance.
+// Image is supplied by the client — the version/image catalogue lives in the
+// front-end, not the backend.
 type CreateDBInstanceRequest struct {
 	Version     string `json:"version" binding:"required"`
-	Port        int    `json:"port"`
+	Image       string `json:"image" binding:"required"`
+	Port        int    `json:"port" binding:"required"`
 	Runtime     string `json:"runtime"`
 	BindAddress string `json:"bind_address"`
-}
-
-// VersionTemplate describes a package template for a database version
-type VersionTemplate struct {
-	Version     string `json:"version"`
-	Package     string `json:"package"`
-	Image       string `json:"image"`
-	Description string `json:"description"`
-}
-
-// GetVersionTemplates returns available version templates for a database engine.
-func GetVersionTemplates(dbType DBType) []VersionTemplate {
-	switch dbType {
-	case DBTypeMySQL:
-		return []VersionTemplate{
-			{Version: "8.0", Image: "mysql:8.0", Description: "MySQL 8.0"},
-			{Version: "8.4", Image: "mysql:8.4", Description: "MySQL 8.4 LTS"},
-		}
-	case DBTypePostgreSQL:
-		return []VersionTemplate{
-			{Version: "15", Image: "postgres:15", Description: "PostgreSQL 15"},
-			{Version: "16", Image: "postgres:16", Description: "PostgreSQL 16"},
-		}
-	case DBTypeRedis:
-		return []VersionTemplate{
-			{Version: "7", Image: "redis:7-alpine", Description: "Redis 7"},
-			{Version: "6", Image: "redis:6-alpine", Description: "Redis 6"},
-		}
-	}
-	return nil
 }
 
 // IsValidDBType reports whether t is one of the supported engine enums.

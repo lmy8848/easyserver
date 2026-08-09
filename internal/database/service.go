@@ -115,15 +115,10 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, fmt.Errorf("version %s is already installed for %s", req.Version, dbType)
 	}
 
-	image := ""
-	for _, t := range GetVersionTemplates(dbType) {
-		if t.Version == req.Version {
-			image = t.Image
-			break
-		}
-	}
-	if image == "" {
-		return nil, fmt.Errorf("unsupported database image version %s", req.Version)
+	// The client sends the image + version (the front-end owns the version/image
+	// catalogue); the image is required — without it there is nothing to pull.
+	if strings.TrimSpace(req.Image) == "" {
+		return nil, fmt.Errorf("image is required")
 	}
 	runtimeName := strings.ToLower(strings.TrimSpace(req.Runtime))
 	if runtimeName == "" {
@@ -156,7 +151,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, err
 	}
 
-	spec := containerSpec(dbType, runtimeName, req.Version, image, containerID, volumeName, bindAddress, port, password)
+	spec := containerSpec(dbType, runtimeName, req.Version, req.Image, containerID, volumeName, bindAddress, port, password)
 	if err := s.runtime.Create(ctx, spec); err != nil {
 		return nil, err
 	}
@@ -174,7 +169,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		_ = s.runtime.Remove(ctx, runtimeName, containerID)
 		return nil, err
 	}
-	v := &DBInstance{DBType: dbType, Version: req.Version, Port: port, Status: "running", Runtime: runtimeName, Image: image,
+	v := &DBInstance{DBType: dbType, Version: req.Version, Port: port, Status: "running", Runtime: runtimeName, Image: req.Image,
 		ContainerID: containerID, VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress,
 		AdminPassword: encryptedPassword}
 	id, err := s.repo.CreateInstance(ctx, v)

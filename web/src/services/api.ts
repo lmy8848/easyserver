@@ -537,7 +537,7 @@ export const dbServerApi = {
   listInstances: (dbtype: string) =>
     api.get<ApiResponse<DBInstance[]>>(`/db/${dbtype}/instances`),
 
-  createInstance: (dbtype: string, data: { version: string; port?: number; runtime?: string; bind_address?: string }) =>
+  createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; runtime?: string; bind_address?: string }) =>
     api.post<ApiResponse>(`/db/${dbtype}/instances`, data),
 
   uninstallInstance: (iid: number) =>
