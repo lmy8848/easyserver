@@ -18,7 +18,8 @@ import NetworkTab from './NetworkTab';
 const ENGINES = ['docker', 'podman'];
 
 const engineName = (e: string) => (e === 'podman' ? 'Podman' : 'Docker');
-const engineLogo = (e: string) => (e === 'podman' ? <SiPodman size={16} /> : <SiDocker size={16} />);
+const engineColor = (e: string) => (e === 'podman' ? '#892CA0' : '#2496ED');
+const engineLogo = (e: string) => (e === 'podman' ? <SiPodman size={16} color="#892CA0" /> : <SiDocker size={16} color="#2496ED" />);
 const engineOptionLabel = (e: string) => (
   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{engineLogo(e)}{engineName(e)}</span>
 );
@@ -97,7 +98,7 @@ export default function Container() {
     <div>
       {/* 标题 + 右侧引擎切换/状态/操作 */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8, color: engineColor(engine) }}>
           {engine === 'podman' ? <SiPodman size={26} /> : <SiDocker size={26} />}
         </span>
         <h2 style={{ margin: 0 }}>容器管理</h2>
