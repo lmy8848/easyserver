@@ -24,6 +24,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const [logs, setLogs] = useState('');
   const [stats, setStats] = useState<ContainerStats | null>(null);
   const [actionLoading, setActionLoading] = useState<string>('');
+  const [execLoading, setExecLoading] = useState(false);
   const [createForm] = Form.useForm();
   const [execForm] = Form.useForm();
   const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
@@ -92,6 +93,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const handleExec = async () => {
     try {
       const values = await execForm.validateFields();
+      setExecLoading(true);
       const res = await api.post(withEngine(`/container/instances/${selectedContainer}/exec`, engine), values);
       Modal.info({
         title: '执行结果',
@@ -102,6 +104,8 @@ export default function ContainerTab({ engine }: { engine: string }) {
       execForm.resetFields();
     } catch {
       message.error('执行失败');
+    } finally {
+      setExecLoading(false);
     }
   };
 
@@ -269,7 +273,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
       </Modal>
 
       {/* Exec Modal */}
-      <Modal title="在容器中执行命令" open={execVisible} onOk={handleExec} onCancel={() => setExecVisible(false)} destroyOnHidden>
+      <Modal title="在容器中执行命令" open={execVisible} onOk={handleExec} onCancel={() => setExecVisible(false)} destroyOnHidden confirmLoading={execLoading}>
         <Form form={execForm} layout="vertical">
           <Form.Item name="command" label="命令" rules={[{ required: true }]}><Input placeholder="ls -la" /></Form.Item>
         </Form>

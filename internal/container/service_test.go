@@ -93,6 +93,22 @@ func TestParseJSONRowsPodman(t *testing.T) {
 	}
 }
 
+func TestHumanSize(t *testing.T) {
+	cases := []struct{ in int64; want string }{
+		{0, "0B"},
+		{512, "512B"},
+		{164982104, "165MB"},
+		{1536, "1.5KB"},
+		{1 << 20, "1MB"},
+		{5 * 1 << 30, "5.4GB"},
+	}
+	for _, tc := range cases {
+		if got := humanSize(tc.in); got != tc.want {
+			t.Errorf("humanSize(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestExpandImageRef(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"nginx:latest", "docker.io/library/nginx:latest"},

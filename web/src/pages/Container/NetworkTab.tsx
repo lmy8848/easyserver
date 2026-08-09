@@ -14,6 +14,8 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
   const [createForm] = Form.useForm();
+  const [createLoading, setCreateLoading] = useState(false);
+  const [removing, setRemoving] = useState<string>('');
 
   const loadNetworks = async () => {
     try {
@@ -31,6 +33,7 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
+      setCreateLoading(true);
       await api.post(withEngine('/container/networks', engine), values);
       message.success('网络创建成功');
       setCreateVisible(false);
@@ -39,10 +42,13 @@ export default function NetworkTab({ engine }: { engine: string }) {
       loadNetworks();
     } catch {
       message.error('创建失败');
+    } finally {
+      setCreateLoading(false);
     }
   };
 
   const handleRemove = async (id: string) => {
+    setRemoving(id);
     try {
       await api.delete(withEngine(`/container/networks/${id}`, engine));
       message.success('网络已删除');
@@ -50,6 +56,8 @@ export default function NetworkTab({ engine }: { engine: string }) {
       loadNetworks();
     } catch {
       message.error('删除失败');
+    } finally {
+      setRemoving('');
     }
   };
 
@@ -68,7 +76,7 @@ export default function NetworkTab({ engine }: { engine: string }) {
           <Tag>系统网络</Tag>
         ) : (
           <Popconfirm title="确定删除此网络？" onConfirm={() => handleRemove(record.id)} okText="删除" cancelText="取消">
-            <Button icon={<DeleteOutlined />} size="small" danger>删除</Button>
+            <Button icon={<DeleteOutlined />} size="small" danger loading={removing === record.id} disabled={!!removing}>删除</Button>
           </Popconfirm>
         );
       },
@@ -88,7 +96,7 @@ export default function NetworkTab({ engine }: { engine: string }) {
         <Table columns={columns} dataSource={networks} rowKey="id" loading={loading} locale={{ emptyText: '暂无网络' }} />
       </Card>
 
-      <Modal title="创建网络" open={createVisible} onOk={handleCreate} onCancel={() => setCreateVisible(false)}>
+      <Modal title="创建网络" open={createVisible} onOk={handleCreate} onCancel={() => setCreateVisible(false)} confirmLoading={createLoading}>
         <Form form={createForm} layout="vertical">
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input placeholder="my-network" /></Form.Item>
           <Form.Item name="driver" label="驱动" initialValue="bridge">

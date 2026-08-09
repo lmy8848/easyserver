@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Tabs, Select, Badge, Button, Switch, Space, message, Result } from 'antd';
 import {
   CodeOutlined, CloudDownloadOutlined,
@@ -29,11 +29,23 @@ const engineOptionLabel = (e: string) => (
   </span>
 );
 
+// Health score for engine auto-selection: running > installed-not-running >
+// not-installed > unknown. Podman counts as running once installed.
+function engineScore(e: string, s: DockerStatus | null): number {
+  if (!s) return 0;
+  if (s.installed && (e === 'podman' || s.running)) return 3;
+  if (s.installed) return 2;
+  return 1;
+}
+
 export default function Container() {
   const [engine, setEngine] = useState('docker');
   const [statuses, setStatuses] = useState<Record<string, DockerStatus | null>>({ docker: null, podman: null });
   const [checking, setChecking] = useState(true);
   const [installing, setInstalling] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [socketLoading, setSocketLoading] = useState(false);
+  const pickedRef = useRef(false); // auto-select the healthiest engine only on first load
 
   // Detect both engines on mount.
   const checkRuntimes = useCallback(async () => {
@@ -49,6 +61,16 @@ export default function Container() {
     }));
     setStatuses(next);
     setChecking(false);
+    if (!pickedRef.current) {
+      pickedRef.current = true;
+      let best: string = ENGINES[0]!;
+      let bestScore = -1;
+      for (const r of ENGINES) {
+        const sc = engineScore(r, next[r] ?? null);
+        if (sc > bestScore) { bestScore = sc; best = r; }
+      }
+      setEngine(best);
+    }
   }, []);
 
   useEffect(() => { checkRuntimes(); }, [checkRuntimes]);
@@ -72,22 +94,28 @@ export default function Container() {
   };
 
   const handleStart = async () => {
+    setStarting(true);
     try {
       await api.post(withEngine('/container/start', engine));
       message.success(`${engine} 已启动`);
     } catch {
       message.error(`启动 ${engine} 失败`);
     } finally {
+      setStarting(false);
       await checkRuntimes();
     }
   };
 
   const handleSocket = async (action: 'enable' | 'disable') => {
+    setSocketLoading(true);
     try {
       await api.post(withEngine(`/container/socket/${action}`, engine));
       message.success(`Socket 已${action === 'enable' ? '启用' : '禁用'}`);
     } catch {
       message.error('Socket 操作失败');
+    } finally {
+      setSocketLoading(false);
+      await checkRuntimes();
     }
   };
 
@@ -130,13 +158,14 @@ export default function Container() {
           {!status?.installed ? (
             <Button icon={<RocketOutlined />} loading={installing} onClick={handleInstall}>安装 {engine}</Button>
           ) : engine === 'docker' && !status.running ? (
-            <Button icon={<PlayCircleOutlined />} onClick={handleStart}>启动</Button>
+            <Button icon={<PlayCircleOutlined />} loading={starting} onClick={handleStart}>启动</Button>
           ) : null}
           {status?.installed && engine === 'podman' && (
             <Switch
               checked={!!status.socket_enabled}
               checkedChildren="Socket"
               unCheckedChildren="Socket"
+              loading={socketLoading}
               onChange={(checked) => handleSocket(checked ? 'enable' : 'disable')}
             />
           )}

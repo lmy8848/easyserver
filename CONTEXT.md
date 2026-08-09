@@ -20,7 +20,8 @@
 
 - **DB Engine** — 数据库引擎类型（MySQL、PostgreSQL、Redis）。每个引擎有默认端口和预定义版本模板。
   - ⚠ 代码中名为 `model.DBServer`（`model/db_server.go`），但它不是"运行中的数据库实例"——它是引擎目录。文档用 "DB Engine"，代码保留 `DBServer` 不动。
-- **DB Version** — 某 DB Engine 的受管数据库容器实例（例如 MySQL 8.0 运行在端口 3306）。一个引擎可以同时有多个实例；宿主机安装的数据库不属于 EasyServer 的管理范围。
+- **Database Instance** — 某 DB Engine 的受管数据库容器实例（例如 MySQL 8.0 运行在端口 3306）。它独占容器、数据卷和配置；一个引擎可以同时有多个实例，宿主机安装的数据库不属于 EasyServer 的管理范围。
+  _Avoid_: DB Version
 - **Database** — 某个 DB Version 下的实际数据库（例如 `myapp`）。
 - **DB User** — 数据库用户，跨版本共享（同一引擎下所有版本共用用户列表）。
 - **DB Backup** — 数据库备份记录，关联到特定 Database。

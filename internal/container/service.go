@@ -189,7 +189,7 @@ func (p podmanPSRow) toContainer() Container {
 		Labels:    fmt.Sprint(p.Labels),
 		Mounts:    strings.Join(p.Mounts, ","),
 		Networks:  strings.Join(p.Networks, ","),
-		Size:      fmt.Sprint(p.Size),
+		Size:      humanSize(p.Size),
 	}
 }
 
@@ -208,7 +208,7 @@ func (p podmanImageRow) toImage() Image {
 		ID:         p.ID,
 		Repository: p.Repository,
 		Tag:        p.Tag,
-		Size:       fmt.Sprint(p.Size),
+		Size:       humanSize(p.Size),
 		CreatedAt:  p.CreatedAt,
 		Labels:     p.Labels,
 	}
@@ -840,6 +840,26 @@ func expandImageRef(image string) string {
 	return "docker.io/library/" + image
 }
 
+// humanSize renders a raw byte count as a readable string (e.g. 164982104 →
+// "165MB"). Podman's image/container JSON reports Size as int64 bytes; Docker
+// already emits a readable string, so only podman paths go through here.
+func humanSize(b int64) string {
+	if b < 0 {
+		return "0B"
+	}
+	const unit = 1000
+	if b < unit {
+		return fmt.Sprintf("%dB", b)
+	}
+	div, exp := int64(unit), uint(0)
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	s := fmt.Sprintf("%.1f", float64(b)/float64(div))
+	return strings.TrimSuffix(s, ".0") + string("KMGTPE"[exp]) + "B"
+}
+
 func (s *Service) detectOS(ctx context.Context) string {
 	stdout, _, err := s.executor.RunCombined(ctx, "cat", "/etc/os-release")
 	if err != nil {
@@ -1336,10 +1356,13 @@ func (s *Service) ListVolumes(ctx context.Context, engine Engine) ([]Volume, err
 }
 
 // CreateVolume creates a new volume.
-func (s *Service) CreateVolume(ctx context.Context, engine Engine, name, driver string) error {
+func (s *Service) CreateVolume(ctx context.Context, engine Engine, name, driver string, labels map[string]string) error {
 	args := []string{"volume", "create"}
 	if driver != "" {
 		args = append(args, "--driver", driver)
+	}
+	for k, v := range labels {
+		args = append(args, "--label", k+"="+v)
 	}
 	args = append(args, name)
 

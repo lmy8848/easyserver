@@ -558,8 +558,9 @@ func (h *ContainerHandler) ListVolumes(c *gin.Context) {
 // CreateVolume creates a new volume
 func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 	var req struct {
-		Name   string `json:"name" binding:"required"`
-		Driver string `json:"driver"`
+		Name   string            `json:"name" binding:"required"`
+		Driver string            `json:"driver"`
+		Labels map[string]string `json:"labels"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
@@ -567,7 +568,7 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "创建数据卷 "+req.Name)
-	if err := h.containerService.CreateVolume(c.Request.Context(), h.engineName(c), req.Name, req.Driver); err != nil {
+	if err := h.containerService.CreateVolume(c.Request.Context(), h.engineName(c), req.Name, req.Driver, req.Labels); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}

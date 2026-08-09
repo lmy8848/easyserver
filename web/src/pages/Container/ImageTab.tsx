@@ -16,6 +16,7 @@ export default function ImageTab({ engine }: { engine: string }) {
   const [pullVisible, setPullVisible] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [pullForm] = Form.useForm();
+  const [removing, setRemoving] = useState<string>('');
   const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
   const loadImages = async () => {
@@ -54,6 +55,7 @@ export default function ImageTab({ engine }: { engine: string }) {
   };
 
   const handleRemove = async (id: string) => {
+    setRemoving(id);
     try {
       await api.delete(withEngine(`/container/images/${id}?force=true`, engine));
       message.success('镜像已删除');
@@ -61,6 +63,8 @@ export default function ImageTab({ engine }: { engine: string }) {
       loadImages();
     } catch {
       message.error('删除失败');
+    } finally {
+      setRemoving('');
     }
   };
 
@@ -74,7 +78,7 @@ export default function ImageTab({ engine }: { engine: string }) {
       key: 'action',
       render: (_: unknown, record: Image) => (
         <Popconfirm title="确定删除此镜像？" onConfirm={() => handleRemove(record.id)} okText="删除" cancelText="取消">
-          <Button icon={<DeleteOutlined />} size="small" danger>删除</Button>
+          <Button icon={<DeleteOutlined />} size="small" danger loading={removing === record.id} disabled={!!removing}>删除</Button>
         </Popconfirm>
       ),
     },

@@ -21,3 +21,19 @@ export function formatUptime(seconds: number): string {
   if (hours > 0) return `${hours}小时${minutes}分钟`;
   return `${minutes}分钟`;
 }
+
+/**
+ * Format a created-time string to `YYYY-MM-DD HH:mm`. Handles both Docker's
+ * `2006-01-02 15:04:05 +0800 CST` and Podman's RFC3339. Falls back to the raw
+ * value when unparseable.
+ */
+export function formatCreatedAt(value: string): string {
+  if (!value) return '-';
+  let d = new Date(value);
+  if (isNaN(d.getTime()) && / [A-Z]{3,4}$/.test(value)) {
+    d = new Date(value.replace(/ [A-Z]{3,4}$/, ''));
+  }
+  if (isNaN(d.getTime())) return value;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
