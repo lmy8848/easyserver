@@ -5,7 +5,7 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { DockerStatus } from './types';
-import { withRuntime } from './types';
+import { withEngine } from './types';
 
 // 安装步骤
 const INSTALL_STEPS = [
@@ -15,7 +15,7 @@ const INSTALL_STEPS = [
   { key: 'verify', label: '验证安装结果' },
 ];
 
-export default function DockerInstallWizard({ runtime, onInstalled }: { runtime: string; onInstalled: () => void }) {
+export default function DockerInstallWizard({ engine, onInstalled }: { engine: string; onInstalled: () => void }) {
   const [installing, setInstalling] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -23,21 +23,21 @@ export default function DockerInstallWizard({ runtime, onInstalled }: { runtime:
 
   const checkStatus = async () => {
     try {
-      const res = await api.get(withRuntime('/runtime/status', runtime));
+      const res = await api.get(withEngine('/container/status', engine));
       setStatus(res.data?.data);
     } catch {
       // ignore
     }
   };
 
-  useEffect(() => { checkStatus(); }, [runtime]);
+  useEffect(() => { checkStatus(); }, [engine]);
 
   // 轮询验证安装结果
   const verifyInstall = async (): Promise<boolean> => {
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 2000));
       try {
-        const res = await api.get(withRuntime('/runtime/status', runtime));
+        const res = await api.get(withEngine('/container/status', engine));
         const s = res.data?.data;
         if (s?.installed && s?.running) {
           setStatus(s);
@@ -61,7 +61,7 @@ export default function DockerInstallWizard({ runtime, onInstalled }: { runtime:
       setCurrentStep(1);
 
       // Step 2: 安装（调用后端 API，等待完成）
-      await api.post(withRuntime('/runtime/install', runtime));
+      await api.post(withEngine('/container/install', engine));
       setCurrentStep(2);
 
       // Step 3: 启用服务（短暂延迟给用户视觉反馈）
@@ -71,7 +71,7 @@ export default function DockerInstallWizard({ runtime, onInstalled }: { runtime:
       // Step 4: 验证安装
       const verified = await verifyInstall();
       if (verified) {
-        message.success(`${runtime} 安装成功！`);
+        message.success(`${engine} 安装成功！`);
         onInstalled();
       } else {
         setError('安装完成但验证失败，请手动检查状态');
@@ -87,19 +87,19 @@ export default function DockerInstallWizard({ runtime, onInstalled }: { runtime:
 
   const handleStart = async () => {
     try {
-      await api.post(withRuntime('/runtime/start', runtime));
-      message.success(`${runtime} 已启动`);
+      await api.post(withEngine('/container/start', engine));
+      message.success(`${engine} 已启动`);
       await checkStatus();
       onInstalled();
     } catch {
-      message.error(`启动 ${runtime} 失败`);
+      message.error(`启动 ${engine} 失败`);
     }
   };
 
   return (
     <div style={{ textAlign: 'center', padding: '60px 0' }}>
       <DockerOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 24 }} />
-      <h2>{runtime} 环境配置</h2>
+      <h2>{engine} 环境配置</h2>
 
       {status && (
         <Descriptions column={1} style={{ maxWidth: 400, margin: '24px auto', textAlign: 'left' }}>
@@ -154,11 +154,11 @@ export default function DockerInstallWizard({ runtime, onInstalled }: { runtime:
       <Space>
         {!status?.installed ? (
           <Button type="primary" icon={<RocketOutlined />} size="large" loading={installing} onClick={handleInstall} disabled={installing}>
-            {installing ? '安装中...' : `安装 ${runtime}`}
+            {installing ? '安装中...' : `安装 ${engine}`}
           </Button>
         ) : !status.running ? (
           <Button type="primary" icon={<PlayCircleOutlined />} size="large" onClick={handleStart}>
-            启动 {runtime}
+            启动 {engine}
           </Button>
         ) : (
           <Button type="primary" icon={<ReloadOutlined />} size="large" onClick={onInstalled}>

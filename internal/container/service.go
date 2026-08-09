@@ -27,9 +27,9 @@ const (
 //	[ip:]hostPort->containerPort/protocol
 var portMappingRE = regexp.MustCompile(`^(?:(.*?):)?(\d+)->(\d+)/(.+)$`)
 
-// binaryFor maps a runtime name to the CLI binary that manages it.
-func binaryFor(runtime string) string {
-	if runtime == "podman" {
+// engineBinary maps a engine name to the CLI binary that manages it.
+func engineBinary(engine string) string {
+	if engine == "podman" {
 		return "podman"
 	}
 	return "docker"
@@ -214,7 +214,7 @@ func (p podmanImageRow) toImage() Image {
 	}
 }
 
-// parseJSONRows splits runtime CLI output into rows. Docker emits one JSON
+// parseJSONRows splits engine CLI output into rows. Docker emits one JSON
 // object per line (NDJSON); Podman emits a single JSON array. Both are
 // accepted, and each element is passed to `mapRow`.
 func parseJSONRows(output string, mapRow func([]byte) (any, bool)) ([]any, error) {
@@ -247,22 +247,22 @@ func parseJSONRows(output string, mapRow func([]byte) (any, bool)) ([]any, error
 	return out, nil
 }
 
-func isPodman(runtime string) bool { return binaryFor(runtime) == "podman" }
+func isPodmanEngine(engine string) bool { return engineBinary(engine) == "podman" }
 
 // --- Container operations ---
 
-// checkRuntime checks if the given runtime binary is installed and accessible.
-func (s *Service) checkRuntime(ctx context.Context, runtime string) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "version", "--format", "{{.Server.Version}}")
+// checkEngine checks if the given engine binary is installed and accessible.
+func (s *Service) checkEngine(ctx context.Context, engine string) error {
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "version", "--format", "{{.Server.Version}}")
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s is not installed or not accessible", runtime)
+		return fmt.Errorf("%s is not installed or not accessible", engine)
 	}
 	return nil
 }
 
-// ListContainers returns all containers for the given runtime.
-func (s *Service) ListContainers(ctx context.Context, runtime string, all bool) ([]Container, error) {
-	if err := s.checkRuntime(ctx, runtime); err != nil {
+// ListContainers returns all containers for the given engine.
+func (s *Service) ListContainers(ctx context.Context, engine string, all bool) ([]Container, error) {
+	if err := s.checkEngine(ctx, engine); err != nil {
 		return nil, err
 	}
 
@@ -271,13 +271,13 @@ func (s *Service) ListContainers(ctx context.Context, runtime string, all bool) 
 		args = append(args, "-a")
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s ps failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s ps failed: %s", engine, output)
 	}
 
 	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
-		if isPodman(runtime) {
+		if isPodmanEngine(engine) {
 			var d podmanPSRow
 			if err := json.Unmarshal(line, &d); err != nil {
 				log.Printf("container: parse podman container json error: %v, line: %s", err, line[:min(100, len(line))])
@@ -304,10 +304,10 @@ func (s *Service) ListContainers(ctx context.Context, runtime string, all bool) 
 }
 
 // GetContainer returns details of a specific container.
-func (s *Service) GetContainer(ctx context.Context, runtime, id string) (*Container, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "inspect", "--format", "{{json .}}", id)
+func (s *Service) GetContainer(ctx context.Context, engine, id string) (*Container, error) {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "inspect", "--format", "{{json .}}", id)
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s inspect failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s inspect failed: %s", engine, output)
 	}
 
 	trimmed := strings.TrimSpace(output)
@@ -329,69 +329,69 @@ func (s *Service) GetContainer(ctx context.Context, runtime, id string) (*Contai
 	return &c, nil
 }
 
-func (s *Service) containerAction(ctx context.Context, runtime, action, id string) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), action, id)
+func (s *Service) containerAction(ctx context.Context, engine, action, id string) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), action, id)
 	if err != nil || exitCode != 0 {
 		if output != "" {
-			return fmt.Errorf("%s %s failed: %s", runtime, action, output)
+			return fmt.Errorf("%s %s failed: %s", engine, action, output)
 		}
-		return fmt.Errorf("%s %s failed: %v", runtime, action, err)
+		return fmt.Errorf("%s %s failed: %v", engine, action, err)
 	}
 	return nil
 }
 
 // StartContainer starts a container.
-func (s *Service) StartContainer(ctx context.Context, runtime, id string) error {
-	return s.containerAction(ctx, runtime, "start", id)
+func (s *Service) StartContainer(ctx context.Context, engine, id string) error {
+	return s.containerAction(ctx, engine, "start", id)
 }
 
 // StopContainer stops a container.
-func (s *Service) StopContainer(ctx context.Context, runtime, id string) error {
-	return s.containerAction(ctx, runtime, "stop", id)
+func (s *Service) StopContainer(ctx context.Context, engine, id string) error {
+	return s.containerAction(ctx, engine, "stop", id)
 }
 
 // RestartContainer restarts a container.
-func (s *Service) RestartContainer(ctx context.Context, runtime, id string) error {
-	return s.containerAction(ctx, runtime, "restart", id)
+func (s *Service) RestartContainer(ctx context.Context, engine, id string) error {
+	return s.containerAction(ctx, engine, "restart", id)
 }
 
 // PauseContainer pauses a container.
-func (s *Service) PauseContainer(ctx context.Context, runtime, id string) error {
-	return s.containerAction(ctx, runtime, "pause", id)
+func (s *Service) PauseContainer(ctx context.Context, engine, id string) error {
+	return s.containerAction(ctx, engine, "pause", id)
 }
 
 // UnpauseContainer unpauses a container.
-func (s *Service) UnpauseContainer(ctx context.Context, runtime, id string) error {
-	return s.containerAction(ctx, runtime, "unpause", id)
+func (s *Service) UnpauseContainer(ctx context.Context, engine, id string) error {
+	return s.containerAction(ctx, engine, "unpause", id)
 }
 
 // RemoveContainer removes a container.
-func (s *Service) RemoveContainer(ctx context.Context, runtime, id string, force bool) error {
+func (s *Service) RemoveContainer(ctx context.Context, engine, id string, force bool) error {
 	args := []string{"rm"}
 	if force {
 		args = append(args, "-f")
 	}
 	args = append(args, id)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s rm failed: %v", runtime, err)
+		return fmt.Errorf("%s rm failed: %v", engine, err)
 	}
 	return nil
 }
 
 // GetContainerLogs returns container logs.
-func (s *Service) GetContainerLogs(ctx context.Context, runtime, id string, tail int) (string, error) {
+func (s *Service) GetContainerLogs(ctx context.Context, engine, id string, tail int) (string, error) {
 	args := []string{"logs", "--tail", fmt.Sprintf("%d", tail), id}
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return "", fmt.Errorf("%s logs failed: %s", runtime, output)
+		return "", fmt.Errorf("%s logs failed: %s", engine, output)
 	}
 	return output, nil
 }
 
 // ExecInContainer executes a command in a running container.
-func (s *Service) ExecInContainer(ctx context.Context, runtime, id, cmd string) (string, error) {
+func (s *Service) ExecInContainer(ctx context.Context, engine, id, cmd string) (string, error) {
 	if strings.ContainsRune(cmd, '\x00') {
 		return "", fmt.Errorf("command contains null byte")
 	}
@@ -403,15 +403,15 @@ func (s *Service) ExecInContainer(ctx context.Context, runtime, id, cmd string) 
 		return "", fmt.Errorf("command cannot be empty")
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "exec", id, "sh", "-c", cmd)
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "exec", id, "sh", "-c", cmd)
 	if err != nil || exitCode != 0 {
-		return output, fmt.Errorf("%s exec failed: %s", runtime, output)
+		return output, fmt.Errorf("%s exec failed: %s", engine, output)
 	}
 	return output, nil
 }
 
 // CreateContainer creates a new container.
-func (s *Service) CreateContainer(ctx context.Context, runtime string, req CreateRequest) (string, error) {
+func (s *Service) CreateContainer(ctx context.Context, engine string, req CreateRequest) (string, error) {
 	args := []string{"create"}
 
 	if req.Name != "" {
@@ -463,27 +463,27 @@ func (s *Service) CreateContainer(ctx context.Context, runtime string, req Creat
 		args = append(args, strings.Fields(req.Command)...)
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return "", fmt.Errorf("%s create failed: %s", runtime, output)
+		return "", fmt.Errorf("%s create failed: %s", engine, output)
 	}
 
 	return strings.TrimSpace(output), nil
 }
 
-// ListImages returns all images for the given runtime.
-func (s *Service) ListImages(ctx context.Context, runtime string) ([]Image, error) {
-	if err := s.checkRuntime(ctx, runtime); err != nil {
+// ListImages returns all images for the given engine.
+func (s *Service) ListImages(ctx context.Context, engine string) ([]Image, error) {
+	if err := s.checkEngine(ctx, engine); err != nil {
 		return nil, err
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "images", "--format", "json")
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "images", "--format", "json")
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s images failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s images failed: %s", engine, output)
 	}
 
 	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
-		if isPodman(runtime) {
+		if isPodmanEngine(engine) {
 			var d podmanImageRow
 			if err := json.Unmarshal(line, &d); err != nil {
 				log.Printf("container: parse podman image json error: %v, line: %s", err, line[:min(100, len(line))])
@@ -510,35 +510,35 @@ func (s *Service) ListImages(ctx context.Context, runtime string) ([]Image, erro
 }
 
 // PullImage pulls an image.
-func (s *Service) PullImage(ctx context.Context, runtime, image string) error {
-	_, _, exitCode, err := s.executor.RunWithTimeout(ctx, ImagePullTimeout, binaryFor(runtime), "pull", image)
+func (s *Service) PullImage(ctx context.Context, engine, image string) error {
+	_, _, exitCode, err := s.executor.RunWithTimeout(ctx, ImagePullTimeout, engineBinary(engine), "pull", image)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s pull failed: %v", runtime, err)
+		return fmt.Errorf("%s pull failed: %v", engine, err)
 	}
 	return nil
 }
 
 // RemoveImage removes an image.
-func (s *Service) RemoveImage(ctx context.Context, runtime, id string, force bool) error {
+func (s *Service) RemoveImage(ctx context.Context, engine, id string, force bool) error {
 	args := []string{"rmi"}
 	if force {
 		args = append(args, "-f")
 	}
 	args = append(args, id)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s rmi failed: %v", runtime, err)
+		return fmt.Errorf("%s rmi failed: %v", engine, err)
 	}
 	return nil
 }
 
 // GetContainerStats returns real-time resource usage stats for a container.
-func (s *Service) GetContainerStats(ctx context.Context, runtime, id string) (*Stats, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "stats", id, "--no-stream", "--format",
+func (s *Service) GetContainerStats(ctx context.Context, engine, id string) (*Stats, error) {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "stats", id, "--no-stream", "--format",
 		`{"cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}","mem_percent":"{{.MemPerc}}","net_rx":"{{.NetIO}}","block_read":"{{.BlockIO}}","pids":"{{.PIDs}}"}`)
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s stats failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s stats failed: %s", engine, output)
 	}
 
 	var raw struct {
@@ -635,10 +635,10 @@ func parseBytes(s string) int64 {
 }
 
 // GetContainerTop returns the list of processes running inside a container.
-func (s *Service) GetContainerTop(ctx context.Context, runtime, id string) ([]ProcessInfo, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm")
+func (s *Service) GetContainerTop(ctx context.Context, engine, id string) ([]ProcessInfo, error) {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm")
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s top failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s top failed: %s", engine, output)
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -672,25 +672,25 @@ func (s *Service) GetContainerTop(ctx context.Context, runtime, id string) ([]Pr
 }
 
 // CopyToContainer copies a file from host to container.
-func (s *Service) CopyToContainer(ctx context.Context, runtime, id, srcPath, destPath string) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "cp", srcPath, id+":"+destPath)
+func (s *Service) CopyToContainer(ctx context.Context, engine, id, srcPath, destPath string) error {
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s cp to container failed: %v", runtime, err)
+		return fmt.Errorf("%s cp to container failed: %v", engine, err)
 	}
 	return nil
 }
 
 // CopyFromContainer copies a file from container to host.
-func (s *Service) CopyFromContainer(ctx context.Context, runtime, id, srcPath, destPath string) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "cp", id+":"+srcPath, destPath)
+func (s *Service) CopyFromContainer(ctx context.Context, engine, id, srcPath, destPath string) error {
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s cp from container failed: %v", runtime, err)
+		return fmt.Errorf("%s cp from container failed: %v", engine, err)
 	}
 	return nil
 }
 
 // RenameContainer renames a container.
-func (s *Service) RenameContainer(ctx context.Context, runtime, id, newName string) error {
+func (s *Service) RenameContainer(ctx context.Context, engine, id, newName string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("container ID cannot be empty")
 	}
@@ -709,15 +709,15 @@ func (s *Service) RenameContainer(ctx context.Context, runtime, id, newName stri
 		return fmt.Errorf("container name cannot start with '%c'", newName[0])
 	}
 
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "rename", id, newName)
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "rename", id, newName)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s rename failed: %v", runtime, err)
+		return fmt.Errorf("%s rename failed: %v", engine, err)
 	}
 	return nil
 }
 
 // UpdateContainer updates container resource limits.
-func (s *Service) UpdateContainer(ctx context.Context, runtime, id string, req UpdateRequest) error {
+func (s *Service) UpdateContainer(ctx context.Context, engine, id string, req UpdateRequest) error {
 	args := []string{"update"}
 
 	if req.Memory > 0 {
@@ -732,20 +732,20 @@ func (s *Service) UpdateContainer(ctx context.Context, runtime, id string, req U
 
 	args = append(args, id)
 
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s update failed: %s", runtime, output)
+		return fmt.Errorf("%s update failed: %s", engine, output)
 	}
 	return nil
 }
 
 // --- System operations ---
 
-// Detect checks if the given runtime is installed, its version, compose
+// Detect checks if the given engine is installed, its version, compose
 // version, running status, and OS.
-func (s *Service) Detect(ctx context.Context, runtime string) (*DockerStatus, error) {
+func (s *Service) Detect(ctx context.Context, engine string) (*DockerStatus, error) {
 	status := &DockerStatus{}
-	bin := binaryFor(runtime)
+	bin := engineBinary(engine)
 
 	status.OS = s.detectOS(ctx)
 
@@ -759,20 +759,20 @@ func (s *Service) Detect(ctx context.Context, runtime string) (*DockerStatus, er
 
 	// Podman has no daemon; if the binary works it's usable. Docker's running
 	// state is probed via `info` (differently-shaped template fields).
-	if isPodman(runtime) {
+	if isPodmanEngine(engine) {
 		status.Running = true
 	} else {
 		_, exitCode, err = s.executor.RunCombined(ctx, bin, "info", "--format", "{{.ServerVersion}}")
 		status.Running = err == nil && exitCode == 0
 	}
 
-	status.ComposeVersion = s.detectComposeVersion(ctx, runtime)
+	status.ComposeVersion = s.detectComposeVersion(ctx, engine)
 
 	return status, nil
 }
 
-func (s *Service) detectComposeVersion(ctx context.Context, runtime string) string {
-	if isPodman(runtime) {
+func (s *Service) detectComposeVersion(ctx context.Context, engine string) string {
+	if isPodmanEngine(engine) {
 		composeOut, exitCode, err := s.executor.RunCombined(ctx, "podman-compose", "version")
 		if err == nil && exitCode == 0 {
 			return strings.TrimSpace(composeOut)
@@ -817,10 +817,10 @@ func (s *Service) detectOS(ctx context.Context) string {
 	}
 }
 
-// Install installs the given runtime. Docker uses the official convenience
+// Install installs the given engine. Docker uses the official convenience
 // script; Podman installs via the distro package manager (no official script).
-func (s *Service) Install(ctx context.Context, runtime string) error {
-	if isPodman(runtime) {
+func (s *Service) Install(ctx context.Context, engine string) error {
+	if isPodmanEngine(engine) {
 		return s.installPodman(ctx)
 	}
 	return s.installDocker(ctx)
@@ -893,61 +893,61 @@ func (s *Service) installPodman(ctx context.Context) error {
 	return nil
 }
 
-// serviceUnit returns the systemd unit backing the timeout runtime's service.
-func serviceUnit(runtime string) string {
-	if isPodman(runtime) {
+// serviceUnit returns the systemd unit backing the timeout engine's service.
+func serviceUnit(engine string) string {
+	if isPodmanEngine(engine) {
 		return "podman.socket"
 	}
 	return "docker"
 }
 
-// StartRuntime starts the runtime's systemd service.
-func (s *Service) StartRuntime(ctx context.Context, runtime string) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "start", serviceUnit(runtime))
+// StartEngine starts the engine's systemd service.
+func (s *Service) StartEngine(ctx context.Context, engine string) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "start", serviceUnit(engine))
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("failed to start %s: %s", runtime, output)
+		return fmt.Errorf("failed to start %s: %s", engine, output)
 	}
 	return nil
 }
 
-// StopRuntime stops the runtime's systemd service.
-func (s *Service) StopRuntime(ctx context.Context, runtime string) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "stop", serviceUnit(runtime))
+// StopEngine stops the engine's systemd service.
+func (s *Service) StopEngine(ctx context.Context, engine string) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "stop", serviceUnit(engine))
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("failed to stop %s: %s", runtime, output)
+		return fmt.Errorf("failed to stop %s: %s", engine, output)
 	}
 	return nil
 }
 
-// RestartRuntime restarts the runtime's systemd service.
-func (s *Service) RestartRuntime(ctx context.Context, runtime string) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "restart", serviceUnit(runtime))
+// RestartEngine restarts the engine's systemd service.
+func (s *Service) RestartEngine(ctx context.Context, engine string) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "restart", serviceUnit(engine))
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("failed to restart %s: %s", runtime, output)
+		return fmt.Errorf("failed to restart %s: %s", engine, output)
 	}
 	return nil
 }
 
-// GetInfo returns the runtime's system info as a map.
-func (s *Service) GetInfo(ctx context.Context, runtime string) (map[string]interface{}, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "info", "--format", "{{json .}}")
+// GetInfo returns the engine's system info as a map.
+func (s *Service) GetInfo(ctx context.Context, engine string) (map[string]interface{}, error) {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "info", "--format", "{{json .}}")
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s info failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s info failed: %s", engine, output)
 	}
 
 	var info map[string]interface{}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &info); err != nil {
-		return nil, fmt.Errorf("parse %s info: %w", runtime, err)
+		return nil, fmt.Errorf("parse %s info: %w", engine, err)
 	}
 
 	return info, nil
 }
 
-// ConfigureMirror configures the runtime's registry mirror. Docker writes
+// ConfigureMirror configures the engine's registry mirror. Docker writes
 // /etc/docker/daemon.json; Podman writes unqualified-search-registries to
 // /etc/containers/registries.conf.
-func (s *Service) ConfigureMirror(ctx context.Context, runtime, mirrorURL string) error {
-	if isPodman(runtime) {
+func (s *Service) ConfigureMirror(ctx context.Context, engine, mirrorURL string) error {
+	if isPodmanEngine(engine) {
 		return s.configurePodmanMirror(ctx, mirrorURL)
 	}
 	return s.configureDockerMirror(ctx, mirrorURL)
@@ -986,7 +986,7 @@ func (s *Service) configureDockerMirror(ctx context.Context, mirrorURL string) e
 		return fmt.Errorf("failed to write daemon.json: %v", err)
 	}
 
-	return s.RestartRuntime(ctx, "docker")
+	return s.RestartEngine(ctx, "docker")
 }
 
 // configurePodmanMirror writes an unqualified-search-registries entry to
@@ -1017,8 +1017,8 @@ func truncateOutput(output string, maxLen int) string {
 // --- Compose operations ---
 
 // composeCommand returns the executable and base args for a compose invocation.
-func (s *Service) composeCommand(runtime, composeFile string) (string, []string) {
-	if isPodman(runtime) {
+func (s *Service) composeCommand(engine, composeFile string) (string, []string) {
+	if isPodmanEngine(engine) {
 		args := []string{}
 		if composeFile != "" {
 			args = append(args, "-f", composeFile)
@@ -1032,10 +1032,10 @@ func (s *Service) composeCommand(runtime, composeFile string) (string, []string)
 	return "docker", args
 }
 
-// ListProjects lists all Compose projects for the given runtime.
+// ListProjects lists all Compose projects for the given engine.
 // ponytail: podman-compose has no `ls --format json`; unsupported there.
-func (s *Service) ListProjects(ctx context.Context, runtime string) ([]ComposeProject, error) {
-	if isPodman(runtime) {
+func (s *Service) ListProjects(ctx context.Context, engine string) ([]ComposeProject, error) {
+	if isPodmanEngine(engine) {
 		return []ComposeProject{}, nil
 	}
 
@@ -1103,9 +1103,9 @@ func (s *Service) getProjectServices(ctx context.Context, name, configFile strin
 }
 
 // ComposeUp runs compose up -d for a project.
-func (s *Service) ComposeUp(ctx context.Context, runtime, projectDir string) error {
+func (s *Service) ComposeUp(ctx context.Context, engine, projectDir string) error {
 	composeFile := s.findComposeFile(projectDir)
-	bin, args := s.composeCommand(runtime, composeFile)
+	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "up", "-d")
 
 	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
@@ -1116,9 +1116,9 @@ func (s *Service) ComposeUp(ctx context.Context, runtime, projectDir string) err
 }
 
 // ComposeDown runs compose down for a project.
-func (s *Service) ComposeDown(ctx context.Context, runtime, projectDir string) error {
+func (s *Service) ComposeDown(ctx context.Context, engine, projectDir string) error {
 	composeFile := s.findComposeFile(projectDir)
-	bin, args := s.composeCommand(runtime, composeFile)
+	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "down")
 
 	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
@@ -1129,9 +1129,9 @@ func (s *Service) ComposeDown(ctx context.Context, runtime, projectDir string) e
 }
 
 // ComposeRestart runs compose restart for a project.
-func (s *Service) ComposeRestart(ctx context.Context, runtime, projectDir string) error {
+func (s *Service) ComposeRestart(ctx context.Context, engine, projectDir string) error {
 	composeFile := s.findComposeFile(projectDir)
-	bin, args := s.composeCommand(runtime, composeFile)
+	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "restart")
 
 	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
@@ -1142,9 +1142,9 @@ func (s *Service) ComposeRestart(ctx context.Context, runtime, projectDir string
 }
 
 // ComposeGetLogs returns logs for a compose project.
-func (s *Service) ComposeGetLogs(ctx context.Context, runtime, projectDir string, tail int) (string, error) {
+func (s *Service) ComposeGetLogs(ctx context.Context, engine, projectDir string, tail int) (string, error) {
 	composeFile := s.findComposeFile(projectDir)
-	bin, args := s.composeCommand(runtime, composeFile)
+	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "logs", "--tail", fmt.Sprintf("%d", tail))
 
 	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
@@ -1200,11 +1200,11 @@ func (s *Service) findComposeFile(projectDir string) string {
 
 // --- Volume operations ---
 
-// ListVolumes returns all volumes for the given runtime.
-func (s *Service) ListVolumes(ctx context.Context, runtime string) ([]Volume, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "volume", "ls", "--format", "json")
+// ListVolumes returns all volumes for the given engine.
+func (s *Service) ListVolumes(ctx context.Context, engine string) ([]Volume, error) {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "volume", "ls", "--format", "json")
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s volume ls failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s volume ls failed: %s", engine, output)
 	}
 
 	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
@@ -1238,31 +1238,31 @@ func (s *Service) ListVolumes(ctx context.Context, runtime string) ([]Volume, er
 }
 
 // CreateVolume creates a new volume.
-func (s *Service) CreateVolume(ctx context.Context, runtime, name, driver string) error {
+func (s *Service) CreateVolume(ctx context.Context, engine, name, driver string) error {
 	args := []string{"volume", "create"}
 	if driver != "" {
 		args = append(args, "--driver", driver)
 	}
 	args = append(args, name)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s volume create failed: %v", runtime, err)
+		return fmt.Errorf("%s volume create failed: %v", engine, err)
 	}
 	return nil
 }
 
 // RemoveVolume removes a volume.
-func (s *Service) RemoveVolume(ctx context.Context, runtime, name string, force bool) error {
+func (s *Service) RemoveVolume(ctx context.Context, engine, name string, force bool) error {
 	args := []string{"volume", "rm"}
 	if force {
 		args = append(args, "-f")
 	}
 	args = append(args, name)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s volume rm failed: %v", runtime, err)
+		return fmt.Errorf("%s volume rm failed: %v", engine, err)
 	}
 	return nil
 }
@@ -1274,11 +1274,11 @@ type networkDetails struct {
 	Gateway string
 }
 
-// ListNetworks returns all networks for the given runtime.
-func (s *Service) ListNetworks(ctx context.Context, runtime string) ([]Network, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "network", "ls", "--format", "json")
+// ListNetworks returns all networks for the given engine.
+func (s *Service) ListNetworks(ctx context.Context, engine string) ([]Network, error) {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "network", "ls", "--format", "json")
 	if err != nil || exitCode != 0 {
-		return nil, fmt.Errorf("%s network ls failed: %s", runtime, output)
+		return nil, fmt.Errorf("%s network ls failed: %s", engine, output)
 	}
 
 	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
@@ -1307,7 +1307,7 @@ func (s *Service) ListNetworks(ctx context.Context, runtime string) ([]Network, 
 	networks := make([]Network, 0, len(rows))
 	for _, r := range rows {
 		net := r.(Network)
-		details := s.inspectNetwork(ctx, runtime, net.ID)
+		details := s.inspectNetwork(ctx, engine, net.ID)
 		if details != nil {
 			net.Subnet = details.Subnet
 			net.Gateway = details.Gateway
@@ -1318,8 +1318,8 @@ func (s *Service) ListNetworks(ctx context.Context, runtime string) ([]Network, 
 	return networks, nil
 }
 
-func (s *Service) inspectNetwork(ctx context.Context, runtime, id string) *networkDetails {
-	output, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "network", "inspect", "--format", "{{json .IPAM}}", id)
+func (s *Service) inspectNetwork(ctx context.Context, engine, id string) *networkDetails {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "network", "inspect", "--format", "{{json .IPAM}}", id)
 	if err != nil || exitCode != 0 {
 		return nil
 	}
@@ -1344,25 +1344,25 @@ func (s *Service) inspectNetwork(ctx context.Context, runtime, id string) *netwo
 }
 
 // CreateNetwork creates a new network.
-func (s *Service) CreateNetwork(ctx context.Context, runtime, name, driver string) error {
+func (s *Service) CreateNetwork(ctx context.Context, engine, name, driver string) error {
 	args := []string{"network", "create"}
 	if driver != "" {
 		args = append(args, "--driver", driver)
 	}
 	args = append(args, name)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), args...)
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s network create failed: %v", runtime, err)
+		return fmt.Errorf("%s network create failed: %v", engine, err)
 	}
 	return nil
 }
 
 // RemoveNetwork removes a network.
-func (s *Service) RemoveNetwork(ctx context.Context, runtime, id string) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, binaryFor(runtime), "network", "rm", id)
+func (s *Service) RemoveNetwork(ctx context.Context, engine, id string) error {
+	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "network", "rm", id)
 	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s network rm failed: %v", runtime, err)
+		return fmt.Errorf("%s network rm failed: %v", engine, err)
 	}
 	return nil
 }

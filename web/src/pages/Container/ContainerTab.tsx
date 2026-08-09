@@ -11,9 +11,9 @@ import {
 import api from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import type { Container, ContainerStats, ImageCategory } from './types';
-import { formatBytes, getStatusColor, withRuntime } from './types';
+import { formatBytes, getStatusColor, withEngine } from './types';
 
-export default function ContainerTab({ runtime }: { runtime: string }) {
+export default function ContainerTab({ engine }: { engine: string }) {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
@@ -30,7 +30,7 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
 
   const loadContainers = async () => {
     try {
-      const res = await api.get(withRuntime('/containers?all=true', runtime));
+      const res = await api.get(withEngine('/container/instances?all=true', engine));
       setContainers(res.data?.data?.containers || []);
     } catch {
       message.error('加载容器列表失败');
@@ -39,12 +39,12 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
     }
   };
 
-  useEffect(() => { loadContainers(); }, [runtime]);
+  useEffect(() => { loadContainers(); }, [engine]);
 
   const handleAction = async (action: string, id: string) => {
     setActionLoading(`${id}:${action}`);
     try {
-      await api.post(withRuntime(`/containers/${id}/${action}`, runtime));
+      await api.post(withEngine(`/container/instances/${id}/${action}`, engine));
       message.success('操作成功');
       await loadContainers();
     } catch {
@@ -57,7 +57,7 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
   const handleRemove = async (id: string, force: boolean) => {
     setActionLoading(`${id}:remove`);
     try {
-      await api.delete(withRuntime(`/containers/${id}?force=${force}`, runtime));
+      await api.delete(withEngine(`/container/instances/${id}?force=${force}`, engine));
       message.success('容器已删除');
       await loadContainers();
     } catch {
@@ -73,7 +73,7 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
     try {
       const values = await createForm.validateFields();
       setCreateLoading(true);
-      const res = await api.post(withRuntime('/containers', runtime), values, { timeout: 600000 }); // 10 min: docker pull may take time
+      const res = await api.post(withEngine('/container/instances', engine), values, { timeout: 600000 }); // 10 min: docker pull may take time
       const resultData = res.data?.data;
       const createdId = resultData?.id || resultData; // Backend might return { id: ... } or string
       message.success(createdId ? `容器创建成功 (ID: ${String(createdId).substring(0, 12)})` : '容器创建成功');
@@ -92,7 +92,7 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
   const handleExec = async () => {
     try {
       const values = await execForm.validateFields();
-      const res = await api.post(withRuntime(`/containers/${selectedContainer}/exec`, runtime), values);
+      const res = await api.post(withEngine(`/container/instances/${selectedContainer}/exec`, engine), values);
       Modal.info({
         title: '执行结果',
         content: <pre style={{ maxHeight: 400, overflow: 'auto' }}>{res.data?.data?.output}</pre>,
@@ -107,7 +107,7 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
 
   const handleLogs = async (id: string) => {
     try {
-      const res = await api.get(withRuntime(`/containers/${id}/logs?tail=200`, runtime));
+      const res = await api.get(withEngine(`/container/instances/${id}/logs?tail=200`, engine));
       setLogs(res.data?.data?.logs || '');
       setSelectedContainer(id);
       setLogsVisible(true);
@@ -118,7 +118,7 @@ export default function ContainerTab({ runtime }: { runtime: string }) {
 
   const handleStats = async (id: string) => {
     try {
-      const res = await api.get(withRuntime(`/containers/${id}/stats`, runtime));
+      const res = await api.get(withEngine(`/container/instances/${id}/stats`, engine));
       setStats(res.data?.data);
       setSelectedContainer(id);
       setStatsVisible(true);

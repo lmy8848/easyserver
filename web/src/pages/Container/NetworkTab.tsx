@@ -7,9 +7,9 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { Network } from './types';
-import { withRuntime } from './types';
+import { withEngine } from './types';
 
-export default function NetworkTab({ runtime }: { runtime: string }) {
+export default function NetworkTab({ engine }: { engine: string }) {
   const [networks, setNetworks] = useState<Network[]>([]);
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
@@ -17,7 +17,7 @@ export default function NetworkTab({ runtime }: { runtime: string }) {
 
   const loadNetworks = async () => {
     try {
-      const res = await api.get(withRuntime('/networks', runtime));
+      const res = await api.get(withEngine('/container/networks', engine));
       setNetworks(res.data?.data?.networks || []);
     } catch {
       message.error('加载网络列表失败');
@@ -26,12 +26,12 @@ export default function NetworkTab({ runtime }: { runtime: string }) {
     }
   };
 
-  useEffect(() => { loadNetworks(); }, [runtime]);
+  useEffect(() => { loadNetworks(); }, [engine]);
 
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      await api.post(withRuntime('/networks', runtime), values);
+      await api.post(withEngine('/container/networks', engine), values);
       message.success('网络创建成功');
       setCreateVisible(false);
       createForm.resetFields();
@@ -44,7 +44,7 @@ export default function NetworkTab({ runtime }: { runtime: string }) {
 
   const handleRemove = async (id: string) => {
     try {
-      await api.delete(withRuntime(`/networks/${id}`, runtime));
+      await api.delete(withEngine(`/container/networks/${id}`, engine));
       message.success('网络已删除');
       setLoading(true);
       loadNetworks();
