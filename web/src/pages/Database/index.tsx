@@ -246,11 +246,19 @@ export default function DatabasePage() {
   const handleInstallVersion = async () => {
     const server = activeEngine;
     if (!server) return;
+    let values: any;
     try {
-      const values = await installVersionForm.validateFields();
-      // Port left empty → engine default. image comes from the version Select
-      // onChange (preset) or the Docker Hub picker; fall back to the preset
-      // template in case the form wasn't populated.
+      values = await installVersionForm.validateFields();
+    } catch (err: any) {
+      // antd 校验失败抛的是普通对象（{ errorFields }），不是 Error —— 取第一条
+      // 可读消息（如"请选择版本"），避免整对象 toString 成 [object Object]。
+      const msg = err?.errorFields?.[0]?.errors?.[0];
+      message.error(typeof msg === 'string' ? msg : '请选择安装版本');
+      return;
+    }
+    try {
+      // Port left empty → engine default. image comes from the preset catalogue
+      // or the Docker Hub picker (fallback: version→image mapping by convention).
       const tpl = server.templates.find(t => t.version === values.version);
       await dbServerApi.createInstance(server.db_type, {
         ...values,

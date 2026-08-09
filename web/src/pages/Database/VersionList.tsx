@@ -180,9 +180,11 @@ export default function VersionList({
               placeholder="选择要安装的版本"
               onChange={(v) => {
                 // "更多版本" is a sentinel: open the Docker Hub pager instead of
-                // treating it as a version, and clear the selection.
+                // treating it as a version, and clear the selection (empty string
+                // triggers the required rule if the user closes the pager without
+                // picking anything).
                 if (v === MORE_VERSIONS) {
-                  installVersionForm.setFieldsValue({ version: undefined });
+                  installVersionForm.setFieldValue('version', '');
                   openDockerTags();
                   return;
                 }
@@ -243,6 +245,7 @@ export default function VersionList({
             />
             <div style={{ textAlign: 'center', marginTop: 12 }}>
               <Pagination
+                align="center"
                 current={dockerPage}
                 pageSize={DOCKER_PAGE_SIZE}
                 total={dockerTotal}
