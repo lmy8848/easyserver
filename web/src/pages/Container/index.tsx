@@ -20,10 +20,10 @@ const ENGINES = ['docker', 'podman'];
 const engineName = (e: string) => (e === 'podman' ? 'Podman' : 'Docker');
 const engineLogo = (e: string) =>
   e === 'podman'
-    ? <SiPodman size={20} color="#892CA0" style={{ flexShrink: 0, verticalAlign: 'middle' }} />
-    : <SiDocker size={20} color="#2496ED" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+    ? <SiPodman size={20} color="#892CA0" style={{ flexShrink: 0, display: 'block' }} />
+    : <SiDocker size={20} color="#2496ED" style={{ flexShrink: 0, display: 'block' }} />;
 const engineOptionLabel = (e: string) => (
-  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{engineLogo(e)}{engineName(e)}</span>
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, lineHeight: 1 }}>{engineLogo(e)}{engineName(e)}</span>
 );
 
 export default function Container() {
