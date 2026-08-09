@@ -15,15 +15,12 @@ import (
 	"easyserver/internal/deploy"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
 	maxDBNameLen    = 64
 	maxUsernameLen  = 32
 	maxHostLen      = 255
-	maxDescLen      = 500
 	maxLogLines     = 5000
 	defaultCharset  = "utf8mb4"
 	defaultLogLines = 200
@@ -265,7 +262,7 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error
 		return fmt.Errorf("instance not found")
 	}
 
-	dbCount, err := s.repo.CountDatabasesByInstance(ctx, instanceID)
+	dbCount, err := s.countDatabases(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -285,7 +282,7 @@ func (s *Service) DestroyInstance(ctx context.Context, instanceID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	if count, err := s.repo.CountDatabasesByInstance(ctx, instanceID); err != nil {
+	if count, err := s.countDatabases(ctx, v); err != nil {
 		return err
 	} else if count > 0 {
 		return fmt.Errorf("cannot destroy: %d databases still exist for this instance", count)
@@ -606,7 +603,7 @@ func containerStatus(info ContainerStatus, err error) string {
 	return "stopped"
 }
 
-// --- Logical database CRUD ---
+// --- Logical database CRUD (live, engine-owned) ---
 
 func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Database, error) {
 	if ctx == nil {
@@ -619,21 +616,66 @@ func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Databa
 	if instance == nil {
 		return nil, fmt.Errorf("database instance not found")
 	}
-	return s.repo.ListDatabases(ctx, instanceID)
+	return s.queryDatabases(ctx, instance)
 }
 
-func (s *Service) GetDatabaseByID(ctx context.Context, id int64) (*Database, error) {
-	if ctx == nil {
-		ctx = context.Background()
+// queryDatabases lists logical databases live from the engine. Databases are
+// engine-owned state — the panel never persists a mirror of them.
+func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]Database, error) {
+	var out string
+	var err error
+	switch instance.DBType {
+	case DBTypeMySQL:
+		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
+			"SELECT schema_name, default_character_set_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY schema_name")
+	case DBTypePostgreSQL:
+		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
+			"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
+	case DBTypeRedis:
+		return []Database{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
-	return s.repo.GetDatabaseByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(out))
+	}
+	var dbs []Database
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 2)
+		name := strings.TrimSpace(fields[0])
+		if name == "" {
+			continue
+		}
+		charset := ""
+		if len(fields) > 1 {
+			charset = strings.TrimSpace(fields[1])
+		}
+		dbs = append(dbs, Database{Name: name, Charset: charset})
+	}
+	return dbs, nil
+}
+
+// countDatabases returns the live logical-database count for an instance. A
+// stopped instance cannot be queried, so the guard degrades to 0 — the data
+// lives in the container volume and uninstall/destroy are explicit user
+// confirmations anyway.
+func (s *Service) countDatabases(ctx context.Context, v *DBInstance) (int, error) {
+	if v.Status != "running" && v.Status != "active" {
+		return 0, nil
+	}
+	dbs, err := s.queryDatabases(ctx, v)
+	return len(dbs), err
 }
 
 func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *CreateDatabaseRequest) (*Database, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	instance, err := s.repo.GetInstance(ctx, req.DBInstanceID)
+	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
@@ -646,9 +688,6 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 
 	if !isValidDBName(req.Name) {
 		return nil, fmt.Errorf("invalid database name")
-	}
-	if len(req.Description) > maxDescLen {
-		return nil, fmt.Errorf("description too long (max %d chars)", maxDescLen)
 	}
 
 	charset := req.Charset
@@ -667,7 +706,11 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 			return nil, fmt.Errorf("create database failed: %s", out)
 		}
 	case DBTypePostgreSQL:
-		out, err := s.runInVersion(ctx, instance, "createdb", "-E", charset, req.Name)
+		encoding := "UTF8"
+		if charset == "latin1" {
+			encoding = "LATIN1"
+		}
+		out, err := s.runInVersion(ctx, instance, "createdb", "-E", encoding, req.Name)
 		if err != nil {
 			return nil, fmt.Errorf("create database failed: %s", out)
 		}
@@ -675,34 +718,13 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 		return nil, fmt.Errorf("database creation not supported for %s", instance.DBType)
 	}
 
-	id, err := s.repo.CreateDatabase(ctx, req.DBInstanceID, req.Name, charset, req.Description)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Database{
-		ID:           id,
-		DBInstanceID: req.DBInstanceID,
-		DBType:       instance.DBType,
-		Name:         req.Name,
-		Charset:      charset,
-		Status:       "active",
-		Version:      instance.Version,
-	}, nil
+	return &Database{Name: req.Name, Charset: charset}, nil
 }
 
-func (s *Service) DeleteDatabase(ctx context.Context, instanceID, id int64) error {
+func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	d, err := s.repo.GetDatabaseByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("get database: %w", err)
-	}
-	if d == nil || d.DBInstanceID != instanceID {
-		return fmt.Errorf("database not found")
-	}
-
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -710,7 +732,6 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID, id int64) erro
 	if instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-
 	if instance.Status != "running" {
 		return fmt.Errorf("database instance is not running")
 	}
@@ -718,12 +739,12 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID, id int64) erro
 	switch instance.DBType {
 	case DBTypeMySQL:
 		out, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("DROP DATABASE `%s`;",
-			strings.ReplaceAll(d.Name, "`", "``")))
+			strings.ReplaceAll(dbName, "`", "``")))
 		if err != nil {
 			return fmt.Errorf("drop database failed: %s", out)
 		}
 	case DBTypePostgreSQL:
-		out, err := s.runInVersion(ctx, instance, "dropdb", d.Name)
+		out, err := s.runInVersion(ctx, instance, "dropdb", dbName)
 		if err != nil {
 			return fmt.Errorf("drop database failed: %s", out)
 		}
@@ -731,10 +752,10 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID, id int64) erro
 		return fmt.Errorf("database deletion not supported for %s", instance.DBType)
 	}
 
-	return s.repo.DeleteDatabase(ctx, instanceID, id)
+	return nil
 }
 
-// --- DB User CRUD ---
+// --- DB User CRUD (live, engine-owned) ---
 
 func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, error) {
 	if ctx == nil {
@@ -747,7 +768,57 @@ func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, 
 	if instance == nil {
 		return nil, fmt.Errorf("database instance not found")
 	}
-	return s.repo.ListDBUsers(ctx, instanceID)
+	return s.queryUsers(ctx, instance)
+}
+
+// queryUsers lists database users live from the engine (the engine owns them).
+func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUser, error) {
+	var out string
+	var err error
+	switch instance.DBType {
+	case DBTypeMySQL:
+		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
+			"SELECT user, host FROM mysql.user WHERE user NOT IN ('mysql.session','mysql.sys','mysql.infoschema') ORDER BY user, host")
+	case DBTypePostgreSQL:
+		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
+			"SELECT rolname FROM pg_roles WHERE rolcanlogin ORDER BY rolname")
+	case DBTypeRedis:
+		return []DBUser{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(out))
+	}
+	var users []DBUser
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 2)
+		username := strings.TrimSpace(fields[0])
+		if username == "" {
+			continue
+		}
+		host := ""
+		if len(fields) > 1 {
+			host = strings.TrimSpace(fields[1])
+		}
+		users = append(users, DBUser{Username: username, Host: host})
+	}
+	return users, nil
+}
+
+// isAdminUser reports whether username is the engine's built-in administrator.
+func isAdminUser(dbType DBType, username string) bool {
+	switch dbType {
+	case DBTypeMySQL:
+		return username == "root"
+	case DBTypePostgreSQL:
+		return username == "postgres"
+	}
+	return false
 }
 
 func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *CreateDBUserRequest) (*DBUser, error) {
@@ -794,35 +865,13 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 		return nil, fmt.Errorf("user creation not supported for %s", instance.DBType)
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
-	}
-
-	id, err := s.repo.CreateDBUser(ctx, instanceID, req.Username, string(hashedPassword), host)
-	if err != nil {
-		return nil, err
-	}
-	return &DBUser{
-		ID:       id,
-		DBType:   instance.DBType,
-		Username: req.Username,
-		Host:     host,
-	}, nil
+	return &DBUser{Username: req.Username, Host: host}, nil
 }
 
-func (s *Service) DeleteDBUser(ctx context.Context, instanceID, id int64) error {
+func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, host string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	u, err := s.repo.GetDBUser(ctx, instanceID, id)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
-	}
-	if u == nil {
-		return fmt.Errorf("user not found")
-	}
-
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -831,16 +880,26 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID, id int64) error 
 		return fmt.Errorf("database instance not found")
 	}
 
+	if !isValidUsername(username) {
+		return fmt.Errorf("invalid username")
+	}
+	if isAdminUser(instance.DBType, username) {
+		return fmt.Errorf("cannot delete the administrator user")
+	}
+	if instance.DBType == DBTypeMySQL && !isValidHost(host) {
+		return fmt.Errorf("invalid host")
+	}
+
 	switch instance.DBType {
 	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("DROP USER '%s'@'%s';", u.Username, u.Host)
+		sqlStr := fmt.Sprintf("DROP USER '%s'@'%s';", username, host)
 		out, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr)
 		if err != nil {
 			return fmt.Errorf("drop user failed: %s", out)
 		}
 	case DBTypePostgreSQL:
 		out, err := s.runInVersion(ctx, instance, "psql", "-c",
-			fmt.Sprintf("DROP USER \"%s\";", u.Username))
+			fmt.Sprintf("DROP USER \"%s\";", username))
 		if err != nil {
 			return fmt.Errorf("drop user failed: %s", out)
 		}
@@ -848,21 +907,13 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID, id int64) error 
 		return fmt.Errorf("user deletion not supported for %s", instance.DBType)
 	}
 
-	return s.repo.DeleteDBUser(ctx, instanceID, id)
+	return nil
 }
 
-func (s *Service) GrantPrivileges(ctx context.Context, instanceID, userID int64, req *GrantRequest) error {
+func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, username, host string, req *GrantRequest) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	u, err := s.repo.GetDBUser(ctx, instanceID, userID)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
-	}
-	if u == nil {
-		return fmt.Errorf("user not found")
-	}
-
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -888,28 +939,19 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID, userID int64,
 	switch instance.DBType {
 	case DBTypeMySQL:
 		sqlStr := fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			req.Privileges, strings.ReplaceAll(req.Database, "`", "``"), u.Username, u.Host)
+			req.Privileges, strings.ReplaceAll(req.Database, "`", "``"), username, host)
 		out, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr)
 		if err != nil {
 			return fmt.Errorf("grant failed: %s", out)
 		}
 	case DBTypePostgreSQL:
-		sqlStr := fmt.Sprintf("GRANT %s ON DATABASE \"%s\" TO \"%s\";", req.Privileges, req.Database, u.Username)
+		sqlStr := fmt.Sprintf("GRANT %s ON DATABASE \"%s\" TO \"%s\";", req.Privileges, req.Database, username)
 		out, err := s.runInVersion(ctx, instance, "psql", "-c", sqlStr)
 		if err != nil {
 			return fmt.Errorf("grant failed: %s", out)
 		}
 	default:
 		return fmt.Errorf("privilege grant not supported for %s", instance.DBType)
-	}
-
-	privStr := fmt.Sprintf("%s@%s", req.Privileges, req.Database)
-	existing := u.Privileges
-	if existing != "" {
-		existing += ";"
-	}
-	if err := s.repo.UpdateDBUserPrivileges(ctx, userID, existing+privStr); err != nil {
-		return fmt.Errorf("update privileges in db: %w", err)
 	}
 
 	return nil
@@ -922,7 +964,7 @@ func (s *Service) SetBackupDir(dir string) {
 	s.backupDir = dir
 }
 
-func (s *Service) CreateBackup(ctx context.Context, instanceID, databaseID int64, dbName string, dbType DBType) (*DBBackup, error) {
+func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
 	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
 	}
@@ -942,7 +984,6 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID, databaseID int64
 	backup := &DBBackup{
 		DBInstanceID: instanceID,
 		DBType:       dbType,
-		DatabaseID:   databaseID,
 		DatabaseName: dbName,
 		BackupType:   "manual",
 		FilePath:     filePath,
@@ -1030,8 +1071,8 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	return s.runtime.CopyFrom(ctx, instance.Runtime, instance.ContainerID, "/data/dump.rdb", backup.FilePath)
 }
 
-func (s *Service) ListBackups(ctx context.Context, databaseID int64) ([]DBBackup, error) {
-	return s.repo.ListBackups(ctx, databaseID)
+func (s *Service) ListBackups(ctx context.Context, instanceID int64, dbName string) ([]DBBackup, error) {
+	return s.repo.ListBackups(ctx, instanceID, dbName)
 }
 
 func (s *Service) GetBackup(ctx context.Context, id int64) (*DBBackup, error) {
@@ -1125,12 +1166,12 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	return nil
 }
 
-func (s *Service) CleanOldBackups(ctx context.Context, databaseID int64, maxBackups int) error {
+func (s *Service) CleanOldBackups(ctx context.Context, instanceID int64, dbName string, maxBackups int) error {
 	if maxBackups <= 0 {
 		maxBackups = MaxBackupsPerDB
 	}
 
-	backups, err := s.repo.ListBackups(ctx, databaseID)
+	backups, err := s.repo.ListBackups(ctx, instanceID, dbName)
 	if err != nil {
 		return err
 	}
@@ -1176,16 +1217,17 @@ func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []st
 	return args
 }
 
-func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *DBInstance, DBType, error) {
-	db, err := s.repo.GetDatabaseByID(ctx, dbID)
-	if err != nil || db == nil {
-		return nil, nil, "", fmt.Errorf("数据库不存在")
+// getInstanceForSQL resolves the instance for a database-level SQL operation.
+// Database names travel as URL path parameters now — no persisted db lookup.
+func (s *Service) getInstanceForSQL(ctx context.Context, instanceID int64, dbName string) (*DBInstance, error) {
+	if !isValidDBName(dbName) {
+		return nil, fmt.Errorf("无效的数据库名")
 	}
-	instance, err := s.repo.GetInstance(ctx, db.DBInstanceID)
+	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, nil, "", fmt.Errorf("数据库实例不存在")
+		return nil, fmt.Errorf("数据库实例不存在")
 	}
-	return db, instance, instance.DBType, nil
+	return instance, nil
 }
 
 func shellQuote(value string) string {
@@ -1226,8 +1268,8 @@ func ValidateTableName(name string) bool {
 	return name != "" && len(name) <= 64 && tableNameRegexp.MatchString(name)
 }
 
-func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]interface{}, error) {
-	db, instance, _, err := s.lookupDB(ctx, dbID)
+func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName string) ([]map[string]interface{}, error) {
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
@@ -1235,22 +1277,20 @@ func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]inte
 	var tables []map[string]interface{}
 	switch instance.DBType {
 	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, db.Name, "SHOW TABLES;")
+		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, "SHOW TABLES;")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
-			if i == 0 {
-				continue
-			}
 			line = strings.TrimSpace(line)
-			if line != "" {
-				tables = append(tables, map[string]interface{}{"name": line})
+			if i == 0 || line == "" {
+				continue // first line is the "Tables_in_<db>" header
 			}
+			tables = append(tables, map[string]interface{}{"name": line})
 		}
 	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, db.Name,
+		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
 			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
@@ -1267,24 +1307,24 @@ func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]inte
 	return tables, nil
 }
 
-func (s *Service) DescribeTable(ctx context.Context, dbID int64, tableName string) (*DescribeResult, error) {
+func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, tableName string) (*DescribeResult, error) {
 	if !ValidateTableName(tableName) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
 
-	builder := NewSQLBuilder(dbType)
+	builder := NewSQLBuilder(instance.DBType)
 	describeSQL := builder.BuildDescribeTable(tableName)
 
-	out, err := s.execRaw(ctx, instance, dbType, db.Name, describeSQL)
+	out, err := s.execRaw(ctx, instance, instance.DBType, dbName, describeSQL)
 	if err != nil {
 		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(out))
 	}
 
-	tableInfo := ParseTableInfo(dbType, tableName, out)
+	tableInfo := ParseTableInfo(instance.DBType, tableName, out)
 
 	var columns []map[string]interface{}
 	for _, col := range tableInfo.Columns {
@@ -1306,7 +1346,7 @@ func (s *Service) DescribeTable(ctx context.Context, dbID int64, tableName strin
 	}, nil
 }
 
-func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, page, pageSize int) (*PagedQueryResult, error) {
+func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tableName string, page, pageSize int) (*PagedQueryResult, error) {
 	if !ValidateTableName(tableName) {
 		return nil, fmt.Errorf("无效的表名")
 	}
@@ -1321,20 +1361,21 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	}
 	offset := (page - 1) * pageSize
 
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
+	dbType := instance.DBType
 
 	var total int
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
+		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
 		if err == nil {
 			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
 		}
 	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
+		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
 		if err == nil {
 			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
 		}
@@ -1344,7 +1385,7 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	var rows [][]interface{}
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, db.Name,
+		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName,
 			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
@@ -1363,7 +1404,7 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 			}
 		}
 	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, db.Name,
+		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
 			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
@@ -1395,33 +1436,35 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	}, nil
 }
 
-func (s *Service) ExecuteSQL(ctx context.Context, dbID int64, sql string) (*DMLResult, error) {
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql string) (*DMLResult, error) {
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
+	dbType := instance.DBType
 
 	validator := NewSQLValidator(dbType)
 	if r := validator.ValidateSQL(sql); !r.Valid {
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
-		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, db.Name, SanitizeSQLError(out))
+		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(out))
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
-func (s *Service) InsertRecord(ctx context.Context, dbID int64, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
+func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
+	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
 	validator := NewSQLValidator(dbType)
@@ -1435,21 +1478,22 @@ func (s *Service) InsertRecord(ctx context.Context, dbID int64, table string, da
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
-func (s *Service) UpdateRecord(ctx context.Context, dbID int64, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
+func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
+	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
 	validator := NewSQLValidator(dbType)
@@ -1463,21 +1507,22 @@ func (s *Service) UpdateRecord(ctx context.Context, dbID int64, table string, da
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
 
-func (s *Service) DeleteRecord(ctx context.Context, dbID int64, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
+func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
+	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
 	validator := NewSQLValidator(dbType)
@@ -1491,21 +1536,22 @@ func (s *Service) DeleteRecord(ctx context.Context, dbID int64, table string, pk
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
 	return &DMLResult{Success: true}, nil
 }
 
-func (s *Service) CreateTable(ctx context.Context, dbID int64, tableName string, columns []TableColumn) error {
+func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tableName string, columns []TableColumn) error {
 	if !ValidateTableName(tableName) {
 		return fmt.Errorf("无效的表名")
 	}
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err
 	}
+	dbType := instance.DBType
 
 	allowedTypes := map[string]bool{
 		"INT": true, "INTEGER": true, "TINYINT": true, "SMALLINT": true, "MEDIUMINT": true, "BIGINT": true,
@@ -1567,21 +1613,22 @@ func (s *Service) CreateTable(ctx context.Context, dbID int64, tableName string,
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
 		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(out))
 	}
 	return nil
 }
 
-func (s *Service) DropTable(ctx context.Context, dbID int64, tableName string) error {
+func (s *Service) DropTable(ctx context.Context, instanceID int64, dbName, tableName string) error {
 	if !ValidateTableName(tableName) {
 		return fmt.Errorf("无效的表名")
 	}
-	db, instance, dbType, err := s.lookupDB(ctx, dbID)
+	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err
 	}
+	dbType := instance.DBType
 
 	var sql string
 	switch dbType {
@@ -1593,7 +1640,7 @@ func (s *Service) DropTable(ctx context.Context, dbID int64, tableName string) e
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
 		return fmt.Errorf("删除表失败: %s", out)
 	}

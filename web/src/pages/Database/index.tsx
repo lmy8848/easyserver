@@ -8,7 +8,8 @@ import ServerList from './ServerList';
 import VersionList from './VersionList';
 import DatabaseList from './DatabaseList';
 import TableExplorer from './TableExplorer';
-import type { VersionTemplate, TableData, TableInfo, SqlResult, ENGINE_VERSION_TEMPLATES } from './types';
+import type { VersionTemplate, TableData, TableInfo, SqlResult } from './types';
+import { ENGINE_VERSION_TEMPLATES } from './types';
 
 export default function DatabasePage() {
   // ===== Navigation state =====
@@ -151,10 +152,10 @@ export default function DatabasePage() {
     catch (error) { console.error('Failed to fetch users:', error); message.error('加载用户列表失败'); } finally { setUsersLoading(false); }
   };
 
-  const fetchTables = async (dbId: number) => {
+  const fetchTables = async (instanceId: number, dbName: string) => {
     setTableLoading(true);
     try {
-      const res = await dbServerApi.listTables(dbId);
+      const res = await dbServerApi.listTables(instanceId, dbName);
       const data = res.data?.data;
       setTableList(Array.isArray(data) ? data.map((t: any) => t.name) : []);
     } catch (error) {
@@ -163,12 +164,12 @@ export default function DatabasePage() {
     } finally { setTableLoading(false); }
   };
 
-  const fetchTableData = async (dbId: number, table: string, page: number = 1) => {
+  const fetchTableData = async (instanceId: number, dbName: string, table: string, page: number = 1) => {
     setTableDataLoading(true);
     try {
       const [queryRes, describeRes] = await Promise.all([
-        dbServerApi.queryTable(dbId, table, page, 50),
-        dbServerApi.describeTable(dbId, table),
+        dbServerApi.queryTable(instanceId, dbName, table, page, 50),
+        dbServerApi.describeTable(instanceId, dbName, table),
       ]);
       const data = queryRes.data?.data;
       if (data && data.headers) {
@@ -191,10 +192,10 @@ export default function DatabasePage() {
     } finally { setTableDataLoading(false); }
   };
 
-  const fetchBackups = async (dbId: number) => {
+  const fetchBackups = async (instanceId: number, dbName: string) => {
     setBackupsLoading(true);
     try {
-      const res = await dbServerApi.listBackups(dbId);
+      const res = await dbServerApi.listBackups(instanceId, dbName);
       setBackups(res.data?.data || []);
     } catch (error) {
       console.error('Failed to fetch backups:', error);
@@ -236,11 +237,13 @@ export default function DatabasePage() {
   };
 
   const enterDatabase = async (db: Database) => {
+    const instance = selectedVersion;
+    if (!instance) return;
     setSelectedDatabase(db);
     setSelectedTable('');
     setTableData(null);
     setSqlResult(null);
-    await Promise.all([fetchTables(db.id), fetchBackups(db.id)]);
+    await Promise.all([fetchTables(instance.id, db.name), fetchBackups(instance.id, db.name)]);
   };
 
   const goBackToServers = () => {
@@ -336,11 +339,11 @@ export default function DatabasePage() {
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
-  const handleDeleteDB = async (dbId: number) => {
+  const handleDeleteDB = async (dbName: string) => {
     const version = selectedVersion;
     if (!version) return;
     try {
-      await dbServerApi.deleteDatabase(version.id, dbId);
+      await dbServerApi.deleteDatabase(version.id, dbName);
       message.success('数据库已删除');
       fetchDatabases(version.id);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
@@ -359,11 +362,11 @@ export default function DatabasePage() {
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
-  const handleDeleteUser = async (userId: number) => {
+  const handleDeleteUser = async (user: DBUser) => {
     const version = selectedVersion;
     if (!version) return;
     try {
-      await dbServerApi.deleteUser(version.id, userId);
+      await dbServerApi.deleteUser(version.id, user.username, user.host || '%');
       message.success('用户已删除');
       fetchUsers(version.id);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
@@ -379,7 +382,7 @@ export default function DatabasePage() {
         ...values,
         privileges: Array.isArray(values.privileges) ? values.privileges.join(', ') : values.privileges,
       };
-      await dbServerApi.grantPrivileges(version.id, user.id, payload);
+      await dbServerApi.grantPrivileges(version.id, user.username, payload, user.host || '%');
       message.success('授权成功');
       setGrantVisible(false);
       fetchUsers(version.id);
@@ -433,7 +436,8 @@ export default function DatabasePage() {
 
   // ===== Table/Record handlers =====
   const handleExecuteSQL = async () => {
-    if (!selectedDatabase || !sqlInput.trim()) return;
+    const version = selectedVersion;
+    if (!selectedDatabase || !version || !sqlInput.trim()) return;
 
     // Confirm destructive operations before execution
     const sqlUpper = sqlInput.trim().toUpperCase();
@@ -455,22 +459,23 @@ export default function DatabasePage() {
 
     setSqlLoading(true);
     try {
-      const res = await dbServerApi.executeSQL(selectedDatabase.id, sqlInput);
+      const res = await dbServerApi.executeSQL(version.id, selectedDatabase.name, sqlInput);
       setSqlResult(res.data?.data || null);
       if (selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
-        fetchTableData(selectedDatabase.id, selectedTable);
+        fetchTableData(version.id, selectedDatabase.name, selectedTable);
       }
     } catch (error: unknown) { setSqlResult({ success: false, error: (error instanceof Error ? error.message : String(error)) }); }
     finally { setSqlLoading(false); }
   };
 
   const handleCreateBackup = async () => {
-    if (!selectedDatabase) return;
+    const version = selectedVersion;
+    if (!selectedDatabase || !version) return;
     setBackupCreating(true);
     try {
-      await dbServerApi.createBackup(selectedDatabase.id);
+      await dbServerApi.createBackup(version.id, selectedDatabase.name);
       message.success('备份已开始，请稍候...');
-      setTimeout(() => fetchBackups(selectedDatabase.id), 2000);
+      setTimeout(() => fetchBackups(version.id, selectedDatabase.name), 2000);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '备份失败')); }
     finally { setBackupCreating(false); }
   };
@@ -490,42 +495,48 @@ export default function DatabasePage() {
   };
 
   const handleRestoreBackup = async (backupId: number) => {
+    const version = selectedVersion;
+    if (!selectedDatabase || !version) return;
     try {
       await dbServerApi.restoreBackup(backupId);
       message.success('恢复成功');
-      if (selectedDatabase) fetchTables(selectedDatabase.id);
+      if (selectedDatabase) fetchTables(version.id, selectedDatabase.name);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
   };
 
   const handleDeleteBackup = async (backupId: number) => {
+    const version = selectedVersion;
+    if (!selectedDatabase || !version) return;
     try {
       await dbServerApi.deleteBackup(backupId);
       message.success('备份已删除');
-      if (selectedDatabase) fetchBackups(selectedDatabase.id);
+      if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   const handleCreateTable = async () => {
-    if (!selectedDatabase) return;
+    const version = selectedVersion;
+    if (!selectedDatabase || !version) return;
     setCreateTableLoading(true);
     try {
       const values = await createForm.validateFields();
-      await dbServerApi.createTable(selectedDatabase.id, { name: values.tableName, columns: values.columns || [] });
+      await dbServerApi.createTable(version.id, selectedDatabase.name, { name: values.tableName, columns: values.columns || [] });
       message.success('表创建成功');
       setCreateTableVisible(false);
       createForm.resetFields();
-      fetchTables(selectedDatabase.id);
+      fetchTables(version.id, selectedDatabase.name);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setCreateTableLoading(false); }
   };
 
   const handleDropTable = async (tableName: string) => {
-    if (!selectedDatabase) return;
+    const version = selectedVersion;
+    if (!selectedDatabase || !version) return;
     try {
-      await dbServerApi.dropTable(selectedDatabase.id, tableName);
+      await dbServerApi.dropTable(version.id, selectedDatabase.name, tableName);
       message.success('表已删除');
       if (selectedTable === tableName) { setSelectedTable(''); setTableData(null); }
-      fetchTables(selectedDatabase.id);
+      fetchTables(version.id, selectedDatabase.name);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除表失败')); }
   };
 
@@ -544,36 +555,38 @@ export default function DatabasePage() {
   };
 
   const handleSaveRecord = async () => {
-    if (!selectedDatabase || !selectedTable) return;
+    const version = selectedVersion;
+    if (!selectedDatabase || !version || !selectedTable) return;
     setRecordSaving(true);
     try {
       const values = await recordForm.validateFields();
       if (editingRecord) {
         const pk = tableInfo?.primaryKey || tableData?.headers?.[0] || 'id';
         const pkVal = editingRecord[pk];
-        const res = await dbServerApi.updateRecord(selectedDatabase.id, selectedTable, values, pk, pkVal);
+        const res = await dbServerApi.updateRecord(version.id, selectedDatabase.name, selectedTable, values, pk, pkVal);
         if (res.data?.data?.success) message.success('更新成功');
         else message.error(res.data?.data?.error || '更新失败');
       } else {
-        const res = await dbServerApi.insertRecord(selectedDatabase.id, selectedTable, values);
+        const res = await dbServerApi.insertRecord(version.id, selectedDatabase.name, selectedTable, values);
         if (res.data?.data?.success) message.success('插入成功');
         else message.error(res.data?.data?.error || '插入失败');
       }
       setRecordModalVisible(false);
-      fetchTableData(selectedDatabase.id, selectedTable, tablePage);
+      fetchTableData(version.id, selectedDatabase.name, selectedTable, tablePage);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setRecordSaving(false); }
   };
 
   const handleDeleteRecord = async (record: any) => {
-    if (!selectedDatabase || !selectedTable) return;
+    const version = selectedVersion;
+    if (!selectedDatabase || !version || !selectedTable) return;
     try {
       const pk = tableInfo?.primaryKey || tableData?.headers?.[0] || 'id';
       const pkVal = record[pk];
-      const res = await dbServerApi.deleteRecord(selectedDatabase.id, selectedTable, pk, pkVal);
+      const res = await dbServerApi.deleteRecord(version.id, selectedDatabase.name, selectedTable, pk, pkVal);
       if (res.data?.data?.success) {
         message.success('删除成功');
-        fetchTableData(selectedDatabase.id, selectedTable, tablePage);
+        fetchTableData(version.id, selectedDatabase.name, selectedTable, tablePage);
       } else { message.error(res.data?.data?.error || '删除失败'); }
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
@@ -611,9 +624,9 @@ export default function DatabasePage() {
         tableDataLoading={tableDataLoading}
         tablePage={tablePage}
         tableInfo={tableInfo}
-        onSelectTable={(t) => { setSelectedTable(t); if (selectedDatabase) fetchTableData(selectedDatabase.id, t); }}
-        onFetchTables={() => selectedDatabase && fetchTables(selectedDatabase.id)}
-        onFetchTableData={(t, p) => selectedDatabase && fetchTableData(selectedDatabase.id, t, p)}
+        onSelectTable={(t) => { setSelectedTable(t); if (selectedDatabase) fetchTableData(selectedVersion.id, selectedDatabase.name, t); }}
+        onFetchTables={() => selectedDatabase && fetchTables(selectedVersion.id, selectedDatabase.name)}
+        onFetchTableData={(t, p) => selectedDatabase && fetchTableData(selectedVersion.id, selectedDatabase.name, t, p)}
         createTableVisible={createTableVisible}
         createTableLoading={createTableLoading}
         createForm={createForm}
@@ -666,8 +679,8 @@ export default function DatabasePage() {
         operating={operating}
         onBack={goBackToVersions}
         onEnterDatabase={enterDatabase}
-        onRefreshDatabases={() => fetchDatabases(selectedServer.id)}
-        onRefreshUsers={() => fetchUsers(selectedServer.id)}
+        onRefreshDatabases={() => fetchDatabases(selectedVersion.id)}
+        onRefreshUsers={() => fetchUsers(selectedVersion.id)}
         onDeleteDB={handleDeleteDB}
         onDeleteUser={handleDeleteUser}
         onStartVersion={handleStartVersion}

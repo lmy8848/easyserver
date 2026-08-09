@@ -250,7 +250,6 @@ export interface DBBackup {
   id: number;
   db_type: string;
   db_version_id: number;
-  database_id: number;
   database_name: string;
   backup_type: string; // manual, scheduled
   file_path: string;
@@ -276,26 +275,15 @@ export interface DBInstance {
 }
 
 export interface Database {
-  id: number;
-  db_type: string;
-  db_version_id: number;
+  // Logical database inside an instance — live engine state, no persisted id.
   name: string;
   charset: string;
-  description: string;
-  size_bytes: number;
-  status: string;
-  version: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface DBUser {
-  id: number;
-  db_type: string;
   username: string;
-  host: string;
-  privileges: string;
-  created_at: string;
+  host: string; // MySQL only; empty for PostgreSQL
+  privileges?: string;
 }
 
 // Cron task types（systemd timer 承载，name 为唯一标识）

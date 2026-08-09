@@ -35,19 +35,18 @@ export default function DatabaseList({
 
   const statusTag = (status: string) => <ServiceStatusTag status={status} />;
 
-  const versionDatabases = databases.filter(d => d.db_version_id === version.id);
+  // Logical databases come back instance-scoped from the API — no client filter.
+  const versionDatabases = databases;
 
   const dbColumns = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 60, responsive: ['md'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
     { title: '数据库名', dataIndex: 'name', key: 'name', render: (t: string) => <strong>{t}</strong> },
-    { title: '字符集', dataIndex: 'charset', key: 'charset', width: 100, responsive: ['lg'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
-    { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true, responsive: ['md'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
+    { title: '字符集', dataIndex: 'charset', key: 'charset', width: 120, responsive: ['lg'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
     {
       title: '操作', key: 'action', width: 200,
       render: (_: unknown, record: DBType) => (
         <Space size="small">
           <Button type="link" size="small" icon={<TableOutlined />} onClick={() => onEnterDatabase(record)}>管理</Button>
-          <Popconfirm title="确定删除此数据库？" onConfirm={() => onDeleteDB(record.id)}>
+          <Popconfirm title="确定删除此数据库？" onConfirm={() => onDeleteDB(record.name)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
         </Space>
@@ -56,17 +55,15 @@ export default function DatabaseList({
   ];
 
   const userColumns = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 60, responsive: ['md'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
     { title: '用户名', dataIndex: 'username', key: 'username', render: (t: string) => <strong>{t}</strong> },
-    { title: '主机', dataIndex: 'host', key: 'host', width: 120, responsive: ['lg'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
-    { title: '权限', dataIndex: 'privileges', key: 'privileges', ellipsis: true, responsive: ['md'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
+    { title: '主机', dataIndex: 'host', key: 'host', width: 160, render: (t: string) => t || '-' },
     {
       title: '操作', key: 'action', width: 180,
       render: (_: unknown, record: DBUser) => (
         <Space size="small">
           <Button type="link" size="small" icon={<KeyOutlined />}
             onClick={() => onOpenGrant(record)}>授权</Button>
-          <Popconfirm title="确定删除此用户？" onConfirm={() => onDeleteUser(record.id)}>
+          <Popconfirm title="确定删除此用户？" onConfirm={() => onDeleteUser(record)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>
         </Space>
@@ -114,17 +111,6 @@ export default function DatabaseList({
             </Space>
           </Col>
         </Row>
-        {version.status === 'running' && (
-          <div style={{ marginTop: 12, padding: '8px 0', borderTop: '1px solid #f0f0f0' }}>
-            <Space size="large">
-              {version.pid && version.pid > 0 && <span>PID: <strong>{version.pid}</strong></span>}
-              {version.memory_bytes && version.memory_bytes > 0 && <span>内存: <strong>{(version.memory_bytes / 1024 / 1024).toFixed(1)} MB</strong></span>}
-              {version.uptime && <span>运行时间: <strong>{version.uptime}</strong></span>}
-              {version.connections !== undefined && <span>连接数: <strong>{version.connections}</strong></span>}
-              <span>配置: <Tag>{version.config_file || 'N/A'}</Tag></span>
-            </Space>
-          </div>
-        )}
       </Card>
 
       <Card>
@@ -140,7 +126,7 @@ export default function DatabaseList({
                     onClick={() => { dbForm.resetFields(); onDbModalVisibleChange(true); }}
                     disabled={version.status !== 'running'}>创建数据库</Button>
                 </div>
-                <Table columns={dbColumns} dataSource={versionDatabases} rowKey="id" loading={dbsLoading} size="small"
+                <Table columns={dbColumns} dataSource={versionDatabases} rowKey="name" loading={dbsLoading} size="small"
                   locale={{ emptyText: <Empty description="暂无数据库" /> }} />
               </div>
             ),
@@ -156,7 +142,7 @@ export default function DatabaseList({
                     onClick={() => { userForm.resetFields(); onUserModalVisibleChange(true); }}
                     disabled={version.status !== 'running'}>创建用户</Button>
                 </div>
-                <Table columns={userColumns} dataSource={dbUsers} rowKey="id" loading={usersLoading} size="small"
+                <Table columns={userColumns} dataSource={dbUsers} rowKey={(r: DBUser) => `${r.username}@${r.host}`} loading={usersLoading} size="small"
                   locale={{ emptyText: <Empty description="暂无用户" /> }} />
               </div>
             ),
@@ -263,7 +249,6 @@ export default function DatabaseList({
           <Form.Item name="charset" label="字符集" initialValue="utf8mb4">
             <Select><Select.Option value="utf8mb4">utf8mb4</Select.Option><Select.Option value="utf8">utf8</Select.Option></Select>
           </Form.Item>
-          <Form.Item name="description" label="描述"><Input placeholder="可选" /></Form.Item>
         </Form>
       </Modal>
       <Modal title="创建用户" open={userModalVisible} onCancel={() => onUserModalVisibleChange(false)}
@@ -279,9 +264,8 @@ export default function DatabaseList({
       <Modal title={`授权 - ${grantUser?.username || ''}`} open={grantVisible} onCancel={() => onGrantVisibleChange(false)}
         onOk={onGrant} okText="授权" cancelText="取消">
         <Form form={grantForm} layout="vertical">
-          <Form.Item name="db_version_id" hidden initialValue={version.id}><Input /></Form.Item>
           <Form.Item name="database" label="数据库" rules={[{ required: true }]}>
-            <Select>{databases.filter(d => d.db_version_id === version.id).map(db => <Select.Option key={db.id} value={db.name}>{db.name}</Select.Option>)}</Select>
+            <Select>{databases.map(db => <Select.Option key={db.name} value={db.name}>{db.name}</Select.Option>)}</Select>
           </Form.Item>
           <Form.Item name="privileges" label="权限" rules={[{ required: true }]}>
             <Select mode="multiple">

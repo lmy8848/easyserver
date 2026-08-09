@@ -119,30 +119,20 @@ func DBEngines() []DBEngine {
 	}
 }
 
-// Database represents a logical database inside an instance.
+// Database is a logical database inside an instance, queried live from the
+// engine — it is never persisted (the engine owns its databases; the panel only
+// reflects them). Charset is fetched alongside the name in one query.
 type Database struct {
-	ID           int64  `json:"id"`
-	DBType       DBType `json:"db_type"`
-	DBInstanceID int64  `json:"db_version_id"`
-	Name         string `json:"name"`
-	Charset      string `json:"charset"`
-	Description  string `json:"description"`
-	SizeBytes    int64  `json:"size_bytes"`
-	Status       string `json:"status"`
-	Version      string `json:"version"` // which version this DB belongs to
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	Name    string `json:"name"`
+	Charset string `json:"charset"`
 }
 
-// DBUser represents a database user (shared across instances).
+// DBUser is a database user, queried live from the engine. Privileges are not
+// summarized here (grant/revoke are per-object); the grant flow adds new grants.
 type DBUser struct {
-	ID         int64  `json:"id"`
-	DBType     DBType `json:"db_type"`
 	Username   string `json:"username"`
-	Password   string `json:"password,omitempty"`
 	Host       string `json:"host"`
-	Privileges string `json:"privileges"`
-	CreatedAt  string `json:"created_at"`
+	Privileges string `json:"privileges,omitempty"`
 }
 
 // DBBackup represents a database backup record.
@@ -150,7 +140,6 @@ type DBBackup struct {
 	ID           int64  `json:"id"`
 	DBType       DBType `json:"db_type"`
 	DBInstanceID int64  `json:"db_version_id"`
-	DatabaseID   int64  `json:"database_id"`
 	DatabaseName string `json:"database_name"`
 	BackupType   string `json:"backup_type"` // manual, scheduled
 	FilePath     string `json:"file_path"`
@@ -162,10 +151,9 @@ type DBBackup struct {
 
 // CreateDatabaseRequest is the request for creating a database.
 type CreateDatabaseRequest struct {
-	DBInstanceID int64  `json:"db_version_id" binding:"required"`
-	Name         string `json:"name" binding:"required"`
-	Charset      string `json:"charset"`
-	Description  string `json:"description"`
+	Name        string `json:"name" binding:"required"`
+	Charset     string `json:"charset"`
+	Description string `json:"description"`
 }
 
 // CreateDBUserRequest is the request for creating a database user.
@@ -175,11 +163,10 @@ type CreateDBUserRequest struct {
 	Host     string `json:"host"`
 }
 
-// GrantRequest is the request for granting privileges.
+// GrantRequest is the request for granting privileges to a user.
 type GrantRequest struct {
-	DBInstanceID int64  `json:"db_version_id" binding:"required"`
-	Database     string `json:"database" binding:"required"`
-	Privileges   string `json:"privileges" binding:"required"`
+	Database   string `json:"database" binding:"required"`
+	Privileges string `json:"privileges" binding:"required"`
 }
 
 // ColumnInfo represents a column's metadata.

@@ -573,57 +573,58 @@ export const dbServerApi = {
   saveInstanceConfig: (iid: number, content: string) =>
     api.put<ApiResponse>(`/db/instances/${iid}/config`, { content }),
 
-  // Databases (instance-scoped)
+  // Databases (instance-scoped; logical databases are live engine state, so the
+  // database name is the identifier — never a persisted id)
   listDatabases: (instanceId: number) =>
     api.get<ApiResponse<Database[]>>(`/db/instances/${instanceId}/databases`),
 
   createDatabase: (instanceId: number, data: { name: string; charset?: string; description?: string }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/databases`, data),
 
-  deleteDatabase: (instanceId: number, dbId: number) =>
-    api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${dbId}`),
+  deleteDatabase: (instanceId: number, dbName: string) =>
+    api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}`),
 
-  // DB Users (instance-scoped)
+  // DB Users (instance-scoped; username + host for MySQL)
   listUsers: (instanceId: number) =>
     api.get<ApiResponse<DBUser[]>>(`/db/instances/${instanceId}/users`),
 
   createUser: (instanceId: number, data: { username: string; password: string; host?: string }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/users`, data),
 
-  deleteUser: (instanceId: number, userId: number) =>
-    api.delete<ApiResponse>(`/db/instances/${instanceId}/users/${userId}`),
+  deleteUser: (instanceId: number, username: string, host: string = '%') =>
+    api.delete<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}`, { params: { host } }),
 
-  grantPrivileges: (instanceId: number, userId: number, data: { privileges: string; database?: string }) =>
-    api.post<ApiResponse>(`/db/instances/${instanceId}/users/${userId}/grant`, data),
+  grantPrivileges: (instanceId: number, username: string, data: { privileges: string; database?: string }, host: string = '%') =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/grant`, data, { params: { host } }),
 
   // Database introspection
-  listTables: (dbId: number) =>
-    api.get<ApiResponse<Array<{ name: string }>>>(`/db/databases/${dbId}/tables`),
+  listTables: (instanceId: number, dbName: string) =>
+    api.get<ApiResponse<Array<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`),
 
-  describeTable: (dbId: number, table: string) =>
-    api.get<ApiResponse<{ table_name: string; primary_key: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/databases/${dbId}/describe`, { params: { table } }),
+  describeTable: (instanceId: number, dbName: string, table: string) =>
+    api.get<ApiResponse<{ table_name: string; primary_key: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
 
   // Table management
-  createTable: (dbId: number, data: { name: string; columns: Array<{ name: string; type: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean }> }) =>
-    api.post<ApiResponse>(`/db/databases/${dbId}/tables`, data),
+  createTable: (instanceId: number, dbName: string, data: { name: string; columns: Array<{ name: string; type: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean }> }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, data),
 
-  dropTable: (dbId: number, table: string) =>
-    api.delete<ApiResponse>(`/db/databases/${dbId}/tables`, { params: { table } }),
+  dropTable: (instanceId: number, dbName: string, table: string) =>
+    api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, { params: { table } }),
 
-  queryTable: (dbId: number, table: string, page: number = 1, pageSize: number = 50) =>
-    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/databases/${dbId}/query`, { params: { table, page, page_size: pageSize } }),
+  queryTable: (instanceId: number, dbName: string, table: string, page: number = 1, pageSize: number = 50) =>
+    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/query`, { params: { table, page, page_size: pageSize } }),
 
-  executeSQL: (dbId: number, sql: string) =>
-    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/databases/${dbId}/execute`, { sql }),
+  executeSQL: (instanceId: number, dbName: string, sql: string) =>
+    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/execute`, { sql }),
 
-  insertRecord: (dbId: number, table: string, data: Record<string, string | number | null>) =>
-    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/databases/${dbId}/insert`, { table, data }),
+  insertRecord: (instanceId: number, dbName: string, table: string, data: Record<string, string | number | null>) =>
+    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/insert`, { table, data }),
 
-  updateRecord: (dbId: number, table: string, data: Record<string, string | number | null>, primaryKey: string, primaryVal: string | number) =>
-    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/databases/${dbId}/update`, { table, data, primary_key: primaryKey, primary_val: primaryVal }),
+  updateRecord: (instanceId: number, dbName: string, table: string, data: Record<string, string | number | null>, primaryKey: string, primaryVal: string | number) =>
+    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/update`, { table, data, primary_key: primaryKey, primary_val: primaryVal }),
 
-  deleteRecord: (dbId: number, table: string, primaryKey: string, primaryVal: string | number) =>
-    api.post<ApiResponse<{ success: boolean; error?: string }>>(`/db/databases/${dbId}/delete`, { table, primary_key: primaryKey, primary_val: primaryVal }),
+  deleteRecord: (instanceId: number, dbName: string, table: string, primaryKey: string, primaryVal: string | number) =>
+    api.post<ApiResponse<{ success: boolean; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/delete`, { table, primary_key: primaryKey, primary_val: primaryVal }),
 
   // MySQL config management
   getMySQLConfig: () =>
@@ -655,12 +656,12 @@ export const dbServerApi = {
   getRedisCommonParams: () =>
     api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/redis/common-params'),
 
-  // Backup management
-  createBackup: (dbId: number) =>
-    api.post<ApiResponse<DBBackup>>(`/db/databases/${dbId}/backup`),
+  // Backup management (scoped by instance + database name)
+  createBackup: (instanceId: number, dbName: string) =>
+    api.post<ApiResponse<DBBackup>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backup`),
 
-  listBackups: (dbId: number) =>
-    api.get<ApiResponse<DBBackup[]>>(`/db/databases/${dbId}/backups`),
+  listBackups: (instanceId: number, dbName: string) =>
+    api.get<ApiResponse<DBBackup[]>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backups`),
 
   downloadBackup: (backupId: number) =>
     api.get(`/db/backups/${backupId}/download`, { responseType: 'blob' }),

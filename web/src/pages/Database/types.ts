@@ -110,8 +110,8 @@ export interface DatabaseListProps {
   onEnterDatabase: (db: Database) => void;
   onRefreshDatabases: () => void;
   onRefreshUsers: () => void;
-  onDeleteDB: (dbId: number) => void;
-  onDeleteUser: (userId: number) => void;
+  onDeleteDB: (dbName: string) => void;
+  onDeleteUser: (user: DBUser) => void;
   onStartVersion: (v: DBInstance) => void;
   onStopVersion: (v: DBInstance) => void;
   onRestartVersion: (v: DBInstance) => void;

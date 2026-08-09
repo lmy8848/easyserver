@@ -41,33 +41,34 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/instances/:iid/config", instanceHandler.GetInstanceConfig)
 	protected.PUT("/db/instances/:iid/config", instanceHandler.SaveInstanceConfig)
 
-	// Logical databases, scoped by instance.
+	// Logical databases, scoped by instance. Databases are live engine state —
+	// the db name is the identifier, there is no persisted db id.
 	protected.GET("/db/instances/:iid/databases", dbHandler.ListDatabases)
 	protected.POST("/db/instances/:iid/databases", dbHandler.CreateDatabase)
-	protected.DELETE("/db/instances/:iid/databases/:did", dbHandler.DeleteDatabase)
+	protected.DELETE("/db/instances/:iid/databases/:dbname", dbHandler.DeleteDatabase)
 
-	// DB Users, scoped by instance.
+	// DB Users, scoped by instance (username, plus host for MySQL).
 	protected.GET("/db/instances/:iid/users", userHandler.ListDBUsers)
 	protected.POST("/db/instances/:iid/users", userHandler.CreateDBUser)
-	protected.DELETE("/db/instances/:iid/users/:uid", userHandler.DeleteDBUser)
-	protected.POST("/db/instances/:iid/users/:uid/grant", userHandler.GrantPrivileges)
+	protected.DELETE("/db/instances/:iid/users/:username", userHandler.DeleteDBUser)
+	protected.POST("/db/instances/:iid/users/:username/grant", userHandler.GrantPrivileges)
 
-	// Database introspection (database id is globally unique)
-	protected.GET("/db/databases/:did/tables", dbHandler.ListTables)
-	protected.GET("/db/databases/:did/describe", dbHandler.DescribeTable)
-	protected.GET("/db/databases/:did/query", dbHandler.QueryTable)
-	protected.POST("/db/databases/:did/execute", dbHandler.ExecuteSQL)
-	protected.POST("/db/databases/:did/insert", dbHandler.InsertRecord)
-	protected.POST("/db/databases/:did/update", dbHandler.UpdateRecord)
-	protected.POST("/db/databases/:did/delete", dbHandler.DeleteRecord)
+	// Database introspection (instance-scoped, addressed by database name)
+	protected.GET("/db/instances/:iid/databases/:dbname/tables", dbHandler.ListTables)
+	protected.GET("/db/instances/:iid/databases/:dbname/describe", dbHandler.DescribeTable)
+	protected.GET("/db/instances/:iid/databases/:dbname/query", dbHandler.QueryTable)
+	protected.POST("/db/instances/:iid/databases/:dbname/execute", dbHandler.ExecuteSQL)
+	protected.POST("/db/instances/:iid/databases/:dbname/insert", dbHandler.InsertRecord)
+	protected.POST("/db/instances/:iid/databases/:dbname/update", dbHandler.UpdateRecord)
+	protected.POST("/db/instances/:iid/databases/:dbname/delete", dbHandler.DeleteRecord)
 
 	// Table management
-	protected.POST("/db/databases/:did/tables", dbHandler.CreateTable)
-	protected.DELETE("/db/databases/:did/tables", dbHandler.DropTable)
+	protected.POST("/db/instances/:iid/databases/:dbname/tables", dbHandler.CreateTable)
+	protected.DELETE("/db/instances/:iid/databases/:dbname/tables", dbHandler.DropTable)
 
 	// Database backup
-	protected.POST("/db/databases/:did/backup", backupHandler.CreateBackup)
-	protected.GET("/db/databases/:did/backups", backupHandler.ListBackups)
+	protected.POST("/db/instances/:iid/databases/:dbname/backup", backupHandler.CreateBackup)
+	protected.GET("/db/instances/:iid/databases/:dbname/backups", backupHandler.ListBackups)
 	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
 	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
@@ -363,18 +364,13 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dbID, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
-	dbInfo, err := h.svc.GetDatabaseByID(c.Request.Context(), dbID)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
-		return
-	}
-	middleware.AuditSummary(c, "删除数据库 "+dbInfo.Name)
-	if err := h.svc.DeleteDatabase(c.Request.Context(), iid, dbID); err != nil {
+	middleware.AuditSummary(c, "删除数据库 "+dbName)
+	if err := h.svc.DeleteDatabase(c.Request.Context(), iid, dbName); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -384,13 +380,17 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 // --- Database introspection ---
 
 func (h *DatabaseHandler) ListTables(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
-	tables, err := h.svc.ListTables(c.Request.Context(), did)
+	tables, err := h.svc.ListTables(c.Request.Context(), iid, dbName)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -400,9 +400,13 @@ func (h *DatabaseHandler) ListTables(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 	tableName := c.Query("table")
@@ -415,7 +419,7 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.DescribeTable(c.Request.Context(), did, tableName)
+	result, err := h.svc.DescribeTable(c.Request.Context(), iid, dbName, tableName)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -425,9 +429,13 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) QueryTable(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 	tableName := c.Query("table")
@@ -442,7 +450,7 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
 
-	result, err := h.svc.QueryTable(c.Request.Context(), did, tableName, page, pageSize)
+	result, err := h.svc.QueryTable(c.Request.Context(), iid, dbName, tableName, page, pageSize)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -458,9 +466,13 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
@@ -471,14 +483,9 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	dbInfo, err := h.svc.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
-		return
-	}
-	middleware.AuditSummary(c, "执行SQL (数据库: "+dbInfo.Name+")")
+	middleware.AuditSummary(c, "执行SQL (数据库: "+dbName+")")
 
-	result, err := h.svc.ExecuteSQL(c.Request.Context(), did, req.SQL)
+	result, err := h.svc.ExecuteSQL(c.Request.Context(), iid, dbName, req.SQL)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.Wrap(err))
 		return
@@ -493,9 +500,13 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
@@ -509,7 +520,7 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "插入记录到表 "+req.Table)
 
-	result, err := h.svc.InsertRecord(c.Request.Context(), did, req.Table, req.Data, c.Query("dry_run") == "true")
+	result, err := h.svc.InsertRecord(c.Request.Context(), iid, dbName, req.Table, req.Data, c.Query("dry_run") == "true")
 	if err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -519,9 +530,13 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
@@ -537,7 +552,7 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "更新表 "+req.Table+" 记录")
 
-	result, err := h.svc.UpdateRecord(c.Request.Context(), did, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
+	result, err := h.svc.UpdateRecord(c.Request.Context(), iid, dbName, req.Table, req.Data, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -547,9 +562,13 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
@@ -564,7 +583,7 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "删除表 "+req.Table+" 记录")
 
-	result, err := h.svc.DeleteRecord(c.Request.Context(), did, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
+	result, err := h.svc.DeleteRecord(c.Request.Context(), iid, dbName, req.Table, req.PrimaryKey, req.PrimaryVal, c.Query("dry_run") == "true")
 	if err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -576,9 +595,13 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
 // --- Table management ---
 
 func (h *DatabaseHandler) CreateTable(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
@@ -609,7 +632,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 		})
 	}
 
-	if err := h.svc.CreateTable(c.Request.Context(), did, req.Name, columns); err != nil {
+	if err := h.svc.CreateTable(c.Request.Context(), iid, dbName, req.Name, columns); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
 			c.Error(apperror.ErrBadRequest.Wrap(err))
 		} else {
@@ -622,9 +645,13 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) DropTable(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
@@ -635,7 +662,7 @@ func (h *DatabaseHandler) DropTable(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "删除表 "+tableName)
 
-	if err := h.svc.DropTable(c.Request.Context(), did, tableName); err != nil {
+	if err := h.svc.DropTable(c.Request.Context(), iid, dbName, tableName); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
 			c.Error(apperror.ErrBadRequest.Wrap(err))
 		} else {
@@ -693,13 +720,14 @@ func (h *UserHandler) DeleteDBUser(c *gin.Context) {
 	if !ok {
 		return
 	}
-	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户ID"))
+	username := c.Param("username")
+	if username == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户名"))
 		return
 	}
-	middleware.AuditSummary(c, "删除数据库用户 "+strconv.FormatInt(uid, 10))
-	if err := h.svc.DeleteDBUser(c.Request.Context(), iid, uid); err != nil {
+	host := c.DefaultQuery("host", "%")
+	middleware.AuditSummary(c, "删除数据库用户 "+username)
+	if err := h.svc.DeleteDBUser(c.Request.Context(), iid, username, host); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -711,18 +739,19 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 	if !ok {
 		return
 	}
-	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户ID"))
+	username := c.Param("username")
+	if username == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户名"))
 		return
 	}
+	host := c.DefaultQuery("host", "%")
 	var req database.GrantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	middleware.AuditSummary(c, "授权数据库用户 "+strconv.FormatInt(uid, 10))
-	if err := h.svc.GrantPrivileges(c.Request.Context(), iid, uid, &req); err != nil {
+	middleware.AuditSummary(c, "授权数据库用户 "+username)
+	if err := h.svc.GrantPrivileges(c.Request.Context(), iid, username, host, &req); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -739,20 +768,24 @@ func NewBackupHandler(svc *database.Service) *BackupHandler {
 }
 
 func (h *BackupHandler) CreateBackup(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	// Get database info (carries its instance id and engine type)
-	db, err := h.svc.GetDatabaseByID(c.Request.Context(), did)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
-	middleware.AuditSummary(c, "创建数据库备份 "+db.Name)
+	middleware.AuditSummary(c, "创建数据库备份 "+dbName)
 
-	backup, err := h.svc.CreateBackup(c.Request.Context(), db.DBInstanceID, did, db.Name, db.DBType)
+	instance, err := h.svc.GetInstance(c.Request.Context(), iid)
+	if err != nil || instance == nil {
+		c.Error(apperror.ErrNotFound.WithMessage("数据库实例不存在"))
+		return
+	}
+
+	backup, err := h.svc.CreateBackup(c.Request.Context(), iid, dbName, instance.DBType)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -762,13 +795,17 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 }
 
 func (h *BackupHandler) ListBackups(c *gin.Context) {
-	did, err := strconv.ParseInt(c.Param("did"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	dbName := c.Param("dbname")
+	if dbName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库名"))
 		return
 	}
 
-	backups, err := h.svc.ListBackups(c.Request.Context(), did)
+	backups, err := h.svc.ListBackups(c.Request.Context(), iid, dbName)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return

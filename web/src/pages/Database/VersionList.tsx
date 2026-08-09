@@ -42,7 +42,7 @@ export default function VersionList({
       onOk: async () => {
         if (newPort > 0 && newPort !== v.port) {
           try {
-            await dbServerApi.updateVersionPort(v.id, newPort);
+            await dbServerApi.updateInstancePort(v.id, newPort);
             message.success('端口已修改，启动服务后生效');
             onRefreshVersions();
           } catch (error: unknown) {
