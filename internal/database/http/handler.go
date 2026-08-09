@@ -18,14 +18,11 @@ import (
 
 // RegisterRoutes registers database management routes.
 func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
-	engineHandler := NewEngineHandler(svc)
 	instanceHandler := NewInstanceHandler(svc)
 	dbHandler := NewDatabaseHandler(svc)
 	userHandler := NewUserHandler(svc)
 	backupHandler := NewBackupHandler(svc)
 	configHandler := NewConfigHandler()
-
-	protected.GET("/db", engineHandler.List)
 
 	// Instance lifecycle, scoped by engine enum.
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
@@ -76,20 +73,6 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/mysql/common-params", configHandler.GetMySQLCommonParams)
 	protected.GET("/db/postgresql/common-params", configHandler.GetPGCommonParams)
 	protected.GET("/db/redis/common-params", configHandler.GetRedisCommonParams)
-}
-
-// EngineHandler serves the static engine catalog (no aggregate state — instance
-// status lives on the instances and is refreshed by the instance endpoints).
-type EngineHandler struct {
-	svc *database.Service
-}
-
-func NewEngineHandler(svc *database.Service) *EngineHandler {
-	return &EngineHandler{svc: svc}
-}
-
-func (h *EngineHandler) List(c *gin.Context) {
-	httpx.Success(c, h.svc.ListEngines(c.Request.Context()))
 }
 
 // InstanceHandler handles instance lifecycle endpoints, scoped by engine enum.

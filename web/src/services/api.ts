@@ -4,7 +4,7 @@ import type {
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
-  WebServer, Website, DBEngine, DBInstance, Database, DBUser,
+  WebServer, Website, DBInstance, Database, DBUser,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -533,9 +533,6 @@ export const websiteApi = {
 
 // Database Server API
 export const dbServerApi = {
-  listEngines: () =>
-    api.get<ApiResponse<DBEngine[]>>('/db'),
-
   // Instance lifecycle, scoped by engine enum.
   listInstances: (dbtype: string) =>
     api.get<ApiResponse<DBInstance[]>>(`/db/${dbtype}/instances`),

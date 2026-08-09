@@ -1,4 +1,4 @@
-import type { DBEngine, Database, DBUser, DBInstance } from '../../types';
+import type { Database, DBUser, DBInstance } from '../../types';
 
 // Version templates from API
 export interface VersionTemplate {
@@ -7,22 +7,43 @@ export interface VersionTemplate {
   description: string;
 }
 
+// EngineInfo is what sub-pages need to know about the active engine. It is a
+// static front-end constant, not a backend catalog — the top-level tab defines
+// it, so the backend /db catalog endpoint was removed.
+export interface EngineInfo {
+  db_type: string;
+  display_name: string;
+}
+
+export interface EngineTab extends EngineInfo {
+  templates: VersionTemplate[];
+}
+
 // Fixed per-engine installable versions (the version-template HTTP endpoint was
-// removed; the template catalogue is static).
-export const ENGINE_VERSION_TEMPLATES: Record<string, VersionTemplate[]> = {
-  mysql: [
-    { version: '8.0', image: 'mysql:8.0', description: 'MySQL 8.0' },
-    { version: '8.4', image: 'mysql:8.4', description: 'MySQL 8.4 LTS' },
-  ],
-  postgresql: [
-    { version: '15', image: 'postgres:15', description: 'PostgreSQL 15' },
-    { version: '16', image: 'postgres:16', description: 'PostgreSQL 16' },
-  ],
-  redis: [
-    { version: '7', image: 'redis:7-alpine', description: 'Redis 7' },
-    { version: '6', image: 'redis:6-alpine', description: 'Redis 6' },
-  ],
-};
+// removed; the template catalogue is static). Also drives the top-level Tabs.
+export const ENGINE_TABS: EngineTab[] = [
+  {
+    db_type: 'mysql', display_name: 'MySQL',
+    templates: [
+      { version: '8.0', image: 'mysql:8.0', description: 'MySQL 8.0' },
+      { version: '8.4', image: 'mysql:8.4', description: 'MySQL 8.4 LTS' },
+    ],
+  },
+  {
+    db_type: 'postgresql', display_name: 'PostgreSQL',
+    templates: [
+      { version: '15', image: 'postgres:15', description: 'PostgreSQL 15' },
+      { version: '16', image: 'postgres:16', description: 'PostgreSQL 16' },
+    ],
+  },
+  {
+    db_type: 'redis', display_name: 'Redis',
+    templates: [
+      { version: '7', image: 'redis:7-alpine', description: 'Redis 7' },
+      { version: '6', image: 'redis:6-alpine', description: 'Redis 6' },
+    ],
+  },
+];
 
 // Table data structure
 export interface TableData {
@@ -46,28 +67,12 @@ export interface SqlResult {
 
 // ===== Component Props =====
 
-// ServerList props
-export interface ServerListProps {
-  servers: DBEngine[];
-  loading: boolean;
-  onEnterServer: (server: DBEngine) => void;
-  onRefresh: () => void;
-  installVersionVisible: boolean;
-  onInstallVersionVisibleChange: (visible: boolean) => void;
-  versionTemplates: VersionTemplate[];
-  installVersionForm: any;
-  onInstallVersion: () => void;
-  portCheck: { available: boolean; message: string; process?: string } | null;
-  onCheckPort: (port: number) => void;
-}
-
 // VersionList props
 export interface VersionListProps {
-  server: DBEngine;
+  server: EngineInfo;
   versions: DBInstance[];
   versionsLoading: boolean;
   operating: string;
-  onBack: () => void;
   onEnterVersion: (version: DBInstance) => void;
   onRefreshVersions: () => void;
   onStartVersion: (v: DBInstance) => void;
@@ -99,7 +104,7 @@ export interface VersionListProps {
 
 // DatabaseList props
 export interface DatabaseListProps {
-  server: DBEngine;
+  server: EngineInfo;
   version: DBInstance;
   databases: Database[];
   dbsLoading: boolean;
@@ -153,7 +158,7 @@ export interface DatabaseListProps {
 
 // TableExplorer props
 export interface TableExplorerProps {
-  server: DBEngine;
+  server: EngineInfo;
   version: DBInstance;
   database: Database;
   onBack: () => void;
@@ -211,4 +216,4 @@ export interface TableExplorerProps {
 }
 
 // Re-export parent types for convenience
-export type { DBEngine, Database, DBUser, DBInstance };
+export type { Database, DBUser, DBInstance };

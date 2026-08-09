@@ -9,16 +9,6 @@ const (
 	DBTypeRedis      DBType = "redis"
 )
 
-// DBEngine is one of the database engine enum entries. It is a static catalog
-// (never persisted): display metadata, the default port and the version/image
-// templates are all code-defined.
-type DBEngine struct {
-	DBType      DBType `json:"db_type"` // mysql, postgresql, redis
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	DefaultPort int    `json:"default_port"`
-}
-
 // DBInstance is a container-backed Database Instance — the top-level resource of
 // the database module. The container is addressed by ContainerID only; each
 // instance owns one managed container, one named data volume, an instance-level
@@ -86,28 +76,17 @@ func IsValidDBType(t DBType) bool {
 	return false
 }
 
-// DBEngines returns the static engine catalog.
-func DBEngines() []DBEngine {
-	return []DBEngine{
-		{
-			DBType:      DBTypeMySQL,
-			DisplayName: "MySQL",
-			Description: "最流行的关系型数据库，广泛用于 Web 应用",
-			DefaultPort: 3306,
-		},
-		{
-			DBType:      DBTypePostgreSQL,
-			DisplayName: "PostgreSQL",
-			Description: "功能强大的开源关系型数据库",
-			DefaultPort: 5432,
-		},
-		{
-			DBType:      DBTypeRedis,
-			DisplayName: "Redis",
-			Description: "高性能内存数据库，用于缓存和消息队列",
-			DefaultPort: 6379,
-		},
+// defaultPort returns the engine's well-known listen port.
+func defaultPort(dbType DBType) int {
+	switch dbType {
+	case DBTypeMySQL:
+		return 3306
+	case DBTypePostgreSQL:
+		return 5432
+	case DBTypeRedis:
+		return 6379
 	}
+	return 0
 }
 
 // Database is a logical database inside an instance, queried live from the

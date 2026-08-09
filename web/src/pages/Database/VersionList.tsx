@@ -5,7 +5,7 @@ import {
 import {
   DatabaseOutlined, PlusOutlined, ReloadOutlined,
   PlayCircleOutlined, StopOutlined,
-  FileTextOutlined, UndoOutlined, EditOutlined, ArrowLeftOutlined,
+  FileTextOutlined, UndoOutlined, EditOutlined,
 } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import STYLES from './styles';
@@ -13,7 +13,7 @@ import type { VersionListProps, DBInstance } from './types';
 
 export default function VersionList({
   server, versions, versionsLoading, operating,
-  onBack, onEnterVersion, onRefreshVersions,
+  onEnterVersion, onRefreshVersions,
   onStartVersion, onStopVersion, onUninstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, onInstallVersion,
@@ -57,7 +57,6 @@ export default function VersionList({
     <div>
       <Card style={{ marginBottom: 16 }}>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
           <DatabaseOutlined style={{ fontSize: 24, color: '#1677ff' }} />
           <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
         </Space>

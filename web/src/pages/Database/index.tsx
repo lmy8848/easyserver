@@ -1,21 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag } from 'antd';
+import { Form, message, Modal, Tag, Tabs } from 'antd';
 import { dbServerApi } from '../../services/api';
-import type { DBEngine, Database, DBUser, DBInstance } from '../../types';
+import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
-import ServerList from './ServerList';
 import VersionList from './VersionList';
 import DatabaseList from './DatabaseList';
 import TableExplorer from './TableExplorer';
-import type { VersionTemplate, TableData, TableInfo, SqlResult } from './types';
-import { ENGINE_VERSION_TEMPLATES } from './types';
+import type { TableData, TableInfo, SqlResult } from './types';
+import { ENGINE_TABS } from './types';
 
 export default function DatabasePage() {
   // ===== Navigation state =====
-  const [servers, setServers] = useState<DBEngine[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedServer, setSelectedServer] = useState<DBEngine | null>(null);
+  // The engine is a static front-end Tab (MySQL/PostgreSQL/Redis); the instance
+  // list, instance detail and database explorer render below it.
+  const [activeDbType, setActiveDbType] = useState('mysql');
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
@@ -23,7 +22,6 @@ export default function DatabasePage() {
   // ===== Version state =====
   const [versions, setVersions] = useState<DBInstance[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
-  const [versionTemplates, setVersionTemplates] = useState<VersionTemplate[]>([]);
   const [installVersionVisible, setInstallVersionVisible] = useState(false);
   const [installVersionForm] = Form.useForm();
 
@@ -93,15 +91,18 @@ export default function DatabasePage() {
   const [recordSaving, setRecordSaving] = useState(false);
 
   // ===== Fetch functions =====
-  const fetchServers = async () => {
-    try {
-      const res = await dbServerApi.listEngines();
-      setServers(res.data?.data || []);
-    } catch (error) { console.error('Failed to fetch engines:', error); message.error('加载引擎列表失败'); } finally { setLoading(false); }
+  // activeDbType only ever holds one of ENGINE_TABS' db_type keys (initial value
+  // and Tabs items are both hard-coded), so find() always matches.
+  const activeEngine = ENGINE_TABS.find(e => e.db_type === activeDbType)!;
+
+  const fetchInstances = async (dbtype: string) => {
+    setVersionsLoading(true);
+    try { const res = await dbServerApi.listInstances(dbtype); setVersions(res.data?.data || []); }
+    catch (error) { console.error('Failed to fetch instances:', error); message.error('加载实例列表失败'); } finally { setVersionsLoading(false); }
   };
 
   // ===== Effects =====
-  useEffect(() => { fetchServers(); }, []);
+  useEffect(() => { fetchInstances('mysql'); }, []);
 
   useEffect(() => {
     if (!logVisible || !logVersion) return;
@@ -120,12 +121,6 @@ export default function DatabasePage() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [logContent, logFollow]);
-
-  const fetchInstances = async (dbtype: string) => {
-    setVersionsLoading(true);
-    try { const res = await dbServerApi.listInstances(dbtype); setVersions(res.data?.data || []); }
-    catch (error) { console.error('Failed to fetch instances:', error); message.error('加载实例列表失败'); } finally { setVersionsLoading(false); }
-  };
 
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
@@ -206,12 +201,14 @@ export default function DatabasePage() {
   };
 
   // ===== Navigation handlers =====
-  const enterServer = async (server: DBEngine) => {
-    setSelectedServer(server);
+  // ===== Navigation handlers =====
+  // Switching engine Tab resets to the instance list and reloads it.
+  const changeEngine = (dbtype: string) => {
+    setActiveDbType(dbtype);
     setSelectedVersion(null);
     setSelectedDatabase(null);
-    await fetchInstances(server.db_type);
-    setVersionTemplates(ENGINE_VERSION_TEMPLATES[server.db_type] || []);
+    setDatabases([]); setDBUsers([]);
+    fetchInstances(dbtype);
   };
 
   const enterVersion = async (version: DBInstance) => {
@@ -233,13 +230,6 @@ export default function DatabasePage() {
     await Promise.all([fetchTables(instance.id, db.name), fetchBackups(instance.id, db.name)]);
   };
 
-  const goBackToServers = () => {
-    setSelectedServer(null);
-    setSelectedVersion(null);
-    setSelectedDatabase(null);
-    setVersions([]); setDatabases([]); setDBUsers([]);
-  };
-
   const goBackToVersions = () => {
     setSelectedVersion(null);
     setSelectedDatabase(null);
@@ -254,7 +244,7 @@ export default function DatabasePage() {
 
   // ===== Version actions =====
   const handleInstallVersion = async () => {
-    const server = selectedServer;
+    const server = activeEngine;
     if (!server) return;
     try {
       const values = await installVersionForm.validateFields();
@@ -266,7 +256,7 @@ export default function DatabasePage() {
   };
 
   const handleStartVersion = async (v: DBInstance) => {
-    const server = selectedServer;
+    const server = activeEngine;
     if (!server) return;
     setOperating(`start-${v.id}`);
     try {
@@ -278,7 +268,7 @@ export default function DatabasePage() {
   };
 
   const handleStopVersion = async (v: DBInstance) => {
-    const server = selectedServer;
+    const server = activeEngine;
     if (!server) return;
     setOperating(`stop-${v.id}`);
     try {
@@ -290,7 +280,7 @@ export default function DatabasePage() {
   };
 
   const handleRestartVersion = async (v: DBInstance) => {
-    const server = selectedServer;
+    const server = activeEngine;
     if (!server) return;
     setOperating(`restart-${v.id}`);
     try {
@@ -302,7 +292,7 @@ export default function DatabasePage() {
   };
 
   const handleUninstallVersion = async (v: DBInstance) => {
-    const server = selectedServer;
+    const server = activeEngine;
     if (!server) return;
     setOperating(`uninstall-${v.id}`);
     try {
@@ -416,7 +406,7 @@ export default function DatabasePage() {
     try {
       const res = await dbServerApi.getInstanceConfig(v.id);
       const data = res?.data?.data;
-      setConfigContent(`# ${selectedServer?.display_name} Config: ${data?.file_path || ''}\n\n${data?.content || ''}`);
+      setConfigContent(`# ${activeEngine.display_name} Config: ${data?.file_path || ''}\n\n${data?.content || ''}`);
     } catch (error: unknown) { setConfigContent('# Error: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setConfigLoading(false); }
   };
@@ -595,135 +585,130 @@ export default function DatabasePage() {
   };
 
   // ===== Render =====
-
-  // Level 4: Database detail (tables + SQL + backups)
-  if (selectedDatabase && selectedVersion && selectedServer) {
-    return (
-      <TableExplorer
-        server={selectedServer}
-        version={selectedVersion}
-        database={selectedDatabase}
-        onBack={goBackToVersionDetail}
-        tableList={tableList}
-        tableLoading={tableLoading}
-        selectedTable={selectedTable}
-        tableData={tableData}
-        tableDataLoading={tableDataLoading}
-        tablePage={tablePage}
-        tableInfo={tableInfo}
-        onSelectTable={(t) => { setSelectedTable(t); if (selectedDatabase) fetchTableData(selectedVersion.id, selectedDatabase.name, t); }}
-        onFetchTables={() => selectedDatabase && fetchTables(selectedVersion.id, selectedDatabase.name)}
-        onFetchTableData={(t, p) => selectedDatabase && fetchTableData(selectedVersion.id, selectedDatabase.name, t, p)}
-        createTableVisible={createTableVisible}
-        createTableLoading={createTableLoading}
-        createForm={createForm}
-        onCreateTableVisibleChange={setCreateTableVisible}
-        onCreateTable={handleCreateTable}
-        onDropTable={handleDropTable}
-        recordModalVisible={recordModalVisible}
-        editingRecord={editingRecord}
-        recordForm={recordForm}
-        recordSaving={recordSaving}
-        onRecordModalVisibleChange={setRecordModalVisible}
-        onOpenInsertModal={openInsertModal}
-        onOpenEditModal={openEditModal}
-        onSaveRecord={handleSaveRecord}
-        onDeleteRecord={handleDeleteRecord}
-        sqlInput={sqlInput}
-        sqlResult={sqlResult}
-        sqlLoading={sqlLoading}
-        onSqlInputChange={setSqlInput}
-        onExecuteSQL={handleExecuteSQL}
-        backups={backups}
-        backupsLoading={backupsLoading}
-        backupCreating={backupCreating}
-        onCreateBackup={handleCreateBackup}
-        onDownloadBackup={handleDownloadBackup}
-        onRestoreBackup={handleRestoreBackup}
-        onDeleteBackup={handleDeleteBackup}
-        logVisible={logVisible}
-        logVersion={logVersion}
-        logContent={logContent}
-        logLoading={logLoading}
-        logFollow={logFollow}
-        logRef={logRef}
-        onLogVisibleChange={setLogVisible}
-        onLogFollowChange={setLogFollow}
-      />
-    );
-  }
-
-  // Level 3: Version detail (databases + users + config)
-  if (selectedVersion && selectedServer) {
-    return (
-      <DatabaseList
-        server={selectedServer}
-        version={selectedVersion}
-        databases={databases}
-        dbsLoading={dbsLoading}
-        dbUsers={dbUsers}
-        usersLoading={usersLoading}
-        operating={operating}
-        onBack={goBackToVersions}
-        onEnterDatabase={enterDatabase}
-        onRefreshDatabases={() => fetchDatabases(selectedVersion.id)}
-        onRefreshUsers={() => fetchUsers(selectedVersion.id)}
-        onDeleteDB={handleDeleteDB}
-        onDeleteUser={handleDeleteUser}
-        onStartVersion={handleStartVersion}
-        onStopVersion={handleStopVersion}
-        onRestartVersion={handleRestartVersion}
-        dbModalVisible={dbModalVisible}
-        onDbModalVisibleChange={setDbModalVisible}
-        dbForm={dbForm}
-        onCreateDB={handleCreateDB}
-        userModalVisible={userModalVisible}
-        onUserModalVisibleChange={setUserModalVisible}
-        userForm={userForm}
-        onCreateUser={handleCreateUser}
-        grantVisible={grantVisible}
-        grantUser={grantUser}
-        grantForm={grantForm}
-        onGrantVisibleChange={setGrantVisible}
-        onGrant={handleGrant}
-        onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
-        dbConfig={dbConfig}
-        dbConfigLoading={dbConfigLoading}
-        onFetchDBConfig={() => fetchDBConfig()}
-        onSaveDBConfig={handleSaveDBConfig}
-        onUpdateDBParam={updateDBParam}
-        logVisible={logVisible}
-        logVersion={logVersion}
-        logContent={logContent}
-        logLoading={logLoading}
-        logFollow={logFollow}
-        logRef={logRef}
-        onLogVisibleChange={setLogVisible}
-        onLogFollowChange={setLogFollow}
-        showConfig={showConfig}
-        showLogs={showLogs}
-      />
-    );
-  }
-
-  // Level 2: Version list
-  if (selectedServer) {
+  // The engine is a persistent top-level Tab; below it the three detail levels
+  // (instance list → instance detail → database explorer) render by selection.
+  const renderContent = () => {
+    if (selectedDatabase && selectedVersion) {
+      return (
+        <TableExplorer
+          server={activeEngine}
+          version={selectedVersion}
+          database={selectedDatabase}
+          onBack={goBackToVersionDetail}
+          tableList={tableList}
+          tableLoading={tableLoading}
+          selectedTable={selectedTable}
+          tableData={tableData}
+          tableDataLoading={tableDataLoading}
+          tablePage={tablePage}
+          tableInfo={tableInfo}
+          onSelectTable={(t) => { setSelectedTable(t); if (selectedDatabase) fetchTableData(selectedVersion.id, selectedDatabase.name, t); }}
+          onFetchTables={() => selectedDatabase && fetchTables(selectedVersion.id, selectedDatabase.name)}
+          onFetchTableData={(t, p) => selectedDatabase && fetchTableData(selectedVersion.id, selectedDatabase.name, t, p)}
+          createTableVisible={createTableVisible}
+          createTableLoading={createTableLoading}
+          createForm={createForm}
+          onCreateTableVisibleChange={setCreateTableVisible}
+          onCreateTable={handleCreateTable}
+          onDropTable={handleDropTable}
+          recordModalVisible={recordModalVisible}
+          editingRecord={editingRecord}
+          recordForm={recordForm}
+          recordSaving={recordSaving}
+          onRecordModalVisibleChange={setRecordModalVisible}
+          onOpenInsertModal={openInsertModal}
+          onOpenEditModal={openEditModal}
+          onSaveRecord={handleSaveRecord}
+          onDeleteRecord={handleDeleteRecord}
+          sqlInput={sqlInput}
+          sqlResult={sqlResult}
+          sqlLoading={sqlLoading}
+          onSqlInputChange={setSqlInput}
+          onExecuteSQL={handleExecuteSQL}
+          backups={backups}
+          backupsLoading={backupsLoading}
+          backupCreating={backupCreating}
+          onCreateBackup={handleCreateBackup}
+          onDownloadBackup={handleDownloadBackup}
+          onRestoreBackup={handleRestoreBackup}
+          onDeleteBackup={handleDeleteBackup}
+          logVisible={logVisible}
+          logVersion={logVersion}
+          logContent={logContent}
+          logLoading={logLoading}
+          logFollow={logFollow}
+          logRef={logRef}
+          onLogVisibleChange={setLogVisible}
+          onLogFollowChange={setLogFollow}
+        />
+      );
+    }
+    if (selectedVersion) {
+      return (
+        <DatabaseList
+          server={activeEngine}
+          version={selectedVersion}
+          databases={databases}
+          dbsLoading={dbsLoading}
+          dbUsers={dbUsers}
+          usersLoading={usersLoading}
+          operating={operating}
+          onBack={goBackToVersions}
+          onEnterDatabase={enterDatabase}
+          onRefreshDatabases={() => fetchDatabases(selectedVersion.id)}
+          onRefreshUsers={() => fetchUsers(selectedVersion.id)}
+          onDeleteDB={handleDeleteDB}
+          onDeleteUser={handleDeleteUser}
+          onStartVersion={handleStartVersion}
+          onStopVersion={handleStopVersion}
+          onRestartVersion={handleRestartVersion}
+          dbModalVisible={dbModalVisible}
+          onDbModalVisibleChange={setDbModalVisible}
+          dbForm={dbForm}
+          onCreateDB={handleCreateDB}
+          userModalVisible={userModalVisible}
+          onUserModalVisibleChange={setUserModalVisible}
+          userForm={userForm}
+          onCreateUser={handleCreateUser}
+          grantVisible={grantVisible}
+          grantUser={grantUser}
+          grantForm={grantForm}
+          onGrantVisibleChange={setGrantVisible}
+          onGrant={handleGrant}
+          onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
+          dbConfig={dbConfig}
+          dbConfigLoading={dbConfigLoading}
+          onFetchDBConfig={() => fetchDBConfig()}
+          onSaveDBConfig={handleSaveDBConfig}
+          onUpdateDBParam={updateDBParam}
+          logVisible={logVisible}
+          logVersion={logVersion}
+          logContent={logContent}
+          logLoading={logLoading}
+          logFollow={logFollow}
+          logRef={logRef}
+          onLogVisibleChange={setLogVisible}
+          onLogFollowChange={setLogFollow}
+          showConfig={showConfig}
+          showLogs={showLogs}
+        />
+      );
+    }
     return (
       <VersionList
-        server={selectedServer}
+        server={activeEngine}
         versions={versions}
         versionsLoading={versionsLoading}
         operating={operating}
-        onBack={goBackToServers}
         onEnterVersion={enterVersion}
-        onRefreshVersions={() => fetchInstances(selectedServer.db_type)}
+        onRefreshVersions={() => fetchInstances(activeDbType)}
         onStartVersion={handleStartVersion}
         onStopVersion={handleStopVersion}
         onRestartVersion={handleRestartVersion}
         onUninstallVersion={handleUninstallVersion}
         installVersionVisible={installVersionVisible}
         onInstallVersionVisibleChange={setInstallVersionVisible}
-        versionTemplates={versionTemplates}
+        versionTemplates={activeEngine.templates}
         installVersionForm={installVersionForm}
         onInstallVersion={handleInstallVersion}
         portCheck={portCheck}
@@ -741,22 +726,16 @@ export default function DatabasePage() {
         statusTag={statusTag}
       />
     );
-  }
+  };
 
-  // Level 1: Server list
   return (
-    <ServerList
-      servers={servers}
-      loading={loading}
-      onEnterServer={enterServer}
-      onRefresh={() => { setLoading(true); fetchServers(); }}
-      installVersionVisible={installVersionVisible}
-      onInstallVersionVisibleChange={setInstallVersionVisible}
-      versionTemplates={versionTemplates}
-      installVersionForm={installVersionForm}
-      onInstallVersion={handleInstallVersion}
-      portCheck={portCheck}
-      onCheckPort={checkPort}
-    />
+    <div>
+      <Tabs
+        activeKey={activeDbType}
+        onChange={changeEngine}
+        items={ENGINE_TABS.map(e => ({ key: e.db_type, label: e.display_name }))}
+      />
+      {renderContent()}
+    </div>
   );
 }

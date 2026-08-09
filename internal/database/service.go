@@ -71,15 +71,6 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime, encryptionK
 	}
 }
 
-// ListEngines returns the static engine catalog. Engine state lives on the
-// instances, not the engine row — the catalog carries no aggregate status.
-func (s *Service) ListEngines(ctx context.Context) []DBEngine {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return DBEngines()
-}
-
 // refreshInstanceStatus queries the container runtime (by container ID) and
 // persists the derived instance status.
 func (s *Service) refreshInstanceStatus(ctx context.Context, v *DBInstance) {
@@ -115,10 +106,6 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if !IsValidDBType(dbType) {
 		return nil, fmt.Errorf("unsupported database type %q", dbType)
 	}
-	engine := engineByType(dbType)
-	if engine == nil {
-		return nil, fmt.Errorf("unsupported database type %q", dbType)
-	}
 
 	count, err := s.repo.CountInstancesByDBTypeAndVersion(ctx, dbType, req.Version)
 	if err != nil {
@@ -147,7 +134,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 	port := req.Port
 	if port == 0 {
-		port = engine.DefaultPort
+		port = defaultPort(dbType)
 	}
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("port must be between 1 and 65535")
@@ -198,16 +185,6 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 	v.ID = id
 	return v, nil
-}
-
-// engineByType returns the static catalog entry for a dbType.
-func engineByType(dbType DBType) *DBEngine {
-	for _, e := range DBEngines() {
-		if e.DBType == dbType {
-			return &e
-		}
-	}
-	return nil
 }
 
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error {

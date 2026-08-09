@@ -233,16 +233,6 @@ export interface Website {
   updated_at: string;
 }
 
-// Database Server types
-// Database engine catalog entry — static (db_type/display_name/default_port).
-// Instance status lives on the instances; there is no engine-level aggregate.
-export interface DBEngine {
-  db_type: string; // mysql, postgresql, redis
-  display_name: string;
-  description: string;
-  default_port: number;
-}
-
 // Database Backup types
 export interface DBBackup {
   id: number;
