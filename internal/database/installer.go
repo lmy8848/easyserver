@@ -37,9 +37,10 @@ func (l *installLog) Tail(from int) ([]string, int) {
 	return l.lines[from:], len(l.lines)
 }
 
-// installTask is one in-flight installation. No database row exists while it
-// runs — the task is the only record of the install until it completes (the
-// row is written on success as "running", on failure as "failed").
+// installTask is one in-flight installation. While the image is being pulled no
+// database row exists — the task is the only record; once the container is
+// created the install goroutine writes a "provisioning" row that the task later
+// flips to "running"/"failed".
 type installTask struct {
 	installID  string
 	engine     DBType
@@ -66,10 +67,11 @@ func (t *InstallTask) Done() <-chan struct{} { return t.done }
 func (t *InstallTask) Err() error { return t.errFn() }
 
 // installer runs database installations in the background. One install per
-// engine at a time (serialized); no instance row exists until the install
-// completes, so a refresh shows no new instance — only the "正在安装" entry from
-// the active list. Service restart abandons in-flight tasks (their logs are
-// lost; no half-installed row is left behind).
+// engine at a time (serialized); the image-pull phase has no database row (the
+// "正在安装" entry comes from the active-installs list), then the container's
+// creation writes a "provisioning" row that a refresh sees. Service restart
+// abandons in-flight tasks (their logs are lost; a created-but-unstarted
+// container row stays "provisioning" for manual cleanup).
 type installer struct {
 	mu    sync.Mutex
 	busy  map[DBType]bool
@@ -194,48 +196,57 @@ func writeLog(log *installLog, msg string) {
 
 // installInstance runs the container creation pipeline and reports progress
 // into log. rt is an install-scoped runtime whose command output is hooked into
-// log. The instance row is written only when the install terminates — "running"
-// on success, "failed" on error (the failed row stays so the failure and its
-// log remain visible and the container can be cleaned up). While installing,
-// no row exists; the in-memory task is the only record.
+// log. The instance row is written once the container is created (image pulled)
+// — status "provisioning" until start + readiness flip it to "running"; a
+// failure flips it to "failed" (the row stays so the failure and its log remain
+// visible and the container can be cleaned up). The image-pull phase has no row;
+// the in-memory task is its only record.
 func (s *Service) installInstance(ctx context.Context, dbType DBType, version, image, engineName, containerID, volumeName, bindAddress string, port int, password string, spec ContainerSpec, rt DatabaseRuntime, log *installLog) error {
-	writeRow := func(status string) {
-		v := &DBInstance{DBType: dbType, Version: version, Port: port, Status: status,
-			ContainerEngine: engineName, Image: image, ContainerID: containerID,
-			VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password}
-		if _, err := s.repo.CreateInstance(ctx, v); err != nil {
-			log.append("❌ 写入实例记录失败: " + err.Error())
-		}
-	}
-	fail := func(msg string, err error) error {
+	fail := func(id int64, msg string, err error) error {
 		_ = rt.Remove(ctx, engineName, containerID)
-		writeRow("failed")
+		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
 		log.append("❌ " + msg + ": " + err.Error())
 		return err
 	}
 
 	log.append("开始安装 " + image + " ...")
 	if err := rt.Create(ctx, spec); err != nil {
-		return fail("创建容器失败", err)
+		log.append("❌ 创建容器失败: " + err.Error())
+		return err
 	}
-	log.append("容器已创建")
+	log.append("容器已创建，写入实例记录...")
+
+	// Container created (image pulled) → write the row now; the instance becomes
+	// visible in the list as "正在安装". No row exists during the image pull.
+	id, err := s.repo.CreateInstance(ctx, &DBInstance{
+		DBType: dbType, Version: version, Port: port, Status: "provisioning",
+		ContainerEngine: engineName, Image: image, ContainerID: containerID,
+		VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password,
+	})
+	if err != nil {
+		_ = rt.Remove(ctx, engineName, containerID)
+		log.append("❌ 写入实例记录失败: " + err.Error())
+		return err
+	}
 
 	if dbType == DBTypeRedis {
 		log.append("写入 Redis 配置...")
 		if err := seedRedisConfig(ctx, rt, engineName, containerID, password); err != nil {
-			return fail("写入 Redis 配置失败", err)
+			return fail(id, "写入 Redis 配置失败", err)
 		}
 	}
 
 	log.append("启动容器...")
 	if err := rt.Start(ctx, engineName, containerID); err != nil {
-		return fail("启动容器失败", err)
+		return fail(id, "启动容器失败", err)
 	}
 	log.append("等待数据库就绪（最长 2 分钟）...")
 	if _, err := waitForHealthy(ctx, rt, engineName, containerID, 2*time.Minute); err != nil {
-		return fail("数据库未就绪", err)
+		return fail(id, "数据库未就绪", err)
 	}
 	log.append("✅ 安装完成，数据库已就绪")
-	writeRow("running")
+	if err := s.repo.UpdateInstanceStatus(ctx, id, "running"); err != nil {
+		return err
+	}
 	return nil
 }

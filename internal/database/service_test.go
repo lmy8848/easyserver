@@ -127,10 +127,9 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	// No instance row exists while the install runs — only the task does.
-	if rows, _ := repo.ListInstances(context.Background(), DBTypeMySQL); len(rows) != 0 {
-		t.Fatalf("expected no instance row during install, got %d", len(rows))
-	}
+	// A row appears only after the container is created (provisioning), not at
+	// submit time — the fake create succeeds instantly, so the row may or may not
+	// be visible yet here; what matters is no "stopped" instance ever appears.
 	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}

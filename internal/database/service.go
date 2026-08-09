@@ -85,6 +85,12 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 // refreshInstanceStatus queries the container runtime (by container ID) and
 // persists the derived instance status.
 func (s *Service) refreshInstanceStatus(ctx context.Context, v *DBInstance) {
+	// provisioning rows are mid-install records: the container is created but the
+	// install isn't done, so its live state (created/restarting/…) is not the
+	// instance's status — overwriting it here would turn "正在安装" into "stopped".
+	if v.Status == "provisioning" {
+		return
+	}
 	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerID)
 	status := containerStatus(info, err)
 	v.Status = status
@@ -175,9 +181,9 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	spec := containerSpec(dbType, engineName, req.Version, req.Image, containerID, volumeName, bindAddress, port, password)
 
 	// Claim the engine before launching so the "already installing" error is
-	// returned synchronously. No database row is created here — an instance
-	// must not exist until it is actually installed (the row is written by the
-	// install goroutine on success/failure).
+	// returned synchronously. No database row is created here — the install
+	// goroutine writes one once the container is created (status provisioning),
+	// so an image pull never surfaces a half-installed instance.
 	if err := s.installer.begin(dbType); err != nil {
 		return nil, err
 	}
