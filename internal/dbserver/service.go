@@ -2,21 +2,40 @@ package dbserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
+	"time"
 
+	"easyserver/internal/deploy"
 	"easyserver/internal/infra/executor"
 )
 
 type Service struct {
-	executor executor.CommandExecutor
-	repo     Repository
+	executor      executor.CommandExecutor
+	repo          Repository
+	runtime       DatabaseRuntime
+	encryptionKey []byte
 }
 
 func NewService(exec executor.CommandExecutor, repo Repository) *Service {
-	return &Service{executor: exec, repo: repo}
+	return NewServiceWithEncryptionKey(exec, repo, "")
+}
+
+func NewServiceWithEncryptionKey(exec executor.CommandExecutor, repo Repository, encryptionKey string) *Service {
+	return &Service{
+		executor:      exec,
+		repo:          repo,
+		runtime:       NewCLIContainerRuntime(exec),
+		encryptionKey: []byte(encryptionKey),
+	}
+}
+
+// NewServiceWithRuntime is the test seam for lifecycle behavior.
+func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime, encryptionKey string) *Service {
+	return &Service{repo: repo, runtime: runtime, encryptionKey: []byte(encryptionKey)}
 }
 
 // SeedPredefinedServers inserts predefined database server entries if not exists.
@@ -89,62 +108,80 @@ func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *Cre
 		return nil, fmt.Errorf("version %s is already installed", req.Version)
 	}
 
-	// Find package name from templates
-	packageName := ""
+	// Resolve an immutable container image from the engine's supported templates.
+	image := ""
 	templates := GetVersionTemplates(ds.Name)
 	for _, t := range templates {
 		if t.Version == req.Version {
-			packageName = t.Package
+			image = t.Image
 			break
 		}
 	}
-	if packageName == "" {
-		packageName = fmt.Sprintf("%s-server", ds.Name)
+	if image == "" {
+		return nil, fmt.Errorf("unsupported database image version %s", req.Version)
 	}
-
-	// Install
-	log.Printf("db: installing %s version %s (package: %s)", ds.Name, req.Version, packageName)
-	s.executor.RunCombined(ctx, "apt-get", "update", "-y")
-	out, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", packageName)
-	if err != nil {
-		return nil, fmt.Errorf("install failed: %s", out)
+	runtimeName := strings.ToLower(strings.TrimSpace(req.Runtime))
+	if runtimeName == "" {
+		runtimeName = "docker"
 	}
-
-	// Detect service name
-	serviceName := s.detectServiceName(ds.Name, req.Version)
-
-	// Set port
+	if runtimeName != "docker" && runtimeName != "podman" {
+		return nil, fmt.Errorf("unsupported container runtime %q", runtimeName)
+	}
 	port := req.Port
 	if port == 0 {
 		port = ds.DefaultPort
 	}
-
-	// Enable and start
-	s.executor.RunCombined(ctx, "systemctl", "enable", serviceName)
-	startOut, _, startErr := s.executor.RunCombined(ctx, "systemctl", "start", serviceName)
-	status := "running"
-	if startErr != nil {
-		status = "stopped"
-		log.Printf("db: failed to start %s: %s", serviceName, startOut)
+	if port < 1 || port > 65535 {
+		return nil, fmt.Errorf("port must be between 1 and 65535")
 	}
-
-	// Save version record
-	id, err := s.repo.CreateVersion(ctx, dbServerID, req.Version, serviceName, port, status)
+	bindAddress := strings.TrimSpace(req.BindAddress)
+	if bindAddress == "" {
+		bindAddress = "127.0.0.1"
+	}
+	containerName := fmt.Sprintf("easyserver-db-%s-%s", sanitizeName(ds.Name), sanitizeName(req.Version))
+	volumeName := containerName + "-data"
+	password, err := generateAdminPassword()
+	if err != nil {
+		return nil, err
+	}
+	adminUser := "root"
+	if ds.Name == "postgresql" {
+		adminUser = "postgres"
+	}
+	if len(s.encryptionKey) != 32 {
+		return nil, fmt.Errorf("database encryption key must be configured")
+	}
+	encryptedPassword, err := deploy.Encrypt(password, s.encryptionKey)
 	if err != nil {
 		return nil, err
 	}
 
-	// Update server summary
-	s.updateServerSummary(ctx, dbServerID)
+	spec := containerSpec(ds.Name, runtimeName, req.Version, image, containerName, volumeName, bindAddress, port, adminUser, password)
+	if err := s.runtime.Create(ctx, spec); err != nil {
+		return nil, err
+	}
+	if err := s.runtime.Start(ctx, runtimeName, containerName); err != nil {
+		_ = s.runtime.Remove(ctx, runtimeName, containerName, false)
+		return nil, fmt.Errorf("start database container: %w", err)
+	}
+	statusInfo, err := waitForHealthy(ctx, s.runtime, runtimeName, containerName, 2*time.Minute)
+	if err != nil {
+		_ = s.runtime.Remove(ctx, runtimeName, containerName, false)
+		return nil, err
+	}
+	v := &DBVersion{DBServerID: dbServerID, Version: req.Version, ServiceName: containerName,
+		Port: port, Status: "running", CreatedAt: "", Runtime: runtimeName, Image: image,
+		ContainerID: containerName, VolumeName: volumeName, BindAddress: bindAddress,
+		AdminUser: adminUser, AdminPassword: encryptedPassword, AdminPasswordPlain: password, HealthStatus: statusInfo.Health}
+	id, err := s.repo.CreateContainerVersion(ctx, v)
+	if err != nil {
+		_ = s.runtime.Remove(ctx, runtimeName, containerName, false)
+		return nil, err
+	}
+	v.ID = id
 
-	return &DBVersion{
-		ID:          id,
-		DBServerID:  dbServerID,
-		Version:     req.Version,
-		ServiceName: serviceName,
-		Port:        port,
-		Status:      status,
-	}, nil
+	s.updateServerSummary(ctx, dbServerID)
+	return v, nil
 }
 
 func (s *Service) UninstallVersion(ctx context.Context, versionID int64) error {
@@ -165,24 +202,79 @@ func (s *Service) UninstallVersion(ctx context.Context, versionID int64) error {
 		return fmt.Errorf("cannot uninstall: %d databases still exist for this version", dbCount)
 	}
 
-	// Stop and remove
-	s.executor.RunCombined(ctx, "systemctl", "stop", v.ServiceName)
-	s.executor.RunCombined(ctx, "systemctl", "disable", v.ServiceName)
-
-	ds, _ := s.Get(ctx, v.DBServerID)
-	if ds != nil {
-		templates := GetVersionTemplates(ds.Name)
-		for _, t := range templates {
-			if t.Version == v.Version {
-				s.executor.RunCombined(ctx, "apt-get", "remove", "-y", t.Package)
-				break
-			}
-		}
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ServiceName, false); err != nil {
+		return fmt.Errorf("remove database container: %w", err)
 	}
-
 	s.repo.DeleteVersion(ctx, versionID)
 	s.updateServerSummary(ctx, v.DBServerID)
 	return nil
+}
+
+// DestroyVersion removes the managed container, its data volume and metadata.
+func (s *Service) DestroyVersion(ctx context.Context, versionID int64) error {
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	if count, err := s.repo.CountDatabasesByVersion(ctx, versionID); err != nil {
+		return err
+	} else if count > 0 {
+		return fmt.Errorf("cannot destroy: %d databases still exist for this instance", count)
+	}
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ServiceName, false); err != nil {
+		return fmt.Errorf("remove database container: %w", err)
+	}
+	if err := s.runtime.RemoveVolume(ctx, v.Runtime, v.VolumeName); err != nil {
+		return fmt.Errorf("remove database volume: %w", err)
+	}
+	if err := s.repo.DeleteVersion(ctx, versionID); err != nil {
+		return err
+	}
+	s.updateServerSummary(ctx, v.DBServerID)
+	return nil
+}
+
+// ResetAdminPassword rotates the administrator password and returns it once.
+func (s *Service) ResetAdminPassword(ctx context.Context, versionID int64) (string, error) {
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return "", fmt.Errorf("version not found")
+	}
+	if v.Runtime == "" || v.ServiceName == "" || len(s.encryptionKey) != 32 {
+		return "", fmt.Errorf("database instance encryption is not configured")
+	}
+	password, err := generateAdminPassword()
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case strings.HasPrefix(strings.ToLower(v.Image), "mysql"):
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "mysql", "-uroot", "-p"+mustDecrypt(s.encryptionKey, v.AdminPassword), "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+			return "", fmt.Errorf("reset MySQL password: %w", err)
+		}
+	case strings.HasPrefix(strings.ToLower(v.Image), "postgres"):
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "psql", "-U", "postgres", "-c", "ALTER USER postgres WITH PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+			return "", fmt.Errorf("reset PostgreSQL password: %w", err)
+		}
+	default:
+		return "", fmt.Errorf("password reset is not supported for this database image")
+	}
+	encrypted, err := deploy.Encrypt(password, s.encryptionKey)
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.UpdateVersionPassword(ctx, versionID, encrypted); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+func mustDecrypt(key []byte, encrypted string) string {
+	password, err := deploy.Decrypt(encrypted, key)
+	if err != nil {
+		return ""
+	}
+	return password
 }
 
 func (s *Service) StartVersion(ctx context.Context, versionID int64) error {
@@ -193,9 +285,11 @@ func (s *Service) StartVersion(ctx context.Context, versionID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", "start", v.ServiceName)
-	if err != nil {
-		return fmt.Errorf("start failed: %s", out)
+	if err := s.runtime.Start(ctx, v.Runtime, v.ServiceName); err != nil {
+		return fmt.Errorf("start failed: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ServiceName, 2*time.Minute); err != nil {
+		return err
 	}
 	s.repo.UpdateVersionStatus(ctx, versionID, "running")
 	s.updateServerSummary(ctx, v.DBServerID)
@@ -210,9 +304,8 @@ func (s *Service) StopVersion(ctx context.Context, versionID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", "stop", v.ServiceName)
-	if err != nil {
-		return fmt.Errorf("stop failed: %s", out)
+	if err := s.runtime.Stop(ctx, v.Runtime, v.ServiceName); err != nil {
+		return fmt.Errorf("stop failed: %w", err)
 	}
 	s.repo.UpdateVersionStatus(ctx, versionID, "stopped")
 	s.updateServerSummary(ctx, v.DBServerID)
@@ -227,9 +320,11 @@ func (s *Service) RestartVersion(ctx context.Context, versionID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", "restart", v.ServiceName)
-	if err != nil {
-		return fmt.Errorf("restart failed: %s", out)
+	if err := s.runtime.Restart(ctx, v.Runtime, v.ServiceName); err != nil {
+		return fmt.Errorf("restart failed: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ServiceName, 2*time.Minute); err != nil {
+		return err
 	}
 	s.repo.UpdateVersionStatus(ctx, versionID, "running")
 	s.updateServerSummary(ctx, v.DBServerID)
@@ -249,7 +344,30 @@ func (s *Service) UpdateVersionPort(ctx context.Context, versionID int64, newPor
 	if v.Status == "running" {
 		return fmt.Errorf("cannot change port while service is running. Stop it first")
 	}
-
+	if newPort < 1 || newPort > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	ds, err := s.Get(ctx, v.DBServerID)
+	if err != nil || ds == nil {
+		return fmt.Errorf("database engine not found")
+	}
+	password := mustDecrypt(s.encryptionKey, v.AdminPassword)
+	if password == "" {
+		return fmt.Errorf("database administrator password is unavailable")
+	}
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ServiceName, false); err != nil {
+		return fmt.Errorf("remove old database container: %w", err)
+	}
+	spec := containerSpec(ds.Name, v.Runtime, v.Version, v.Image, v.ServiceName, v.VolumeName, v.BindAddress, newPort, v.AdminUser, password)
+	if err := s.runtime.Create(ctx, spec); err != nil {
+		return fmt.Errorf("recreate database container: %w", err)
+	}
+	if err := s.runtime.Start(ctx, v.Runtime, v.ServiceName); err != nil {
+		return fmt.Errorf("start database container: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ServiceName, 2*time.Minute); err != nil {
+		return err
+	}
 	return s.repo.UpdateVersionPort(ctx, versionID, newPort)
 }
 
@@ -267,11 +385,47 @@ func (s *Service) GetVersionServiceLogs(ctx context.Context, versionID int64, li
 	if lines > 5000 {
 		lines = 5000
 	}
-	out, _, err := s.executor.RunCombined(ctx, "journalctl", "-u", v.ServiceName, "-n", strconv.Itoa(lines), "--no-pager")
-	if err != nil {
-		return out, nil
+	return s.runtime.Logs(ctx, v.Runtime, v.ServiceName, lines)
+}
+
+// GetVersionConfig reads the engine configuration from inside its container.
+func (s *Service) GetVersionConfig(ctx context.Context, versionID int64) (string, string, error) {
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return "", "", fmt.Errorf("version not found")
 	}
-	return out, nil
+	path := configPathForImage(v.Image)
+	out, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "cat", path)
+	return out, path, err
+}
+
+// SaveVersionConfig writes engine configuration inside the managed container.
+func (s *Service) SaveVersionConfig(ctx context.Context, versionID int64, content string) error {
+	if len(content) > 256*1024 {
+		return fmt.Errorf("configuration is too large")
+	}
+	v, err := s.GetVersion(ctx, versionID)
+	if err != nil || v == nil {
+		return fmt.Errorf("version not found")
+	}
+	path := configPathForImage(v.Image)
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+	if _, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
+		return fmt.Errorf("save configuration: %w", err)
+	}
+	return nil
+}
+
+func configPathForImage(image string) string {
+	image = strings.ToLower(image)
+	switch {
+	case strings.HasPrefix(image, "mysql"):
+		return "/etc/mysql/conf.d/easyserver.cnf"
+	case strings.HasPrefix(image, "postgres"):
+		return "/var/lib/postgresql/data/postgresql.conf"
+	default:
+		return "/usr/local/etc/redis/redis.conf"
+	}
 }
 
 // RefreshStatus refreshes all versions for a server
@@ -281,11 +435,8 @@ func (s *Service) RefreshStatus(ctx context.Context, dbServerID int64) {
 	}
 	versions, _ := s.ListVersions(ctx, dbServerID)
 	for _, v := range versions {
-		out, _, _ := s.executor.RunCombined(ctx, "systemctl", "is-active", v.ServiceName)
-		status := "stopped"
-		if strings.TrimSpace(out) == "active" {
-			status = "running"
-		}
+		info, err := s.runtime.Status(ctx, v.Runtime, v.ServiceName)
+		status := containerStatus(info, err)
 		s.repo.UpdateVersionStatus(ctx, v.ID, status)
 	}
 	s.updateServerSummary(ctx, dbServerID)
@@ -329,35 +480,56 @@ func (s *Service) updateServerSummary(ctx context.Context, dbServerID int64) {
 	s.repo.UpdateServerStatus(ctx, dbServerID, status, summary)
 }
 
-// detectServiceName detects the systemd service name for a database version
-func (s *Service) detectServiceName(dbName, version string) string {
-	switch dbName {
-	case "mysql":
-		return "mariadb"
-	case "postgresql":
-		// PostgreSQL uses version-specific service: postgresql@15-main or postgresql
-		// Try version-specific first, fallback to generic
-		versionService := fmt.Sprintf("postgresql@%s-main", version)
-		if _, err := s.executor.LookPath("pg_ctlcluster"); err == nil {
-			return versionService
+func sanitizeName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			b.WriteRune(ch)
+		} else {
+			b.WriteByte('-')
 		}
-		return "postgresql"
-	case "redis":
-		return "redis-server"
 	}
-	return dbName
+	return strings.Trim(b.String(), "-")
 }
 
-// GetMySQLCmd returns the mysql command for executing SQL
-func (s *Service) GetMySQLCmd(ctx context.Context) string {
-	if ctx == nil {
-		ctx = context.Background()
+func generateAdminPassword() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate database password: %w", err)
 	}
-	if _, err := s.executor.LookPath("mariadb"); err == nil {
-		return "mariadb"
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func containerSpec(engine, runtimeName, version, image, name, volume, bind string, port int, user, password string) ContainerSpec {
+	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -u"+user+" -p$MYSQL_ROOT_PASSWORD"
+	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
+	command := []string(nil)
+	switch engine {
+	case "postgresql":
+		dataDir = "/var/lib/postgresql/data"
+		env = map[string]string{"POSTGRES_PASSWORD": password}
+		health = "pg_isready -U postgres"
+	case "redis":
+		dataDir = "/data"
+		env = map[string]string{"REDIS_PASSWORD": password}
+		health = "redis-cli -a $REDIS_PASSWORD ping"
+		command = []string{"redis-server", "--requirepass", password}
 	}
-	if _, err := s.executor.LookPath("mysql"); err == nil {
-		return "mysql"
+	return ContainerSpec{Runtime: runtimeName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
+		BindAddress: bind, HostPort: port, ContainerPort: port, Environment: env,
+		Labels: map[string]string{"com.easyserver.engine": engine, "com.easyserver.version": version}, HealthCommand: health, Command: command}
+}
+
+func containerStatus(info ContainerStatus, err error) string {
+	if err != nil {
+		return "stopped"
 	}
-	return ""
+	if info.State == "running" && (info.Health == "healthy" || info.Health == "") {
+		return "running"
+	}
+	if info.State == "running" {
+		return "unhealthy"
+	}
+	return "stopped"
 }

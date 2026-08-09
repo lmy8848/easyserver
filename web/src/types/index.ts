@@ -297,6 +297,13 @@ export interface DBUser {
   host: string;
   privileges: string;
   created_at: string;
+  runtime?: string;
+  image?: string;
+  container_id?: string;
+  volume_name?: string;
+  bind_address?: string;
+  admin_user?: string;
+  health_status?: string;
 }
 
 // Cron task types（systemd timer 承载，name 为唯一标识）

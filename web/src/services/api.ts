@@ -541,16 +541,22 @@ export const dbServerApi = {
 
   // Version management
   getVersionTemplates: (id: number) =>
-    api.get<ApiResponse<Array<{ version: string; package: string; description: string }>>>(`/db-servers/${id}/version-templates`),
+    api.get<ApiResponse<Array<{ version: string; image: string; description: string }>>>(`/db-servers/${id}/version-templates`),
 
   listVersions: (id: number) =>
     api.get<ApiResponse<DBVersion[]>>(`/db-servers/${id}/versions`),
 
-  installVersion: (id: number, data: { version: string; port?: number }) =>
+  installVersion: (id: number, data: { version: string; port?: number; runtime?: string; bind_address?: string }) =>
     api.post<ApiResponse>(`/db-servers/${id}/versions`, data),
 
   uninstallVersion: (vid: number) =>
     api.delete<ApiResponse>(`/db-servers/versions/${vid}`),
+
+  destroyVersion: (vid: number) =>
+    api.delete<ApiResponse>(`/db-servers/versions/${vid}/data`),
+
+  resetAdminPassword: (vid: number) =>
+    api.post<ApiResponse<{ admin_password: string }>>(`/db-servers/versions/${vid}/reset-password`),
 
   startVersion: (vid: number) =>
     api.post<ApiResponse>(`/db-servers/versions/${vid}/start`),
@@ -566,6 +572,12 @@ export const dbServerApi = {
 
   getVersionLogs: (vid: number, lines: number = 200) =>
     api.get<ApiResponse<{ logs: string }>>(`/db-servers/versions/${vid}/logs`, { params: { lines } }),
+
+  getVersionConfig: (vid: number) =>
+    api.get<ApiResponse<{ file_path: string; content: string }>>(`/db-servers/versions/${vid}/config`),
+
+  saveVersionConfig: (vid: number, content: string) =>
+    api.put<ApiResponse>(`/db-servers/versions/${vid}/config`, { content }),
 
   // Databases
   listDatabases: (serverId: number) =>

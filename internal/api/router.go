@@ -135,11 +135,11 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	containerService := container.NewService(cmdExec)
 
 	dbServerRepo := dbserver.NewSQLiteRepository(db)
-	dbServerService := dbserver.NewService(cmdExec, dbServerRepo)
+	dbServerService := dbserver.NewServiceWithEncryptionKey(cmdExec, dbServerRepo, cfg.Deploy.EncryptionKey)
 	dbServerService.SeedPredefinedServers(ctx)
 
 	databaseMgmtRepo := database_mgmt.NewSQLiteRepository(db)
-	databaseMgmtService := database_mgmt.NewService(databaseMgmtRepo, cmdExec)
+	databaseMgmtService := database_mgmt.NewServiceWithEncryptionKey(databaseMgmtRepo, cmdExec, cfg.Deploy.EncryptionKey)
 
 	deployRepo := deploy.NewSQLiteRepository(db)
 	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)

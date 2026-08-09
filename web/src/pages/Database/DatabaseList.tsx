@@ -170,7 +170,7 @@ export default function DatabaseList({
                   <div style={{ textAlign: 'center', padding: 40 }}>
                     <Button type="primary" icon={<CodeOutlined />} loading={dbConfigLoading}
                       onClick={onFetchDBConfig}>加载配置</Button>
-                    <p style={{ color: '#999', marginTop: 12 }}>读取服务器上的配置文件</p>
+                    <p style={{ color: '#999', marginTop: 12 }}>读取当前数据库实例容器内的配置文件</p>
                   </div>
                 ) : dbConfig.found === false ? (
                   <Empty description={`未找到 ${server.display_name} 配置文件`} />

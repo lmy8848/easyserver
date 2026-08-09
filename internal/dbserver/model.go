@@ -1,6 +1,6 @@
 package dbserver
 
-// DBServer represents a database software type (MySQL, PostgreSQL, Redis)
+// DBServer is the API representation of a database engine catalog entry.
 type DBServer struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`         // mysql, postgresql, redis
@@ -12,29 +12,41 @@ type DBServer struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// DBVersion represents an installed version of a database
+// DBVersion is retained as a wire name for a container-backed Database Instance.
 type DBVersion struct {
-	ID          int64  `json:"id"`
-	DBServerID  int64  `json:"db_server_id"`
-	Version     string `json:"version"`      // 5.7, 8.0, 13, 15, etc.
-	ServiceName string `json:"service_name"` // mysql, mysql@5.7, postgresql@13
-	ConfigFile  string `json:"config_file"`
-	DataDir     string `json:"data_dir"`
-	Port        int    `json:"port"`
-	Status      string `json:"status"` // running, stopped
-	CreatedAt   string `json:"created_at"`
+	ID                 int64  `json:"id"`
+	DBServerID         int64  `json:"db_server_id"`
+	Version            string `json:"version"`      // 5.7, 8.0, 13, 15, etc.
+	ServiceName        string `json:"service_name"` // managed container name (legacy key)
+	ConfigFile         string `json:"config_file"`
+	DataDir            string `json:"data_dir"`
+	Port               int    `json:"port"`
+	Status             string `json:"status"` // running, stopped
+	CreatedAt          string `json:"created_at"`
+	Runtime            string `json:"runtime"`
+	Image              string `json:"image"`
+	ContainerID        string `json:"container_id"`
+	VolumeName         string `json:"volume_name"`
+	BindAddress        string `json:"bind_address"`
+	AdminUser          string `json:"admin_user"`
+	AdminPassword      string `json:"-"`
+	AdminPasswordPlain string `json:"admin_password,omitempty"`
+	HealthStatus       string `json:"health_status"`
 }
 
 // CreateDBVersionRequest is the request for installing a new database version
 type CreateDBVersionRequest struct {
-	Version string `json:"version" binding:"required"`
-	Port    int    `json:"port"`
+	Version     string `json:"version" binding:"required"`
+	Port        int    `json:"port"`
+	Runtime     string `json:"runtime"`
+	BindAddress string `json:"bind_address"`
 }
 
 // VersionTemplate describes a package template for a database version
 type VersionTemplate struct {
 	Version     string `json:"version"`
 	Package     string `json:"package"`
+	Image       string `json:"image"`
 	Description string `json:"description"`
 }
 
@@ -43,19 +55,18 @@ func GetVersionTemplates(dbName string) []VersionTemplate {
 	switch dbName {
 	case "mysql":
 		return []VersionTemplate{
-			{Version: "10.11", Package: "default-mysql-server", Description: "MariaDB 10.11（Debian 默认）"},
-			{Version: "10.5", Package: "mariadb-server-10.5", Description: "MariaDB 10.5（稳定版）"},
-			{Version: "8.0", Package: "mysql-server-8.0", Description: "MySQL 8.0（需额外源）"},
+			{Version: "8.0", Image: "mysql:8.0", Description: "MySQL 8.0"},
+			{Version: "8.4", Image: "mysql:8.4", Description: "MySQL 8.4 LTS"},
 		}
 	case "postgresql":
 		return []VersionTemplate{
-			{Version: "15", Package: "postgresql-15", Description: "PostgreSQL 15（推荐）"},
-			{Version: "13", Package: "postgresql-13", Description: "PostgreSQL 13（稳定）"},
+			{Version: "15", Image: "postgres:15", Description: "PostgreSQL 15"},
+			{Version: "16", Image: "postgres:16", Description: "PostgreSQL 16"},
 		}
 	case "redis":
 		return []VersionTemplate{
-			{Version: "7", Package: "redis-server", Description: "Redis 7（最新稳定）"},
-			{Version: "6", Package: "redis-server", Description: "Redis 6"},
+			{Version: "7", Image: "redis:7-alpine", Description: "Redis 7"},
+			{Version: "6", Image: "redis:6-alpine", Description: "Redis 6"},
 		}
 	}
 	return nil

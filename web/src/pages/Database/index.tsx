@@ -4,7 +4,6 @@ import { dbServerApi } from '../../services/api';
 import type { DBServer, Database, DBUser, DBVersion } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
-import DEFAULT_CONFIG_TEMPLATES from './constants';
 import ServerList from './ServerList';
 import VersionList from './VersionList';
 import DatabaseList from './DatabaseList';
@@ -202,16 +201,14 @@ export default function DatabasePage() {
   };
 
   const fetchDBConfig = async (serverName?: string) => {
-    const name = serverName || selectedServer?.name;
-    if (!name) return;
+    void serverName;
+    if (!selectedVersion) return;
     setDBConfigLoading(true);
     try {
-      let res;
-      if (name === 'mysql') res = await dbServerApi.getMySQLConfig();
-      else if (name === 'postgresql') res = await dbServerApi.getPostgreSQLConfig();
-      else if (name === 'redis') res = await dbServerApi.getRedisConfig();
-      else { setDBConfig(null); return; }
-      setDBConfig(res.data?.data || null);
+      const res = await dbServerApi.getVersionConfig(selectedVersion.id);
+      const data = res.data?.data;
+      const section = { name: 'main', params: { content: data?.content || '' } };
+      setDBConfig({ found: true, config: { file_path: data?.file_path, sections: [section] }, sections: { main: { params: section.params, meta: [] } } });
     } catch (error) {
       console.error('Failed to load config:', error);
       setDBConfig(null);
@@ -392,12 +389,11 @@ export default function DatabasePage() {
 
   // ===== Config handlers =====
   const handleSaveDBConfig = async () => {
-    if (!dbConfig?.config?.sections || !selectedServer?.name) return;
+    if (!dbConfig?.config?.sections || !selectedVersion) return;
     try {
-      if (selectedServer.name === 'mysql') await dbServerApi.saveMySQLConfig(dbConfig.config.sections);
-      else if (selectedServer.name === 'postgresql') await dbServerApi.savePostgreSQLConfig(dbConfig.config.sections);
-      else if (selectedServer.name === 'redis') await dbServerApi.saveRedisConfig(dbConfig.config.sections);
-      message.success('配置已保存（已自动备份原文件）');
+      const content = dbConfig.config.sections[0]?.params?.content || '';
+      await dbServerApi.saveVersionConfig(selectedVersion.id, content);
+      message.success('实例配置已保存，重启后生效');
       fetchDBConfig();
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '保存失败')); }
   };
@@ -425,34 +421,13 @@ export default function DatabasePage() {
     finally { setLogLoading(false); }
   };
 
-  const showConfig = async (_v: DBVersion) => {
+  const showConfig = async (v: DBVersion) => {
     setConfigVisible(true);
     setConfigLoading(true);
     try {
-      const serverName = selectedServer?.name;
-      let res;
-      if (serverName === 'mysql') res = await dbServerApi.getMySQLConfig();
-      else if (serverName === 'postgresql') res = await dbServerApi.getPostgreSQLConfig();
-      else if (serverName === 'redis') res = await dbServerApi.getRedisConfig();
-      else { setConfigContent('# Unsupported database type'); return; }
-
+      const res = await dbServerApi.getVersionConfig(v.id);
       const data = res?.data?.data;
-      const config = data?.config;
-      if (data?.found && config && config.sections.length > 0) {
-        let content = `# ${selectedServer?.display_name} Config: ${config.file_path}\n\n`;
-        for (const section of config.sections) {
-          if (section.name !== 'main') content += `[${section.name}]\n`;
-          for (const [key, val] of Object.entries(section.params || {})) {
-            content += serverName === 'redis' ? `${key} ${val}\n` : `${key} = ${val}\n`;
-          }
-          content += '\n';
-        }
-        setConfigContent(content);
-      } else {
-        const dbType = serverName || 'mysql';
-        const template = DEFAULT_CONFIG_TEMPLATES[dbType] || DEFAULT_CONFIG_TEMPLATES['mysql'];
-        setConfigContent(`# ${selectedServer?.display_name} 默认配置模板\n# 保存后将创建配置文件\n\n${template}`);
-      }
+      setConfigContent(`# ${selectedServer?.display_name} Config: ${data?.file_path || ''}\n\n${data?.content || ''}`);
     } catch (error: unknown) { setConfigContent('# Error: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setConfigLoading(false); }
   };

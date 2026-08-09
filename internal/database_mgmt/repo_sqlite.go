@@ -21,11 +21,11 @@ func NewSQLiteRepository(db *sql.DB) *SQLiteRepository {
 
 // ListDatabases returns databases for a given server, with version info joined.
 func (r *SQLiteRepository) ListDatabases(ctx context.Context, dbServerID int64) ([]Database, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT d.id, d.db_server_id, d.db_version_id, d.name, d.charset, d.description,
+	rows, err := r.db.QueryContext(ctx, `SELECT d.id, v.engine_id, d.instance_id, d.name, d.charset, d.description,
 		d.size_bytes, d.status, d.created_at, d.updated_at, COALESCE(v.version, '') as version
-		FROM databases d
-		LEFT JOIN db_versions v ON d.db_version_id = v.id
-		WHERE d.db_server_id = ? ORDER BY d.id`, dbServerID)
+		FROM instance_databases d
+		LEFT JOIN database_instances v ON d.instance_id = v.id
+		WHERE v.engine_id = ? ORDER BY d.id`, dbServerID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func (r *SQLiteRepository) ListDatabases(ctx context.Context, dbServerID int64) 
 // GetDatabase returns a database by server ID and database ID.
 func (r *SQLiteRepository) GetDatabase(ctx context.Context, dbServerID, id int64) (*Database, error) {
 	d := &Database{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, db_server_id, db_version_id, name FROM databases WHERE id = ? AND db_server_id = ?`,
+	err := r.db.QueryRowContext(ctx, `SELECT d.id, v.engine_id, d.instance_id, d.name FROM instance_databases d JOIN database_instances v ON d.instance_id = v.id WHERE d.id = ? AND v.engine_id = ?`,
 		id, dbServerID).Scan(&d.ID, &d.DBServerID, &d.DBVersionID, &d.Name)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -61,7 +61,7 @@ func (r *SQLiteRepository) GetDatabase(ctx context.Context, dbServerID, id int64
 // GetDatabaseByID returns a database by its ID only.
 func (r *SQLiteRepository) GetDatabaseByID(ctx context.Context, id int64) (*Database, error) {
 	d := &Database{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, db_server_id, db_version_id, name FROM databases WHERE id = ?`, id).Scan(
+	err := r.db.QueryRowContext(ctx, `SELECT d.id, v.engine_id, d.instance_id, d.name FROM instance_databases d JOIN database_instances v ON d.instance_id = v.id WHERE d.id = ?`, id).Scan(
 		&d.ID, &d.DBServerID, &d.DBVersionID, &d.Name)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -71,8 +71,8 @@ func (r *SQLiteRepository) GetDatabaseByID(ctx context.Context, id int64) (*Data
 
 // CreateDatabase inserts a new database record.
 func (r *SQLiteRepository) CreateDatabase(ctx context.Context, dbServerID, dbVersionID int64, name, charset, description string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `INSERT INTO databases (db_server_id, db_version_id, name, charset, description)
-		VALUES (?, ?, ?, ?, ?)`, dbServerID, dbVersionID, name, charset, description)
+	result, err := r.db.ExecContext(ctx, `INSERT INTO instance_databases (instance_id, name, charset, description)
+		VALUES (?, ?, ?, ?)`, dbVersionID, name, charset, description)
 	if err != nil {
 		return 0, err
 	}
@@ -81,14 +81,14 @@ func (r *SQLiteRepository) CreateDatabase(ctx context.Context, dbServerID, dbVer
 
 // DeleteDatabase removes a database record.
 func (r *SQLiteRepository) DeleteDatabase(ctx context.Context, dbServerID, id int64) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM databases WHERE id = ? AND db_server_id = ?", id, dbServerID)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM instance_databases WHERE id = ? AND instance_id IN (SELECT id FROM database_instances WHERE engine_id = ?)", id, dbServerID)
 	return err
 }
 
 // ListDBUsers returns users for a given server.
 func (r *SQLiteRepository) ListDBUsers(ctx context.Context, dbServerID int64) ([]DBUser, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, db_server_id, username, host, privileges, created_at
-		FROM db_users WHERE db_server_id = ? ORDER BY id`, dbServerID)
+	rows, err := r.db.QueryContext(ctx, `SELECT u.id, v.engine_id, u.username, u.host, u.privileges, u.created_at
+		FROM instance_users u JOIN database_instances v ON u.instance_id = v.id WHERE v.engine_id = ? ORDER BY u.id`, dbServerID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (r *SQLiteRepository) ListDBUsers(ctx context.Context, dbServerID int64) ([
 // GetDBUser returns a user by server ID and user ID.
 func (r *SQLiteRepository) GetDBUser(ctx context.Context, dbServerID, id int64) (*DBUser, error) {
 	u := &DBUser{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, db_server_id, username, host FROM db_users WHERE id = ? AND db_server_id = ?`,
+	err := r.db.QueryRowContext(ctx, `SELECT u.id, v.engine_id, u.username, u.host FROM instance_users u JOIN database_instances v ON u.instance_id = v.id WHERE u.id = ? AND v.engine_id = ?`,
 		id, dbServerID).Scan(&u.ID, &u.DBServerID, &u.Username, &u.Host)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -122,7 +122,7 @@ func (r *SQLiteRepository) GetDBUser(ctx context.Context, dbServerID, id int64) 
 
 // CreateDBUser inserts a new database user record.
 func (r *SQLiteRepository) CreateDBUser(ctx context.Context, dbServerID int64, username, hashedPassword, host string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `INSERT INTO db_users (db_server_id, username, password, host) VALUES (?, ?, ?, ?)`,
+	result, err := r.db.ExecContext(ctx, `INSERT INTO instance_users (instance_id, username, password, host) VALUES (?, ?, ?, ?)`,
 		dbServerID, username, hashedPassword, host)
 	if err != nil {
 		return 0, err
@@ -132,20 +132,20 @@ func (r *SQLiteRepository) CreateDBUser(ctx context.Context, dbServerID int64, u
 
 // DeleteDBUser removes a database user record.
 func (r *SQLiteRepository) DeleteDBUser(ctx context.Context, dbServerID, id int64) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM db_users WHERE id = ? AND db_server_id = ?", id, dbServerID)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM instance_users WHERE id = ? AND instance_id IN (SELECT id FROM database_instances WHERE engine_id = ?)", id, dbServerID)
 	return err
 }
 
 // UpdateDBUserPrivileges updates the privileges string for a user.
 func (r *SQLiteRepository) UpdateDBUserPrivileges(ctx context.Context, id int64, privileges string) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE db_users SET privileges = ? WHERE id = ?", privileges, id)
+	_, err := r.db.ExecContext(ctx, "UPDATE instance_users SET privileges = ? WHERE id = ?", privileges, id)
 	return err
 }
 
 // GetServer returns a lightweight server lookup by ID.
 func (r *SQLiteRepository) GetServer(ctx context.Context, id int64) (*dbserver.DBServer, error) {
 	ds := &dbserver.DBServer{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, name, display_name, status FROM db_servers WHERE id = ?`, id).Scan(
+	err := r.db.QueryRowContext(ctx, `SELECT id, name, display_name, status FROM database_engines WHERE id = ?`, id).Scan(
 		&ds.ID, &ds.Name, &ds.DisplayName, &ds.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -156,8 +156,8 @@ func (r *SQLiteRepository) GetServer(ctx context.Context, id int64) (*dbserver.D
 // GetVersion returns a lightweight version lookup by ID.
 func (r *SQLiteRepository) GetVersion(ctx context.Context, id int64) (*dbserver.DBVersion, error) {
 	v := &dbserver.DBVersion{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, db_server_id, version, service_name, port, status FROM db_versions WHERE id = ?`, id).Scan(
-		&v.ID, &v.DBServerID, &v.Version, &v.ServiceName, &v.Port, &v.Status)
+	err := r.db.QueryRowContext(ctx, `SELECT id, engine_id, version, container_name, port, status, runtime, image, container_id, volume_name, bind_address, admin_user, admin_password, health_status FROM database_instances WHERE id = ?`, id).Scan(
+		&v.ID, &v.DBServerID, &v.Version, &v.ServiceName, &v.Port, &v.Status, &v.Runtime, &v.Image, &v.ContainerID, &v.VolumeName, &v.BindAddress, &v.AdminUser, &v.AdminPassword, &v.HealthStatus)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -166,7 +166,7 @@ func (r *SQLiteRepository) GetVersion(ctx context.Context, id int64) (*dbserver.
 
 // ListVersions returns versions for a server (lightweight).
 func (r *SQLiteRepository) ListVersions(ctx context.Context, dbServerID int64) ([]dbserver.DBVersion, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, db_server_id, version, service_name, port, status FROM db_versions WHERE db_server_id = ?`, dbServerID)
+	rows, err := r.db.QueryContext(ctx, `SELECT id, engine_id, version, container_name, port, status, runtime, image, container_id, volume_name, bind_address, admin_user, admin_password, health_status FROM database_instances WHERE engine_id = ?`, dbServerID)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (r *SQLiteRepository) ListVersions(ctx context.Context, dbServerID int64) (
 	var versions []dbserver.DBVersion
 	for rows.Next() {
 		var v dbserver.DBVersion
-		if err := rows.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ServiceName, &v.Port, &v.Status); err != nil {
+		if err := rows.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ServiceName, &v.Port, &v.Status, &v.Runtime, &v.Image, &v.ContainerID, &v.VolumeName, &v.BindAddress, &v.AdminUser, &v.AdminPassword, &v.HealthStatus); err != nil {
 			log.Printf("scan version row: %v", err)
 			continue
 		}
@@ -190,9 +190,9 @@ func (r *SQLiteRepository) ListVersions(ctx context.Context, dbServerID int64) (
 // CreateBackup inserts a new backup record and returns its ID.
 func (r *SQLiteRepository) CreateBackup(ctx context.Context, backup *DBBackup) (int64, error) {
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO db_backups (db_server_id, db_version_id, database_id, database_name, backup_type, file_path, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		backup.DBServerID, backup.DBVersionID, backup.DatabaseID, backup.DatabaseName, backup.BackupType, backup.FilePath, backup.Status)
+		`INSERT INTO instance_backups (instance_id, database_id, database_name, backup_type, file_path, status)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		backup.DBVersionID, backup.DatabaseID, backup.DatabaseName, backup.BackupType, backup.FilePath, backup.Status)
 	if err != nil {
 		return 0, fmt.Errorf("insert backup record: %w", err)
 	}
@@ -202,7 +202,7 @@ func (r *SQLiteRepository) CreateBackup(ctx context.Context, backup *DBBackup) (
 // UpdateBackupStatus updates the status of a backup record.
 func (r *SQLiteRepository) UpdateBackupStatus(ctx context.Context, id int64, status string, fileSize int64, errorMessage string) error {
 	_, err := r.db.ExecContext(ctx,
-		"UPDATE db_backups SET status = ?, file_size = ?, error_message = ? WHERE id = ?",
+		"UPDATE instance_backups SET status = ?, file_size = ?, error_message = ? WHERE id = ?",
 		status, fileSize, errorMessage, id)
 	return err
 }
@@ -210,8 +210,8 @@ func (r *SQLiteRepository) UpdateBackupStatus(ctx context.Context, id int64, sta
 // ListBackups returns all backups for a database.
 func (r *SQLiteRepository) ListBackups(ctx context.Context, databaseID int64) ([]DBBackup, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, db_server_id, db_version_id, database_id, database_name, backup_type, file_path, file_size, status, error_message, created_at
-		FROM db_backups WHERE database_id = ? ORDER BY created_at DESC`, databaseID)
+		`SELECT b.id, v.engine_id, b.instance_id, b.database_id, b.database_name, b.backup_type, b.file_path, b.file_size, b.status, b.error_message, b.created_at
+		FROM instance_backups b JOIN database_instances v ON b.instance_id = v.id WHERE b.database_id = ? ORDER BY b.created_at DESC`, databaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -237,8 +237,8 @@ func (r *SQLiteRepository) ListBackups(ctx context.Context, databaseID int64) ([
 func (r *SQLiteRepository) GetBackup(ctx context.Context, id int64) (*DBBackup, error) {
 	b := &DBBackup{}
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, db_server_id, db_version_id, database_id, database_name, backup_type, file_path, file_size, status, error_message, created_at
-		FROM db_backups WHERE id = ?`, id).Scan(
+		`SELECT b.id, v.engine_id, b.instance_id, b.database_id, b.database_name, b.backup_type, b.file_path, b.file_size, b.status, b.error_message, b.created_at
+		FROM instance_backups b JOIN database_instances v ON b.instance_id = v.id WHERE b.id = ?`, id).Scan(
 		&b.ID, &b.DBServerID, &b.DBVersionID, &b.DatabaseID, &b.DatabaseName,
 		&b.BackupType, &b.FilePath, &b.FileSize, &b.Status, &b.ErrorMessage, &b.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -249,6 +249,6 @@ func (r *SQLiteRepository) GetBackup(ctx context.Context, id int64) (*DBBackup, 
 
 // DeleteBackup deletes a backup record.
 func (r *SQLiteRepository) DeleteBackup(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM db_backups WHERE id = ?", id)
+	_, err := r.db.ExecContext(ctx, "DELETE FROM instance_backups WHERE id = ?", id)
 	return err
 }

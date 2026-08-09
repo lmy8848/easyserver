@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"easyserver/internal/dbserver"
+	"easyserver/internal/deploy"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 
@@ -30,7 +30,6 @@ const (
 	defaultLogLines = 200
 
 	DefaultBackupDir = "/var/backups/easyserver/db"
-	DefaultRedisRDB  = "/var/lib/redis/dump.rdb"
 	MaxBackupsPerDB  = 10
 )
 
@@ -47,17 +46,25 @@ var validPrivileges = map[string]bool{
 
 // Service manages databases, users, backups, and SQL queries.
 type Service struct {
-	repo      Repository
-	executor  executor.CommandExecutor
-	backupDir string
+	repo          Repository
+	executor      executor.CommandExecutor
+	runtime       dbserver.DatabaseRuntime
+	backupDir     string
+	encryptionKey []byte
 }
 
 // NewService creates a new database management Service.
 func NewService(repo Repository, exec executor.CommandExecutor) *Service {
+	return NewServiceWithEncryptionKey(repo, exec, "")
+}
+
+func NewServiceWithEncryptionKey(repo Repository, exec executor.CommandExecutor, encryptionKey string) *Service {
 	return &Service{
-		repo:      repo,
-		executor:  exec,
-		backupDir: DefaultBackupDir,
+		repo:          repo,
+		executor:      exec,
+		runtime:       dbserver.NewCLIContainerRuntime(exec),
+		backupDir:     DefaultBackupDir,
+		encryptionKey: []byte(encryptionKey),
 	}
 }
 
@@ -135,13 +142,13 @@ func (s *Service) CreateDatabase(ctx context.Context, dbServerID int64, req *Cre
 
 	switch server.Name {
 	case "mysql":
-		out, _, err := s.executor.RunCombined(ctx, "mysql", "-e", fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;",
+		out, err := s.runInVersion(ctx, version, "mysql", "-e", fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;",
 			strings.ReplaceAll(req.Name, "`", "``"), charset))
 		if err != nil {
 			return nil, fmt.Errorf("create database failed: %s", out)
 		}
 	case "postgresql":
-		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "createdb", "-E", charset, req.Name)
+		out, err := s.runInVersion(ctx, version, "createdb", "-E", charset, req.Name)
 		if err != nil {
 			return nil, fmt.Errorf("create database failed: %s", out)
 		}
@@ -196,13 +203,13 @@ func (s *Service) DeleteDatabase(ctx context.Context, dbServerID, id int64) erro
 
 	switch server.Name {
 	case "mysql":
-		out, _, err := s.executor.RunCombined(ctx, "mysql", "-e", fmt.Sprintf("DROP DATABASE `%s`;",
+		out, err := s.runInVersion(ctx, version, "mysql", "-e", fmt.Sprintf("DROP DATABASE `%s`;",
 			strings.ReplaceAll(d.Name, "`", "``")))
 		if err != nil {
 			return fmt.Errorf("drop database failed: %s", out)
 		}
 	case "postgresql":
-		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "dropdb", d.Name)
+		out, err := s.runInVersion(ctx, version, "dropdb", d.Name)
 		if err != nil {
 			return fmt.Errorf("drop database failed: %s", out)
 		}
@@ -247,14 +254,8 @@ func (s *Service) CreateDBUser(ctx context.Context, dbServerID int64, req *Creat
 	if err != nil {
 		return nil, fmt.Errorf("list versions: %w", err)
 	}
-	anyRunning := false
-	for _, v := range versions {
-		if v.Status == "running" {
-			anyRunning = true
-			break
-		}
-	}
-	if !anyRunning {
+	activeVersion := firstRunningVersion(versions)
+	if activeVersion == nil {
 		return nil, fmt.Errorf("no running version available")
 	}
 
@@ -273,12 +274,12 @@ func (s *Service) CreateDBUser(ctx context.Context, dbServerID int64, req *Creat
 	switch server.Name {
 	case "mysql":
 		sqlStr := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s';", req.Username, host, escapeMySQLString(req.Password))
-		out, _, err := s.executor.RunCombined(ctx, "mysql", "-e", sqlStr)
+		out, err := s.runInVersion(ctx, activeVersion, "mysql", "-e", sqlStr)
 		if err != nil {
 			return nil, fmt.Errorf("create user failed: %s", out)
 		}
 	case "postgresql":
-		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "psql", "-c",
+		out, err := s.runInVersion(ctx, activeVersion, "psql", "-c",
 			fmt.Sprintf("CREATE USER \"%s\" WITH PASSWORD '%s';", req.Username, escapePGString(req.Password)))
 		if err != nil {
 			return nil, fmt.Errorf("create user failed: %s", out)
@@ -292,7 +293,7 @@ func (s *Service) CreateDBUser(ctx context.Context, dbServerID int64, req *Creat
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	id, err := s.repo.CreateDBUser(ctx, dbServerID, req.Username, string(hashedPassword), host)
+	id, err := s.repo.CreateDBUser(ctx, activeVersion.ID, req.Username, string(hashedPassword), host)
 	if err != nil {
 		return nil, err
 	}
@@ -329,26 +330,20 @@ func (s *Service) DeleteDBUser(ctx context.Context, dbServerID, id int64) error 
 	if err != nil {
 		return fmt.Errorf("list versions: %w", err)
 	}
-	anyRunning := false
-	for _, v := range versions {
-		if v.Status == "running" {
-			anyRunning = true
-			break
-		}
-	}
-	if !anyRunning {
+	activeVersion := firstRunningVersion(versions)
+	if activeVersion == nil {
 		return fmt.Errorf("no running version available")
 	}
 
 	switch server.Name {
 	case "mysql":
 		sqlStr := fmt.Sprintf("DROP USER '%s'@'%s';", u.Username, u.Host)
-		out, _, err := s.executor.RunCombined(ctx, "mysql", "-e", sqlStr)
+		out, err := s.runInVersion(ctx, activeVersion, "mysql", "-e", sqlStr)
 		if err != nil {
 			return fmt.Errorf("drop user failed: %s", out)
 		}
 	case "postgresql":
-		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "psql", "-c",
+		out, err := s.runInVersion(ctx, activeVersion, "psql", "-c",
 			fmt.Sprintf("DROP USER \"%s\";", u.Username))
 		if err != nil {
 			return fmt.Errorf("drop user failed: %s", out)
@@ -404,13 +399,13 @@ func (s *Service) GrantPrivileges(ctx context.Context, dbServerID, userID int64,
 	case "mysql":
 		sqlStr := fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
 			req.Privileges, strings.ReplaceAll(req.Database, "`", "``"), u.Username, u.Host)
-		out, _, err := s.executor.RunCombined(ctx, "mysql", "-e", sqlStr)
+		out, err := s.runInVersion(ctx, version, "mysql", "-e", sqlStr)
 		if err != nil {
 			return fmt.Errorf("grant failed: %s", out)
 		}
 	case "postgresql":
 		sqlStr := fmt.Sprintf("GRANT %s ON DATABASE \"%s\" TO \"%s\";", req.Privileges, req.Database, u.Username)
-		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "psql", "-c", sqlStr)
+		out, err := s.runInVersion(ctx, version, "psql", "-c", sqlStr)
 		if err != nil {
 			return fmt.Errorf("grant failed: %s", out)
 		}
@@ -511,7 +506,11 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType st
 }
 
 func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
-	out, _, _, err := s.executor.Run(ctx, "mysqldump", "--single-transaction", "--routines", "--triggers", backup.DatabaseName)
+	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	if err != nil || version == nil {
+		return fmt.Errorf("database instance not found")
+	}
+	out, err := s.runInVersion(ctx, version, "mysqldump", "--single-transaction", "--routines", "--triggers", backup.DatabaseName)
 	if err != nil {
 		return fmt.Errorf("mysqldump failed: %w", err)
 	}
@@ -519,7 +518,11 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 }
 
 func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
-	out, _, _, err := s.executor.Run(ctx, "sudo", "-u", "postgres", "pg_dump", "-Fc", backup.DatabaseName)
+	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	if err != nil || version == nil {
+		return fmt.Errorf("database instance not found")
+	}
+	out, err := s.runInVersion(ctx, version, "pg_dump", "-Fc", backup.DatabaseName)
 	if err != nil {
 		return fmt.Errorf("pg_dump failed: %w", err)
 	}
@@ -527,18 +530,17 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 }
 
 func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
-	_, _, err := s.executor.RunCombined(ctx, "redis-cli", "BGSAVE")
+	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	if err != nil || version == nil {
+		return fmt.Errorf("database instance not found")
+	}
+	_, err = s.runInVersion(ctx, version, "redis-cli", "BGSAVE")
 	if err != nil {
 		return fmt.Errorf("redis BGSAVE failed: %w", err)
 	}
 
 	time.Sleep(2 * time.Second)
-
-	data, err := os.ReadFile(DefaultRedisRDB)
-	if err != nil {
-		return fmt.Errorf("read RDB file: %w", err)
-	}
-	return os.WriteFile(backup.FilePath, data, 0644)
+	return s.runtime.CopyFrom(ctx, version.Runtime, version.ServiceName, "/data/dump.rdb", backup.FilePath)
 }
 
 // ListBackups returns all backups for a database.
@@ -593,23 +595,30 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType string) er
 }
 
 func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
-	file, err := os.Open(backup.FilePath)
-	if err != nil {
-		return fmt.Errorf("open backup file: %w", err)
+	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	if err != nil || version == nil {
+		return fmt.Errorf("database instance not found")
 	}
-	defer file.Close()
-
-	cmd := exec.CommandContext(ctx, "mysql", backup.DatabaseName)
-	cmd.Stdin = file
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("mysql restore failed: %s", string(out))
+	target := "/tmp/easyserver-restore.sql"
+	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ServiceName, backup.FilePath, target); err != nil {
+		return fmt.Errorf("copy backup into container: %w", err)
+	}
+	if _, err := s.runInVersion(ctx, version, "sh", "-c", "mysql "+shellQuote(backup.DatabaseName)+" < "+target); err != nil {
+		return fmt.Errorf("mysql restore failed: %w", err)
 	}
 	return nil
 }
 
 func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error {
-	out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "pg_restore", "-d", backup.DatabaseName, "-c", backup.FilePath)
+	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	if err != nil || version == nil {
+		return fmt.Errorf("database instance not found")
+	}
+	target := "/tmp/easyserver-restore.dump"
+	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ServiceName, backup.FilePath, target); err != nil {
+		return fmt.Errorf("copy backup into container: %w", err)
+	}
+	out, err := s.runInVersion(ctx, version, "pg_restore", "-d", backup.DatabaseName, "-c", target)
 	if err != nil {
 		return fmt.Errorf("pg_restore failed: %s", out)
 	}
@@ -617,19 +626,17 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 }
 
 func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
-	s.executor.RunCombined(ctx, "redis-cli", "SHUTDOWN", "NOSAVE")
-	time.Sleep(1 * time.Second)
-
-	data, err := os.ReadFile(backup.FilePath)
-	if err != nil {
-		return fmt.Errorf("read backup file: %w", err)
+	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	if err != nil || version == nil {
+		return fmt.Errorf("database instance not found")
 	}
-	if err := os.WriteFile(DefaultRedisRDB, data, 0644); err != nil {
-		return fmt.Errorf("write RDB file: %w", err)
+	if err := s.runtime.Stop(ctx, version.Runtime, version.ServiceName); err != nil {
+		return fmt.Errorf("stop Redis failed: %w", err)
 	}
-
-	_, _, err = s.executor.RunCombined(ctx, "systemctl", "start", "redis-server")
-	if err != nil {
+	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ServiceName, backup.FilePath, "/data/dump.rdb"); err != nil {
+		return fmt.Errorf("copy Redis backup: %w", err)
+	}
+	if err := s.runtime.Start(ctx, version.Runtime, version.ServiceName); err != nil {
 		return fmt.Errorf("start Redis failed: %w", err)
 	}
 	return nil
@@ -658,18 +665,51 @@ func (s *Service) CleanOldBackups(ctx context.Context, databaseID int64, maxBack
 
 // --- SQL Query operations ---
 
+func (s *Service) runInVersion(ctx context.Context, version *dbserver.DBVersion, args ...string) (string, error) {
+	if version == nil || version.Runtime == "" || version.ServiceName == "" {
+		return "", fmt.Errorf("database instance is not container-managed")
+	}
+	args = s.withAdminCredentials(version, args)
+	return s.runtime.Exec(ctx, version.Runtime, version.ServiceName, args...)
+}
+
+func (s *Service) withAdminCredentials(version *dbserver.DBVersion, args []string) []string {
+	if len(args) == 0 || len(s.encryptionKey) != 32 {
+		return args
+	}
+	password, err := deploy.Decrypt(version.AdminPassword, s.encryptionKey)
+	if err != nil || password == "" {
+		return args
+	}
+	engine := strings.ToLower(version.Image)
+	if strings.HasPrefix(engine, "mysql") {
+		return append([]string{args[0], "-uroot", "-p" + password}, args[1:]...)
+	}
+	if strings.HasPrefix(engine, "postgres") {
+		return append([]string{args[0], "-U", "postgres"}, args[1:]...)
+	}
+	if strings.HasPrefix(engine, "redis") && args[0] == "redis-cli" {
+		return append([]string{args[0], "-a", password}, args[1:]...)
+	}
+	return args
+}
+
 // lookupDB resolves dbID → database + server + typed DBType.
-func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *dbserver.DBServer, DBType, error) {
+func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *dbserver.DBServer, *dbserver.DBVersion, DBType, error) {
 	db, err := s.repo.GetDatabaseByID(ctx, dbID)
 	if err != nil || db == nil {
-		return nil, nil, "", fmt.Errorf("数据库不存在")
+		return nil, nil, nil, "", fmt.Errorf("数据库不存在")
 	}
 	server, err := s.repo.GetServer(ctx, db.DBServerID)
 	if err != nil || server == nil {
-		return nil, nil, "", fmt.Errorf("服务器不存在")
+		return nil, nil, nil, "", fmt.Errorf("服务器不存在")
+	}
+	version, err := s.repo.GetVersion(ctx, db.DBVersionID)
+	if err != nil || version == nil {
+		return nil, nil, nil, "", fmt.Errorf("数据库实例不存在")
 	}
 	dbType := getDBTypeFromName(server.Name)
-	return db, server, dbType, nil
+	return db, server, version, dbType, nil
 }
 
 func getDBTypeFromName(name string) DBType {
@@ -684,14 +724,25 @@ func getDBTypeFromName(name string) DBType {
 	return DBTypeMySQL
 }
 
-func (s *Service) execRaw(ctx context.Context, dbType DBType, dbName string, sql string) (string, error) {
+func firstRunningVersion(versions []dbserver.DBVersion) *dbserver.DBVersion {
+	for i := range versions {
+		if versions[i].Status == "running" {
+			return &versions[i]
+		}
+	}
+	return nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func (s *Service) execRaw(ctx context.Context, version *dbserver.DBVersion, dbType DBType, dbName string, sql string) (string, error) {
 	switch dbType {
 	case DBTypeMySQL:
-		out, _, err := s.executor.RunCombined(ctx, "mysql", dbName, "-e", sql)
-		return out, err
+		return s.runInVersion(ctx, version, "mysql", dbName, "-e", sql)
 	case DBTypePostgreSQL:
-		out, _, err := s.executor.RunCombined(ctx, "sudo", "-u", "postgres", "psql", "-d", dbName, "-c", sql)
-		return out, err
+		return s.runInVersion(ctx, version, "psql", "-d", dbName, "-c", sql)
 	}
 	return "", fmt.Errorf("不支持的数据库类型")
 }
@@ -722,7 +773,7 @@ func ValidateTableName(name string) bool {
 
 // ListTables returns all table names in the given database.
 func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]interface{}, error) {
-	db, server, _, err := s.lookupDB(ctx, dbID)
+	db, server, version, _, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -730,7 +781,7 @@ func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]inte
 	var tables []map[string]interface{}
 	switch server.Name {
 	case "mysql":
-		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name, "SHOW TABLES;")
+		out, err := s.execRaw(ctx, version, DBTypeMySQL, db.Name, "SHOW TABLES;")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
 		}
@@ -745,7 +796,7 @@ func (s *Service) ListTables(ctx context.Context, dbID int64) ([]map[string]inte
 			}
 		}
 	case "postgresql":
-		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name,
+		out, err := s.execRaw(ctx, version, DBTypePostgreSQL, db.Name,
 			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
@@ -767,7 +818,7 @@ func (s *Service) DescribeTable(ctx context.Context, dbID int64, tableName strin
 	if !ValidateTableName(tableName) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -775,7 +826,7 @@ func (s *Service) DescribeTable(ctx context.Context, dbID int64, tableName strin
 	builder := NewSQLBuilder(dbType)
 	describeSQL := builder.BuildDescribeTable(tableName)
 
-	out, err := s.execRaw(ctx, dbType, db.Name, describeSQL)
+	out, err := s.execRaw(ctx, version, dbType, db.Name, describeSQL)
 	if err != nil {
 		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(out))
 	}
@@ -818,7 +869,7 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	}
 	offset := (page - 1) * pageSize
 
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -826,12 +877,12 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	var total int
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
+		out, err := s.execRaw(ctx, version, DBTypeMySQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
 		if err == nil {
 			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
 		}
 	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
+		out, err := s.execRaw(ctx, version, DBTypePostgreSQL, db.Name, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
 		if err == nil {
 			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
 		}
@@ -841,7 +892,7 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 	var rows [][]interface{}
 	switch dbType {
 	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, DBTypeMySQL, db.Name,
+		out, err := s.execRaw(ctx, version, DBTypeMySQL, db.Name,
 			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
@@ -860,7 +911,7 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 			}
 		}
 	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, DBTypePostgreSQL, db.Name,
+		out, err := s.execRaw(ctx, version, DBTypePostgreSQL, db.Name,
 			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
@@ -894,7 +945,7 @@ func (s *Service) QueryTable(ctx context.Context, dbID int64, tableName string, 
 
 // ExecuteSQL runs raw SQL and returns the result.
 func (s *Service) ExecuteSQL(ctx context.Context, dbID int64, sql string) (*DMLResult, error) {
-	db, server, dbType, err := s.lookupDB(ctx, dbID)
+	db, server, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -904,7 +955,7 @@ func (s *Service) ExecuteSQL(ctx context.Context, dbID int64, sql string) (*DMLR
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, version, dbType, db.Name, sql)
 	if execErr != nil {
 		log.Printf("ExecuteSQL %s error [db=%s]: %s", server.Name, db.Name, SanitizeSQLError(out))
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
@@ -917,7 +968,7 @@ func (s *Service) InsertRecord(ctx context.Context, dbID int64, table string, da
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -934,7 +985,7 @@ func (s *Service) InsertRecord(ctx context.Context, dbID int64, table string, da
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, version, dbType, db.Name, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
@@ -946,7 +997,7 @@ func (s *Service) UpdateRecord(ctx context.Context, dbID int64, table string, da
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -963,7 +1014,7 @@ func (s *Service) UpdateRecord(ctx context.Context, dbID int64, table string, da
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, version, dbType, db.Name, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
@@ -975,7 +1026,7 @@ func (s *Service) DeleteRecord(ctx context.Context, dbID int64, table string, pk
 	if !ValidateTableName(table) {
 		return nil, fmt.Errorf("无效的表名")
 	}
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return nil, err
 	}
@@ -992,7 +1043,7 @@ func (s *Service) DeleteRecord(ctx context.Context, dbID int64, table string, pk
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, version, dbType, db.Name, sql)
 	if execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
 	}
@@ -1004,7 +1055,7 @@ func (s *Service) CreateTable(ctx context.Context, dbID int64, tableName string,
 	if !ValidateTableName(tableName) {
 		return fmt.Errorf("无效的表名")
 	}
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return err
 	}
@@ -1069,7 +1120,7 @@ func (s *Service) CreateTable(ctx context.Context, dbID int64, tableName string,
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, version, dbType, db.Name, sql)
 	if execErr != nil {
 		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(out))
 	}
@@ -1081,7 +1132,7 @@ func (s *Service) DropTable(ctx context.Context, dbID int64, tableName string) e
 	if !ValidateTableName(tableName) {
 		return fmt.Errorf("无效的表名")
 	}
-	db, _, dbType, err := s.lookupDB(ctx, dbID)
+	db, _, version, dbType, err := s.lookupDB(ctx, dbID)
 	if err != nil {
 		return err
 	}
@@ -1096,7 +1147,7 @@ func (s *Service) DropTable(ctx context.Context, dbID int64, tableName string) e
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := s.execRaw(ctx, dbType, db.Name, sql)
+	out, execErr := s.execRaw(ctx, version, dbType, db.Name, sql)
 	if execErr != nil {
 		return fmt.Errorf("删除表失败: %s", out)
 	}

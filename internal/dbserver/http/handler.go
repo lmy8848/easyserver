@@ -34,11 +34,15 @@ func RegisterRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Servic
 	protected.GET("/db-servers/:id/versions", versionHandler.ListVersions)
 	protected.POST("/db-servers/:id/versions", versionHandler.InstallVersion)
 	protected.DELETE("/db-servers/versions/:vid", versionHandler.UninstallVersion)
+	protected.DELETE("/db-servers/versions/:vid/data", versionHandler.DestroyVersion)
+	protected.POST("/db-servers/versions/:vid/reset-password", versionHandler.ResetAdminPassword)
 	protected.POST("/db-servers/versions/:vid/start", versionHandler.StartVersion)
 	protected.POST("/db-servers/versions/:vid/stop", versionHandler.StopVersion)
 	protected.POST("/db-servers/versions/:vid/restart", versionHandler.RestartVersion)
 	protected.PUT("/db-servers/versions/:vid/port", versionHandler.UpdateVersionPort)
 	protected.GET("/db-servers/versions/:vid/logs", versionHandler.GetVersionLogs)
+	protected.GET("/db-servers/versions/:vid/config", versionHandler.GetVersionConfig)
+	protected.PUT("/db-servers/versions/:vid/config", versionHandler.SaveVersionConfig)
 
 	// Databases nested
 	protected.GET("/db-servers/:id/databases", dbHandler.ListDatabases)
@@ -71,19 +75,8 @@ func RegisterRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Servic
 	protected.POST("/db-servers/backups/:bid/restore", backupHandler.RestoreBackup)
 	protected.DELETE("/db-servers/backups/:bid", backupHandler.DeleteBackup)
 
-	// MySQL config management
-	protected.GET("/db-servers/mysql/config", configHandler.GetMySQLConfig)
-	protected.POST("/db-servers/mysql/config", configHandler.SaveMySQLConfig)
 	protected.GET("/db-servers/mysql/common-params", configHandler.GetMySQLCommonParams)
-
-	// PostgreSQL config management
-	protected.GET("/db-servers/postgresql/config", configHandler.GetPostgreSQLConfig)
-	protected.POST("/db-servers/postgresql/config", configHandler.SavePostgreSQLConfig)
 	protected.GET("/db-servers/postgresql/common-params", configHandler.GetPGCommonParams)
-
-	// Redis config management
-	protected.GET("/db-servers/redis/config", configHandler.GetRedisConfig)
-	protected.POST("/db-servers/redis/config", configHandler.SaveRedisConfig)
 	protected.GET("/db-servers/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
@@ -200,6 +193,34 @@ func (h *VersionHandler) UninstallVersion(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "已卸载"})
 }
 
+func (h *VersionHandler) DestroyVersion(c *gin.Context) {
+	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+		return
+	}
+	middleware.AuditSummary(c, "销毁数据库实例数据 #"+strconv.FormatInt(vid, 10))
+	if err := h.dbServerService.DestroyVersion(c.Request.Context(), vid); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "实例与数据卷已销毁"})
+}
+
+func (h *VersionHandler) ResetAdminPassword(c *gin.Context) {
+	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+		return
+	}
+	password, err := h.dbServerService.ResetAdminPassword(c.Request.Context(), vid)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"admin_password": password})
+}
+
 func (h *VersionHandler) StartVersion(c *gin.Context) {
 	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
 	if err != nil {
@@ -289,6 +310,40 @@ func (h *VersionHandler) GetVersionLogs(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, gin.H{"logs": logs})
+}
+
+func (h *VersionHandler) GetVersionConfig(c *gin.Context) {
+	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+		return
+	}
+	content, path, err := h.dbServerService.GetVersionConfig(c.Request.Context(), vid)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"file_path": path, "content": content})
+}
+
+func (h *VersionHandler) SaveVersionConfig(c *gin.Context) {
+	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+		return
+	}
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+	if err := h.dbServerService.SaveVersionConfig(c.Request.Context(), vid, req.Content); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "实例配置已保存，重启后生效"})
 }
 
 // DatabaseHandler handles database CRUD, introspection, and table management endpoints.

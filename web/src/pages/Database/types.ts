@@ -3,7 +3,7 @@ import type { DBServer, Database, DBUser, DBVersion } from '../../types';
 // Version templates from API
 export interface VersionTemplate {
   version: string;
-  package: string;
+  image: string;
   description: string;
 }
 

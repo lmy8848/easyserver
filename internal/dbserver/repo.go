@@ -16,11 +16,13 @@ type Repository interface {
 	GetVersion(ctx context.Context, id int64) (*DBVersion, error)
 	CountVersionsByServerAndVersion(ctx context.Context, dbServerID int64, version string) (int, error)
 	CreateVersion(ctx context.Context, dbServerID int64, version, serviceName string, port int, status string) (int64, error)
+	CreateContainerVersion(ctx context.Context, v *DBVersion) (int64, error)
 	DeleteVersion(ctx context.Context, id int64) error
 	CountDatabasesByVersion(ctx context.Context, versionID int64) (int, error)
 
 	// Status updates
 	UpdateVersionStatus(ctx context.Context, id int64, status string) error
 	UpdateVersionPort(ctx context.Context, id int64, port int) error
+	UpdateVersionPassword(ctx context.Context, id int64, encryptedPassword string) error
 	UpdateServerStatus(ctx context.Context, id int64, status, versionSummary string) error
 }
