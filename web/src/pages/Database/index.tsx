@@ -248,7 +248,9 @@ export default function DatabasePage() {
     if (!server) return;
     try {
       const values = await installVersionForm.validateFields();
-      await dbServerApi.createInstance(server.db_type, values);
+      // Port left empty → use the engine default (the backend no longer
+      // supplies one).
+      await dbServerApi.createInstance(server.db_type, { ...values, port: values.port || server.default_port });
       message.success('版本安装成功');
       setInstallVersionVisible(false);
       fetchInstances(server.db_type);

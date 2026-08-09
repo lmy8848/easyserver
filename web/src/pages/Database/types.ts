@@ -13,6 +13,7 @@ export interface VersionTemplate {
 export interface EngineInfo {
   db_type: string;
   display_name: string;
+  default_port: number;
 }
 
 export interface EngineTab extends EngineInfo {
@@ -23,21 +24,21 @@ export interface EngineTab extends EngineInfo {
 // removed; the template catalogue is static). Also drives the top-level Tabs.
 export const ENGINE_TABS: EngineTab[] = [
   {
-    db_type: 'mysql', display_name: 'MySQL',
+    db_type: 'mysql', display_name: 'MySQL', default_port: 3306,
     templates: [
       { version: '8.0', image: 'mysql:8.0', description: 'MySQL 8.0' },
       { version: '8.4', image: 'mysql:8.4', description: 'MySQL 8.4 LTS' },
     ],
   },
   {
-    db_type: 'postgresql', display_name: 'PostgreSQL',
+    db_type: 'postgresql', display_name: 'PostgreSQL', default_port: 5432,
     templates: [
       { version: '15', image: 'postgres:15', description: 'PostgreSQL 15' },
       { version: '16', image: 'postgres:16', description: 'PostgreSQL 16' },
     ],
   },
   {
-    db_type: 'redis', display_name: 'Redis',
+    db_type: 'redis', display_name: 'Redis', default_port: 6379,
     templates: [
       { version: '7', image: 'redis:7-alpine', description: 'Redis 7' },
       { version: '6', image: 'redis:6-alpine', description: 'Redis 6' },

@@ -132,7 +132,7 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
 
-	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0"})
+	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
 	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
 
-	if _, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0"}); err == nil {
+	if _, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306}); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
 	}
 	if len(rt.removed) != 1 {
@@ -170,7 +170,7 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
 
-	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0"})
+	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}

@@ -76,19 +76,6 @@ func IsValidDBType(t DBType) bool {
 	return false
 }
 
-// defaultPort returns the engine's well-known listen port.
-func defaultPort(dbType DBType) int {
-	switch dbType {
-	case DBTypeMySQL:
-		return 3306
-	case DBTypePostgreSQL:
-		return 5432
-	case DBTypeRedis:
-		return 6379
-	}
-	return 0
-}
-
 // Database is a logical database inside an instance, queried live from the
 // engine — it is never persisted (the engine owns its databases; the panel only
 // reflects them). Charset is fetched alongside the name in one query.

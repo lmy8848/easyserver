@@ -132,10 +132,9 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if runtimeName != "docker" && runtimeName != "podman" {
 		return nil, fmt.Errorf("unsupported container runtime %q", runtimeName)
 	}
+	// The client always sends the port (the front-end fills the engine default);
+	// a missing/invalid value is rejected here.
 	port := req.Port
-	if port == 0 {
-		port = defaultPort(dbType)
-	}
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("port must be between 1 and 65535")
 	}
