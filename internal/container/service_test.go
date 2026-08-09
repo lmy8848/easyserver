@@ -152,7 +152,7 @@ insecure = false
 		t.Fatalf("GetRegistryConfig: %v", err)
 	}
 	want := RegistryConfig{
-		Mirror:             "docker.io",
+		Mirrors:            []string{"docker.io"},
 		InsecureRegistries: []string{"registry.local:5000"},
 	}
 	if !reflect.DeepEqual(got, want) {

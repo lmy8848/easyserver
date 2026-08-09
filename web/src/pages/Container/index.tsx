@@ -15,6 +15,7 @@ import ImageTab from './ImageTab';
 import ComposeTab from './ComposeTab';
 import VolumeTab from './VolumeTab';
 import NetworkTab from './NetworkTab';
+import RegistryTab from './RegistryTab';
 
 const ENGINES = ['docker', 'podman'];
 
@@ -120,6 +121,7 @@ export default function Container() {
     { key: 'compose', label: <span><FolderOutlined /> Compose</span>, children: <ComposeTab engine={engine} /> },
     { key: 'volumes', label: <span><DatabaseOutlined /> 存储卷</span>, children: <VolumeTab engine={engine} /> },
     { key: 'networks', label: <span><GlobalOutlined /> 网络</span>, children: <NetworkTab engine={engine} /> },
+    { key: 'registry', label: <span><RocketOutlined /> 镜像仓库</span>, children: <RegistryTab engine={engine} /> },
   ];
 
   return (

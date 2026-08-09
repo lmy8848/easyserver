@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1065,7 +1066,7 @@ func (s *Service) GetInfo(ctx context.Context, engine Engine) (map[string]interf
 // compat with the single-mirror endpoint; richer config goes through
 // SetRegistryConfig.
 func (s *Service) ConfigureMirror(ctx context.Context, engine Engine, mirrorURL string) error {
-	return s.SetRegistryConfig(ctx, engine, RegistryConfig{Mirror: mirrorURL})
+	return s.SetRegistryConfig(ctx, engine, RegistryConfig{Mirrors: []string{mirrorURL}})
 }
 
 // GetRegistryConfig reads the engine's mirror + insecure registries.
@@ -1092,8 +1093,10 @@ func (s *Service) getDockerRegistryConfig(ctx context.Context) (RegistryConfig, 
 	if err := json.Unmarshal([]byte(stdout), &config); err != nil {
 		return cfg, nil // missing/unparseable → defaults
 	}
-	if mirrors, ok := config["registry-mirrors"].([]interface{}); ok && len(mirrors) > 0 {
-		cfg.Mirror = fmt.Sprint(mirrors[0])
+	if mirrors, ok := config["registry-mirrors"].([]interface{}); ok {
+		for _, v := range mirrors {
+			cfg.Mirrors = append(cfg.Mirrors, fmt.Sprint(v))
+		}
 	}
 	if ins, ok := config["insecure-registries"].([]interface{}); ok {
 		for _, v := range ins {
@@ -1118,10 +1121,10 @@ func (s *Service) setDockerRegistryConfig(ctx context.Context, cfg RegistryConfi
 		config = make(map[string]interface{})
 	}
 
-	if cfg.Mirror == "" {
+	if len(cfg.Mirrors) == 0 {
 		delete(config, "registry-mirrors")
 	} else {
-		config["registry-mirrors"] = []string{cfg.Mirror}
+		config["registry-mirrors"] = cfg.Mirrors
 	}
 	if len(cfg.InsecureRegistries) == 0 {
 		delete(config, "insecure-registries")
@@ -1151,8 +1154,8 @@ func (s *Service) getPodmanRegistryConfig(ctx context.Context) (RegistryConfig, 
 	var cfg RegistryConfig
 	stdout, _, _ := s.executor.RunCombined(ctx, "cat", "/etc/containers/registries.conf")
 	if m := regexp.MustCompile(`unqualified-search-registries\s*=\s*\[(.*?)\]`).FindStringSubmatch(stdout); len(m) == 2 {
-		if items := regexp.MustCompile(`"([^"]*)"`).FindAllStringSubmatch(m[1], -1); len(items) > 0 {
-			cfg.Mirror = items[0][1]
+		for _, item := range regexp.MustCompile(`"([^"]*)"`).FindAllStringSubmatch(m[1], -1) {
+			cfg.Mirrors = append(cfg.Mirrors, item[1])
 		}
 	}
 	for _, seg := range strings.Split(stdout, "[[registry]]")[1:] {
@@ -1169,12 +1172,16 @@ func (s *Service) getPodmanRegistryConfig(ctx context.Context) (RegistryConfig, 
 func (s *Service) setPodmanRegistryConfig(ctx context.Context, cfg RegistryConfig) error {
 	// Empty config → leave the distro default file untouched (avoids breaking
 	// short-name resolution by writing an empty registries.conf).
-	if cfg.Mirror == "" && len(cfg.InsecureRegistries) == 0 {
+	if len(cfg.Mirrors) == 0 && len(cfg.InsecureRegistries) == 0 {
 		return nil
 	}
 	var b strings.Builder
-	if cfg.Mirror != "" {
-		fmt.Fprintf(&b, "unqualified-search-registries = [\"%s\"]\n", cfg.Mirror)
+	if len(cfg.Mirrors) > 0 {
+		quoted := make([]string, 0, len(cfg.Mirrors))
+		for _, m := range cfg.Mirrors {
+			quoted = append(quoted, `"`+m+`"`)
+		}
+		fmt.Fprintf(&b, "unqualified-search-registries = [%s]\n", strings.Join(quoted, ", "))
 	}
 	for _, loc := range cfg.InsecureRegistries {
 		fmt.Fprintf(&b, "\n[[registry]]\nlocation = \"%s\"\ninsecure = true\n", loc)
@@ -1186,6 +1193,29 @@ func (s *Service) setPodmanRegistryConfig(ctx context.Context, cfg RegistryConfi
 		return fmt.Errorf("failed to write registries.conf: %v", err)
 	}
 	return nil
+}
+
+// GetLoggedInRegistries lists the registry addresses the engine currently has
+// credentials for. Docker keeps them in ~/.docker/config.json; Podman in
+// ~/.config/containers/auth.json — both under the "auths" key.
+func (s *Service) GetLoggedInRegistries(ctx context.Context, engine Engine) ([]string, error) {
+	path := "/root/.config/containers/auth.json"
+	if !isPodmanEngine(engine) {
+		path = "/root/.docker/config.json"
+	}
+	stdout, _, _ := s.executor.RunCombined(ctx, "cat", path)
+	var auth struct {
+		Auths map[string]json.RawMessage `json:"auths"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &auth); err != nil {
+		return []string{}, nil // no file / unparseable → none logged in
+	}
+	regs := make([]string, 0, len(auth.Auths))
+	for k := range auth.Auths {
+		regs = append(regs, k)
+	}
+	sort.Strings(regs)
+	return regs, nil
 }
 
 // RegistryLogin authenticates to a private registry. Password goes over stdin

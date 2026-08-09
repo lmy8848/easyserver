@@ -157,7 +157,7 @@ func (h *ContainerHandler) SetRegistryConfig(c *gin.Context) {
 		return
 	}
 	engine := h.engineName(c)
-	middleware.AuditSummary(c, "配置 "+string(engine)+" 镜像仓库 "+req.Mirror)
+	middleware.AuditSummary(c, "配置 "+string(engine)+" 镜像仓库")
 	if err := h.containerService.SetRegistryConfig(c.Request.Context(), engine, req); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -179,6 +179,16 @@ func (h *ContainerHandler) RegistryLogin(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, gin.H{"message": "登录成功"})
+}
+
+// GetLoggedInRegistries lists the registries the engine is logged into.
+func (h *ContainerHandler) GetLoggedInRegistries(c *gin.Context) {
+	regs, err := h.containerService.GetLoggedInRegistries(c.Request.Context(), h.engineName(c))
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"registries": regs})
 }
 
 // RegistryLogout clears stored credentials for a registry.
@@ -700,6 +710,7 @@ func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Serv
 	protected.POST("/container/mirror", handler.ConfigureMirror)
 	protected.GET("/container/registry", handler.GetRegistryConfig)
 	protected.POST("/container/registry", handler.SetRegistryConfig)
+	protected.GET("/container/registry/auth", handler.GetLoggedInRegistries)
 	protected.POST("/container/registry/login", handler.RegistryLogin)
 	protected.POST("/container/registry/logout", handler.RegistryLogout)
 	protected.POST("/container/socket/enable", handler.EnableSocket)

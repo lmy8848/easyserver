@@ -3,12 +3,11 @@ import {
   Card, Table, Tag, Button, Space, message, Popconfirm, Modal, Form, Input,
 } from 'antd';
 import {
-  DeleteOutlined, CloudDownloadOutlined, ReloadOutlined, SettingOutlined,
+  DeleteOutlined, CloudDownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
-import RegistrySettingsModal from './RegistrySettingsModal';
 import type { Image, ImageCategory } from './types';
 import { withEngine } from './types';
 
@@ -16,7 +15,6 @@ export default function ImageTab({ engine }: { engine: string }) {
   const [images, setImages] = useState<Image[]>([]);
   const [loading, setLoading] = useState(true);
   const [pullVisible, setPullVisible] = useState(false);
-  const [registryVisible, setRegistryVisible] = useState(false);
   const [pullForm] = Form.useForm();
   const [removing, setRemoving] = useState<string>('');
   const [pulling, runPull] = useAsyncRun();
@@ -89,7 +87,6 @@ export default function ImageTab({ engine }: { engine: string }) {
       <Card
         extra={
           <Space>
-            <Button icon={<SettingOutlined />} onClick={() => setRegistryVisible(true)}>镜像仓库设置</Button>
             <Button icon={<CloudDownloadOutlined />} type="primary" onClick={() => setPullVisible(true)}>拉取镜像</Button>
             <Button icon={<ReloadOutlined />} onClick={() => { setLoading(true); loadImages(); }}>刷新</Button>
           </Space>
@@ -133,8 +130,6 @@ export default function ImageTab({ engine }: { engine: string }) {
           </>
         )}
       </Modal>
-
-      <RegistrySettingsModal engine={engine} open={registryVisible} onClose={() => setRegistryVisible(false)} />
     </>
   );
 }
