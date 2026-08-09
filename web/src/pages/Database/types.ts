@@ -24,29 +24,38 @@ export interface EngineTab extends EngineInfo {
 }
 
 // Curated presets per engine. Versions follow current mainstream releases
-// (researched 2026-08): MySQL 8.4/9.7 LTS (8.0 is EOL), PostgreSQL 16/17/18,
-// Redis 7/8. The "更多版本" flow lists all published Docker Hub tags.
+// (researched 2026-08): MySQL 8.4/9.7 LTS + Innovation lines (8.0 is EOL but
+// still widely deployed), PostgreSQL 14–18, Redis 7.4/8.x. The "更多版本" flow
+// lists all published Docker Hub tags.
 export const ENGINE_TABS: EngineTab[] = [
   {
     db_type: 'mysql', display_name: 'MySQL', default_port: 3306, base_image: 'mysql',
     templates: [
+      { version: '8.0', image: 'mysql:8.0', description: 'MySQL 8.0（已 EOL，应用仍广泛）' },
       { version: '8.4', image: 'mysql:8.4', description: 'MySQL 8.4 LTS' },
-      { version: '9.7', image: 'mysql:9.7', description: 'MySQL 9.7 LTS' },
+      { version: '9.6', image: 'mysql:9.6', description: 'MySQL 9.6 Innovation' },
+      { version: '9.7', image: 'mysql:9.7', description: 'MySQL 9.7 LTS（当前主线）' },
+      { version: '26.7', image: 'mysql:26.7', description: 'MySQL 26.7 Innovation（最新）' },
     ],
   },
   {
     db_type: 'postgresql', display_name: 'PostgreSQL', default_port: 5432, base_image: 'postgres',
     templates: [
-      { version: '18', image: 'postgres:18', description: 'PostgreSQL 18' },
-      { version: '17', image: 'postgres:17', description: 'PostgreSQL 17' },
+      { version: '14', image: 'postgres:14', description: 'PostgreSQL 14（2026-11 EOL）' },
+      { version: '15', image: 'postgres:15', description: 'PostgreSQL 15' },
       { version: '16', image: 'postgres:16', description: 'PostgreSQL 16' },
+      { version: '17', image: 'postgres:17', description: 'PostgreSQL 17' },
+      { version: '18', image: 'postgres:18', description: 'PostgreSQL 18（最新）' },
     ],
   },
   {
     db_type: 'redis', display_name: 'Redis', default_port: 6379, base_image: 'redis',
     templates: [
-      { version: '8', image: 'redis:8-alpine', description: 'Redis 8' },
-      { version: '7', image: 'redis:7-alpine', description: 'Redis 7' },
+      { version: '7.4', image: 'redis:7.4-alpine', description: 'Redis 7.4（上一主线）' },
+      { version: '8.0', image: 'redis:8.0-alpine', description: 'Redis 8.0' },
+      { version: '8.4', image: 'redis:8.4-alpine', description: 'Redis 8.4' },
+      { version: '8.8', image: 'redis:8.8-alpine', description: 'Redis 8.8' },
+      { version: '8.10', image: 'redis:8.10-alpine', description: 'Redis 8.10（最新）' },
     ],
   },
 ];
