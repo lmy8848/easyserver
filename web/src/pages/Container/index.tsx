@@ -3,7 +3,7 @@ import { Tabs, Select, Badge, Button, Switch, Space, message, Result } from 'ant
 import {
   CodeOutlined, CloudDownloadOutlined,
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
-  ReloadOutlined, RocketOutlined, PlayCircleOutlined,
+  ReloadOutlined, RocketOutlined, PlayCircleOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
 import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
 import api from '../../services/api';
@@ -121,7 +121,7 @@ export default function Container() {
     { key: 'compose', label: <span><FolderOutlined /> Compose</span>, children: <ComposeTab engine={engine} /> },
     { key: 'volumes', label: <span><DatabaseOutlined /> 存储卷</span>, children: <VolumeTab engine={engine} /> },
     { key: 'networks', label: <span><GlobalOutlined /> 网络</span>, children: <NetworkTab engine={engine} /> },
-    { key: 'registry', label: <span><RocketOutlined /> 镜像仓库</span>, children: <RegistryTab engine={engine} /> },
+    { key: 'registry', label: <span><CloudServerOutlined /> 镜像仓库</span>, children: <RegistryTab engine={engine} /> },
   ];
 
   return (

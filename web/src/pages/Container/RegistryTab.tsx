@@ -7,11 +7,16 @@ import api from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import { withEngine } from './types';
 
+interface LoggedInRegistry {
+  server: string;
+  username: string;
+}
+
 export default function RegistryTab({ engine }: { engine: string }) {
   const [configForm] = Form.useForm();
   const [authForm] = Form.useForm();
   const [loading, setLoading] = useState(true);
-  const [loggedIn, setLoggedIn] = useState<string[]>([]);
+  const [loggedIn, setLoggedIn] = useState<LoggedInRegistry[]>([]);
   const [saveLoading, runSave] = useAsyncRun();
   const [loginLoading, runLogin] = useAsyncRun();
   const [logoutLoading, setLogoutLoading] = useState<string>('');
@@ -126,7 +131,7 @@ export default function RegistryTab({ engine }: { engine: string }) {
 
       <Divider style={{ margin: '24px 0 16px' }}>私有仓库登录</Divider>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-        message="凭据仅用于当前引擎拉取私有镜像，密码经 stdin 传输不落日志。" />
+        message="凭据仅用于当前引擎拉取私有镜像，密码经 stdin 传输不落日志。GitHub Container Registry / GitLab 等将个人访问令牌（PAT）填入密码栏即可。" />
 
       <Form form={authForm} layout="inline" style={{ rowGap: 12 }}>
         <Form.Item name="server" label="仓库" rules={[{ required: true }]}>
@@ -136,7 +141,7 @@ export default function RegistryTab({ engine }: { engine: string }) {
           <Input placeholder="用户名" style={{ width: 140 }} />
         </Form.Item>
         <Form.Item name="password" label="密码" rules={[{ required: true }]}>
-          <Input.Password placeholder="密码" style={{ width: 140 }} />
+          <Input.Password placeholder="密码 / Token" style={{ width: 160 }} />
         </Form.Item>
         <Form.Item>
           <Button type="primary" loading={loginLoading} onClick={handleLogin}>登录</Button>
@@ -149,15 +154,16 @@ export default function RegistryTab({ engine }: { engine: string }) {
           header={<span style={{ fontWeight: 500 }}>已登录仓库</span>}
           style={{ marginTop: 16 }}
           dataSource={loggedIn}
-          renderItem={(server) => (
+          renderItem={(reg) => (
             <List.Item
               actions={[
-                <Popconfirm key="logout" title={`确定退出 ${server}？`} onConfirm={() => handleLogout(server)} okText="退出" cancelText="取消">
-                  <Button size="small" icon={<LogoutOutlined />} loading={logoutLoading === server}>退出</Button>
+                <Popconfirm key="logout" title={`确定退出 ${reg.server}？`} onConfirm={() => handleLogout(reg.server)} okText="退出" cancelText="取消">
+                  <Button size="small" icon={<LogoutOutlined />} danger loading={logoutLoading === reg.server}>退出</Button>
                 </Popconfirm>,
               ]}
             >
-              <Tag color="green">{server}</Tag>
+              <Tag color="green">{reg.server}</Tag>
+              {reg.username && <span style={{ color: '#666', marginLeft: 8 }}>{reg.username}</span>}
             </List.Item>
           )}
         />
