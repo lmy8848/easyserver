@@ -540,9 +540,10 @@ export const dbServerApi = {
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string }) =>
     api.post<ApiResponse>(`/db/${dbtype}/instances`, data),
 
-  // Published Docker Hub tags for an engine's official image ("更多版本" flow).
-  listDockerTags: (dbtype: string) =>
-    api.get<ApiResponse<string[]>>(`/db/${dbtype}/docker-tags`),
+  // Published Docker Hub tags for an engine's official image ("更多版本" flow),
+  // paginated — the version Select flips pages through this.
+  listDockerTags: (dbtype: string, page = 1, pageSize = 10) =>
+    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/${dbtype}/docker-tags`, { params: { page, page_size: pageSize } }),
 
   uninstallInstance: (iid: number) =>
     api.delete<ApiResponse>(`/db/instances/${iid}`),

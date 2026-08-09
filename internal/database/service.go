@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"easyserver/internal/deploy"
@@ -181,14 +182,62 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	return v, nil
 }
 
-// ListDockerTags returns the published tags for an engine's official image,
-// proxied from Docker Hub. It powers the front-end "更多版本" flow — users can
-// pick any published tag, not just the curated presets.
-func (s *Service) ListDockerTags(ctx context.Context, dbType DBType) ([]string, error) {
+// dockerTagsCache holds the full (filtered) tag list for one engine, with a TTL
+// so the front-end paginates against one snapshot instead of re-hitting the
+// rate-limited Docker Hub API on every page flip.
+type dockerTagsCache struct {
+	tags    []string
+	fetched time.Time
+}
+
+var dockerTagsCacheStore = struct {
+	sync.Mutex
+	m map[DBType]dockerTagsCache
+}{m: make(map[DBType]dockerTagsCache)}
+
+const dockerTagsCacheTTL = 10 * time.Minute
+
+// ListDockerTags returns one page of published tags for an engine's official
+// image, proxied from Docker Hub (filtered to version-like tags, cached). It
+// powers the front-end "更多版本" flow — users can pick any published tag, not
+// just the curated presets.
+func (s *Service) ListDockerTags(ctx context.Context, dbType DBType, page, pageSize int) ([]string, int, error) {
 	if !IsValidDBType(dbType) {
-		return nil, fmt.Errorf("unsupported database type %q", dbType)
+		return nil, 0, fmt.Errorf("unsupported database type %q", dbType)
 	}
-	return fetchDockerHubTags(dockerImageBase(dbType))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+	tags, err := s.dockerTags(dbType)
+	if err != nil {
+		return nil, 0, err
+	}
+	start := (page - 1) * pageSize
+	if start >= len(tags) {
+		return []string{}, len(tags), nil
+	}
+	end := start + pageSize
+	if end > len(tags) {
+		end = len(tags)
+	}
+	return tags[start:end], len(tags), nil
+}
+
+func (s *Service) dockerTags(dbType DBType) ([]string, error) {
+	dockerTagsCacheStore.Lock()
+	defer dockerTagsCacheStore.Unlock()
+	if c, ok := dockerTagsCacheStore.m[dbType]; ok && time.Since(c.fetched) < dockerTagsCacheTTL {
+		return c.tags, nil
+	}
+	tags, err := fetchDockerHubTags(dockerImageBase(dbType))
+	if err != nil {
+		return nil, err
+	}
+	dockerTagsCacheStore.m[dbType] = dockerTagsCache{tags: tags, fetched: time.Now()}
+	return tags, nil
 }
 
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error {

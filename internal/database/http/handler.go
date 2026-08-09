@@ -124,12 +124,14 @@ func (h *InstanceHandler) ListDockerTags(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tags, err := h.svc.ListDockerTags(c.Request.Context(), engine)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	tags, total, err := h.svc.ListDockerTags(c.Request.Context(), engine, page, pageSize)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, tags)
+	httpx.Success(c, gin.H{"items": tags, "total": total, "page": page, "page_size": pageSize})
 }
 
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {
