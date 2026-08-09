@@ -70,49 +70,57 @@ func (r *sqliteRepo) SeedServer(ctx context.Context, name, displayName, descript
 	return nil
 }
 
-// ListVersions returns all versions for a database server
-func (r *sqliteRepo) ListVersions(ctx context.Context, dbServerID int64) ([]DBVersion, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, engine_id, version, container_name, config_dir, '', port, status, created_at,
-		runtime, image, container_id, volume_name, bind_address, admin_user, admin_password, health_status
+// instanceColumns lists database_instances columns in the exact order scanInstance
+// expects. Keeping it in one place avoids the query/scan drift that duplicated
+// SELECTs caused.
+const instanceColumns = `id, engine_id, version, container_name, config_dir, bind_address, port, admin_user, admin_password, status, health_status, created_at, runtime, image, container_id, volume_name`
+
+// scanInstance scans one database_instance row/query result into a DBInstance.
+// It works for both *sql.Row and *sql.Rows.
+func scanInstance(row interface{ Scan(...any) error }) (DBInstance, error) {
+	var v DBInstance
+	err := row.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ContainerName, &v.ConfigDir,
+		&v.BindAddress, &v.Port, &v.AdminUser, &v.AdminPassword, &v.Status, &v.HealthStatus,
+		&v.CreatedAt, &v.Runtime, &v.Image, &v.ContainerID, &v.VolumeName)
+	return v, err
+}
+
+// ListVersions returns all instances for a database engine
+func (r *sqliteRepo) ListVersions(ctx context.Context, dbServerID int64) ([]DBInstance, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+instanceColumns+`
 		FROM database_instances WHERE engine_id = ? ORDER BY id`, dbServerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var versions []DBVersion
+	var versions []DBInstance
 	for rows.Next() {
-		var v DBVersion
-		if err := rows.Scan(&v.ID, &v.DBServerID, &v.Version, &v.ServiceName,
-			&v.ConfigFile, &v.DataDir, &v.Port, &v.Status, &v.CreatedAt,
-			&v.Runtime, &v.Image, &v.ContainerID, &v.VolumeName, &v.BindAddress, &v.AdminUser, &v.AdminPassword, &v.HealthStatus); err != nil {
-			log.Printf("scan version row: %v", err)
+		v, err := scanInstance(rows)
+		if err != nil {
+			log.Printf("scan instance row: %v", err)
 			continue
 		}
 		versions = append(versions, v)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate versions: %w", err)
+		return nil, fmt.Errorf("iterate instances: %w", err)
 	}
 	return versions, nil
 }
 
-// GetVersion returns a version by ID
-func (r *sqliteRepo) GetVersion(ctx context.Context, id int64) (*DBVersion, error) {
-	v := &DBVersion{}
-	err := r.db.QueryRowContext(ctx, `SELECT id, engine_id, version, container_name, config_dir, '', port, status, created_at,
-		runtime, image, container_id, volume_name, bind_address, admin_user, admin_password, health_status
-		FROM database_instances WHERE id = ?`, id).Scan(
-		&v.ID, &v.DBServerID, &v.Version, &v.ServiceName,
-		&v.ConfigFile, &v.DataDir, &v.Port, &v.Status, &v.CreatedAt,
-		&v.Runtime, &v.Image, &v.ContainerID, &v.VolumeName, &v.BindAddress, &v.AdminUser, &v.AdminPassword, &v.HealthStatus)
+// GetVersion returns an instance by ID
+func (r *sqliteRepo) GetVersion(ctx context.Context, id int64) (*DBInstance, error) {
+	row := r.db.QueryRowContext(ctx, `SELECT `+instanceColumns+`
+		FROM database_instances WHERE id = ?`, id)
+	v, err := scanInstance(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return v, nil
+	return &v, nil
 }
 
 // CountVersionsByServerAndVersion counts versions for a given server and version string
@@ -134,12 +142,12 @@ func (r *sqliteRepo) CreateVersion(ctx context.Context, dbServerID int64, versio
 }
 
 // CreateContainerVersion inserts all metadata for a new managed database container.
-func (r *sqliteRepo) CreateContainerVersion(ctx context.Context, v *DBVersion) (int64, error) {
+func (r *sqliteRepo) CreateContainerVersion(ctx context.Context, v *DBInstance) (int64, error) {
 	result, err := r.db.ExecContext(ctx, `INSERT INTO database_instances
-		(engine_id, version, runtime, image, container_name, container_id, volume_name, bind_address, port, admin_user, admin_password, status, health_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		v.DBServerID, v.Version, v.Runtime, v.Image, v.ServiceName, v.ContainerID, v.VolumeName,
-		v.BindAddress, v.Port, v.AdminUser, v.AdminPassword, v.Status, v.HealthStatus)
+		(engine_id, version, runtime, image, container_name, container_id, volume_name, config_dir, bind_address, port, admin_user, admin_password, status, health_status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		v.DBServerID, v.Version, v.Runtime, v.Image, v.ContainerName, v.ContainerID, v.VolumeName,
+		v.ConfigDir, v.BindAddress, v.Port, v.AdminUser, v.AdminPassword, v.Status, v.HealthStatus)
 	if err != nil {
 		return 0, err
 	}

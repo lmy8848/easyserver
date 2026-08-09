@@ -89,7 +89,7 @@ export default function DatabaseList({
                 </Space>
                 <div style={STYLES.versionInfo}>
                   <Space size="middle">
-                    <span>服务: <strong>{version.service_name}</strong></span>
+                    <span>服务: <strong>{version.container_name}</strong></span>
                     <span>端口: <strong>{version.port}</strong></span>
                   </Space>
                 </div>

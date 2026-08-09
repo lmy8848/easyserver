@@ -29,12 +29,12 @@ func TestSQLiteRepositoryUsesDatabaseInstanceSchema(t *testing.T) {
 	if err != nil || len(engines) != 1 {
 		t.Fatalf("list engines: %v %#v", err, engines)
 	}
-	id, err := repo.CreateContainerVersion(ctx, &DBVersion{
+	id, err := repo.CreateContainerVersion(ctx, &DBInstance{
 		DBServerID:    engines[0].ID,
 		Version:       "8.0",
 		Runtime:       "docker",
 		Image:         "mysql:8.0",
-		ServiceName:   "easyserver-db-mysql-8",
+		ContainerName: "easyserver-db-mysql-8",
 		ContainerID:   "container-id",
 		VolumeName:    "easyserver-db-mysql-8-data",
 		BindAddress:   "127.0.0.1",

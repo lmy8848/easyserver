@@ -1,26 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, message, Modal, Tag } from 'antd';
 import { dbServerApi } from '../../services/api';
-import type { DBServer, Database, DBUser, DBVersion } from '../../types';
+import type { DBServer, Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import ServerList from './ServerList';
 import VersionList from './VersionList';
 import DatabaseList from './DatabaseList';
 import TableExplorer from './TableExplorer';
-import type { VersionTemplate, TableData, TableInfo, SqlResult } from './types';
+import type { VersionTemplate, TableData, TableInfo, SqlResult, ENGINE_VERSION_TEMPLATES } from './types';
 
 export default function DatabasePage() {
   // ===== Navigation state =====
   const [servers, setServers] = useState<DBServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedServer, setSelectedServer] = useState<DBServer | null>(null);
-  const [selectedVersion, setSelectedVersion] = useState<DBVersion | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
 
   // ===== Version state =====
-  const [versions, setVersions] = useState<DBVersion[]>([]);
+  const [versions, setVersions] = useState<DBInstance[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versionTemplates, setVersionTemplates] = useState<VersionTemplate[]>([]);
   const [installVersionVisible, setInstallVersionVisible] = useState(false);
@@ -53,7 +53,7 @@ export default function DatabasePage() {
 
   // ===== Service logs =====
   const [logVisible, setLogVisible] = useState(false);
-  const [logVersion, setLogVersion] = useState<DBVersion | null>(null);
+  const [logVersion, setLogVersion] = useState<DBInstance | null>(null);
   const [logContent, setLogContent] = useState('');
   const [logLoading, setLogLoading] = useState(false);
   const [logFollow, setLogFollow] = useState(true);
@@ -221,13 +221,10 @@ export default function DatabasePage() {
     setSelectedVersion(null);
     setSelectedDatabase(null);
     await fetchVersions(server.id);
-    try {
-      const res = await dbServerApi.getVersionTemplates(server.id);
-      setVersionTemplates(res.data?.data || []);
-    } catch (error) { console.error('Failed to fetch version templates:', error); }
+    setVersionTemplates(ENGINE_VERSION_TEMPLATES[server.name] || []);
   };
 
-  const enterVersion = async (version: DBVersion) => {
+  const enterVersion = async (version: DBInstance) => {
     setSelectedVersion(version);
     setSelectedDatabase(null);
     const server = selectedServer;
@@ -275,7 +272,7 @@ export default function DatabasePage() {
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
-  const handleStartVersion = async (v: DBVersion) => {
+  const handleStartVersion = async (v: DBInstance) => {
     const server = selectedServer;
     if (!server) return;
     setOperating(`start-${v.id}`);
@@ -287,7 +284,7 @@ export default function DatabasePage() {
     finally { setOperating(''); }
   };
 
-  const handleStopVersion = async (v: DBVersion) => {
+  const handleStopVersion = async (v: DBInstance) => {
     const server = selectedServer;
     if (!server) return;
     setOperating(`stop-${v.id}`);
@@ -299,7 +296,7 @@ export default function DatabasePage() {
     finally { setOperating(''); }
   };
 
-  const handleRestartVersion = async (v: DBVersion) => {
+  const handleRestartVersion = async (v: DBInstance) => {
     const server = selectedServer;
     if (!server) return;
     setOperating(`restart-${v.id}`);
@@ -311,7 +308,7 @@ export default function DatabasePage() {
     finally { setOperating(''); }
   };
 
-  const handleUninstallVersion = async (v: DBVersion) => {
+  const handleUninstallVersion = async (v: DBInstance) => {
     const server = selectedServer;
     if (!server) return;
     setOperating(`uninstall-${v.id}`);
@@ -410,7 +407,7 @@ export default function DatabasePage() {
   };
 
   // ===== Log/Config show functions =====
-  const showLogs = async (v: DBVersion) => {
+  const showLogs = async (v: DBInstance) => {
     setLogVersion(v);
     setLogVisible(true);
     setLogLoading(true);
@@ -421,7 +418,7 @@ export default function DatabasePage() {
     finally { setLogLoading(false); }
   };
 
-  const showConfig = async (v: DBVersion) => {
+  const showConfig = async (v: DBInstance) => {
     setConfigVisible(true);
     setConfigLoading(true);
     try {

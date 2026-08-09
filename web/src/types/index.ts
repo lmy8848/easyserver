@@ -191,7 +191,7 @@ export interface WebServer {
   config_file: string;
   sites_available: string;
   sites_enabled: string;
-  service_name: string;
+  container_name: string;
   binary_path: string;
   default_port: number;
   log_dir: string;
@@ -260,11 +260,11 @@ export interface DBBackup {
   created_at: string;
 }
 
-export interface DBVersion {
+export interface DBInstance {
   id: number;
   db_server_id: number;
   version: string;
-  service_name: string;
+  container_name: string;
   config_file: string;
   data_dir: string;
   port: number;

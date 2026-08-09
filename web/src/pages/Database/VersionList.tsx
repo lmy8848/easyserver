@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import STYLES from './styles';
-import type { VersionListProps, DBVersion } from './types';
+import type { VersionListProps, DBInstance } from './types';
 
 export default function VersionList({
   server, versions, versionsLoading, operating,
@@ -23,7 +23,7 @@ export default function VersionList({
   statusColor, statusTag,
 }: VersionListProps) {
 
-  const handleUpdatePort = (v: DBVersion) => {
+  const handleUpdatePort = (v: DBInstance) => {
     if (v.status === 'running') {
       message.warning('请先停止服务再修改端口');
       return;
@@ -100,7 +100,7 @@ export default function VersionList({
                     description={
                       <div>
                         <p style={{ margin: '4px 0' }}>端口: <strong>{v.port}</strong></p>
-                        <p style={{ margin: '4px 0' }}>服务: <Tag>{v.service_name}</Tag></p>
+                        <p style={{ margin: '4px 0' }}>服务: <Tag>{v.container_name}</Tag></p>
                       </div>
                     }
                   />

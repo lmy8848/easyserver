@@ -26,58 +26,57 @@ func RegisterRoutes(protected *gin.RouterGroup, dbServerService *dbserver.Servic
 	backupHandler := NewBackupHandler(dbServerService, dbMgmtService)
 	configHandler := NewConfigHandler()
 
-	protected.GET("/db-servers", handler.List)
-	protected.GET("/db-servers/:id", handler.Get)
+	protected.GET("/db-instances", handler.List)
+	protected.GET("/db-instances/:id", handler.Get)
 
 	// Version management
-	protected.GET("/db-servers/:id/version-templates", versionHandler.GetVersionTemplates)
-	protected.GET("/db-servers/:id/versions", versionHandler.ListVersions)
-	protected.POST("/db-servers/:id/versions", versionHandler.InstallVersion)
-	protected.DELETE("/db-servers/versions/:vid", versionHandler.UninstallVersion)
-	protected.DELETE("/db-servers/versions/:vid/data", versionHandler.DestroyVersion)
-	protected.POST("/db-servers/versions/:vid/reset-password", versionHandler.ResetAdminPassword)
-	protected.POST("/db-servers/versions/:vid/start", versionHandler.StartVersion)
-	protected.POST("/db-servers/versions/:vid/stop", versionHandler.StopVersion)
-	protected.POST("/db-servers/versions/:vid/restart", versionHandler.RestartVersion)
-	protected.PUT("/db-servers/versions/:vid/port", versionHandler.UpdateVersionPort)
-	protected.GET("/db-servers/versions/:vid/logs", versionHandler.GetVersionLogs)
-	protected.GET("/db-servers/versions/:vid/config", versionHandler.GetVersionConfig)
-	protected.PUT("/db-servers/versions/:vid/config", versionHandler.SaveVersionConfig)
+	protected.GET("/db-instances/:id/versions", versionHandler.ListVersions)
+	protected.POST("/db-instances/:id/versions", versionHandler.InstallVersion)
+	protected.DELETE("/db-instances/versions/:vid", versionHandler.UninstallVersion)
+	protected.DELETE("/db-instances/versions/:vid/data", versionHandler.DestroyVersion)
+	protected.POST("/db-instances/versions/:vid/reset-password", versionHandler.ResetAdminPassword)
+	protected.POST("/db-instances/versions/:vid/start", versionHandler.StartVersion)
+	protected.POST("/db-instances/versions/:vid/stop", versionHandler.StopVersion)
+	protected.POST("/db-instances/versions/:vid/restart", versionHandler.RestartVersion)
+	protected.PUT("/db-instances/versions/:vid/port", versionHandler.UpdateVersionPort)
+	protected.GET("/db-instances/versions/:vid/logs", versionHandler.GetVersionLogs)
+	protected.GET("/db-instances/versions/:vid/config", versionHandler.GetVersionConfig)
+	protected.PUT("/db-instances/versions/:vid/config", versionHandler.SaveVersionConfig)
 
 	// Databases nested
-	protected.GET("/db-servers/:id/databases", dbHandler.ListDatabases)
-	protected.POST("/db-servers/:id/databases", dbHandler.CreateDatabase)
-	protected.DELETE("/db-servers/:id/databases/:did", dbHandler.DeleteDatabase)
+	protected.GET("/db-instances/:id/databases", dbHandler.ListDatabases)
+	protected.POST("/db-instances/:id/databases", dbHandler.CreateDatabase)
+	protected.DELETE("/db-instances/:id/databases/:did", dbHandler.DeleteDatabase)
 
 	// DB Users nested
-	protected.GET("/db-servers/:id/users", userHandler.ListDBUsers)
-	protected.POST("/db-servers/:id/users", userHandler.CreateDBUser)
-	protected.DELETE("/db-servers/:id/users/:uid", userHandler.DeleteDBUser)
-	protected.POST("/db-servers/:id/users/:uid/grant", userHandler.GrantPrivileges)
+	protected.GET("/db-instances/:id/users", userHandler.ListDBUsers)
+	protected.POST("/db-instances/:id/users", userHandler.CreateDBUser)
+	protected.DELETE("/db-instances/:id/users/:uid", userHandler.DeleteDBUser)
+	protected.POST("/db-instances/:id/users/:uid/grant", userHandler.GrantPrivileges)
 
 	// Database introspection
-	protected.GET("/db-servers/databases/:did/tables", dbHandler.ListTables)
-	protected.GET("/db-servers/databases/:did/describe", dbHandler.DescribeTable)
-	protected.GET("/db-servers/databases/:did/query", dbHandler.QueryTable)
-	protected.POST("/db-servers/databases/:did/execute", dbHandler.ExecuteSQL)
-	protected.POST("/db-servers/databases/:did/insert", dbHandler.InsertRecord)
-	protected.POST("/db-servers/databases/:did/update", dbHandler.UpdateRecord)
-	protected.POST("/db-servers/databases/:did/delete", dbHandler.DeleteRecord)
+	protected.GET("/db-instances/databases/:did/tables", dbHandler.ListTables)
+	protected.GET("/db-instances/databases/:did/describe", dbHandler.DescribeTable)
+	protected.GET("/db-instances/databases/:did/query", dbHandler.QueryTable)
+	protected.POST("/db-instances/databases/:did/execute", dbHandler.ExecuteSQL)
+	protected.POST("/db-instances/databases/:did/insert", dbHandler.InsertRecord)
+	protected.POST("/db-instances/databases/:did/update", dbHandler.UpdateRecord)
+	protected.POST("/db-instances/databases/:did/delete", dbHandler.DeleteRecord)
 
 	// Table management
-	protected.POST("/db-servers/databases/:did/tables", dbHandler.CreateTable)
-	protected.DELETE("/db-servers/databases/:did/tables", dbHandler.DropTable)
+	protected.POST("/db-instances/databases/:did/tables", dbHandler.CreateTable)
+	protected.DELETE("/db-instances/databases/:did/tables", dbHandler.DropTable)
 
 	// Database backup
-	protected.POST("/db-servers/databases/:did/backup", backupHandler.CreateBackup)
-	protected.GET("/db-servers/databases/:did/backups", backupHandler.ListBackups)
-	protected.GET("/db-servers/backups/:bid/download", backupHandler.DownloadBackup)
-	protected.POST("/db-servers/backups/:bid/restore", backupHandler.RestoreBackup)
-	protected.DELETE("/db-servers/backups/:bid", backupHandler.DeleteBackup)
+	protected.POST("/db-instances/databases/:did/backup", backupHandler.CreateBackup)
+	protected.GET("/db-instances/databases/:did/backups", backupHandler.ListBackups)
+	protected.GET("/db-instances/backups/:bid/download", backupHandler.DownloadBackup)
+	protected.POST("/db-instances/backups/:bid/restore", backupHandler.RestoreBackup)
+	protected.DELETE("/db-instances/backups/:bid", backupHandler.DeleteBackup)
 
-	protected.GET("/db-servers/mysql/common-params", configHandler.GetMySQLCommonParams)
-	protected.GET("/db-servers/postgresql/common-params", configHandler.GetPGCommonParams)
-	protected.GET("/db-servers/redis/common-params", configHandler.GetRedisCommonParams)
+	protected.GET("/db-instances/mysql/common-params", configHandler.GetMySQLCommonParams)
+	protected.GET("/db-instances/postgresql/common-params", configHandler.GetPGCommonParams)
+	protected.GET("/db-instances/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
 // DBServerHandler handles top-level DB server endpoints (list, get).
@@ -130,21 +129,6 @@ func NewVersionHandler(dbServerService *dbserver.Service) *VersionHandler {
 	return &VersionHandler{dbServerService: dbServerService}
 }
 
-func (h *VersionHandler) GetVersionTemplates(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
-		return
-	}
-	server, err := h.dbServerService.Get(c.Request.Context(), id)
-	if err != nil || server == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库服务器不存在"))
-		return
-	}
-	templates := dbserver.GetVersionTemplates(server.Name)
-	httpx.Success(c, templates)
-}
-
 func (h *VersionHandler) ListVersions(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -165,7 +149,7 @@ func (h *VersionHandler) InstallVersion(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
 		return
 	}
-	var req dbserver.CreateDBVersionRequest
+	var req dbserver.CreateDBInstanceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
@@ -282,7 +266,7 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库版本不存在"))
 		return
 	}
-	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ServiceName+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
+	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ContainerName+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
 
 	if req.Port < 1 || req.Port > 65535 {
 		c.Error(apperror.ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
@@ -805,7 +789,7 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 		return
 	}
 
-	backup, err := h.dbMgmtService.CreateBackup(c.Request.Context(), db.DBServerID, db.DBVersionID, did, db.Name, server.Name)
+	backup, err := h.dbMgmtService.CreateBackup(c.Request.Context(), db.DBServerID, db.DBInstanceID, did, db.Name, server.Name)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return

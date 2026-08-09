@@ -17,6 +17,8 @@ type ContainerSpec struct {
 	Image         string
 	Volume        string
 	DataDir       string
+	ConfigVolume  string
+	ConfigDir     string
 	BindAddress   string
 	HostPort      int
 	ContainerPort int
@@ -38,7 +40,7 @@ type DatabaseRuntime interface {
 	Start(ctx context.Context, runtime, name string) error
 	Stop(ctx context.Context, runtime, name string) error
 	Restart(ctx context.Context, runtime, name string) error
-	Remove(ctx context.Context, runtime, name string, removeVolume bool) error
+	Remove(ctx context.Context, runtime, name string) error
 	Status(ctx context.Context, runtime, name string) (ContainerStatus, error)
 	Logs(ctx context.Context, runtime, name string, lines int) (string, error)
 	Exec(ctx context.Context, runtime, name string, args ...string) (string, error)
@@ -50,6 +52,10 @@ type DatabaseRuntime interface {
 // CLIContainerRuntime implements DatabaseRuntime with Docker or rootful Podman.
 type CLIContainerRuntime struct {
 	executor executor.CommandExecutor
+	// lastSpec records the most recent Create spec, exposed for tests to assert
+	// the structured contract (label, volume, port binding) without inspecting
+	// command concatenation.
+	lastSpec ContainerSpec
 }
 
 func NewCLIContainerRuntime(exec executor.CommandExecutor) *CLIContainerRuntime {
@@ -89,8 +95,18 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 	if spec.HostPort < 1 || spec.HostPort > 65535 || spec.ContainerPort < 1 || spec.ContainerPort > 65535 {
 		return fmt.Errorf("invalid container port")
 	}
+	if spec.Labels == nil {
+		spec.Labels = map[string]string{}
+	}
+	spec.Labels["com.easyserver.managed"] = "true"
+	r.lastSpec = spec
 	if _, err := r.command(ctx, spec.Runtime, "volume", "create", spec.Volume); err != nil {
 		return fmt.Errorf("create data volume: %w", err)
+	}
+	if spec.ConfigVolume != "" {
+		if _, err := r.command(ctx, spec.Runtime, "volume", "create", spec.ConfigVolume); err != nil {
+			return fmt.Errorf("create config volume: %w", err)
+		}
 	}
 
 	args := []string{"create", "--name", spec.Name}
@@ -100,6 +116,9 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 	}
 	args = append(args, "--publish", fmt.Sprintf("%s:%d:%d", spec.BindAddress, spec.HostPort, spec.ContainerPort))
 	args = append(args, "--volume", spec.Volume+":"+spec.DataDir)
+	if spec.ConfigVolume != "" && spec.ConfigDir != "" {
+		args = append(args, "--volume", spec.ConfigVolume+":"+spec.ConfigDir)
+	}
 	for _, key := range sortedKeys(spec.Environment) {
 		args = append(args, "--env", key+"="+spec.Environment[key])
 	}
@@ -130,15 +149,9 @@ func (r *CLIContainerRuntime) Restart(ctx context.Context, runtime, name string)
 	return err
 }
 
-func (r *CLIContainerRuntime) Remove(ctx context.Context, runtime, name string, removeVolume bool) error {
-	if _, err := r.command(ctx, runtime, "rm", "--force", name); err != nil {
-		return err
-	}
-	if removeVolume {
-		// The caller passes the volume separately when it needs destructive cleanup.
-		return fmt.Errorf("remove volume requires an explicit volume name")
-	}
-	return nil
+func (r *CLIContainerRuntime) Remove(ctx context.Context, runtime, name string) error {
+	_, err := r.command(ctx, runtime, "rm", "--force", name)
+	return err
 }
 
 func (r *CLIContainerRuntime) Status(ctx context.Context, runtime, name string) (ContainerStatus, error) {
@@ -208,7 +221,7 @@ func waitForHealthy(ctx context.Context, runtime DatabaseRuntime, runtimeName, c
 		if err != nil {
 			return status, err
 		}
-		if status.State == "running" && (status.Health == "healthy" || status.Health == "") {
+		if status.State == "running" && status.Health == "healthy" {
 			return status, nil
 		}
 		if status.State == "exited" || status.State == "dead" {

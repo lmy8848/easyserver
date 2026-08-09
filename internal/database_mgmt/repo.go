@@ -24,8 +24,8 @@ type Repository interface {
 
 	// Lookup helpers (lightweight queries)
 	GetServer(ctx context.Context, id int64) (*dbserver.DBServer, error)
-	GetVersion(ctx context.Context, id int64) (*dbserver.DBVersion, error)
-	ListVersions(ctx context.Context, dbServerID int64) ([]dbserver.DBVersion, error)
+	GetVersion(ctx context.Context, id int64) (*dbserver.DBInstance, error)
+	ListVersions(ctx context.Context, dbServerID int64) ([]dbserver.DBInstance, error)
 
 	// Backup operations
 	CreateBackup(ctx context.Context, backup *DBBackup) (int64, error)

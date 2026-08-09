@@ -12,21 +12,22 @@ type DBServer struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// DBVersion is retained as a wire name for a container-backed Database Instance.
-type DBVersion struct {
+// DBInstance is a container-backed Database Instance — the top-level resource of
+// the database module. Each instance owns one managed container, one named data
+// volume, an instance-level config dir, a fixed image and a fixed runtime.
+type DBInstance struct {
 	ID                 int64  `json:"id"`
 	DBServerID         int64  `json:"db_server_id"`
-	Version            string `json:"version"`      // 5.7, 8.0, 13, 15, etc.
-	ServiceName        string `json:"service_name"` // managed container name (legacy key)
-	ConfigFile         string `json:"config_file"`
-	DataDir            string `json:"data_dir"`
+	Version            string `json:"version"`        // 5.7, 8.0, 13, 15, etc.
+	ContainerName      string `json:"container_name"` // managed container name
 	Port               int    `json:"port"`
-	Status             string `json:"status"` // running, stopped
+	Status             string `json:"status"` // running, stopped, unhealthy
 	CreatedAt          string `json:"created_at"`
 	Runtime            string `json:"runtime"`
 	Image              string `json:"image"`
 	ContainerID        string `json:"container_id"`
 	VolumeName         string `json:"volume_name"`
+	ConfigDir          string `json:"config_dir"`
 	BindAddress        string `json:"bind_address"`
 	AdminUser          string `json:"admin_user"`
 	AdminPassword      string `json:"-"`
@@ -34,8 +35,8 @@ type DBVersion struct {
 	HealthStatus       string `json:"health_status"`
 }
 
-// CreateDBVersionRequest is the request for installing a new database version
-type CreateDBVersionRequest struct {
+// CreateDBInstanceRequest is the request for installing a new database version
+type CreateDBInstanceRequest struct {
 	Version     string `json:"version" binding:"required"`
 	Port        int    `json:"port"`
 	Runtime     string `json:"runtime"`

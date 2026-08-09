@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os/exec"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -80,10 +79,19 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	if fake.calls[0].name != "podman" || len(fake.calls[0].args) < 3 || fake.calls[0].args[0] != "volume" {
 		t.Fatalf("unexpected volume call: %#v", fake.calls[0])
 	}
-	joined := strings.Join(fake.calls[1].args, " ")
-	for _, want := range []string{"create", "--name easyserver-db-mysql-8", "--label com.easyserver.managed=true", "--publish 127.0.0.1:3306:3306", "--volume easyserver-db-mysql-8-data:/var/lib/mysql", "mysql:8.0"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("container args missing %q: %s", want, joined)
-		}
+
+	// Assert the structured contract, not the concatenated CLI args.
+	spec := runtime.lastSpec
+	if spec.Volume != "easyserver-db-mysql-8-data" || spec.DataDir != "/var/lib/mysql" {
+		t.Fatalf("data volume mapping lost: volume=%q datadir=%q", spec.Volume, spec.DataDir)
+	}
+	if spec.BindAddress != "127.0.0.1" {
+		t.Fatalf("expected loopback bind by default, got %q", spec.BindAddress)
+	}
+	if spec.HostPort != 3306 || spec.ContainerPort != 3306 {
+		t.Fatalf("unexpected port mapping: %d:%d", spec.HostPort, spec.ContainerPort)
+	}
+	if spec.Labels["com.easyserver.managed"] != "true" {
+		t.Fatalf("managed label not set: %#v", spec.Labels)
 	}
 }

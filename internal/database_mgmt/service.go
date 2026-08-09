@@ -54,10 +54,6 @@ type Service struct {
 }
 
 // NewService creates a new database management Service.
-func NewService(repo Repository, exec executor.CommandExecutor) *Service {
-	return NewServiceWithEncryptionKey(repo, exec, "")
-}
-
 func NewServiceWithEncryptionKey(repo Repository, exec executor.CommandExecutor, encryptionKey string) *Service {
 	return &Service{
 		repo:          repo,
@@ -106,7 +102,7 @@ func (s *Service) CreateDatabase(ctx context.Context, dbServerID int64, req *Cre
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	version, err := s.repo.GetVersion(ctx, req.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, req.DBInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get version: %w", err)
 	}
@@ -156,19 +152,19 @@ func (s *Service) CreateDatabase(ctx context.Context, dbServerID int64, req *Cre
 		return nil, fmt.Errorf("database creation not supported for %s", server.Name)
 	}
 
-	id, err := s.repo.CreateDatabase(ctx, dbServerID, req.DBVersionID, req.Name, charset, req.Description)
+	id, err := s.repo.CreateDatabase(ctx, dbServerID, req.DBInstanceID, req.Name, charset, req.Description)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Database{
-		ID:          id,
-		DBServerID:  dbServerID,
-		DBVersionID: req.DBVersionID,
-		Name:        req.Name,
-		Charset:     charset,
-		Status:      "active",
-		Version:     version.Version,
+		ID:           id,
+		DBServerID:   dbServerID,
+		DBInstanceID: req.DBInstanceID,
+		Name:         req.Name,
+		Charset:      charset,
+		Status:       "active",
+		Version:      version.Version,
 	}, nil
 }
 
@@ -193,7 +189,7 @@ func (s *Service) DeleteDatabase(ctx context.Context, dbServerID, id int64) erro
 		return fmt.Errorf("database server not found")
 	}
 
-	version, err := s.repo.GetVersion(ctx, d.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, d.DBInstanceID)
 	if err != nil {
 		return fmt.Errorf("get version: %w", err)
 	}
@@ -376,7 +372,7 @@ func (s *Service) GrantPrivileges(ctx context.Context, dbServerID, userID int64,
 		return fmt.Errorf("database server not found")
 	}
 
-	version, err := s.repo.GetVersion(ctx, req.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, req.DBInstanceID)
 	if err != nil {
 		return fmt.Errorf("get version: %w", err)
 	}
@@ -454,7 +450,7 @@ func (s *Service) CreateBackup(ctx context.Context, dbServerID, dbVersionID, dat
 
 	backup := &DBBackup{
 		DBServerID:   dbServerID,
-		DBVersionID:  dbVersionID,
+		DBInstanceID: dbVersionID,
 		DatabaseID:   databaseID,
 		DatabaseName: dbName,
 		BackupType:   "manual",
@@ -506,7 +502,7 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType st
 }
 
 func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
-	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, backup.DBInstanceID)
 	if err != nil || version == nil {
 		return fmt.Errorf("database instance not found")
 	}
@@ -518,7 +514,7 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 }
 
 func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
-	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, backup.DBInstanceID)
 	if err != nil || version == nil {
 		return fmt.Errorf("database instance not found")
 	}
@@ -530,7 +526,7 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 }
 
 func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
-	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, backup.DBInstanceID)
 	if err != nil || version == nil {
 		return fmt.Errorf("database instance not found")
 	}
@@ -540,7 +536,7 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	}
 
 	time.Sleep(2 * time.Second)
-	return s.runtime.CopyFrom(ctx, version.Runtime, version.ServiceName, "/data/dump.rdb", backup.FilePath)
+	return s.runtime.CopyFrom(ctx, version.Runtime, version.ContainerName, "/data/dump.rdb", backup.FilePath)
 }
 
 // ListBackups returns all backups for a database.
@@ -595,12 +591,12 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType string) er
 }
 
 func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
-	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, backup.DBInstanceID)
 	if err != nil || version == nil {
 		return fmt.Errorf("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.sql"
-	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ServiceName, backup.FilePath, target); err != nil {
+	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
 	if _, err := s.runInVersion(ctx, version, "sh", "-c", "mysql "+shellQuote(backup.DatabaseName)+" < "+target); err != nil {
@@ -610,12 +606,12 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 }
 
 func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error {
-	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, backup.DBInstanceID)
 	if err != nil || version == nil {
 		return fmt.Errorf("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.dump"
-	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ServiceName, backup.FilePath, target); err != nil {
+	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
 	out, err := s.runInVersion(ctx, version, "pg_restore", "-d", backup.DatabaseName, "-c", target)
@@ -626,17 +622,17 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 }
 
 func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
-	version, err := s.repo.GetVersion(ctx, backup.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, backup.DBInstanceID)
 	if err != nil || version == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	if err := s.runtime.Stop(ctx, version.Runtime, version.ServiceName); err != nil {
+	if err := s.runtime.Stop(ctx, version.Runtime, version.ContainerName); err != nil {
 		return fmt.Errorf("stop Redis failed: %w", err)
 	}
-	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ServiceName, backup.FilePath, "/data/dump.rdb"); err != nil {
+	if err := s.runtime.CopyTo(ctx, version.Runtime, version.ContainerName, backup.FilePath, "/data/dump.rdb"); err != nil {
 		return fmt.Errorf("copy Redis backup: %w", err)
 	}
-	if err := s.runtime.Start(ctx, version.Runtime, version.ServiceName); err != nil {
+	if err := s.runtime.Start(ctx, version.Runtime, version.ContainerName); err != nil {
 		return fmt.Errorf("start Redis failed: %w", err)
 	}
 	return nil
@@ -665,15 +661,15 @@ func (s *Service) CleanOldBackups(ctx context.Context, databaseID int64, maxBack
 
 // --- SQL Query operations ---
 
-func (s *Service) runInVersion(ctx context.Context, version *dbserver.DBVersion, args ...string) (string, error) {
-	if version == nil || version.Runtime == "" || version.ServiceName == "" {
+func (s *Service) runInVersion(ctx context.Context, version *dbserver.DBInstance, args ...string) (string, error) {
+	if version == nil || version.Runtime == "" || version.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
 	args = s.withAdminCredentials(version, args)
-	return s.runtime.Exec(ctx, version.Runtime, version.ServiceName, args...)
+	return s.runtime.Exec(ctx, version.Runtime, version.ContainerName, args...)
 }
 
-func (s *Service) withAdminCredentials(version *dbserver.DBVersion, args []string) []string {
+func (s *Service) withAdminCredentials(version *dbserver.DBInstance, args []string) []string {
 	if len(args) == 0 || len(s.encryptionKey) != 32 {
 		return args
 	}
@@ -695,7 +691,7 @@ func (s *Service) withAdminCredentials(version *dbserver.DBVersion, args []strin
 }
 
 // lookupDB resolves dbID → database + server + typed DBType.
-func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *dbserver.DBServer, *dbserver.DBVersion, DBType, error) {
+func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *dbserver.DBServer, *dbserver.DBInstance, DBType, error) {
 	db, err := s.repo.GetDatabaseByID(ctx, dbID)
 	if err != nil || db == nil {
 		return nil, nil, nil, "", fmt.Errorf("数据库不存在")
@@ -704,7 +700,7 @@ func (s *Service) lookupDB(ctx context.Context, dbID int64) (*Database, *dbserve
 	if err != nil || server == nil {
 		return nil, nil, nil, "", fmt.Errorf("服务器不存在")
 	}
-	version, err := s.repo.GetVersion(ctx, db.DBVersionID)
+	version, err := s.repo.GetVersion(ctx, db.DBInstanceID)
 	if err != nil || version == nil {
 		return nil, nil, nil, "", fmt.Errorf("数据库实例不存在")
 	}
@@ -724,7 +720,7 @@ func getDBTypeFromName(name string) DBType {
 	return DBTypeMySQL
 }
 
-func firstRunningVersion(versions []dbserver.DBVersion) *dbserver.DBVersion {
+func firstRunningVersion(versions []dbserver.DBInstance) *dbserver.DBInstance {
 	for i := range versions {
 		if versions[i].Status == "running" {
 			return &versions[i]
@@ -737,7 +733,7 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func (s *Service) execRaw(ctx context.Context, version *dbserver.DBVersion, dbType DBType, dbName string, sql string) (string, error) {
+func (s *Service) execRaw(ctx context.Context, version *dbserver.DBInstance, dbType DBType, dbName string, sql string) (string, error) {
 	switch dbType {
 	case DBTypeMySQL:
 		return s.runInVersion(ctx, version, "mysql", dbName, "-e", sql)

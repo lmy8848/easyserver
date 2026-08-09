@@ -12,11 +12,11 @@ type Repository interface {
 	SeedServer(ctx context.Context, name, displayName, description string, defaultPort int) error
 
 	// Version operations
-	ListVersions(ctx context.Context, dbServerID int64) ([]DBVersion, error)
-	GetVersion(ctx context.Context, id int64) (*DBVersion, error)
+	ListVersions(ctx context.Context, dbServerID int64) ([]DBInstance, error)
+	GetVersion(ctx context.Context, id int64) (*DBInstance, error)
 	CountVersionsByServerAndVersion(ctx context.Context, dbServerID int64, version string) (int, error)
 	CreateVersion(ctx context.Context, dbServerID int64, version, serviceName string, port int, status string) (int64, error)
-	CreateContainerVersion(ctx context.Context, v *DBVersion) (int64, error)
+	CreateContainerVersion(ctx context.Context, v *DBInstance) (int64, error)
 	DeleteVersion(ctx context.Context, id int64) error
 	CountDatabasesByVersion(ctx context.Context, versionID int64) (int, error)
 

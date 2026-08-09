@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -18,10 +19,6 @@ type Service struct {
 	repo          Repository
 	runtime       DatabaseRuntime
 	encryptionKey []byte
-}
-
-func NewService(exec executor.CommandExecutor, repo Repository) *Service {
-	return NewServiceWithEncryptionKey(exec, repo, "")
 }
 
 func NewServiceWithEncryptionKey(exec executor.CommandExecutor, repo Repository, encryptionKey string) *Service {
@@ -69,7 +66,7 @@ func (s *Service) Get(ctx context.Context, id int64) (*DBServer, error) {
 
 // Version management
 
-func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]DBVersion, error) {
+func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]DBInstance, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -83,14 +80,14 @@ func (s *Service) ListVersions(ctx context.Context, dbServerID int64) ([]DBVersi
 	return s.repo.ListVersions(ctx, dbServerID)
 }
 
-func (s *Service) GetVersion(ctx context.Context, id int64) (*DBVersion, error) {
+func (s *Service) GetVersion(ctx context.Context, id int64) (*DBInstance, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return s.repo.GetVersion(ctx, id)
 }
 
-func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *CreateDBVersionRequest) (*DBVersion, error) {
+func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *CreateDBInstanceRequest) (*DBInstance, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -160,22 +157,30 @@ func (s *Service) InstallVersion(ctx context.Context, dbServerID int64, req *Cre
 	if err := s.runtime.Create(ctx, spec); err != nil {
 		return nil, err
 	}
+	// Redis loads a config file on startup; seed the mounted config volume with
+	// an initial file carrying the admin password before the first start.
+	if ds.Name == "redis" {
+		if err := seedRedisConfig(ctx, s.runtime, runtimeName, containerName, password); err != nil {
+			_ = s.runtime.Remove(ctx, runtimeName, containerName)
+			return nil, err
+		}
+	}
 	if err := s.runtime.Start(ctx, runtimeName, containerName); err != nil {
-		_ = s.runtime.Remove(ctx, runtimeName, containerName, false)
+		_ = s.runtime.Remove(ctx, runtimeName, containerName)
 		return nil, fmt.Errorf("start database container: %w", err)
 	}
 	statusInfo, err := waitForHealthy(ctx, s.runtime, runtimeName, containerName, 2*time.Minute)
 	if err != nil {
-		_ = s.runtime.Remove(ctx, runtimeName, containerName, false)
+		_ = s.runtime.Remove(ctx, runtimeName, containerName)
 		return nil, err
 	}
-	v := &DBVersion{DBServerID: dbServerID, Version: req.Version, ServiceName: containerName,
+	v := &DBInstance{DBServerID: dbServerID, Version: req.Version, ContainerName: containerName,
 		Port: port, Status: "running", CreatedAt: "", Runtime: runtimeName, Image: image,
-		ContainerID: containerName, VolumeName: volumeName, BindAddress: bindAddress,
+		ContainerID: containerName, VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress,
 		AdminUser: adminUser, AdminPassword: encryptedPassword, AdminPasswordPlain: password, HealthStatus: statusInfo.Health}
 	id, err := s.repo.CreateContainerVersion(ctx, v)
 	if err != nil {
-		_ = s.runtime.Remove(ctx, runtimeName, containerName, false)
+		_ = s.runtime.Remove(ctx, runtimeName, containerName)
 		return nil, err
 	}
 	v.ID = id
@@ -202,7 +207,7 @@ func (s *Service) UninstallVersion(ctx context.Context, versionID int64) error {
 		return fmt.Errorf("cannot uninstall: %d databases still exist for this version", dbCount)
 	}
 
-	if err := s.runtime.Remove(ctx, v.Runtime, v.ServiceName, false); err != nil {
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
 	s.repo.DeleteVersion(ctx, versionID)
@@ -221,11 +226,16 @@ func (s *Service) DestroyVersion(ctx context.Context, versionID int64) error {
 	} else if count > 0 {
 		return fmt.Errorf("cannot destroy: %d databases still exist for this instance", count)
 	}
-	if err := s.runtime.Remove(ctx, v.Runtime, v.ServiceName, false); err != nil {
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
 	if err := s.runtime.RemoveVolume(ctx, v.Runtime, v.VolumeName); err != nil {
 		return fmt.Errorf("remove database volume: %w", err)
+	}
+	if v.ConfigDir != "" {
+		if err := s.runtime.RemoveVolume(ctx, v.Runtime, v.ContainerName+"-config"); err != nil {
+			return fmt.Errorf("remove database config volume: %w", err)
+		}
 	}
 	if err := s.repo.DeleteVersion(ctx, versionID); err != nil {
 		return err
@@ -240,8 +250,12 @@ func (s *Service) ResetAdminPassword(ctx context.Context, versionID int64) (stri
 	if err != nil || v == nil {
 		return "", fmt.Errorf("version not found")
 	}
-	if v.Runtime == "" || v.ServiceName == "" || len(s.encryptionKey) != 32 {
+	if v.Runtime == "" || v.ContainerName == "" || len(s.encryptionKey) != 32 {
 		return "", fmt.Errorf("database instance encryption is not configured")
+	}
+	oldPassword, err := s.decryptAdminPassword(v)
+	if err != nil {
+		return "", err
 	}
 	password, err := generateAdminPassword()
 	if err != nil {
@@ -249,12 +263,16 @@ func (s *Service) ResetAdminPassword(ctx context.Context, versionID int64) (stri
 	}
 	switch {
 	case strings.HasPrefix(strings.ToLower(v.Image), "mysql"):
-		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "mysql", "-uroot", "-p"+mustDecrypt(s.encryptionKey, v.AdminPassword), "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "mysql", "-uroot", "-p"+oldPassword, "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
 			return "", fmt.Errorf("reset MySQL password: %w", err)
 		}
 	case strings.HasPrefix(strings.ToLower(v.Image), "postgres"):
-		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "psql", "-U", "postgres", "-c", "ALTER USER postgres WITH PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "psql", "-U", "postgres", "-c", "ALTER USER postgres WITH PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
 			return "", fmt.Errorf("reset PostgreSQL password: %w", err)
+		}
+	case strings.HasPrefix(strings.ToLower(v.Image), "redis"):
+		if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "redis-cli", "-a", oldPassword, "CONFIG", "SET", "requirepass", password); err != nil {
+			return "", fmt.Errorf("reset Redis password: %w", err)
 		}
 	default:
 		return "", fmt.Errorf("password reset is not supported for this database image")
@@ -269,12 +287,15 @@ func (s *Service) ResetAdminPassword(ctx context.Context, versionID int64) (stri
 	return password, nil
 }
 
-func mustDecrypt(key []byte, encrypted string) string {
-	password, err := deploy.Decrypt(encrypted, key)
-	if err != nil {
-		return ""
+func (s *Service) decryptAdminPassword(v *DBInstance) (string, error) {
+	if len(s.encryptionKey) != 32 {
+		return "", fmt.Errorf("database instance encryption is not configured")
 	}
-	return password
+	password, err := deploy.Decrypt(v.AdminPassword, s.encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("decrypt administrator password: %w", err)
+	}
+	return password, nil
 }
 
 func (s *Service) StartVersion(ctx context.Context, versionID int64) error {
@@ -285,10 +306,10 @@ func (s *Service) StartVersion(ctx context.Context, versionID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	if err := s.runtime.Start(ctx, v.Runtime, v.ServiceName); err != nil {
+	if err := s.runtime.Start(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("start failed: %w", err)
 	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ServiceName, 2*time.Minute); err != nil {
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
 	s.repo.UpdateVersionStatus(ctx, versionID, "running")
@@ -304,7 +325,7 @@ func (s *Service) StopVersion(ctx context.Context, versionID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	if err := s.runtime.Stop(ctx, v.Runtime, v.ServiceName); err != nil {
+	if err := s.runtime.Stop(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("stop failed: %w", err)
 	}
 	s.repo.UpdateVersionStatus(ctx, versionID, "stopped")
@@ -320,10 +341,10 @@ func (s *Service) RestartVersion(ctx context.Context, versionID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("version not found")
 	}
-	if err := s.runtime.Restart(ctx, v.Runtime, v.ServiceName); err != nil {
+	if err := s.runtime.Restart(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("restart failed: %w", err)
 	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ServiceName, 2*time.Minute); err != nil {
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
 	s.repo.UpdateVersionStatus(ctx, versionID, "running")
@@ -351,21 +372,21 @@ func (s *Service) UpdateVersionPort(ctx context.Context, versionID int64, newPor
 	if err != nil || ds == nil {
 		return fmt.Errorf("database engine not found")
 	}
-	password := mustDecrypt(s.encryptionKey, v.AdminPassword)
-	if password == "" {
-		return fmt.Errorf("database administrator password is unavailable")
+	password, err := s.decryptAdminPassword(v)
+	if err != nil {
+		return err
 	}
-	if err := s.runtime.Remove(ctx, v.Runtime, v.ServiceName, false); err != nil {
+	if err := s.runtime.Remove(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("remove old database container: %w", err)
 	}
-	spec := containerSpec(ds.Name, v.Runtime, v.Version, v.Image, v.ServiceName, v.VolumeName, v.BindAddress, newPort, v.AdminUser, password)
+	spec := containerSpec(ds.Name, v.Runtime, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminUser, password)
 	if err := s.runtime.Create(ctx, spec); err != nil {
 		return fmt.Errorf("recreate database container: %w", err)
 	}
-	if err := s.runtime.Start(ctx, v.Runtime, v.ServiceName); err != nil {
+	if err := s.runtime.Start(ctx, v.Runtime, v.ContainerName); err != nil {
 		return fmt.Errorf("start database container: %w", err)
 	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ServiceName, 2*time.Minute); err != nil {
+	if _, err := waitForHealthy(ctx, s.runtime, v.Runtime, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
 	return s.repo.UpdateVersionPort(ctx, versionID, newPort)
@@ -385,7 +406,7 @@ func (s *Service) GetVersionServiceLogs(ctx context.Context, versionID int64, li
 	if lines > 5000 {
 		lines = 5000
 	}
-	return s.runtime.Logs(ctx, v.Runtime, v.ServiceName, lines)
+	return s.runtime.Logs(ctx, v.Runtime, v.ContainerName, lines)
 }
 
 // GetVersionConfig reads the engine configuration from inside its container.
@@ -395,7 +416,7 @@ func (s *Service) GetVersionConfig(ctx context.Context, versionID int64) (string
 		return "", "", fmt.Errorf("version not found")
 	}
 	path := configPathForImage(v.Image)
-	out, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "cat", path)
+	out, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "cat", path)
 	return out, path, err
 }
 
@@ -410,7 +431,7 @@ func (s *Service) SaveVersionConfig(ctx context.Context, versionID int64, conten
 	}
 	path := configPathForImage(v.Image)
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	if _, err := s.runtime.Exec(ctx, v.Runtime, v.ServiceName, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
+	if _, err := s.runtime.Exec(ctx, v.Runtime, v.ContainerName, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
 		return fmt.Errorf("save configuration: %w", err)
 	}
 	return nil
@@ -428,6 +449,29 @@ func configPathForImage(image string) string {
 	}
 }
 
+// seedRedisConfig writes an initial redis.conf into the freshly-created config
+// volume so `redis-server <config>` can load it on first start. The file is
+// staged on the host, then copied into the container's mounted config dir.
+func seedRedisConfig(ctx context.Context, runtime DatabaseRuntime, runtimeName, container, password string) error {
+	content := "requirepass " + password + "\n"
+	tmp, err := os.CreateTemp("", "easyserver-redis-*.conf")
+	if err != nil {
+		return fmt.Errorf("stage redis config: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write staged redis config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close staged redis config: %w", err)
+	}
+	if err := runtime.CopyTo(ctx, runtimeName, container, tmp.Name(), "/usr/local/etc/redis/redis.conf"); err != nil {
+		return fmt.Errorf("seed redis config: %w", err)
+	}
+	return nil
+}
+
 // RefreshStatus refreshes all versions for a server
 func (s *Service) RefreshStatus(ctx context.Context, dbServerID int64) {
 	if ctx == nil {
@@ -435,7 +479,7 @@ func (s *Service) RefreshStatus(ctx context.Context, dbServerID int64) {
 	}
 	versions, _ := s.ListVersions(ctx, dbServerID)
 	for _, v := range versions {
-		info, err := s.runtime.Status(ctx, v.Runtime, v.ServiceName)
+		info, err := s.runtime.Status(ctx, v.Runtime, v.ContainerName)
 		status := containerStatus(info, err)
 		s.repo.UpdateVersionStatus(ctx, v.ID, status)
 	}
@@ -505,8 +549,11 @@ func containerSpec(engine, runtimeName, version, image, name, volume, bind strin
 	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -u"+user+" -p$MYSQL_ROOT_PASSWORD"
 	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
 	command := []string(nil)
+	configVolume, configDir := "", ""
 	switch engine {
 	case "postgresql":
+		// PostgreSQL config lives in its data volume (postgresql.conf), so no
+		// separate config volume is mounted.
 		dataDir = "/var/lib/postgresql/data"
 		env = map[string]string{"POSTGRES_PASSWORD": password}
 		health = "pg_isready -U postgres"
@@ -514,9 +561,15 @@ func containerSpec(engine, runtimeName, version, image, name, volume, bind strin
 		dataDir = "/data"
 		env = map[string]string{"REDIS_PASSWORD": password}
 		health = "redis-cli -a $REDIS_PASSWORD ping"
-		command = []string{"redis-server", "--requirepass", password}
+		configVolume, configDir = name+"-config", "/usr/local/etc/redis"
+		// Load the mounted redis.conf so instance-level config persists and
+		// takes effect on restart; the CLI requirepass still wins over the file.
+		command = []string{"redis-server", "--requirepass", password, configDir + "/redis.conf"}
+	default: // mysql
+		configVolume, configDir = name+"-config", "/etc/mysql/conf.d"
 	}
 	return ContainerSpec{Runtime: runtimeName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
+		ConfigVolume: configVolume, ConfigDir: configDir,
 		BindAddress: bind, HostPort: port, ContainerPort: port, Environment: env,
 		Labels: map[string]string{"com.easyserver.engine": engine, "com.easyserver.version": version}, HealthCommand: health, Command: command}
 }
@@ -525,7 +578,7 @@ func containerStatus(info ContainerStatus, err error) string {
 	if err != nil {
 		return "stopped"
 	}
-	if info.State == "running" && (info.Health == "healthy" || info.Health == "") {
+	if info.State == "running" && info.Health == "healthy" {
 		return "running"
 	}
 	if info.State == "running" {
