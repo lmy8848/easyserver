@@ -97,6 +97,9 @@ export default function Container() {
     <div>
       {/* 标题 + 右侧引擎切换/状态/操作 */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8 }}>
+          {engine === 'podman' ? <SiPodman size={26} /> : <SiDocker size={26} />}
+        </span>
         <h2 style={{ margin: 0 }}>容器管理</h2>
         <div style={{ flex: 1 }} />
         <Select
