@@ -192,7 +192,6 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 	s.userRepo.UpdateLastLoginIP(ctx, user.ID, ip)
 
 	evt := LoginEvent{Action: "LOGIN_SUCCESS", Username: username, IP: ip, UserAgent: userAgent, Success: true, Time: now}
-	s.loginLogger.LogLoginEvent(ctx, evt)
 	if s.notifier != nil {
 		s.notifier.NotifyLogin(evt)
 	}

@@ -75,21 +75,16 @@ func (s *Service) CreateSession(ctx context.Context) (*CreateResult, error) {
 }
 
 // GetStatus returns the current state for the polling web client. A confirmed
-// session is consumed (deleted) on first read so the issued token can only be
-// picked up once. Invalid/expired tokens report "expired" without leaking
-// existence.
+// session is claimed atomically (conditional UPDATE) so the issued token can
+// only be picked up by one poll; later polls see "expired". Invalid/expired
+// tokens report "expired" without leaking existence.
 func (s *Service) GetStatus(ctx context.Context, qrToken string) (*StatusResult, error) {
-	sess, err := s.repo.GetByToken(ctx, qrToken)
+	// 原子领取：仅一个 poll 能抢到 confirmed 行。
+	sess, ok, err := s.repo.Consume(ctx, qrToken)
 	if err != nil {
 		return nil, err
 	}
-	if sess == nil {
-		return &StatusResult{Status: "expired"}, nil
-	}
-
-	switch sess.Status {
-	case StatusConfirmed:
-		// One-time pickup: hand over the token + user payload, then delete.
+	if ok {
 		res := &StatusResult{
 			Status:    "confirmed",
 			ExpiresAt: sess.ExpiresAt,
@@ -102,15 +97,26 @@ func (s *Service) GetStatus(ctx context.Context, qrToken string) (*StatusResult,
 				res.MustChangePass = lp.MustChangePass
 			}
 		}
-		_ = s.repo.Delete(ctx, qrToken)
 		return res, nil
+	}
+
+	// 未抢到：据当前状态区分 expired / cancelled / pending。
+	cur, err := s.repo.GetByToken(ctx, qrToken)
+	if err != nil {
+		return nil, err
+	}
+	if cur == nil || cur.Status == StatusConsumed {
+		// 已被消费或行已清理。
+		return &StatusResult{Status: "expired"}, nil
+	}
+	switch cur.Status {
 	case StatusCancelled:
-		return &StatusResult{Status: "cancelled", ExpiresAt: sess.ExpiresAt}, nil
+		return &StatusResult{Status: "cancelled", ExpiresAt: cur.ExpiresAt}, nil
 	default: // pending
-		if time.Now().After(sess.ExpiresAt) {
+		if time.Now().After(cur.ExpiresAt) {
 			return &StatusResult{Status: "expired"}, nil
 		}
-		return &StatusResult{Status: "pending", ExpiresAt: sess.ExpiresAt}, nil
+		return &StatusResult{Status: "pending", ExpiresAt: cur.ExpiresAt}, nil
 	}
 }
 

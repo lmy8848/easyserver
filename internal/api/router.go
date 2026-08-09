@@ -233,12 +233,8 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 		ServeWeb(e)
 	}
 
-	// ── Startup audit event ──
-	auditSvc.LogSystemEvent(ctx, "面板启动")
-
 	// ── Shutdown function ──
 	shutdown := func() {
-		auditSvc.LogSystemEvent(context.Background(), "面板停止")
 		auditSvc.Close()
 		cancel()
 		wg.Wait()

@@ -58,6 +58,29 @@ func (r *sqliteRepo) MarkConfirmed(ctx context.Context, qrToken string, userID i
 	return nil
 }
 
+func (r *sqliteRepo) Consume(ctx context.Context, qrToken string) (*QRLoginSession, bool, error) {
+	// 抢锁：仅当仍是 confirmed 时置为 consumed。并发 poll 中只有一个会获行。
+	res, err := r.db.ExecContext(ctx, `UPDATE qr_login_sessions
+		SET status = ? WHERE qr_token = ? AND status = ?`,
+		StatusConsumed, qrToken, StatusConfirmed)
+	if err != nil {
+		return nil, false, fmt.Errorf("consume qr login session: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	if n == 0 {
+		// 没抢到锁：已被消费 / 已取消 / 仍 pending
+		return nil, false, nil
+	}
+	s, err := r.GetByToken(ctx, qrToken)
+	if err != nil {
+		return nil, false, err
+	}
+	return s, true, nil
+}
+
 func (r *sqliteRepo) Delete(ctx context.Context, qrToken string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM qr_login_sessions WHERE qr_token = ?", qrToken)
 	return err
@@ -65,7 +88,7 @@ func (r *sqliteRepo) Delete(ctx context.Context, qrToken string) error {
 
 func (r *sqliteRepo) DeleteExpired(ctx context.Context) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM qr_login_sessions
-		WHERE expires_at < ? OR status = ?`, time.Now(), StatusCancelled)
+		WHERE expires_at < ? OR status IN (?, ?)`, time.Now(), StatusCancelled, StatusConsumed)
 	if err != nil {
 		return 0, err
 	}

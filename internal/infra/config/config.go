@@ -160,7 +160,7 @@ func Load(path string) (*Config, error) {
 		},
 		Auth: AuthConfig{
 			SessionTimeout:         24 * time.Hour,
-			IdleTimeout:            30 * time.Minute,
+			IdleTimeout:            24 * time.Hour,
 			MaxLoginAttempts:       5,
 			LockoutDuration:        15 * time.Minute,
 			RateLimit:              1000,

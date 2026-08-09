@@ -16,6 +16,7 @@ var (
 const (
 	StatusPending   = "pending"   // QR displayed, waiting for mobile to scan+confirm
 	StatusConfirmed = "confirmed" // Mobile confirmed; web_token issued, awaiting web pickup
+	StatusConsumed  = "consumed"  // A web client claimed the token (one-time); ready for cleanup
 	StatusCancelled = "cancelled" // User cancelled before confirmation
 )
 
