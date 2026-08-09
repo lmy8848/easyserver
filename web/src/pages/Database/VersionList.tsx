@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input, Divider,
-  message, Popconfirm, Row, Col, Empty, Spin,
+  Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input, List,
+  message, Popconfirm, Row, Col, Empty, Spin, Pagination,
 } from 'antd';
 import {
   DatabaseOutlined, PlusOutlined, ReloadOutlined,
@@ -11,6 +11,10 @@ import {
 import { dbServerApi } from '../../services/api';
 import STYLES from './styles';
 import type { VersionListProps, DBInstance } from './types';
+
+// Sentinel option value — picking "更多版本" opens the Docker Hub pager modal
+// instead of selecting a version.
+const MORE_VERSIONS = '__more_versions__';
 
 export default function VersionList({
   server, versions, versionsLoading, operating,
@@ -24,26 +28,45 @@ export default function VersionList({
   statusColor, statusTag,
 }: VersionListProps) {
 
-  // ===== Docker Hub "更多版本" (paged, merged into the version Select) =====
+  // ===== Docker Hub "更多版本" pager modal =====
   const DOCKER_PAGE_SIZE = 10;
+  const [dockerVisible, setDockerVisible] = useState(false);
   const [dockerTags, setDockerTags] = useState<string[]>([]);
   const [dockerTotal, setDockerTotal] = useState(0);
   const [dockerPage, setDockerPage] = useState(1);
   const [dockerLoading, setDockerLoading] = useState(false);
-  const dockerTotalPages = Math.ceil(dockerTotal / DOCKER_PAGE_SIZE);
 
-  const fetchDockerTags = async (page: number) => {
+  const openDockerTags = async () => {
+    setDockerVisible(true);
     setDockerLoading(true);
     try {
-      const res = await dbServerApi.listDockerTags(server.db_type, page, DOCKER_PAGE_SIZE);
+      const res = await dbServerApi.listDockerTags(server.db_type, 1, DOCKER_PAGE_SIZE);
       setDockerTags(res.data?.data?.items || []);
       setDockerTotal(res.data?.data?.total || 0);
-      setDockerPage(res.data?.data?.page || page);
+      setDockerPage(1);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '查询 Docker Hub 失败');
       setDockerTags([]);
       setDockerTotal(0);
     } finally { setDockerLoading(false); }
+  };
+
+  const fetchDockerPage = async (page: number) => {
+    setDockerLoading(true);
+    try {
+      const res = await dbServerApi.listDockerTags(server.db_type, page, DOCKER_PAGE_SIZE);
+      setDockerTags(res.data?.data?.items || []);
+      setDockerPage(res.data?.data?.page || page);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '查询 Docker Hub 失败');
+    } finally { setDockerLoading(false); }
+  };
+
+  // Picking a published tag fills version + image into the install form; the
+  // image is `${base_image}:${tag}` so the backend never invents image names.
+  const pickDockerTag = (tag: string) => {
+    installVersionForm.setFieldsValue({ version: tag, image: `${server.base_image}:${tag}` });
+    setDockerVisible(false);
   };
 
   const handleUpdatePort = (v: DBInstance) => {
@@ -156,49 +179,25 @@ export default function VersionList({
             <Select
               placeholder="选择要安装的版本"
               onChange={(v) => {
+                // "更多版本" is a sentinel: open the Docker Hub pager instead of
+                // treating it as a version, and clear the selection.
+                if (v === MORE_VERSIONS) {
+                  installVersionForm.setFieldsValue({ version: undefined });
+                  openDockerTags();
+                  return;
+                }
                 const t = versionTemplates.find(t => t.version === v);
                 installVersionForm.setFieldsValue({ image: t ? t.image : `${server.base_image}:${v}` });
               }}
-              dropdownRender={(menu) => (
-                <>
-                  {menu}
-                  <Divider style={{ margin: '4px 0' }} />
-                  <Space style={{ padding: '0 8px 4px', justifyContent: 'space-between', width: '100%' }}>
-                    <Button type="link" size="small" icon={<ReloadOutlined />} loading={dockerLoading}
-                      style={{ paddingLeft: 0 }} onClick={() => fetchDockerTags(1)}>
-                      更多版本
-                    </Button>
-                    {dockerTotal > 0 && (
-                      <Space size="small">
-                        <Button size="small" disabled={dockerPage <= 1 || dockerLoading}
-                          onClick={() => fetchDockerTags(dockerPage - 1)}>上一页</Button>
-                        <span style={{ fontSize: 12, color: '#999' }}>
-                          {dockerLoading ? '加载中…' : `第 ${dockerPage} / ${dockerTotalPages} 页`}
-                        </span>
-                        <Button size="small" disabled={dockerPage >= dockerTotalPages || dockerLoading}
-                          onClick={() => fetchDockerTags(dockerPage + 1)}>下一页</Button>
-                      </Space>
-                    )}
-                  </Space>
-                </>
-              )}
             >
-              <Select.OptGroup label="预设版本">
-                {versionTemplates.map(t => (
-                  <Select.Option key={t.version} value={t.version}>
-                    <strong>{t.version}</strong><span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{t.description}</span>
-                  </Select.Option>
-                ))}
-              </Select.OptGroup>
-              {dockerTags.length > 0 && (
-                <Select.OptGroup label={`更多版本（Docker Hub 第 ${dockerPage} 页）`}>
-                  {dockerTags.map(tag => (
-                    <Select.Option key={tag} value={tag}>
-                      <strong>{server.base_image}:{tag}</strong>
-                    </Select.Option>
-                  ))}
-                </Select.OptGroup>
-              )}
+              {versionTemplates.map(t => (
+                <Select.Option key={t.version} value={t.version}>
+                  <strong>{t.version}</strong><span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{t.description}</span>
+                </Select.Option>
+              ))}
+              <Select.Option value={MORE_VERSIONS}>
+                <span style={{ color: '#1677ff' }}>＋ 更多版本（查询 Docker Hub）</span>
+              </Select.Option>
             </Select>
           </Form.Item>
           <Form.Item name="container_engine" label="容器引擎" initialValue="docker">
@@ -214,6 +213,46 @@ export default function VersionList({
               onChange={(val) => val && onCheckPort(val as number)} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Docker Hub tag pager (opened from the "更多版本" Select option) */}
+      <Modal
+        title={`${server.display_name} - 更多版本（Docker Hub）`}
+        open={dockerVisible}
+        onCancel={() => setDockerVisible(false)}
+        footer={null}
+      >
+        {dockerLoading ? (
+          <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+        ) : dockerTags.length === 0 ? (
+          <Empty description="未获取到版本列表" />
+        ) : (
+          <>
+            <List
+              size="small"
+              bordered
+              dataSource={dockerTags}
+              renderItem={(tag) => (
+                <List.Item onClick={() => pickDockerTag(tag)} style={{ cursor: 'pointer' }}>
+                  <Space>
+                    <Tag>{server.base_image}:{tag}</Tag>
+                    <span style={{ color: '#999', fontSize: 12 }}>点击选择此版本</span>
+                  </Space>
+                </List.Item>
+              )}
+            />
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+              <Pagination
+                current={dockerPage}
+                pageSize={DOCKER_PAGE_SIZE}
+                total={dockerTotal}
+                showSizeChanger={false}
+                showQuickJumper={false}
+                onChange={fetchDockerPage}
+              />
+            </div>
+          </>
+        )}
       </Modal>
 
       {/* Service Logs Modal */}
