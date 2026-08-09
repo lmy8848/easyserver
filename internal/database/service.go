@@ -110,7 +110,18 @@ func (s *Service) GetInstance(ctx context.Context, id int64) (*DBInstance, error
 	return s.repo.GetInstance(ctx, id)
 }
 
-func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *CreateDBInstanceRequest) (*DBInstance, error) {
+// CreateInstanceResult is what CreateInstance returns. The install runs in the
+// background and no instance row exists until it succeeds, so the caller gets
+// the install id (to stream the log) rather than an instance.
+type CreateInstanceResult struct {
+	InstallID string `json:"install_id"`
+	Version   string `json:"version"`
+	Image     string `json:"image"`
+	Port      int    `json:"port"`
+	Status    string `json:"status"` // always "provisioning" (informational)
+}
+
+func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *CreateDBInstanceRequest) (*CreateInstanceResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -163,33 +174,21 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 
 	spec := containerSpec(dbType, engineName, req.Version, req.Image, containerID, volumeName, bindAddress, port, password)
 
-	// Claim the engine before creating the row so the "already installing" error
-	// is returned synchronously; the row itself is created now (status
-	// "provisioning") so a refresh shows the install in progress and can re-open
-	// its log stream.
+	// Claim the engine before launching so the "already installing" error is
+	// returned synchronously. No database row is created here — an instance
+	// must not exist until it is actually installed (the row is written by the
+	// install goroutine on success/failure).
 	if err := s.installer.begin(dbType); err != nil {
 		return nil, err
 	}
-	v := &DBInstance{DBType: dbType, Version: req.Version, Port: port, Status: "provisioning", ContainerEngine: engineName, Image: req.Image,
-		ContainerID: containerID, VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress,
-		AdminPassword: password}
-	id, err := s.repo.CreateInstance(ctx, v)
-	if err != nil {
-		s.installer.end(dbType)
-		return nil, err
-	}
-	v.ID = id
-
-	// Install in the background. The runtime is built per-install and its output
-	// hook streams into the task log; s.runtime stays untouched for normal ops.
-	s.installer.start(dbType, id, func(log *installLog) error {
+	s.installer.start(dbType, containerID, InstallMeta{Version: req.Version, Image: req.Image}, func(log *installLog) error {
 		rt := s.runtimeFactory()
 		if cli, ok := rt.(*CLIContainerRuntime); ok {
 			cli.SetOutputHook(func(line string) { log.append(line) })
 		}
-		return s.installInstance(ctx, dbType, v, spec, password, rt, log)
+		return s.installInstance(ctx, dbType, req.Version, req.Image, engineName, containerID, volumeName, bindAddress, port, password, spec, rt, log)
 	})
-	return v, nil
+	return &CreateInstanceResult{InstallID: containerID, Version: req.Version, Image: req.Image, Port: port, Status: "provisioning"}, nil
 }
 
 // dockerTagsCache holds the full (filtered) tag list for one engine, with a TTL
@@ -251,24 +250,30 @@ func (s *Service) dockerTags(dbType DBType) ([]string, error) {
 }
 
 // InstallTask exposes an in-flight install's log and completion to the SSE
-// handler. Returns false when no task is running for the instance.
-func (s *Service) InstallTask(instanceID int64) (*InstallTask, bool) {
-	t, ok := s.installer.get(instanceID)
+// handler. Returns false when no task is running for the install id.
+func (s *Service) InstallTask(installID string) (*InstallTask, bool) {
+	t, ok := s.installer.get(installID)
 	if !ok {
 		return nil, false
 	}
 	return &InstallTask{Log: t.log, done: t.done, errFn: func() error { return t.err }}, true
 }
 
-// WaitForInstall blocks until the instance's install finishes and returns its
-// error. Used by tests (and a handy end-of-stream sync for future callers).
-func (s *Service) WaitForInstall(instanceID int64) error {
-	t, ok := s.installer.get(instanceID)
+// WaitForInstall blocks until the install finishes and returns its error. Used
+// by tests (and a handy end-of-stream sync for future callers).
+func (s *Service) WaitForInstall(installID string) error {
+	t, ok := s.installer.get(installID)
 	if !ok {
 		return nil
 	}
 	<-t.done
 	return t.err
+}
+
+// ActiveInstalls lists installs currently running — the front-end's "正在安装"
+// entry and the source of its log modal.
+func (s *Service) ActiveInstalls() []ActiveInstall {
+	return s.installer.Active()
 }
 
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error {

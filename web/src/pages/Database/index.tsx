@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, message, Modal, Tag, Tabs } from 'antd';
 import { dbServerApi } from '../../services/api';
-import type { Database, DBUser, DBInstance } from '../../types';
+import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import VersionList from './VersionList';
@@ -62,17 +62,27 @@ export default function DatabasePage() {
   const logRef = useRef<HTMLDivElement>(null);
 
   // ===== Install log (SSE stream) =====
-  // State lives here (not in VersionList) so an install can auto-open it, and
-  // the title-bar "正在安装" button can re-open it after close/refresh.
-  const [installLogInstance, setInstallLogInstance] = useState<DBInstance | null>(null);
+  // Keyed by install_id (= container id), not instance id — no instance row
+  // exists while installing. State lives here (not in VersionList) so an
+  // install can auto-open it, and the title-bar "正在安装" button can re-open it
+  // after close/refresh.
+  const [activeInstalls, setActiveInstalls] = useState<ActiveInstall[]>([]);
+  const [installLogInstance, setInstallLogInstance] = useState<{ id: string; version: string } | null>(null);
   const [installLogLines, setInstallLogLines] = useState<string[]>([]);
   const [installLogError, setInstallLogError] = useState('');
   const [installLogDone, setInstallLogDone] = useState(false);
   const [installLogFollow, setInstallLogFollow] = useState(true);
   const installLogRef = useRef<HTMLDivElement>(null);
 
-  const openInstallLog = (v: DBInstance) => {
-    setInstallLogInstance(v);
+  const fetchActiveInstalls = async () => {
+    try {
+      const res = await dbServerApi.listActiveInstalls();
+      setActiveInstalls(res.data?.data || []);
+    } catch { /* polling endpoint, ignore transient errors */ }
+  };
+
+  const openInstallLog = (install: { id: string; version: string }) => {
+    setInstallLogInstance(install);
     setInstallLogLines([]);
     setInstallLogError('');
     setInstallLogDone(false);
@@ -123,7 +133,25 @@ export default function DatabasePage() {
   };
 
   // ===== Effects =====
-  useEffect(() => { fetchInstances('mysql'); }, []);
+  useEffect(() => { fetchInstances('mysql'); fetchActiveInstalls(); }, []);
+
+  // While an install runs for the current engine, poll for completion so the
+  // instance list refreshes even if the log window is closed.
+  useEffect(() => {
+    const engineActive = activeInstalls.some(a => a.engine === activeDbType);
+    if (!engineActive) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await dbServerApi.listActiveInstalls();
+        const next = res.data?.data || [];
+        setActiveInstalls(next);
+        if (!next.some(a => a.engine === activeDbType)) {
+          fetchInstances(activeDbType); // install finished/failed
+        }
+      } catch { /* keep polling */ }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [activeInstalls, activeDbType]);
 
   useEffect(() => {
     if (!logVisible || !logVersion) return;
@@ -147,12 +175,17 @@ export default function DatabasePage() {
     if (!installLogInstance) return;
     // SSE replay: the server sends every buffered line first (cursor starts at
     // 0), then follows live until the {type:'done'} frame.
-    const es = new EventSource(`/api/db/instances/${installLogInstance.id}/install/log`);
+    const es = new EventSource(`/api/db/installs/${installLogInstance.id}/log`);
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'line') setInstallLogLines(prev => [...prev, msg.text]);
-        else if (msg.type === 'done') { setInstallLogError(msg.error || ''); setInstallLogDone(true); es.close(); }
+        else if (msg.type === 'done') {
+          setInstallLogError(msg.error || '');
+          setInstallLogDone(true);
+          es.close();
+          fetchInstances(activeDbType); // row now exists (running/failed)
+        }
       } catch { /* ignore malformed frames */ }
     };
     // Server closed the stream (or a transient blip); stop so the "done" state
@@ -254,6 +287,7 @@ export default function DatabasePage() {
     setSelectedDatabase(null);
     setDatabases([]); setDBUsers([]);
     fetchInstances(dbtype);
+    fetchActiveInstalls();
   };
 
   const enterVersion = async (version: DBInstance) => {
@@ -316,10 +350,13 @@ export default function DatabasePage() {
       message.success('已开始安装，正在打开安装日志…');
       setInstallVersionVisible(false);
       fetchInstances(server.db_type);
-      // Auto-open the live install log; the title-bar "正在安装" button (shown
-      // while the row is provisioning) re-opens it after close/refresh.
-      const inst = res.data?.data as DBInstance | undefined;
-      if (inst?.id) openInstallLog(inst);
+      fetchActiveInstalls();
+      // Auto-open the live install log; the title-bar "正在安装" button (driven
+      // by activeInstalls) re-opens it after close/refresh.
+      const data = res.data?.data as { install_id?: string } | undefined;
+      if (data?.install_id) {
+        openInstallLog({ id: data.install_id, version: values.version });
+      }
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setBusy(''); }
   };
@@ -810,6 +847,7 @@ export default function DatabasePage() {
         onLogVisibleChange={setLogVisible}
         onLogFollowChange={setLogFollow}
         onShowLogs={showLogs}
+        activeInstalls={activeInstalls}
         installLogInstance={installLogInstance}
         installLogLines={installLogLines}
         installLogError={installLogError}

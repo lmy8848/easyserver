@@ -4,7 +4,7 @@ import type {
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
-  WebServer, Website, DBInstance, Database, DBUser,
+  WebServer, Website, DBInstance, ActiveInstall, Database, DBUser,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -538,7 +538,12 @@ export const dbServerApi = {
     api.get<ApiResponse<DBInstance[]>>(`/db/${dbtype}/instances`),
 
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string }) =>
-    api.post<ApiResponse>(`/db/${dbtype}/instances`, data),
+    api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/${dbtype}/instances`, data),
+
+  // Installs in progress (no instance row exists until one finishes) — drives
+  // the title-bar "正在安装" button and the install log modal.
+  listActiveInstalls: () =>
+    api.get<ApiResponse<ActiveInstall[]>>('/db/installs'),
 
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),
   // paginated — the version Select flips pages through this.

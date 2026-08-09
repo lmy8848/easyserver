@@ -1,4 +1,4 @@
-import type { Database, DBUser, DBInstance } from '../../types';
+import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
 
 // Version templates from API
 export interface VersionTemplate {
@@ -115,14 +115,15 @@ export interface VersionListProps {
   onShowLogs: (v: DBInstance) => void;
   // Install log modal (SSE stream — state lives in the parent so install can
   // auto-open it and the title-bar "正在安装" button can re-open it after
-  // refresh/close)
-  installLogInstance: DBInstance | null;
+  // refresh/close). Keyed by install_id (= container id), not instance id.
+  activeInstalls: ActiveInstall[];
+  installLogInstance: { id: string; version: string } | null;
   installLogLines: string[];
   installLogError: string;
   installLogDone: boolean;
   installLogFollow: boolean;
   installLogRef: React.RefObject<HTMLDivElement | null>;
-  onOpenInstallLog: (v: DBInstance) => void;
+  onOpenInstallLog: (install: { id: string; version: string }) => void;
   onCloseInstallLog: () => void;
   onInstallLogFollowChange: (follow: boolean) => void;
   // Status helpers

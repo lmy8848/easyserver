@@ -123,22 +123,25 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt)
 
-	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	// Install is async now — wait for it before asserting lifecycle effects.
-	if err := svc.WaitForInstall(v.ID); err != nil {
+	// No instance row exists while the install runs — only the task does.
+	if rows, _ := repo.ListInstances(context.Background(), DBTypeMySQL); len(rows) != 0 {
+		t.Fatalf("expected no instance row during install, got %d", len(rows))
+	}
+	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
-	got, _ := repo.GetInstance(context.Background(), v.ID)
-	if got == nil || got.Status != "running" {
-		t.Fatalf("expected running instance, got %+v", got)
+	got := findInstanceByStatus(repo, "running")
+	if got == nil {
+		t.Fatalf("expected running instance after install, got %+v", repo.instances)
 	}
-	if v.BindAddress != "127.0.0.1" {
-		t.Fatalf("expected loopback bind by default, got %q", v.BindAddress)
+	if got.BindAddress != "127.0.0.1" {
+		t.Fatalf("expected loopback bind by default, got %q", got.BindAddress)
 	}
-	if len(rt.createSpecs) != 1 || rt.createSpecs[0].Name != v.ContainerID {
+	if len(rt.createSpecs) != 1 || rt.createSpecs[0].Name != got.ContainerID {
 		t.Fatalf("unexpected create specs: %+v", rt.createSpecs)
 	}
 	if len(rt.removed) != 0 {
@@ -149,23 +152,23 @@ func TestCreateInstanceHealthy(t *testing.T) {
 func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 	repo := newFakeRepo()
 	// Container exits before becoming healthy → waitForHealthy fails fast and
-	// the async install must roll back the container and mark the row failed.
+	// the async install must roll back the container and record a failed row.
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
 	svc := NewServiceWithRuntime(repo, rt)
 
-	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(v.ID); err == nil {
+	if err := svc.WaitForInstall(res.InstallID); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
 	}
 	if len(rt.removed) != 1 {
 		t.Fatalf("expected container rollback after health failure, removed=%v", rt.removed)
 	}
-	got, _ := repo.GetInstance(context.Background(), v.ID)
-	if got == nil || got.Status != "failed" {
-		t.Fatalf("expected failed instance row kept for inspection, got %+v", got)
+	got := findInstanceByStatus(repo, "failed")
+	if got == nil {
+		t.Fatalf("expected failed instance row kept for inspection, got %+v", repo.instances)
 	}
 }
 
@@ -174,24 +177,40 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt)
 
-	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(v.ID); err != nil {
+	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
+	got := findInstanceByStatus(repo, "running")
+	if got == nil {
+		t.Fatalf("expected running instance after install, got %+v", repo.instances)
+	}
 
-	if err := svc.DestroyInstance(context.Background(), v.ID); err != nil {
+	if err := svc.DestroyInstance(context.Background(), got.ID); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
-	if len(rt.removed) != 1 || rt.removed[0] != v.ContainerID {
+	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerID {
 		t.Fatalf("expected container removed, got %v", rt.removed)
 	}
-	if len(rt.removedVol) != 2 || rt.removedVol[0] != v.VolumeName {
+	if len(rt.removedVol) != 2 || rt.removedVol[0] != got.VolumeName {
 		t.Fatalf("expected data + config volumes removed, got %v", rt.removedVol)
 	}
-	if _, ok := repo.instances[v.ID]; ok {
+	if _, ok := repo.instances[got.ID]; ok {
 		t.Fatal("expected instance metadata deleted")
 	}
+}
+
+// findInstanceByStatus returns the (single) instance row for the engine with
+// the given status, or nil. Installs write exactly one row on completion.
+func findInstanceByStatus(repo *fakeRepo, status string) *DBInstance {
+	rows, _ := repo.ListInstances(context.Background(), DBTypeMySQL)
+	for i := range rows {
+		if rows[i].Status == status {
+			return &rows[i]
+		}
+	}
+	return nil
 }

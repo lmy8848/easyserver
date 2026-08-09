@@ -34,7 +34,7 @@ export default function VersionList({
   portCheck, onCheckPort,
   logVisible, logVersion, logContent, logLoading, logFollow, logRef,
   onLogVisibleChange, onLogFollowChange, onShowLogs,
-  installLogInstance, installLogLines, installLogError, installLogDone, installLogFollow, installLogRef,
+  activeInstalls, installLogInstance, installLogLines, installLogError, installLogDone, installLogFollow, installLogRef,
   onOpenInstallLog, onCloseInstallLog, onInstallLogFollowChange,
   statusTag,
 }: VersionListProps) {
@@ -96,9 +96,11 @@ export default function VersionList({
     );
   }, [versions]);
 
-  // Installs are serialized per engine, so at most one row is provisioning;
-  // the title-bar install button turns into a "正在安装" trigger for it.
-  const installingVersion = versions.find(v => v.status === 'provisioning') ?? null;
+  // Installs are serialized per engine, so at most one is active for this tab;
+  // the title-bar install button turns into a "正在安装" trigger for it. No
+  // instance row exists while installing — this comes from the active-installs
+  // endpoint, keyed by install_id.
+  const installing = activeInstalls.find(a => a.engine === server.db_type) ?? null;
 
   const handleUpdatePort = (v: DBInstance) => {
     if (v.status === 'running') {
@@ -181,8 +183,8 @@ export default function VersionList({
                     onClick={() => onStopVersion(selectedVersion)}>停止</Button>
                 ) : selectedVersion.status === 'failed' ? (
                   <Button type="primary" ghost icon={<FileTextOutlined />}
-                    onClick={() => onOpenInstallLog(selectedVersion)}>查看安装日志</Button>
-                ) : selectedVersion.status === 'provisioning' ? null : (
+                    onClick={() => onOpenInstallLog({ id: selectedVersion.container_id, version: selectedVersion.version })}>查看安装日志</Button>
+                ) : (
                   <Button type="primary" icon={<PlayCircleOutlined />} loading={operating === `start-${selectedVersion.id}`}
                     onClick={() => onStartVersion(selectedVersion)}>启动</Button>
                 )}
@@ -202,9 +204,9 @@ export default function VersionList({
               </>
             )}
             <Button icon={<ReloadOutlined />} loading={versionsLoading} onClick={onRefreshVersions}>刷新</Button>
-            {installingVersion ? (
+            {installing ? (
               <Button style={{ background: '#fa8c16', borderColor: '#fa8c16', color: '#fff' }}
-                icon={<LoadingOutlined />} onClick={() => onOpenInstallLog(installingVersion)}>正在安装</Button>
+                icon={<LoadingOutlined />} onClick={() => onOpenInstallLog({ id: installing.install_id, version: installing.version })}>正在安装</Button>
             ) : (
               <Button type="primary" icon={<PlusOutlined />}
                 onClick={() => { installVersionForm.resetFields(); onInstallVersionVisibleChange(true); }}>安装版本</Button>

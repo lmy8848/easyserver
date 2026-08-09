@@ -29,9 +29,11 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
 	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
 	protected.GET("/db/:dbtype/docker-tags", instanceHandler.ListDockerTags)
-	// Install log stream (SSE) — the async installer appends lines; subscribers
-	// replay the buffer then follow live. Completes with a "done" event.
-	protected.GET("/db/instances/:iid/install/log", instanceHandler.InstallLogStream)
+	// Installs run without a database row until they finish; the install id is
+	// the container id. "Active" lists in-progress installs (the "正在安装" entry),
+	// and the log endpoint streams one install's log via SSE.
+	protected.GET("/db/installs", instanceHandler.ListActiveInstalls)
+	protected.GET("/db/installs/:iid/log", instanceHandler.InstallLogStream)
 	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
 	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
 	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
@@ -138,9 +140,16 @@ func (h *InstanceHandler) ListDockerTags(c *gin.Context) {
 	httpx.Success(c, gin.H{"items": tags, "total": total, "page": page, "page_size": pageSize})
 }
 
+// ListActiveInstalls returns installs currently in progress — the front-end
+// renders a "正在安装" entry per active install for the current engine.
+func (h *InstanceHandler) ListActiveInstalls(c *gin.Context) {
+	httpx.Success(c, h.svc.ActiveInstalls())
+}
+
 func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
-	iid, ok := parseIID(c)
-	if !ok {
+	installID := c.Param("iid")
+	if installID == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的安装ID"))
 		return
 	}
 	// SSE headers
@@ -161,7 +170,7 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 	// Task may still be alive (installing) or already finished (done/errored) —
 	// finished tasks are kept so their log stays replayable. If it's gone
 	// entirely, the server restarted mid-install and the in-memory log is lost.
-	task, ok := h.svc.InstallTask(iid)
+	task, ok := h.svc.InstallTask(installID)
 	if !ok {
 		send(map[string]string{"type": "done", "error": "安装日志已丢失（服务可能已重启），无法查看"})
 		return
