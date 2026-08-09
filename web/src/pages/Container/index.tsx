@@ -23,7 +23,10 @@ const engineLogo = (e: string) =>
     ? <SiPodman size={20} color="#892CA0" style={{ flexShrink: 0, display: 'block' }} />
     : <SiDocker size={20} color="#2496ED" style={{ flexShrink: 0, display: 'block' }} />;
 const engineOptionLabel = (e: string) => (
-  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, lineHeight: 1 }}>{engineLogo(e)}{engineName(e)}</span>
+  <span style={{ display: 'flex', alignItems: 'center', height: '100%', gap: 6 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', lineHeight: 0 }}>{engineLogo(e)}</span>
+    {engineName(e)}
+  </span>
 );
 
 export default function Container() {
