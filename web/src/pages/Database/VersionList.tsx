@@ -4,13 +4,21 @@ import {
   message, Popconfirm, Row, Col, Empty, Spin, Pagination,
 } from 'antd';
 import {
-  DatabaseOutlined, PlusOutlined, ReloadOutlined,
   PlayCircleOutlined, StopOutlined,
-  FileTextOutlined, UndoOutlined, EditOutlined,
+  FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, ReloadOutlined, DatabaseOutlined,
 } from '@ant-design/icons';
+import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
 import STYLES from './styles';
 import type { VersionListProps, DBInstance } from './types';
+
+// Engine brand logo + color (simple-icons). Falls back to a neutral accent for
+// engines not in the map.
+const ENGINE_BRAND: Record<string, { Icon: typeof SiMysql; color: string }> = {
+  mysql: { Icon: SiMysql, color: '#4479A1' },
+  postgresql: { Icon: SiPostgresql, color: '#4169E1' },
+  redis: { Icon: SiRedis, color: '#FF4438' },
+};
 
 // Sentinel option value — picking "更多版本" opens the Docker Hub pager modal
 // instead of selecting a version.
@@ -103,7 +111,13 @@ export default function VersionList({
     <div>
       <Card style={{ marginBottom: 16 }}>
         <Space>
-          <DatabaseOutlined style={{ fontSize: 24, color: '#1677ff' }} />
+          {(() => {
+            const brand = ENGINE_BRAND[server.db_type];
+            const Icon = brand?.Icon;
+            return Icon
+              ? <Icon size={26} color={brand.color} />
+              : <DatabaseOutlined style={{ fontSize: 24, color: '#1677ff' }} />;
+          })()}
           <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
         </Space>
       </Card>
@@ -202,7 +216,7 @@ export default function VersionList({
               </Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="container_engine" label="容器引擎" initialValue="docker">
+          <Form.Item name="container_engine" label="容器引擎" initialValue="podman">
             <Select options={[{ value: 'docker', label: 'Docker' }, { value: 'podman', label: 'Podman（rootful）' }]} />
           </Form.Item>
           <Form.Item name="port" label="端口（留空使用默认）"
