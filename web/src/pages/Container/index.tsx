@@ -5,9 +5,8 @@ import {
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
   ReloadOutlined, RocketOutlined, PlayCircleOutlined,
 } from '@ant-design/icons';
+import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
 import api from '../../services/api';
-import dockerLogo from '../../assets/container-logos/docker.svg';
-import podmanLogo from '../../assets/container-logos/podman.svg';
 import type { DockerStatus } from './types';
 import { withEngine } from './types';
 import ContainerTab from './ContainerTab';
@@ -19,10 +18,8 @@ import NetworkTab from './NetworkTab';
 const ENGINES = ['docker', 'podman'];
 
 const engineName = (e: string) => (e === 'podman' ? 'Podman' : 'Docker');
-const engineImg = (e: string) => (e === 'podman' ? podmanLogo : dockerLogo);
-const engineLogo = (e: string) => (
-  <img src={engineImg(e)} alt={engineName(e)} style={{ height: 16, width: 'auto' }} />
-);
+const engineColor = (e: string) => (e === 'podman' ? '#892CA0' : '#2496ED');
+const engineLogo = (e: string) => (e === 'podman' ? <SiPodman size={16} color="#892CA0" /> : <SiDocker size={16} color="#2496ED" />);
 const engineOptionLabel = (e: string) => (
   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{engineLogo(e)}{engineName(e)}</span>
 );
@@ -101,8 +98,8 @@ export default function Container() {
     <div>
       {/* 标题 + 右侧引擎切换/状态/操作 */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8 }}>
-          <img src={engineImg(engine)} alt={engineName(engine)} style={{ height: 26, width: 'auto' }} />
+        <span style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8, color: engineColor(engine) }}>
+          {engine === 'podman' ? <SiPodman size={26} /> : <SiDocker size={26} />}
         </span>
         <h2 style={{ margin: 0 }}>容器管理</h2>
         <div style={{ flex: 1 }} />
