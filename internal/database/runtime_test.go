@@ -73,11 +73,13 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if len(fake.calls) != 2 {
-		t.Fatalf("expected volume create and container create, got %d calls", len(fake.calls))
+	// Only one command now — `create`; named volumes are auto-created by the
+	// engine on first mount, no explicit `volume create`.
+	if len(fake.calls) != 1 {
+		t.Fatalf("expected a single container create, got %d calls", len(fake.calls))
 	}
-	if fake.calls[0].name != "podman" || len(fake.calls[0].args) < 3 || fake.calls[0].args[0] != "volume" {
-		t.Fatalf("unexpected volume call: %#v", fake.calls[0])
+	if fake.calls[0].name != "podman" || len(fake.calls[0].args) < 3 || fake.calls[0].args[0] != "create" {
+		t.Fatalf("unexpected create call: %#v", fake.calls[0])
 	}
 
 	// Assert the structured contract, not the concatenated CLI args.

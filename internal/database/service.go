@@ -134,6 +134,9 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if bindAddress == "" {
 		bindAddress = "127.0.0.1"
 	}
+	if bindAddress != "127.0.0.1" && bindAddress != "0.0.0.0" {
+		return nil, fmt.Errorf("unsupported bind address %q (only 127.0.0.1 or 0.0.0.0)", bindAddress)
+	}
 	containerID := fmt.Sprintf("easyserver-db-%s-%s", sanitizeName(string(dbType)), sanitizeName(req.Version))
 	volumeName := containerID + "-data"
 	// Admin password is stored plainly: SQLite file and container environment

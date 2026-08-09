@@ -100,14 +100,6 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 	}
 	spec.Labels["com.easyserver.managed"] = "true"
 	r.lastSpec = spec
-	if _, err := r.command(ctx, spec.ContainerEngine, "volume", "create", spec.Volume); err != nil {
-		return fmt.Errorf("create data volume: %w", err)
-	}
-	if spec.ConfigVolume != "" {
-		if _, err := r.command(ctx, spec.ContainerEngine, "volume", "create", spec.ConfigVolume); err != nil {
-			return fmt.Errorf("create config volume: %w", err)
-		}
-	}
 
 	args := []string{"create", "--name", spec.Name}
 	args = append(args, "--label", "com.easyserver.managed=true", "--label", "com.easyserver.kind=database")
@@ -115,6 +107,8 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 		args = append(args, "--label", key+"="+spec.Labels[key])
 	}
 	args = append(args, "--publish", fmt.Sprintf("%s:%d:%d", spec.BindAddress, spec.HostPort, spec.ContainerPort))
+	// Named volumes are auto-created by the engine on first mount — no explicit
+	// `volume create` needed (and none left orphaned on create failure).
 	args = append(args, "--volume", spec.Volume+":"+spec.DataDir)
 	if spec.ConfigVolume != "" && spec.ConfigDir != "" {
 		args = append(args, "--volume", spec.ConfigVolume+":"+spec.ConfigDir)
@@ -128,7 +122,6 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 	args = append(args, spec.Image)
 	args = append(args, spec.Command...)
 	if _, err := r.command(ctx, spec.ContainerEngine, args...); err != nil {
-		// The volume is deliberately left behind for recovery when create fails.
 		return fmt.Errorf("create database container: %w", err)
 	}
 	return nil

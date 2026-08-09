@@ -248,6 +248,12 @@ export default function VersionList({
           <Form.Item name="container_engine" label="容器引擎" initialValue="podman">
             <Select options={[{ value: 'docker', label: 'Docker' }, { value: 'podman', label: 'Podman（rootful）' }]} />
           </Form.Item>
+          <Form.Item name="bind_address" label="监听地址" initialValue="127.0.0.1">
+            <Select options={[
+              { value: '127.0.0.1', label: '仅本机（127.0.0.1）' },
+              { value: '0.0.0.0', label: '所有网卡（0.0.0.0）' },
+            ]} />
+          </Form.Item>
           <Form.Item name="port" label="端口（留空使用默认）"
             extra={portCheck && (
               portCheck.available
