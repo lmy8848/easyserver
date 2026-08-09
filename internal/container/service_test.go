@@ -1,6 +1,9 @@
 package container
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestParsePortsString(t *testing.T) {
 	cases := []struct {
@@ -42,5 +45,50 @@ func TestParsePortsString(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestParseJSONRowsPodman ensures the Podman output shape (single JSON array,
+// lowercase-ish fields, typed arrays where Docker uses strings) parses via the
+// centralized dispatch into the public Container/Image models.
+func TestParseJSONRowsPodman(t *testing.T) {
+	psOutput := `[
+	  {"Id":"34359ee","Names":["debian-dev"],"Image":"docker.io/library/debian:13-slim",
+	   "State":"exited","CreatedAt":"4 days ago","Command":["--init"],
+	   "Ports":null,"Labels":{"a":"b"},"Mounts":["/dev"],"Networks":["podman"],"Size":0}
+	]`
+	rows, err := parseJSONRows(psOutput, func(line []byte) (any, bool) {
+		var d podmanPSRow
+		if err := json.Unmarshal(line, &d); err != nil {
+			return nil, false
+		}
+		return d.toContainer(), true
+	})
+	if err != nil {
+		t.Fatalf("parseJSONRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len=%d want=1", len(rows))
+	}
+	c := rows[0].(Container)
+	if c.Name != "debian-dev" || c.State != "exited" || c.Image == "" {
+		t.Errorf("container mapping wrong: %+v", c)
+	}
+
+	imgOutput := `[{"Id":"b82115d","Repository":"docker.io/library/nginx","Tag":"1.25",
+	  "Size":123456,"CreatedAt":"2026-08-05T16:18:31Z","Labels":{"k":"v"}}]`
+	rows, err = parseJSONRows(imgOutput, func(line []byte) (any, bool) {
+		var d podmanImageRow
+		if err := json.Unmarshal(line, &d); err != nil {
+			return nil, false
+		}
+		return d.toImage(), true
+	})
+	if err != nil {
+		t.Fatalf("parseJSONRows images: %v", err)
+	}
+	img := rows[0].(Image)
+	if img.Repository != "docker.io/library/nginx" || img.Tag != "1.25" {
+		t.Errorf("image mapping wrong: %+v", img)
 	}
 }

@@ -5,16 +5,17 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { DockerStatus } from './types';
+import { withRuntime } from './types';
 
 // 安装步骤
 const INSTALL_STEPS = [
-  { key: 'download', label: '下载安装脚本' },
-  { key: 'install', label: '安装 Docker 引擎' },
-  { key: 'enable', label: '启用 Docker 服务' },
+  { key: 'download', label: '下载安装包' },
+  { key: 'install', label: '安装引擎' },
+  { key: 'enable', label: '启用服务' },
   { key: 'verify', label: '验证安装结果' },
 ];
 
-export default function DockerInstallWizard({ onInstalled }: { onInstalled: () => void }) {
+export default function DockerInstallWizard({ runtime, onInstalled }: { runtime: string; onInstalled: () => void }) {
   const [installing, setInstalling] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [status, setStatus] = useState<DockerStatus | null>(null);
@@ -22,21 +23,21 @@ export default function DockerInstallWizard({ onInstalled }: { onInstalled: () =
 
   const checkStatus = async () => {
     try {
-      const res = await api.get('/docker/status');
+      const res = await api.get(withRuntime('/runtime/status', runtime));
       setStatus(res.data?.data);
     } catch {
       // ignore
     }
   };
 
-  useEffect(() => { checkStatus(); }, []);
+  useEffect(() => { checkStatus(); }, [runtime]);
 
   // 轮询验证安装结果
   const verifyInstall = async (): Promise<boolean> => {
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 2000));
       try {
-        const res = await api.get('/docker/status');
+        const res = await api.get(withRuntime('/runtime/status', runtime));
         const s = res.data?.data;
         if (s?.installed && s?.running) {
           setStatus(s);
@@ -60,7 +61,7 @@ export default function DockerInstallWizard({ onInstalled }: { onInstalled: () =
       setCurrentStep(1);
 
       // Step 2: 安装（调用后端 API，等待完成）
-      await api.post('/docker/install');
+      await api.post(withRuntime('/runtime/install', runtime));
       setCurrentStep(2);
 
       // Step 3: 启用服务（短暂延迟给用户视觉反馈）
@@ -70,10 +71,10 @@ export default function DockerInstallWizard({ onInstalled }: { onInstalled: () =
       // Step 4: 验证安装
       const verified = await verifyInstall();
       if (verified) {
-        message.success('Docker 安装成功！');
+        message.success(`${runtime} 安装成功！`);
         onInstalled();
       } else {
-        setError('安装完成但验证失败，请手动检查 Docker 状态');
+        setError('安装完成但验证失败，请手动检查状态');
       }
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } }; message?: string };
@@ -86,19 +87,19 @@ export default function DockerInstallWizard({ onInstalled }: { onInstalled: () =
 
   const handleStart = async () => {
     try {
-      await api.post('/docker/start');
-      message.success('Docker 已启动');
+      await api.post(withRuntime('/runtime/start', runtime));
+      message.success(`${runtime} 已启动`);
       await checkStatus();
       onInstalled();
     } catch {
-      message.error('启动 Docker 失败');
+      message.error(`启动 ${runtime} 失败`);
     }
   };
 
   return (
     <div style={{ textAlign: 'center', padding: '60px 0' }}>
       <DockerOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 24 }} />
-      <h2>Docker 环境配置</h2>
+      <h2>{runtime} 环境配置</h2>
 
       {status && (
         <Descriptions column={1} style={{ maxWidth: 400, margin: '24px auto', textAlign: 'left' }}>
@@ -153,11 +154,11 @@ export default function DockerInstallWizard({ onInstalled }: { onInstalled: () =
       <Space>
         {!status?.installed ? (
           <Button type="primary" icon={<RocketOutlined />} size="large" loading={installing} onClick={handleInstall} disabled={installing}>
-            {installing ? '安装中...' : '安装 Docker'}
+            {installing ? '安装中...' : `安装 ${runtime}`}
           </Button>
         ) : !status.running ? (
           <Button type="primary" icon={<PlayCircleOutlined />} size="large" onClick={handleStart}>
-            启动 Docker
+            启动 {runtime}
           </Button>
         ) : (
           <Button type="primary" icon={<ReloadOutlined />} size="large" onClick={onInstalled}>

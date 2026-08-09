@@ -7,8 +7,9 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { Volume } from './types';
+import { withRuntime } from './types';
 
-export default function VolumeTab() {
+export default function VolumeTab({ runtime }: { runtime: string }) {
   const [volumes, setVolumes] = useState<Volume[]>([]);
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
@@ -16,7 +17,7 @@ export default function VolumeTab() {
 
   const loadVolumes = async () => {
     try {
-      const res = await api.get('/volumes');
+      const res = await api.get(withRuntime('/volumes', runtime));
       setVolumes(res.data?.data?.volumes || []);
     } catch {
       message.error('加载存储卷列表失败');
@@ -25,12 +26,12 @@ export default function VolumeTab() {
     }
   };
 
-  useEffect(() => { loadVolumes(); }, []);
+  useEffect(() => { loadVolumes(); }, [runtime]);
 
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      await api.post('/volumes', values);
+      await api.post(withRuntime('/volumes', runtime), values);
       message.success('存储卷创建成功');
       setCreateVisible(false);
       createForm.resetFields();
@@ -43,7 +44,7 @@ export default function VolumeTab() {
 
   const handleRemove = async (name: string) => {
     try {
-      await api.delete(`/volumes/${name}?force=true`);
+      await api.delete(withRuntime(`/volumes/${name}?force=true`, runtime));
       message.success('存储卷已删除');
       setLoading(true);
       loadVolumes();

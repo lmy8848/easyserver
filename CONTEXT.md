@@ -45,7 +45,11 @@ _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 
 ### 容器
 
-- **Container** — Docker 容器。管理启动、停止、日志等。
+- **Container Runtime** — 容器引擎类型：Docker 或 Podman。面板自动探测已装运行时，前端以双 tab 呈现；同一时刻每个请求只作用于一个运行时。API 层是一套路由，运行时通过 `?runtime=podman` query 参数区分（缺省 `docker`）。
+- **Container** — 某个 Container Runtime 下的容器实例。管理启动、停止、日志等。
+- **Image** — 容器镜像，归属某个 Container Runtime。
+- **Compose Project** — 由 Compose 描述文件定义的一组服务。Docker 用 `docker compose`，Podman 用 `podman-compose`。
+- **Volume** / **Network** — 容器卷与容器网络，均归属某个 Container Runtime。
 
 ### 系统管理
 

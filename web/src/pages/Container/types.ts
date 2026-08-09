@@ -79,6 +79,13 @@ export interface ContainerStats {
 
 // ==================== Helpers ====================
 
+// withRuntime appends `runtime=podman` to a URL when the active runtime is
+// podman. Docker is the backend default, so no param is needed for it.
+export function withRuntime(url: string, runtime: string): string {
+  if (runtime !== 'podman') return url;
+  return url + (url.includes('?') ? '&' : '?') + 'runtime=podman';
+}
+
 // Re-export from shared utils (backward compatible)
 export { formatBytes } from '../../utils/format';
 export { getServiceStatusColor as getStatusColor } from '../../utils/status';

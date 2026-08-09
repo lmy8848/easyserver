@@ -11,9 +11,9 @@ import {
 import api from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import type { Container, ContainerStats, ImageCategory } from './types';
-import { formatBytes, getStatusColor } from './types';
+import { formatBytes, getStatusColor, withRuntime } from './types';
 
-export default function ContainerTab() {
+export default function ContainerTab({ runtime }: { runtime: string }) {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
@@ -30,7 +30,7 @@ export default function ContainerTab() {
 
   const loadContainers = async () => {
     try {
-      const res = await api.get('/containers?all=true');
+      const res = await api.get(withRuntime('/containers?all=true', runtime));
       setContainers(res.data?.data?.containers || []);
     } catch {
       message.error('加载容器列表失败');
@@ -39,12 +39,12 @@ export default function ContainerTab() {
     }
   };
 
-  useEffect(() => { loadContainers(); }, []);
+  useEffect(() => { loadContainers(); }, [runtime]);
 
   const handleAction = async (action: string, id: string) => {
     setActionLoading(`${id}:${action}`);
     try {
-      await api.post(`/containers/${id}/${action}`);
+      await api.post(withRuntime(`/containers/${id}/${action}`, runtime));
       message.success('操作成功');
       await loadContainers();
     } catch {
@@ -57,7 +57,7 @@ export default function ContainerTab() {
   const handleRemove = async (id: string, force: boolean) => {
     setActionLoading(`${id}:remove`);
     try {
-      await api.delete(`/containers/${id}?force=${force}`);
+      await api.delete(withRuntime(`/containers/${id}?force=${force}`, runtime));
       message.success('容器已删除');
       await loadContainers();
     } catch {
@@ -73,7 +73,7 @@ export default function ContainerTab() {
     try {
       const values = await createForm.validateFields();
       setCreateLoading(true);
-      const res = await api.post('/containers', values, { timeout: 600000 }); // 10 min: docker pull may take time
+      const res = await api.post(withRuntime('/containers', runtime), values, { timeout: 600000 }); // 10 min: docker pull may take time
       const resultData = res.data?.data;
       const createdId = resultData?.id || resultData; // Backend might return { id: ... } or string
       message.success(createdId ? `容器创建成功 (ID: ${String(createdId).substring(0, 12)})` : '容器创建成功');
@@ -92,7 +92,7 @@ export default function ContainerTab() {
   const handleExec = async () => {
     try {
       const values = await execForm.validateFields();
-      const res = await api.post(`/containers/${selectedContainer}/exec`, values);
+      const res = await api.post(withRuntime(`/containers/${selectedContainer}/exec`, runtime), values);
       Modal.info({
         title: '执行结果',
         content: <pre style={{ maxHeight: 400, overflow: 'auto' }}>{res.data?.data?.output}</pre>,
@@ -107,7 +107,7 @@ export default function ContainerTab() {
 
   const handleLogs = async (id: string) => {
     try {
-      const res = await api.get(`/containers/${id}/logs?tail=200`);
+      const res = await api.get(withRuntime(`/containers/${id}/logs?tail=200`, runtime));
       setLogs(res.data?.data?.logs || '');
       setSelectedContainer(id);
       setLogsVisible(true);
@@ -118,7 +118,7 @@ export default function ContainerTab() {
 
   const handleStats = async (id: string) => {
     try {
-      const res = await api.get(`/containers/${id}/stats`);
+      const res = await api.get(withRuntime(`/containers/${id}/stats`, runtime));
       setStats(res.data?.data);
       setSelectedContainer(id);
       setStatsVisible(true);
