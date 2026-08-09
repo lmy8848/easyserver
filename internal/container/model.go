@@ -1,5 +1,15 @@
 package container
 
+// Engine identifies a container engine (Docker or Podman). Typed (not a bare
+// string) so a misspelled engine fails to compile instead of silently falling
+// back to Docker.
+type Engine string
+
+const (
+	EngineDocker Engine = "docker"
+	EnginePodman Engine = "podman"
+)
+
 // Container represents a Docker container exposed over the API.
 // Docker CLI outputs uppercase keys; service.go unmarshals into a private
 // shim and maps into this lowercase shape before returning.
@@ -60,13 +70,15 @@ type CreateRequest struct {
 	CPUs          float64           `json:"cpus"`
 }
 
-// DockerStatus represents Docker installation and running status.
+// DockerStatus represents a container engine's installation and running status.
 type DockerStatus struct {
-	Installed      bool   `json:"installed"`
-	Version        string `json:"version"`
-	ComposeVersion string `json:"compose_version"`
-	Running        bool   `json:"running"`
-	OS             string `json:"os"`
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	Running   bool   `json:"running"`
+	OS        string `json:"os"`
+	// SocketEnabled is whether the engine's API socket unit is enabled
+	// (podman.socket). Docker-only daemon makes this irrelevant there.
+	SocketEnabled bool `json:"socket_enabled"`
 }
 
 // Stats represents real-time container resource usage.

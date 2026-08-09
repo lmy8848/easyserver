@@ -8,8 +8,9 @@ import {
 import api from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import type { Image, ImageCategory } from './types';
+import { withEngine } from './types';
 
-export default function ImageTab() {
+export default function ImageTab({ engine }: { engine: string }) {
   const [images, setImages] = useState<Image[]>([]);
   const [loading, setLoading] = useState(true);
   const [pullVisible, setPullVisible] = useState(false);
@@ -19,7 +20,7 @@ export default function ImageTab() {
 
   const loadImages = async () => {
     try {
-      const res = await api.get('/images');
+      const res = await api.get(withEngine('/container/images', engine));
       setImages(res.data?.data?.images || []);
     } catch {
       message.error('加载镜像列表失败');
@@ -28,7 +29,7 @@ export default function ImageTab() {
     }
   };
 
-  useEffect(() => { loadImages(); }, []);
+  useEffect(() => { loadImages(); }, [engine]);
 
   const handlePull = async () => {
     let values;
@@ -39,7 +40,7 @@ export default function ImageTab() {
     }
     setPulling(true);
     try {
-      await api.post('/images/pull', values);
+      await api.post(withEngine('/container/images/pull', engine), values);
       message.success('镜像拉取成功');
       setPullVisible(false);
       pullForm.resetFields();
@@ -54,7 +55,7 @@ export default function ImageTab() {
 
   const handleRemove = async (id: string) => {
     try {
-      await api.delete(`/images/${id}?force=true`);
+      await api.delete(withEngine(`/container/images/${id}?force=true`, engine));
       message.success('镜像已删除');
       setLoading(true);
       loadImages();

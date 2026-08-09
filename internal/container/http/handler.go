@@ -23,11 +23,20 @@ func NewContainerHandler(
 	}
 }
 
-// ========== Docker Management ==========
+// engineName returns the engine selected by the `?engine=` query param,
+// defaulting to docker.
+func (h *ContainerHandler) engineName(c *gin.Context) container.Engine {
+	if r := c.Query("engine"); r == string(container.EnginePodman) {
+		return container.EnginePodman
+	}
+	return container.EngineDocker
+}
 
-// DetectDocker checks Docker installation status
-func (h *ContainerHandler) DetectDocker(c *gin.Context) {
-	status, err := h.containerService.DetectDocker(c.Request.Context())
+// ========== Runtime Management ==========
+
+// DetectEngine checks a engine's installation status
+func (h *ContainerHandler) DetectEngine(c *gin.Context) {
+	status, err := h.containerService.Detect(c.Request.Context(), h.engineName(c))
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -35,49 +44,75 @@ func (h *ContainerHandler) DetectDocker(c *gin.Context) {
 	httpx.Success(c, status)
 }
 
-// InstallDocker installs Docker using official script
-func (h *ContainerHandler) InstallDocker(c *gin.Context) {
-	middleware.AuditSummary(c, "安装 Docker")
-	if err := h.containerService.InstallDocker(c.Request.Context()); err != nil {
+// InstallEngine installs a engine
+func (h *ContainerHandler) InstallEngine(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "安装 "+string(engine))
+	if err := h.containerService.Install(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": "Docker 安装成功"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 安装成功"})
 }
 
-// StartDocker starts the Docker service
-func (h *ContainerHandler) StartDocker(c *gin.Context) {
-	middleware.AuditSummary(c, "启动 Docker")
-	if err := h.containerService.StartDocker(c.Request.Context()); err != nil {
+// StartEngine starts a engine's service
+func (h *ContainerHandler) StartEngine(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "启动 "+string(engine))
+	if err := h.containerService.StartEngine(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": "Docker 已启动"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 已启动"})
 }
 
-// StopDocker stops the Docker service
-func (h *ContainerHandler) StopDocker(c *gin.Context) {
-	middleware.AuditSummary(c, "停止 Docker")
-	if err := h.containerService.StopDocker(c.Request.Context()); err != nil {
+// StopEngine stops a engine's service
+func (h *ContainerHandler) StopEngine(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "停止 "+string(engine))
+	if err := h.containerService.StopEngine(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": "Docker 已停止"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 已停止"})
 }
 
-// RestartDocker restarts the Docker service
-func (h *ContainerHandler) RestartDocker(c *gin.Context) {
-	middleware.AuditSummary(c, "重启 Docker")
-	if err := h.containerService.RestartDocker(c.Request.Context()); err != nil {
+// RestartEngine restarts a engine's service
+func (h *ContainerHandler) RestartEngine(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "重启 "+string(engine))
+	if err := h.containerService.RestartEngine(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": "Docker 已重启"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 已重启"})
 }
 
-// GetDockerInfo returns Docker system info
-func (h *ContainerHandler) GetDockerInfo(c *gin.Context) {
-	info, err := h.containerService.GetDockerInfo(c.Request.Context())
+// EnableSocket enables a engine's API socket unit (e.g. podman.socket).
+func (h *ContainerHandler) EnableSocket(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "启用 "+string(engine)+" Socket")
+	if err := h.containerService.EnableSocket(c.Request.Context(), engine); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "Socket 已启用"})
+}
+
+// DisableSocket disables a engine's API socket unit.
+func (h *ContainerHandler) DisableSocket(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "禁用 "+string(engine)+" Socket")
+	if err := h.containerService.DisableSocket(c.Request.Context(), engine); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "Socket 已禁用"})
+}
+
+// GetEngineInfo returns a engine's system info
+func (h *ContainerHandler) GetEngineInfo(c *gin.Context) {
+	info, err := h.containerService.GetInfo(c.Request.Context(), h.engineName(c))
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -85,7 +120,7 @@ func (h *ContainerHandler) GetDockerInfo(c *gin.Context) {
 	httpx.Success(c, info)
 }
 
-// ConfigureMirror configures Docker registry mirror
+// ConfigureMirror configures a engine's registry mirror
 func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 	var req struct {
 		MirrorURL string `json:"mirror_url"`
@@ -95,8 +130,9 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 		return
 	}
 
-	middleware.AuditSummary(c, "配置 Docker 镜像源 "+req.MirrorURL)
-	if err := h.containerService.ConfigureMirror(c.Request.Context(), req.MirrorURL); err != nil {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "配置 "+string(engine)+" 镜像源 "+req.MirrorURL)
+	if err := h.containerService.ConfigureMirror(c.Request.Context(), engine, req.MirrorURL); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -108,7 +144,7 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 // ListContainers returns all containers
 func (h *ContainerHandler) ListContainers(c *gin.Context) {
 	all := c.Query("all") == "true"
-	containers, err := h.containerService.ListContainers(c.Request.Context(), all)
+	containers, err := h.containerService.ListContainers(c.Request.Context(), h.engineName(c), all)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -119,7 +155,7 @@ func (h *ContainerHandler) ListContainers(c *gin.Context) {
 // GetContainer returns a specific container
 func (h *ContainerHandler) GetContainer(c *gin.Context) {
 	id := c.Param("id")
-	container, err := h.containerService.GetContainer(c.Request.Context(), id)
+	container, err := h.containerService.GetContainer(c.Request.Context(), h.engineName(c), id)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("容器不存在"))
 		return
@@ -136,7 +172,7 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "创建容器 "+req.Name)
-	id, err := h.containerService.CreateContainer(c.Request.Context(), req)
+	id, err := h.containerService.CreateContainer(c.Request.Context(), h.engineName(c), req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -148,7 +184,7 @@ func (h *ContainerHandler) CreateContainer(c *gin.Context) {
 func (h *ContainerHandler) StartContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "启动容器 "+id)
-	if err := h.containerService.StartContainer(c.Request.Context(), id); err != nil {
+	if err := h.containerService.StartContainer(c.Request.Context(), h.engineName(c), id); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -159,7 +195,7 @@ func (h *ContainerHandler) StartContainer(c *gin.Context) {
 func (h *ContainerHandler) StopContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "停止容器 "+id)
-	if err := h.containerService.StopContainer(c.Request.Context(), id); err != nil {
+	if err := h.containerService.StopContainer(c.Request.Context(), h.engineName(c), id); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -170,7 +206,7 @@ func (h *ContainerHandler) StopContainer(c *gin.Context) {
 func (h *ContainerHandler) RestartContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "重启容器 "+id)
-	if err := h.containerService.RestartContainer(c.Request.Context(), id); err != nil {
+	if err := h.containerService.RestartContainer(c.Request.Context(), h.engineName(c), id); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -181,7 +217,7 @@ func (h *ContainerHandler) RestartContainer(c *gin.Context) {
 func (h *ContainerHandler) PauseContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "暂停容器 "+id)
-	if err := h.containerService.PauseContainer(c.Request.Context(), id); err != nil {
+	if err := h.containerService.PauseContainer(c.Request.Context(), h.engineName(c), id); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -192,7 +228,7 @@ func (h *ContainerHandler) PauseContainer(c *gin.Context) {
 func (h *ContainerHandler) UnpauseContainer(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "恢复容器 "+id)
-	if err := h.containerService.UnpauseContainer(c.Request.Context(), id); err != nil {
+	if err := h.containerService.UnpauseContainer(c.Request.Context(), h.engineName(c), id); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -204,7 +240,7 @@ func (h *ContainerHandler) RemoveContainer(c *gin.Context) {
 	id := c.Param("id")
 	force := c.Query("force") == "true"
 	middleware.AuditSummary(c, "删除容器 "+id)
-	if err := h.containerService.RemoveContainer(c.Request.Context(), id, force); err != nil {
+	if err := h.containerService.RemoveContainer(c.Request.Context(), h.engineName(c), id, force); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -222,7 +258,7 @@ func (h *ContainerHandler) GetContainerLogs(c *gin.Context) {
 		tail = t
 	}
 
-	logs, err := h.containerService.GetContainerLogs(c.Request.Context(), id, tail)
+	logs, err := h.containerService.GetContainerLogs(c.Request.Context(), h.engineName(c), id, tail)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -244,7 +280,7 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 	// Log exec command for audit
 	middleware.AuditSummary(c, "容器内执行命令 "+id+": "+req.Command)
 
-	output, err := h.containerService.ExecInContainer(c.Request.Context(), id, req.Command)
+	output, err := h.containerService.ExecInContainer(c.Request.Context(), h.engineName(c), id, req.Command)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -255,7 +291,7 @@ func (h *ContainerHandler) ExecInContainer(c *gin.Context) {
 // GetContainerStats returns real-time container stats
 func (h *ContainerHandler) GetContainerStats(c *gin.Context) {
 	id := c.Param("id")
-	stats, err := h.containerService.GetContainerStats(c.Request.Context(), id)
+	stats, err := h.containerService.GetContainerStats(c.Request.Context(), h.engineName(c), id)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -266,7 +302,7 @@ func (h *ContainerHandler) GetContainerStats(c *gin.Context) {
 // GetContainerTop returns processes running in a container
 func (h *ContainerHandler) GetContainerTop(c *gin.Context) {
 	id := c.Param("id")
-	processes, err := h.containerService.GetContainerTop(c.Request.Context(), id)
+	processes, err := h.containerService.GetContainerTop(c.Request.Context(), h.engineName(c), id)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -287,7 +323,7 @@ func (h *ContainerHandler) CopyToContainer(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "复制文件到容器 "+id+": "+req.SrcPath+" -> "+req.DestPath)
-	if err := h.containerService.CopyToContainer(c.Request.Context(), id, req.SrcPath, req.DestPath); err != nil {
+	if err := h.containerService.CopyToContainer(c.Request.Context(), h.engineName(c), id, req.SrcPath, req.DestPath); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -307,7 +343,7 @@ func (h *ContainerHandler) CopyFromContainer(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "从容器复制文件 "+id+": "+req.SrcPath+" -> "+req.DestPath)
-	if err := h.containerService.CopyFromContainer(c.Request.Context(), id, req.SrcPath, req.DestPath); err != nil {
+	if err := h.containerService.CopyFromContainer(c.Request.Context(), h.engineName(c), id, req.SrcPath, req.DestPath); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -326,7 +362,7 @@ func (h *ContainerHandler) RenameContainer(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "重命名容器 "+id+" 为 "+req.Name)
-	if err := h.containerService.RenameContainer(c.Request.Context(), id, req.Name); err != nil {
+	if err := h.containerService.RenameContainer(c.Request.Context(), h.engineName(c), id, req.Name); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -343,7 +379,7 @@ func (h *ContainerHandler) UpdateContainer(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "更新容器 "+id)
-	if err := h.containerService.UpdateContainer(c.Request.Context(), id, req); err != nil {
+	if err := h.containerService.UpdateContainer(c.Request.Context(), h.engineName(c), id, req); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -352,9 +388,9 @@ func (h *ContainerHandler) UpdateContainer(c *gin.Context) {
 
 // ========== Image Management ==========
 
-// ListImages returns all Docker images
+// ListImages returns all images
 func (h *ContainerHandler) ListImages(c *gin.Context) {
-	images, err := h.containerService.ListImages(c.Request.Context())
+	images, err := h.containerService.ListImages(c.Request.Context(), h.engineName(c))
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -362,7 +398,7 @@ func (h *ContainerHandler) ListImages(c *gin.Context) {
 	httpx.Success(c, gin.H{"images": images})
 }
 
-// PullImage pulls a Docker image
+// PullImage pulls an image
 func (h *ContainerHandler) PullImage(c *gin.Context) {
 	var req struct {
 		Image string `json:"image" binding:"required"`
@@ -373,19 +409,19 @@ func (h *ContainerHandler) PullImage(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "拉取镜像 "+req.Image)
-	if err := h.containerService.PullImage(c.Request.Context(), req.Image); err != nil {
+	if err := h.containerService.PullImage(c.Request.Context(), h.engineName(c), req.Image); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "镜像已拉取"})
 }
 
-// RemoveImage removes a Docker image
+// RemoveImage removes an image
 func (h *ContainerHandler) RemoveImage(c *gin.Context) {
 	id := c.Param("id")
 	force := c.Query("force") == "true"
 	middleware.AuditSummary(c, "删除镜像 "+id)
-	if err := h.containerService.RemoveImage(c.Request.Context(), id, force); err != nil {
+	if err := h.containerService.RemoveImage(c.Request.Context(), h.engineName(c), id, force); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -396,7 +432,7 @@ func (h *ContainerHandler) RemoveImage(c *gin.Context) {
 
 // ListComposeProjects lists all compose projects
 func (h *ContainerHandler) ListComposeProjects(c *gin.Context) {
-	projects, err := h.containerService.ListProjects(c.Request.Context())
+	projects, err := h.containerService.ListProjects(c.Request.Context(), h.engineName(c))
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -404,7 +440,7 @@ func (h *ContainerHandler) ListComposeProjects(c *gin.Context) {
 	httpx.Success(c, gin.H{"projects": projects})
 }
 
-// ComposeUp runs docker compose up -d
+// ComposeUp runs compose up -d
 func (h *ContainerHandler) ComposeUp(c *gin.Context) {
 	var req struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
@@ -415,14 +451,14 @@ func (h *ContainerHandler) ComposeUp(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "启动 Compose "+req.ProjectDir)
-	if err := h.containerService.ComposeUp(c.Request.Context(), req.ProjectDir); err != nil {
+	if err := h.containerService.ComposeUp(c.Request.Context(), h.engineName(c), req.ProjectDir); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "Compose 已启动"})
 }
 
-// ComposeDown runs docker compose down
+// ComposeDown runs compose down
 func (h *ContainerHandler) ComposeDown(c *gin.Context) {
 	var req struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
@@ -433,14 +469,14 @@ func (h *ContainerHandler) ComposeDown(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "停止 Compose "+req.ProjectDir)
-	if err := h.containerService.ComposeDown(c.Request.Context(), req.ProjectDir); err != nil {
+	if err := h.containerService.ComposeDown(c.Request.Context(), h.engineName(c), req.ProjectDir); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "Compose 已停止"})
 }
 
-// ComposeRestart runs docker compose restart
+// ComposeRestart runs compose restart
 func (h *ContainerHandler) ComposeRestart(c *gin.Context) {
 	var req struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
@@ -451,7 +487,7 @@ func (h *ContainerHandler) ComposeRestart(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "重启 Compose "+req.ProjectDir)
-	if err := h.containerService.ComposeRestart(c.Request.Context(), req.ProjectDir); err != nil {
+	if err := h.containerService.ComposeRestart(c.Request.Context(), h.engineName(c), req.ProjectDir); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -469,7 +505,7 @@ func (h *ContainerHandler) ComposeLogs(c *gin.Context) {
 		tail = t
 	}
 
-	logs, err := h.containerService.ComposeGetLogs(c.Request.Context(), projectDir, tail)
+	logs, err := h.containerService.ComposeGetLogs(c.Request.Context(), h.engineName(c), projectDir, tail)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -509,9 +545,9 @@ func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) {
 
 // ========== Volume Management ==========
 
-// ListVolumes returns all Docker volumes
+// ListVolumes returns all volumes
 func (h *ContainerHandler) ListVolumes(c *gin.Context) {
-	volumes, err := h.containerService.ListVolumes(c.Request.Context())
+	volumes, err := h.containerService.ListVolumes(c.Request.Context(), h.engineName(c))
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -519,7 +555,7 @@ func (h *ContainerHandler) ListVolumes(c *gin.Context) {
 	httpx.Success(c, gin.H{"volumes": volumes})
 }
 
-// CreateVolume creates a new Docker volume
+// CreateVolume creates a new volume
 func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 	var req struct {
 		Name   string `json:"name" binding:"required"`
@@ -531,19 +567,19 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "创建数据卷 "+req.Name)
-	if err := h.containerService.CreateVolume(c.Request.Context(), req.Name, req.Driver); err != nil {
+	if err := h.containerService.CreateVolume(c.Request.Context(), h.engineName(c), req.Name, req.Driver); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "卷已创建"})
 }
 
-// RemoveVolume removes a Docker volume
+// RemoveVolume removes a volume
 func (h *ContainerHandler) RemoveVolume(c *gin.Context) {
 	name := c.Param("name")
 	force := c.Query("force") == "true"
 	middleware.AuditSummary(c, "删除数据卷 "+name)
-	if err := h.containerService.RemoveVolume(c.Request.Context(), name, force); err != nil {
+	if err := h.containerService.RemoveVolume(c.Request.Context(), h.engineName(c), name, force); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -552,9 +588,9 @@ func (h *ContainerHandler) RemoveVolume(c *gin.Context) {
 
 // ========== Network Management ==========
 
-// ListNetworks returns all Docker networks
+// ListNetworks returns all networks
 func (h *ContainerHandler) ListNetworks(c *gin.Context) {
-	networks, err := h.containerService.ListNetworks(c.Request.Context())
+	networks, err := h.containerService.ListNetworks(c.Request.Context(), h.engineName(c))
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -562,7 +598,7 @@ func (h *ContainerHandler) ListNetworks(c *gin.Context) {
 	httpx.Success(c, gin.H{"networks": networks})
 }
 
-// CreateNetwork creates a new Docker network
+// CreateNetwork creates a new network
 func (h *ContainerHandler) CreateNetwork(c *gin.Context) {
 	var req struct {
 		Name   string `json:"name" binding:"required"`
@@ -574,18 +610,18 @@ func (h *ContainerHandler) CreateNetwork(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "创建网络 "+req.Name)
-	if err := h.containerService.CreateNetwork(c.Request.Context(), req.Name, req.Driver); err != nil {
+	if err := h.containerService.CreateNetwork(c.Request.Context(), h.engineName(c), req.Name, req.Driver); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "网络已创建"})
 }
 
-// RemoveNetwork removes a Docker network
+// RemoveNetwork removes a network
 func (h *ContainerHandler) RemoveNetwork(c *gin.Context) {
 	id := c.Param("id")
 	middleware.AuditSummary(c, "删除网络 "+id)
-	if err := h.containerService.RemoveNetwork(c.Request.Context(), id); err != nil {
+	if err := h.containerService.RemoveNetwork(c.Request.Context(), h.engineName(c), id); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -595,55 +631,57 @@ func (h *ContainerHandler) RemoveNetwork(c *gin.Context) {
 func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Service) {
 	handler := NewContainerHandler(containerService)
 
-	// Docker management
-	protected.GET("/docker/status", handler.DetectDocker)
-	protected.POST("/docker/install", handler.InstallDocker)
-	protected.POST("/docker/start", handler.StartDocker)
-	protected.POST("/docker/stop", handler.StopDocker)
-	protected.POST("/docker/restart", handler.RestartDocker)
-	protected.GET("/docker/info", handler.GetDockerInfo)
-	protected.POST("/docker/mirror", handler.ConfigureMirror)
+	// Engine management (?engine=docker|podman, default docker)
+	protected.GET("/container/status", handler.DetectEngine)
+	protected.POST("/container/install", handler.InstallEngine)
+	protected.POST("/container/start", handler.StartEngine)
+	protected.POST("/container/stop", handler.StopEngine)
+	protected.POST("/container/restart", handler.RestartEngine)
+	protected.GET("/container/info", handler.GetEngineInfo)
+	protected.POST("/container/mirror", handler.ConfigureMirror)
+	protected.POST("/container/socket/enable", handler.EnableSocket)
+	protected.POST("/container/socket/disable", handler.DisableSocket)
 
-	// Container management
-	protected.GET("/containers", handler.ListContainers)
-	protected.GET("/containers/:id", handler.GetContainer)
-	protected.POST("/containers", handler.CreateContainer)
-	protected.POST("/containers/:id/start", handler.StartContainer)
-	protected.POST("/containers/:id/stop", handler.StopContainer)
-	protected.POST("/containers/:id/restart", handler.RestartContainer)
-	protected.POST("/containers/:id/pause", handler.PauseContainer)
-	protected.POST("/containers/:id/unpause", handler.UnpauseContainer)
-	protected.DELETE("/containers/:id", handler.RemoveContainer)
-	protected.GET("/containers/:id/logs", handler.GetContainerLogs)
-	protected.POST("/containers/:id/exec", handler.ExecInContainer)
-	protected.GET("/containers/:id/stats", handler.GetContainerStats)
-	protected.GET("/containers/:id/top", handler.GetContainerTop)
-	protected.POST("/containers/:id/copy-to", handler.CopyToContainer)
-	protected.POST("/containers/:id/copy-from", handler.CopyFromContainer)
-	protected.POST("/containers/:id/rename", handler.RenameContainer)
-	protected.PUT("/containers/:id/update", handler.UpdateContainer)
+	// Container instances
+	protected.GET("/container/instances", handler.ListContainers)
+	protected.GET("/container/instances/:id", handler.GetContainer)
+	protected.POST("/container/instances", handler.CreateContainer)
+	protected.POST("/container/instances/:id/start", handler.StartContainer)
+	protected.POST("/container/instances/:id/stop", handler.StopContainer)
+	protected.POST("/container/instances/:id/restart", handler.RestartContainer)
+	protected.POST("/container/instances/:id/pause", handler.PauseContainer)
+	protected.POST("/container/instances/:id/unpause", handler.UnpauseContainer)
+	protected.DELETE("/container/instances/:id", handler.RemoveContainer)
+	protected.GET("/container/instances/:id/logs", handler.GetContainerLogs)
+	protected.POST("/container/instances/:id/exec", handler.ExecInContainer)
+	protected.GET("/container/instances/:id/stats", handler.GetContainerStats)
+	protected.GET("/container/instances/:id/top", handler.GetContainerTop)
+	protected.POST("/container/instances/:id/copy-to", handler.CopyToContainer)
+	protected.POST("/container/instances/:id/copy-from", handler.CopyFromContainer)
+	protected.POST("/container/instances/:id/rename", handler.RenameContainer)
+	protected.PUT("/container/instances/:id/update", handler.UpdateContainer)
 
 	// Image management
-	protected.GET("/images", handler.ListImages)
-	protected.POST("/images/pull", handler.PullImage)
-	protected.DELETE("/images/:id", handler.RemoveImage)
+	protected.GET("/container/images", handler.ListImages)
+	protected.POST("/container/images/pull", handler.PullImage)
+	protected.DELETE("/container/images/:id", handler.RemoveImage)
 
 	// Compose management
-	protected.GET("/compose/projects", handler.ListComposeProjects)
-	protected.POST("/compose/up", handler.ComposeUp)
-	protected.POST("/compose/down", handler.ComposeDown)
-	protected.POST("/compose/restart", handler.ComposeRestart)
-	protected.GET("/compose/logs", handler.ComposeLogs)
-	protected.GET("/compose/config", handler.ComposeGetConfig)
-	protected.PUT("/compose/config", handler.ComposeSaveConfig)
+	protected.GET("/container/compose/projects", handler.ListComposeProjects)
+	protected.POST("/container/compose/up", handler.ComposeUp)
+	protected.POST("/container/compose/down", handler.ComposeDown)
+	protected.POST("/container/compose/restart", handler.ComposeRestart)
+	protected.GET("/container/compose/logs", handler.ComposeLogs)
+	protected.GET("/container/compose/config", handler.ComposeGetConfig)
+	protected.PUT("/container/compose/config", handler.ComposeSaveConfig)
 
 	// Volume management
-	protected.GET("/volumes", handler.ListVolumes)
-	protected.POST("/volumes", handler.CreateVolume)
-	protected.DELETE("/volumes/:name", handler.RemoveVolume)
+	protected.GET("/container/volumes", handler.ListVolumes)
+	protected.POST("/container/volumes", handler.CreateVolume)
+	protected.DELETE("/container/volumes/:name", handler.RemoveVolume)
 
 	// Network management
-	protected.GET("/networks", handler.ListNetworks)
-	protected.POST("/networks", handler.CreateNetwork)
-	protected.DELETE("/networks/:id", handler.RemoveNetwork)
+	protected.GET("/container/networks", handler.ListNetworks)
+	protected.POST("/container/networks", handler.CreateNetwork)
+	protected.DELETE("/container/networks/:id", handler.RemoveNetwork)
 }

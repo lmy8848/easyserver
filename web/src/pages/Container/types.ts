@@ -17,9 +17,9 @@ export interface ImageCategory {
 export interface DockerStatus {
   installed: boolean;
   version: string;
-  compose_version: string;
   running: boolean;
   os: string;
+  socket_enabled: boolean;
 }
 
 export interface Container {
@@ -78,6 +78,13 @@ export interface ContainerStats {
 }
 
 // ==================== Helpers ====================
+
+// withEngine appends `engine=podman` to a URL when the active engine is
+// podman. Docker is the backend default, so no param is needed for it.
+export function withEngine(url: string, engine: string): string {
+  if (engine !== 'podman') return url;
+  return url + (url.includes('?') ? '&' : '?') + 'engine=podman';
+}
 
 // Re-export from shared utils (backward compatible)
 export { formatBytes } from '../../utils/format';

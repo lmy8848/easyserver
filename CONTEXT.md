@@ -20,7 +20,7 @@
 
 - **DB Engine** — 数据库引擎类型（MySQL、PostgreSQL、Redis）。每个引擎有默认端口和预定义版本模板。
   - ⚠ 代码中名为 `model.DBServer`（`model/db_server.go`），但它不是"运行中的数据库实例"——它是引擎目录。文档用 "DB Engine"，代码保留 `DBServer` 不动。
-- **DB Version** — 某引擎的已安装实例（例如 MySQL 8.0 运行在端口 3306）。一个引擎可以同时装多个版本。
+- **DB Version** — 某 DB Engine 的受管数据库容器实例（例如 MySQL 8.0 运行在端口 3306）。一个引擎可以同时有多个实例；宿主机安装的数据库不属于 EasyServer 的管理范围。
 - **Database** — 某个 DB Version 下的实际数据库（例如 `myapp`）。
 - **DB User** — 数据库用户，跨版本共享（同一引擎下所有版本共用用户列表）。
 - **DB Backup** — 数据库备份记录，关联到特定 Database。
@@ -45,7 +45,12 @@ _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 
 ### 容器
 
-- **Container** — Docker 容器。管理启动、停止、日志等。
+- **ContainerEngine** — 容器引擎类型：Docker 或 Podman。刻意避开 `Runtime`（该词已指编程语言运行时，见上「运行时」节），也不撞 OCI 的低层 container runtime。面板自动探测已装引擎，前端以双 tab 呈现；同一时刻每个请求只作用于一个引擎。API 全部收在 `/container/*` 前缀下，引擎通过 `?engine=podman` query 参数区分（缺省 `docker`）。
+- **Managed Database Container** — 由 EasyServer 创建、标识并全生命周期管理的数据库容器。它是 DB Version 的运行载体，不是通用容器列表中可任意编辑的 Container。
+- **Container** — 某个 ContainerEngine 下的容器实例。管理启动、停止、日志等。API 资源路径为 `/container/instances`。
+- **Image** — 容器镜像，归属某个 ContainerEngine。
+- **Compose Project** — 由 Compose 描述文件定义的一组服务。Docker 用 `docker compose`，Podman 用 `podman-compose`。
+- **Volume** / **Network** — 容器卷与容器网络，均归属某个 ContainerEngine。
 
 ### 系统管理
 

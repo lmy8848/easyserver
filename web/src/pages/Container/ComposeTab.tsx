@@ -8,8 +8,9 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import type { ComposeProject } from './types';
+import { withEngine } from './types';
 
-export default function ComposeTab() {
+export default function ComposeTab({ engine }: { engine: string }) {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [logsVisible, setLogsVisible] = useState(false);
@@ -20,7 +21,7 @@ export default function ComposeTab() {
 
   const loadProjects = async () => {
     try {
-      const res = await api.get('/compose/projects');
+      const res = await api.get(withEngine('/container/compose/projects', engine));
       setProjects(res.data?.data?.projects || []);
     } catch {
       // Compose might not be available
@@ -29,11 +30,11 @@ export default function ComposeTab() {
     }
   };
 
-  useEffect(() => { loadProjects(); }, []);
+  useEffect(() => { loadProjects(); }, [engine]);
 
   const handleAction = async (action: string, dir: string) => {
     try {
-      await api.post(`/compose/${action}`, { project_dir: dir });
+      await api.post(withEngine(`/container/compose/${action}`, engine), { project_dir: dir });
       message.success(`compose ${action} 成功`);
       setLoading(true);
       loadProjects();
@@ -44,7 +45,7 @@ export default function ComposeTab() {
 
   const handleLogs = async (dir: string) => {
     try {
-      const res = await api.get(`/compose/logs?dir=${encodeURIComponent(dir)}&tail=200`);
+      const res = await api.get(withEngine(`/container/compose/logs?dir=${encodeURIComponent(dir)}&tail=200`, engine));
       setLogs(res.data?.data?.logs || '');
       setLogsVisible(true);
     } catch {
@@ -54,7 +55,7 @@ export default function ComposeTab() {
 
   const handleGetConfig = async (dir: string) => {
     try {
-      const res = await api.get(`/compose/config?dir=${encodeURIComponent(dir)}`);
+      const res = await api.get(withEngine(`/container/compose/config?dir=${encodeURIComponent(dir)}`, engine));
       const content = res.data?.data?.content || '';
       setConfigDir(dir);
       configForm.setFieldsValue({ content });
@@ -67,7 +68,7 @@ export default function ComposeTab() {
   const handleSaveConfig = async () => {
     try {
       const values = await configForm.validateFields();
-      await api.put('/compose/config', { project_dir: configDir, content: values.content });
+      await api.put(withEngine('/container/compose/config', engine), { project_dir: configDir, content: values.content });
       message.success('配置已保存');
       setConfigVisible(false);
     } catch {
