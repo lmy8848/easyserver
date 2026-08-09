@@ -942,27 +942,28 @@ func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 	return nil
 }
 
-// socketUnit returns the systemd unit for the engine's Docker-compatible
-// API socket (podman.socket / docker.socket). Optional, enable/disable only.
-func socketUnit(engine Engine) string {
-	if isPodmanEngine(engine) {
-		return "podman.socket"
-	}
-	return "docker.socket"
-}
+// enableSocketUnit is the systemd unit for Podman's Docker-compatible API
+// socket. Podman-only; Docker's daemon is via docker.service.
+const enableSocketUnit = "podman.socket"
 
-// EnableSocket enables the engine's API socket unit at boot.
+// EnableSocket enables Podman's API socket unit at boot.
 func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "enable", socketUnit(engine))
+	if !isPodmanEngine(engine) {
+		return fmt.Errorf("Socket 操作仅支持 Podman")
+	}
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "enable", enableSocketUnit)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to enable %s socket: %s", engine, output)
 	}
 	return nil
 }
 
-// DisableSocket disables the engine's API socket unit.
+// DisableSocket disables Podman's API socket unit.
 func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "disable", socketUnit(engine))
+	if !isPodmanEngine(engine) {
+		return fmt.Errorf("Socket 操作仅支持 Podman")
+	}
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "disable", enableSocketUnit)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to disable %s socket: %s", engine, output)
 	}

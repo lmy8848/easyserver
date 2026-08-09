@@ -177,8 +177,8 @@ export default function DockerInstallWizard({ engine, onInstalled }: { engine: s
         <Button icon={<ReloadOutlined />} onClick={checkStatus} disabled={installing}>刷新状态</Button>
       </Space>
 
-      {/* 可选：启用/禁用 API Socket（podman.socket / docker.socket） */}
-      {status?.installed && (
+      {/* 可选：启用/禁用 API Socket（仅 Podman，Docker 的 socket 是守护进程触发器） */}
+      {status?.installed && engine === 'podman' && (
         <Space style={{ marginTop: 16 }}>
           <Button size="small" onClick={() => handleSocket('enable')}>启用 Socket</Button>
           <Button size="small" onClick={() => handleSocket('disable')}>禁用 Socket</Button>
