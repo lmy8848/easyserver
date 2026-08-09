@@ -765,11 +765,14 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 	} else {
 		// Docker: CLI and engine (docker.service) are separate packages.
 		// "Installed" means the engine unit exists; "Running" means the
-		// daemon is active.
-		status.Version = s.dockerCLIVersion(ctx)
+		// daemon is active. Version is the daemon (server) version, only
+		// available while running.
 		status.Installed = s.unitExists(ctx, "docker.service")
 		if status.Installed {
 			status.Running = s.unitActive(ctx, "docker.service")
+			if status.Running {
+				status.Version = s.dockerServerVersion(ctx)
+			}
 		}
 	}
 
@@ -778,13 +781,14 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 	return status, nil
 }
 
-// dockerCLIVersion returns the Docker client version (CLI only, no daemon).
-func (s *Service) dockerCLIVersion(ctx context.Context) string {
-	stdout, exitCode, err := s.executor.RunCombined(ctx, engineBinary(EngineDocker), "--version")
+// dockerServerVersion returns the Docker daemon (server) version. Only
+// meaningful while the daemon is running.
+func (s *Service) dockerServerVersion(ctx context.Context) string {
+	stdout, exitCode, err := s.executor.RunCombined(ctx, engineBinary(EngineDocker), "version", "--format", "{{.Server.Version}}")
 	if err != nil || exitCode != 0 {
 		return ""
 	}
-	return extractVersion(stdout)
+	return strings.TrimSpace(stdout)
 }
 
 // unitExists reports whether a systemd unit file is present.
