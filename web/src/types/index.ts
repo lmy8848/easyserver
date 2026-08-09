@@ -254,7 +254,7 @@ export interface DBInstance {
   port: number;
   status: string; // running, stopped, unhealthy
   created_at: string;
-  runtime?: string;
+  container_engine?: string;
   image?: string;
   container_id: string;
   volume_name?: string;

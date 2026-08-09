@@ -12,20 +12,20 @@ import (
 
 // ContainerSpec describes a database container without exposing CLI details to callers.
 type ContainerSpec struct {
-	Runtime       string
-	Name          string
-	Image         string
-	Volume        string
-	DataDir       string
-	ConfigVolume  string
-	ConfigDir     string
-	BindAddress   string
-	HostPort      int
-	ContainerPort int
-	Environment   map[string]string
-	Labels        map[string]string
-	HealthCommand string
-	Command       []string
+	ContainerEngine string
+	Name            string
+	Image           string
+	Volume          string
+	DataDir         string
+	ConfigVolume    string
+	ConfigDir       string
+	BindAddress     string
+	HostPort        int
+	ContainerPort   int
+	Environment     map[string]string
+	Labels          map[string]string
+	HealthCommand   string
+	Command         []string
 }
 
 // ContainerStatus is the externally observable state of a managed database container.
@@ -100,11 +100,11 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 	}
 	spec.Labels["com.easyserver.managed"] = "true"
 	r.lastSpec = spec
-	if _, err := r.command(ctx, spec.Runtime, "volume", "create", spec.Volume); err != nil {
+	if _, err := r.command(ctx, spec.ContainerEngine, "volume", "create", spec.Volume); err != nil {
 		return fmt.Errorf("create data volume: %w", err)
 	}
 	if spec.ConfigVolume != "" {
-		if _, err := r.command(ctx, spec.Runtime, "volume", "create", spec.ConfigVolume); err != nil {
+		if _, err := r.command(ctx, spec.ContainerEngine, "volume", "create", spec.ConfigVolume); err != nil {
 			return fmt.Errorf("create config volume: %w", err)
 		}
 	}
@@ -127,7 +127,7 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 	}
 	args = append(args, spec.Image)
 	args = append(args, spec.Command...)
-	if _, err := r.command(ctx, spec.Runtime, args...); err != nil {
+	if _, err := r.command(ctx, spec.ContainerEngine, args...); err != nil {
 		// The volume is deliberately left behind for recovery when create fails.
 		return fmt.Errorf("create database container: %w", err)
 	}

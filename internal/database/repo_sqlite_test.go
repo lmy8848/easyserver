@@ -23,22 +23,22 @@ func TestSQLiteRepositoryUsesDatabaseInstanceSchema(t *testing.T) {
 	repo := NewSQLiteRepository(db)
 	ctx := context.Background()
 	id, err := repo.CreateInstance(ctx, &DBInstance{
-		DBType:        DBTypeMySQL,
-		Version:       "8.0",
-		Runtime:       "docker",
-		Image:         "mysql:8.0",
-		ContainerID:   "easyserver-db-mysql-8",
-		VolumeName:    "easyserver-db-mysql-8-data",
-		BindAddress:   "127.0.0.1",
-		Port:          3306,
-		AdminPassword: "ciphertext",
-		Status:        "running",
+		DBType:          DBTypeMySQL,
+		Version:         "8.0",
+		ContainerEngine: "docker",
+		Image:           "mysql:8.0",
+		ContainerID:     "easyserver-db-mysql-8",
+		VolumeName:      "easyserver-db-mysql-8-data",
+		BindAddress:     "127.0.0.1",
+		Port:            3306,
+		AdminPassword:   "ciphertext",
+		Status:          "running",
 	})
 	if err != nil {
 		t.Fatalf("create instance: %v", err)
 	}
 	instance, err := repo.GetInstance(ctx, id)
-	if err != nil || instance == nil || instance.Runtime != "docker" || instance.DBType != DBTypeMySQL {
+	if err != nil || instance == nil || instance.ContainerEngine != "docker" || instance.DBType != DBTypeMySQL {
 		t.Fatalf("get instance: %v %#v", err, instance)
 	}
 }

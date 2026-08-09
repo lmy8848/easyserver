@@ -58,17 +58,17 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	fake := &runtimeFakeExecutor{}
 	runtime := NewCLIContainerRuntime(fake)
 	err := runtime.Create(context.Background(), ContainerSpec{
-		Runtime:       "podman",
-		Name:          "easyserver-db-mysql-8",
-		Image:         "mysql:8.0",
-		Volume:        "easyserver-db-mysql-8-data",
-		DataDir:       "/var/lib/mysql",
-		BindAddress:   "127.0.0.1",
-		HostPort:      3306,
-		ContainerPort: 3306,
-		Environment:   map[string]string{"MYSQL_ROOT_PASSWORD": "secret"},
-		Labels:        map[string]string{"com.easyserver.engine": "mysql"},
-		HealthCommand: "mysqladmin ping -h localhost",
+		ContainerEngine: "podman",
+		Name:            "easyserver-db-mysql-8",
+		Image:           "mysql:8.0",
+		Volume:          "easyserver-db-mysql-8-data",
+		DataDir:         "/var/lib/mysql",
+		BindAddress:     "127.0.0.1",
+		HostPort:        3306,
+		ContainerPort:   3306,
+		Environment:     map[string]string{"MYSQL_ROOT_PASSWORD": "secret"},
+		Labels:          map[string]string{"com.easyserver.engine": "mysql"},
+		HealthCommand:   "mysqladmin ping -h localhost",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)

@@ -14,30 +14,30 @@ const (
 // instance owns one managed container, one named data volume, an instance-level
 // config dir, a fixed image and a fixed runtime.
 type DBInstance struct {
-	ID            int64  `json:"id"`
-	DBType        DBType `json:"db_type"` // mysql, postgresql, redis
-	Version       string `json:"version"` // 5.7, 8.0, 13, 15, etc.
-	Port          int    `json:"port"`
-	Status        string `json:"status"` // running, stopped, unhealthy
-	CreatedAt     string `json:"created_at"`
-	Runtime       string `json:"runtime"`
-	Image         string `json:"image"`
-	ContainerID   string `json:"container_id"`
-	VolumeName    string `json:"volume_name"`
-	ConfigDir     string `json:"config_dir"`
-	BindAddress   string `json:"bind_address"`
-	AdminPassword string `json:"-"`
+	ID              int64  `json:"id"`
+	DBType          DBType `json:"db_type"` // mysql, postgresql, redis
+	Version         string `json:"version"` // 5.7, 8.0, 13, 15, etc.
+	Port            int    `json:"port"`
+	Status          string `json:"status"` // running, stopped, unhealthy
+	CreatedAt       string `json:"created_at"`
+	ContainerEngine string `json:"container_engine"`
+	Image           string `json:"image"`
+	ContainerID     string `json:"container_id"`
+	VolumeName      string `json:"volume_name"`
+	ConfigDir       string `json:"config_dir"`
+	BindAddress     string `json:"bind_address"`
+	AdminPassword   string `json:"-"`
 }
 
 // CreateDBInstanceRequest is the request for installing a new database instance.
 // Image is supplied by the client — the version/image catalogue lives in the
 // front-end, not the backend.
 type CreateDBInstanceRequest struct {
-	Version     string `json:"version" binding:"required"`
-	Image       string `json:"image" binding:"required"`
-	Port        int    `json:"port" binding:"required"`
-	Runtime     string `json:"runtime"`
-	BindAddress string `json:"bind_address"`
+	Version         string `json:"version" binding:"required"`
+	Image           string `json:"image" binding:"required"`
+	Port            int    `json:"port" binding:"required"`
+	ContainerEngine string `json:"container_engine"`
+	BindAddress     string `json:"bind_address"`
 }
 
 // IsValidDBType reports whether t is one of the supported engine enums.

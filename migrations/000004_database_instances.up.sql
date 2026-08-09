@@ -23,7 +23,7 @@ CREATE TABLE database_instances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     db_type TEXT NOT NULL CHECK(db_type IN ('mysql','postgresql','redis')),
     version TEXT NOT NULL,
-    runtime TEXT NOT NULL DEFAULT 'docker' CHECK(runtime IN ('docker','podman')),
+    container_engine TEXT NOT NULL DEFAULT 'docker' CHECK(container_engine IN ('docker','podman')),
     image TEXT NOT NULL,
     container_id TEXT NOT NULL UNIQUE,
     volume_name TEXT NOT NULL UNIQUE,

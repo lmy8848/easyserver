@@ -172,6 +172,9 @@ export default function VersionList({
           <Button type="link" size="small" icon={<ReloadOutlined />} style={{ paddingLeft: 0 }} onClick={openDockerTags}>
             更多版本（查询 Docker Hub）
           </Button>
+          <Form.Item name="container_engine" label="容器引擎" initialValue="docker">
+            <Select options={[{ value: 'docker', label: 'Docker' }, { value: 'podman', label: 'Podman（rootful）' }]} />
+          </Form.Item>
           <Form.Item name="port" label="端口（留空使用默认）"
             extra={portCheck && (
               portCheck.available
