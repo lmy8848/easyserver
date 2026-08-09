@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -14,6 +15,7 @@ type CommandExecutor interface {
 	Run(ctx context.Context, name string, args ...string) (stdout, stderr string, exitCode int, err error)
 	RunWithTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, exitCode int, err error)
 	RunCombined(ctx context.Context, name string, args ...string) (output string, exitCode int, err error)
+	RunWithStdin(ctx context.Context, stdin string, name string, args ...string) (output string, exitCode int, err error)
 	RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (output string, exitCode int, err error)
 	Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error)
 	Command(ctx context.Context, opts StartOptions, name string, args ...string) *exec.Cmd
@@ -83,6 +85,29 @@ func (e *OSExecutor) RunCombined(ctx context.Context, name string, args ...strin
 	}
 
 	cmd := exec.CommandContext(ctx, name, args...)
+	output, err := cmd.CombinedOutput()
+	result := string(output)
+	exitCode := 0
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return result, -1, err
+		}
+	}
+	return result, exitCode, nil
+}
+
+// RunWithStdin is RunCombined but feeds `stdin` to the command (e.g.
+// `--password-stdin`); used to avoid secrets appearing in argv/ps.
+func (e *OSExecutor) RunWithStdin(ctx context.Context, stdin string, name string, args ...string) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(stdin)
 	output, err := cmd.CombinedOutput()
 	result := string(output)
 	exitCode := 0

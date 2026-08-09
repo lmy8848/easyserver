@@ -1061,17 +1061,49 @@ func (s *Service) GetInfo(ctx context.Context, engine Engine) (map[string]interf
 	return info, nil
 }
 
-// ConfigureMirror configures the engine's registry mirror. Docker writes
-// /etc/docker/daemon.json; Podman writes unqualified-search-registries to
-// /etc/containers/registries.conf.
+// ConfigureMirror configures the engine's registry mirror. Kept for backward
+// compat with the single-mirror endpoint; richer config goes through
+// SetRegistryConfig.
 func (s *Service) ConfigureMirror(ctx context.Context, engine Engine, mirrorURL string) error {
-	if isPodmanEngine(engine) {
-		return s.configurePodmanMirror(ctx, mirrorURL)
-	}
-	return s.configureDockerMirror(ctx, mirrorURL)
+	return s.SetRegistryConfig(ctx, engine, RegistryConfig{Mirror: mirrorURL})
 }
 
-func (s *Service) configureDockerMirror(ctx context.Context, mirrorURL string) error {
+// GetRegistryConfig reads the engine's mirror + insecure registries.
+// Docker writes /etc/docker/daemon.json; Podman writes /etc/containers/registries.conf.
+func (s *Service) GetRegistryConfig(ctx context.Context, engine Engine) (RegistryConfig, error) {
+	if isPodmanEngine(engine) {
+		return s.getPodmanRegistryConfig(ctx)
+	}
+	return s.getDockerRegistryConfig(ctx)
+}
+
+// SetRegistryConfig persists the engine's mirror + insecure registries.
+func (s *Service) SetRegistryConfig(ctx context.Context, engine Engine, cfg RegistryConfig) error {
+	if isPodmanEngine(engine) {
+		return s.setPodmanRegistryConfig(ctx, cfg)
+	}
+	return s.setDockerRegistryConfig(ctx, cfg)
+}
+
+func (s *Service) getDockerRegistryConfig(ctx context.Context) (RegistryConfig, error) {
+	var cfg RegistryConfig
+	stdout, _, _ := s.executor.RunCombined(ctx, "cat", "/etc/docker/daemon.json")
+	var config map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &config); err != nil {
+		return cfg, nil // missing/unparseable → defaults
+	}
+	if mirrors, ok := config["registry-mirrors"].([]interface{}); ok && len(mirrors) > 0 {
+		cfg.Mirror = fmt.Sprint(mirrors[0])
+	}
+	if ins, ok := config["insecure-registries"].([]interface{}); ok {
+		for _, v := range ins {
+			cfg.InsecureRegistries = append(cfg.InsecureRegistries, fmt.Sprint(v))
+		}
+	}
+	return cfg, nil
+}
+
+func (s *Service) setDockerRegistryConfig(ctx context.Context, cfg RegistryConfig) error {
 	existing := "{}"
 	stdout, exitCode, err := s.executor.RunCombined(ctx, "cat", "/etc/docker/daemon.json")
 	if err == nil && exitCode == 0 {
@@ -1086,10 +1118,15 @@ func (s *Service) configureDockerMirror(ctx context.Context, mirrorURL string) e
 		config = make(map[string]interface{})
 	}
 
-	if mirrorURL == "" {
+	if cfg.Mirror == "" {
 		delete(config, "registry-mirrors")
 	} else {
-		config["registry-mirrors"] = []string{mirrorURL}
+		config["registry-mirrors"] = []string{cfg.Mirror}
+	}
+	if len(cfg.InsecureRegistries) == 0 {
+		delete(config, "insecure-registries")
+	} else {
+		config["insecure-registries"] = cfg.InsecureRegistries
 	}
 
 	newConfig, err := json.MarshalIndent(config, "", "  ")
@@ -1107,20 +1144,66 @@ func (s *Service) configureDockerMirror(ctx context.Context, mirrorURL string) e
 	return s.RestartEngine(ctx, "docker")
 }
 
-// configurePodmanMirror writes an unqualified-search-registries entry to
-// /etc/containers/registries.conf. Empty URL leaves the file untouched.
-func (s *Service) configurePodmanMirror(ctx context.Context, mirrorURL string) error {
-	if mirrorURL == "" {
-		// reset to distro default: leave the file untouched
+// registriesConfInsecure matches the location value inside a [[registry]] block.
+var registriesConfInsecure = regexp.MustCompile(`location\s*=\s*"([^"]*)"`)
+
+func (s *Service) getPodmanRegistryConfig(ctx context.Context) (RegistryConfig, error) {
+	var cfg RegistryConfig
+	stdout, _, _ := s.executor.RunCombined(ctx, "cat", "/etc/containers/registries.conf")
+	if m := regexp.MustCompile(`unqualified-search-registries\s*=\s*\[(.*?)\]`).FindStringSubmatch(stdout); len(m) == 2 {
+		if items := regexp.MustCompile(`"([^"]*)"`).FindAllStringSubmatch(m[1], -1); len(items) > 0 {
+			cfg.Mirror = items[0][1]
+		}
+	}
+	for _, seg := range strings.Split(stdout, "[[registry]]")[1:] {
+		if !regexp.MustCompile(`insecure\s*=\s*true`).MatchString(seg) {
+			continue
+		}
+		if loc := registriesConfInsecure.FindStringSubmatch(seg); len(loc) == 2 {
+			cfg.InsecureRegistries = append(cfg.InsecureRegistries, loc[1])
+		}
+	}
+	return cfg, nil
+}
+
+func (s *Service) setPodmanRegistryConfig(ctx context.Context, cfg RegistryConfig) error {
+	// Empty config → leave the distro default file untouched (avoids breaking
+	// short-name resolution by writing an empty registries.conf).
+	if cfg.Mirror == "" && len(cfg.InsecureRegistries) == 0 {
 		return nil
 	}
-	// ponytail: single-mirror best-effort; multiple mirrors/regex blocks later if needed.
-	config := fmt.Sprintf("unqualified-search-registries = [\"%s\"]\n", mirrorURL)
-	encoded := base64.StdEncoding.EncodeToString([]byte(config))
+	var b strings.Builder
+	if cfg.Mirror != "" {
+		fmt.Fprintf(&b, "unqualified-search-registries = [\"%s\"]\n", cfg.Mirror)
+	}
+	for _, loc := range cfg.InsecureRegistries {
+		fmt.Fprintf(&b, "\n[[registry]]\nlocation = \"%s\"\ninsecure = true\n", loc)
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte(b.String()))
 	writeCmd := fmt.Sprintf("mkdir -p /etc/containers && echo '%s' | base64 -d > /etc/containers/registries.conf", encoded)
 	_, exitCode, err := s.executor.RunCombined(ctx, "bash", "-c", writeCmd)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to write registries.conf: %v", err)
+	}
+	return nil
+}
+
+// RegistryLogin authenticates to a private registry. Password goes over stdin
+// (--password-stdin) so it never appears in argv/ps.
+func (s *Service) RegistryLogin(ctx context.Context, engine Engine, server, username, password string) error {
+	output, exitCode, err := s.executor.RunWithStdin(ctx, password+"\n", engineBinary(engine),
+		"login", server, "--username", username, "--password-stdin")
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("%s login failed: %s", engine, truncateOutput(output, 500))
+	}
+	return nil
+}
+
+// RegistryLogout clears stored credentials for a registry.
+func (s *Service) RegistryLogout(ctx context.Context, engine Engine, server string) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "logout", server)
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("%s logout failed: %s", engine, truncateOutput(output, 500))
 	}
 	return nil
 }

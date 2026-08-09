@@ -1,8 +1,12 @@
 package container
 
 import (
+	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
+
+	"easyserver/internal/infra/executor"
 )
 
 func TestParsePortsString(t *testing.T) {
@@ -126,5 +130,32 @@ func TestExpandImageRef(t *testing.T) {
 		if got := expandImageRef(tc.in); got != tc.want {
 			t.Errorf("expandImageRef(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestGetPodmanRegistryConfig(t *testing.T) {
+	mock := executor.NewMockExecutor()
+	mock.SetResponse("cat /etc/containers/registries.conf", executor.MockSuccess(`
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+location = "registry.local:5000"
+insecure = true
+
+[[registry]]
+location = "docker.io"
+insecure = false
+`))
+	s := NewService(mock)
+	got, err := s.GetRegistryConfig(context.Background(), EnginePodman)
+	if err != nil {
+		t.Fatalf("GetRegistryConfig: %v", err)
+	}
+	want := RegistryConfig{
+		Mirror:             "docker.io",
+		InsecureRegistries: []string{"registry.local:5000"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got=%+v want=%+v", got, want)
 	}
 }
