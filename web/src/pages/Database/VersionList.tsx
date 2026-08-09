@@ -100,7 +100,7 @@ export default function VersionList({
                     description={
                       <div>
                         <p style={{ margin: '4px 0' }}>端口: <strong>{v.port}</strong></p>
-                        <p style={{ margin: '4px 0' }}>服务: <Tag>{v.container_name}</Tag></p>
+                        <p style={{ margin: '4px 0' }}>服务: <Tag>{v.container_id}</Tag></p>
                       </div>
                     }
                   />

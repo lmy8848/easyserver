@@ -4,7 +4,7 @@ import type {
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
-  WebServer, Website, DBServer, DBInstance, Database, DBUser,
+  WebServer, Website, DBEngineSummary, DBInstance, Database, DBUser,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -533,146 +533,143 @@ export const websiteApi = {
 
 // Database Server API
 export const dbServerApi = {
-  list: () =>
-    api.get<ApiResponse<DBServer[]>>('/db-instances'),
+  listEngines: () =>
+    api.get<ApiResponse<DBEngineSummary[]>>('/db'),
 
-  get: (id: number) =>
-    api.get<ApiResponse<DBServer>>(`/db-instances/${id}`),
+  // Instance lifecycle, scoped by engine enum.
+  listInstances: (dbtype: string) =>
+    api.get<ApiResponse<DBInstance[]>>(`/db/${dbtype}/instances`),
 
-  // Version management
-  listVersions: (id: number) =>
-    api.get<ApiResponse<DBInstance[]>>(`/db-instances/${id}/versions`),
+  createInstance: (dbtype: string, data: { version: string; port?: number; runtime?: string; bind_address?: string }) =>
+    api.post<ApiResponse>(`/db/${dbtype}/instances`, data),
 
-  installVersion: (id: number, data: { version: string; port?: number; runtime?: string; bind_address?: string }) =>
-    api.post<ApiResponse>(`/db-instances/${id}/versions`, data),
+  uninstallInstance: (iid: number) =>
+    api.delete<ApiResponse>(`/db/instances/${iid}`),
 
-  uninstallVersion: (vid: number) =>
-    api.delete<ApiResponse>(`/db-instances/versions/${vid}`),
+  destroyInstance: (iid: number) =>
+    api.delete<ApiResponse>(`/db/instances/${iid}/data`),
 
-  destroyVersion: (vid: number) =>
-    api.delete<ApiResponse>(`/db-instances/versions/${vid}/data`),
+  resetAdminPassword: (iid: number) =>
+    api.post<ApiResponse<{ admin_password: string }>>(`/db/instances/${iid}/reset-password`),
 
-  resetAdminPassword: (vid: number) =>
-    api.post<ApiResponse<{ admin_password: string }>>(`/db-instances/versions/${vid}/reset-password`),
+  startInstance: (iid: number) =>
+    api.post<ApiResponse>(`/db/instances/${iid}/start`),
 
-  startVersion: (vid: number) =>
-    api.post<ApiResponse>(`/db-instances/versions/${vid}/start`),
+  stopInstance: (iid: number) =>
+    api.post<ApiResponse>(`/db/instances/${iid}/stop`),
 
-  stopVersion: (vid: number) =>
-    api.post<ApiResponse>(`/db-instances/versions/${vid}/stop`),
+  restartInstance: (iid: number) =>
+    api.post<ApiResponse>(`/db/instances/${iid}/restart`),
 
-  restartVersion: (vid: number) =>
-    api.post<ApiResponse>(`/db-instances/versions/${vid}/restart`),
+  updateInstancePort: (iid: number, port: number) =>
+    api.put<ApiResponse>(`/db/instances/${iid}/port`, { port }),
 
-  updateVersionPort: (vid: number, port: number) =>
-    api.put<ApiResponse>(`/db-instances/versions/${vid}/port`, { port }),
+  getInstanceLogs: (iid: number, lines: number = 200) =>
+    api.get<ApiResponse<{ logs: string }>>(`/db/instances/${iid}/logs`, { params: { lines } }),
 
-  getVersionLogs: (vid: number, lines: number = 200) =>
-    api.get<ApiResponse<{ logs: string }>>(`/db-instances/versions/${vid}/logs`, { params: { lines } }),
+  getInstanceConfig: (iid: number) =>
+    api.get<ApiResponse<{ file_path: string; content: string }>>(`/db/instances/${iid}/config`),
 
-  getVersionConfig: (vid: number) =>
-    api.get<ApiResponse<{ file_path: string; content: string }>>(`/db-instances/versions/${vid}/config`),
+  saveInstanceConfig: (iid: number, content: string) =>
+    api.put<ApiResponse>(`/db/instances/${iid}/config`, { content }),
 
-  saveVersionConfig: (vid: number, content: string) =>
-    api.put<ApiResponse>(`/db-instances/versions/${vid}/config`, { content }),
+  // Databases (instance-scoped)
+  listDatabases: (instanceId: number) =>
+    api.get<ApiResponse<Database[]>>(`/db/instances/${instanceId}/databases`),
 
-  // Databases
-  listDatabases: (serverId: number) =>
-    api.get<ApiResponse<Database[]>>(`/db-instances/${serverId}/databases`),
+  createDatabase: (instanceId: number, data: { name: string; charset?: string; description?: string }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/databases`, data),
 
-  createDatabase: (serverId: number, data: { name: string; charset?: string; description?: string }) =>
-    api.post<ApiResponse>(`/db-instances/${serverId}/databases`, data),
+  deleteDatabase: (instanceId: number, dbId: number) =>
+    api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${dbId}`),
 
-  deleteDatabase: (serverId: number, dbId: number) =>
-    api.delete<ApiResponse>(`/db-instances/${serverId}/databases/${dbId}`),
+  // DB Users (instance-scoped)
+  listUsers: (instanceId: number) =>
+    api.get<ApiResponse<DBUser[]>>(`/db/instances/${instanceId}/users`),
 
-  // DB Users
-  listUsers: (serverId: number) =>
-    api.get<ApiResponse<DBUser[]>>(`/db-instances/${serverId}/users`),
+  createUser: (instanceId: number, data: { username: string; password: string; host?: string }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/users`, data),
 
-  createUser: (serverId: number, data: { username: string; password: string; host?: string }) =>
-    api.post<ApiResponse>(`/db-instances/${serverId}/users`, data),
+  deleteUser: (instanceId: number, userId: number) =>
+    api.delete<ApiResponse>(`/db/instances/${instanceId}/users/${userId}`),
 
-  deleteUser: (serverId: number, userId: number) =>
-    api.delete<ApiResponse>(`/db-instances/${serverId}/users/${userId}`),
-
-  grantPrivileges: (serverId: number, userId: number, data: { privileges: string; database?: string }) =>
-    api.post<ApiResponse>(`/db-instances/${serverId}/users/${userId}/grant`, data),
+  grantPrivileges: (instanceId: number, userId: number, data: { privileges: string; database?: string }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/users/${userId}/grant`, data),
 
   // Database introspection
   listTables: (dbId: number) =>
-    api.get<ApiResponse<Array<{ name: string }>>>(`/db-instances/databases/${dbId}/tables`),
+    api.get<ApiResponse<Array<{ name: string }>>>(`/db/databases/${dbId}/tables`),
 
   describeTable: (dbId: number, table: string) =>
-    api.get<ApiResponse<{ table_name: string; primary_key: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db-instances/databases/${dbId}/describe`, { params: { table } }),
+    api.get<ApiResponse<{ table_name: string; primary_key: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/databases/${dbId}/describe`, { params: { table } }),
 
   // Table management
   createTable: (dbId: number, data: { name: string; columns: Array<{ name: string; type: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean }> }) =>
-    api.post<ApiResponse>(`/db-instances/databases/${dbId}/tables`, data),
+    api.post<ApiResponse>(`/db/databases/${dbId}/tables`, data),
 
   dropTable: (dbId: number, table: string) =>
-    api.delete<ApiResponse>(`/db-instances/databases/${dbId}/tables`, { params: { table } }),
+    api.delete<ApiResponse>(`/db/databases/${dbId}/tables`, { params: { table } }),
 
   queryTable: (dbId: number, table: string, page: number = 1, pageSize: number = 50) =>
-    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db-instances/databases/${dbId}/query`, { params: { table, page, page_size: pageSize } }),
+    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/databases/${dbId}/query`, { params: { table, page, page_size: pageSize } }),
 
   executeSQL: (dbId: number, sql: string) =>
-    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db-instances/databases/${dbId}/execute`, { sql }),
+    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/databases/${dbId}/execute`, { sql }),
 
   insertRecord: (dbId: number, table: string, data: Record<string, string | number | null>) =>
-    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db-instances/databases/${dbId}/insert`, { table, data }),
+    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/databases/${dbId}/insert`, { table, data }),
 
   updateRecord: (dbId: number, table: string, data: Record<string, string | number | null>, primaryKey: string, primaryVal: string | number) =>
-    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db-instances/databases/${dbId}/update`, { table, data, primary_key: primaryKey, primary_val: primaryVal }),
+    api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/databases/${dbId}/update`, { table, data, primary_key: primaryKey, primary_val: primaryVal }),
 
   deleteRecord: (dbId: number, table: string, primaryKey: string, primaryVal: string | number) =>
-    api.post<ApiResponse<{ success: boolean; error?: string }>>(`/db-instances/databases/${dbId}/delete`, { table, primary_key: primaryKey, primary_val: primaryVal }),
+    api.post<ApiResponse<{ success: boolean; error?: string }>>(`/db/databases/${dbId}/delete`, { table, primary_key: primaryKey, primary_val: primaryVal }),
 
   // MySQL config management
   getMySQLConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db-instances/mysql/config'),
+    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db/mysql/config'),
 
   saveMySQLConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.post<ApiResponse>('/db-instances/mysql/config', { sections }),
+    api.post<ApiResponse>('/db/mysql/config', { sections }),
 
   getMySQLCommonParams: (section: string = 'mysqld') =>
-    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db-instances/mysql/common-params', { params: { section } }),
+    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/mysql/common-params', { params: { section } }),
 
   // PostgreSQL config management
   getPostgreSQLConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db-instances/postgresql/config'),
+    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db/postgresql/config'),
 
   savePostgreSQLConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.post<ApiResponse>('/db-instances/postgresql/config', { sections }),
+    api.post<ApiResponse>('/db/postgresql/config', { sections }),
 
   getPGCommonParams: () =>
-    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db-instances/postgresql/common-params'),
+    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/postgresql/common-params'),
 
   // Redis config management
   getRedisConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db-instances/redis/config'),
+    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db/redis/config'),
 
   saveRedisConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.post<ApiResponse>('/db-instances/redis/config', { sections }),
+    api.post<ApiResponse>('/db/redis/config', { sections }),
 
   getRedisCommonParams: () =>
-    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db-instances/redis/common-params'),
+    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/redis/common-params'),
 
   // Backup management
   createBackup: (dbId: number) =>
-    api.post<ApiResponse<DBBackup>>(`/db-instances/databases/${dbId}/backup`),
+    api.post<ApiResponse<DBBackup>>(`/db/databases/${dbId}/backup`),
 
   listBackups: (dbId: number) =>
-    api.get<ApiResponse<DBBackup[]>>(`/db-instances/databases/${dbId}/backups`),
+    api.get<ApiResponse<DBBackup[]>>(`/db/databases/${dbId}/backups`),
 
   downloadBackup: (backupId: number) =>
-    api.get(`/db-instances/backups/${backupId}/download`, { responseType: 'blob' }),
+    api.get(`/db/backups/${backupId}/download`, { responseType: 'blob' }),
 
   restoreBackup: (backupId: number) =>
-    api.post<ApiResponse>(`/db-instances/backups/${backupId}/restore`, { confirm: true }),
+    api.post<ApiResponse>(`/db/backups/${backupId}/restore`, { confirm: true }),
 
   deleteBackup: (backupId: number) =>
-    api.delete<ApiResponse>(`/db-instances/backups/${backupId}`),
+    api.delete<ApiResponse>(`/db/backups/${backupId}`),
 };
 
 // Cron task management

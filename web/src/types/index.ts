@@ -234,21 +234,21 @@ export interface Website {
 }
 
 // Database Server types
-export interface DBServer {
-  id: number;
-  name: string;
+// Database engine summary — static catalog (db_type/display_name/default_port)
+// plus a status/version aggregate computed from the instance rows on read.
+export interface DBEngineSummary {
+  db_type: string; // mysql, postgresql, redis
   display_name: string;
   description: string;
   default_port: number;
   status: string; // not_installed, running, stopped, partial
-  version: string;
-  created_at: string;
+  version: string; // e.g. "8.0, 8.4"
 }
 
 // Database Backup types
 export interface DBBackup {
   id: number;
-  db_server_id: number;
+  db_type: string;
   db_version_id: number;
   database_id: number;
   database_name: string;
@@ -277,7 +277,7 @@ export interface DBInstance {
 
 export interface Database {
   id: number;
-  db_server_id: number;
+  db_type: string;
   db_version_id: number;
   name: string;
   charset: string;
@@ -291,7 +291,7 @@ export interface Database {
 
 export interface DBUser {
   id: number;
-  db_server_id: number;
+  db_type: string;
   username: string;
   host: string;
   privileges: string;

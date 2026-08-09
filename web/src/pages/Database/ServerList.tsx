@@ -34,7 +34,7 @@ export default function ServerList({
       ) : (
         <Row gutter={[16, 16]}>
           {servers.map(server => (
-            <Col xs={24} sm={12} lg={8} key={server.id} style={{ display: 'flex' }}>
+            <Col xs={24} sm={12} lg={8} key={server.db_type} style={{ display: 'flex' }}>
               <Card
                 hoverable
                 onClick={() => onEnterServer(server)}

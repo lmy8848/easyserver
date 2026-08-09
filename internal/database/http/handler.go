@@ -25,56 +25,56 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	backupHandler := NewBackupHandler(svc)
 	configHandler := NewConfigHandler()
 
-	protected.GET("/db-instances", engineHandler.List)
+	protected.GET("/db", engineHandler.List)
 
 	// Instance lifecycle, scoped by engine enum.
-	protected.GET("/db-instances/:engine/instances", instanceHandler.ListInstances)
-	protected.POST("/db-instances/:engine/instances", instanceHandler.CreateInstance)
-	protected.DELETE("/db-instances/instances/:iid", instanceHandler.UninstallInstance)
-	protected.DELETE("/db-instances/instances/:iid/data", instanceHandler.DestroyInstance)
-	protected.POST("/db-instances/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
-	protected.POST("/db-instances/instances/:iid/start", instanceHandler.StartInstance)
-	protected.POST("/db-instances/instances/:iid/stop", instanceHandler.StopInstance)
-	protected.POST("/db-instances/instances/:iid/restart", instanceHandler.RestartInstance)
-	protected.PUT("/db-instances/instances/:iid/port", instanceHandler.UpdateInstancePort)
-	protected.GET("/db-instances/instances/:iid/logs", instanceHandler.GetInstanceLogs)
-	protected.GET("/db-instances/instances/:iid/config", instanceHandler.GetInstanceConfig)
-	protected.PUT("/db-instances/instances/:iid/config", instanceHandler.SaveInstanceConfig)
+	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
+	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
+	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
+	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
+	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
+	protected.POST("/db/instances/:iid/start", instanceHandler.StartInstance)
+	protected.POST("/db/instances/:iid/stop", instanceHandler.StopInstance)
+	protected.POST("/db/instances/:iid/restart", instanceHandler.RestartInstance)
+	protected.PUT("/db/instances/:iid/port", instanceHandler.UpdateInstancePort)
+	protected.GET("/db/instances/:iid/logs", instanceHandler.GetInstanceLogs)
+	protected.GET("/db/instances/:iid/config", instanceHandler.GetInstanceConfig)
+	protected.PUT("/db/instances/:iid/config", instanceHandler.SaveInstanceConfig)
 
 	// Logical databases, scoped by instance.
-	protected.GET("/db-instances/instances/:iid/databases", dbHandler.ListDatabases)
-	protected.POST("/db-instances/instances/:iid/databases", dbHandler.CreateDatabase)
-	protected.DELETE("/db-instances/instances/:iid/databases/:did", dbHandler.DeleteDatabase)
+	protected.GET("/db/instances/:iid/databases", dbHandler.ListDatabases)
+	protected.POST("/db/instances/:iid/databases", dbHandler.CreateDatabase)
+	protected.DELETE("/db/instances/:iid/databases/:did", dbHandler.DeleteDatabase)
 
 	// DB Users, scoped by instance.
-	protected.GET("/db-instances/instances/:iid/users", userHandler.ListDBUsers)
-	protected.POST("/db-instances/instances/:iid/users", userHandler.CreateDBUser)
-	protected.DELETE("/db-instances/instances/:iid/users/:uid", userHandler.DeleteDBUser)
-	protected.POST("/db-instances/instances/:iid/users/:uid/grant", userHandler.GrantPrivileges)
+	protected.GET("/db/instances/:iid/users", userHandler.ListDBUsers)
+	protected.POST("/db/instances/:iid/users", userHandler.CreateDBUser)
+	protected.DELETE("/db/instances/:iid/users/:uid", userHandler.DeleteDBUser)
+	protected.POST("/db/instances/:iid/users/:uid/grant", userHandler.GrantPrivileges)
 
 	// Database introspection (database id is globally unique)
-	protected.GET("/db-instances/databases/:did/tables", dbHandler.ListTables)
-	protected.GET("/db-instances/databases/:did/describe", dbHandler.DescribeTable)
-	protected.GET("/db-instances/databases/:did/query", dbHandler.QueryTable)
-	protected.POST("/db-instances/databases/:did/execute", dbHandler.ExecuteSQL)
-	protected.POST("/db-instances/databases/:did/insert", dbHandler.InsertRecord)
-	protected.POST("/db-instances/databases/:did/update", dbHandler.UpdateRecord)
-	protected.POST("/db-instances/databases/:did/delete", dbHandler.DeleteRecord)
+	protected.GET("/db/databases/:did/tables", dbHandler.ListTables)
+	protected.GET("/db/databases/:did/describe", dbHandler.DescribeTable)
+	protected.GET("/db/databases/:did/query", dbHandler.QueryTable)
+	protected.POST("/db/databases/:did/execute", dbHandler.ExecuteSQL)
+	protected.POST("/db/databases/:did/insert", dbHandler.InsertRecord)
+	protected.POST("/db/databases/:did/update", dbHandler.UpdateRecord)
+	protected.POST("/db/databases/:did/delete", dbHandler.DeleteRecord)
 
 	// Table management
-	protected.POST("/db-instances/databases/:did/tables", dbHandler.CreateTable)
-	protected.DELETE("/db-instances/databases/:did/tables", dbHandler.DropTable)
+	protected.POST("/db/databases/:did/tables", dbHandler.CreateTable)
+	protected.DELETE("/db/databases/:did/tables", dbHandler.DropTable)
 
 	// Database backup
-	protected.POST("/db-instances/databases/:did/backup", backupHandler.CreateBackup)
-	protected.GET("/db-instances/databases/:did/backups", backupHandler.ListBackups)
-	protected.GET("/db-instances/backups/:bid/download", backupHandler.DownloadBackup)
-	protected.POST("/db-instances/backups/:bid/restore", backupHandler.RestoreBackup)
-	protected.DELETE("/db-instances/backups/:bid", backupHandler.DeleteBackup)
+	protected.POST("/db/databases/:did/backup", backupHandler.CreateBackup)
+	protected.GET("/db/databases/:did/backups", backupHandler.ListBackups)
+	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
+	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
+	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
 
-	protected.GET("/db-instances/mysql/common-params", configHandler.GetMySQLCommonParams)
-	protected.GET("/db-instances/postgresql/common-params", configHandler.GetPGCommonParams)
-	protected.GET("/db-instances/redis/common-params", configHandler.GetRedisCommonParams)
+	protected.GET("/db/mysql/common-params", configHandler.GetMySQLCommonParams)
+	protected.GET("/db/postgresql/common-params", configHandler.GetPGCommonParams)
+	protected.GET("/db/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
 // EngineHandler serves the engine list with live aggregate summaries.
@@ -107,7 +107,7 @@ func NewInstanceHandler(svc *database.Service) *InstanceHandler {
 }
 
 func parseEngine(c *gin.Context) (database.DBType, bool) {
-	engine := database.DBType(c.Param("engine"))
+	engine := database.DBType(c.Param("dbtype"))
 	if !database.IsValidDBType(engine) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库引擎"))
 		return "", false

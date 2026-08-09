@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, message, Modal, Tag } from 'antd';
 import { dbServerApi } from '../../services/api';
-import type { DBServer, Database, DBUser, DBInstance } from '../../types';
+import type { DBEngineSummary, Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import ServerList from './ServerList';
@@ -12,9 +12,9 @@ import type { VersionTemplate, TableData, TableInfo, SqlResult, ENGINE_VERSION_T
 
 export default function DatabasePage() {
   // ===== Navigation state =====
-  const [servers, setServers] = useState<DBServer[]>([]);
+  const [servers, setServers] = useState<DBEngineSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedServer, setSelectedServer] = useState<DBServer | null>(null);
+  const [selectedServer, setSelectedServer] = useState<DBEngineSummary | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
@@ -94,9 +94,9 @@ export default function DatabasePage() {
   // ===== Fetch functions =====
   const fetchServers = async () => {
     try {
-      const res = await dbServerApi.list();
+      const res = await dbServerApi.listEngines();
       setServers(res.data?.data || []);
-    } catch (error) { console.error('Failed to fetch servers:', error); message.error('加载服务器列表失败'); } finally { setLoading(false); }
+    } catch (error) { console.error('Failed to fetch engines:', error); message.error('加载引擎列表失败'); } finally { setLoading(false); }
   };
 
   // ===== Effects =====
@@ -106,7 +106,7 @@ export default function DatabasePage() {
     if (!logVisible || !logVersion) return;
     const refresh = async () => {
       try {
-        const res = await dbServerApi.getVersionLogs(logVersion.id, 200);
+        const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
         setLogContent(res.data?.data?.logs || '(empty)');
       } catch (error) { console.error('Failed to refresh logs:', error); }
     };
@@ -120,32 +120,34 @@ export default function DatabasePage() {
     }
   }, [logContent, logFollow]);
 
-  const refreshServer = async (serverId: number) => {
+  // Re-fetch the engine summaries so the aggregate status/version reflects the
+  // latest instance state (engines have no persisted status of their own).
+  const refreshServer = async (dbType: string) => {
     try {
-      const res = await dbServerApi.get(serverId);
-      const updated = res.data?.data;
+      const res = await dbServerApi.listEngines();
+      const updated = res.data?.data?.find((s) => s.db_type === dbType);
       if (updated) {
-        setServers(prev => prev.map(s => s.id === serverId ? { ...s, ...updated } : s));
-        setSelectedServer(prev => prev && prev.id === serverId ? { ...prev, ...updated } : prev);
+        setServers(prev => prev.map(s => s.db_type === dbType ? { ...s, ...updated } : s));
+        setSelectedServer(prev => prev && prev.db_type === dbType ? { ...prev, ...updated } : prev);
       }
-    } catch (error) { console.error('Failed to refresh server:', error); }
+    } catch (error) { console.error('Failed to refresh engine:', error); }
   };
 
-  const fetchVersions = async (serverId: number) => {
+  const fetchInstances = async (dbtype: string) => {
     setVersionsLoading(true);
-    try { const res = await dbServerApi.listVersions(serverId); setVersions(res.data?.data || []); }
-    catch (error) { console.error('Failed to fetch versions:', error); message.error('加载版本列表失败'); } finally { setVersionsLoading(false); }
+    try { const res = await dbServerApi.listInstances(dbtype); setVersions(res.data?.data || []); }
+    catch (error) { console.error('Failed to fetch instances:', error); message.error('加载实例列表失败'); } finally { setVersionsLoading(false); }
   };
 
-  const fetchDatabases = async (serverId: number) => {
+  const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
-    try { const res = await dbServerApi.listDatabases(serverId); setDatabases(res.data?.data || []); }
+    try { const res = await dbServerApi.listDatabases(instanceId); setDatabases(res.data?.data || []); }
     catch (error) { console.error('Failed to fetch databases:', error); message.error('加载数据库列表失败'); } finally { setDbsLoading(false); }
   };
 
-  const fetchUsers = async (serverId: number) => {
+  const fetchUsers = async (instanceId: number) => {
     setUsersLoading(true);
-    try { const res = await dbServerApi.listUsers(serverId); setDBUsers(res.data?.data || []); }
+    try { const res = await dbServerApi.listUsers(instanceId); setDBUsers(res.data?.data || []); }
     catch (error) { console.error('Failed to fetch users:', error); message.error('加载用户列表失败'); } finally { setUsersLoading(false); }
   };
 
@@ -205,7 +207,7 @@ export default function DatabasePage() {
     if (!selectedVersion) return;
     setDBConfigLoading(true);
     try {
-      const res = await dbServerApi.getVersionConfig(selectedVersion.id);
+      const res = await dbServerApi.getInstanceConfig(selectedVersion.id);
       const data = res.data?.data;
       const section = { name: 'main', params: { content: data?.content || '' } };
       setDBConfig({ found: true, config: { file_path: data?.file_path, sections: [section] }, sections: { main: { params: section.params, meta: [] } } });
@@ -216,20 +218,21 @@ export default function DatabasePage() {
   };
 
   // ===== Navigation handlers =====
-  const enterServer = async (server: DBServer) => {
+  const enterServer = async (server: DBEngineSummary) => {
     setSelectedServer(server);
     setSelectedVersion(null);
     setSelectedDatabase(null);
-    await fetchVersions(server.id);
-    setVersionTemplates(ENGINE_VERSION_TEMPLATES[server.name] || []);
+    await fetchInstances(server.db_type);
+    setVersionTemplates(ENGINE_VERSION_TEMPLATES[server.db_type] || []);
   };
 
   const enterVersion = async (version: DBInstance) => {
     setSelectedVersion(version);
     setSelectedDatabase(null);
-    const server = selectedServer;
-    if (!server) return;
-    await Promise.all([fetchDatabases(server.id), fetchUsers(server.id)]);
+    // Scope by instance id — databases/users belong to one instance, never the
+    // engine. (Previously the engine id was used here, leaking every instance's
+    // databases/users into the same view.)
+    await Promise.all([fetchDatabases(version.id), fetchUsers(version.id)]);
   };
 
   const enterDatabase = async (db: Database) => {
@@ -265,10 +268,10 @@ export default function DatabasePage() {
     if (!server) return;
     try {
       const values = await installVersionForm.validateFields();
-      await dbServerApi.installVersion(server.id, values);
+      await dbServerApi.createInstance(server.db_type, values);
       message.success('版本安装成功');
       setInstallVersionVisible(false);
-      await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
+      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
@@ -277,9 +280,9 @@ export default function DatabasePage() {
     if (!server) return;
     setOperating(`start-${v.id}`);
     try {
-      await dbServerApi.startVersion(v.id);
+      await dbServerApi.startInstance(v.id);
       message.success('已启动');
-      await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
+      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '启动失败')); }
     finally { setOperating(''); }
   };
@@ -289,9 +292,9 @@ export default function DatabasePage() {
     if (!server) return;
     setOperating(`stop-${v.id}`);
     try {
-      await dbServerApi.stopVersion(v.id);
+      await dbServerApi.stopInstance(v.id);
       message.success('已停止');
-      await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
+      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '停止失败')); }
     finally { setOperating(''); }
   };
@@ -301,9 +304,9 @@ export default function DatabasePage() {
     if (!server) return;
     setOperating(`restart-${v.id}`);
     try {
-      await dbServerApi.restartVersion(v.id);
+      await dbServerApi.restartInstance(v.id);
       message.success('已重启');
-      await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
+      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '重启失败')); }
     finally { setOperating(''); }
   };
@@ -313,74 +316,73 @@ export default function DatabasePage() {
     if (!server) return;
     setOperating(`uninstall-${v.id}`);
     try {
-      await dbServerApi.uninstallVersion(v.id);
+      await dbServerApi.uninstallInstance(v.id);
       message.success('已卸载');
-      await Promise.all([fetchVersions(server.id), refreshServer(server.id)]);
+      await Promise.all([fetchInstances(server.db_type), refreshServer(server.db_type)]);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
     finally { setOperating(''); }
   };
 
   // ===== Database CRUD =====
   const handleCreateDB = async () => {
-    const server = selectedServer;
     const version = selectedVersion;
-    if (!server || !version) return;
+    if (!version) return;
     try {
       const values = await dbForm.validateFields();
-      await dbServerApi.createDatabase(server.id, { ...values, db_version_id: version.id });
+      await dbServerApi.createDatabase(version.id, values);
       message.success('数据库创建成功');
       setDbModalVisible(false);
-      fetchDatabases(server.id);
+      fetchDatabases(version.id);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
   const handleDeleteDB = async (dbId: number) => {
-    const server = selectedServer;
-    if (!server) return;
+    const version = selectedVersion;
+    if (!version) return;
     try {
-      await dbServerApi.deleteDatabase(server.id, dbId);
+      await dbServerApi.deleteDatabase(version.id, dbId);
       message.success('数据库已删除');
-      fetchDatabases(server.id);
+      fetchDatabases(version.id);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   // ===== User CRUD =====
   const handleCreateUser = async () => {
-    const server = selectedServer;
-    if (!server) return;
+    const version = selectedVersion;
+    if (!version) return;
     try {
       const values = await userForm.validateFields();
-      await dbServerApi.createUser(server.id, values);
+      await dbServerApi.createUser(version.id, values);
       message.success('用户创建成功');
       setUserModalVisible(false);
-      fetchUsers(server.id);
+      fetchUsers(version.id);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
   const handleDeleteUser = async (userId: number) => {
-    const server = selectedServer;
-    if (!server) return;
+    const version = selectedVersion;
+    if (!version) return;
     try {
-      await dbServerApi.deleteUser(server.id, userId);
+      await dbServerApi.deleteUser(version.id, userId);
       message.success('用户已删除');
-      fetchUsers(server.id);
+      fetchUsers(version.id);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
   };
 
   const handleGrant = async () => {
-    const server = selectedServer;
+    const version = selectedVersion;
     const user = grantUser;
-    if (!server || !user) return;
+    if (!version || !user) return;
     try {
       const values = await grantForm.validateFields();
       const payload = {
         ...values,
         privileges: Array.isArray(values.privileges) ? values.privileges.join(', ') : values.privileges,
       };
-      await dbServerApi.grantPrivileges(server.id, user.id, payload);
+      await dbServerApi.grantPrivileges(version.id, user.id, payload);
       message.success('授权成功');
       setGrantVisible(false);
-      fetchUsers(server.id);
+      fetchUsers(version.id);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
   };
 
@@ -389,7 +391,7 @@ export default function DatabasePage() {
     if (!dbConfig?.config?.sections || !selectedVersion) return;
     try {
       const content = dbConfig.config.sections[0]?.params?.content || '';
-      await dbServerApi.saveVersionConfig(selectedVersion.id, content);
+      await dbServerApi.saveInstanceConfig(selectedVersion.id, content);
       message.success('实例配置已保存，重启后生效');
       fetchDBConfig();
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '保存失败')); }
@@ -412,7 +414,7 @@ export default function DatabasePage() {
     setLogVisible(true);
     setLogLoading(true);
     try {
-      const res = await dbServerApi.getVersionLogs(v.id, 200);
+      const res = await dbServerApi.getInstanceLogs(v.id, 200);
       setLogContent(res.data?.data?.logs || '(empty)');
     } catch (error: unknown) { setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error))); }
     finally { setLogLoading(false); }
@@ -422,7 +424,7 @@ export default function DatabasePage() {
     setConfigVisible(true);
     setConfigLoading(true);
     try {
-      const res = await dbServerApi.getVersionConfig(v.id);
+      const res = await dbServerApi.getInstanceConfig(v.id);
       const data = res?.data?.data;
       setConfigContent(`# ${selectedServer?.display_name} Config: ${data?.file_path || ''}\n\n${data?.content || ''}`);
     } catch (error: unknown) { setConfigContent('# Error: ' + (error instanceof Error ? error.message : String(error))); }
@@ -714,7 +716,7 @@ export default function DatabasePage() {
         operating={operating}
         onBack={goBackToServers}
         onEnterVersion={enterVersion}
-        onRefreshVersions={() => fetchVersions(selectedServer.id)}
+        onRefreshVersions={() => fetchInstances(selectedServer.db_type)}
         onStartVersion={handleStartVersion}
         onStopVersion={handleStopVersion}
         onRestartVersion={handleRestartVersion}

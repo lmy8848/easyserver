@@ -1,4 +1,4 @@
-import type { DBServer, Database, DBUser, DBInstance } from '../../types';
+import type { DBEngineSummary, Database, DBUser, DBInstance } from '../../types';
 
 // Version templates from API
 export interface VersionTemplate {
@@ -48,9 +48,9 @@ export interface SqlResult {
 
 // ServerList props
 export interface ServerListProps {
-  servers: DBServer[];
+  servers: DBEngineSummary[];
   loading: boolean;
-  onEnterServer: (server: DBServer) => void;
+  onEnterServer: (server: DBEngineSummary) => void;
   onRefresh: () => void;
   installVersionVisible: boolean;
   onInstallVersionVisibleChange: (visible: boolean) => void;
@@ -63,7 +63,7 @@ export interface ServerListProps {
 
 // VersionList props
 export interface VersionListProps {
-  server: DBServer;
+  server: DBEngineSummary;
   versions: DBInstance[];
   versionsLoading: boolean;
   operating: string;
@@ -99,7 +99,7 @@ export interface VersionListProps {
 
 // DatabaseList props
 export interface DatabaseListProps {
-  server: DBServer;
+  server: DBEngineSummary;
   version: DBInstance;
   databases: Database[];
   dbsLoading: boolean;
@@ -153,7 +153,7 @@ export interface DatabaseListProps {
 
 // TableExplorer props
 export interface TableExplorerProps {
-  server: DBServer;
+  server: DBEngineSummary;
   version: DBInstance;
   database: Database;
   onBack: () => void;
@@ -211,4 +211,4 @@ export interface TableExplorerProps {
 }
 
 // Re-export parent types for convenience
-export type { DBServer, Database, DBUser, DBInstance };
+export type { DBEngineSummary, Database, DBUser, DBInstance };

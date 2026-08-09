@@ -89,7 +89,7 @@ export default function DatabaseList({
                 </Space>
                 <div style={STYLES.versionInfo}>
                   <Space size="middle">
-                    <span>服务: <strong>{version.container_name}</strong></span>
+                    <span>服务: <strong>{version.container_id}</strong></span>
                     <span>端口: <strong>{version.port}</strong></span>
                   </Space>
                 </div>
@@ -161,7 +161,7 @@ export default function DatabaseList({
               </div>
             ),
           },
-          ...(server.name === 'mysql' || server.name === 'postgresql' || server.name === 'redis' ? [{
+          ...(server.db_type === 'mysql' || server.db_type === 'postgresql' || server.db_type === 'redis' ? [{
             key: 'config',
             label: <span><CodeOutlined /> 配置文件</span>,
             children: (
