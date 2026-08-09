@@ -94,7 +94,10 @@ func TestParseJSONRowsPodman(t *testing.T) {
 }
 
 func TestHumanSize(t *testing.T) {
-	cases := []struct{ in int64; want string }{
+	cases := []struct {
+		in   int64
+		want string
+	}{
 		{0, "0B"},
 		{512, "512B"},
 		{164982104, "165MB"},

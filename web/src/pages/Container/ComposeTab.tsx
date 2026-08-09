@@ -7,6 +7,7 @@ import {
   InfoCircleOutlined, EditOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { ComposeProject } from './types';
 import { withEngine } from './types';
 
@@ -19,7 +20,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const [logs, setLogs] = useState('');
   const [configForm] = Form.useForm();
   const [actionLoading, setActionLoading] = useState<string>('');
-  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveLoading, runSaveConfig] = useAsyncRun();
 
   const loadProjects = async () => {
     try {
@@ -73,14 +74,11 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const handleSaveConfig = async () => {
     try {
       const values = await configForm.validateFields();
-      setSaveLoading(true);
-      await api.put(withEngine('/container/compose/config', engine), { project_dir: configDir, content: values.content });
+      await runSaveConfig(() => api.put(withEngine('/container/compose/config', engine), { project_dir: configDir, content: values.content }));
       message.success('配置已保存');
       setConfigVisible(false);
     } catch {
       message.error('保存失败');
-    } finally {
-      setSaveLoading(false);
     }
   };
 

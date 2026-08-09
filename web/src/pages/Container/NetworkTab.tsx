@@ -6,6 +6,7 @@ import {
   DeleteOutlined, PlusOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Network } from './types';
 import { withEngine } from './types';
 
@@ -14,8 +15,8 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
   const [createForm] = Form.useForm();
-  const [createLoading, setCreateLoading] = useState(false);
   const [removing, setRemoving] = useState<string>('');
+  const [createLoading, runCreate] = useAsyncRun();
 
   const loadNetworks = async () => {
     try {
@@ -33,8 +34,7 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      setCreateLoading(true);
-      await api.post(withEngine('/container/networks', engine), values);
+      await runCreate(() => api.post(withEngine('/container/networks', engine), values));
       message.success('网络创建成功');
       setCreateVisible(false);
       createForm.resetFields();
@@ -42,8 +42,6 @@ export default function NetworkTab({ engine }: { engine: string }) {
       loadNetworks();
     } catch {
       message.error('创建失败');
-    } finally {
-      setCreateLoading(false);
     }
   };
 

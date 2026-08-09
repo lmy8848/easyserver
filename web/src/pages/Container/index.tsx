@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons';
 import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
 import api from '../../services/api';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { DockerStatus } from './types';
 import { withEngine } from './types';
 import ContainerTab from './ContainerTab';
@@ -42,9 +43,9 @@ export default function Container() {
   const [engine, setEngine] = useState('docker');
   const [statuses, setStatuses] = useState<Record<string, DockerStatus | null>>({ docker: null, podman: null });
   const [checking, setChecking] = useState(true);
-  const [installing, setInstalling] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [socketLoading, setSocketLoading] = useState(false);
+  const [installing, runInstall] = useAsyncRun();
+  const [starting, runStart] = useAsyncRun();
+  const [socketLoading, runSocket] = useAsyncRun();
   const pickedRef = useRef(false); // auto-select the healthiest engine only on first load
 
   // Detect both engines on mount.
@@ -80,41 +81,35 @@ export default function Container() {
   const ready = !!status?.installed && (engine === 'podman' || !!status?.running);
 
   const handleInstall = async () => {
-    setInstalling(true);
     try {
-      await api.post(withEngine('/container/install', engine));
+      await runInstall(() => api.post(withEngine('/container/install', engine)));
       message.success(`${engine} 安装成功`);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } }; message?: string };
       message.error(`安装失败：${axiosErr?.response?.data?.message || axiosErr?.message || '未知错误'}`);
     } finally {
-      setInstalling(false);
       await checkRuntimes();
     }
   };
 
   const handleStart = async () => {
-    setStarting(true);
     try {
-      await api.post(withEngine('/container/start', engine));
+      await runStart(() => api.post(withEngine('/container/start', engine)));
       message.success(`${engine} 已启动`);
     } catch {
       message.error(`启动 ${engine} 失败`);
     } finally {
-      setStarting(false);
       await checkRuntimes();
     }
   };
 
   const handleSocket = async (action: 'enable' | 'disable') => {
-    setSocketLoading(true);
     try {
-      await api.post(withEngine(`/container/socket/${action}`, engine));
+      await runSocket(() => api.post(withEngine(`/container/socket/${action}`, engine)));
       message.success(`Socket 已${action === 'enable' ? '启用' : '禁用'}`);
     } catch {
       message.error('Socket 操作失败');
     } finally {
-      setSocketLoading(false);
       await checkRuntimes();
     }
   };

@@ -6,6 +6,7 @@ import {
   DeleteOutlined, PlusOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Volume } from './types';
 import { withEngine } from './types';
 import { formatCreatedAt } from '../../utils/format';
@@ -15,8 +16,8 @@ export default function VolumeTab({ engine }: { engine: string }) {
   const [loading, setLoading] = useState(true);
   const [createVisible, setCreateVisible] = useState(false);
   const [createForm] = Form.useForm();
-  const [createLoading, setCreateLoading] = useState(false);
   const [removing, setRemoving] = useState<string>('');
+  const [createLoading, runCreate] = useAsyncRun();
 
   const loadVolumes = async () => {
     try {
@@ -38,8 +39,7 @@ export default function VolumeTab({ engine }: { engine: string }) {
       (values.labels || []).forEach((l: { key?: string; value?: string }) => {
         if (l.key) labels[l.key] = l.value || '';
       });
-      setCreateLoading(true);
-      await api.post(withEngine('/container/volumes', engine), { ...values, labels });
+      await runCreate(() => api.post(withEngine('/container/volumes', engine), { ...values, labels }));
       message.success('存储卷创建成功');
       setCreateVisible(false);
       createForm.resetFields();
@@ -47,8 +47,6 @@ export default function VolumeTab({ engine }: { engine: string }) {
       loadVolumes();
     } catch {
       message.error('创建失败');
-    } finally {
-      setCreateLoading(false);
     }
   };
 
