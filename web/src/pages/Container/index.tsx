@@ -5,6 +5,7 @@ import {
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
   ReloadOutlined, RocketOutlined, PlayCircleOutlined,
 } from '@ant-design/icons';
+import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
 import api from '../../services/api';
 import type { DockerStatus } from './types';
 import { withEngine } from './types';
@@ -15,6 +16,12 @@ import VolumeTab from './VolumeTab';
 import NetworkTab from './NetworkTab';
 
 const ENGINES = ['docker', 'podman'];
+
+const engineName = (e: string) => (e === 'podman' ? 'Podman' : 'Docker');
+const engineLogo = (e: string) => (e === 'podman' ? <SiPodman size={16} /> : <SiDocker size={16} />);
+const engineOptionLabel = (e: string) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{engineLogo(e)}{engineName(e)}</span>
+);
 
 export default function Container() {
   const [engine, setEngine] = useState('docker');
@@ -95,8 +102,9 @@ export default function Container() {
         <Select
           value={engine}
           onChange={setEngine}
-          style={{ width: 140 }}
-          options={ENGINES.map(r => ({ value: r, label: r === 'podman' ? 'Podman' : 'Docker' }))}
+          style={{ width: 150 }}
+          optionLabelProp="label"
+          options={ENGINES.map(r => ({ value: r, label: engineOptionLabel(r) }))}
         />
         {status && (
           <span style={{ marginLeft: 12, display: 'inline-flex', alignItems: 'center', gap: 6, color: '#666' }}>
