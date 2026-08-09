@@ -893,7 +893,7 @@ func (s *Service) installPodman(ctx context.Context) error {
 	return nil
 }
 
-// serviceUnit returns the systemd unit backing the timeout engine's service.
+// serviceUnit returns the systemd unit backing the engine's service.
 func serviceUnit(engine Engine) string {
 	if isPodmanEngine(engine) {
 		return "podman.socket"
@@ -901,8 +901,16 @@ func serviceUnit(engine Engine) string {
 	return "docker"
 }
 
+// engineControlSupported reports whether the engine has a daemon/service that
+// can be started/stopped. Podman has no daemon (CLI talks directly), so its
+// engine-level start/stop is unsupported.
+func engineControlSupported(engine Engine) bool { return !isPodmanEngine(engine) }
+
 // StartEngine starts the engine's systemd service.
 func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
+	if !engineControlSupported(engine) {
+		return fmt.Errorf("%s 无守护进程，不支持启停", engine)
+	}
 	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "start", serviceUnit(engine))
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to start %s: %s", engine, output)
@@ -912,6 +920,9 @@ func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 
 // StopEngine stops the engine's systemd service.
 func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
+	if !engineControlSupported(engine) {
+		return fmt.Errorf("%s 无守护进程，不支持启停", engine)
+	}
 	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "stop", serviceUnit(engine))
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to stop %s: %s", engine, output)
@@ -921,9 +932,39 @@ func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 
 // RestartEngine restarts the engine's systemd service.
 func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
+	if !engineControlSupported(engine) {
+		return fmt.Errorf("%s 无守护进程，不支持启停", engine)
+	}
 	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "restart", serviceUnit(engine))
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("failed to restart %s: %s", engine, output)
+	}
+	return nil
+}
+
+// socketUnit returns the systemd unit for the engine's Docker-compatible
+// API socket (podman.socket / docker.socket). Optional, enable/disable only.
+func socketUnit(engine Engine) string {
+	if isPodmanEngine(engine) {
+		return "podman.socket"
+	}
+	return "docker.socket"
+}
+
+// EnableSocket enables the engine's API socket unit at boot.
+func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "enable", socketUnit(engine))
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to enable %s socket: %s", engine, output)
+	}
+	return nil
+}
+
+// DisableSocket disables the engine's API socket unit.
+func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
+	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "disable", socketUnit(engine))
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to disable %s socket: %s", engine, output)
 	}
 	return nil
 }

@@ -88,6 +88,28 @@ func (h *ContainerHandler) RestartEngine(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": string(engine) + " 已重启"})
 }
 
+// EnableSocket enables a engine's API socket unit (e.g. podman.socket).
+func (h *ContainerHandler) EnableSocket(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "启用 "+string(engine)+" Socket")
+	if err := h.containerService.EnableSocket(c.Request.Context(), engine); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "Socket 已启用"})
+}
+
+// DisableSocket disables a engine's API socket unit.
+func (h *ContainerHandler) DisableSocket(c *gin.Context) {
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "禁用 "+string(engine)+" Socket")
+	if err := h.containerService.DisableSocket(c.Request.Context(), engine); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "Socket 已禁用"})
+}
+
 // GetEngineInfo returns a engine's system info
 func (h *ContainerHandler) GetEngineInfo(c *gin.Context) {
 	info, err := h.containerService.GetInfo(c.Request.Context(), h.engineName(c))
@@ -617,6 +639,8 @@ func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Serv
 	protected.POST("/container/restart", handler.RestartEngine)
 	protected.GET("/container/info", handler.GetEngineInfo)
 	protected.POST("/container/mirror", handler.ConfigureMirror)
+	protected.POST("/container/socket/enable", handler.EnableSocket)
+	protected.POST("/container/socket/disable", handler.DisableSocket)
 
 	// Container instances
 	protected.GET("/container/instances", handler.ListContainers)

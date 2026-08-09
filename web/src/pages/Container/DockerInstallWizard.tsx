@@ -96,6 +96,15 @@ export default function DockerInstallWizard({ engine, onInstalled }: { engine: s
     }
   };
 
+  const handleSocket = async (action: 'enable' | 'disable') => {
+    try {
+      await api.post(withEngine(`/container/socket/${action}`, engine));
+      message.success(`Socket 已${action === 'enable' ? '启用' : '禁用'}`);
+    } catch {
+      message.error('Socket 操作失败');
+    }
+  };
+
   return (
     <div style={{ textAlign: 'center', padding: '60px 0' }}>
       <DockerOutlined style={{ fontSize: 64, color: '#1890ff', marginBottom: 24 }} />
@@ -156,7 +165,7 @@ export default function DockerInstallWizard({ engine, onInstalled }: { engine: s
           <Button type="primary" icon={<RocketOutlined />} size="large" loading={installing} onClick={handleInstall} disabled={installing}>
             {installing ? '安装中...' : `安装 ${engine}`}
           </Button>
-        ) : !status.running ? (
+        ) : engine === 'docker' && !status.running ? (
           <Button type="primary" icon={<PlayCircleOutlined />} size="large" onClick={handleStart}>
             启动 {engine}
           </Button>
@@ -167,6 +176,14 @@ export default function DockerInstallWizard({ engine, onInstalled }: { engine: s
         )}
         <Button icon={<ReloadOutlined />} onClick={checkStatus} disabled={installing}>刷新状态</Button>
       </Space>
+
+      {/* 可选：启用/禁用 API Socket（podman.socket / docker.socket） */}
+      {status?.installed && (
+        <Space style={{ marginTop: 16 }}>
+          <Button size="small" onClick={() => handleSocket('enable')}>启用 Socket</Button>
+          <Button size="small" onClick={() => handleSocket('disable')}>禁用 Socket</Button>
+        </Space>
+      )}
     </div>
   );
 }
