@@ -25,11 +25,11 @@ func NewContainerHandler(
 
 // engineName returns the engine selected by the `?engine=` query param,
 // defaulting to docker.
-func (h *ContainerHandler) engineName(c *gin.Context) string {
-	if r := c.Query("engine"); r == "podman" {
-		return "podman"
+func (h *ContainerHandler) engineName(c *gin.Context) container.Engine {
+	if r := c.Query("engine"); r == string(container.EnginePodman) {
+		return container.EnginePodman
 	}
-	return "docker"
+	return container.EngineDocker
 }
 
 // ========== Runtime Management ==========
@@ -47,45 +47,45 @@ func (h *ContainerHandler) DetectEngine(c *gin.Context) {
 // InstallEngine installs a engine
 func (h *ContainerHandler) InstallEngine(c *gin.Context) {
 	engine := h.engineName(c)
-	middleware.AuditSummary(c, "安装 "+engine)
+	middleware.AuditSummary(c, "安装 "+string(engine))
 	if err := h.containerService.Install(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": engine + " 安装成功"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 安装成功"})
 }
 
 // StartEngine starts a engine's service
 func (h *ContainerHandler) StartEngine(c *gin.Context) {
 	engine := h.engineName(c)
-	middleware.AuditSummary(c, "启动 "+engine)
+	middleware.AuditSummary(c, "启动 "+string(engine))
 	if err := h.containerService.StartEngine(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": engine + " 已启动"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 已启动"})
 }
 
 // StopEngine stops a engine's service
 func (h *ContainerHandler) StopEngine(c *gin.Context) {
 	engine := h.engineName(c)
-	middleware.AuditSummary(c, "停止 "+engine)
+	middleware.AuditSummary(c, "停止 "+string(engine))
 	if err := h.containerService.StopEngine(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": engine + " 已停止"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 已停止"})
 }
 
 // RestartEngine restarts a engine's service
 func (h *ContainerHandler) RestartEngine(c *gin.Context) {
 	engine := h.engineName(c)
-	middleware.AuditSummary(c, "重启 "+engine)
+	middleware.AuditSummary(c, "重启 "+string(engine))
 	if err := h.containerService.RestartEngine(c.Request.Context(), engine); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": engine + " 已重启"})
+	httpx.Success(c, gin.H{"message": string(engine) + " 已重启"})
 }
 
 // GetEngineInfo returns a engine's system info
@@ -109,7 +109,7 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 	}
 
 	engine := h.engineName(c)
-	middleware.AuditSummary(c, "配置 "+engine+" 镜像源 "+req.MirrorURL)
+	middleware.AuditSummary(c, "配置 "+string(engine)+" 镜像源 "+req.MirrorURL)
 	if err := h.containerService.ConfigureMirror(c.Request.Context(), engine, req.MirrorURL); err != nil {
 		c.Error(apperror.WrapError(err))
 		return

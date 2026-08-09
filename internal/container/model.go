@@ -1,5 +1,15 @@
 package container
 
+// Engine identifies a container engine (Docker or Podman). Typed (not a bare
+// string) so a misspelled engine fails to compile instead of silently falling
+// back to Docker.
+type Engine string
+
+const (
+	EngineDocker Engine = "docker"
+	EnginePodman Engine = "podman"
+)
+
 // Container represents a Docker container exposed over the API.
 // Docker CLI outputs uppercase keys; service.go unmarshals into a private
 // shim and maps into this lowercase shape before returning.
