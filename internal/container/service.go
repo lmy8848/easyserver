@@ -459,7 +459,13 @@ func (s *Service) CreateContainer(ctx context.Context, engine Engine, req Create
 		args = append(args, "--cpus", fmt.Sprintf("%.2f", req.CPUs))
 	}
 
-	args = append(args, req.Image)
+	// Podman can't resolve short image names without a registries.conf; expand
+	// them to the docker.io namespace so creation works out of the box.
+	image := req.Image
+	if isPodmanEngine(engine) {
+		image = expandImageRef(image)
+	}
+	args = append(args, image)
 
 	if req.Command != "" {
 		args = append(args, strings.Fields(req.Command)...)
@@ -810,6 +816,28 @@ func extractVersion(output string) string {
 		return m[1]
 	}
 	return strings.TrimSpace(output)
+}
+
+// expandImageRef qualifies a short image name (e.g. "nginx:latest") with the
+// docker.io namespace so Podman can resolve it without a registries.conf.
+// A reference whose first component looks like a registry host (contains '.'
+// or ':', or is "localhost") is left untouched. Single-component names get the
+// docker.io/library/ prefix (matching Podman's default short-name expansion);
+// multi-component short names (e.g. "foo/bar") get docker.io/.
+func expandImageRef(image string) string {
+	first := image
+	if i := strings.IndexByte(image, '/'); i >= 0 {
+		first = image[:i]
+	} else if i := strings.IndexByte(image, ':'); i >= 0 {
+		first = image[:i]
+	}
+	if strings.ContainsAny(first, ".:") || first == "localhost" {
+		return image
+	}
+	if strings.ContainsRune(image, '/') {
+		return "docker.io/" + image
+	}
+	return "docker.io/library/" + image
 }
 
 func (s *Service) detectOS(ctx context.Context) string {

@@ -92,3 +92,20 @@ func TestParseJSONRowsPodman(t *testing.T) {
 		t.Errorf("image mapping wrong: %+v", img)
 	}
 }
+
+func TestExpandImageRef(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"nginx:latest", "docker.io/library/nginx:latest"},
+		{"nginx", "docker.io/library/nginx"},
+		{"redis:alpine", "docker.io/library/redis:alpine"},
+		{"foo/bar:v1", "docker.io/foo/bar:v1"},
+		{"docker.io/library/nginx:latest", "docker.io/library/nginx:latest"},
+		{"ghcr.io/org/app:tag", "ghcr.io/org/app:tag"},
+		{"localhost:5000/app", "localhost:5000/app"},
+	}
+	for _, tc := range cases {
+		if got := expandImageRef(tc.in); got != tc.want {
+			t.Errorf("expandImageRef(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
