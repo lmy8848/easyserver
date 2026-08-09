@@ -56,10 +56,19 @@ type CLIContainerRuntime struct {
 	// the structured contract (label, volume, port binding) without inspecting
 	// command concatenation.
 	lastSpec ContainerSpec
+	// outputHook, when set, receives every non-empty trimmed command output line
+	// (e.g. image pull progress). The installer wires it to the install log.
+	outputHook func(string)
 }
 
 func NewCLIContainerRuntime(exec executor.CommandExecutor) *CLIContainerRuntime {
 	return &CLIContainerRuntime{executor: exec}
+}
+
+// SetOutputHook installs a per-line callback for all command output. Used by
+// the installer to stream pull/create/start output into the install log.
+func (r *CLIContainerRuntime) SetOutputHook(fn func(string)) {
+	r.outputHook = fn
 }
 
 func containerBinary(runtime string) (string, error) {
@@ -79,6 +88,13 @@ func (r *CLIContainerRuntime) command(ctx context.Context, runtime string, args 
 		return "", err
 	}
 	out, code, runErr := r.executor.RunCombined(ctx, bin, args...)
+	if r.outputHook != nil {
+		for _, line := range strings.Split(out, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				r.outputHook(line)
+			}
+		}
+	}
 	if runErr != nil || code != 0 {
 		if runErr != nil {
 			return out, fmt.Errorf("%s: %w", bin, runErr)

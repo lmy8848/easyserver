@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,9 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
 	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
 	protected.GET("/db/:dbtype/docker-tags", instanceHandler.ListDockerTags)
+	// Install log stream (SSE) — the async installer appends lines; subscribers
+	// replay the buffer then follow live. Completes with a "done" event.
+	protected.GET("/db/instances/:iid/install/log", instanceHandler.InstallLogStream)
 	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
 	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
 	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
@@ -132,6 +136,69 @@ func (h *InstanceHandler) ListDockerTags(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, gin.H{"items": tags, "total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	// SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	// Lines and completion are both sent as default `data:` events with a JSON
+	// envelope {type, ...} — the front-end's EventSource onmessage parses them.
+	send := func(payload map[string]string) {
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+		c.Writer.Flush()
+	}
+
+	// Task may still be alive (installing) or already finished (done/errored).
+	// If it's gone entirely, fall back to whatever the status says — a
+	// provisioning row without a task means the server restarted mid-install.
+	task, ok := h.svc.InstallTask(iid)
+	if !ok {
+		send(map[string]string{"type": "done", "error": "安装任务已不存在（服务可能已重启）"})
+		return
+	}
+	log := task.Log
+
+	cursor := 0
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		default:
+		}
+		lines, next := log.Tail(cursor)
+		for _, line := range lines {
+			send(map[string]string{"type": "line", "text": line})
+		}
+		cursor = next
+
+		select {
+		case <-task.Done():
+			// Flush anything that landed between the tail above and completion.
+			if lines, next := log.Tail(cursor); len(lines) > 0 {
+				for _, line := range lines {
+					send(map[string]string{"type": "line", "text": line})
+				}
+				cursor = next
+			}
+			errMsg := ""
+			if task.Err() != nil {
+				errMsg = task.Err().Error()
+			}
+			send(map[string]string{"type": "done", "error": errMsg})
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
 }
 
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {

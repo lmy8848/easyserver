@@ -43,9 +43,11 @@ var validPrivileges = map[string]bool{
 // Service manages the whole database domain: container-backed instances
 // (lifecycle) and the logical databases, users, backups and SQL inside them.
 type Service struct {
-	repo      Repository
-	runtime   DatabaseRuntime
-	backupDir string
+	repo           Repository
+	runtime        DatabaseRuntime // shared runtime for normal (non-install) ops
+	backupDir      string
+	installer      *installer
+	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
 }
 
 // NewService creates a database Service over the given Repository, driving
@@ -55,6 +57,10 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 		repo:      repo,
 		runtime:   NewCLIContainerRuntime(exec),
 		backupDir: DefaultBackupDir,
+		installer: newInstaller(),
+		runtimeFactory: func() DatabaseRuntime {
+			return NewCLIContainerRuntime(exec)
+		},
 	}
 }
 
@@ -65,6 +71,10 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 		repo:      repo,
 		runtime:   runtime,
 		backupDir: DefaultBackupDir,
+		installer: newInstaller(),
+		runtimeFactory: func() DatabaseRuntime {
+			return runtime
+		},
 	}
 }
 
@@ -148,32 +158,33 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 
 	spec := containerSpec(dbType, engineName, req.Version, req.Image, containerID, volumeName, bindAddress, port, password)
-	if err := s.runtime.Create(ctx, spec); err != nil {
+
+	// Claim the engine before creating the row so the "already installing" error
+	// is returned synchronously; the row itself is created now (status
+	// "provisioning") so a refresh shows the install in progress and can re-open
+	// its log stream.
+	if err := s.installer.begin(dbType); err != nil {
 		return nil, err
 	}
-	if dbType == DBTypeRedis {
-		if err := seedRedisConfig(ctx, s.runtime, engineName, containerID, password); err != nil {
-			_ = s.runtime.Remove(ctx, engineName, containerID)
-			return nil, err
-		}
-	}
-	if err := s.runtime.Start(ctx, engineName, containerID); err != nil {
-		_ = s.runtime.Remove(ctx, engineName, containerID)
-		return nil, fmt.Errorf("start database container: %w", err)
-	}
-	if _, err := waitForHealthy(ctx, s.runtime, engineName, containerID, 2*time.Minute); err != nil {
-		_ = s.runtime.Remove(ctx, engineName, containerID)
-		return nil, err
-	}
-	v := &DBInstance{DBType: dbType, Version: req.Version, Port: port, Status: "running", ContainerEngine: engineName, Image: req.Image,
+	v := &DBInstance{DBType: dbType, Version: req.Version, Port: port, Status: "provisioning", ContainerEngine: engineName, Image: req.Image,
 		ContainerID: containerID, VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress,
 		AdminPassword: password}
 	id, err := s.repo.CreateInstance(ctx, v)
 	if err != nil {
-		_ = s.runtime.Remove(ctx, engineName, containerID)
+		s.installer.end(dbType)
 		return nil, err
 	}
 	v.ID = id
+
+	// Install in the background. The runtime is built per-install and its output
+	// hook streams into the task log; s.runtime stays untouched for normal ops.
+	s.installer.start(dbType, id, func(log *installLog) error {
+		rt := s.runtimeFactory()
+		if cli, ok := rt.(*CLIContainerRuntime); ok {
+			cli.SetOutputHook(func(line string) { log.append(line) })
+		}
+		return s.installInstance(ctx, dbType, v, spec, password, rt, log)
+	})
 	return v, nil
 }
 
@@ -233,6 +244,27 @@ func (s *Service) dockerTags(dbType DBType) ([]string, error) {
 	}
 	dockerTagsCacheStore.m[dbType] = dockerTagsCache{tags: tags, fetched: time.Now()}
 	return tags, nil
+}
+
+// InstallTask exposes an in-flight install's log and completion to the SSE
+// handler. Returns false when no task is running for the instance.
+func (s *Service) InstallTask(instanceID int64) (*InstallTask, bool) {
+	t, ok := s.installer.get(instanceID)
+	if !ok {
+		return nil, false
+	}
+	return &InstallTask{Log: t.log, done: t.done, errFn: func() error { return t.err }}, true
+}
+
+// WaitForInstall blocks until the instance's install finishes and returns its
+// error. Used by tests (and a handy end-of-stream sync for future callers).
+func (s *Service) WaitForInstall(instanceID int64) error {
+	t, ok := s.installer.get(instanceID)
+	if !ok {
+		return nil
+	}
+	<-t.done
+	return t.err
 }
 
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error {

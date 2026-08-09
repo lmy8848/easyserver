@@ -271,7 +271,7 @@ export default function DatabasePage() {
         image,
         port: values.port || server.default_port,
       });
-      message.success('版本安装成功');
+      message.success('已开始安装，可点击实例查看实时日志');
       setInstallVersionVisible(false);
       fetchInstances(server.db_type);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
@@ -614,9 +614,13 @@ export default function DatabasePage() {
   // ===== Status helpers (shared) =====
   const statusTag = (status: string) => {
     const labels: Record<string, string> = {
-      running: '运行中', stopped: '已停止', partial: '部分运行', not_installed: '未安装',
+      running: '运行中', stopped: '已停止', provisioning: '正在安装', failed: '安装失败',
+      partial: '部分运行', not_installed: '未安装',
     };
-    return <Tag color={getServiceStatusColor(status)}>{labels[status] || status}</Tag>;
+    const colors: Record<string, string> = {
+      running: 'success', provisioning: 'processing', failed: 'error', stopped: 'default',
+    };
+    return <Tag color={colors[status] || getServiceStatusColor(status)}>{labels[status] || status}</Tag>;
   };
 
   // ===== Render =====

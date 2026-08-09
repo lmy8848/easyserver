@@ -127,8 +127,13 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if v == nil || v.Status != "running" {
-		t.Fatalf("expected running instance, got %+v", v)
+	// Install is async now — wait for it before asserting lifecycle effects.
+	if err := svc.WaitForInstall(v.ID); err != nil {
+		t.Fatalf("install wait: %v", err)
+	}
+	got, _ := repo.GetInstance(context.Background(), v.ID)
+	if got == nil || got.Status != "running" {
+		t.Fatalf("expected running instance, got %+v", got)
 	}
 	if v.BindAddress != "127.0.0.1" {
 		t.Fatalf("expected loopback bind by default, got %q", v.BindAddress)
@@ -144,15 +149,23 @@ func TestCreateInstanceHealthy(t *testing.T) {
 func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 	repo := newFakeRepo()
 	// Container exits before becoming healthy → waitForHealthy fails fast and
-	// CreateInstance must roll back the container.
+	// the async install must roll back the container and mark the row failed.
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
 	svc := NewServiceWithRuntime(repo, rt)
 
-	if _, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"}); err == nil {
+	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := svc.WaitForInstall(v.ID); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
 	}
 	if len(rt.removed) != 1 {
 		t.Fatalf("expected container rollback after health failure, removed=%v", rt.removed)
+	}
+	got, _ := repo.GetInstance(context.Background(), v.ID)
+	if got == nil || got.Status != "failed" {
+		t.Fatalf("expected failed instance row kept for inspection, got %+v", got)
 	}
 }
 
@@ -164,6 +177,9 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
+	}
+	if err := svc.WaitForInstall(v.ID); err != nil {
+		t.Fatalf("install wait: %v", err)
 	}
 
 	if err := svc.DestroyInstance(context.Background(), v.ID); err != nil {
