@@ -50,13 +50,23 @@ type Service struct {
 	backupDir     string
 }
 
+// normalizeKey derives the AES key from the configured string. Like the deploy
+// domain, it takes the first 32 bytes of the configured value — config examples
+// ship a 64-char hex string, and 32 bytes is exactly what AES-256 needs.
+func normalizeKey(encryptionKey string) []byte {
+	if len(encryptionKey) >= 32 {
+		return []byte(encryptionKey[:32])
+	}
+	return []byte(encryptionKey)
+}
+
 // NewService creates a database Service over the given Repository, driving
 // containers through the CLI Runtime seam.
 func NewService(repo Repository, exec executor.CommandExecutor, encryptionKey string) *Service {
 	return &Service{
 		repo:          repo,
 		runtime:       NewCLIContainerRuntime(exec),
-		encryptionKey: []byte(encryptionKey),
+		encryptionKey: normalizeKey(encryptionKey),
 		backupDir:     DefaultBackupDir,
 	}
 }
@@ -67,7 +77,7 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime, encryptionK
 	return &Service{
 		repo:          repo,
 		runtime:       runtime,
-		encryptionKey: []byte(encryptionKey),
+		encryptionKey: normalizeKey(encryptionKey),
 		backupDir:     DefaultBackupDir,
 	}
 }
