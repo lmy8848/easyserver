@@ -30,7 +30,7 @@ export default function VersionList({
   onEnterVersion, onRefreshVersions,
   onStartVersion, onStopVersion, onUninstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
-  versionTemplates, installVersionForm, onInstallVersion,
+  versionTemplates, installVersionForm, busy, onInstallVersion,
   portCheck, onCheckPort,
   logVisible, logVersion, logContent, logLoading, logFollow, logRef,
   onLogVisibleChange, onLogFollowChange, onShowLogs,
@@ -213,7 +213,7 @@ export default function VersionList({
 
       {/* Install Version Modal */}
       <Modal title={`安装${server.display_name}`} open={installVersionVisible} onCancel={() => onInstallVersionVisibleChange(false)}
-        onOk={onInstallVersion} okText="安装" cancelText="取消">
+        onOk={onInstallVersion} okText="安装" cancelText="取消" confirmLoading={busy === 'install-version'}>
         <Form form={installVersionForm} layout="vertical">
           {/* image is resolved from the preset catalogue or the Docker Hub
               picker; hidden because users never type image names. */}

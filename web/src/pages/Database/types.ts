@@ -88,6 +88,7 @@ export interface VersionListProps {
   versions: DBInstance[];
   versionsLoading: boolean;
   operating: string;
+  busy: string;
   onEnterVersion: (version: DBInstance) => void;
   onRefreshVersions: () => void;
   onStartVersion: (v: DBInstance) => void;
@@ -125,6 +126,7 @@ export interface DatabaseListProps {
   dbUsers: DBUser[];
   usersLoading: boolean;
   operating: string;
+  busy: string;
   onBack: () => void;
   onEnterDatabase: (db: Database) => void;
   onRefreshDatabases: () => void;
@@ -214,6 +216,7 @@ export interface TableExplorerProps {
   backups: any[];
   backupsLoading: boolean;
   backupCreating: boolean;
+  busy: string;
   onCreateBackup: () => void;
   onDownloadBackup: (backupId: number) => void;
   onRestoreBackup: (backupId: number) => void;

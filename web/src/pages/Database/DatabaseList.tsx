@@ -19,7 +19,7 @@ export default function DatabaseList({
   dbModalVisible, onDbModalVisibleChange, dbForm, onCreateDB,
   userModalVisible, onUserModalVisibleChange, userForm, onCreateUser,
   grantVisible, grantUser, grantForm, onGrantVisibleChange, onGrant, onOpenGrant,
-  dbConfig, dbConfigLoading, onFetchDBConfig, onSaveDBConfig, onUpdateDBParam,
+  dbConfig, dbConfigLoading, busy, onFetchDBConfig, onSaveDBConfig, onUpdateDBParam,
   logVisible, logVersion, logContent, logLoading, logFollow, logRef,
   onLogVisibleChange, onLogFollowChange,
   showConfig, showLogs,
@@ -47,7 +47,7 @@ export default function DatabaseList({
         <Space size="small">
           <Button type="link" size="small" icon={<TableOutlined />} onClick={() => onEnterDatabase(record)}>管理</Button>
           <Popconfirm title="确定删除此数据库？" onConfirm={() => onDeleteDB(record.name)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-db-${record.name}`}>删除</Button>
           </Popconfirm>
         </Space>
       ),
@@ -64,7 +64,7 @@ export default function DatabaseList({
           <Button type="link" size="small" icon={<KeyOutlined />}
             onClick={() => onOpenGrant(record)}>授权</Button>
           <Popconfirm title="确定删除此用户？" onConfirm={() => onDeleteUser(record)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-user-${record.username}@${record.host}`}>删除</Button>
           </Popconfirm>
         </Space>
       ),
@@ -169,7 +169,7 @@ export default function DatabaseList({
                       </Space>
                       <Space>
                         <Button icon={<ReloadOutlined />} onClick={onFetchDBConfig}>重新加载</Button>
-                        <Button type="primary" onClick={onSaveDBConfig}>保存配置</Button>
+                        <Button type="primary" loading={busy === 'save-config'} onClick={onSaveDBConfig}>保存配置</Button>
                       </Space>
                     </div>
                     <Tabs
@@ -242,7 +242,7 @@ export default function DatabaseList({
 
       {/* Modals */}
       <Modal title="创建数据库" open={dbModalVisible} onCancel={() => onDbModalVisibleChange(false)}
-        onOk={onCreateDB} okText="创建" cancelText="取消">
+        onOk={onCreateDB} okText="创建" cancelText="取消" confirmLoading={busy === 'create-db'}>
         <Form form={dbForm} layout="vertical">
           <Form.Item label="版本"><Input value={`${server.display_name} ${version.version}`} disabled /></Form.Item>
           <Form.Item name="name" label="数据库名" rules={[{ required: true }]}><Input placeholder="如：my_app" /></Form.Item>
@@ -252,7 +252,7 @@ export default function DatabaseList({
         </Form>
       </Modal>
       <Modal title="创建用户" open={userModalVisible} onCancel={() => onUserModalVisibleChange(false)}
-        onOk={onCreateUser} okText="创建" cancelText="取消">
+        onOk={onCreateUser} okText="创建" cancelText="取消" confirmLoading={busy === 'create-user'}>
         <Form form={userForm} layout="vertical">
           <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="如：app_user" /></Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true }, { min: 6 }]}><Input.Password /></Form.Item>
@@ -262,7 +262,7 @@ export default function DatabaseList({
         </Form>
       </Modal>
       <Modal title={`授权 - ${grantUser?.username || ''}`} open={grantVisible} onCancel={() => onGrantVisibleChange(false)}
-        onOk={onGrant} okText="授权" cancelText="取消">
+        onOk={onGrant} okText="授权" cancelText="取消" confirmLoading={busy === 'grant'}>
         <Form form={grantForm} layout="vertical">
           <Form.Item name="database" label="数据库" rules={[{ required: true }]}>
             <Select>{databases.map(db => <Select.Option key={db.name} value={db.name}>{db.name}</Select.Option>)}</Select>

@@ -18,6 +18,9 @@ export default function DatabasePage() {
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
+  // busy tracks one in-flight write operation at a time (a short string key);
+  // buttons/modals match on it to show their loading state.
+  const [busy, setBusy] = useState('');
 
   // ===== Version state =====
   const [versions, setVersions] = useState<DBInstance[]>([]);
@@ -256,6 +259,7 @@ export default function DatabasePage() {
       message.error(typeof msg === 'string' ? msg : '请选择安装版本');
       return;
     }
+    setBusy('install-version');
     try {
       // Port left empty → engine default. image is always sent fully qualified
       // (preset/picker already carry `docker.io/`); only as a last resort fall
@@ -271,6 +275,7 @@ export default function DatabasePage() {
       setInstallVersionVisible(false);
       fetchInstances(server.db_type);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    finally { setBusy(''); }
   };
 
   const handleStartVersion = async (v: DBInstance) => {
@@ -325,6 +330,7 @@ export default function DatabasePage() {
   const handleCreateDB = async () => {
     const version = selectedVersion;
     if (!version) return;
+    setBusy('create-db');
     try {
       const values = await dbForm.validateFields();
       await dbServerApi.createDatabase(version.id, values);
@@ -332,22 +338,26 @@ export default function DatabasePage() {
       setDbModalVisible(false);
       fetchDatabases(version.id);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    finally { setBusy(''); }
   };
 
   const handleDeleteDB = async (dbName: string) => {
     const version = selectedVersion;
     if (!version) return;
+    setBusy(`delete-db-${dbName}`);
     try {
       await dbServerApi.deleteDatabase(version.id, dbName);
       message.success('数据库已删除');
       fetchDatabases(version.id);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
+    finally { setBusy(''); }
   };
 
   // ===== User CRUD =====
   const handleCreateUser = async () => {
     const version = selectedVersion;
     if (!version) return;
+    setBusy('create-user');
     try {
       const values = await userForm.validateFields();
       await dbServerApi.createUser(version.id, values);
@@ -355,22 +365,26 @@ export default function DatabasePage() {
       setUserModalVisible(false);
       fetchUsers(version.id);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    finally { setBusy(''); }
   };
 
   const handleDeleteUser = async (user: DBUser) => {
     const version = selectedVersion;
     if (!version) return;
+    setBusy(`delete-user-${user.username}@${user.host}`);
     try {
       await dbServerApi.deleteUser(version.id, user.username, user.host || '%');
       message.success('用户已删除');
       fetchUsers(version.id);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
+    finally { setBusy(''); }
   };
 
   const handleGrant = async () => {
     const version = selectedVersion;
     const user = grantUser;
     if (!version || !user) return;
+    setBusy('grant');
     try {
       const values = await grantForm.validateFields();
       const payload = {
@@ -382,17 +396,20 @@ export default function DatabasePage() {
       setGrantVisible(false);
       fetchUsers(version.id);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    finally { setBusy(''); }
   };
 
   // ===== Config handlers =====
   const handleSaveDBConfig = async () => {
     if (!dbConfig?.config?.sections || !selectedVersion) return;
+    setBusy('save-config');
     try {
       const content = dbConfig.config.sections[0]?.params?.content || '';
       await dbServerApi.saveInstanceConfig(selectedVersion.id, content);
       message.success('实例配置已保存，重启后生效');
       fetchDBConfig();
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '保存失败')); }
+    finally { setBusy(''); }
   };
 
   const updateDBParam = (section: string, key: string, value: string) => {
@@ -492,21 +509,25 @@ export default function DatabasePage() {
   const handleRestoreBackup = async (backupId: number) => {
     const version = selectedVersion;
     if (!selectedDatabase || !version) return;
+    setBusy(`restore-${backupId}`);
     try {
       await dbServerApi.restoreBackup(backupId);
       message.success('恢复成功');
       if (selectedDatabase) fetchTables(version.id, selectedDatabase.name);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
+    finally { setBusy(''); }
   };
 
   const handleDeleteBackup = async (backupId: number) => {
     const version = selectedVersion;
     if (!selectedDatabase || !version) return;
+    setBusy(`delete-backup-${backupId}`);
     try {
       await dbServerApi.deleteBackup(backupId);
       message.success('备份已删除');
       if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
+    finally { setBusy(''); }
   };
 
   const handleCreateTable = async () => {
@@ -527,12 +548,14 @@ export default function DatabasePage() {
   const handleDropTable = async (tableName: string) => {
     const version = selectedVersion;
     if (!selectedDatabase || !version) return;
+    setBusy(`drop-table-${tableName}`);
     try {
       await dbServerApi.dropTable(version.id, selectedDatabase.name, tableName);
       message.success('表已删除');
       if (selectedTable === tableName) { setSelectedTable(''); setTableData(null); }
       fetchTables(version.id, selectedDatabase.name);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除表失败')); }
+    finally { setBusy(''); }
   };
 
   const openInsertModal = () => {
@@ -575,6 +598,7 @@ export default function DatabasePage() {
   const handleDeleteRecord = async (record: any) => {
     const version = selectedVersion;
     if (!selectedDatabase || !version || !selectedTable) return;
+    setBusy(`delete-record-${record._key}`);
     try {
       const pk = tableInfo?.primaryKey || tableData?.headers?.[0] || 'id';
       const pkVal = record[pk];
@@ -584,6 +608,7 @@ export default function DatabasePage() {
         fetchTableData(version.id, selectedDatabase.name, selectedTable, tablePage);
       } else { message.error(res.data?.data?.error || '删除失败'); }
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
+    finally { setBusy(''); }
   };
 
   // ===== Status helpers (shared) =====
@@ -638,6 +663,7 @@ export default function DatabasePage() {
           backups={backups}
           backupsLoading={backupsLoading}
           backupCreating={backupCreating}
+          busy={busy}
           onCreateBackup={handleCreateBackup}
           onDownloadBackup={handleDownloadBackup}
           onRestoreBackup={handleRestoreBackup}
@@ -688,6 +714,7 @@ export default function DatabasePage() {
           onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
           dbConfig={dbConfig}
           dbConfigLoading={dbConfigLoading}
+          busy={busy}
           onFetchDBConfig={() => fetchDBConfig()}
           onSaveDBConfig={handleSaveDBConfig}
           onUpdateDBParam={updateDBParam}
@@ -720,6 +747,7 @@ export default function DatabasePage() {
         onInstallVersionVisibleChange={setInstallVersionVisible}
         versionTemplates={activeEngine.templates}
         installVersionForm={installVersionForm}
+        busy={busy}
         onInstallVersion={handleInstallVersion}
         portCheck={portCheck}
         onCheckPort={checkPort}

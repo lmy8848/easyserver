@@ -20,7 +20,7 @@ export default function TableExplorer({
   recordModalVisible, editingRecord, recordForm, recordSaving,
   onRecordModalVisibleChange, onOpenInsertModal, onOpenEditModal, onSaveRecord, onDeleteRecord,
   sqlInput, sqlResult, sqlLoading, onSqlInputChange, onExecuteSQL,
-  backups, backupsLoading, backupCreating,
+  backups, backupsLoading, backupCreating, busy,
   onCreateBackup, onDownloadBackup, onRestoreBackup, onDeleteBackup,
   logVisible, logVersion, logContent, logLoading, logFollow, logRef,
   onLogVisibleChange, onLogFollowChange,
@@ -62,7 +62,7 @@ export default function TableExplorer({
                     }}>
                     <span><TableOutlined style={{ marginRight: 8 }} />{t}</span>
                     <Popconfirm title={`确定删除表 ${t}？此操作不可恢复！`} onConfirm={(e) => { e?.stopPropagation(); onDropTable(t); }}>
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} loading={busy === `drop-table-${t}`} onClick={(e) => e.stopPropagation()} />
                     </Popconfirm>
                   </div>
                 ))
@@ -101,7 +101,7 @@ export default function TableExplorer({
                           <Space size="small">
                             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onOpenEditModal(record)}>编辑</Button>
                             <Popconfirm title="确定删除此记录？" onConfirm={() => onDeleteRecord(record)}>
-                              <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                              <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-record-${record._key}`}>删除</Button>
                             </Popconfirm>
                           </Space>
                         ),
@@ -188,14 +188,14 @@ export default function TableExplorer({
                                   下载
                                 </Button>
                                 <Popconfirm title="确定恢复此备份？这将覆盖当前数据。" onConfirm={() => onRestoreBackup(record.id)}>
-                                  <Button type="link" size="small" icon={<UndoOutlined />}>
+                                  <Button type="link" size="small" icon={<UndoOutlined />} loading={busy === `restore-${record.id}`}>
                                     恢复
                                   </Button>
                                 </Popconfirm>
                               </>
                             )}
                             <Popconfirm title="确定删除此备份？" onConfirm={() => onDeleteBackup(record.id)}>
-                              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                              <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-backup-${record.id}`}>
                                 删除
                               </Button>
                             </Popconfirm>
