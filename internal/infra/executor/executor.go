@@ -15,7 +15,6 @@ type CommandExecutor interface {
 	Run(ctx context.Context, name string, args ...string) (stdout, stderr string, exitCode int, err error)
 	RunWithTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, exitCode int, err error)
 	RunCombined(ctx context.Context, name string, args ...string) (output string, exitCode int, err error)
-	RunWithStdin(ctx context.Context, stdin string, name string, args ...string) (output string, exitCode int, err error)
 	RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (output string, exitCode int, err error)
 	Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error)
 	Command(ctx context.Context, opts StartOptions, name string, args ...string) *exec.Cmd
@@ -42,6 +41,9 @@ type CommandOptions struct {
 	WorkDir string
 	Env     []string
 	Timeout time.Duration
+	// Stdin, when non-empty, is fed to the command's stdin (e.g. passwords via
+	// --password-stdin).
+	Stdin string
 }
 
 type OSExecutor struct{}
@@ -99,29 +101,9 @@ func (e *OSExecutor) RunCombined(ctx context.Context, name string, args ...strin
 	return result, exitCode, nil
 }
 
-// RunWithStdin is RunCombined but feeds `stdin` to the command (e.g.
-// `--password-stdin`); used to avoid secrets appearing in argv/ps.
-func (e *OSExecutor) RunWithStdin(ctx context.Context, stdin string, name string, args ...string) (string, int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = strings.NewReader(stdin)
-	output, err := cmd.CombinedOutput()
-	result := string(output)
-	exitCode := 0
-
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return result, -1, err
-		}
-	}
-	return result, exitCode, nil
-}
-
+// RunWithOptions runs a command with custom options (env, workdir, timeout,
+// stdin). Stdin feeds the command's stdin (e.g. --password-stdin) to keep
+// secrets out of argv/ps.
 func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (string, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -134,6 +116,9 @@ func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, na
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	applyCommandOptions(cmd, opts.WorkDir, opts.Env)
+	if opts.Stdin != "" {
+		cmd.Stdin = strings.NewReader(opts.Stdin)
+	}
 	output, err := cmd.CombinedOutput()
 	result := string(output)
 	exitCode := 0

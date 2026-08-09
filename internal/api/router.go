@@ -131,6 +131,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	serviceManager := systemd.NewServiceManager(cmdExec, cronRepo, miseProvider)
 
+	container.SetAuthEnv()
 	containerService := container.NewService(cmdExec)
 
 	dbServerRepo := dbserver.NewSQLiteRepository(db)

@@ -73,11 +73,6 @@ func (m *MockExecutor) RunCombined(ctx context.Context, name string, args ...str
 	return stdout, exitCode, nil
 }
 
-// RunWithStdin executes a mock command, ignoring stdin.
-func (m *MockExecutor) RunWithStdin(ctx context.Context, stdin string, name string, args ...string) (string, int, error) {
-	return m.RunCombined(ctx, name, args...)
-}
-
 // RunWithOptions executes a mock command with custom options
 func (m *MockExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (string, int, error) {
 	return m.RunCombined(ctx, name, args...)

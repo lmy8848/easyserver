@@ -96,6 +96,13 @@ type RegistryAuth struct {
 	Password string `json:"password" binding:"required"`
 }
 
+// LoggedInRegistry is a registry the engine has credentials for, with the
+// decoded username (from the base64 "username:password" auth field).
+type LoggedInRegistry struct {
+	Server   string `json:"server"`
+	Username string `json:"username"`
+}
+
 // Stats represents real-time container resource usage.
 type Stats struct {
 	CPUPercent float64 `json:"cpu_percent"`

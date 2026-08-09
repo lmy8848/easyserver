@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -1195,34 +1196,67 @@ func (s *Service) setPodmanRegistryConfig(ctx context.Context, cfg RegistryConfi
 	return nil
 }
 
-// GetLoggedInRegistries lists the registry addresses the engine currently has
-// credentials for. Docker keeps them in ~/.docker/config.json; Podman in
-// ~/.config/containers/auth.json — both under the "auths" key.
-func (s *Service) GetLoggedInRegistries(ctx context.Context, engine Engine) ([]string, error) {
-	path := "/root/.config/containers/auth.json"
-	if !isPodmanEngine(engine) {
-		path = "/root/.docker/config.json"
+// authPath returns the stable auth file path for the engine. It's derived from
+// the panel's $HOME so login, pull, and reads all agree regardless of how the
+// panel was launched (root vs sudo vs normal user). Being $HOME-based keeps it
+// consistent with what the engine would otherwise default to for docker.
+func authPath(engine Engine) string {
+	home, _ := os.UserHomeDir()
+	if isPodmanEngine(engine) {
+		return filepath.Join(home, ".config", "containers", "auth.json")
 	}
-	stdout, _, _ := s.executor.RunCombined(ctx, "cat", path)
+	return filepath.Join(home, ".docker", "config.json")
+}
+
+// SetAuthEnv forces REGISTRY_AUTH_FILE / DOCKER_CONFIG to stable $HOME-based
+// paths at panel startup. Child processes inherit os.Environ(), so every
+// docker/podman command (login, pull, create, run) reads and writes the same
+// auth file. Without REGISTRY_AUTH_FILE, rootless podman would instead write to
+// ${XDG_RUNTIME_DIR}/containers/auth.json (e.g. /run/user/1000/...), which
+// differs once the panel is relaunched as root.
+func SetAuthEnv() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	os.Setenv("REGISTRY_AUTH_FILE", filepath.Join(home, ".config", "containers", "auth.json"))
+	os.Setenv("DOCKER_CONFIG", filepath.Join(home, ".docker"))
+}
+
+// GetLoggedInRegistries lists the registries the engine has credentials for,
+// with the decoded username. Docker keeps them in ~/.docker/config.json; Podman
+// in ~/.config/containers/auth.json — both under the "auths" key at authPath().
+// Each entry's "auth" holds base64("username:password").
+func (s *Service) GetLoggedInRegistries(ctx context.Context, engine Engine) ([]LoggedInRegistry, error) {
+	stdout, _, _ := s.executor.RunCombined(ctx, "cat", authPath(engine))
 	var auth struct {
-		Auths map[string]json.RawMessage `json:"auths"`
+		Auths map[string]struct {
+			Auth string `json:"auth"`
+		} `json:"auths"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &auth); err != nil {
-		return []string{}, nil // no file / unparseable → none logged in
+		return []LoggedInRegistry{}, nil // no file / unparseable → none logged in
 	}
-	regs := make([]string, 0, len(auth.Auths))
-	for k := range auth.Auths {
-		regs = append(regs, k)
+	out := make([]LoggedInRegistry, 0, len(auth.Auths))
+	for server, entry := range auth.Auths {
+		username := ""
+		if decoded, err := base64.StdEncoding.DecodeString(entry.Auth); err == nil {
+			if i := strings.IndexByte(string(decoded), ':'); i >= 0 {
+				username = string(decoded)[:i]
+			}
+		}
+		out = append(out, LoggedInRegistry{Server: server, Username: username})
 	}
-	sort.Strings(regs)
-	return regs, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].Server < out[j].Server })
+	return out, nil
 }
 
 // RegistryLogin authenticates to a private registry. Password goes over stdin
 // (--password-stdin) so it never appears in argv/ps.
 func (s *Service) RegistryLogin(ctx context.Context, engine Engine, server, username, password string) error {
-	output, exitCode, err := s.executor.RunWithStdin(ctx, password+"\n", engineBinary(engine),
-		"login", server, "--username", username, "--password-stdin")
+	output, exitCode, err := s.executor.RunWithOptions(ctx,
+		executor.CommandOptions{Stdin: password + "\n"},
+		engineBinary(engine), "login", server, "--username", username, "--password-stdin")
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("%s login failed: %s", engine, truncateOutput(output, 500))
 	}
