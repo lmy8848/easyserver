@@ -192,7 +192,10 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		if cli, ok := rt.(*CLIContainerRuntime); ok {
 			cli.SetOutputHook(func(line string) { log.append(line) })
 		}
-		return s.installInstance(ctx, dbType, req.Version, req.Image, engineName, containerID, volumeName, bindAddress, port, password, spec, rt, log)
+		// Detach from the request context: the install outlives the HTTP request
+		// (which is canceled once CreateInstance responds), so it must not inherit
+		// its cancellation — otherwise every container command dies immediately.
+		return s.installInstance(context.Background(), dbType, req.Version, req.Image, engineName, containerID, volumeName, bindAddress, port, password, spec, rt, log)
 	})
 	return &CreateInstanceResult{InstallID: containerID, Version: req.Version, Image: req.Image, Port: port, Status: "provisioning"}, nil
 }
