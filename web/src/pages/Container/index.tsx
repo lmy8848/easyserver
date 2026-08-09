@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs, Select, Tag, Button, Spin, Space, message } from 'antd';
+import { Tabs, Select, Tag, Button, Spin, Space, message, Result } from 'antd';
 import {
   CodeOutlined, CloudDownloadOutlined,
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
@@ -127,10 +127,20 @@ export default function Container() {
 
       {ready ? (
         <Tabs items={resourceTabs} />
+      ) : !status?.installed ? (
+        <Result
+          status="info"
+          title={`${engine === 'podman' ? 'Podman' : 'Docker'} 未安装`}
+          subTitle={`点击下方按钮安装 ${engine}，安装完成后即可管理容器`}
+          extra={<Button type="primary" icon={<RocketOutlined />} loading={installing} onClick={handleInstall}>安装 {engine}</Button>}
+        />
       ) : (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: '#888' }}>
-          {status?.installed ? `请先启动 ${engine}` : `${engine} 未安装，请点击右上角「安装 ${engine}」`}
-        </div>
+        <Result
+          status="warning"
+          title={`${engine === 'podman' ? 'Podman' : 'Docker'} 已安装但未运行`}
+          subTitle="请启动引擎服务后继续"
+          extra={<Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>启动 {engine}</Button>}
+        />
       )}
     </div>
   );
