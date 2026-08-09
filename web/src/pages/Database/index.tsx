@@ -61,6 +61,24 @@ export default function DatabasePage() {
   const [logFollow, setLogFollow] = useState(true);
   const logRef = useRef<HTMLDivElement>(null);
 
+  // ===== Install log (SSE stream) =====
+  // State lives here (not in VersionList) so an install can auto-open it, and
+  // the title-bar "正在安装" button can re-open it after close/refresh.
+  const [installLogInstance, setInstallLogInstance] = useState<DBInstance | null>(null);
+  const [installLogLines, setInstallLogLines] = useState<string[]>([]);
+  const [installLogError, setInstallLogError] = useState('');
+  const [installLogDone, setInstallLogDone] = useState(false);
+  const [installLogFollow, setInstallLogFollow] = useState(true);
+  const installLogRef = useRef<HTMLDivElement>(null);
+
+  const openInstallLog = (v: DBInstance) => {
+    setInstallLogInstance(v);
+    setInstallLogLines([]);
+    setInstallLogError('');
+    setInstallLogDone(false);
+  };
+  const closeInstallLog = () => setInstallLogInstance(null);
+
   // ===== Table explorer state =====
   const [tableList, setTableList] = useState<string[]>([]);
   const [tableLoading, setTableLoading] = useState(false);
@@ -124,6 +142,30 @@ export default function DatabasePage() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [logContent, logFollow]);
+
+  useEffect(() => {
+    if (!installLogInstance) return;
+    // SSE replay: the server sends every buffered line first (cursor starts at
+    // 0), then follows live until the {type:'done'} frame.
+    const es = new EventSource(`/api/db/instances/${installLogInstance.id}/install/log`);
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'line') setInstallLogLines(prev => [...prev, msg.text]);
+        else if (msg.type === 'done') { setInstallLogError(msg.error || ''); setInstallLogDone(true); es.close(); }
+      } catch { /* ignore malformed frames */ }
+    };
+    // Server closed the stream (or a transient blip); stop so the "done" state
+    // governs the UI. EventSource auto-reconnects otherwise.
+    es.onerror = () => { setInstallLogDone(true); es.close(); };
+    return () => es.close();
+  }, [installLogInstance]);
+
+  useEffect(() => {
+    if (installLogFollow && installLogRef.current) {
+      installLogRef.current.scrollTop = installLogRef.current.scrollHeight;
+    }
+  }, [installLogLines, installLogFollow]);
 
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
@@ -266,14 +308,18 @@ export default function DatabasePage() {
       // back to `docker.io/<base_image>:<version>`.
       const rawImage = (values.image || '').trim();
       const image = rawImage.includes('/') ? rawImage : `docker.io/${server.base_image}:${values.version}`;
-      await dbServerApi.createInstance(server.db_type, {
+      const res = await dbServerApi.createInstance(server.db_type, {
         ...values,
         image,
         port: values.port || server.default_port,
       });
-      message.success('已开始安装，可点击实例查看实时日志');
+      message.success('已开始安装，正在打开安装日志…');
       setInstallVersionVisible(false);
       fetchInstances(server.db_type);
+      // Auto-open the live install log; the title-bar "正在安装" button (shown
+      // while the row is provisioning) re-opens it after close/refresh.
+      const inst = res.data?.data as DBInstance | undefined;
+      if (inst?.id) openInstallLog(inst);
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setBusy(''); }
   };
@@ -764,6 +810,15 @@ export default function DatabasePage() {
         onLogVisibleChange={setLogVisible}
         onLogFollowChange={setLogFollow}
         onShowLogs={showLogs}
+        installLogInstance={installLogInstance}
+        installLogLines={installLogLines}
+        installLogError={installLogError}
+        installLogDone={installLogDone}
+        installLogFollow={installLogFollow}
+        installLogRef={installLogRef}
+        onOpenInstallLog={openInstallLog}
+        onCloseInstallLog={closeInstallLog}
+        onInstallLogFollowChange={setInstallLogFollow}
         statusTag={statusTag}
       />
     );

@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input, List,
-  message, Popconfirm, Row, Col, Empty, Spin, Pagination, Table,
+  message, Popconfirm, Row, Col, Empty, Spin, Pagination, Table, Switch,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   PlayCircleOutlined, StopOutlined,
-  FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, ReloadOutlined, DatabaseOutlined,
+  FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, ReloadOutlined, DatabaseOutlined, LoadingOutlined,
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
@@ -34,57 +34,10 @@ export default function VersionList({
   portCheck, onCheckPort,
   logVisible, logVersion, logContent, logLoading, logFollow, logRef,
   onLogVisibleChange, onLogFollowChange, onShowLogs,
+  installLogInstance, installLogLines, installLogError, installLogDone, installLogFollow, installLogRef,
+  onOpenInstallLog, onCloseInstallLog, onInstallLogFollowChange,
   statusTag,
 }: VersionListProps) {
-
-  // ===== Install log stream (SSE) =====
-  // An install is async: the row shows "provisioning", and opening this modal
-  // streams the install log — replaying everything written so far (including
-  // after a page refresh) then following live until the "done" event.
-  const [installLogInstance, setInstallLogInstance] = useState<DBInstance | null>(null);
-  const [installLogLines, setInstallLogLines] = useState<string[]>([]);
-  const [installLogError, setInstallLogError] = useState('');
-  const [installLogDone, setInstallLogDone] = useState(false);
-  const installLogRef = useRef<HTMLDivElement>(null);
-
-  const openInstallLog = (v: DBInstance) => {
-    setInstallLogInstance(v);
-    setInstallLogLines([]);
-    setInstallLogError('');
-    setInstallLogDone(false);
-  };
-
-  useEffect(() => {
-    if (!installLogInstance) return;
-    const es = new EventSource(`/api/db/instances/${installLogInstance.id}/install/log`);
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'line') {
-          setInstallLogLines(prev => [...prev, msg.text]);
-        } else if (msg.type === 'done') {
-          setInstallLogError(msg.error || '');
-          setInstallLogDone(true);
-          es.close();
-        }
-      } catch { /* ignore malformed frames */ }
-    };
-    es.onerror = () => {
-      // Server closed the stream (or transient blip); stop so the "done" state
-      // governs the UI. EventSource auto-reconnects otherwise.
-      setInstallLogDone(true);
-      es.close();
-    };
-    return () => es.close();
-  }, [installLogInstance]);
-
-  useEffect(() => {
-    if (installLogRef.current) {
-      installLogRef.current.scrollTop = installLogRef.current.scrollHeight;
-    }
-  }, [installLogLines]);
-
-  const closeInstallLog = () => setInstallLogInstance(null);
 
   // ===== Docker Hub "更多版本" pager modal =====
   const DOCKER_PAGE_SIZE = 10;
@@ -142,6 +95,10 @@ export default function VersionList({
       prev && versions.some(v => v.id === prev.id) ? prev : versions[0] ?? null,
     );
   }, [versions]);
+
+  // Installs are serialized per engine, so at most one row is provisioning;
+  // the title-bar install button turns into a "正在安装" trigger for it.
+  const installingVersion = versions.find(v => v.status === 'provisioning') ?? null;
 
   const handleUpdatePort = (v: DBInstance) => {
     if (v.status === 'running') {
@@ -219,30 +176,39 @@ export default function VersionList({
               <>
                 <span style={{ fontWeight: 600 }}>版本 {selectedVersion.version}</span>
                 {statusTag(selectedVersion.status)}
-                {(selectedVersion.status === 'provisioning' || selectedVersion.status === 'failed') ? (
-                  <Button type="primary" ghost icon={<FileTextOutlined />} onClick={() => openInstallLog(selectedVersion)}>
-                    {selectedVersion.status === 'provisioning' ? '查看安装进度' : '查看安装日志'}
-                  </Button>
-                ) : selectedVersion.status === 'running' ? (
+                {selectedVersion.status === 'running' ? (
                   <Button icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
                     onClick={() => onStopVersion(selectedVersion)}>停止</Button>
-                ) : (
+                ) : selectedVersion.status === 'failed' ? (
+                  <Button type="primary" ghost icon={<FileTextOutlined />}
+                    onClick={() => onOpenInstallLog(selectedVersion)}>查看安装日志</Button>
+                ) : selectedVersion.status === 'provisioning' ? null : (
                   <Button type="primary" icon={<PlayCircleOutlined />} loading={operating === `start-${selectedVersion.id}`}
                     onClick={() => onStartVersion(selectedVersion)}>启动</Button>
                 )}
-                <Button icon={<FileTextOutlined />} onClick={() => onShowLogs(selectedVersion)}>日志</Button>
-                <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
-                <Button type="primary" ghost icon={<DatabaseOutlined />}
-                  disabled={selectedVersion.status !== 'running'}
-                  onClick={() => onEnterVersion(selectedVersion)}>进入实例</Button>                <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
-                  onConfirm={() => onUninstallVersion(selectedVersion)}>
-                  <Button danger icon={<UndoOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
-                </Popconfirm>
+                {selectedVersion.status !== 'provisioning' && (
+                  <>
+                    <Button icon={<FileTextOutlined />} onClick={() => onShowLogs(selectedVersion)}>日志</Button>
+                    <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
+                    <Button type="primary" ghost icon={<DatabaseOutlined />}
+                      disabled={selectedVersion.status !== 'running'}
+                      onClick={() => onEnterVersion(selectedVersion)}>进入实例</Button>
+                    <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
+                      onConfirm={() => onUninstallVersion(selectedVersion)}>
+                      <Button danger icon={<UndoOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
+                    </Popconfirm>
+                  </>
+                )}
               </>
             )}
             <Button icon={<ReloadOutlined />} loading={versionsLoading} onClick={onRefreshVersions}>刷新</Button>
-            <Button type="primary" icon={<PlusOutlined />}
-              onClick={() => { installVersionForm.resetFields(); onInstallVersionVisibleChange(true); }}>安装版本</Button>
+            {installingVersion ? (
+              <Button style={{ background: '#fa8c16', borderColor: '#fa8c16', color: '#fff' }}
+                icon={<LoadingOutlined />} onClick={() => onOpenInstallLog(installingVersion)}>正在安装</Button>
+            ) : (
+              <Button type="primary" icon={<PlusOutlined />}
+                onClick={() => { installVersionForm.resetFields(); onInstallVersionVisibleChange(true); }}>安装版本</Button>
+            )}
           </Space>
         </div>
       </Card>
@@ -359,7 +325,9 @@ export default function VersionList({
         )}
       </Modal>
 
-      {/* Install Log Stream Modal — streams the async install's output via SSE */}
+      {/* Install Log Stream Modal — streams the async install's output via SSE.
+          Footer is a follow Switch + close only: the install outcome is already
+          the final log line (✅/❌), no extra status block below needed. */}
       <Modal
         title={
           <Space>
@@ -369,18 +337,15 @@ export default function VersionList({
           </Space>
         }
         open={!!installLogInstance}
-        onCancel={closeInstallLog}
+        onCancel={onCloseInstallLog}
         footer={
-          <Row justify="space-between" align="middle">
-            <Col>
-              {installLogDone
-                ? (installLogError
-                  ? <span style={{ color: '#ff4d4f' }}>安装失败：{installLogError}</span>
-                  : <span style={{ color: '#52c41a' }}>安装完成</span>)
-                : <span style={{ color: '#8c8c8c', fontSize: 12 }}>安装进行中… 刷新页面后可继续查看</span>}
-            </Col>
-            <Col><Button size="small" onClick={closeInstallLog}>关闭</Button></Col>
-          </Row>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space size="small">
+              <Switch checked={installLogFollow} onChange={onInstallLogFollowChange} />
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>自动滚动</span>
+            </Space>
+            <Button size="small" onClick={onCloseInstallLog}>关闭</Button>
+          </Space>
         }
         width="90vw" style={{ maxWidth: 960 }}>
         <div ref={installLogRef} style={{
@@ -389,16 +354,23 @@ export default function VersionList({
           fontSize: 13, lineHeight: 1.8, padding: '8px 0', borderRadius: 6,
           maxHeight: '60vh', overflowY: 'auto', overflowX: 'auto',
         }}>
-          {installLogLines.length === 0 ? (
+          {installLogLines.length === 0 && !installLogError && (
             <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>
               {installLogDone ? '无日志输出' : '等待日志输出…'}
             </div>
-          ) : installLogLines.map((line, i) => (
+          )}
+          {installLogLines.map((line, i) => (
             <div key={i} style={STYLES.logLine}>
               <span style={STYLES.logLineNumber}>{i + 1}</span>
               <span style={STYLES.logLineText}>{line || ' '}</span>
             </div>
           ))}
+          {installLogError && (
+            <div style={STYLES.logLine}>
+              <span style={STYLES.logLineNumber}>{installLogLines.length + 1}</span>
+              <span style={{ ...STYLES.logLineText, color: '#ff4d4f' }}>❌ {installLogError}</span>
+            </div>
+          )}
         </div>
       </Modal>
 

@@ -113,6 +113,18 @@ export interface VersionListProps {
   onLogVisibleChange: (visible: boolean) => void;
   onLogFollowChange: (follow: boolean) => void;
   onShowLogs: (v: DBInstance) => void;
+  // Install log modal (SSE stream — state lives in the parent so install can
+  // auto-open it and the title-bar "正在安装" button can re-open it after
+  // refresh/close)
+  installLogInstance: DBInstance | null;
+  installLogLines: string[];
+  installLogError: string;
+  installLogDone: boolean;
+  installLogFollow: boolean;
+  installLogRef: React.RefObject<HTMLDivElement | null>;
+  onOpenInstallLog: (v: DBInstance) => void;
+  onCloseInstallLog: () => void;
+  onInstallLogFollowChange: (follow: boolean) => void;
   // Status helpers
   statusTag: (status: string) => React.ReactNode;
 }
