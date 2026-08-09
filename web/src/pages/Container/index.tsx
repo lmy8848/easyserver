@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs, Select, Tag, Button, Switch, Space, message, Result } from 'antd';
+import { Tabs, Select, Badge, Button, Switch, Space, message, Result } from 'antd';
 import {
   CodeOutlined, CloudDownloadOutlined,
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
@@ -99,14 +99,15 @@ export default function Container() {
           options={ENGINES.map(r => ({ value: r, label: r === 'podman' ? 'Podman' : 'Docker' }))}
         />
         {status && (
-          <Tag color={ready ? 'green' : 'red'} style={{ marginLeft: 8 }}>
-            {!status.installed ? '未安装' : (ready ? '运行中' : '已停止')}
-          </Tag>
+          <span style={{ marginLeft: 12, display: 'inline-flex', alignItems: 'center', gap: 6, color: '#666' }}>
+            <Badge status={ready ? 'success' : 'error'} />
+            <span>
+              {!status.installed ? '未安装' : (ready ? '运行中' : '已停止')}
+              {status.installed && status.version ? ` · v${status.version}` : ''}
+            </span>
+          </span>
         )}
-        {status?.installed && status.version && (
-          <span style={{ marginLeft: 8, color: '#888', fontSize: 12 }}>v{status.version}</span>
-        )}
-        <Space style={{ marginLeft: 8 }}>
+        <Space style={{ marginLeft: 12 }}>
           {!status?.installed ? (
             <Button icon={<RocketOutlined />} loading={installing} onClick={handleInstall}>安装 {engine}</Button>
           ) : engine === 'docker' && !status.running ? (
