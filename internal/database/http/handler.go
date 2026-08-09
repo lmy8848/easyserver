@@ -27,6 +27,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	// Instance lifecycle, scoped by engine enum.
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
 	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
+	protected.GET("/db/:dbtype/docker-tags", instanceHandler.ListDockerTags)
 	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
 	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
 	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
@@ -116,6 +117,19 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, instances)
+}
+
+func (h *InstanceHandler) ListDockerTags(c *gin.Context) {
+	engine, ok := parseEngine(c)
+	if !ok {
+		return
+	}
+	tags, err := h.svc.ListDockerTags(c.Request.Context(), engine)
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, tags)
 }
 
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {

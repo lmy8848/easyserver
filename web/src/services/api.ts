@@ -540,6 +540,10 @@ export const dbServerApi = {
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; runtime?: string; bind_address?: string }) =>
     api.post<ApiResponse>(`/db/${dbtype}/instances`, data),
 
+  // Published Docker Hub tags for an engine's official image ("更多版本" flow).
+  listDockerTags: (dbtype: string) =>
+    api.get<ApiResponse<string[]>>(`/db/${dbtype}/docker-tags`),
+
   uninstallInstance: (iid: number) =>
     api.delete<ApiResponse>(`/db/instances/${iid}`),
 

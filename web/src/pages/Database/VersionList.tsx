@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import {
-  Card, Button, Space, Tag, Modal, Form, Select, InputNumber,
+  Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input, List,
   message, Popconfirm, Row, Col, Empty, Spin,
 } from 'antd';
 import {
@@ -22,6 +23,30 @@ export default function VersionList({
   onLogVisibleChange, onLogFollowChange, onShowLogs,
   statusColor, statusTag,
 }: VersionListProps) {
+
+  // ===== Docker Hub "更多版本" picker =====
+  const [dockerVisible, setDockerVisible] = useState(false);
+  const [dockerTags, setDockerTags] = useState<string[]>([]);
+  const [dockerLoading, setDockerLoading] = useState(false);
+
+  const openDockerTags = async () => {
+    setDockerVisible(true);
+    setDockerLoading(true);
+    try {
+      const res = await dbServerApi.listDockerTags(server.db_type);
+      setDockerTags(res.data?.data || []);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '查询 Docker Hub 失败');
+      setDockerTags([]);
+    } finally { setDockerLoading(false); }
+  };
+
+  // Picking a published tag fills version + image into the install form; the
+  // image is `${base_image}:${tag}` so the backend never invents image names.
+  const pickDockerTag = (tag: string) => {
+    installVersionForm.setFieldsValue({ version: tag, image: `${server.base_image}:${tag}` });
+    setDockerVisible(false);
+  };
 
   const handleUpdatePort = (v: DBInstance) => {
     if (v.status === 'running') {
@@ -126,8 +151,17 @@ export default function VersionList({
       <Modal title="安装数据库版本" open={installVersionVisible} onCancel={() => onInstallVersionVisibleChange(false)}
         onOk={onInstallVersion} okText="安装" cancelText="取消">
         <Form form={installVersionForm} layout="vertical">
+          {/* image is resolved from the preset catalogue or the Docker Hub
+              picker; hidden because users never type image names. */}
+          <Form.Item name="image" hidden><Input /></Form.Item>
           <Form.Item name="version" label="选择版本" rules={[{ required: true, message: '请选择版本' }]}>
-            <Select placeholder="选择要安装的版本">
+            <Select
+              placeholder="选择要安装的版本"
+              onChange={(v) => {
+                const t = versionTemplates.find(t => t.version === v);
+                installVersionForm.setFieldsValue({ image: t?.image });
+              }}
+            >
               {versionTemplates.map(t => (
                 <Select.Option key={t.version} value={t.version}>
                   <strong>{t.version}</strong><span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{t.description}</span>
@@ -135,6 +169,9 @@ export default function VersionList({
               ))}
             </Select>
           </Form.Item>
+          <Button type="link" size="small" icon={<ReloadOutlined />} style={{ paddingLeft: 0 }} onClick={openDockerTags}>
+            更多版本（查询 Docker Hub）
+          </Button>
           <Form.Item name="port" label="端口（留空使用默认）"
             extra={portCheck && (
               portCheck.available
@@ -145,6 +182,34 @@ export default function VersionList({
               onChange={(val) => val && onCheckPort(val as number)} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Docker Hub tag picker (更多版本) */}
+      <Modal
+        title={`${server.display_name} - 更多版本（Docker Hub）`}
+        open={dockerVisible}
+        onCancel={() => setDockerVisible(false)}
+        footer={null}
+      >
+        {dockerLoading ? (
+          <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+        ) : dockerTags.length === 0 ? (
+          <Empty description="未获取到版本列表" />
+        ) : (
+          <List
+            size="small"
+            bordered
+            dataSource={dockerTags}
+            renderItem={(tag) => (
+              <List.Item onClick={() => pickDockerTag(tag)} style={{ cursor: 'pointer' }}>
+                <Space>
+                  <Tag>{server.base_image}:{tag}</Tag>
+                  <span style={{ color: '#999', fontSize: 12 }}>点击选择此版本</span>
+                </Space>
+              </List.Item>
+            )}
+          />
+        )}
       </Modal>
 
       {/* Service Logs Modal */}

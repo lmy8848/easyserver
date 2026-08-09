@@ -49,6 +49,21 @@ func IsValidDBType(t DBType) bool {
 	return false
 }
 
+// dockerImageBase returns the Docker Hub official image name for an engine. It
+// is the only user-facing knob for the "更多版本" flow — the user picks a tag of
+// this official image; the panel never builds arbitrary image names.
+func dockerImageBase(dbType DBType) string {
+	switch dbType {
+	case DBTypeMySQL:
+		return "mysql"
+	case DBTypePostgreSQL:
+		return "postgres"
+	case DBTypeRedis:
+		return "redis"
+	}
+	return ""
+}
+
 // Database is a logical database inside an instance, queried live from the
 // engine — it is never persisted (the engine owns its databases; the panel only
 // reflects them). Charset is fetched alongside the name in one query.

@@ -181,6 +181,16 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	return v, nil
 }
 
+// ListDockerTags returns the published tags for an engine's official image,
+// proxied from Docker Hub. It powers the front-end "更多版本" flow — users can
+// pick any published tag, not just the curated presets.
+func (s *Service) ListDockerTags(ctx context.Context, dbType DBType) ([]string, error) {
+	if !IsValidDBType(dbType) {
+		return nil, fmt.Errorf("unsupported database type %q", dbType)
+	}
+	return fetchDockerHubTags(dockerImageBase(dbType))
+}
+
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error {
 	if ctx == nil {
 		ctx = context.Background()

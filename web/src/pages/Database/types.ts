@@ -14,34 +14,39 @@ export interface EngineInfo {
   db_type: string;
   display_name: string;
   default_port: number;
+  // base_image is the Docker Hub official image for the engine; a custom tag
+  // picked from "更多版本" is built as `${base_image}:${tag}`.
+  base_image: string;
 }
 
 export interface EngineTab extends EngineInfo {
   templates: VersionTemplate[];
 }
 
-// Fixed per-engine installable versions (the version-template HTTP endpoint was
-// removed; the template catalogue is static). Also drives the top-level Tabs.
+// Curated presets per engine. Versions follow current mainstream releases
+// (researched 2026-08): MySQL 8.4/9.7 LTS (8.0 is EOL), PostgreSQL 16/17/18,
+// Redis 7/8. The "更多版本" flow lists all published Docker Hub tags.
 export const ENGINE_TABS: EngineTab[] = [
   {
-    db_type: 'mysql', display_name: 'MySQL', default_port: 3306,
+    db_type: 'mysql', display_name: 'MySQL', default_port: 3306, base_image: 'mysql',
     templates: [
-      { version: '8.0', image: 'mysql:8.0', description: 'MySQL 8.0' },
       { version: '8.4', image: 'mysql:8.4', description: 'MySQL 8.4 LTS' },
+      { version: '9.7', image: 'mysql:9.7', description: 'MySQL 9.7 LTS' },
     ],
   },
   {
-    db_type: 'postgresql', display_name: 'PostgreSQL', default_port: 5432,
+    db_type: 'postgresql', display_name: 'PostgreSQL', default_port: 5432, base_image: 'postgres',
     templates: [
-      { version: '15', image: 'postgres:15', description: 'PostgreSQL 15' },
+      { version: '18', image: 'postgres:18', description: 'PostgreSQL 18' },
+      { version: '17', image: 'postgres:17', description: 'PostgreSQL 17' },
       { version: '16', image: 'postgres:16', description: 'PostgreSQL 16' },
     ],
   },
   {
-    db_type: 'redis', display_name: 'Redis', default_port: 6379,
+    db_type: 'redis', display_name: 'Redis', default_port: 6379, base_image: 'redis',
     templates: [
+      { version: '8', image: 'redis:8-alpine', description: 'Redis 8' },
       { version: '7', image: 'redis:7-alpine', description: 'Redis 7' },
-      { version: '6', image: 'redis:6-alpine', description: 'Redis 6' },
     ],
   },
 ];
