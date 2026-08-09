@@ -262,18 +262,17 @@ export interface DBBackup {
 
 export interface DBInstance {
   id: number;
-  db_server_id: number;
+  db_type: string;
   version: string;
-  container_name: string;
-  config_file: string;
-  data_dir: string;
   port: number;
-  status: string; // running, stopped
+  status: string; // running, stopped, unhealthy
   created_at: string;
-  pid?: number;
-  memory_bytes?: number;
-  uptime?: string;
-  connections?: number;
+  runtime?: string;
+  image?: string;
+  container_id: string;
+  volume_name?: string;
+  config_dir?: string;
+  bind_address?: string;
 }
 
 export interface Database {
@@ -297,13 +296,6 @@ export interface DBUser {
   host: string;
   privileges: string;
   created_at: string;
-  runtime?: string;
-  image?: string;
-  container_id?: string;
-  volume_name?: string;
-  bind_address?: string;
-  admin_user?: string;
-  health_status?: string;
 }
 
 // Cron task types（systemd timer 承载，name 为唯一标识）

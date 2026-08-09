@@ -54,71 +54,65 @@ func (f *fakeDBRuntime) RemoveVolume(_ context.Context, _, volume string) error 
 
 // fakeRepo is a minimal in-memory Repository for the lifecycle tests.
 type fakeRepo struct {
-	servers   map[int64]*DBServer
 	instances map[int64]*DBInstance
 	nextID    int64
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
-		servers: map[int64]*DBServer{
-			1: {ID: 1, Name: "mysql", DisplayName: "MySQL", DefaultPort: 3306},
-		},
 		instances: map[int64]*DBInstance{},
 		nextID:    100,
 	}
 }
-func (r *fakeRepo) ListServers(context.Context) ([]DBServer, error) { return nil, nil }
-func (r *fakeRepo) GetServer(_ context.Context, id int64) (*DBServer, error) {
-	return r.servers[id], nil
-}
-func (r *fakeRepo) SeedServer(context.Context, string, string, string, int) error { return nil }
-func (r *fakeRepo) ListVersions(context.Context, int64) ([]DBInstance, error) {
+func (r *fakeRepo) ListInstances(context.Context, DBType) ([]DBInstance, error) {
 	var out []DBInstance
 	for _, v := range r.instances {
 		out = append(out, *v)
 	}
 	return out, nil
 }
-func (r *fakeRepo) GetVersion(_ context.Context, id int64) (*DBInstance, error) {
+func (r *fakeRepo) ListAllInstances(context.Context) ([]DBInstance, error) {
+	var out []DBInstance
+	for _, v := range r.instances {
+		out = append(out, *v)
+	}
+	return out, nil
+}
+func (r *fakeRepo) GetInstance(_ context.Context, id int64) (*DBInstance, error) {
 	return r.instances[id], nil
 }
-func (r *fakeRepo) CountVersionsByServerAndVersion(context.Context, int64, string) (int, error) {
+func (r *fakeRepo) CountInstancesByDBTypeAndVersion(context.Context, DBType, string) (int, error) {
 	return 0, nil
 }
-func (r *fakeRepo) CreateVersion(context.Context, int64, string, string, int, string) (int64, error) {
-	return 0, nil
-}
-func (r *fakeRepo) CreateContainerVersion(_ context.Context, v *DBInstance) (int64, error) {
+func (r *fakeRepo) CreateInstance(_ context.Context, v *DBInstance) (int64, error) {
 	r.nextID++
 	v.ID = r.nextID
 	r.instances[v.ID] = v
 	return v.ID, nil
 }
-func (r *fakeRepo) DeleteVersion(_ context.Context, id int64) error {
+func (r *fakeRepo) DeleteInstance(_ context.Context, id int64) error {
 	delete(r.instances, id)
 	return nil
 }
-func (r *fakeRepo) CountDatabasesByVersion(context.Context, int64) (int, error) { return 0, nil }
-func (r *fakeRepo) UpdateVersionStatus(_ context.Context, id int64, status string) error {
+func (r *fakeRepo) CountDatabasesByInstance(context.Context, int64) (int, error) { return 0, nil }
+func (r *fakeRepo) UpdateInstanceStatus(_ context.Context, id int64, status string) error {
 	if v := r.instances[id]; v != nil {
 		v.Status = status
 	}
 	return nil
 }
-func (r *fakeRepo) UpdateVersionPort(_ context.Context, id int64, port int) error {
+func (r *fakeRepo) UpdateInstancePort(_ context.Context, id int64, port int) error {
 	if v := r.instances[id]; v != nil {
 		v.Port = port
 	}
 	return nil
 }
-func (r *fakeRepo) UpdateVersionPassword(_ context.Context, id int64, pw string) error {
+func (r *fakeRepo) UpdateInstancePassword(_ context.Context, id int64, pw string) error {
 	if v := r.instances[id]; v != nil {
 		v.AdminPassword = pw
 	}
 	return nil
 }
-func (r *fakeRepo) UpdateServerStatus(context.Context, int64, string, string) error { return nil }
 
 // database/user/backup operations (unused by the lifecycle tests, but required
 // by the merged Repository interface).
@@ -127,7 +121,7 @@ func (r *fakeRepo) GetDatabase(context.Context, int64, int64) (*Database, error)
 	return nil, nil
 }
 func (r *fakeRepo) GetDatabaseByID(context.Context, int64) (*Database, error) { return nil, nil }
-func (r *fakeRepo) CreateDatabase(context.Context, int64, int64, string, string, string) (int64, error) {
+func (r *fakeRepo) CreateDatabase(context.Context, int64, string, string, string) (int64, error) {
 	return 0, nil
 }
 func (r *fakeRepo) DeleteDatabase(context.Context, int64, int64) error       { return nil }
@@ -142,9 +136,10 @@ func (r *fakeRepo) CreateBackup(context.Context, *DBBackup) (int64, error)      
 func (r *fakeRepo) UpdateBackupStatus(context.Context, int64, string, int64, string) error {
 	return nil
 }
-func (r *fakeRepo) ListBackups(context.Context, int64) ([]DBBackup, error) { return nil, nil }
-func (r *fakeRepo) GetBackup(context.Context, int64) (*DBBackup, error)    { return nil, nil }
-func (r *fakeRepo) DeleteBackup(context.Context, int64) error              { return nil }
+func (r *fakeRepo) ListBackups(context.Context, int64) ([]DBBackup, error)          { return nil, nil }
+func (r *fakeRepo) GetBackup(context.Context, int64) (*DBBackup, error)             { return nil, nil }
+func (r *fakeRepo) DeleteBackup(context.Context, int64) error                       { return nil }
+func (r *fakeRepo) UpdateServerStatus(context.Context, int64, string, string) error { return nil }
 
 func mustKey(t *testing.T) []byte {
 	t.Helper()
@@ -155,12 +150,12 @@ func mustKey(t *testing.T) []byte {
 	return key
 }
 
-func TestInstallVersionHealthy(t *testing.T) {
+func TestCreateInstanceHealthy(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
 
-	v, err := svc.InstallVersion(context.Background(), 1, &CreateDBInstanceRequest{Version: "8.0"})
+	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -170,7 +165,7 @@ func TestInstallVersionHealthy(t *testing.T) {
 	if v.BindAddress != "127.0.0.1" {
 		t.Fatalf("expected loopback bind by default, got %q", v.BindAddress)
 	}
-	if len(rt.createSpecs) != 1 || rt.createSpecs[0].Name != v.ContainerName {
+	if len(rt.createSpecs) != 1 || rt.createSpecs[0].Name != v.ContainerID {
 		t.Fatalf("unexpected create specs: %+v", rt.createSpecs)
 	}
 	if len(rt.removed) != 0 {
@@ -178,14 +173,14 @@ func TestInstallVersionHealthy(t *testing.T) {
 	}
 }
 
-func TestInstallVersionHealthFailRollsBack(t *testing.T) {
+func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 	repo := newFakeRepo()
 	// Container exits before becoming healthy → waitForHealthy fails fast and
-	// InstallVersion must roll back the container.
+	// CreateInstance must roll back the container.
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
 	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
 
-	if _, err := svc.InstallVersion(context.Background(), 1, &CreateDBInstanceRequest{Version: "8.0"}); err == nil {
+	if _, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0"}); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
 	}
 	if len(rt.removed) != 1 {
@@ -198,15 +193,15 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt, string(mustKey(t)))
 
-	v, err := svc.InstallVersion(context.Background(), 1, &CreateDBInstanceRequest{Version: "8.0"})
+	v, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0"})
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	if err := svc.DestroyVersion(context.Background(), v.ID); err != nil {
+	if err := svc.DestroyInstance(context.Background(), v.ID); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
-	if len(rt.removed) != 1 || rt.removed[0] != v.ContainerName {
+	if len(rt.removed) != 1 || rt.removed[0] != v.ContainerID {
 		t.Fatalf("expected container removed, got %v", rt.removed)
 	}
 	if len(rt.removedVol) != 2 || rt.removedVol[0] != v.VolumeName {

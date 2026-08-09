@@ -4,41 +4,35 @@ import (
 	"context"
 )
 
-// Repository defines data access for the whole database domain: engine catalog,
-// container-backed instances, and the logical databases/users/backups inside them.
+// Repository defines data access for the whole database domain: container-backed
+// instances, and the logical databases/users/backups inside them. The database
+// engine is an enum (db_type), never a persisted catalog row.
 type Repository interface {
-	// Engine catalog operations
-	ListServers(ctx context.Context) ([]DBServer, error)
-	GetServer(ctx context.Context, id int64) (*DBServer, error)
-	SeedServer(ctx context.Context, name, displayName, description string, defaultPort int) error
-
 	// Instance operations
-	ListVersions(ctx context.Context, dbServerID int64) ([]DBInstance, error)
-	GetVersion(ctx context.Context, id int64) (*DBInstance, error)
-	CountVersionsByServerAndVersion(ctx context.Context, dbServerID int64, version string) (int, error)
-	CreateVersion(ctx context.Context, dbServerID int64, version, containerName string, port int, status string) (int64, error)
-	CreateContainerVersion(ctx context.Context, v *DBInstance) (int64, error)
-	DeleteVersion(ctx context.Context, id int64) error
-	CountDatabasesByVersion(ctx context.Context, versionID int64) (int, error)
+	ListInstances(ctx context.Context, dbType DBType) ([]DBInstance, error)
+	ListAllInstances(ctx context.Context) ([]DBInstance, error)
+	GetInstance(ctx context.Context, id int64) (*DBInstance, error)
+	CountInstancesByDBTypeAndVersion(ctx context.Context, dbType DBType, version string) (int, error)
+	CreateInstance(ctx context.Context, v *DBInstance) (int64, error)
+	DeleteInstance(ctx context.Context, id int64) error
+	CountDatabasesByInstance(ctx context.Context, instanceID int64) (int, error)
 
 	// Instance status updates
-	UpdateVersionStatus(ctx context.Context, id int64, status string) error
-	UpdateVersionPort(ctx context.Context, id int64, port int) error
-	UpdateVersionPassword(ctx context.Context, id int64, encryptedPassword string) error
-	UpdateServerStatus(ctx context.Context, id int64, status, versionSummary string) error
+	UpdateInstanceStatus(ctx context.Context, id int64, status string) error
+	UpdateInstancePort(ctx context.Context, id int64, port int) error
+	UpdateInstancePassword(ctx context.Context, id int64, encryptedPassword string) error
 
-	// Logical database operations
-	ListDatabases(ctx context.Context, dbServerID int64) ([]Database, error)
-	GetDatabase(ctx context.Context, dbServerID, id int64) (*Database, error)
+	// Logical database operations (instance-scoped)
+	ListDatabases(ctx context.Context, instanceID int64) ([]Database, error)
 	GetDatabaseByID(ctx context.Context, id int64) (*Database, error)
-	CreateDatabase(ctx context.Context, dbServerID, dbVersionID int64, name, charset, description string) (int64, error)
-	DeleteDatabase(ctx context.Context, dbServerID, id int64) error
+	CreateDatabase(ctx context.Context, instanceID int64, name, charset, description string) (int64, error)
+	DeleteDatabase(ctx context.Context, instanceID, id int64) error
 
-	// DB User operations
-	ListDBUsers(ctx context.Context, dbServerID int64) ([]DBUser, error)
-	GetDBUser(ctx context.Context, dbServerID, id int64) (*DBUser, error)
-	CreateDBUser(ctx context.Context, dbServerID int64, username, hashedPassword, host string) (int64, error)
-	DeleteDBUser(ctx context.Context, dbServerID, id int64) error
+	// DB User operations (instance-scoped)
+	ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, error)
+	GetDBUser(ctx context.Context, instanceID, id int64) (*DBUser, error)
+	CreateDBUser(ctx context.Context, instanceID int64, username, hashedPassword, host string) (int64, error)
+	DeleteDBUser(ctx context.Context, instanceID, id int64) error
 	UpdateDBUserPrivileges(ctx context.Context, id int64, privileges string) error
 
 	// Backup operations

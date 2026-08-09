@@ -18,42 +18,41 @@ import (
 
 // RegisterRoutes registers database management routes.
 func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
-	handler := NewDBServerHandler(svc)
-	versionHandler := NewVersionHandler(svc)
+	engineHandler := NewEngineHandler(svc)
+	instanceHandler := NewInstanceHandler(svc)
 	dbHandler := NewDatabaseHandler(svc)
 	userHandler := NewUserHandler(svc)
 	backupHandler := NewBackupHandler(svc)
 	configHandler := NewConfigHandler()
 
-	protected.GET("/db-instances", handler.List)
-	protected.GET("/db-instances/:id", handler.Get)
+	protected.GET("/db-instances", engineHandler.List)
 
-	// Version management
-	protected.GET("/db-instances/:id/versions", versionHandler.ListVersions)
-	protected.POST("/db-instances/:id/versions", versionHandler.InstallVersion)
-	protected.DELETE("/db-instances/versions/:vid", versionHandler.UninstallVersion)
-	protected.DELETE("/db-instances/versions/:vid/data", versionHandler.DestroyVersion)
-	protected.POST("/db-instances/versions/:vid/reset-password", versionHandler.ResetAdminPassword)
-	protected.POST("/db-instances/versions/:vid/start", versionHandler.StartVersion)
-	protected.POST("/db-instances/versions/:vid/stop", versionHandler.StopVersion)
-	protected.POST("/db-instances/versions/:vid/restart", versionHandler.RestartVersion)
-	protected.PUT("/db-instances/versions/:vid/port", versionHandler.UpdateVersionPort)
-	protected.GET("/db-instances/versions/:vid/logs", versionHandler.GetVersionLogs)
-	protected.GET("/db-instances/versions/:vid/config", versionHandler.GetVersionConfig)
-	protected.PUT("/db-instances/versions/:vid/config", versionHandler.SaveVersionConfig)
+	// Instance lifecycle, scoped by engine enum.
+	protected.GET("/db-instances/:engine/instances", instanceHandler.ListInstances)
+	protected.POST("/db-instances/:engine/instances", instanceHandler.CreateInstance)
+	protected.DELETE("/db-instances/instances/:iid", instanceHandler.UninstallInstance)
+	protected.DELETE("/db-instances/instances/:iid/data", instanceHandler.DestroyInstance)
+	protected.POST("/db-instances/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
+	protected.POST("/db-instances/instances/:iid/start", instanceHandler.StartInstance)
+	protected.POST("/db-instances/instances/:iid/stop", instanceHandler.StopInstance)
+	protected.POST("/db-instances/instances/:iid/restart", instanceHandler.RestartInstance)
+	protected.PUT("/db-instances/instances/:iid/port", instanceHandler.UpdateInstancePort)
+	protected.GET("/db-instances/instances/:iid/logs", instanceHandler.GetInstanceLogs)
+	protected.GET("/db-instances/instances/:iid/config", instanceHandler.GetInstanceConfig)
+	protected.PUT("/db-instances/instances/:iid/config", instanceHandler.SaveInstanceConfig)
 
-	// Databases nested
-	protected.GET("/db-instances/:id/databases", dbHandler.ListDatabases)
-	protected.POST("/db-instances/:id/databases", dbHandler.CreateDatabase)
-	protected.DELETE("/db-instances/:id/databases/:did", dbHandler.DeleteDatabase)
+	// Logical databases, scoped by instance.
+	protected.GET("/db-instances/instances/:iid/databases", dbHandler.ListDatabases)
+	protected.POST("/db-instances/instances/:iid/databases", dbHandler.CreateDatabase)
+	protected.DELETE("/db-instances/instances/:iid/databases/:did", dbHandler.DeleteDatabase)
 
-	// DB Users nested
-	protected.GET("/db-instances/:id/users", userHandler.ListDBUsers)
-	protected.POST("/db-instances/:id/users", userHandler.CreateDBUser)
-	protected.DELETE("/db-instances/:id/users/:uid", userHandler.DeleteDBUser)
-	protected.POST("/db-instances/:id/users/:uid/grant", userHandler.GrantPrivileges)
+	// DB Users, scoped by instance.
+	protected.GET("/db-instances/instances/:iid/users", userHandler.ListDBUsers)
+	protected.POST("/db-instances/instances/:iid/users", userHandler.CreateDBUser)
+	protected.DELETE("/db-instances/instances/:iid/users/:uid", userHandler.DeleteDBUser)
+	protected.POST("/db-instances/instances/:iid/users/:uid/grant", userHandler.GrantPrivileges)
 
-	// Database introspection
+	// Database introspection (database id is globally unique)
 	protected.GET("/db-instances/databases/:did/tables", dbHandler.ListTables)
 	protected.GET("/db-instances/databases/:did/describe", dbHandler.DescribeTable)
 	protected.GET("/db-instances/databases/:did/query", dbHandler.QueryTable)
@@ -78,74 +77,69 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db-instances/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
-// DBServerHandler handles top-level DB server endpoints (list, get).
-// Sub-domain endpoints are delegated to focused sub-handlers.
-type DBServerHandler struct {
+// EngineHandler serves the engine list with live aggregate summaries.
+type EngineHandler struct {
 	svc *database.Service
 }
 
-func NewDBServerHandler(svc *database.Service) *DBServerHandler {
-	return &DBServerHandler{svc: svc}
+func NewEngineHandler(svc *database.Service) *EngineHandler {
+	return &EngineHandler{svc: svc}
 }
 
-func (h *DBServerHandler) List(c *gin.Context) {
+func (h *EngineHandler) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	h.svc.RefreshAllStatus(ctx)
-	servers, err := h.svc.List(ctx)
+	summaries, err := h.svc.ListEngines(ctx)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, servers)
+	httpx.Success(c, summaries)
 }
 
-func (h *DBServerHandler) Get(c *gin.Context) {
-	ctx := c.Request.Context()
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
-		return
-	}
-	h.svc.RefreshStatus(ctx, id)
-	server, err := h.svc.Get(ctx, id)
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	if server == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库服务器不存在"))
-		return
-	}
-	httpx.Success(c, server)
-}
-
-// VersionHandler handles DB version management endpoints.
-type VersionHandler struct {
+// InstanceHandler handles instance lifecycle endpoints, scoped by engine enum.
+type InstanceHandler struct {
 	svc *database.Service
 }
 
-func NewVersionHandler(svc *database.Service) *VersionHandler {
-	return &VersionHandler{svc: svc}
+func NewInstanceHandler(svc *database.Service) *InstanceHandler {
+	return &InstanceHandler{svc: svc}
 }
 
-func (h *VersionHandler) ListVersions(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+func parseEngine(c *gin.Context) (database.DBType, bool) {
+	engine := database.DBType(c.Param("engine"))
+	if !database.IsValidDBType(engine) {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库引擎"))
+		return "", false
+	}
+	return engine, true
+}
+
+func parseIID(c *gin.Context) (int64, bool) {
+	iid, err := strconv.ParseInt(c.Param("iid"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+		return 0, false
+	}
+	return iid, true
+}
+
+func (h *InstanceHandler) ListInstances(c *gin.Context) {
+	engine, ok := parseEngine(c)
+	if !ok {
 		return
 	}
-	versions, err := h.svc.ListVersions(c.Request.Context(), id)
+	instances, err := h.svc.ListInstances(c.Request.Context(), engine)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, versions)
+	httpx.Success(c, instances)
 }
 
-func (h *VersionHandler) InstallVersion(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ID"))
+func (h *InstanceHandler) CreateInstance(c *gin.Context) {
+	engine, ok := parseEngine(c)
+	if !ok {
 		return
 	}
 	var req database.CreateDBInstanceRequest
@@ -153,50 +147,47 @@ func (h *VersionHandler) InstallVersion(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	middleware.AuditSummary(c, "安装数据库版本 "+req.Version)
-	version, err := h.svc.InstallVersion(c.Request.Context(), id, &req)
+	middleware.AuditSummary(c, "创建数据库实例 "+req.Version)
+	instance, err := h.svc.CreateInstance(c.Request.Context(), engine, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, version)
+	httpx.Success(c, instance)
 }
 
-func (h *VersionHandler) UninstallVersion(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的版本ID"))
+func (h *InstanceHandler) UninstallInstance(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	middleware.AuditSummary(c, "卸载数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.svc.UninstallVersion(c.Request.Context(), vid); err != nil {
+	middleware.AuditSummary(c, "卸载数据库实例 #"+strconv.FormatInt(iid, 10))
+	if err := h.svc.UninstallInstance(c.Request.Context(), iid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "已卸载"})
 }
 
-func (h *VersionHandler) DestroyVersion(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+func (h *InstanceHandler) DestroyInstance(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	middleware.AuditSummary(c, "销毁数据库实例数据 #"+strconv.FormatInt(vid, 10))
-	if err := h.svc.DestroyVersion(c.Request.Context(), vid); err != nil {
+	middleware.AuditSummary(c, "销毁数据库实例数据 #"+strconv.FormatInt(iid, 10))
+	if err := h.svc.DestroyInstance(c.Request.Context(), iid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "实例与数据卷已销毁"})
 }
 
-func (h *VersionHandler) ResetAdminPassword(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+func (h *InstanceHandler) ResetAdminPassword(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	password, err := h.svc.ResetAdminPassword(c.Request.Context(), vid)
+	password, err := h.svc.ResetAdminPassword(c.Request.Context(), iid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -204,52 +195,48 @@ func (h *VersionHandler) ResetAdminPassword(c *gin.Context) {
 	httpx.Success(c, gin.H{"admin_password": password})
 }
 
-func (h *VersionHandler) StartVersion(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的版本ID"))
+func (h *InstanceHandler) StartInstance(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	middleware.AuditSummary(c, "启动数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.svc.StartVersion(c.Request.Context(), vid); err != nil {
+	middleware.AuditSummary(c, "启动数据库实例 #"+strconv.FormatInt(iid, 10))
+	if err := h.svc.StartInstance(c.Request.Context(), iid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"status": "running"})
 }
 
-func (h *VersionHandler) StopVersion(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的版本ID"))
+func (h *InstanceHandler) StopInstance(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	middleware.AuditSummary(c, "停止数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.svc.StopVersion(c.Request.Context(), vid); err != nil {
+	middleware.AuditSummary(c, "停止数据库实例 #"+strconv.FormatInt(iid, 10))
+	if err := h.svc.StopInstance(c.Request.Context(), iid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"status": "stopped"})
 }
 
-func (h *VersionHandler) RestartVersion(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的版本ID"))
+func (h *InstanceHandler) RestartInstance(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	middleware.AuditSummary(c, "重启数据库版本 #"+strconv.FormatInt(vid, 10))
-	if err := h.svc.RestartVersion(c.Request.Context(), vid); err != nil {
+	middleware.AuditSummary(c, "重启数据库实例 #"+strconv.FormatInt(iid, 10))
+	if err := h.svc.RestartInstance(c.Request.Context(), iid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"status": "running"})
 }
 
-func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的版本ID"))
+func (h *InstanceHandler) UpdateInstancePort(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 
@@ -260,19 +247,19 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	vInfo, err := h.svc.GetVersion(c.Request.Context(), vid)
+	vInfo, err := h.svc.GetInstance(c.Request.Context(), iid)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库版本不存在"))
+		c.Error(apperror.ErrNotFound.WithMessage("数据库实例不存在"))
 		return
 	}
-	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ContainerName+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
+	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ContainerID+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
 
 	if req.Port < 1 || req.Port > 65535 {
 		c.Error(apperror.ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
 		return
 	}
 
-	if err := h.svc.UpdateVersionPort(c.Request.Context(), vid, req.Port); err != nil {
+	if err := h.svc.UpdateInstancePort(c.Request.Context(), iid, req.Port); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -280,14 +267,13 @@ func (h *VersionHandler) UpdateVersionPort(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "端口已更新", "port": req.Port})
 }
 
-func (h *VersionHandler) GetVersionLogs(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的版本ID"))
+func (h *InstanceHandler) GetInstanceLogs(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "200"))
-	logs, err := h.svc.GetVersionServiceLogs(c.Request.Context(), vid, lines)
+	logs, err := h.svc.GetInstanceServiceLogs(c.Request.Context(), iid, lines)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -295,13 +281,12 @@ func (h *VersionHandler) GetVersionLogs(c *gin.Context) {
 	httpx.Success(c, gin.H{"logs": logs})
 }
 
-func (h *VersionHandler) GetVersionConfig(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+func (h *InstanceHandler) GetInstanceConfig(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	content, path, err := h.svc.GetVersionConfig(c.Request.Context(), vid)
+	content, path, err := h.svc.GetInstanceConfig(c.Request.Context(), iid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -309,10 +294,9 @@ func (h *VersionHandler) GetVersionConfig(c *gin.Context) {
 	httpx.Success(c, gin.H{"file_path": path, "content": content})
 }
 
-func (h *VersionHandler) SaveVersionConfig(c *gin.Context) {
-	vid, err := strconv.ParseInt(c.Param("vid"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的实例ID"))
+func (h *InstanceHandler) SaveInstanceConfig(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -322,7 +306,7 @@ func (h *VersionHandler) SaveVersionConfig(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	if err := h.svc.SaveVersionConfig(c.Request.Context(), vid, req.Content); err != nil {
+	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Content); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -343,12 +327,11 @@ func NewDatabaseHandler(svc *database.Service) *DatabaseHandler {
 // --- Database CRUD ---
 
 func (h *DatabaseHandler) ListDatabases(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	dbs, err := h.svc.ListDatabases(c.Request.Context(), sid)
+	dbs, err := h.svc.ListDatabases(c.Request.Context(), iid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -357,9 +340,8 @@ func (h *DatabaseHandler) ListDatabases(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	var req database.CreateDatabaseRequest
@@ -368,7 +350,7 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "创建数据库 "+req.Name)
-	db, err := h.svc.CreateDatabase(c.Request.Context(), sid, &req)
+	db, err := h.svc.CreateDatabase(c.Request.Context(), iid, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -377,9 +359,8 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) {
 }
 
 func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	dbID, err := strconv.ParseInt(c.Param("did"), 10, 64)
@@ -393,7 +374,7 @@ func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "删除数据库 "+dbInfo.Name)
-	if err := h.svc.DeleteDatabase(c.Request.Context(), sid, dbID); err != nil {
+	if err := h.svc.DeleteDatabase(c.Request.Context(), iid, dbID); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -676,12 +657,11 @@ func NewUserHandler(svc *database.Service) *UserHandler {
 }
 
 func (h *UserHandler) ListDBUsers(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
-	users, err := h.svc.ListDBUsers(c.Request.Context(), sid)
+	users, err := h.svc.ListDBUsers(c.Request.Context(), iid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -690,9 +670,8 @@ func (h *UserHandler) ListDBUsers(c *gin.Context) {
 }
 
 func (h *UserHandler) CreateDBUser(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	var req database.CreateDBUserRequest
@@ -701,7 +680,7 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "创建数据库用户 "+req.Username)
-	user, err := h.svc.CreateDBUser(c.Request.Context(), sid, &req)
+	user, err := h.svc.CreateDBUser(c.Request.Context(), iid, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -710,9 +689,8 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) {
 }
 
 func (h *UserHandler) DeleteDBUser(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
@@ -721,7 +699,7 @@ func (h *UserHandler) DeleteDBUser(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "删除数据库用户 "+strconv.FormatInt(uid, 10))
-	if err := h.svc.DeleteDBUser(c.Request.Context(), sid, uid); err != nil {
+	if err := h.svc.DeleteDBUser(c.Request.Context(), iid, uid); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -729,9 +707,8 @@ func (h *UserHandler) DeleteDBUser(c *gin.Context) {
 }
 
 func (h *UserHandler) GrantPrivileges(c *gin.Context) {
-	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的服务器ID"))
+	iid, ok := parseIID(c)
+	if !ok {
 		return
 	}
 	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
@@ -745,7 +722,7 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "授权数据库用户 "+strconv.FormatInt(uid, 10))
-	if err := h.svc.GrantPrivileges(c.Request.Context(), sid, uid, &req); err != nil {
+	if err := h.svc.GrantPrivileges(c.Request.Context(), iid, uid, &req); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -767,7 +744,7 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库ID"))
 		return
 	}
-	// Get database info
+	// Get database info (carries its instance id and engine type)
 	db, err := h.svc.GetDatabaseByID(c.Request.Context(), did)
 	if err != nil {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库不存在"))
@@ -775,14 +752,7 @@ func (h *BackupHandler) CreateBackup(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "创建数据库备份 "+db.Name)
 
-	// Get db server info to determine type
-	server, err := h.svc.Get(c.Request.Context(), db.DBServerID)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库服务器不存在"))
-		return
-	}
-
-	backup, err := h.svc.CreateBackup(c.Request.Context(), db.DBServerID, db.DBInstanceID, did, db.Name, server.Name)
+	backup, err := h.svc.CreateBackup(c.Request.Context(), db.DBInstanceID, did, db.Name, db.DBType)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -860,14 +830,7 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, "恢复数据库备份 "+backup.DatabaseName)
 
-	// Get db server info to determine type
-	server, err := h.svc.Get(c.Request.Context(), backup.DBServerID)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库服务器不存在"))
-		return
-	}
-
-	if err := h.svc.RestoreBackup(c.Request.Context(), bid, server.Name); err != nil {
+	if err := h.svc.RestoreBackup(c.Request.Context(), bid, backup.DBType); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}

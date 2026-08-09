@@ -22,33 +22,23 @@ func TestSQLiteRepositoryUsesDatabaseInstanceSchema(t *testing.T) {
 	}
 	repo := NewSQLiteRepository(db)
 	ctx := context.Background()
-	if err := repo.SeedServer(ctx, "mysql", "MySQL", "", 3306); err != nil {
-		t.Fatal(err)
-	}
-	engines, err := repo.ListServers(ctx)
-	if err != nil || len(engines) != 1 {
-		t.Fatalf("list engines: %v %#v", err, engines)
-	}
-	id, err := repo.CreateContainerVersion(ctx, &DBInstance{
-		DBServerID:    engines[0].ID,
+	id, err := repo.CreateInstance(ctx, &DBInstance{
+		DBType:        DBTypeMySQL,
 		Version:       "8.0",
 		Runtime:       "docker",
 		Image:         "mysql:8.0",
-		ContainerName: "easyserver-db-mysql-8",
-		ContainerID:   "container-id",
+		ContainerID:   "easyserver-db-mysql-8",
 		VolumeName:    "easyserver-db-mysql-8-data",
 		BindAddress:   "127.0.0.1",
 		Port:          3306,
-		AdminUser:     "root",
 		AdminPassword: "ciphertext",
 		Status:        "running",
-		HealthStatus:  "healthy",
 	})
 	if err != nil {
 		t.Fatalf("create instance: %v", err)
 	}
-	instance, err := repo.GetVersion(ctx, id)
-	if err != nil || instance == nil || instance.Runtime != "docker" || instance.HealthStatus != "healthy" {
+	instance, err := repo.GetInstance(ctx, id)
+	if err != nil || instance == nil || instance.Runtime != "docker" || instance.DBType != DBTypeMySQL {
 		t.Fatalf("get instance: %v %#v", err, instance)
 	}
 }

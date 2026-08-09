@@ -1,38 +1,51 @@
 package database
 
-// DBServer is the API representation of a database engine catalog entry.
-type DBServer struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`         // mysql, postgresql, redis
-	DisplayName string `json:"display_name"` // MySQL, PostgreSQL, Redis
+// DBType is the database engine enum.
+type DBType string
+
+const (
+	DBTypeMySQL      DBType = "mysql"
+	DBTypePostgreSQL DBType = "postgresql"
+	DBTypeRedis      DBType = "redis"
+)
+
+// DBEngine is one of the database engine enum entries. It is a static catalog
+// (never persisted): display metadata, the default port and the version/image
+// templates are all code-defined.
+type DBEngine struct {
+	DBType      DBType `json:"db_type"` // mysql, postgresql, redis
+	DisplayName string `json:"display_name"`
 	Description string `json:"description"`
 	DefaultPort int    `json:"default_port"`
-	Status      string `json:"status"`  // not_installed, running, stopped, partial
-	Version     string `json:"version"` // summary of installed versions
-	CreatedAt   string `json:"created_at"`
+}
+
+// EngineSummary is the engine-level aggregate view returned for the instance
+// list page. Status/Version are computed in memory from the instance rows on
+// every read; nothing is persisted at engine level.
+type EngineSummary struct {
+	DBEngine
+	Status  string `json:"status"`  // not_installed, running, stopped, partial
+	Version string `json:"version"` // summary of installed versions
 }
 
 // DBInstance is a container-backed Database Instance — the top-level resource of
-// the database module. Each instance owns one managed container, one named data
-// volume, an instance-level config dir, a fixed image and a fixed runtime.
+// the database module. The container is addressed by ContainerID only; each
+// instance owns one managed container, one named data volume, an instance-level
+// config dir, a fixed image and a fixed runtime.
 type DBInstance struct {
-	ID                 int64  `json:"id"`
-	DBServerID         int64  `json:"db_server_id"`
-	Version            string `json:"version"`        // 5.7, 8.0, 13, 15, etc.
-	ContainerName      string `json:"container_name"` // managed container name
-	Port               int    `json:"port"`
-	Status             string `json:"status"` // running, stopped, unhealthy
-	CreatedAt          string `json:"created_at"`
-	Runtime            string `json:"runtime"`
-	Image              string `json:"image"`
-	ContainerID        string `json:"container_id"`
-	VolumeName         string `json:"volume_name"`
-	ConfigDir          string `json:"config_dir"`
-	BindAddress        string `json:"bind_address"`
-	AdminUser          string `json:"admin_user"`
-	AdminPassword      string `json:"-"`
-	AdminPasswordPlain string `json:"admin_password,omitempty"`
-	HealthStatus       string `json:"health_status"`
+	ID            int64  `json:"id"`
+	DBType        DBType `json:"db_type"` // mysql, postgresql, redis
+	Version       string `json:"version"` // 5.7, 8.0, 13, 15, etc.
+	Port          int    `json:"port"`
+	Status        string `json:"status"` // running, stopped, unhealthy
+	CreatedAt     string `json:"created_at"`
+	Runtime       string `json:"runtime"`
+	Image         string `json:"image"`
+	ContainerID   string `json:"container_id"`
+	VolumeName    string `json:"volume_name"`
+	ConfigDir     string `json:"config_dir"`
+	BindAddress   string `json:"bind_address"`
+	AdminPassword string `json:"-"`
 }
 
 // CreateDBInstanceRequest is the request for installing a new database instance
@@ -51,20 +64,20 @@ type VersionTemplate struct {
 	Description string `json:"description"`
 }
 
-// GetVersionTemplates returns available version templates for a database type
-func GetVersionTemplates(dbName string) []VersionTemplate {
-	switch dbName {
-	case "mysql":
+// GetVersionTemplates returns available version templates for a database engine.
+func GetVersionTemplates(dbType DBType) []VersionTemplate {
+	switch dbType {
+	case DBTypeMySQL:
 		return []VersionTemplate{
 			{Version: "8.0", Image: "mysql:8.0", Description: "MySQL 8.0"},
 			{Version: "8.4", Image: "mysql:8.4", Description: "MySQL 8.4 LTS"},
 		}
-	case "postgresql":
+	case DBTypePostgreSQL:
 		return []VersionTemplate{
 			{Version: "15", Image: "postgres:15", Description: "PostgreSQL 15"},
 			{Version: "16", Image: "postgres:16", Description: "PostgreSQL 16"},
 		}
-	case "redis":
+	case DBTypeRedis:
 		return []VersionTemplate{
 			{Version: "7", Image: "redis:7-alpine", Description: "Redis 7"},
 			{Version: "6", Image: "redis:6-alpine", Description: "Redis 6"},
@@ -73,23 +86,32 @@ func GetVersionTemplates(dbName string) []VersionTemplate {
 	return nil
 }
 
-// PredefinedDBServers returns the default database entries
-func PredefinedDBServers() []DBServer {
-	return []DBServer{
+// IsValidDBType reports whether t is one of the supported engine enums.
+func IsValidDBType(t DBType) bool {
+	switch t {
+	case DBTypeMySQL, DBTypePostgreSQL, DBTypeRedis:
+		return true
+	}
+	return false
+}
+
+// DBEngines returns the static engine catalog.
+func DBEngines() []DBEngine {
+	return []DBEngine{
 		{
-			Name:        "mysql",
+			DBType:      DBTypeMySQL,
 			DisplayName: "MySQL",
 			Description: "最流行的关系型数据库，广泛用于 Web 应用",
 			DefaultPort: 3306,
 		},
 		{
-			Name:        "postgresql",
+			DBType:      DBTypePostgreSQL,
 			DisplayName: "PostgreSQL",
 			Description: "功能强大的开源关系型数据库",
 			DefaultPort: 5432,
 		},
 		{
-			Name:        "redis",
+			DBType:      DBTypeRedis,
 			DisplayName: "Redis",
 			Description: "高性能内存数据库，用于缓存和消息队列",
 			DefaultPort: 6379,
@@ -100,7 +122,7 @@ func PredefinedDBServers() []DBServer {
 // Database represents a logical database inside an instance.
 type Database struct {
 	ID           int64  `json:"id"`
-	DBServerID   int64  `json:"db_server_id"`
+	DBType       DBType `json:"db_type"`
 	DBInstanceID int64  `json:"db_version_id"`
 	Name         string `json:"name"`
 	Charset      string `json:"charset"`
@@ -115,7 +137,7 @@ type Database struct {
 // DBUser represents a database user (shared across instances).
 type DBUser struct {
 	ID         int64  `json:"id"`
-	DBServerID int64  `json:"db_server_id"`
+	DBType     DBType `json:"db_type"`
 	Username   string `json:"username"`
 	Password   string `json:"password,omitempty"`
 	Host       string `json:"host"`
@@ -126,7 +148,7 @@ type DBUser struct {
 // DBBackup represents a database backup record.
 type DBBackup struct {
 	ID           int64  `json:"id"`
-	DBServerID   int64  `json:"db_server_id"`
+	DBType       DBType `json:"db_type"`
 	DBInstanceID int64  `json:"db_version_id"`
 	DatabaseID   int64  `json:"database_id"`
 	DatabaseName string `json:"database_name"`
@@ -159,15 +181,6 @@ type GrantRequest struct {
 	Database     string `json:"database" binding:"required"`
 	Privileges   string `json:"privileges" binding:"required"`
 }
-
-// DBType represents the database engine type.
-type DBType string
-
-const (
-	DBTypeMySQL      DBType = "mysql"
-	DBTypePostgreSQL DBType = "postgresql"
-	DBTypeRedis      DBType = "redis"
-)
 
 // ColumnInfo represents a column's metadata.
 type ColumnInfo struct {
