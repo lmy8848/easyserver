@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input, List,
-  message, Popconfirm, Row, Col, Empty, Spin, Pagination,
+  message, Popconfirm, Row, Col, Empty, Spin, Pagination, Table,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   PlayCircleOutlined, StopOutlined,
   FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, ReloadOutlined, DatabaseOutlined,
@@ -33,7 +34,7 @@ export default function VersionList({
   portCheck, onCheckPort,
   logVisible, logVersion, logContent, logLoading, logFollow, logRef,
   onLogVisibleChange, onLogFollowChange, onShowLogs,
-  statusColor, statusTag,
+  statusTag,
 }: VersionListProps) {
 
   // ===== Docker Hub "更多版本" pager modal =====
@@ -77,6 +78,21 @@ export default function VersionList({
     setDockerVisible(false);
   };
 
+  // ===== Selected instance (drives the info table + header actions) =====
+  const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
+
+  // Instances load async; auto-select the first when the list arrives or the
+  // previously selected one disappears.
+  useEffect(() => {
+    if (versions.length === 0) {
+      setSelectedVersion(null);
+      return;
+    }
+    setSelectedVersion(prev =>
+      prev && versions.some(v => v.id === prev.id) ? prev : versions[0] ?? null,
+    );
+  }, [versions]);
+
   const handleUpdatePort = (v: DBInstance) => {
     if (v.status === 'running') {
       message.warning('请先停止服务再修改端口');
@@ -107,79 +123,91 @@ export default function VersionList({
     });
   };
 
+  // ===== Instance info table (one row per field of the selected instance) =====
+  const infoColumns: ColumnsType<{ key: string; label: string; value: React.ReactNode }> = [
+    { title: '属性', dataIndex: 'label', width: 140 },
+    { title: '值', dataIndex: 'value' },
+  ];
+  const infoRows: Array<{ key: string; label: string; value: React.ReactNode }> = selectedVersion ? [
+    { key: 'version', label: '版本', value: <strong>{selectedVersion.version}</strong> },
+    { key: 'status', label: '状态', value: statusTag(selectedVersion.status) },
+    { key: 'port', label: '端口', value: selectedVersion.port },
+    { key: 'container_engine', label: '容器引擎', value: selectedVersion.container_engine },
+    { key: 'image', label: '镜像', value: <Tag>{selectedVersion.image}</Tag> },
+    { key: 'container_id', label: '容器ID', value: <Tag>{selectedVersion.container_id}</Tag> },
+    { key: 'volume_name', label: '数据卷', value: selectedVersion.volume_name },
+    { key: 'bind_address', label: '监听地址', value: selectedVersion.bind_address },
+    { key: 'created_at', label: '创建时间', value: selectedVersion.created_at },
+  ] : [];
+
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
-        <Space align="center">
-          {(() => {
-            const brand = ENGINE_BRAND[server.db_type];
-            const Icon = brand?.Icon;
-            return Icon
-              ? <Icon size={34} color={brand.color} style={{ display: 'flex' }} />
-              : <DatabaseOutlined style={{ fontSize: 30, color: '#1677ff' }} />;
-          })()}
-          <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
-        </Space>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <Space align="center">
+            {(() => {
+              const brand = ENGINE_BRAND[server.db_type];
+              const Icon = brand?.Icon;
+              return Icon
+                ? <Icon size={34} color={brand.color} style={{ display: 'flex' }} />
+                : <DatabaseOutlined style={{ fontSize: 30, color: '#1677ff' }} />;
+            })()}
+            <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
+          </Space>
+
+          {/* Right side: version picker + the selected version's info / status /
+              start-stop / uninstall, plus refresh & install */}
+          <Space wrap size="middle" align="center">
+            <Select
+              style={{ minWidth: 130 }}
+              placeholder="选择版本"
+              value={selectedVersion?.version}
+              onChange={(ver) => setSelectedVersion(versions.find(v => v.version === ver) || null)}
+              options={versions.map(v => ({ value: v.version, label: v.version }))}
+            />
+            {selectedVersion && (
+              <>
+                <span style={{ fontWeight: 600 }}>版本 {selectedVersion.version}</span>
+                {statusTag(selectedVersion.status)}
+                {selectedVersion.status === 'running' ? (
+                  <Button icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
+                    onClick={() => onStopVersion(selectedVersion)}>停止</Button>
+                ) : (
+                  <Button type="primary" icon={<PlayCircleOutlined />} loading={operating === `start-${selectedVersion.id}`}
+                    onClick={() => onStartVersion(selectedVersion)}>启动</Button>
+                )}
+                <Button icon={<FileTextOutlined />} onClick={() => onShowLogs(selectedVersion)}>日志</Button>
+                <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
+                <Button type="primary" ghost icon={<DatabaseOutlined />}
+                  disabled={selectedVersion.status !== 'running'}
+                  onClick={() => onEnterVersion(selectedVersion)}>进入实例</Button>
+                <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
+                  onConfirm={() => onUninstallVersion(selectedVersion)}>
+                  <Button danger icon={<UndoOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
+                </Popconfirm>
+              </>
+            )}
+            <Button icon={<ReloadOutlined />} loading={versionsLoading} onClick={onRefreshVersions}>刷新</Button>
+            <Button type="primary" icon={<PlusOutlined />}
+              onClick={() => { installVersionForm.resetFields(); onInstallVersionVisibleChange(true); }}>安装版本</Button>
+          </Space>
+        </div>
       </Card>
 
-      <Card title="已安装版本" extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} loading={versionsLoading} onClick={onRefreshVersions}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { installVersionForm.resetFields(); onInstallVersionVisibleChange(true); }}>安装版本</Button>
-        </Space>
-      }>
-        <Row gutter={[16, 16]}>
-          {versions.length === 0 && !versionsLoading && <Col span={24}><Empty description="暂未安装任何版本" /></Col>}
-          {versions.map(v => (
-            <Col xs={24} sm={12} lg={8} key={v.id} style={{ display: 'flex' }}>
-              <Card
-                hoverable
-                onClick={() => v.status === 'running' && onEnterVersion(v)}
-                style={{
-                  borderColor: statusColor(v.status),
-                  opacity: v.status !== 'running' ? 0.7 : 1,
-                  width: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-                styles={{
-                  body: {
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                  },
-                }}
-              >
-                <div>
-                  <Card.Meta
-                    title={<Space wrap>{server.display_name} {v.version}{statusTag(v.status)}</Space>}
-                    description={
-                      <div>
-                        <p style={{ margin: '4px 0' }}>端口: <strong>{v.port}</strong></p>
-                        <p style={{ margin: '4px 0' }}>服务: <Tag>{v.container_id}</Tag></p>
-                      </div>
-                    }
-                  />
-                </div>
-                <div style={{ ...STYLES.cardActions, marginTop: 'auto' }}>
-                  {v.status === 'running' ? (
-                    <Button size="small" danger icon={<StopOutlined />} loading={operating === `stop-${v.id}`}
-                      onClick={(e) => { e.stopPropagation(); onStopVersion(v); }}>停止</Button>
-                  ) : (
-                    <Button size="small" type="primary" icon={<PlayCircleOutlined />} loading={operating === `start-${v.id}`}
-                      onClick={(e) => { e.stopPropagation(); onStartVersion(v); }}>启动</Button>
-                  )}
-                  <Button size="small" icon={<FileTextOutlined />} onClick={(e) => { e.stopPropagation(); onShowLogs(v); }}>日志</Button>
-                  <Button size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleUpdatePort(v); }}>修改端口</Button>
-                  <Popconfirm title="确定卸载？" onConfirm={(e) => { e?.stopPropagation(); onUninstallVersion(v); }}>
-                    <Button size="small" danger icon={<UndoOutlined />} loading={operating === `uninstall-${v.id}`} onClick={(e) => e.stopPropagation()}>卸载</Button>
-                  </Popconfirm>
-                </div>
-              </Card>
-            </Col>
-          ))}
-        </Row>
+      <Card title="实例信息" size="small">
+        <Table
+          rowKey="key"
+          columns={infoColumns}
+          dataSource={infoRows}
+          pagination={false}
+          showHeader={false}
+          loading={versionsLoading}
+          locale={{ emptyText: (
+            <Empty
+              description={versions.length === 0 ? '暂未安装任何版本' : '请选择版本查看实例信息'}
+            />
+          ) }}
+        />
       </Card>
 
       {/* Install Version Modal */}

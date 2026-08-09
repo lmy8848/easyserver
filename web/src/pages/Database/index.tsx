@@ -585,14 +585,6 @@ export default function DatabasePage() {
   };
 
   // ===== Status helpers (shared) =====
-  const statusColor = (status: string) => {
-    const colorName = getServiceStatusColor(status);
-    const colorMap: Record<string, string> = {
-      success: '#52c41a', error: '#ff4d4f', warning: '#faad14', default: '#999',
-    };
-    return colorMap[colorName] || '#999';
-  };
-
   const statusTag = (status: string) => {
     const labels: Record<string, string> = {
       running: '运行中', stopped: '已停止', partial: '部分运行', not_installed: '未安装',
@@ -738,7 +730,6 @@ export default function DatabasePage() {
         onLogVisibleChange={setLogVisible}
         onLogFollowChange={setLogFollow}
         onShowLogs={showLogs}
-        statusColor={statusColor}
         statusTag={statusTag}
       />
     );

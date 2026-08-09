@@ -113,7 +113,6 @@ export interface VersionListProps {
   onLogFollowChange: (follow: boolean) => void;
   onShowLogs: (v: DBInstance) => void;
   // Status helpers
-  statusColor: (status: string) => string;
   statusTag: (status: string) => React.ReactNode;
 }
 
