@@ -212,7 +212,7 @@ export default function VersionList({
       </Card>
 
       {/* Install Version Modal */}
-      <Modal title="安装数据库版本" open={installVersionVisible} onCancel={() => onInstallVersionVisibleChange(false)}
+      <Modal title={`安装${server.display_name}`} open={installVersionVisible} onCancel={() => onInstallVersionVisibleChange(false)}
         onOk={onInstallVersion} okText="安装" cancelText="取消">
         <Form form={installVersionForm} layout="vertical">
           {/* image is resolved from the preset catalogue or the Docker Hub
