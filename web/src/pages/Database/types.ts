@@ -128,7 +128,9 @@ export interface InstanceHeaderProps {
 // 按钮在 tab 栏右侧（tabBarExtraContent），不在内容区。
 export interface DatabasesTabProps {
   server: EngineInfo;
-  version: DBInstance;
+  // null while the engine has no installed version — the tab still renders and
+  // its table shows the built-in empty state; create-db is hidden in that case.
+  version: DBInstance | null;
   databases: Database[];
   dbsLoading: boolean;
   busy: string;
@@ -143,15 +145,14 @@ export interface DatabasesTabProps {
   tableExplorer: TableExplorerProps | null;
 }
 
-// 用户 tab — 用户列表 + 创建用户/授权弹窗
+// 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
+// （tabBarExtraContent，见 index.tsx），不在内容区。
 export interface UsersTabProps {
   server: EngineInfo;
-  version: DBInstance;
   dbUsers: DBUser[];
   usersLoading: boolean;
   busy: string;
   databases: Database[];
-  onRefreshUsers: () => void;
   onDeleteUser: (user: DBUser) => void;
   // Create User modal
   userModalVisible: boolean;

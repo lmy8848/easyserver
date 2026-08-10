@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty } from 'antd';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Space } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
@@ -253,13 +253,18 @@ export default function DatabasePage() {
   };
 
   // ===== Navigation handlers =====
-  // ===== Navigation handlers =====
-  // Switching engine Tab resets to the instance list and reloads it.
+  // Switching engine Tab clears all instance-scoped state and reloads. versions
+  // is reset to [] (not just left stale) so the header Select empties at once
+  // instead of briefly showing the previous engine's instance.
   const changeEngine = (dbtype: string) => {
     setActiveDbType(dbtype);
     setSelectedVersion(null);
     setSelectedDatabase(null);
+    setVersions([]);
     setDatabases([]); setDBUsers([]);
+    setDBConfig(null);
+    setSelectedTable(''); setTableData(null); setSqlResult(null); setBackups([]);
+    setDetailTab('databases');
     fetchInstances(dbtype);
     fetchActiveInstalls();
   };
@@ -690,6 +695,27 @@ export default function DatabasePage() {
       onDeleteBackup: handleDeleteBackup,
     } : null;
 
+    // Action buttons live in the inner tab bar's extra area — they follow the
+    // active detail tab (数据库/用户) and are hidden until a version is selected
+    // (there is no instance to act on otherwise).
+    const tabExtra = !selectedVersion ? null : detailTab === 'databases' ? (
+      <Space style={{ marginRight: 8 }}>
+        <Button icon={<ReloadOutlined />} loading={dbsLoading}
+          onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
+        <Button type="primary" icon={<PlusOutlined />}
+          onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
+          disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
+      </Space>
+    ) : detailTab === 'users' ? (
+      <Space style={{ marginRight: 8 }}>
+        <Button icon={<ReloadOutlined />} loading={usersLoading}
+          onClick={() => fetchUsers(selectedVersion.id)}>刷新</Button>
+        <Button type="primary" icon={<PlusOutlined />}
+          onClick={() => { userForm.resetFields(); setUserModalVisible(true); }}
+          disabled={selectedVersion.status !== 'running'}>创建用户</Button>
+      </Space>
+    ) : null;
+
     return (
       <div>
         <InstanceHeader
@@ -723,21 +749,15 @@ export default function DatabasePage() {
           onInstallLogFollowChange={setInstallLogFollow}
           statusTag={statusTag}
         />
-        {selectedVersion && (
-          <Card>
-            <Tabs
-              activeKey={detailTab}
-              onChange={setDetailTab}
-              tabBarExtraContent={detailTab === 'databases' && (
-                <Space style={{ marginRight: 8 }}>
-                  <Button icon={<ReloadOutlined />} loading={dbsLoading}
-                    onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
-                  <Button type="primary" icon={<PlusOutlined />}
-                    onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
-                    disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
-                </Space>
-              )}
-              items={[
+        {/* The detail tabs always render — with no installed version the tables
+            just show their built-in empty state (暂无数据库 / 暂无用户), and the
+            header auto-selects the first instance once one appears. */}
+        <Card>
+          <Tabs
+            activeKey={detailTab}
+            onChange={setDetailTab}
+            tabBarExtraContent={tabExtra}
+            items={[
               {
                 key: 'databases',
                 label: <span><DatabaseOutlined /> 数据库</span>,
@@ -761,12 +781,10 @@ export default function DatabasePage() {
                 label: <span><UserOutlined /> 用户</span>,
                 children: <UsersTab
                   server={activeEngine}
-                  version={selectedVersion}
                   dbUsers={dbUsers}
                   usersLoading={usersLoading}
                   busy={busy}
                   databases={databases}
-                  onRefreshUsers={() => fetchUsers(selectedVersion.id)}
                   onDeleteUser={handleDeleteUser}
                   userModalVisible={userModalVisible}
                   onUserModalVisibleChange={setUserModalVisible}
@@ -795,20 +813,6 @@ export default function DatabasePage() {
               },
             ]} />
           </Card>
-        )}
-        {!selectedVersion && (
-          <Card>
-            <Empty
-              description={
-                <span>
-                  暂未安装任何版本
-                  <br />
-                  <span style={{ color: '#999', fontSize: 13 }}>在右上角版本选择中选择「＋ 安装版本」开始安装</span>
-                </span>
-              }
-            />
-          </Card>
-        )}
       </div>
     );
   };

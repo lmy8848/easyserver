@@ -44,7 +44,7 @@ export default function DatabasesTab({
       <Modal title="创建数据库" open={dbModalVisible} onCancel={() => onDbModalVisibleChange(false)}
         onOk={onCreateDB} okText="创建" cancelText="取消" confirmLoading={busy === 'create-db'}>
         <Form form={dbForm} layout="vertical">
-          <Form.Item label="版本"><Input value={`${server.display_name} ${version.version}`} disabled /></Form.Item>
+          <Form.Item label="版本"><Input value={`${server.display_name} ${version?.version || ''}`} disabled /></Form.Item>
           <Form.Item name="name" label="数据库名" rules={[{ required: true }]}><Input placeholder="如：my_app" /></Form.Item>
           <Form.Item name="charset" label="字符集" initialValue="utf8mb4">
             <Select><Select.Option value="utf8mb4">utf8mb4</Select.Option><Select.Option value="utf8">utf8</Select.Option></Select>

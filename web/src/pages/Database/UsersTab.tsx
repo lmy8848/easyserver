@@ -2,14 +2,15 @@ import {
   Button, Space, Modal, Form, Input, Select, Table, Empty, Popconfirm,
 } from 'antd';
 import {
-  PlusOutlined, DeleteOutlined, ReloadOutlined, KeyOutlined,
+  DeleteOutlined, KeyOutlined,
 } from '@ant-design/icons';
 import type { UsersTabProps, DBUser } from './types';
 
-// 用户 tab — 用户列表 + 创建用户/授权弹窗，随 tab 走。
+// 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
+// （tabBarExtraContent，见 index.tsx），不在本文件。
 export default function UsersTab({
-  version, dbUsers, usersLoading, busy, databases,
-  onRefreshUsers, onDeleteUser,
+  dbUsers, usersLoading, busy, databases,
+  onDeleteUser,
   userModalVisible, onUserModalVisibleChange, userForm, onCreateUser,
   grantVisible, grantUser, grantForm, onGrantVisibleChange, onGrant, onOpenGrant,
 }: UsersTabProps) {
@@ -32,12 +33,6 @@ export default function UsersTab({
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button icon={<ReloadOutlined />} loading={usersLoading} onClick={onRefreshUsers}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { userForm.resetFields(); onUserModalVisibleChange(true); }}
-          disabled={version.status !== 'running'}>创建用户</Button>
-      </div>
       <Table columns={userColumns} dataSource={dbUsers} rowKey={(r: DBUser) => `${r.username}@${r.host}`} loading={usersLoading} size="small"
         locale={{ emptyText: <Empty description="暂无用户" /> }} />
 
