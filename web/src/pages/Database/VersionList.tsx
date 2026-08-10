@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Select, InputNumber, Input, List,
-  message, Popconfirm, Row, Col, Empty, Spin, Pagination, Table, Switch,
+  message, Popconfirm, Empty, Spin, Pagination, Table, Switch,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
-  PlayCircleOutlined, StopOutlined,
-  FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, ReloadOutlined, DatabaseOutlined, LoadingOutlined,
+  PlayCircleOutlined, StopOutlined, ReloadOutlined,
+  FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, DatabaseOutlined, LoadingOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
@@ -27,8 +27,8 @@ const MORE_VERSIONS = '__more_versions__';
 
 export default function VersionList({
   server, versions, versionsLoading, operating,
-  onEnterVersion, onRefreshVersions,
-  onStartVersion, onStopVersion, onUninstallVersion,
+  onSelectVersion, onRefreshVersions,
+  onStartVersion, onStopVersion, onRestartVersion, onUninstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, busy, onInstallVersion,
   portCheck, onCheckPort,
@@ -81,20 +81,36 @@ export default function VersionList({
     setDockerVisible(false);
   };
 
-  // ===== Selected instance (drives the info table + header actions) =====
+  // ===== Selected instance (drives the header actions) =====
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
 
   // Instances load async; auto-select the first when the list arrives or the
-  // previously selected one disappears.
+  // previously selected one disappears. Always take the fresh object from the
+  // incoming list (not `prev`) — status tags/buttons must reflect the latest
+  // status (running/stopped) after a start/stop refresh.
   useEffect(() => {
     if (versions.length === 0) {
       setSelectedVersion(null);
       return;
     }
-    setSelectedVersion(prev =>
-      prev && versions.some(v => v.id === prev.id) ? prev : versions[0] ?? null,
-    );
+    setSelectedVersion(prev => {
+      const fresh = prev ? versions.find(v => v.id === prev.id) : undefined;
+      return fresh ?? versions[0] ?? null;
+    });
   }, [versions]);
+
+  // Sync the local selection to the parent so the instance detail (databases /
+  // users / config, rendered below by DatabaseList) follows the selected
+  // version — and refresh it whenever the instance's status changes.
+  const lastNotifiedKey = useRef<string>('');
+  useEffect(() => {
+    if (!selectedVersion) return;
+    const key = `${selectedVersion.id}:${selectedVersion.status}`;
+    if (key !== lastNotifiedKey.current) {
+      lastNotifiedKey.current = key;
+      onSelectVersion(selectedVersion);
+    }
+  }, [selectedVersion, onSelectVersion]);
 
   // Installs are serialized per engine, so at most one is active for this tab;
   // the title-bar install button turns into a "正在安装" trigger for it. During
@@ -138,7 +154,8 @@ export default function VersionList({
     });
   };
 
-  // ===== Instance info table (one row per field of the selected instance) =====
+  // ===== Instance info modal (one row per field of the selected instance) =====
+  const [infoVisible, setInfoVisible] = useState(false);
   const infoColumns: ColumnsType<{ key: string; label: string; value: React.ReactNode }> = [
     { title: '属性', dataIndex: 'label', width: 140 },
     { title: '值', dataIndex: 'value' },
@@ -170,8 +187,8 @@ export default function VersionList({
             <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name}</span>
           </Space>
 
-          {/* Right side: version picker + the selected version's info / status /
-              start-stop / uninstall, plus refresh & install */}
+          {/* Right side: version picker + the selected version's status /
+              start-stop / logs / info, plus refresh & install */}
           <Space wrap size="middle" align="center">
             <Select
               style={{ minWidth: 130 }}
@@ -185,8 +202,12 @@ export default function VersionList({
                 <span style={{ fontWeight: 600 }}>版本 {selectedVersion.version}</span>
                 {statusTag(selectedVersion.status)}
                 {selectedVersion.status === 'running' ? (
-                  <Button icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
-                    onClick={() => onStopVersion(selectedVersion)}>停止</Button>
+                  <>
+                    <Button icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
+                      onClick={() => onStopVersion(selectedVersion)}>停止</Button>
+                    <Button icon={<ReloadOutlined />} loading={operating === `restart-${selectedVersion.id}`}
+                      onClick={() => onRestartVersion(selectedVersion)}>重启</Button>
+                  </>
                 ) : selectedVersion.status === 'provisioning' ? (
                   <Button type="primary" ghost icon={<FileTextOutlined />}
                     onClick={() => onOpenInstallLog({ id: selectedVersion.container_id, version: selectedVersion.version })}>查看安装进度</Button>
@@ -201,9 +222,7 @@ export default function VersionList({
                   <>
                     <Button icon={<FileTextOutlined />} onClick={() => onShowLogs(selectedVersion)}>日志</Button>
                     <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
-                    <Button type="primary" ghost icon={<DatabaseOutlined />}
-                      disabled={selectedVersion.status !== 'running'}
-                      onClick={() => onEnterVersion(selectedVersion)}>进入实例</Button>
+                    <Button icon={<InfoCircleOutlined />} onClick={() => setInfoVisible(true)}>实例信息</Button>
                     <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
                       onConfirm={() => onUninstallVersion(selectedVersion)}>
                       <Button danger icon={<UndoOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
@@ -224,7 +243,13 @@ export default function VersionList({
         </div>
       </Card>
 
-      <Card title="实例信息" size="small">
+      {/* Instance Info Modal */}
+      <Modal
+        title={`${server.display_name} ${selectedVersion?.version || ''} - 实例信息`}
+        open={infoVisible}
+        onCancel={() => setInfoVisible(false)}
+        footer={<Button size="small" onClick={() => setInfoVisible(false)}>关闭</Button>}
+      >
         <Table
           rowKey="key"
           columns={infoColumns}
@@ -232,13 +257,9 @@ export default function VersionList({
           pagination={false}
           showHeader={false}
           loading={versionsLoading}
-          locale={{ emptyText: (
-            <Empty
-              description={versions.length === 0 ? '暂未安装任何版本' : '请选择版本查看实例信息'}
-            />
-          ) }}
+          locale={{ emptyText: <Empty description="暂无实例信息" /> }}
         />
-      </Card>
+      </Modal>
 
       {/* Install Version Modal */}
       <Modal title={`安装${server.display_name}`} open={installVersionVisible} onCancel={() => onInstallVersionVisibleChange(false)}
@@ -390,16 +411,14 @@ export default function VersionList({
         title={<Space><FileTextOutlined /><span>{server.display_name} {logVersion?.version} - 服务日志</span>{logLoading && <Spin size="small" />}</Space>}
         open={logVisible} onCancel={() => onLogVisibleChange(false)}
         footer={
-          <Row justify="space-between" align="middle">
-            <Col><Space size="middle">
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space size="small">
+              <Switch checked={logFollow} onChange={onLogFollowChange} />
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>自动滚动</span>
               <span style={{ color: '#8c8c8c', fontSize: 12 }}>每 5 秒自动刷新</span>
-              <span style={{ color: logFollow ? '#52c41a' : '#8c8c8c', fontSize: 12 }}>{logFollow ? '● 自动滚动' : '○ 已暂停'}</span>
-            </Space></Col>
-            <Col><Space size="small">
-              <Button size="small" type={logFollow ? 'primary' : 'default'} onClick={() => onLogFollowChange(!logFollow)}>{logFollow ? 'Follow ON' : 'Follow OFF'}</Button>
-              <Button size="small" onClick={() => onLogVisibleChange(false)}>关闭</Button>
-            </Space></Col>
-          </Row>
+            </Space>
+            <Button size="small" onClick={() => onLogVisibleChange(false)}>关闭</Button>
+          </Space>
         }
         width="90vw" style={{ maxWidth: 960 }}>
         <div ref={logRef} style={{

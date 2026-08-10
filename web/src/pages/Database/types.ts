@@ -89,7 +89,9 @@ export interface VersionListProps {
   versionsLoading: boolean;
   operating: string;
   busy: string;
-  onEnterVersion: (version: DBInstance) => void;
+  // Called when the selected version changes (or its status refreshes) — the
+  // parent loads that instance's databases/users and renders the detail below.
+  onSelectVersion: (version: DBInstance) => void;
   onRefreshVersions: () => void;
   onStartVersion: (v: DBInstance) => void;
   onStopVersion: (v: DBInstance) => void;
@@ -130,7 +132,9 @@ export interface VersionListProps {
   statusTag: (status: string) => React.ReactNode;
 }
 
-// DatabaseList props
+// DatabaseList props — instance detail (databases / users / config), rendered
+// directly under the VersionList header card. Lifecycle/log actions live in the
+// parent (VersionList).
 export interface DatabaseListProps {
   server: EngineInfo;
   version: DBInstance;
@@ -138,17 +142,12 @@ export interface DatabaseListProps {
   dbsLoading: boolean;
   dbUsers: DBUser[];
   usersLoading: boolean;
-  operating: string;
   busy: string;
-  onBack: () => void;
   onEnterDatabase: (db: Database) => void;
   onRefreshDatabases: () => void;
   onRefreshUsers: () => void;
   onDeleteDB: (dbName: string) => void;
   onDeleteUser: (user: DBUser) => void;
-  onStartVersion: (v: DBInstance) => void;
-  onStopVersion: (v: DBInstance) => void;
-  onRestartVersion: (v: DBInstance) => void;
   // Create DB modal
   dbModalVisible: boolean;
   onDbModalVisibleChange: (visible: boolean) => void;
@@ -172,17 +171,6 @@ export interface DatabaseListProps {
   onFetchDBConfig: () => void;
   onSaveDBConfig: () => void;
   onUpdateDBParam: (section: string, key: string, value: string) => void;
-  // Log modal
-  logVisible: boolean;
-  logVersion: DBInstance | null;
-  logContent: string;
-  logLoading: boolean;
-  logFollow: boolean;
-  logRef: React.RefObject<HTMLDivElement | null>;
-  onLogVisibleChange: (visible: boolean) => void;
-  onLogFollowChange: (follow: boolean) => void;
-  showConfig: (v: DBInstance) => void;
-  showLogs: (v: DBInstance) => void;
 }
 
 // TableExplorer props

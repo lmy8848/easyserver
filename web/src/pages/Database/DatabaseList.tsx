@@ -1,39 +1,24 @@
 import {
   Card, Button, Space, Tag, Modal, Form, Input, Select, InputNumber,
-  Popconfirm, Row, Col, Table, Tabs, Empty, Spin,
+  Popconfirm, Table, Tabs, Empty,
 } from 'antd';
 import {
   DatabaseOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined,
-  StopOutlined, PlayCircleOutlined,
-  FileTextOutlined, UserOutlined, KeyOutlined,
-  CodeOutlined, ArrowLeftOutlined, TableOutlined,
+  UserOutlined, KeyOutlined, CodeOutlined, TableOutlined,
 } from '@ant-design/icons';
-import STYLES from './styles';
 import type { DatabaseListProps, Database as DBType, DBUser } from './types';
-import { getServiceStatusColor, ServiceStatusTag } from '../../utils/status';
 
+// Instance detail (databases / users / config) — rendered directly under the
+// VersionList header card. The header's lifecycle/log actions live in the parent.
 export default function DatabaseList({
-  server, version, databases, dbsLoading, dbUsers, usersLoading, operating,
-  onBack, onEnterDatabase, onRefreshDatabases, onRefreshUsers,
-  onDeleteDB, onDeleteUser, onStartVersion, onStopVersion, onRestartVersion,
+  server, version, databases, dbsLoading, dbUsers, usersLoading,
+  onEnterDatabase, onRefreshDatabases, onRefreshUsers,
+  onDeleteDB, onDeleteUser,
   dbModalVisible, onDbModalVisibleChange, dbForm, onCreateDB,
   userModalVisible, onUserModalVisibleChange, userForm, onCreateUser,
   grantVisible, grantUser, grantForm, onGrantVisibleChange, onGrant, onOpenGrant,
   dbConfig, dbConfigLoading, busy, onFetchDBConfig, onSaveDBConfig, onUpdateDBParam,
-  logVisible, logVersion, logContent, logLoading, logFollow, logRef,
-  onLogVisibleChange, onLogFollowChange,
-  showConfig, showLogs,
 }: DatabaseListProps) {
-
-  const statusColor = (status: string) => {
-    const colorName = getServiceStatusColor(status);
-    const colorMap: Record<string, string> = {
-      success: '#52c41a', error: '#ff4d4f', warning: '#faad14', default: '#999',
-    };
-    return colorMap[colorName] || '#999';
-  };
-
-  const statusTag = (status: string) => <ServiceStatusTag status={status} />;
 
   // Logical databases come back instance-scoped from the API — no client filter.
   const versionDatabases = databases;
@@ -73,46 +58,6 @@ export default function DatabaseList({
 
   return (
     <div>
-      <Card style={{ marginBottom: 16 }}>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Space size="middle">
-              <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-              <DatabaseOutlined style={{ fontSize: 24, color: statusColor(version.status) }} />
-              <div>
-                <Space>
-                  <span style={{ fontSize: 18, fontWeight: 'bold' }}>{server.display_name} {version.version}</span>
-                  {statusTag(version.status)}
-                </Space>
-                <div style={STYLES.versionInfo}>
-                  <Space size="middle">
-                    <span>服务: <strong>{version.container_id}</strong></span>
-                    <span>端口: <strong>{version.port}</strong></span>
-                  </Space>
-                </div>
-              </div>
-            </Space>
-          </Col>
-          <Col>
-            <Space wrap>
-              {version.status === 'running' ? (
-                <>
-                  <Button icon={<StopOutlined />} danger loading={operating === `stop-${version.id}`}
-                    onClick={() => onStopVersion(version)}>停止</Button>
-                  <Button icon={<ReloadOutlined />} loading={operating === `restart-${version.id}`}
-                    onClick={() => onRestartVersion(version)}>重启</Button>
-                </>
-              ) : (
-                <Button type="primary" icon={<PlayCircleOutlined />} loading={operating === `start-${version.id}`}
-                  onClick={() => onStartVersion(version)}>启动</Button>
-              )}
-              <Button icon={<CodeOutlined />} onClick={() => showConfig(version)}>配置文件</Button>
-              <Button icon={<FileTextOutlined />} onClick={() => showLogs(version)}>服务日志</Button>
-            </Space>
-          </Col>
-        </Row>
-      </Card>
-
       <Card>
         <Tabs items={[
           {
@@ -277,20 +222,6 @@ export default function DatabaseList({
             </Select>
           </Form.Item>
         </Form>
-      </Modal>
-      <Modal
-        title={<Space><FileTextOutlined /><span>{server.display_name} {logVersion?.version} - 服务日志</span>{logLoading && <Spin size="small" />}</Space>}
-        open={logVisible} onCancel={() => onLogVisibleChange(false)}
-        footer={<Row justify="space-between"><Col><Space><span style={{ color: '#8c8c8c', fontSize: 12 }}>每 5 秒自动刷新</span><span style={{ color: logFollow ? '#52c41a' : '#8c8c8c', fontSize: 12 }}>{logFollow ? '● 自动滚动' : '○ 已暂停'}</span></Space></Col><Col><Space><Button size="small" type={logFollow ? 'primary' : 'default'} onClick={() => onLogFollowChange(!logFollow)}>{logFollow ? 'Follow ON' : 'Follow OFF'}</Button><Button size="small" onClick={() => onLogVisibleChange(false)}>关闭</Button></Space></Col></Row>}
-        width="90vw" style={{ maxWidth: 960 }}>
-        <div ref={logRef} style={{ ...STYLES.logContainer }}>
-          {logContent.split('\n').map((line, i) => (
-            <div key={i} style={STYLES.logLine}>
-              <span style={STYLES.logLineNumber}>{i + 1}</span>
-              <span style={STYLES.logLineText}>{line || ' '}</span>
-            </div>
-          ))}
-        </div>
       </Modal>
     </div>
   );
