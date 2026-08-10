@@ -6,7 +6,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
-  FileTextOutlined, UndoOutlined, EditOutlined, PlusOutlined, DatabaseOutlined, LoadingOutlined, InfoCircleOutlined,
+  FileTextOutlined, DeleteOutlined, EditOutlined, DatabaseOutlined, LoadingOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
@@ -24,6 +24,10 @@ const ENGINE_BRAND: Record<string, { Icon: typeof SiMysql; color: string }> = {
 // Sentinel option value — picking "更多版本" opens the Docker Hub pager modal
 // instead of selecting a version.
 const MORE_VERSIONS = '__more_versions__';
+
+// Sentinel option value in the version Select — picking it opens the install
+// modal (the header no longer has a separate "安装版本" button).
+const INSTALL_VERSION = '__install_version__';
 
 export default function VersionList({
   server, versions, versionsLoading, operating,
@@ -191,19 +195,34 @@ export default function VersionList({
               start-stop / logs / info, plus refresh & install */}
           <Space wrap size="middle" align="center">
             <Select
-              style={{ minWidth: 130 }}
+              style={{ minWidth: 150 }}
               placeholder="选择版本"
               value={selectedVersion?.version}
-              onChange={(ver) => setSelectedVersion(versions.find(v => v.version === ver) || null)}
-              options={versions.map(v => ({ value: v.version, label: v.version }))}
-            />
+              onChange={(ver) => {
+                // "安装版本" is a sentinel: open the install modal and leave the
+                // selection unchanged (controlled value snaps back).
+                if (ver === INSTALL_VERSION) {
+                  installVersionForm.resetFields();
+                  onInstallVersionVisibleChange(true);
+                  return;
+                }
+                setSelectedVersion(versions.find(v => v.version === ver) || null);
+              }}
+            >
+              {versions.map(v => (
+                <Select.Option key={v.version} value={v.version}>{v.version}</Select.Option>
+              ))}
+              <Select.Option value={INSTALL_VERSION}>
+                <span style={{ color: '#1677ff' }}>＋ 安装版本</span>
+              </Select.Option>
+            </Select>
             {selectedVersion && (
               <>
                 <span style={{ fontWeight: 600 }}>版本 {selectedVersion.version}</span>
                 {statusTag(selectedVersion.status)}
                 {selectedVersion.status === 'running' ? (
                   <>
-                    <Button icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
+                    <Button danger icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
                       onClick={() => onStopVersion(selectedVersion)}>停止</Button>
                     <Button icon={<ReloadOutlined />} loading={operating === `restart-${selectedVersion.id}`}
                       onClick={() => onRestartVersion(selectedVersion)}>重启</Button>
@@ -225,19 +244,15 @@ export default function VersionList({
                     <Button icon={<InfoCircleOutlined />} onClick={() => setInfoVisible(true)}>实例信息</Button>
                     <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
                       onConfirm={() => onUninstallVersion(selectedVersion)}>
-                      <Button danger icon={<UndoOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
+                      <Button danger icon={<DeleteOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
                     </Popconfirm>
                   </>
                 )}
               </>
             )}
-            <Button icon={<ReloadOutlined />} loading={versionsLoading} onClick={onRefreshVersions}>刷新</Button>
-            {installing ? (
+            {installing && (
               <Button style={{ background: '#fa8c16', borderColor: '#fa8c16', color: '#fff' }}
                 icon={<LoadingOutlined />} onClick={() => onOpenInstallLog(installing)}>正在安装</Button>
-            ) : (
-              <Button type="primary" icon={<PlusOutlined />}
-                onClick={() => { installVersionForm.resetFields(); onInstallVersionVisibleChange(true); }}>安装版本</Button>
             )}
           </Space>
         </div>
