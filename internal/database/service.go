@@ -349,7 +349,9 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 	}
 	switch v.DBType {
 	case DBTypeMySQL:
-		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "mysql", "-uroot", "-p"+oldPassword, "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+		// Same MYSQL_PWD trick as withAdminCredentials — no `-p` on the command
+		// line, so no stderr warning leaks into output.
+		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "-e", "MYSQL_PWD="+oldPassword, "mysql", "-uroot", "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
 			return "", fmt.Errorf("reset MySQL password: %w", err)
 		}
 	case DBTypePostgreSQL:
@@ -1206,7 +1208,12 @@ func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []st
 	password := instance.AdminPassword
 	switch instance.DBType {
 	case DBTypeMySQL:
-		return append([]string{args[0], "-uroot", "-p" + password}, args[1:]...)
+		// Password via MYSQL_PWD env instead of `-p` on the command line: mysql
+		// prints "Using a password on the command line interface can be insecure."
+		// to stderr on every `-p` invocation, and stderr is merged into the parsed
+		// output (RunCombined), so the warning would surface as a bogus first row
+		// in tabular listings. `exec -e` injects the env before the command.
+		return append([]string{"-e", "MYSQL_PWD=" + password, args[0], "-uroot"}, args[1:]...)
 	case DBTypePostgreSQL:
 		return append([]string{args[0], "-U", "postgres"}, args[1:]...)
 	case DBTypeRedis:
