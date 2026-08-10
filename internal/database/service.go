@@ -642,7 +642,9 @@ func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]D
 		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(out))
+		// stderr (the actual engine error) is carried by err, not out — stdout
+		// is empty when the query fails.
+		return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
 	}
 	var dbs []Database
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -705,19 +707,17 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 
 	switch instance.DBType {
 	case DBTypeMySQL:
-		out, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;",
-			strings.ReplaceAll(req.Name, "`", "``"), charset))
-		if err != nil {
-			return nil, fmt.Errorf("create database failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;",
+			strings.ReplaceAll(req.Name, "`", "``"), charset)); err != nil {
+			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	case DBTypePostgreSQL:
 		encoding := "UTF8"
 		if charset == "latin1" {
 			encoding = "LATIN1"
 		}
-		out, err := s.runInVersion(ctx, instance, "createdb", "-E", encoding, req.Name)
-		if err != nil {
-			return nil, fmt.Errorf("create database failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "createdb", "-E", encoding, req.Name); err != nil {
+			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
 		return nil, fmt.Errorf("database creation not supported for %s", instance.DBType)
@@ -743,15 +743,13 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 
 	switch instance.DBType {
 	case DBTypeMySQL:
-		out, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("DROP DATABASE `%s`;",
-			strings.ReplaceAll(dbName, "`", "``")))
-		if err != nil {
-			return fmt.Errorf("drop database failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("DROP DATABASE `%s`;",
+			strings.ReplaceAll(dbName, "`", "``"))); err != nil {
+			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	case DBTypePostgreSQL:
-		out, err := s.runInVersion(ctx, instance, "dropdb", dbName)
-		if err != nil {
-			return fmt.Errorf("drop database failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "dropdb", dbName); err != nil {
+			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
 		return fmt.Errorf("database deletion not supported for %s", instance.DBType)
@@ -793,7 +791,7 @@ func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUse
 		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(out))
+		return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(err.Error()))
 	}
 	var users []DBUser
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -856,15 +854,13 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 	switch instance.DBType {
 	case DBTypeMySQL:
 		sqlStr := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s';", req.Username, host, escapeMySQLString(req.Password))
-		out, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr)
-		if err != nil {
-			return nil, fmt.Errorf("create user failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr); err != nil {
+			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
 		}
 	case DBTypePostgreSQL:
-		out, err := s.runInVersion(ctx, instance, "psql", "-c",
-			fmt.Sprintf("CREATE USER \"%s\" WITH PASSWORD '%s';", req.Username, escapePGString(req.Password)))
-		if err != nil {
-			return nil, fmt.Errorf("create user failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "psql", "-c",
+			fmt.Sprintf("CREATE USER \"%s\" WITH PASSWORD '%s';", req.Username, escapePGString(req.Password))); err != nil {
+			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
 		return nil, fmt.Errorf("user creation not supported for %s", instance.DBType)
@@ -898,15 +894,13 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 	switch instance.DBType {
 	case DBTypeMySQL:
 		sqlStr := fmt.Sprintf("DROP USER '%s'@'%s';", username, host)
-		out, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr)
-		if err != nil {
-			return fmt.Errorf("drop user failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr); err != nil {
+			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
 		}
 	case DBTypePostgreSQL:
-		out, err := s.runInVersion(ctx, instance, "psql", "-c",
-			fmt.Sprintf("DROP USER \"%s\";", username))
-		if err != nil {
-			return fmt.Errorf("drop user failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "psql", "-c",
+			fmt.Sprintf("DROP USER \"%s\";", username)); err != nil {
+			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
 		return fmt.Errorf("user deletion not supported for %s", instance.DBType)
@@ -945,15 +939,13 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 	case DBTypeMySQL:
 		sqlStr := fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
 			req.Privileges, strings.ReplaceAll(req.Database, "`", "``"), username, host)
-		out, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr)
-		if err != nil {
-			return fmt.Errorf("grant failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr); err != nil {
+			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
 		}
 	case DBTypePostgreSQL:
 		sqlStr := fmt.Sprintf("GRANT %s ON DATABASE \"%s\" TO \"%s\";", req.Privileges, req.Database, username)
-		out, err := s.runInVersion(ctx, instance, "psql", "-c", sqlStr)
-		if err != nil {
-			return fmt.Errorf("grant failed: %s", out)
+		if _, err := s.runInVersion(ctx, instance, "psql", "-c", sqlStr); err != nil {
+			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
 		return fmt.Errorf("privilege grant not supported for %s", instance.DBType)
@@ -1147,9 +1139,8 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerID, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
-	out, err := s.runInVersion(ctx, instance, "pg_restore", "-d", backup.DatabaseName, "-c", target)
-	if err != nil {
-		return fmt.Errorf("pg_restore failed: %s", out)
+	if _, err := s.runInVersion(ctx, instance, "pg_restore", "-d", backup.DatabaseName, "-c", target); err != nil {
+		return fmt.Errorf("pg_restore failed: %s", SanitizeSQLError(err.Error()))
 	}
 	return nil
 }
@@ -1286,7 +1277,7 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 	case DBTypeMySQL:
 		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, "SHOW TABLES;")
 		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
+			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -1300,7 +1291,7 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
 			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
 		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(out))
+			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -1328,7 +1319,7 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 
 	out, err := s.execRaw(ctx, instance, instance.DBType, dbName, describeSQL)
 	if err != nil {
-		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(out))
+		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(err.Error()))
 	}
 
 	tableInfo := ParseTableInfo(instance.DBType, tableName, out)
@@ -1395,7 +1386,7 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName,
 			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
+			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -1414,7 +1405,7 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
 			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
 		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(out))
+			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
 		}
 		lines := strings.Split(strings.TrimSpace(out), "\n")
 		for i, line := range lines {
@@ -1457,8 +1448,8 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 
 	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
-		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(out))
-		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
+		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(execErr.Error()))
+		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
@@ -1487,7 +1478,7 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 
 	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
-		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
+		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
@@ -1516,7 +1507,7 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 
 	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
 	if execErr != nil {
-		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
+		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
 	return &DMLResult{Success: true, Output: out}, nil
 }
@@ -1543,9 +1534,8 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
-		return &DMLResult{Success: false, Error: SanitizeSQLError(out)}, nil
+	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
+		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
 	return &DMLResult{Success: true}, nil
 }
@@ -1620,9 +1610,8 @@ func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tab
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
-		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(out))
+	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
+		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(execErr.Error()))
 	}
 	return nil
 }
@@ -1647,9 +1636,8 @@ func (s *Service) DropTable(ctx context.Context, instanceID int64, dbName, table
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
-		return fmt.Errorf("删除表失败: %s", out)
+	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
+		return fmt.Errorf("删除表失败: %s", SanitizeSQLError(execErr.Error()))
 	}
 	return nil
 }

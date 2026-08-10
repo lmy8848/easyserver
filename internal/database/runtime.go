@@ -93,8 +93,20 @@ func (r *CLIContainerRuntime) command(ctx context.Context, runtime string, args 
 // stderr warnings (e.g. mysql's "password on the command line" notice) must
 // never be merged into it. stderr only surfaces in the error when the command
 // itself fails.
+//
+// Leading `-e KEY=VAL` pairs (from withAdminCredentials) are hoisted before
+// the container name: they are `docker exec` options, not part of the in-container
+// command, and exec fails if they land after the name.
 func (r *CLIContainerRuntime) execCommand(ctx context.Context, runtime, name string, args ...string) (string, error) {
-	return r.run(ctx, false, runtime, append([]string{"exec", name}, args...)...)
+	var env []string
+	for len(args) >= 2 && args[0] == "-e" {
+		env = append(env, args[0], args[1])
+		args = args[2:]
+	}
+	execArgs := append([]string{"exec"}, env...)
+	execArgs = append(execArgs, name)
+	execArgs = append(execArgs, args...)
+	return r.run(ctx, false, runtime, execArgs...)
 }
 
 func (r *CLIContainerRuntime) run(ctx context.Context, combine bool, runtime string, args ...string) (string, error) {

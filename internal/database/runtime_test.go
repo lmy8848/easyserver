@@ -75,6 +75,29 @@ func TestExecSeparatesStderrFromQueryOutput(t *testing.T) {
 	}
 }
 
+func TestExecHoistsEnvBeforeContainerName(t *testing.T) {
+	// withAdminCredentials 把 MYSQL_PWD 作为 `-e KEY=VAL` 传入；docker exec 的
+	// 选项必须位于容器名之前，否则 `-e` 会被当成容器内要执行的命令而失败。
+	fake := &runtimeFakeExecutor{}
+	runtime := NewCLIContainerRuntime(fake)
+	_, err := runtime.Exec(context.Background(), "docker", "c1",
+		"-e", "MYSQL_PWD=secret", "mysql", "-uroot", "-N", "-B", "-e", "SHOW DATABASES")
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(fake.calls))
+	}
+	got := fake.calls[0]
+	if got.name != "docker" {
+		t.Fatalf("unexpected binary: %q", got.name)
+	}
+	want := []string{"exec", "-e", "MYSQL_PWD=secret", "c1", "mysql", "-uroot", "-N", "-B", "-e", "SHOW DATABASES"}
+	if strings.Join(got.args, " ") != strings.Join(want, " ") {
+		t.Fatalf("env not hoisted before container name:\n got %q\nwant %q", got.args, want)
+	}
+}
+
 func TestLifecycleCommandKeepsCombinedOutput(t *testing.T) {
 	mock := executor.NewMockExecutor()
 	// 生命周期命令（如拉镜像/启动）stderr 也可能承载进度/诊断，仍须合并 ——
