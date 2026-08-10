@@ -11,6 +11,7 @@ import { dbServerApi } from '../../services/api';
 import InstallModal from './InstallModal';
 import InstallLogModal from './InstallLogModal';
 import InstanceInfoModal from './InstanceInfoModal';
+import ServiceLogModal from './ServiceLogModal';
 import type { InstanceHeaderProps, DBInstance } from './types';
 
 // Engine brand logo + color (simple-icons). Falls back to a neutral accent for
@@ -35,13 +36,15 @@ export default function InstanceHeader({
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, busy, onInstallVersion,
   portCheck, onCheckPort,
-  onShowLogs,
   activeInstalls, installLogInstance, installLogLines, installLogError, installLogDone, installLogFollow, installLogRef,
   onOpenInstallLog, onCloseInstallLog, onInstallLogFollowChange,
   statusTag,
 }: InstanceHeaderProps) {
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
+  // Service log — self-contained (ServiceLogModal owns the poll/follow/scroll);
+  // the header's 日志 button just sets the instance to show.
+  const [logVersion, setLogVersion] = useState<DBInstance | null>(null);
 
   // Instances load async; auto-select the first when the list arrives or the
   // previously selected one disappears. Always take the fresh object from the
@@ -178,7 +181,7 @@ export default function InstanceHeader({
                 )}
                 {selectedVersion.status !== 'provisioning' && (
                   <>
-                    <Button icon={<FileTextOutlined />} onClick={() => onShowLogs(selectedVersion)}>日志</Button>
+                    <Button icon={<FileTextOutlined />} onClick={() => setLogVersion(selectedVersion)}>日志</Button>
                     <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
                     <Button icon={<InfoCircleOutlined />} onClick={() => setInfoVisible(true)}>实例信息</Button>
                     <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
@@ -227,6 +230,11 @@ export default function InstanceHeader({
         loading={versionsLoading}
         onClose={() => setInfoVisible(false)}
         statusTag={statusTag}
+      />
+      <ServiceLogModal
+        version={logVersion}
+        engineName={server.display_name}
+        onClose={() => setLogVersion(null)}
       />
     </>
   );

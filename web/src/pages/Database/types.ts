@@ -84,7 +84,7 @@ export interface SqlResult {
 
 // InstanceHeader props — the engine header card (brand + version picker +
 // lifecycle/ops actions) and its modals. Service-log state lives in the page
-// (ServiceLogModal renders at the root); install-log state lives in the page
+// (InstanceHeader renders it); install-log state lives in the page
 // too so an install can auto-open it and the "正在安装" button can re-open it.
 export interface InstanceHeaderProps {
   server: EngineInfo;
@@ -108,8 +108,6 @@ export interface InstanceHeaderProps {
   onInstallVersion: () => void;
   portCheck: { available: boolean; message: string; process?: string } | null;
   onCheckPort: (port: number) => void;
-  // Service log open (modal renders at the page root)
-  onShowLogs: (v: DBInstance) => void;
   // Install log modal (SSE stream — state lives in the parent). Keyed by
   // install_id (= container id), not instance id.
   activeInstalls: ActiveInstall[];
@@ -165,6 +163,9 @@ export interface DatabaseListProps {
   onFetchDBConfig: () => void;
   onSaveDBConfig: () => void;
   onUpdateDBParam: (section: string, key: string, value: string) => void;
+  // Inline table browser — non-null when a database is selected; the 表 tab
+  // shows it instead of the database list (no separate screen / back level).
+  tableExplorer: TableExplorerProps | null;
 }
 
 // TableExplorer props

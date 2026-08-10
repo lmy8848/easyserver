@@ -6,9 +6,7 @@ import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
 import DatabaseList from './DatabaseList';
-import TableExplorer from './TableExplorer';
-import ServiceLogModal from './ServiceLogModal';
-import type { TableData, TableInfo, SqlResult } from './types';
+import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
 import { ENGINE_TABS } from './types';
 
 export default function DatabasePage() {
@@ -48,11 +46,6 @@ export default function DatabasePage() {
   const [grantVisible, setGrantVisible] = useState(false);
   const [grantUser, setGrantUser] = useState<DBUser | null>(null);
   const [grantForm] = Form.useForm();
-
-  // ===== Service logs =====
-  // Only the open state lives here (null = closed); the log modal owns the
-  // 5s poll, follow switch and scroll (see ServiceLogModal).
-  const [logVersion, setLogVersion] = useState<DBInstance | null>(null);
 
   // ===== Install log (SSE stream) =====
   // Keyed by install_id (= container id), not instance id — no instance row
@@ -656,58 +649,42 @@ export default function DatabasePage() {
 
   // ===== Render =====
   // The engine is a persistent top-level Tab. InstanceHeader is the header card
-  // (version picker + lifecycle actions); when a version is selected its detail
-  // (databases / users / config) renders directly below it, and a database's
-  // tables open via TableExplorer.
+  // (version picker + lifecycle actions + instance-level modals). When a version
+  // is selected, DatabaseList renders its 表/用户/配置文件 tabs below — the 表 tab
+  // shows the table browser inline once a database is picked (no separate
+  // screen). Service log is self-contained in the header now.
   const renderContent = () => {
-    if (selectedDatabase && selectedVersion) {
-      return (
-        <TableExplorer
-          server={activeEngine}
-          version={selectedVersion}
-          database={selectedDatabase}
-          onBack={goBackToVersionDetail}
-          tableList={tableList}
-          tableLoading={tableLoading}
-          selectedTable={selectedTable}
-          tableData={tableData}
-          tableDataLoading={tableDataLoading}
-          tablePage={tablePage}
-          tableInfo={tableInfo}
-          onSelectTable={(t) => { setSelectedTable(t); if (selectedDatabase) fetchTableData(selectedVersion.id, selectedDatabase.name, t); }}
-          onFetchTables={() => selectedDatabase && fetchTables(selectedVersion.id, selectedDatabase.name)}
-          onFetchTableData={(t, p) => selectedDatabase && fetchTableData(selectedVersion.id, selectedDatabase.name, t, p)}
-          createTableVisible={createTableVisible}
-          createTableLoading={createTableLoading}
-          createForm={createForm}
-          onCreateTableVisibleChange={setCreateTableVisible}
-          onCreateTable={handleCreateTable}
-          onDropTable={handleDropTable}
-          recordModalVisible={recordModalVisible}
-          editingRecord={editingRecord}
-          recordForm={recordForm}
-          recordSaving={recordSaving}
-          onRecordModalVisibleChange={setRecordModalVisible}
-          onOpenInsertModal={openInsertModal}
-          onOpenEditModal={openEditModal}
-          onSaveRecord={handleSaveRecord}
-          onDeleteRecord={handleDeleteRecord}
-          sqlInput={sqlInput}
-          sqlResult={sqlResult}
-          sqlLoading={sqlLoading}
-          onSqlInputChange={setSqlInput}
-          onExecuteSQL={handleExecuteSQL}
-          backups={backups}
-          backupsLoading={backupsLoading}
-          backupCreating={backupCreating}
-          busy={busy}
-          onCreateBackup={handleCreateBackup}
-          onDownloadBackup={handleDownloadBackup}
-          onRestoreBackup={handleRestoreBackup}
-          onDeleteBackup={handleDeleteBackup}
-        />
-      );
-    }
+    // The table browser props are built once and handed to the 表 tab via the
+    // grouped `tableExplorer` prop — DatabaseList just forwards them.
+    const tableExplorer: TableExplorerProps | null = selectedDatabase && selectedVersion ? {
+      server: activeEngine,
+      version: selectedVersion,
+      database: selectedDatabase,
+      onBack: goBackToVersionDetail,
+      tableList, tableLoading, selectedTable, tableData, tableDataLoading, tablePage, tableInfo,
+      onSelectTable: (t) => { setSelectedTable(t); if (selectedDatabase) fetchTableData(selectedVersion.id, selectedDatabase.name, t); },
+      onFetchTables: () => selectedDatabase && fetchTables(selectedVersion.id, selectedDatabase.name),
+      onFetchTableData: (t, p) => selectedDatabase && fetchTableData(selectedVersion.id, selectedDatabase.name, t, p),
+      createTableVisible, createTableLoading, createForm,
+      onCreateTableVisibleChange: setCreateTableVisible,
+      onCreateTable: handleCreateTable,
+      onDropTable: handleDropTable,
+      recordModalVisible, editingRecord, recordForm, recordSaving,
+      onRecordModalVisibleChange: setRecordModalVisible,
+      onOpenInsertModal: openInsertModal,
+      onOpenEditModal: openEditModal,
+      onSaveRecord: handleSaveRecord,
+      onDeleteRecord: handleDeleteRecord,
+      sqlInput, sqlResult, sqlLoading,
+      onSqlInputChange: setSqlInput,
+      onExecuteSQL: handleExecuteSQL,
+      backups, backupsLoading, backupCreating, busy,
+      onCreateBackup: handleCreateBackup,
+      onDownloadBackup: handleDownloadBackup,
+      onRestoreBackup: handleRestoreBackup,
+      onDeleteBackup: handleDeleteBackup,
+    } : null;
+
     return (
       <div>
         <InstanceHeader
@@ -729,7 +706,6 @@ export default function DatabasePage() {
           onInstallVersion={handleInstallVersion}
           portCheck={portCheck}
           onCheckPort={checkPort}
-          onShowLogs={setLogVersion}
           activeInstalls={activeInstalls}
           installLogInstance={installLogInstance}
           installLogLines={installLogLines}
@@ -775,6 +751,7 @@ export default function DatabasePage() {
             onFetchDBConfig={() => fetchDBConfig()}
             onSaveDBConfig={handleSaveDBConfig}
             onUpdateDBParam={updateDBParam}
+            tableExplorer={tableExplorer}
           />
         )}
       </div>
@@ -789,13 +766,6 @@ export default function DatabasePage() {
         items={ENGINE_TABS.map(e => ({ key: e.db_type, label: e.display_name }))}
       />
       {renderContent()}
-      {/* Service logs render once at the root — opened from the header "日志"
-          button and reused everywhere (shared modal, no duplicated state). */}
-      <ServiceLogModal
-        version={logVersion}
-        engineName={activeEngine.display_name}
-        onClose={() => setLogVersion(null)}
-      />
     </div>
   );
 }

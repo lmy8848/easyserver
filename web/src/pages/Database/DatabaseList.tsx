@@ -3,13 +3,17 @@ import {
   Popconfirm, Table, Tabs, Empty,
 } from 'antd';
 import {
-  DatabaseOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined,
+  PlusOutlined, DeleteOutlined, ReloadOutlined,
   UserOutlined, KeyOutlined, CodeOutlined, TableOutlined,
 } from '@ant-design/icons';
+import TableExplorer from './TableExplorer';
 import type { DatabaseListProps, Database as DBType, DBUser } from './types';
 
-// Instance detail (databases / users / config) — rendered directly under the
-// InstanceHeader card. The header's lifecycle/log actions live in the parent.
+// Instance detail — three tabs below the InstanceHeader card: 表 (database list,
+// or the inline table browser once a database is picked), 用户 and 配置文件.
+// Each tab keeps its own modals (创建库/建表/记录 with 表, 创建用户/授权 with 用户);
+// instance-level modals (install / install-log / service-log / info) live in
+// the header.
 export default function DatabaseList({
   server, version, databases, dbsLoading, dbUsers, usersLoading,
   onEnterDatabase, onRefreshDatabases, onRefreshUsers,
@@ -18,6 +22,7 @@ export default function DatabaseList({
   userModalVisible, onUserModalVisibleChange, userForm, onCreateUser,
   grantVisible, grantUser, grantForm, onGrantVisibleChange, onGrant, onOpenGrant,
   dbConfig, dbConfigLoading, busy, onFetchDBConfig, onSaveDBConfig, onUpdateDBParam,
+  tableExplorer,
 }: DatabaseListProps) {
 
   // Logical databases come back instance-scoped from the API — no client filter.
@@ -61,9 +66,11 @@ export default function DatabaseList({
       <Card>
         <Tabs items={[
           {
-            key: 'databases',
-            label: <span><DatabaseOutlined /> 数据库 ({versionDatabases.length})</span>,
-            children: (
+            key: 'tables',
+            label: <span><TableOutlined /> 表</span>,
+            children: tableExplorer ? (
+              <TableExplorer {...tableExplorer} />
+            ) : (
               <div>
                 <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                   <Button icon={<ReloadOutlined />} loading={dbsLoading} onClick={onRefreshDatabases}>刷新</Button>
