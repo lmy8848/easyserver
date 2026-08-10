@@ -1,20 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Space } from 'antd';
+import { useState, useEffect } from 'react';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty, Checkbox } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
-import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
+import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
+import InstallLogPanel from './InstallLogPanel';
 import DatabasesTab from './DatabasesTab';
 import UsersTab from './UsersTab';
 import ConfigTab from './ConfigTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
-import { ENGINE_TABS } from './types';
+import { DB_TYPE_TABS } from './types';
 
 export default function DatabasePage() {
   // ===== Navigation state =====
-  // The engine is a static front-end Tab (MySQL/PostgreSQL/Redis); the instance
+  // The database type is a static front-end Tab (MySQL/PostgreSQL/Redis); the instance
   // list, instance detail and database explorer render below it.
   const [activeDbType, setActiveDbType] = useState('mysql');
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
@@ -53,34 +54,6 @@ export default function DatabasePage() {
   const [grantUser, setGrantUser] = useState<DBUser | null>(null);
   const [grantForm] = Form.useForm();
 
-  // ===== Install log (SSE stream) =====
-  // Keyed by install_id (= container id), not instance id — no instance row
-  // exists while installing. State lives here (not in InstanceHeader) so an
-  // install can auto-open it, and the title-bar "正在安装" button can re-open it
-  // after close/refresh.
-  const [activeInstalls, setActiveInstalls] = useState<ActiveInstall[]>([]);
-  const [installLogInstance, setInstallLogInstance] = useState<{ id: string; version: string } | null>(null);
-  const [installLogLines, setInstallLogLines] = useState<string[]>([]);
-  const [installLogError, setInstallLogError] = useState('');
-  const [installLogDone, setInstallLogDone] = useState(false);
-  const [installLogFollow, setInstallLogFollow] = useState(true);
-  const installLogRef = useRef<HTMLDivElement>(null);
-
-  const fetchActiveInstalls = async () => {
-    try {
-      const res = await dbServerApi.listActiveInstalls();
-      setActiveInstalls(res.data?.data || []);
-    } catch { /* polling endpoint, ignore transient errors */ }
-  };
-
-  const openInstallLog = (install: { id: string; version: string }) => {
-    setInstallLogInstance(install);
-    setInstallLogLines([]);
-    setInstallLogError('');
-    setInstallLogDone(false);
-  };
-  const closeInstallLog = () => setInstallLogInstance(null);
-
   // ===== Table explorer state =====
   const [tableList, setTableList] = useState<string[]>([]);
   const [tableLoading, setTableLoading] = useState(false);
@@ -114,9 +87,9 @@ export default function DatabasePage() {
   const [recordSaving, setRecordSaving] = useState(false);
 
   // ===== Fetch functions =====
-  // activeDbType only ever holds one of ENGINE_TABS' db_type keys (initial value
+  // activeDbType only ever holds one of DB_TYPE_TABS' db_type keys (initial value
   // and Tabs items are both hard-coded), so find() always matches.
-  const activeEngine = ENGINE_TABS.find(e => e.db_type === activeDbType)!;
+  const activeDBTypeInfo = DB_TYPE_TABS.find(e => e.db_type === activeDbType)!;
 
   const fetchInstances = async (dbtype: string) => {
     setVersionsLoading(true);
@@ -125,54 +98,15 @@ export default function DatabasePage() {
   };
 
   // ===== Effects =====
-  useEffect(() => { fetchInstances('mysql'); fetchActiveInstalls(); }, []);
+  useEffect(() => { fetchInstances('mysql'); }, []);
 
-  // While an install runs for the current engine, poll for completion so the
-  // instance list refreshes even if the log window is closed.
+  // While an install runs (a row is "installing"), poll the list so the version
+  // flips to running/failed on completion even if the log panel isn't open.
   useEffect(() => {
-    const engineActive = activeInstalls.some(a => a.engine === activeDbType);
-    if (!engineActive) return;
-    const timer = setInterval(async () => {
-      try {
-        const res = await dbServerApi.listActiveInstalls();
-        const next = res.data?.data || [];
-        setActiveInstalls(next);
-        if (!next.some(a => a.engine === activeDbType)) {
-          fetchInstances(activeDbType); // install finished/failed
-        }
-      } catch { /* keep polling */ }
-    }, 5000);
+    if (!versions.some(v => v.status === 'installing')) return;
+    const timer = setInterval(() => fetchInstances(activeDbType), 3000);
     return () => clearInterval(timer);
-  }, [activeInstalls, activeDbType]);
-
-  useEffect(() => {
-    if (!installLogInstance) return;
-    // SSE replay: the server sends every buffered line first (cursor starts at
-    // 0), then follows live until the {type:'done'} frame.
-    const es = new EventSource(`/api/db/installs/${installLogInstance.id}/log`);
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'line') setInstallLogLines(prev => [...prev, msg.text]);
-        else if (msg.type === 'done') {
-          setInstallLogError(msg.error || '');
-          setInstallLogDone(true);
-          es.close();
-          fetchInstances(activeDbType); // row now exists (running/failed)
-        }
-      } catch { /* ignore malformed frames */ }
-    };
-    // Server closed the stream (or a transient blip); stop so the "done" state
-    // governs the UI. EventSource auto-reconnects otherwise.
-    es.onerror = () => { setInstallLogDone(true); es.close(); };
-    return () => es.close();
-  }, [installLogInstance]);
-
-  useEffect(() => {
-    if (installLogFollow && installLogRef.current) {
-      installLogRef.current.scrollTop = installLogRef.current.scrollHeight;
-    }
-  }, [installLogLines, installLogFollow]);
+  }, [versions, activeDbType]);
 
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
@@ -253,10 +187,10 @@ export default function DatabasePage() {
   };
 
   // ===== Navigation handlers =====
-  // Switching engine Tab clears all instance-scoped state and reloads. versions
-  // is reset to [] (not just left stale) so the header Select empties at once
-  // instead of briefly showing the previous engine's instance.
-  const changeEngine = (dbtype: string) => {
+  // Switching database type Tab clears all instance-scoped state and reloads.
+  // versions is reset to [] (not just left stale) so the header Select empties
+  // at once instead of briefly showing the previous type's instance.
+  const changeDBType = (dbtype: string) => {
     setActiveDbType(dbtype);
     setSelectedVersion(null);
     setSelectedDatabase(null);
@@ -266,7 +200,6 @@ export default function DatabasePage() {
     setSelectedTable(''); setTableData(null); setSqlResult(null); setBackups([]);
     setDetailTab('databases');
     fetchInstances(dbtype);
-    fetchActiveInstalls();
   };
 
   // Selecting a version (via the header Select / auto-select) sets it as the
@@ -298,7 +231,7 @@ export default function DatabasePage() {
 
   // ===== Version actions =====
   const handleInstallVersion = async () => {
-    const server = activeEngine;
+    const server = activeDBTypeInfo;
     if (!server) return;
     let values: any;
     try {
@@ -312,32 +245,30 @@ export default function DatabasePage() {
     }
     setBusy('install-version');
     try {
-      // Port left empty → engine default. image is always sent fully qualified
+      // Port left empty → type default. image is always sent fully qualified
       // (preset/picker already carry `docker.io/`); only as a last resort fall
       // back to `docker.io/<base_image>:<version>`.
       const rawImage = (values.image || '').trim();
       const image = rawImage.includes('/') ? rawImage : `docker.io/${server.base_image}:${values.version}`;
-      const res = await dbServerApi.createInstance(server.db_type, {
+      await dbServerApi.createInstance(server.db_type, {
         ...values,
         image,
         port: values.port || server.default_port,
       });
-      message.success('已开始安装，正在打开安装日志…');
+      message.success('已开始安装');
       setInstallVersionVisible(false);
       fetchInstances(server.db_type);
-      fetchActiveInstalls();
-      // Auto-open the live install log; the title-bar "正在安装" button (driven
-      // by activeInstalls) re-opens it after close/refresh.
-      const data = res.data?.data as { install_id?: string } | undefined;
-      if (data?.install_id) {
-        openInstallLog({ id: data.install_id, version: values.version });
-      }
+      // The new "installing" row auto-selects in the header; its log panel
+      // (SSE) renders inline below.
     } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
     finally { setBusy(''); }
   };
 
+  // Cancel an in-flight install lives in InstallLogPanel (the only place the
+  // install's progress is watched). No page-level handler needed.
+
   const handleStartVersion = async (v: DBInstance) => {
-    const server = activeEngine;
+    const server = activeDBTypeInfo;
     if (!server) return;
     setOperating(`start-${v.id}`);
     try {
@@ -349,7 +280,7 @@ export default function DatabasePage() {
   };
 
   const handleStopVersion = async (v: DBInstance) => {
-    const server = activeEngine;
+    const server = activeDBTypeInfo;
     if (!server) return;
     setOperating(`stop-${v.id}`);
     try {
@@ -361,7 +292,7 @@ export default function DatabasePage() {
   };
 
   const handleRestartVersion = async (v: DBInstance) => {
-    const server = activeEngine;
+    const server = activeDBTypeInfo;
     if (!server) return;
     setOperating(`restart-${v.id}`);
     try {
@@ -373,15 +304,79 @@ export default function DatabasePage() {
   };
 
   const handleUninstallVersion = async (v: DBInstance) => {
-    const server = activeEngine;
+    const server = activeDBTypeInfo;
     if (!server) return;
-    setOperating(`uninstall-${v.id}`);
+    // Uninstall keeps the data volume by default so the instance can be
+    // re-installed onto it; the checkbox opts into deleting the data too.
+    let purge = false;
+    Modal.confirm({
+      title: `卸载 ${server.display_name} ${v.version}？`,
+      content: (
+        <div>
+          <p>卸载将删除该数据库实例。默认保留数据卷（可重新安装以恢复数据）。</p>
+          <Checkbox onChange={(e) => { purge = e.target.checked; }}>同时删除数据卷（不可恢复）</Checkbox>
+        </div>
+      ),
+      okText: '卸载',
+      okType: 'danger',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setOperating(`uninstall-${v.id}`);
+        try {
+          await dbServerApi.uninstallInstance(v.id, purge);
+          message.success(purge ? '已卸载并删除数据卷' : '已卸载（数据卷已保留）');
+          fetchInstances(server.db_type);
+        } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
+        finally { setOperating(''); }
+      },
+    });
+  };
+
+  // Reinstall a failed instance directly with its original parameters (no modal):
+  // the backend rolled the container back, so this purges the failed row +
+  // volumes for a clean start, then immediately kicks off the same install.
+  const handleReinstallVersion = async (v: DBInstance) => {
+    const server = activeDBTypeInfo;
+    if (!server) return;
+    setOperating(`reinstall-${v.id}`);
     try {
-      await dbServerApi.uninstallInstance(v.id);
-      message.success('已卸载');
+      await dbServerApi.uninstallInstance(v.id, true);
+      await dbServerApi.createInstance(server.db_type, {
+        version: v.version,
+        image: v.image,
+        port: v.port || server.default_port,
+        container_engine: v.container_engine,
+        bind_address: v.bind_address,
+      });
+      message.success('正在重新安装…');
       fetchInstances(server.db_type);
-    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
+    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '重新安装失败')); }
     finally { setOperating(''); }
+  };
+
+  // Cancel an in-flight install from the header card. The backend aborts the
+  // goroutine and removes the container + instance row; the row disappearing
+  // flips the UI back to the not-installed placeholder.
+  const handleCancelInstall = (v: DBInstance) => {
+    const server = activeDBTypeInfo;
+    if (!server) return;
+    Modal.confirm({
+      title: '取消安装',
+      content: `确定取消 ${server.display_name} ${v.version} 的安装吗？已下载的镜像层会保留。`,
+      okText: '取消安装',
+      okButtonProps: { danger: true },
+      cancelText: '继续安装',
+      onOk: async () => {
+        setOperating(`cancel-install-${v.id}`);
+        try {
+          await dbServerApi.cancelInstall(v.container_id);
+          message.success('已取消安装');
+          fetchInstances(server.db_type);
+        } catch (error: unknown) { message.error((error instanceof Error ? error.message : '取消失败')); }
+        finally { setOperating(''); }
+      },
+    });
   };
 
   // ===== Database CRUD =====
@@ -649,17 +644,17 @@ export default function DatabasePage() {
   // ===== Status helpers (shared) =====
   const statusTag = (status: string) => {
     const labels: Record<string, string> = {
-      running: '运行中', stopped: '已停止', provisioning: '正在安装', failed: '安装失败',
+      running: '运行中', stopped: '已停止', installing: '安装中', failed: '安装失败',
       partial: '部分运行', not_installed: '未安装',
     };
     const colors: Record<string, string> = {
-      running: 'success', provisioning: 'processing', failed: 'error', stopped: 'default',
+      running: 'success', installing: 'processing', failed: 'error', stopped: 'default',
     };
     return <Tag color={colors[status] || getServiceStatusColor(status)}>{labels[status] || status}</Tag>;
   };
 
   // ===== Render =====
-  // The engine is a persistent top-level Tab. InstanceHeader is the header card
+  // The database type is a persistent top-level Tab. InstanceHeader is the header card
   // (version picker + lifecycle actions + instance-level modals). When a version
   // is selected, the 数据库/用户/配置文件 tabs render below — the 数据库 tab shows
   // the table browser inline once a database is picked (no separate screen).
@@ -667,7 +662,7 @@ export default function DatabasePage() {
     // The table browser props are built once and handed to the 数据库 tab; the
     // tab renders it inline when a database is selected.
     const tableExplorer: TableExplorerProps | null = selectedDatabase && selectedVersion ? {
-      server: activeEngine,
+      server: activeDBTypeInfo,
       version: selectedVersion,
       database: selectedDatabase,
       onBack: goBackToVersionDetail,
@@ -718,13 +713,13 @@ export default function DatabasePage() {
 
     return (
       <div>
-        {/* key remounts the header on engine switch — its internal selection and
-            notify-dedup state (lastNotifiedKey is `id:status`, and ids repeat
-            across engines since they share one table) must start fresh, or a new
-            engine's instance is never reported to the parent and the detail
+        {/* key remounts the header on database-type switch — its internal selection
+            and notify-dedup state (lastNotifiedKey is `id:status`, and ids repeat
+            across types since they share one table) must start fresh, or a new
+            type's instance is never reported to the parent and the detail
             tables below stay stale. */}
         <InstanceHeader key={activeDbType}
-          server={activeEngine}
+          server={activeDBTypeInfo}
           versions={versions}
           versionsLoading={versionsLoading}
           operating={operating}
@@ -734,30 +729,44 @@ export default function DatabasePage() {
           onStopVersion={handleStopVersion}
           onRestartVersion={handleRestartVersion}
           onUninstallVersion={handleUninstallVersion}
+          onCancelInstall={handleCancelInstall}
+          onReinstallVersion={handleReinstallVersion}
           installVersionVisible={installVersionVisible}
           onInstallVersionVisibleChange={setInstallVersionVisible}
-          versionTemplates={activeEngine.templates}
+          versionTemplates={activeDBTypeInfo.templates}
           installVersionForm={installVersionForm}
           busy={busy}
           onInstallVersion={handleInstallVersion}
           portCheck={portCheck}
           onCheckPort={checkPort}
-          activeInstalls={activeInstalls}
-          installLogInstance={installLogInstance}
-          installLogLines={installLogLines}
-          installLogError={installLogError}
-          installLogDone={installLogDone}
-          installLogFollow={installLogFollow}
-          installLogRef={installLogRef}
-          onOpenInstallLog={openInstallLog}
-          onCloseInstallLog={closeInstallLog}
-          onInstallLogFollowChange={setInstallLogFollow}
           statusTag={statusTag}
         />
-        {/* The detail tabs always render — with no installed version the tables
-            just show their built-in empty state (暂无数据库 / 暂无用户), and the
-            header auto-selects the first instance once one appears. */}
-        <Card>
+        {/* No installed version — plain placeholder with an install action. The
+            installing state is no longer a placeholder: the row exists from
+            submit time, so it appears in the list and selects into the log panel. */}
+        {versions.length === 0 && !versionsLoading ? (
+          <Card>
+            <Empty style={{ padding: '48px 0' }}
+              description={`尚未安装 ${activeDBTypeInfo.display_name} 数据库实例`}>
+              <Button type="primary" icon={<PlusOutlined />}
+                onClick={() => { installVersionForm.resetFields(); setInstallVersionVisible(true); }}>
+                安装数据库
+              </Button>
+            </Empty>
+          </Card>
+        ) : selectedVersion && (selectedVersion.status === 'installing' || selectedVersion.status === 'failed') ? (
+          // key=instance id: a reinstall reuses the same container id (so
+          // containerId prop is unchanged), but it is a brand-new install with a
+          // fresh log stream — remounting on id change resets the SSE connection
+          // so the new install's log shows instead of the stale failed one.
+          <InstallLogPanel
+            key={selectedVersion.id}
+            containerId={selectedVersion.container_id}
+            version={selectedVersion.version}
+            onDone={() => fetchInstances(activeDbType)}
+          />
+        ) : (
+          <Card>
           <Tabs
             activeKey={detailTab}
             onChange={setDetailTab}
@@ -767,7 +776,7 @@ export default function DatabasePage() {
                 key: 'databases',
                 label: <span><DatabaseOutlined /> 数据库</span>,
                 children: <DatabasesTab
-                  server={activeEngine}
+                  server={activeDBTypeInfo}
                   version={selectedVersion}
                   databases={databases}
                   dbsLoading={dbsLoading}
@@ -785,7 +794,7 @@ export default function DatabasePage() {
                 key: 'users',
                 label: <span><UserOutlined /> 用户</span>,
                 children: <UsersTab
-                  server={activeEngine}
+                  server={activeDBTypeInfo}
                   dbUsers={dbUsers}
                   usersLoading={usersLoading}
                   busy={busy}
@@ -807,7 +816,7 @@ export default function DatabasePage() {
                 key: 'config',
                 label: <span><CodeOutlined /> 配置文件</span>,
                 children: <ConfigTab
-                  server={activeEngine}
+                  server={activeDBTypeInfo}
                   dbConfig={dbConfig}
                   dbConfigLoading={dbConfigLoading}
                   busy={busy}
@@ -818,6 +827,7 @@ export default function DatabasePage() {
               },
             ]} />
           </Card>
+        )}
       </div>
     );
   };
@@ -826,8 +836,8 @@ export default function DatabasePage() {
     <div>
       <Tabs
         activeKey={activeDbType}
-        onChange={changeEngine}
-        items={ENGINE_TABS.map(e => ({ key: e.db_type, label: e.display_name }))}
+        onChange={changeDBType}
+        items={DB_TYPE_TABS.map(e => ({ key: e.db_type, label: e.display_name }))}
       />
       {renderContent()}
     </div>

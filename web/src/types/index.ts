@@ -262,17 +262,8 @@ export interface DBInstance {
   bind_address?: string;
 }
 
-// An install in progress — no instance row exists until it finishes, so the
-// front-end shows a "正在安装" entry from this instead of a DBInstance.
-export interface ActiveInstall {
-  install_id: string;
-  engine: string;
-  version: string;
-  image: string;
-}
-
 export interface Database {
-  // Logical database inside an instance — live engine state, no persisted id.
+  // Logical database inside an instance — live database state, no persisted id.
   name: string;
   charset: string;
 }

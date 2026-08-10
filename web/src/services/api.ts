@@ -4,7 +4,7 @@ import type {
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
-  WebServer, Website, DBInstance, ActiveInstall, Database, DBUser,
+  WebServer, Website, DBInstance, Database, DBUser,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -540,18 +540,18 @@ export const dbServerApi = {
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string }) =>
     api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/${dbtype}/instances`, data),
 
-  // Installs in progress (no instance row exists until one finishes) — drives
-  // the title-bar "正在安装" button and the install log modal.
-  listActiveInstalls: () =>
-    api.get<ApiResponse<ActiveInstall[]>>('/db/installs'),
+  // Cancel an in-flight install (image pull or provisioning).
+  cancelInstall: (iid: string) =>
+    api.post<ApiResponse<null>>(`/db/installs/${iid}/cancel`),
 
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),
   // paginated — the version Select flips pages through this.
   listDockerTags: (dbtype: string, page = 1, pageSize = 10) =>
     api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/${dbtype}/docker-tags`, { params: { page, page_size: pageSize } }),
 
-  uninstallInstance: (iid: number) =>
-    api.delete<ApiResponse>(`/db/instances/${iid}`),
+  // Uninstall the instance. purge=true also deletes the data (and config) volumes.
+  uninstallInstance: (iid: number, purge = false) =>
+    api.delete<ApiResponse>(`/db/instances/${iid}`, { params: { purge: purge ? '1' : undefined } }),
 
   destroyInstance: (iid: number) =>
     api.delete<ApiResponse>(`/db/instances/${iid}/data`),

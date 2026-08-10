@@ -34,6 +34,17 @@ func (f *runtimeFakeExecutor) RunCombined(ctx context.Context, name string, args
 	f.calls = append(f.calls, runtimeExecCall{name: name, args: args})
 	return f.out, f.code, nil
 }
+func (f *runtimeFakeExecutor) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, int, error) {
+	f.calls = append(f.calls, runtimeExecCall{name: name, args: args})
+	if onLine != nil {
+		for _, l := range strings.Split(f.out, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				onLine(l)
+			}
+		}
+	}
+	return f.out, f.code, nil
+}
 func (f *runtimeFakeExecutor) RunWithOptions(ctx context.Context, opts executor.CommandOptions, name string, args ...string) (string, int, error) {
 	panic("unused")
 }
@@ -105,8 +116,7 @@ func TestLifecycleCommandKeepsCombinedOutput(t *testing.T) {
 	mock.SetResponse("docker pull", executor.MockResponse{
 		Stdout:   "pulling image...",
 		Stderr:   "extracting layer 3/5",
-		ExitCode: 0,
-	})
+		ExitCode: 0})
 	runtime := NewCLIContainerRuntime(mock)
 	out, err := runtime.command(context.Background(), "docker", "pull", "mysql:8.0")
 	if err != nil {
@@ -130,7 +140,7 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 		HostPort:        3306,
 		ContainerPort:   3306,
 		Environment:     map[string]string{"MYSQL_ROOT_PASSWORD": "secret"},
-		Labels:          map[string]string{"com.easyserver.engine": "mysql"},
+		Labels:          map[string]string{"com.easyserver.dbtype": "mysql"},
 		HealthCommand:   "mysqladmin ping -h localhost",
 	})
 	if err != nil {
@@ -158,5 +168,69 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	}
 	if spec.Labels["com.easyserver.managed"] != "true" {
 		t.Fatalf("managed label not set: %#v", spec.Labels)
+	}
+}
+
+func TestRemoveToleratesAlreadyGone(t *testing.T) {
+	mock := executor.NewMockExecutor()
+	// 失败安装回滚后重装/卸载会再次删除容器/数据卷 —— 目标资源已不存在时
+	// 应视为成功，而不是让重装流程报错。
+	mock.SetResponse("podman rm", executor.MockResponse{ExitCode: 1, Stderr: "Error: no such container \"easyserver-db-mysql-8.0\""})
+	mock.SetResponse("podman volume", executor.MockResponse{ExitCode: 1, Stderr: "Error: no such volume \"easyserver-db-mysql-8.0-data\""})
+	rt := NewCLIContainerRuntime(mock)
+
+	if err := rt.Remove(context.Background(), "podman", "easyserver-db-mysql-8.0"); err != nil {
+		t.Fatalf("Remove of already-gone container should be a no-op: %v", err)
+	}
+	if err := rt.RemoveVolume(context.Background(), "podman", "easyserver-db-mysql-8.0-data"); err != nil {
+		t.Fatalf("RemoveVolume of already-gone volume should be a no-op: %v", err)
+	}
+}
+
+func TestStreamRunFeedsHookLineByLine(t *testing.T) {
+	// 流式路径（拉镜像等长耗时命令）必须把 stdout+stderr 逐行实时喂给
+	// outputHook，而不是等命令结束一次性回放。用真实 OSExecutor + 无害的
+	// sh 命令验证双 pipe 合并。
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	rt := NewCLIContainerRuntime(executor.NewOSExecutor())
+	var got []string
+	rt.SetOutputHook(func(line string) { got = append(got, line) })
+
+	if _, err := rt.streamRun(context.Background(), "sh", "-c", "echo out-line; echo err-line >&2; sleep 1; echo last-line"); err != nil {
+		t.Fatalf("streamRun: %v", err)
+	}
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"out-line", "err-line", "last-line"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("hook missing %q (stdout+stderr must merge line by line): %v", want, got)
+		}
+	}
+	if len(got) < 3 {
+		t.Fatalf("expected all lines streamed, got only %v", got)
+	}
+}
+
+func TestStatusDoesNotPolluteOutputHook(t *testing.T) {
+	// 安装期间 waitForHealthy 每 500ms 轮询一次容器状态；Status 的
+	// `podman inspect` 输出（running|starting）绝不能经 outputHook 灌进安装日志，
+	// 否则会刷出整屏重复状态行。生命周期命令（start 等）仍须走 hook。
+	fake := &runtimeFakeExecutor{out: "running|starting"}
+	runtime := NewCLIContainerRuntime(fake)
+	var hooked []string
+	runtime.SetOutputHook(func(line string) { hooked = append(hooked, line) })
+
+	if _, err := runtime.Status(context.Background(), "podman", "c1"); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(hooked) != 0 {
+		t.Fatalf("Status output leaked into output hook: %v", hooked)
+	}
+	if err := runtime.Start(context.Background(), "podman", "c1"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if len(hooked) != 1 || hooked[0] != "running|starting" {
+		t.Fatalf("lifecycle command should still fire the hook, got %v", hooked)
 	}
 }

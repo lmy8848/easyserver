@@ -127,9 +127,9 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	// A row appears only after the container is created (provisioning), not at
-	// submit time — the fake create succeeds instantly, so the row may or may not
-	// be visible yet here; what matters is no "stopped" instance ever appears.
+	// The row exists from submit time (status "installing"); the install
+	// goroutine flips it to "running". What matters here is no "stopped"
+	// instance ever appears.
 	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
@@ -148,10 +148,11 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	}
 }
 
-func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
+func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 	repo := newFakeRepo()
-	// Container exits before becoming healthy → waitForHealthy fails fast and
-	// the async install must roll back the container and record a failed row.
+	// Container exits before becoming healthy → waitForHealthy fails fast. The
+	// container is deliberately kept for troubleshooting (its logs are lost on
+	// rm); reinstall runs "uninstall + install", and uninstall removes it.
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
 	svc := NewServiceWithRuntime(repo, rt)
 
@@ -162,8 +163,8 @@ func TestCreateInstanceHealthFailRollsBack(t *testing.T) {
 	if err := svc.WaitForInstall(res.InstallID); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
 	}
-	if len(rt.removed) != 1 {
-		t.Fatalf("expected container rollback after health failure, removed=%v", rt.removed)
+	if len(rt.removed) != 0 {
+		t.Fatalf("failed install must keep the container for inspection, removed=%v", rt.removed)
 	}
 	got := findInstanceByStatus(repo, "failed")
 	if got == nil {
@@ -202,7 +203,37 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	}
 }
 
-// findInstanceByStatus returns the (single) instance row for the engine with
+func TestPostgres18MovesDataDir(t *testing.T) {
+	// postgres:18+ moved PGDATA into a version subdir — the volume must mount the
+	// parent (/var/lib/postgresql) and config lives under the version dir. Older
+	// majors keep the classic /var/lib/postgresql/data layout. Empty dataDir skips
+	// the pgDataDir assertion (that helper is postgres-only).
+	cases := []struct {
+		image    string
+		dataDir  string
+		confPath string
+	}{
+		{"docker.io/postgres:18", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.conf"},
+		{"docker.io/postgres:18-alpine", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.conf"},
+		{"docker.io/postgres:17", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.conf"},
+		{"docker.io/postgres:16", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.conf"},
+		// config paths must survive the fully-qualified image form used at runtime
+		{"docker.io/mysql:9.7", "", "/etc/mysql/conf.d/easyserver.cnf"},
+		{"docker.io/redis:8.0-alpine", "", "/usr/local/etc/redis/redis.conf"},
+	}
+	for _, c := range cases {
+		if c.dataDir != "" {
+			if got := pgDataDir(c.image); got != c.dataDir {
+				t.Errorf("%s: data dir = %q, want %q", c.image, got, c.dataDir)
+			}
+		}
+		if got := configPathForImage(c.image); got != c.confPath {
+			t.Errorf("%s: config path = %q, want %q", c.image, got, c.confPath)
+		}
+	}
+}
+
+// findInstanceByStatus returns the (single) instance row for the database type with
 // the given status, or nil. Installs write exactly one row on completion.
 func findInstanceByStatus(repo *fakeRepo, status string) *DBInstance {
 	rows, _ := repo.ListInstances(context.Background(), DBTypeMySQL)

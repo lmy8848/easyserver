@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -85,7 +86,7 @@ func containerBinary(runtime string) (string, error) {
 // command runs a lifecycle command with stdout+stderr combined — install/log
 // paths want the whole stream (pull progress, container logs, errors).
 func (r *CLIContainerRuntime) command(ctx context.Context, runtime string, args ...string) (string, error) {
-	return r.run(ctx, true, runtime, args...)
+	return r.run(ctx, true, true, runtime, args...)
 }
 
 // execCommand runs a command inside the container with stdout and stderr
@@ -106,13 +107,21 @@ func (r *CLIContainerRuntime) execCommand(ctx context.Context, runtime, name str
 	execArgs := append([]string{"exec"}, env...)
 	execArgs = append(execArgs, name)
 	execArgs = append(execArgs, args...)
-	return r.run(ctx, false, runtime, execArgs...)
+	return r.run(ctx, false, true, runtime, execArgs...)
 }
 
-func (r *CLIContainerRuntime) run(ctx context.Context, combine bool, runtime string, args ...string) (string, error) {
+// run executes one container CLI command. hook=false skips the output hook:
+// used by Status, whose `podman inspect` poll output would otherwise spam the
+// install log with a `running|starting` line every 500ms during waitForHealthy.
+func (r *CLIContainerRuntime) run(ctx context.Context, combine, hook bool, runtime string, args ...string) (string, error) {
 	bin, err := containerBinary(runtime)
 	if err != nil {
 		return "", err
+	}
+	// 安装场景（挂载了 outputHook）的合并命令改走流式：拉镜像/启动是长耗时
+	// 操作，输出要逐行实时进安装日志，而不是等命令整体结束后一次性回放。
+	if combine && hook && r.outputHook != nil {
+		return r.streamRun(ctx, bin, args...)
 	}
 	var out, stderr string
 	var code int
@@ -122,7 +131,7 @@ func (r *CLIContainerRuntime) run(ctx context.Context, combine bool, runtime str
 	} else {
 		out, stderr, code, runErr = r.executor.Run(ctx, bin, args...)
 	}
-	if r.outputHook != nil {
+	if hook && r.outputHook != nil {
 		for _, line := range strings.Split(out, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				r.outputHook(line)
@@ -142,6 +151,25 @@ func (r *CLIContainerRuntime) run(ctx context.Context, combine bool, runtime str
 			}
 		}
 		return out, fmt.Errorf("%s exited with code %d: %s", bin, code, detail)
+	}
+	return out, nil
+}
+
+// streamRun executes a lifecycle command with stdout+stderr streamed line by
+// line into the output hook as they arrive — image pulls and starts are
+// long-running, so their progress should stream, not replay when the command
+// finishes. Returns the full merged output with the same error shape as run.
+func (r *CLIContainerRuntime) streamRun(ctx context.Context, bin string, args ...string) (string, error) {
+	out, _, err := r.executor.RunStream(ctx, func(line string) {
+		if t := strings.TrimSpace(line); t != "" && r.outputHook != nil {
+			r.outputHook(t)
+		}
+	}, bin, args...)
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return out, fmt.Errorf("%s exited with code %d: %s", bin, exitErr.ExitCode(), strings.TrimSpace(out))
+		}
+		return out, fmt.Errorf("%s: %w", bin, err)
 	}
 	return out, nil
 }
@@ -202,11 +230,33 @@ func (r *CLIContainerRuntime) Restart(ctx context.Context, runtime, name string)
 
 func (r *CLIContainerRuntime) Remove(ctx context.Context, runtime, name string) error {
 	_, err := r.command(ctx, runtime, "rm", "--force", name)
+	// The container may already be gone (failed install rolls it back, then a
+	// reinstall/uninstall removes it again) — treat that as success.
+	if err != nil && notFound(err, "no such container") {
+		return nil
+	}
 	return err
 }
 
+// notFound reports whether err is a docker/podman "does not exist" error for the
+// given resource marker ("no such container", "no such volume", …). Idempotent
+// deletes (rm / volume rm) surface these as failures even though the desired
+// end state (resource gone) is already true.
+func notFound(err error, markers ...string) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, m := range markers {
+		if strings.Contains(s, m) || strings.Contains(s, "not found") {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *CLIContainerRuntime) Status(ctx context.Context, runtime, name string) (ContainerStatus, error) {
-	out, err := r.command(ctx, runtime, "inspect", "--format", "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}", name)
+	out, err := r.run(ctx, true, false, runtime, "inspect", "--format", "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}", name)
 	if err != nil {
 		return ContainerStatus{}, err
 	}
@@ -250,6 +300,11 @@ func (r *CLIContainerRuntime) RemoveVolume(ctx context.Context, runtime, volume 
 		return fmt.Errorf("volume name is required")
 	}
 	_, err := r.command(ctx, runtime, "volume", "rm", volume)
+	// The volume may never have been created (e.g. an install that failed before
+	// the container existed) — deleting a missing volume is a no-op, not an error.
+	if err != nil && notFound(err, "no such volume") {
+		return nil
+	}
 	return err
 }
 
@@ -263,10 +318,12 @@ func sortedKeys(values map[string]string) []string {
 }
 
 func waitForHealthy(ctx context.Context, runtime DatabaseRuntime, runtimeName, container string, timeout time.Duration) (ContainerStatus, error) {
-	if timeout <= 0 {
-		timeout = time.Minute
+	// timeout > 0 enforces a deadline; timeout <= 0 waits indefinitely (the
+	// install path relies on container exit or user cancel to terminate).
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
 	}
-	deadline := time.Now().Add(timeout)
 	for {
 		status, err := runtime.Status(ctx, runtimeName, container)
 		if err != nil {
@@ -278,7 +335,7 @@ func waitForHealthy(ctx context.Context, runtime DatabaseRuntime, runtimeName, c
 		if status.State == "exited" || status.State == "dead" {
 			return status, fmt.Errorf("database container stopped before becoming healthy")
 		}
-		if time.Now().After(deadline) {
+		if !deadline.IsZero() && time.Now().After(deadline) {
 			return status, fmt.Errorf("database container did not become healthy within %s", timeout)
 		}
 		select {

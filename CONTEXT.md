@@ -18,12 +18,12 @@
 
 ### 数据库管理
 
-- **DB Engine** — 数据库引擎类型（MySQL、PostgreSQL、Redis）。每个引擎有默认端口和预定义版本模板。
-  - ⚠ 代码中名为 `model.DBServer`（`model/db_server.go`），但它不是"运行中的数据库实例"——它是引擎目录。文档用 "DB Engine"，代码保留 `DBServer` 不动。
-- **Database Instance** — 某 DB Engine 的受管数据库容器实例（例如 MySQL 8.0 运行在端口 3306）。它独占容器、数据卷和配置；一个引擎可以同时有多个实例，宿主机安装的数据库不属于 EasyServer 的管理范围。
+- **DB Type** — 数据库类型（MySQL、PostgreSQL、Redis）。每种类型有默认端口和预定义版本模板。代码中为 `DBType`（`internal/database/model.go`）。
+- **Database Instance** — 某 DB Type 的受管数据库容器实例（例如 MySQL 8.0 运行在端口 3306）。它独占容器、数据卷和配置；一种类型可以同时有多个实例，宿主机安装的数据库不属于 EasyServer 的管理范围。
   _Avoid_: DB Version
-- **Database** — 某个 DB Version 下的实际数据库（例如 `myapp`）。
-- **DB User** — 数据库用户，跨版本共享（同一引擎下所有版本共用用户列表）。
+- **Direct Connection（直连）** — 面板用数据库驱动（而非容器 CLI）经宿主映射端口访问 Database Instance 的通道。MySQL 与 PostgreSQL 的库/用户/表/表格浏览/SQL 执行走直连，拿到结构化类型与参数化查询；备份/恢复与配置编辑仍走容器 CLI。Redis 目前保持 CLI 通道。
+- **Database** — 某个 Database Instance 下的实际数据库（例如 `myapp`）。
+- **DB User** — 数据库用户，跨版本共享（同一类型下所有版本共用用户列表）。
 - **DB Backup** — 数据库备份记录，关联到特定 Database。
 
 ### 定时任务
@@ -53,9 +53,14 @@ _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 - **Compose Project** — 由 Compose 描述文件定义的一组服务。Docker 用 `docker compose`，Podman 用 `podman-compose`。
 - **Volume** / **Network** — 容器卷与容器网络，均归属某个 ContainerEngine。
 
+### 后台任务
+
+- **Background Task（后台任务）** — 由通用任务执行器管理的一次后台执行单元。执行器保证：Task Key 去重（同键同时只跑一个）、任务级超时（可选，到点取消本次尝试的上下文并按失败处理）、失败重试（可选，固定间隔，重试期间状态仍为 running，日志连续追加）、全局并发上限（超出拒绝而非排队）、终态保留（失败/取消保留至同 key 重装，成功即清）。能力由调用方按需开启，非任务必选。
+- **Task Key** — 后台任务的去重键，**同时也是查找句柄**（同一键同时只允许一个任务运行，因此键唯一标识一次执行）。数据库安装的 Task Key = 容器名（container ID）。- **Task Log（任务日志）** — 后台任务的可选附件：内存环形缓冲 + 游标回放，订阅者先回放已缓冲行再收实时行；不接收日志则不产生任何流式成本。
+
 ### 系统管理
 
-- **Process** — 通过 `ProcessManager` 管理的、由 EasyServer 启动的子进程（如长时间运行的部署脚本）。有生命周期守护：意外退出可自动重启。
+- **Process** — ⚠ 已过期：旧文档称由 `ProcessManager` 管理，代码中已不存在该组件。术语避用，由 Background Task 承接"后台执行单元"的语义。
 - **System Process** — 通过 `SystemProcessService` 管理的 systemd 服务。
 - **Template** — 预定义的服务模板，一键安装常见软件（如 Nginx、MySQL）。
 

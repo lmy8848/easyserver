@@ -25,15 +25,14 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	backupHandler := NewBackupHandler(svc)
 	configHandler := NewConfigHandler()
 
-	// Instance lifecycle, scoped by engine enum.
+	// Instance lifecycle, scoped by database type.
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
 	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
 	protected.GET("/db/:dbtype/docker-tags", instanceHandler.ListDockerTags)
 	// Installs run without a database row until they finish; the install id is
-	// the container id. "Active" lists in-progress installs (the "正在安装" entry),
-	// and the log endpoint streams one install's log via SSE.
-	protected.GET("/db/installs", instanceHandler.ListActiveInstalls)
+	// the container id. The log endpoint streams one install's log via SSE.
 	protected.GET("/db/installs/:iid/log", instanceHandler.InstallLogStream)
+	protected.POST("/db/installs/:iid/cancel", instanceHandler.CancelInstall)
 	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
 	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
 	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
@@ -45,7 +44,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/instances/:iid/config", instanceHandler.GetInstanceConfig)
 	protected.PUT("/db/instances/:iid/config", instanceHandler.SaveInstanceConfig)
 
-	// Logical databases, scoped by instance. Databases are live engine state —
+	// Logical databases, scoped by instance. Databases are live database state —
 	// the db name is the identifier, there is no persisted db id.
 	protected.GET("/db/instances/:iid/databases", dbHandler.ListDatabases)
 	protected.POST("/db/instances/:iid/databases", dbHandler.CreateDatabase)
@@ -82,7 +81,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
-// InstanceHandler handles instance lifecycle endpoints, scoped by engine enum.
+// InstanceHandler handles instance lifecycle endpoints, scoped by database type.
 type InstanceHandler struct {
 	svc *database.Service
 }
@@ -91,13 +90,13 @@ func NewInstanceHandler(svc *database.Service) *InstanceHandler {
 	return &InstanceHandler{svc: svc}
 }
 
-func parseEngine(c *gin.Context) (database.DBType, bool) {
-	engine := database.DBType(c.Param("dbtype"))
-	if !database.IsValidDBType(engine) {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库引擎"))
+func parseDBType(c *gin.Context) (database.DBType, bool) {
+	dbType := database.DBType(c.Param("dbtype"))
+	if !database.IsValidDBType(dbType) {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库类型"))
 		return "", false
 	}
-	return engine, true
+	return dbType, true
 }
 
 func parseIID(c *gin.Context) (int64, bool) {
@@ -110,14 +109,14 @@ func parseIID(c *gin.Context) (int64, bool) {
 }
 
 func (h *InstanceHandler) ListInstances(c *gin.Context) {
-	engine, ok := parseEngine(c)
+	dbType, ok := parseDBType(c)
 	if !ok {
 		return
 	}
 	// Refresh live container status before returning — instance status is never
 	// persisted as authoritative; the runtime is the source of truth.
-	h.svc.RefreshStatus(c.Request.Context(), engine)
-	instances, err := h.svc.ListInstances(c.Request.Context(), engine)
+	h.svc.RefreshStatus(c.Request.Context(), dbType)
+	instances, err := h.svc.ListInstances(c.Request.Context(), dbType)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -126,24 +125,18 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 }
 
 func (h *InstanceHandler) ListDockerTags(c *gin.Context) {
-	engine, ok := parseEngine(c)
+	dbType, ok := parseDBType(c)
 	if !ok {
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	tags, total, err := h.svc.ListDockerTags(c.Request.Context(), engine, page, pageSize)
+	tags, total, err := h.svc.ListDockerTags(c.Request.Context(), dbType, page, pageSize)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"items": tags, "total": total, "page": page, "page_size": pageSize})
-}
-
-// ListActiveInstalls returns installs currently in progress — the front-end
-// renders a "正在安装" entry per active install for the current engine.
-func (h *InstanceHandler) ListActiveInstalls(c *gin.Context) {
-	httpx.Success(c, h.svc.ActiveInstalls())
 }
 
 func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
@@ -168,14 +161,16 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 	}
 
 	// Task may still be alive (installing) or already finished (done/errored) —
-	// finished tasks are kept so their log stays replayable. If it's gone
-	// entirely, the server restarted mid-install and the in-memory log is lost.
-	task, ok := h.svc.InstallTask(installID)
+	// finished failed/canceled tasks are kept so their log stays replayable; a
+	// succeeded task is cleaned up on completion (its log already flushed to the
+	// client). If it's gone entirely, the server restarted mid-install and the
+	// in-memory log is lost.
+	tk, ok := h.svc.InstallTask(installID)
 	if !ok {
-		send(map[string]string{"type": "done", "error": "安装日志已丢失（服务可能已重启），无法查看"})
+		send(map[string]string{"type": "done", "error": "安装日志已丢失（服务可能已重启或安装已完成），无法查看"})
 		return
 	}
-	log := task.Log
+	log := tk.Log()
 
 	cursor := 0
 	for {
@@ -191,7 +186,7 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 		cursor = next
 
 		select {
-		case <-task.Done():
+		case <-tk.Done():
 			// Flush anything that landed between the tail above and completion.
 			if lines, next := log.Tail(cursor); len(lines) > 0 {
 				for _, line := range lines {
@@ -200,8 +195,8 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 				cursor = next
 			}
 			errMsg := ""
-			if task.Err() != nil {
-				errMsg = task.Err().Error()
+			if tk.Err() != nil {
+				errMsg = tk.Err().Error()
 			}
 			send(map[string]string{"type": "done", "error": errMsg})
 			return
@@ -210,8 +205,22 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 	}
 }
 
+// CancelInstall aborts an in-flight install (image pull or provisioning).
+func (h *InstanceHandler) CancelInstall(c *gin.Context) {
+	iid := c.Param("iid")
+	if iid == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的安装ID"))
+		return
+	}
+	if err := h.svc.CancelInstall(iid); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, nil)
+}
+
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {
-	engine, ok := parseEngine(c)
+	dbType, ok := parseDBType(c)
 	if !ok {
 		return
 	}
@@ -221,7 +230,7 @@ func (h *InstanceHandler) CreateInstance(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "创建数据库实例 "+req.Version)
-	instance, err := h.svc.CreateInstance(c.Request.Context(), engine, &req)
+	instance, err := h.svc.CreateInstance(c.Request.Context(), dbType, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -234,8 +243,11 @@ func (h *InstanceHandler) UninstallInstance(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Retain the data volume by default (the container's data persists and the
+	// instance can be re-installed onto it); pass ?purge=1 to also delete it.
+	purge := c.Query("purge") == "1"
 	middleware.AuditSummary(c, "卸载数据库实例 #"+strconv.FormatInt(iid, 10))
-	if err := h.svc.UninstallInstance(c.Request.Context(), iid); err != nil {
+	if err := h.svc.UninstallInstance(c.Request.Context(), iid, purge); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}

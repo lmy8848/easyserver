@@ -1,4 +1,4 @@
-import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
+import type { Database, DBUser, DBInstance } from '../../types';
 
 // Version templates from API
 export interface VersionTemplate {
@@ -7,27 +7,27 @@ export interface VersionTemplate {
   description: string;
 }
 
-// EngineInfo is what sub-pages need to know about the active engine. It is a
-// static front-end constant, not a backend catalog — the top-level tab defines
-// it, so the backend /db catalog endpoint was removed.
-export interface EngineInfo {
+// DBTypeInfo is what sub-pages need to know about the active database type. It
+// is a static front-end constant, not a backend catalog — the top-level tab
+// defines it, so the backend /db catalog endpoint was removed.
+export interface DBTypeInfo {
   db_type: string;
   display_name: string;
   default_port: number;
-  // base_image is the Docker Hub official image for the engine; a custom tag
-  // picked from "更多版本" is built as `${base_image}:${tag}`.
+  // base_image is the Docker Hub official image for the database type; a custom
+  // tag picked from "更多版本" is built as `${base_image}:${tag}`.
   base_image: string;
 }
 
-export interface EngineTab extends EngineInfo {
+export interface DBTypeTab extends DBTypeInfo {
   templates: VersionTemplate[];
 }
 
-// Curated presets per engine. Versions follow current mainstream releases
+// Curated presets per database type. Versions follow current mainstream releases
 // (researched 2026-08): MySQL 8.4/9.7 LTS + Innovation lines (8.0 is EOL but
 // still widely deployed), PostgreSQL 14–18, Redis 7.4/8.x. The "更多版本" flow
 // lists all published Docker Hub tags.
-export const ENGINE_TABS: EngineTab[] = [
+export const DB_TYPE_TABS: DBTypeTab[] = [
   {
     db_type: 'mysql', display_name: 'MySQL', default_port: 3306, base_image: 'mysql',
     templates: [
@@ -82,12 +82,12 @@ export interface SqlResult {
 
 // ===== Component Props =====
 
-// InstanceHeader props — the engine header card (brand + version picker +
+// InstanceHeader props — the type header card (brand + version picker +
 // lifecycle/ops actions) and its modals. Service-log state lives in the page
-// (InstanceHeader renders it); install-log state lives in the page
-// too so an install can auto-open it and the "正在安装" button can re-open it.
+// (InstanceHeader renders it); the install log is inline (InstallLogPanel),
+// rendered by the page when the selected version is installing/failed.
 export interface InstanceHeaderProps {
-  server: EngineInfo;
+  server: DBTypeInfo;
   versions: DBInstance[];
   versionsLoading: boolean;
   operating: string;
@@ -100,6 +100,8 @@ export interface InstanceHeaderProps {
   onStopVersion: (v: DBInstance) => void;
   onRestartVersion: (v: DBInstance) => void;
   onUninstallVersion: (v: DBInstance) => void;
+  onCancelInstall: (v: DBInstance) => void;
+  onReinstallVersion: (v: DBInstance) => void;
   // Install version modal
   installVersionVisible: boolean;
   onInstallVersionVisibleChange: (visible: boolean) => void;
@@ -108,18 +110,6 @@ export interface InstanceHeaderProps {
   onInstallVersion: () => void;
   portCheck: { available: boolean; message: string; process?: string } | null;
   onCheckPort: (port: number) => void;
-  // Install log modal (SSE stream — state lives in the parent). Keyed by
-  // install_id (= container id), not instance id.
-  activeInstalls: ActiveInstall[];
-  installLogInstance: { id: string; version: string } | null;
-  installLogLines: string[];
-  installLogError: string;
-  installLogDone: boolean;
-  installLogFollow: boolean;
-  installLogRef: React.RefObject<HTMLDivElement | null>;
-  onOpenInstallLog: (install: { id: string; version: string }) => void;
-  onCloseInstallLog: () => void;
-  onInstallLogFollowChange: (follow: boolean) => void;
   // Status helpers
   statusTag: (status: string) => React.ReactNode;
 }
@@ -127,8 +117,8 @@ export interface InstanceHeaderProps {
 // 数据库 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗。刷新/创建
 // 按钮在 tab 栏右侧（tabBarExtraContent），不在内容区。
 export interface DatabasesTabProps {
-  server: EngineInfo;
-  // null while the engine has no installed version — the tab still renders and
+  server: DBTypeInfo;
+  // null while the database type has no installed version — the tab still renders and
   // its table shows the built-in empty state; create-db is hidden in that case.
   version: DBInstance | null;
   databases: Database[];
@@ -148,7 +138,7 @@ export interface DatabasesTabProps {
 // 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
 // （tabBarExtraContent，见 index.tsx），不在内容区。
 export interface UsersTabProps {
-  server: EngineInfo;
+  server: DBTypeInfo;
   dbUsers: DBUser[];
   usersLoading: boolean;
   busy: string;
@@ -170,7 +160,7 @@ export interface UsersTabProps {
 
 // 配置文件 tab — 结构化参数编辑
 export interface ConfigTabProps {
-  server: EngineInfo;
+  server: DBTypeInfo;
   dbConfig: any;
   dbConfigLoading: boolean;
   busy: string;
@@ -181,7 +171,7 @@ export interface ConfigTabProps {
 
 // 表浏览器（内联在表 tab 中）— 选中数据库后展示
 export interface TableExplorerProps {
-  server: EngineInfo;
+  server: DBTypeInfo;
   version: DBInstance;
   database: Database;
   onBack: () => void;

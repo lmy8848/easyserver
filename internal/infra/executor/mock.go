@@ -78,6 +78,27 @@ func (m *MockExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, 
 	return m.RunCombined(ctx, name, args...)
 }
 
+// RunStream delivers the mock's combined output line by line to onLine (all at
+// once — a mock has no real streaming, but exercises the callback contract).
+func (m *MockExecutor) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, int, error) {
+	stdout, stderr, code, err := m.Run(ctx, name, args...)
+	combined := stdout
+	if stderr != "" {
+		combined = stdout + "\n" + stderr
+	}
+	if onLine != nil {
+		for _, line := range strings.Split(combined, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				onLine(line)
+			}
+		}
+	}
+	if err != nil {
+		return combined, code, err
+	}
+	return combined, code, nil
+}
+
 // MockProcess is a mock implementation of Process
 type MockProcess struct {
 	pid    int

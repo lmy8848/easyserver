@@ -15,6 +15,7 @@ import (
 
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
+	"easyserver/internal/infra/task"
 )
 
 const (
@@ -24,10 +25,6 @@ const (
 	maxLogLines     = 5000
 	defaultCharset  = "utf8mb4"
 	defaultLogLines = 200
-
-	// installTaskTTL bounds how long a finished install's log stays in memory
-	// (replayable via SSE) before it's pruned on the next install.
-	installTaskTTL = 30 * time.Minute
 
 	DefaultBackupDir = "/var/backups/easyserver/db"
 	MaxBackupsPerDB  = 10
@@ -50,7 +47,7 @@ type Service struct {
 	repo           Repository
 	runtime        DatabaseRuntime // shared runtime for normal (non-install) ops
 	backupDir      string
-	installer      *installer
+	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
 }
 
@@ -61,7 +58,7 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 		repo:      repo,
 		runtime:   NewCLIContainerRuntime(exec),
 		backupDir: DefaultBackupDir,
-		installer: newInstaller(),
+		taskMgr:   task.NewManager(8),
 		runtimeFactory: func() DatabaseRuntime {
 			return NewCLIContainerRuntime(exec)
 		},
@@ -75,7 +72,7 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 		repo:      repo,
 		runtime:   runtime,
 		backupDir: DefaultBackupDir,
-		installer: newInstaller(),
+		taskMgr:   task.NewManager(8),
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
@@ -85,10 +82,12 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 // refreshInstanceStatus queries the container runtime (by container ID) and
 // persists the derived instance status.
 func (s *Service) refreshInstanceStatus(ctx context.Context, v *DBInstance) {
-	// provisioning rows are mid-install records: the container is created but the
+	// installing/provisioning rows are mid-install records: the container is created but the
 	// install isn't done, so its live state (created/restarting/…) is not the
 	// instance's status — overwriting it here would turn "正在安装" into "stopped".
-	if v.Status == "provisioning" {
+	// failed rows keep their status too: the container was deliberately rolled
+	// back, so its live state (stopped) must not mask the failure.
+	if v.Status == "installing" || v.Status == "provisioning" || v.Status == "failed" {
 		return
 	}
 	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerID)
@@ -116,15 +115,16 @@ func (s *Service) GetInstance(ctx context.Context, id int64) (*DBInstance, error
 	return s.repo.GetInstance(ctx, id)
 }
 
-// CreateInstanceResult is what CreateInstance returns. The install runs in the
-// background and no instance row exists until it succeeds, so the caller gets
-// the install id (to stream the log) rather than an instance.
+// CreateInstanceResult is what CreateInstance returns. The instance row exists
+// from the start (status "installing"), so the caller gets both the install id
+// (to stream the log) and the instance id.
 type CreateInstanceResult struct {
-	InstallID string `json:"install_id"`
-	Version   string `json:"version"`
-	Image     string `json:"image"`
-	Port      int    `json:"port"`
-	Status    string `json:"status"` // always "provisioning" (informational)
+	InstallID  string `json:"install_id"`
+	InstanceID int64  `json:"instance_id"`
+	Version    string `json:"version"`
+	Image      string `json:"image"`
+	Port       int    `json:"port"`
+	Status     string `json:"status"` // always "installing" (informational)
 }
 
 func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *CreateDBInstanceRequest) (*CreateInstanceResult, error) {
@@ -155,7 +155,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if engineName != "docker" && engineName != "podman" {
 		return nil, fmt.Errorf("unsupported container runtime %q", engineName)
 	}
-	// The client always sends the port (the front-end fills the engine default);
+	// The client always sends the port (the front-end fills the type default);
 	// a missing/invalid value is rejected here.
 	port := req.Port
 	if port < 1 || port > 65535 {
@@ -180,27 +180,42 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 
 	spec := containerSpec(dbType, engineName, req.Version, req.Image, containerID, volumeName, bindAddress, port, password)
 
-	// Claim the engine before launching so the "already installing" error is
-	// returned synchronously. No database row is created here — the install
-	// goroutine writes one once the container is created (status provisioning),
-	// so an image pull never surfaces a half-installed instance.
-	if err := s.installer.begin(dbType); err != nil {
-		return nil, err
+	// Write the instance row up front (status "installing") — the install never
+	// has a row-less phase, and the front-end renders the "正在安装" state straight
+	// from the instance list. The install goroutine flips it to "running" on
+	// success / "failed" on error (or removes the row on cancel). Dedup against
+	// an in-flight install of the same DB type happens synchronously in the task
+	// executor; if that rejects the request, undo the just-written row.
+	row := &DBInstance{
+		DBType: dbType, Version: req.Version, Port: port, Status: "installing",
+		ContainerEngine: engineName, Image: req.Image, ContainerID: containerID,
+		VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password,
 	}
-	s.installer.start(dbType, containerID, InstallMeta{Version: req.Version, Image: req.Image}, func(log *installLog) error {
+	id, err := s.repo.CreateInstance(ctx, row)
+	if err != nil {
+		return nil, fmt.Errorf("write instance record: %w", err)
+	}
+	if _, err := s.taskMgr.StartWithLog(containerID, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
 		if cli, ok := rt.(*CLIContainerRuntime); ok {
-			cli.SetOutputHook(func(line string) { log.append(line) })
+			cli.SetOutputHook(func(line string) { log.Append(line) })
 		}
 		// Detach from the request context: the install outlives the HTTP request
 		// (which is canceled once CreateInstance responds), so it must not inherit
-		// its cancellation — otherwise every container command dies immediately.
-		return s.installInstance(context.Background(), dbType, req.Version, req.Image, engineName, containerID, volumeName, bindAddress, port, password, spec, rt, log)
-	})
-	return &CreateInstanceResult{InstallID: containerID, Version: req.Version, Image: req.Image, Port: port, Status: "provisioning"}, nil
+		// its cancellation — the per-task context from the task executor drives it,
+		// and CancelInstall cancels that.
+		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerID, volumeName, password, spec, rt, log)
+	}); err != nil {
+		// Duplicate install (same container already installing) or concurrency
+		// limit: the row was written above but no task started — remove it so the
+		// panel doesn't show a phantom "installing" entry.
+		_ = s.repo.DeleteInstance(ctx, id)
+		return nil, err
+	}
+	return &CreateInstanceResult{InstallID: containerID, InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
 }
 
-// dockerTagsCache holds the full (filtered) tag list for one engine, with a TTL
+// dockerTagsCache holds the full (filtered) tag list for one database type, with a TTL
 // so the front-end paginates against one snapshot instead of re-hitting the
 // rate-limited Docker Hub API on every page flip.
 type dockerTagsCache struct {
@@ -215,7 +230,7 @@ var dockerTagsCacheStore = struct {
 
 const dockerTagsCacheTTL = 10 * time.Minute
 
-// ListDockerTags returns one page of published tags for an engine's official
+// ListDockerTags returns one page of published tags for a database type's official
 // image, proxied from Docker Hub (filtered to version-like tags, cached). It
 // powers the front-end "更多版本" flow — users can pick any published tag, not
 // just the curated presets.
@@ -259,33 +274,26 @@ func (s *Service) dockerTags(dbType DBType) ([]string, error) {
 }
 
 // InstallTask exposes an in-flight install's log and completion to the SSE
-// handler. Returns false when no task is running for the install id.
-func (s *Service) InstallTask(installID string) (*InstallTask, bool) {
-	t, ok := s.installer.get(installID)
-	if !ok {
-		return nil, false
-	}
-	return &InstallTask{Log: t.log, done: t.done, errFn: func() error { return t.err }}, true
+// handler. Returns false when no task exists for the install id (successful
+// installs are cleaned up on completion, so this is only live/failed/canceled).
+func (s *Service) InstallTask(installID string) (*task.Task, bool) {
+	return s.taskMgr.Get(installID)
 }
 
 // WaitForInstall blocks until the install finishes and returns its error. Used
 // by tests (and a handy end-of-stream sync for future callers).
 func (s *Service) WaitForInstall(installID string) error {
-	t, ok := s.installer.get(installID)
+	t, ok := s.taskMgr.Get(installID)
 	if !ok {
 		return nil
 	}
-	<-t.done
-	return t.err
+	<-t.Done()
+	return t.Err()
 }
 
-// ActiveInstalls lists installs currently running — the front-end's "正在安装"
-// entry and the source of its log modal.
-func (s *Service) ActiveInstalls() []ActiveInstall {
-	return s.installer.Active()
-}
-
-func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error {
+// UninstallInstance removes the managed container. The data volume is retained
+// by default so the instance can be re-installed onto it; purge deletes it too.
+func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -294,16 +302,18 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64) error
 		return fmt.Errorf("instance not found")
 	}
 
-	dbCount, err := s.countDatabases(ctx, v)
-	if err != nil {
-		return err
-	}
-	if dbCount > 0 {
-		return fmt.Errorf("cannot uninstall: %d databases still exist for this instance", dbCount)
-	}
-
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerID); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
+	}
+	if purge {
+		if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
+			return fmt.Errorf("remove database volume: %w", err)
+		}
+		if v.ConfigDir != "" {
+			if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, strings.TrimSuffix(v.VolumeName, "-data")+"-config"); err != nil {
+				return fmt.Errorf("remove database config volume: %w", err)
+			}
+		}
 	}
 	return s.repo.DeleteInstance(ctx, instanceID)
 }
@@ -313,11 +323,6 @@ func (s *Service) DestroyInstance(ctx context.Context, instanceID int64) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
-	}
-	if count, err := s.countDatabases(ctx, v); err != nil {
-		return err
-	} else if count > 0 {
-		return fmt.Errorf("cannot destroy: %d databases still exist for this instance", count)
 	}
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerID); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
@@ -472,7 +477,7 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerID, lines)
 }
 
-// GetInstanceConfig reads the engine configuration from inside its container.
+// GetInstanceConfig reads the database configuration from inside its container.
 func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (string, string, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
@@ -483,7 +488,7 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (stri
 	return out, path, err
 }
 
-// SaveInstanceConfig writes engine configuration inside the managed container.
+// SaveInstanceConfig writes database configuration inside the managed container.
 func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, content string) error {
 	if len(content) > 256*1024 {
 		return fmt.Errorf("configuration is too large")
@@ -502,14 +507,55 @@ func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, cont
 
 func configPathForImage(image string) string {
 	image = strings.ToLower(image)
+	// Images are stored fully qualified (docker.io/mysql:8.0) — match the repo
+	// basename, not the registry prefix (docker.io/… has no "mysql" prefix).
+	if i := strings.LastIndex(image, "/"); i >= 0 {
+		image = image[i+1:]
+	}
 	switch {
 	case strings.HasPrefix(image, "mysql"):
 		return "/etc/mysql/conf.d/easyserver.cnf"
 	case strings.HasPrefix(image, "postgres"):
-		return "/var/lib/postgresql/data/postgresql.conf"
+		return pgConfigPath(image)
 	default:
 		return "/usr/local/etc/redis/redis.conf"
 	}
+}
+
+// postgresMajor extracts the PostgreSQL major version from an image reference
+// (e.g. "docker.io/postgres:18-alpine" → 18). Returns 0 when the tag carries no
+// leading version number.
+func postgresMajor(image string) int {
+	i := strings.LastIndex(image, ":")
+	if i < 0 {
+		return 0
+	}
+	var major int
+	if n, err := fmt.Sscanf(image[i+1:], "%d", &major); err != nil || n != 1 {
+		return 0
+	}
+	return major
+}
+
+// pgDataDir is the container path the data volume is mounted at. postgres:18+
+// moved the default PGDATA into a major-version subdirectory
+// (/var/lib/postgresql/<major>/docker, docker-library/postgres#1259): mounting
+// a volume at the old /var/lib/postgresql/data makes the entrypoint refuse to
+// start ("unused mount/volume"), so 18+ must mount the parent instead.
+func pgDataDir(image string) string {
+	if postgresMajor(image) >= 18 {
+		return "/var/lib/postgresql"
+	}
+	return "/var/lib/postgresql/data"
+}
+
+// pgConfigPath is where postgresql.conf lives inside the container — under the
+// same PGDATA the image uses, which moved to a version subdir in 18+.
+func pgConfigPath(image string) string {
+	if major := postgresMajor(image); major >= 18 {
+		return fmt.Sprintf("/var/lib/postgresql/%d/docker/postgresql.conf", major)
+	}
+	return "/var/lib/postgresql/data/postgresql.conf"
 }
 
 // seedRedisConfig writes an initial redis.conf into the freshly-created config
@@ -534,7 +580,7 @@ func seedRedisConfig(ctx context.Context, runtime DatabaseRuntime, engineName, c
 	return nil
 }
 
-// RefreshStatus refreshes instance statuses for an engine (dbType).
+// RefreshStatus refreshes instance statuses for a database type (dbType).
 func (s *Service) RefreshStatus(ctx context.Context, dbType DBType) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -566,17 +612,18 @@ func generateAdminPassword() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-func containerSpec(engine DBType, engineName, version, image, name, volume, bind string, port int, password string) ContainerSpec {
+func containerSpec(dbType DBType, engineName, version, image, name, volume, bind string, port int, password string) ContainerSpec {
 	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -uroot -p$MYSQL_ROOT_PASSWORD"
 	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
 	command := []string(nil)
 	configVolume, configDir := "", ""
 	adminUser := "root"
-	switch engine {
+	switch dbType {
 	case DBTypePostgreSQL:
 		// PostgreSQL config lives in its data volume (postgresql.conf), so no
-		// separate config volume is mounted.
-		dataDir = "/var/lib/postgresql/data"
+		// separate config volume is mounted. 18+ images expect the volume at
+		// /var/lib/postgresql (PGDATA moved into a version subdir) — see pgDataDir.
+		dataDir = pgDataDir(image)
 		env = map[string]string{"POSTGRES_PASSWORD": password}
 		health = "pg_isready -U postgres"
 		adminUser = "postgres"
@@ -592,7 +639,7 @@ func containerSpec(engine DBType, engineName, version, image, name, volume, bind
 	return ContainerSpec{ContainerEngine: engineName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
 		ConfigVolume: configVolume, ConfigDir: configDir,
 		BindAddress: bind, HostPort: port, ContainerPort: port, Environment: env,
-		Labels: map[string]string{"com.easyserver.engine": string(engine), "com.easyserver.version": version, "com.easyserver.admin-user": adminUser}, HealthCommand: health, Command: command}
+		Labels: map[string]string{"com.easyserver.dbtype": string(dbType), "com.easyserver.version": version, "com.easyserver.admin-user": adminUser}, HealthCommand: health, Command: command}
 }
 
 func containerStatus(info ContainerStatus, err error) string {
@@ -608,7 +655,7 @@ func containerStatus(info ContainerStatus, err error) string {
 	return "stopped"
 }
 
-// --- Logical database CRUD (live, engine-owned) ---
+// --- Logical database CRUD (live, server-owned) ---
 
 func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Database, error) {
 	if ctx == nil {
@@ -624,8 +671,8 @@ func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Databa
 	return s.queryDatabases(ctx, instance)
 }
 
-// queryDatabases lists logical databases live from the engine. Databases are
-// engine-owned state — the panel never persists a mirror of them.
+// queryDatabases lists logical databases live from the database server. Databases are
+// server-owned state — the panel never persists a mirror of them.
 func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]Database, error) {
 	var out string
 	var err error
@@ -642,7 +689,7 @@ func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]D
 		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
 	if err != nil {
-		// stderr (the actual engine error) is carried by err, not out — stdout
+		// stderr (the actual database error) is carried by err, not out — stdout
 		// is empty when the query fails.
 		return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
 	}
@@ -664,18 +711,6 @@ func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]D
 		dbs = append(dbs, Database{Name: name, Charset: charset})
 	}
 	return dbs, nil
-}
-
-// countDatabases returns the live logical-database count for an instance. A
-// stopped instance cannot be queried, so the guard degrades to 0 — the data
-// lives in the container volume and uninstall/destroy are explicit user
-// confirmations anyway.
-func (s *Service) countDatabases(ctx context.Context, v *DBInstance) (int, error) {
-	if v.Status != "running" && v.Status != "active" {
-		return 0, nil
-	}
-	dbs, err := s.queryDatabases(ctx, v)
-	return len(dbs), err
 }
 
 func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *CreateDatabaseRequest) (*Database, error) {
@@ -758,7 +793,7 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 	return nil
 }
 
-// --- DB User CRUD (live, engine-owned) ---
+// --- DB User CRUD (live, server-owned) ---
 
 func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, error) {
 	if ctx == nil {
@@ -774,7 +809,7 @@ func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, 
 	return s.queryUsers(ctx, instance)
 }
 
-// queryUsers lists database users live from the engine (the engine owns them).
+// queryUsers lists database users live from the database server (the server owns them).
 func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUser, error) {
 	var out string
 	var err error
@@ -813,7 +848,7 @@ func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUse
 	return users, nil
 }
 
-// isAdminUser reports whether username is the engine's built-in administrator.
+// isAdminUser reports whether username is the database's built-in administrator.
 func isAdminUser(dbType DBType, username string) bool {
 	switch dbType {
 	case DBTypeMySQL:

@@ -1,11 +1,13 @@
 package executor
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -16,6 +18,11 @@ type CommandExecutor interface {
 	RunWithTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) (stdout, stderr string, exitCode int, err error)
 	RunCombined(ctx context.Context, name string, args ...string) (output string, exitCode int, err error)
 	RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (output string, exitCode int, err error)
+	// RunStream runs a command with stdout+stderr merged and each line delivered
+	// to onLine as it arrives (progress for long-running commands like image
+	// pulls). It blocks until the process exits and returns the full merged
+	// output, exit code and error.
+	RunStream(ctx context.Context, onLine func(string), name string, args ...string) (output string, exitCode int, err error)
 	Start(ctx context.Context, opts StartOptions, name string, args ...string) (Process, error)
 	Command(ctx context.Context, opts StartOptions, name string, args ...string) *exec.Cmd
 	LookPath(name string) (string, error)
@@ -131,6 +138,66 @@ func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, na
 		}
 	}
 	return result, exitCode, nil
+}
+
+// RunStream runs a command with stdout+stderr piped and merged, delivering each
+// line to onLine as it arrives (progress for image pulls / long commands). The
+// pipes are set up before Start (os/exec requires it) and both are drained —
+// reading only one would block the process once the other fills its buffer.
+func (e *OSExecutor) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	so, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", -1, err
+	}
+	se, err := cmd.StderrPipe()
+	if err != nil {
+		return "", -1, err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", -1, err
+	}
+
+	lines := make(chan string, 256)
+	var wg sync.WaitGroup
+	read := func(rc io.ReadCloser) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(rc)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}
+	wg.Add(2)
+	go read(so)
+	go read(se)
+	go func() { wg.Wait(); close(lines) }()
+
+	var sb strings.Builder
+	collect := make(chan struct{})
+	go func() {
+		defer close(collect)
+		for line := range lines {
+			sb.WriteString(line)
+			sb.WriteString("\n")
+			if onLine != nil {
+				onLine(line)
+			}
+		}
+	}()
+
+	err = cmd.Wait()
+	<-collect
+
+	code := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			code = exitErr.ExitCode()
+		}
+	}
+	return sb.String(), code, err
 }
 
 type OSProcess struct{ cmd *exec.Cmd }

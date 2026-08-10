@@ -5,16 +5,16 @@ import {
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
-  FileTextOutlined, DeleteOutlined, EditOutlined, DatabaseOutlined, LoadingOutlined, InfoCircleOutlined,
+  FileTextOutlined, DeleteOutlined, EditOutlined, DatabaseOutlined, InfoCircleOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
 import STYLES from './styles';
 import type { InstanceHeaderProps, DBInstance } from './types';
 
-// Engine brand logo + color (simple-icons). Falls back to a neutral accent for
-// engines not in the map.
-const ENGINE_BRAND: Record<string, { Icon: typeof SiMysql; color: string }> = {
+// Type brand logo + color (simple-icons). Falls back to a neutral accent for
+// types not in the map.
+const DB_TYPE_BRAND: Record<string, { Icon: typeof SiMysql; color: string }> = {
   mysql: { Icon: SiMysql, color: '#4479A1' },
   postgresql: { Icon: SiPostgresql, color: '#4169E1' },
   redis: { Icon: SiRedis, color: '#FF4438' },
@@ -28,20 +28,19 @@ const INSTALL_VERSION = '__install_version__';
 // Docker Hub pager instead of selecting a version.
 const MORE_VERSIONS = '__more_versions__';
 
-// The engine header card: brand + version picker + the selected instance's
-// lifecycle/ops actions, plus ALL instance-level modals in one file:
-// install (with embedded Docker Hub pager), install-log (SSE), instance info,
-// and service logs (self-contained). Per-tab modals (create db/user/grant/table/
-// record) live in their own tab files.
+// The type header card: brand + version picker + the selected instance's
+// lifecycle/ops actions, plus the install (with embedded Docker Hub pager),
+// instance-info and service-log modals. Per-tab modals (create db/user/grant/
+// table/record) live in their own tab files; the install log is inline
+// (InstallLogPanel) rendered by the page, not a modal here.
 export default function InstanceHeader({
   server, versions, operating,
   onSelectVersion, onRefreshVersions,
   onStartVersion, onStopVersion, onRestartVersion, onUninstallVersion,
+  onCancelInstall, onReinstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, busy, onInstallVersion,
   portCheck, onCheckPort,
-  activeInstalls, installLogInstance, installLogLines, installLogError, installLogDone, installLogFollow, installLogRef,
-  onOpenInstallLog, onCloseInstallLog, onInstallLogFollowChange,
   statusTag,
 }: InstanceHeaderProps) {
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
@@ -89,18 +88,6 @@ export default function InstanceHeader({
       onSelectVersion(selectedVersion);
     }
   }, [selectedVersion, onSelectVersion]);
-
-  // Installs are serialized per engine, so at most one is active for this tab;
-  // the header shows an orange "正在安装" trigger for it. During the image pull
-  // no instance row exists yet (active-installs endpoint), then a "provisioning"
-  // row appears once the container is created — both lead here.
-  const activeInstall = activeInstalls.find(a => a.engine === server.db_type) ?? null;
-  const provisioningVersion = versions.find(v => v.status === 'provisioning') ?? null;
-  const installing = activeInstall
-    ? { id: activeInstall.install_id, version: activeInstall.version }
-    : provisioningVersion
-      ? { id: provisioningVersion.container_id, version: provisioningVersion.version }
-      : null;
 
   const handleUpdatePort = (v: DBInstance) => {
     if (v.status === 'running') {
@@ -212,7 +199,7 @@ export default function InstanceHeader({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
           <Space align="center">
             {(() => {
-              const brand = ENGINE_BRAND[server.db_type];
+              const brand = DB_TYPE_BRAND[server.db_type];
               const Icon = brand?.Icon;
               return Icon
                 ? <Icon size={34} color={brand.color} style={{ display: 'flex' }} />
@@ -258,18 +245,18 @@ export default function InstanceHeader({
                     <Button type="primary" ghost icon={<ReloadOutlined />} loading={operating === `restart-${selectedVersion.id}`}
                       onClick={() => onRestartVersion(selectedVersion)}>重启</Button>
                   </>
-                ) : selectedVersion.status === 'provisioning' ? (
-                  <Button type="primary" ghost icon={<FileTextOutlined />}
-                    onClick={() => onOpenInstallLog({ id: selectedVersion.container_id, version: selectedVersion.version })}>查看安装进度</Button>
+                ) : selectedVersion.status === 'installing' ? (
+                  <Button danger icon={<CloseOutlined />} loading={operating === `cancel-install-${selectedVersion.id}`}
+                    onClick={() => onCancelInstall(selectedVersion)}>取消安装</Button>
                 ) : selectedVersion.status === 'failed' ? (
-                  <Button type="primary" ghost icon={<FileTextOutlined />}
-                    onClick={() => onOpenInstallLog({ id: selectedVersion.container_id, version: selectedVersion.version })}>查看安装日志</Button>
+                  <Button type="primary" icon={<ReloadOutlined />} loading={operating === `reinstall-${selectedVersion.id}`}
+                    onClick={() => onReinstallVersion(selectedVersion)}>重新安装</Button>
                 ) : (
                   <Button style={{ color: '#52c41a', borderColor: '#52c41a' }}
                     icon={<PlayCircleOutlined />} loading={operating === `start-${selectedVersion.id}`}
                     onClick={() => onStartVersion(selectedVersion)}>启动</Button>
                 )}
-                {selectedVersion.status !== 'provisioning' && (
+                {selectedVersion.status !== 'installing' && selectedVersion.status !== 'failed' && (
                   <>
                     <Button icon={<FileTextOutlined />} onClick={() => setLogVersion(selectedVersion)}>日志</Button>
                     <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
@@ -280,11 +267,16 @@ export default function InstanceHeader({
                     </Popconfirm>
                   </>
                 )}
+                {/* failed: the log/port/info buttons are hidden (nothing meaningful
+                    to inspect), and the row is removed via reinstall's purge; 卸载
+                    stays as a plain delete of the failed attempt. */}
+                {selectedVersion.status === 'failed' && (
+                  <Popconfirm title={`删除失败的 ${server.display_name} ${selectedVersion.version} 记录？`}
+                    onConfirm={() => onUninstallVersion(selectedVersion)}>
+                    <Button danger icon={<DeleteOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
+                  </Popconfirm>
+                )}
               </>
-            )}
-            {installing && (
-              <Button style={{ background: '#fa8c16', borderColor: '#fa8c16', color: '#fff' }}
-                icon={<LoadingOutlined />} onClick={() => onOpenInstallLog(installing)}>正在安装</Button>
             )}
           </Space>
         </div>
@@ -383,53 +375,6 @@ export default function InstanceHeader({
             </div>
           </>
         )}
-      </Modal>
-
-      {/* ===== Install log modal (SSE stream) ===== */}
-      <Modal
-        title={
-          <Space>
-            <FileTextOutlined />
-            <span>{server.display_name} {installLogInstance?.version} - 安装日志</span>
-            {!installLogDone && <Spin size="small" />}
-          </Space>
-        }
-        open={!!installLogInstance}
-        onCancel={onCloseInstallLog}
-        footer={
-          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Space size="small">
-              <Switch checked={installLogFollow} onChange={onInstallLogFollowChange} />
-              <span style={{ color: '#8c8c8c', fontSize: 12 }}>自动滚动</span>
-            </Space>
-            <Button size="small" onClick={onCloseInstallLog}>关闭</Button>
-          </Space>
-        }
-        width="90vw" style={{ maxWidth: 960 }}>
-        <div ref={installLogRef} style={{
-          background: '#fafafa', border: '1px solid #e8e8e8',
-          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
-          fontSize: 13, lineHeight: 1.8, padding: '8px 0', borderRadius: 6,
-          maxHeight: '60vh', overflowY: 'auto', overflowX: 'auto',
-        }}>
-          {installLogLines.length === 0 && !installLogError && (
-            <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>
-              {installLogDone ? '无日志输出' : '等待日志输出…'}
-            </div>
-          )}
-          {installLogLines.map((line, i) => (
-            <div key={i} style={STYLES.logLine}>
-              <span style={STYLES.logLineNumber}>{i + 1}</span>
-              <span style={STYLES.logLineText}>{line || ' '}</span>
-            </div>
-          ))}
-          {installLogError && (
-            <div style={STYLES.logLine}>
-              <span style={STYLES.logLineNumber}>{installLogLines.length + 1}</span>
-              <span style={{ ...STYLES.logLineText, color: '#ff4d4f' }}>❌ {installLogError}</span>
-            </div>
-          )}
-        </div>
       </Modal>
 
       {/* ===== Instance info modal ===== */}

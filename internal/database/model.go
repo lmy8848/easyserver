@@ -1,6 +1,6 @@
 package database
 
-// DBType is the database engine enum.
+// DBType is the database type enum.
 type DBType string
 
 const (
@@ -40,7 +40,7 @@ type CreateDBInstanceRequest struct {
 	BindAddress     string `json:"bind_address"`
 }
 
-// IsValidDBType reports whether t is one of the supported engine enums.
+// IsValidDBType reports whether t is one of the supported database type enums.
 func IsValidDBType(t DBType) bool {
 	switch t {
 	case DBTypeMySQL, DBTypePostgreSQL, DBTypeRedis:
@@ -49,7 +49,7 @@ func IsValidDBType(t DBType) bool {
 	return false
 }
 
-// dockerImageBase returns the Docker Hub official image name for an engine. It
+// dockerImageBase returns the Docker Hub official image name for a database type. It
 // is the only user-facing knob for the "更多版本" flow — the user picks a tag of
 // this official image; the panel never builds arbitrary image names.
 func dockerImageBase(dbType DBType) string {
@@ -65,14 +65,14 @@ func dockerImageBase(dbType DBType) string {
 }
 
 // Database is a logical database inside an instance, queried live from the
-// engine — it is never persisted (the engine owns its databases; the panel only
+// database server — it is never persisted (the server owns its databases; the panel only
 // reflects them). Charset is fetched alongside the name in one query.
 type Database struct {
 	Name    string `json:"name"`
 	Charset string `json:"charset"`
 }
 
-// DBUser is a database user, queried live from the engine. Privileges are not
+// DBUser is a database user, queried live from the database server. Privileges are not
 // summarized here (grant/revoke are per-object); the grant flow adds new grants.
 type DBUser struct {
 	Username   string `json:"username"`

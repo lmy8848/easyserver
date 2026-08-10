@@ -6,7 +6,7 @@ import (
 
 // Repository defines data access for the whole database domain: container-backed
 // instances and the backups produced from them. Logical databases/users are NOT
-// persisted — they are queried live from the engine; the engine owns them.
+// persisted — they are queried live from the database server; the server owns them.
 type Repository interface {
 	// Instance operations
 	ListInstances(ctx context.Context, dbType DBType) ([]DBInstance, error)

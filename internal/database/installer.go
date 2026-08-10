@@ -3,250 +3,87 @@ package database
 import (
 	"context"
 	"fmt"
-	"strings"
-	"sync"
-	"time"
+
+	"easyserver/internal/infra/task"
 )
 
-// installLog is the in-memory line buffer for one installation. The background
-// installer appends to it; SSE subscribers replay everything written so far
-// (cursor-based) and then receive live lines.
-type installLog struct {
-	mu    sync.Mutex
-	lines []string
-}
-
-func (l *installLog) append(line string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	// Keep a bounded history (same ceiling as service logs).
-	if len(l.lines) >= maxLogLines {
-		l.lines = append(l.lines[:0], l.lines[len(l.lines)-maxLogLines*3/4:]...)
-	}
-	l.lines = append(l.lines, line)
-}
-
-// Tail returns lines from index from (0-based); callers keep their own cursor
-// so they never see a line twice. It returns the new end index.
-func (l *installLog) Tail(from int) ([]string, int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if from < 0 || from >= len(l.lines) {
-		return nil, len(l.lines)
-	}
-	return l.lines[from:], len(l.lines)
-}
-
-// installTask is one in-flight installation. While the image is being pulled no
-// database row exists — the task is the only record; once the container is
-// created the install goroutine writes a "provisioning" row that the task later
-// flips to "running"/"failed".
-type installTask struct {
-	installID  string
-	engine     DBType
-	version    string
-	image      string
-	log        *installLog
-	done       chan struct{}
-	err        error
-	finishedAt time.Time // set when the install completes; stale tasks are pruned
-}
-
-// InstallTask is the handler-facing view of a task (safe to hand out of the
-// package): replayable log + completion channel + final error.
-type InstallTask struct {
-	Log   *installLog
-	done  chan struct{}
-	errFn func() error
-}
-
-// Done is closed when the install finishes (success or failure).
-func (t *InstallTask) Done() <-chan struct{} { return t.done }
-
-// Err returns the final error, nil on success.
-func (t *InstallTask) Err() error { return t.errFn() }
-
-// installer runs database installations in the background. One install per
-// engine at a time (serialized); the image-pull phase has no database row (the
-// "正在安装" entry comes from the active-installs list), then the container's
-// creation writes a "provisioning" row that a refresh sees. Service restart
-// abandons in-flight tasks (their logs are lost; a created-but-unstarted
-// container row stays "provisioning" for manual cleanup).
-type installer struct {
-	mu    sync.Mutex
-	busy  map[DBType]bool
-	tasks map[string]*installTask
-}
-
-func newInstaller() *installer {
-	return &installer{
-		busy:  make(map[DBType]bool),
-		tasks: make(map[string]*installTask),
-	}
-}
-
-// begin claims the engine for one install. Returns an error if another install
-// on the same engine is still running.
-func (in *installer) begin(dbType DBType) error {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	in.pruneDone(installTaskTTL)
-	if in.busy[dbType] {
-		return fmt.Errorf("该引擎已有安装正在进行，请稍后再试")
-	}
-	in.busy[dbType] = true
-	return nil
-}
-
-func (in *installer) end(dbType DBType) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	in.busy[dbType] = false
-}
-
-// InstallMeta carries the display info a task records for the active-install
-// list and the log modal title.
-type InstallMeta struct {
-	Version string
-	Image   string
-}
-
-// start registers the task and launches the install goroutine. The task stays
-// in the map after completion so its log stays replayable (the "继续查看日志"
-// flow after refresh/close); only the engine's busy slot is released.
-func (in *installer) start(dbType DBType, installID string, meta InstallMeta, run func(log *installLog) error) *installTask {
-	task := &installTask{
-		installID: installID,
-		engine:    dbType,
-		version:   meta.Version,
-		image:     meta.Image,
-		log:       &installLog{},
-		done:      make(chan struct{}),
-	}
-	in.mu.Lock()
-	in.tasks[installID] = task
-	in.mu.Unlock()
-
-	go func() {
-		defer close(task.done)
-		defer in.end(dbType)
-		task.err = run(task.log)
-		in.mu.Lock()
-		task.finishedAt = time.Now()
-		in.mu.Unlock()
-	}()
-
-	return task
-}
-
-// pruneDone drops finished tasks older than ttl. Done tasks are deliberately
-// kept (see start) so their logs stay viewable; installs are rare, so pruning
-// on each new install keeps the map bounded without a background sweeper.
-func (in *installer) pruneDone(ttl time.Duration) {
-	cutoff := time.Now().Add(-ttl)
-	for id, t := range in.tasks {
-		if !t.finishedAt.IsZero() && t.finishedAt.Before(cutoff) {
-			delete(in.tasks, id)
-		}
-	}
-}
-
-// get returns the task for an install id, if it still exists.
-func (in *installer) get(installID string) (*installTask, bool) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	t, ok := in.tasks[installID]
-	return t, ok
-}
-
-// ActiveInstall is the handler-facing view of an in-progress install — what the
-// front-end needs to show the "正在安装" entry and re-open its log.
-type ActiveInstall struct {
-	InstallID string `json:"install_id"`
-	Engine    string `json:"engine"`
-	Version   string `json:"version"`
-	Image     string `json:"image"`
-}
-
-// Active returns installs still running (not yet done). Finished tasks stay in
-// the map (log replay) but drop out of Active.
-func (in *installer) Active() []ActiveInstall {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	var out []ActiveInstall
-	for _, t := range in.tasks {
-		select {
-		case <-t.done:
-			continue
-		default:
-		}
-		out = append(out, ActiveInstall{InstallID: t.installID, Engine: string(t.engine), Version: t.version, Image: t.image})
-	}
-	return out
-}
-
-// writeLog splits multi-line command output into individual log lines.
-func writeLog(log *installLog, msg string) {
-	for _, line := range strings.Split(msg, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			log.append(line)
-		}
-	}
-}
+// 数据库安装的后台执行由通用任务执行器承担（internal/infra/task）：同 DBType
+// 去重（key=DBType）、取消、状态机、失败/取消保留至同 key 重装、可选 Task Log
+// 附件。这里只保留安装流水线本身 installInstance 与取消入口。
 
 // installInstance runs the container creation pipeline and reports progress
 // into log. rt is an install-scoped runtime whose command output is hooked into
-// log. The instance row is written once the container is created (image pulled)
-// — status "provisioning" until start + readiness flip it to "running"; a
-// failure flips it to "failed" (the row stays so the failure and its log remain
-// visible and the container can be cleaned up). The image-pull phase has no row;
-// the in-memory task is its only record.
-func (s *Service) installInstance(ctx context.Context, dbType DBType, version, image, engineName, containerID, volumeName, bindAddress string, port int, password string, spec ContainerSpec, rt DatabaseRuntime, log *installLog) error {
-	fail := func(id int64, msg string, err error) error {
-		_ = rt.Remove(ctx, engineName, containerID)
+// log. The instance row already exists (status "installing", written up front by
+// CreateInstance); this flips it to "running" on success / "failed" on error, or
+// removes it entirely when the user cancels. ctx is the per-task cancel context
+// from the task executor.
+func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerID, volumeName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
+	canceled := func() bool { return ctx.Err() != nil }
+	// removeInstance is the cancel cleanup: drop the container and the instance
+	// row — the user aborted, so nothing lingers (a failed install keeps its row
+	// for inspection; a canceled one does not).
+	removeInstance := func() {
+		_ = rt.Remove(context.Background(), engineName, containerID)
+		_ = s.repo.DeleteInstance(context.Background(), id)
+	}
+	fail := func(msg string, err error) error {
+		if canceled() {
+			removeInstance()
+			log.Append("❌ 安装已取消")
+			return fmt.Errorf("安装已取消")
+		}
+		// 失败时保留容器，便于排查失败现场（容器日志还在）。重新安装走
+		// "卸载+安装"两步，卸载会先删掉这个残留容器，所以不会被占用卡住。
 		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
-		log.append("❌ " + msg + ": " + err.Error())
+		log.Append("❌ " + msg + ": " + err.Error())
 		return err
 	}
 
-	log.append("开始安装 " + image + " ...")
+	log.Append("开始安装 " + image + " ...")
 	if err := rt.Create(ctx, spec); err != nil {
-		log.append("❌ 创建容器失败: " + err.Error())
+		if canceled() {
+			removeInstance()
+			log.Append("❌ 安装已取消")
+			return fmt.Errorf("安装已取消")
+		}
+		// No container was created — still flip the row to "failed" so the
+		// instance doesn't sit at "installing" forever (the log panel surfaces
+		// the error and offers reinstall).
+		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
+		log.Append("❌ 创建容器失败: " + err.Error())
 		return err
 	}
-	log.append("容器已创建，写入实例记录...")
-
-	// Container created (image pulled) → write the row now; the instance becomes
-	// visible in the list as "正在安装". No row exists during the image pull.
-	id, err := s.repo.CreateInstance(ctx, &DBInstance{
-		DBType: dbType, Version: version, Port: port, Status: "provisioning",
-		ContainerEngine: engineName, Image: image, ContainerID: containerID,
-		VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password,
-	})
-	if err != nil {
-		_ = rt.Remove(ctx, engineName, containerID)
-		log.append("❌ 写入实例记录失败: " + err.Error())
-		return err
-	}
+	log.Append("容器已创建，启动服务...")
 
 	if dbType == DBTypeRedis {
-		log.append("写入 Redis 配置...")
+		log.Append("写入 Redis 配置...")
 		if err := seedRedisConfig(ctx, rt, engineName, containerID, password); err != nil {
-			return fail(id, "写入 Redis 配置失败", err)
+			return fail("写入 Redis 配置失败", err)
 		}
 	}
 
-	log.append("启动容器...")
 	if err := rt.Start(ctx, engineName, containerID); err != nil {
-		return fail(id, "启动容器失败", err)
+		return fail("启动容器失败", err)
 	}
-	log.append("等待数据库就绪（最长 2 分钟）...")
-	if _, err := waitForHealthy(ctx, rt, engineName, containerID, 2*time.Minute); err != nil {
-		return fail(id, "数据库未就绪", err)
+	// 等待就绪不设超时：数据库初始化（尤其首次拉镜像后）没有固定时长，卡住时
+	// 由容器退出（exited 快失败）或用户取消来终止，而不是倒计时误杀。
+	if _, err := waitForHealthy(ctx, rt, engineName, containerID, 0); err != nil {
+		return fail("数据库未就绪", err)
 	}
-	log.append("✅ 安装完成，数据库已就绪")
+	log.Append("✅ 安装完成，数据库已就绪")
 	if err := s.repo.UpdateInstanceStatus(ctx, id, "running"); err != nil {
 		return err
+	}
+	return nil
+}
+
+// CancelInstall aborts an in-flight install. The goroutine observes the cancel
+// at its next command boundary (image pull, create, start, health poll) and
+// removes the container and the instance row before finishing — a canceled
+// install leaves no row behind, unlike a failed one.
+func (s *Service) CancelInstall(installID string) error {
+	if !s.taskMgr.Cancel(installID) {
+		return fmt.Errorf("安装已结束或不存在")
 	}
 	return nil
 }
