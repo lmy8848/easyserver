@@ -222,7 +222,7 @@ export default function VersionList({
                 {statusTag(selectedVersion.status)}
                 {selectedVersion.status === 'running' ? (
                   <>
-                    <Button danger icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
+                    <Button type="primary" danger icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
                       onClick={() => onStopVersion(selectedVersion)}>停止</Button>
                     <Button icon={<ReloadOutlined />} loading={operating === `restart-${selectedVersion.id}`}
                       onClick={() => onRestartVersion(selectedVersion)}>重启</Button>
@@ -244,7 +244,7 @@ export default function VersionList({
                     <Button icon={<InfoCircleOutlined />} onClick={() => setInfoVisible(true)}>实例信息</Button>
                     <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
                       onConfirm={() => onUninstallVersion(selectedVersion)}>
-                      <Button danger icon={<DeleteOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
+                      <Button type="primary" danger icon={<DeleteOutlined />} loading={operating === `uninstall-${selectedVersion.id}`}>卸载</Button>
                     </Popconfirm>
                   </>
                 )}
