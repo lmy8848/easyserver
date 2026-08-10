@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Space } from 'antd';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
@@ -794,6 +794,19 @@ export default function DatabasePage() {
                 />,
               },
             ]} />
+          </Card>
+        )}
+        {!selectedVersion && (
+          <Card>
+            <Empty
+              description={
+                <span>
+                  暂未安装任何版本
+                  <br />
+                  <span style={{ color: '#999', fontSize: 13 }}>在右上角版本选择中选择「＋ 安装版本」开始安装</span>
+                </span>
+              }
+            />
           </Card>
         )}
       </div>
