@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -53,6 +54,45 @@ func (*unusedProcess) Wait() error                        { return nil }
 func (*unusedProcess) Kill() error                        { return nil }
 func (*unusedProcess) Signal(syscall.Signal) error        { return nil }
 func (*unusedProcess) Cmd() *exec.Cmd                     { return nil }
+
+func TestExecSeparatesStderrFromQueryOutput(t *testing.T) {
+	mock := executor.NewMockExecutor()
+	// mysql 客户端把警告打到 stderr —— 成功时不得混入查询结果（列表/SQL 输出
+	// 是解析目标，必须干净）。
+	// MockExecutor 按 `name+空格+args[0]` 匹配：exec 子命令与 pull 子命令分开设置。
+	mock.SetResponse("docker exec", executor.MockResponse{
+		Stdout:   "testdb\tutf8mb4\n",
+		Stderr:   "mysql: [Warning] Using a password on the command line interface can be insecure.",
+		ExitCode: 0,
+	})
+	runtime := NewCLIContainerRuntime(mock)
+	out, err := runtime.Exec(context.Background(), "docker", "c1", "mysql", "-N", "-B", "-e", "SHOW DATABASES")
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if out != "testdb\tutf8mb4\n" {
+		t.Fatalf("stderr leaked into query output: %q", out)
+	}
+}
+
+func TestLifecycleCommandKeepsCombinedOutput(t *testing.T) {
+	mock := executor.NewMockExecutor()
+	// 生命周期命令（如拉镜像/启动）stderr 也可能承载进度/诊断，仍须合并 ——
+	// 安装日志依赖整条输出流。
+	mock.SetResponse("docker pull", executor.MockResponse{
+		Stdout:   "pulling image...",
+		Stderr:   "extracting layer 3/5",
+		ExitCode: 0,
+	})
+	runtime := NewCLIContainerRuntime(mock)
+	out, err := runtime.command(context.Background(), "docker", "pull", "mysql:8.0")
+	if err != nil {
+		t.Fatalf("command: %v", err)
+	}
+	if !strings.Contains(out, "pulling image...") || !strings.Contains(out, "extracting layer 3/5") {
+		t.Fatalf("combined output lost: %q", out)
+	}
+}
 
 func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	fake := &runtimeFakeExecutor{}

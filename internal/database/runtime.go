@@ -82,12 +82,34 @@ func containerBinary(runtime string) (string, error) {
 	}
 }
 
+// command runs a lifecycle command with stdout+stderr combined — install/log
+// paths want the whole stream (pull progress, container logs, errors).
 func (r *CLIContainerRuntime) command(ctx context.Context, runtime string, args ...string) (string, error) {
+	return r.run(ctx, true, runtime, args...)
+}
+
+// execCommand runs a command inside the container with stdout and stderr
+// separated — query output (mysql/psql listings, SQL results) is parsed, so
+// stderr warnings (e.g. mysql's "password on the command line" notice) must
+// never be merged into it. stderr only surfaces in the error when the command
+// itself fails.
+func (r *CLIContainerRuntime) execCommand(ctx context.Context, runtime, name string, args ...string) (string, error) {
+	return r.run(ctx, false, runtime, append([]string{"exec", name}, args...)...)
+}
+
+func (r *CLIContainerRuntime) run(ctx context.Context, combine bool, runtime string, args ...string) (string, error) {
 	bin, err := containerBinary(runtime)
 	if err != nil {
 		return "", err
 	}
-	out, code, runErr := r.executor.RunCombined(ctx, bin, args...)
+	var out, stderr string
+	var code int
+	var runErr error
+	if combine {
+		out, code, runErr = r.executor.RunCombined(ctx, bin, args...)
+	} else {
+		out, stderr, code, runErr = r.executor.Run(ctx, bin, args...)
+	}
 	if r.outputHook != nil {
 		for _, line := range strings.Split(out, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
@@ -99,7 +121,15 @@ func (r *CLIContainerRuntime) command(ctx context.Context, runtime string, args 
 		if runErr != nil {
 			return out, fmt.Errorf("%s: %w", bin, runErr)
 		}
-		return out, fmt.Errorf("%s exited with code %d: %s", bin, code, strings.TrimSpace(out))
+		// For separated runs, append stderr to the detail so the real error
+		// isn't hidden by an empty stdout.
+		detail := strings.TrimSpace(out)
+		if !combine {
+			if s := strings.TrimSpace(stderr); s != "" {
+				detail = strings.TrimSpace(detail + "\n" + s)
+			}
+		}
+		return out, fmt.Errorf("%s exited with code %d: %s", bin, code, detail)
 	}
 	return out, nil
 }
@@ -190,7 +220,7 @@ func (r *CLIContainerRuntime) Exec(ctx context.Context, runtime, name string, ar
 	if name == "" || len(args) == 0 {
 		return "", fmt.Errorf("container name and command are required")
 	}
-	return r.command(ctx, runtime, append([]string{"exec", name}, args...)...)
+	return r.execCommand(ctx, runtime, name, args...)
 }
 
 func (r *CLIContainerRuntime) CopyFrom(ctx context.Context, runtime, name, source, destination string) error {
