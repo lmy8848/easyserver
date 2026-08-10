@@ -15,10 +15,11 @@ const (
 // config dir, a fixed image and a fixed runtime.
 type DBInstance struct {
 	ID              int64  `json:"id"`
-	DBType          DBType `json:"db_type"` // mysql, postgresql, redis
-	Version         string `json:"version"` // 5.7, 8.0, 13, 15, etc.
-	Port            int    `json:"port"`
-	Status          string `json:"status"` // running, stopped, unhealthy
+	DBType          DBType `json:"db_type"`        // mysql, postgresql, redis
+	Version         string `json:"version"`        // 5.7, 8.0, 13, 15, etc.
+	Port            int    `json:"port"`           // host mapping port, chosen by the user
+	ContainerPort   int    `json:"container_port"` // port the engine listens on inside the container — always the engine default; 0 = mapping broken/unknown
+	Status          string `json:"status"`         // running, stopped, unhealthy
 	CreatedAt       string `json:"created_at"`
 	ContainerEngine string `json:"container_engine"`
 	Image           string `json:"image"`
@@ -145,11 +146,12 @@ type DMLResult struct {
 
 // PagedQueryResult is the response for QueryTable.
 type PagedQueryResult struct {
-	Headers  []string        `json:"headers"`
-	Rows     [][]interface{} `json:"rows"`
-	Total    int             `json:"total"`
-	Page     int             `json:"page"`
-	PageSize int             `json:"page_size"`
+	Headers     []string        `json:"headers"`
+	ColumnTypes []string        `json:"column_types"`
+	Rows        [][]interface{} `json:"rows"`
+	Total       int             `json:"total"`
+	Page        int             `json:"page"`
+	PageSize    int             `json:"page_size"`
 }
 
 // DescribeResult is the response for DescribeTable.

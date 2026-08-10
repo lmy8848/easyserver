@@ -50,26 +50,31 @@ type Service struct {
 	backupDir      string
 	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
+	queryRunner    SQLQueryRunner         // CLI fallback channel (Redis / broken mappings)
+	driver         SQLQueryRunner         // direct driver channel (MySQL/PostgreSQL with valid mapping)
 }
 
 // NewService creates a database Service over the given Repository, driving
-// containers through the CLI Runtime seam.
+// containers through the CLI Runtime seam and SQL through the direct driver
+// channel (CLI fallback for Redis / broken mappings).
 func NewService(repo Repository, exec executor.CommandExecutor) *Service {
-	return &Service{
+	rt := NewCLIContainerRuntime(exec)
+	return (&Service{
 		repo:      repo,
-		runtime:   NewCLIContainerRuntime(exec),
+		runtime:   rt,
 		backupDir: DefaultBackupDir,
 		taskMgr:   task.NewManager(8),
 		runtimeFactory: func() DatabaseRuntime {
 			return NewCLIContainerRuntime(exec)
 		},
-	}
+		driver: newDriverQueryRunner(),
+	}).withCLIQueryRunner()
 }
 
 // NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
 // CLI runtime construction.
 func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
-	return &Service{
+	return (&Service{
 		repo:      repo,
 		runtime:   runtime,
 		backupDir: DefaultBackupDir,
@@ -77,7 +82,24 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
+		driver: newDriverQueryRunner(),
+	}).withCLIQueryRunner()
+}
+
+// withCLIQueryRunner wires the CLI fallback channel onto an existing Service.
+// Both constructors share it so the runner closure can reference s.
+func (s *Service) withCLIQueryRunner() *Service {
+	s.queryRunner = s.buildCLIQueryRunner()
+	return s
+}
+
+// runnerFor picks the SQL channel for an instance. Direct driver connection
+// needs a valid engine default port mapping; Redis has no driver in scope.
+func (s *Service) runnerFor(inst *DBInstance) SQLQueryRunner {
+	if inst != nil && (inst.DBType == DBTypeMySQL || inst.DBType == DBTypePostgreSQL) && inst.ContainerPort > 0 {
+		return s.driver
 	}
+	return s.queryRunner
 }
 
 // refreshInstanceStatus queries the container runtime (by container ID) and
@@ -205,7 +227,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	// an in-flight install of the same DB type happens synchronously in the task
 	// executor; if that rejects the request, undo the just-written row.
 	row := &DBInstance{
-		DBType: dbType, Version: req.Version, Port: port, Status: "installing",
+		DBType: dbType, Version: req.Version, Port: port, ContainerPort: containerPortForType(dbType), Status: "installing",
 		ContainerEngine: engineName, Image: req.Image, ContainerName: containerName,
 		VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password,
 	}
@@ -700,6 +722,22 @@ func generateAdminPassword() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// containerPortForType is the port the database engine listens on INSIDE the
+// container — always the engine default (MySQL 3306 / PostgreSQL 5432 / Redis
+// 6379). The user-selected port is only the host mapping (HostPort). The old
+// code mapped the user port 1:1 onto the container port (`--publish X:X`),
+// which pointed at a container port where nothing listens — the mapping was
+// useless to any external client and unusable by the direct-connection channel.
+func containerPortForType(dbType DBType) int {
+	switch dbType {
+	case DBTypePostgreSQL:
+		return 5432
+	case DBTypeRedis:
+		return 6379
+	}
+	return 3306
+}
+
 func containerSpec(dbType DBType, engineName, version, image, name, volume, bind string, port int, password string) ContainerSpec {
 	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -uroot -p$MYSQL_ROOT_PASSWORD"
 	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
@@ -726,7 +764,7 @@ func containerSpec(dbType DBType, engineName, version, image, name, volume, bind
 	}
 	return ContainerSpec{ContainerEngine: engineName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
 		ConfigVolume: configVolume, ConfigDir: configDir,
-		BindAddress: bind, HostPort: port, ContainerPort: port, Environment: env,
+		BindAddress: bind, HostPort: port, ContainerPort: containerPortForType(dbType), Environment: env,
 		Labels: map[string]string{"com.easyserver.dbtype": string(dbType), "com.easyserver.version": version, "com.easyserver.admin-user": adminUser}, HealthCommand: health, Command: command}
 }
 
@@ -762,45 +800,52 @@ func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Databa
 // queryDatabases lists logical databases live from the database server. Databases are
 // server-owned state — the panel never persists a mirror of them.
 func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]Database, error) {
-	var out string
-	var err error
+	var runner SQLQueryRunner
 	switch instance.DBType {
 	case DBTypeMySQL:
-		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
+		runner = s.runnerFor(instance)
+		res, err := runner.Query(ctx, instance, systemDBName(instance.DBType),
 			"SELECT schema_name, default_character_set_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY schema_name")
+		if err != nil {
+			return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
+		}
+		var dbs []Database
+		for _, row := range res.Rows {
+			dbs = append(dbs, Database{Name: str(row, 0), Charset: str(row, 1)})
+		}
+		return dbs, nil
 	case DBTypePostgreSQL:
-		// 列间用 SQL 拼出 tab：不依赖 psql 的 fieldsep 配置（postgres 容器里
-		// unaligned 输出分隔符可能是 |），Go 侧统一按 \t 解析。
-		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
-			"SELECT datname || E'\\t' || pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
+		runner = s.runnerFor(instance)
+		res, err := runner.Query(ctx, instance, systemDBName(instance.DBType),
+			"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
+		if err != nil {
+			return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
+		}
+		var dbs []Database
+		for _, row := range res.Rows {
+			dbs = append(dbs, Database{Name: str(row, 0), Charset: str(row, 1)})
+		}
+		return dbs, nil
 	case DBTypeRedis:
 		return []Database{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
-	if err != nil {
-		// stderr (the actual database error) is carried by err, not out — stdout
-		// is empty when the query fails.
-		return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
+}
+
+// str coerces a query row cell to its string form for display fields. Driver
+// cells may arrive as string, []byte or nil (NULL).
+func str(row []any, i int) string {
+	if i >= len(row) || row[i] == nil {
+		return ""
 	}
-	var dbs []Database
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, "\t", 2)
-		name := strings.TrimSpace(fields[0])
-		if name == "" {
-			continue
-		}
-		charset := ""
-		if len(fields) > 1 {
-			charset = strings.TrimSpace(fields[1])
-		}
-		dbs = append(dbs, Database{Name: name, Charset: charset})
+	switch v := row[i].(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
 	}
-	return dbs, nil
+	return fmt.Sprintf("%v", row[i])
 }
 
 func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *CreateDatabaseRequest) (*Database, error) {
@@ -901,41 +946,34 @@ func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, 
 
 // queryUsers lists database users live from the database server (the server owns them).
 func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUser, error) {
-	var out string
-	var err error
 	switch instance.DBType {
 	case DBTypeMySQL:
-		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
+		res, err := s.runnerFor(instance).Query(ctx, instance, systemDBName(instance.DBType),
 			"SELECT user, host FROM mysql.user WHERE user NOT IN ('mysql.session','mysql.sys','mysql.infoschema') ORDER BY user, host")
+		if err != nil {
+			return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(err.Error()))
+		}
+		var users []DBUser
+		for _, row := range res.Rows {
+			users = append(users, DBUser{Username: str(row, 0), Host: str(row, 1)})
+		}
+		return users, nil
 	case DBTypePostgreSQL:
-		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
+		res, err := s.runnerFor(instance).Query(ctx, instance, systemDBName(instance.DBType),
 			"SELECT rolname FROM pg_roles WHERE rolcanlogin ORDER BY rolname")
+		if err != nil {
+			return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(err.Error()))
+		}
+		var users []DBUser
+		for _, row := range res.Rows {
+			users = append(users, DBUser{Username: str(row, 0)})
+		}
+		return users, nil
 	case DBTypeRedis:
 		return []DBUser{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(err.Error()))
-	}
-	var users []DBUser
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, "\t", 2)
-		username := strings.TrimSpace(fields[0])
-		if username == "" {
-			continue
-		}
-		host := ""
-		if len(fields) > 1 {
-			host = strings.TrimSpace(fields[1])
-		}
-		users = append(users, DBUser{Username: username, Host: host})
-	}
-	return users, nil
 }
 
 // isAdminUser reports whether username is the database's built-in administrator.
@@ -1309,12 +1347,24 @@ func (s *Service) CleanOldBackups(ctx context.Context, instanceID int64, dbName 
 
 // --- SQL query operations ---
 
+// runInVersion runs a command inside the instance's container via the CLI
+// runtime, with admin credentials injected.
 func (s *Service) runInVersion(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
 	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
 	args = s.withAdminCredentials(instance, args)
 	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...)
+}
+
+// cliRunnerExec adapts (*Service).runInVersion to the cliQueryRunner exec
+// signature.
+func (s *Service) cliRunnerExec(ctx context.Context, inst *DBInstance, args ...string) (string, error) {
+	return s.runInVersion(ctx, inst, args...)
+}
+
+func (s *Service) buildCLIQueryRunner() SQLQueryRunner {
+	return &cliQueryRunner{exec: s.cliRunnerExec}
 }
 
 func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []string {
@@ -1357,16 +1407,6 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
-func (s *Service) execRaw(ctx context.Context, version *DBInstance, dbType DBType, dbName string, sql string) (string, error) {
-	switch dbType {
-	case DBTypeMySQL:
-		return s.runInVersion(ctx, version, "mysql", dbName, "-e", sql)
-	case DBTypePostgreSQL:
-		return s.runInVersion(ctx, version, "psql", "-d", dbName, "-c", sql)
-	}
-	return "", fmt.Errorf("不支持的数据库类型")
-}
-
 var pathPattern = regexp.MustCompile(`(?:/[\w.-]+){2,}`)
 
 // SanitizeSQLError strips sensitive information (file paths) from SQL error output.
@@ -1400,31 +1440,21 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 	var tables []map[string]interface{}
 	switch instance.DBType {
 	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, "SHOW TABLES;")
+		res, err := s.runnerFor(instance).Query(ctx, instance, dbName, "SHOW TABLES")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
 		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			line = strings.TrimSpace(line)
-			if i == 0 || line == "" {
-				continue // first line is the "Tables_in_<db>" header
-			}
-			tables = append(tables, map[string]interface{}{"name": line})
+		for _, row := range res.Rows {
+			tables = append(tables, map[string]interface{}{"name": str(row, 0)})
 		}
 	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
-			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
+		res, err := s.runnerFor(instance).Query(ctx, instance, dbName,
+			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
 		if err != nil {
 			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
 		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			line = strings.TrimSpace(line)
-			if i < 2 || line == "" || line == "(0 rows)" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "(") {
-				continue
-			}
-			tables = append(tables, map[string]interface{}{"name": line})
+		for _, row := range res.Rows {
+			tables = append(tables, map[string]interface{}{"name": str(row, 0)})
 		}
 	}
 	return tables, nil
@@ -1442,12 +1472,14 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 	builder := NewSQLBuilder(instance.DBType)
 	describeSQL := builder.BuildDescribeTable(tableName)
 
-	out, err := s.execRaw(ctx, instance, instance.DBType, dbName, describeSQL)
+	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, describeSQL)
 	if err != nil {
 		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(err.Error()))
 	}
 
-	tableInfo := ParseTableInfo(instance.DBType, tableName, out)
+	// The driver channel returns structured describe rows (name, type, nullable,
+	// default, pk-flag columns); the CLI channel parses the same shape from text.
+	tableInfo := tableInfoFromQuery(instance.DBType, tableName, res)
 
 	var columns []map[string]interface{}
 	for _, col := range tableInfo.Columns {
@@ -1482,80 +1514,45 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 	if pageSize > 200 {
 		pageSize = 200
 	}
-	offset := (page - 1) * pageSize
 
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
 	dbType := instance.DBType
+	builder := NewSQLBuilder(dbType)
 
 	var total int
-	switch dbType {
-	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
-		if err == nil {
-			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
-		}
-	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
-		if err == nil {
-			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
-		}
-	}
-
 	var headers []string
+	var columnTypes []string
 	var rows [][]interface{}
 	switch dbType {
-	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName,
-			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
+	case DBTypeMySQL, DBTypePostgreSQL:
+		countRes, err := s.runnerFor(instance).Query(ctx, instance, dbName, builder.BuildCount(tableName))
+		if err == nil && len(countRes.Rows) > 0 {
+			fmt.Sscanf(str(countRes.Rows[0], 0), "%d", &total)
+		}
+		res, err := s.runnerFor(instance).Query(ctx, instance, dbName, builder.BuildSelect(tableName, nil, page, pageSize))
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
 		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			fields := strings.Split(line, "\t")
-			if i == 0 {
-				headers = fields
-			} else {
-				var row []interface{}
-				for _, f := range fields {
-					row = append(row, f)
-				}
-				rows = append(rows, row)
-			}
+		for _, c := range res.Columns {
+			headers = append(headers, c.Name)
+			columnTypes = append(columnTypes, c.Type)
 		}
-	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
-			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
-		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
-		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			fields := strings.Split(line, "|")
-			for j := range fields {
-				fields[j] = strings.TrimSpace(fields[j])
-			}
-			if i == 0 {
-				headers = fields
-			} else if i >= 2 && !strings.HasPrefix(line, "(") && line != "" {
-				var row []interface{}
-				for _, f := range fields {
-					row = append(row, f)
-				}
-				rows = append(rows, row)
-			}
+		rows = make([][]interface{}, len(res.Rows))
+		for i, row := range res.Rows {
+			rows[i] = row
 		}
 	}
 
 	return &PagedQueryResult{
-		Headers:  headers,
-		Rows:     rows,
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
+		Headers:     headers,
+		ColumnTypes: columnTypes,
+		Rows:        rows,
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
 	}, nil
 }
 
@@ -1571,12 +1568,11 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
+	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, sql); execErr != nil {
 		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(execErr.Error()))
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
-	return &DMLResult{Success: true, Output: out}, nil
+	return &DMLResult{Success: true}, nil
 }
 
 func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
@@ -1596,16 +1592,15 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	sql := builder.BuildInsert(table, data, nil)
 	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
+		return &DMLResult{Success: true, DryRun: true, SQL: builder.BuildInsert(table, data, nil)}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
+	params, args := builder.BuildInsertParams(table, data, nil)
+	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
-	return &DMLResult{Success: true, Output: out}, nil
+	return &DMLResult{Success: true}, nil
 }
 
 func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
@@ -1625,16 +1620,15 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	sql := builder.BuildUpdate(table, data, pk, pkVal)
 	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
+		return &DMLResult{Success: true, DryRun: true, SQL: builder.BuildUpdate(table, data, pk, pkVal)}, nil
 	}
 
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
+	params, args := builder.BuildUpdateParams(table, data, pk, pkVal)
+	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
-	return &DMLResult{Success: true, Output: out}, nil
+	return &DMLResult{Success: true}, nil
 }
 
 func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
@@ -1654,12 +1648,12 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	sql := builder.BuildDelete(table, pk, pkVal)
 	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
+		return &DMLResult{Success: true, DryRun: true, SQL: builder.BuildDelete(table, pk, pkVal)}, nil
 	}
 
-	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
+	params, args := builder.BuildDeleteParams(table, pk, pkVal)
+	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
 	return &DMLResult{Success: true}, nil
@@ -1735,7 +1729,7 @@ func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tab
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
+	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, sql); execErr != nil {
 		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(execErr.Error()))
 	}
 	return nil
@@ -1761,7 +1755,7 @@ func (s *Service) DropTable(ctx context.Context, instanceID int64, dbName, table
 		return fmt.Errorf("不支持的数据库类型")
 	}
 
-	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
+	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, sql); execErr != nil {
 		return fmt.Errorf("删除表失败: %s", SanitizeSQLError(execErr.Error()))
 	}
 	return nil

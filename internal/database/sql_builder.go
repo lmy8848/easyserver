@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +25,52 @@ func (b *SQLBuilder) QuoteIdentifier(name string) string {
 		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 	}
 	return name
+}
+
+// placeholder returns the parameter placeholder for the n-th argument: `?` for
+// MySQL, `$n` for PostgreSQL. Both the driver channel (bound parameters) and the
+// CLI channel (interpolated before exec, via renderSQL) consume this shape.
+func (b *SQLBuilder) placeholder(n int) string {
+	if b.dbType == DBTypePostgreSQL {
+		return fmt.Sprintf("$%d", n)
+	}
+	return "?"
+}
+
+// renderSQL interpolates placeholder SQL back into escaped literals for the CLI
+// exec channel (docker exec has no parameter binding). MySQL `?` placeholders
+// and PostgreSQL `$n` placeholders are replaced with SQLBuilder-escaped values.
+func renderSQL(dbType DBType, sql string, args []any) (string, error) {
+	if len(args) == 0 {
+		return sql, nil
+	}
+	b := NewSQLBuilder(dbType)
+	var sb strings.Builder
+	for i := 0; i < len(sql); i++ {
+		if dbType == DBTypeMySQL && sql[i] == '?' {
+			sb.WriteString(b.formatValue(args[0]))
+			args = args[1:]
+			continue
+		}
+		if dbType == DBTypePostgreSQL && sql[i] == '$' && i+1 < len(sql) && sql[i+1] >= '0' && sql[i+1] <= '9' {
+			j := i + 1
+			for j < len(sql) && sql[j] >= '0' && sql[j] <= '9' {
+				j++
+			}
+			n, _ := strconv.Atoi(sql[i+1 : j])
+			if n < 1 || n > len(args) {
+				return "", fmt.Errorf("placeholder $%d has no argument", n)
+			}
+			sb.WriteString(b.formatValue(args[n-1]))
+			i = j - 1
+			continue
+		}
+		sb.WriteByte(sql[i])
+	}
+	if len(args) > 0 {
+		return "", fmt.Errorf("%d unused SQL arguments", len(args))
+	}
+	return sb.String(), nil
 }
 
 // EscapeString escapes a string value for use in SQL.
@@ -91,6 +138,57 @@ func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) 
 		b.QuoteIdentifier(table),
 		b.QuoteIdentifier(pkCol),
 		b.formatValue(pkVal))
+}
+
+// BuildInsertParams is the parameterized form of BuildInsert: the SQL carries
+// placeholders and the values come back as args for driver binding. The CLI
+// channel re-interpolates them via renderSQL. Used by InsertRecord — the dry-run
+// preview still uses BuildInsert so the user sees rendered SQL.
+func (b *SQLBuilder) BuildInsertParams(table string, data map[string]interface{}, tableInfo *TableInfo) (string, []any) {
+	var cols []string
+	var ph []string
+	var args []any
+	n := 0
+	for col, val := range data {
+		if tableInfo != nil {
+			for _, ci := range tableInfo.Columns {
+				if ci.Name == col && ci.IsAutoIncr && (val == nil || val == "") {
+					goto skip
+				}
+			}
+		}
+		cols = append(cols, b.QuoteIdentifier(col))
+		n++
+		ph = append(ph, b.placeholder(n))
+		args = append(args, val)
+	skip:
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
+		b.QuoteIdentifier(table), strings.Join(cols, ", "), strings.Join(ph, ", ")), args
+}
+
+// BuildUpdateParams is the parameterized form of BuildUpdate.
+func (b *SQLBuilder) BuildUpdateParams(table string, data map[string]interface{}, pkCol string, pkVal interface{}) (string, []any) {
+	var sets []string
+	var args []any
+	n := 0
+	for col, val := range data {
+		if col == pkCol {
+			continue
+		}
+		n++
+		sets = append(sets, fmt.Sprintf("%s = %s", b.QuoteIdentifier(col), b.placeholder(n)))
+		args = append(args, val)
+	}
+	n++
+	return fmt.Sprintf("UPDATE %s SET %s WHERE %s = %s;",
+		b.QuoteIdentifier(table), strings.Join(sets, ", "), b.QuoteIdentifier(pkCol), b.placeholder(n)), append(args, pkVal)
+}
+
+// BuildDeleteParams is the parameterized form of BuildDelete.
+func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal interface{}) (string, []any) {
+	return fmt.Sprintf("DELETE FROM %s WHERE %s = %s;",
+		b.QuoteIdentifier(table), b.QuoteIdentifier(pkCol), b.placeholder(1)), []any{pkVal}
 }
 
 // BuildSelect generates a SELECT statement with pagination.

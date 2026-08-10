@@ -358,4 +358,86 @@ func ParseTableInfo(dbType DBType, tableName string, describeOutput string) *Tab
 	return info
 }
 
+// tableInfoFromQuery converts a structured describe query result (name, type,
+// nullable, default, pk-flag per column) into TableInfo. It is the direct-channel
+// counterpart of ParseTableInfo (which parsed psql/mysql text output).
+func tableInfoFromQuery(dbType DBType, tableName string, res *QueryResult) *TableInfo {
+	info := &TableInfo{Name: tableName, Columns: []ColumnInfo{}}
+	// Map column name → row index so both mysql DESCRIBE and the pg
+	// information_schema query (which has its own header order) work.
+	colIdx := map[string]int{}
+	for i, c := range res.Columns {
+		colIdx[c.Name] = i
+	}
+	nameIdx := colIdx["Field"]
+	if _, ok := colIdx["column_name"]; ok {
+		nameIdx = colIdx["column_name"]
+	}
+	if nameIdx < 0 && len(res.Columns) == 0 {
+		return info
+	}
+	hasType := colIdx["Type"] >= 0
+	if _, ok := colIdx["data_type"]; ok {
+		hasType = true
+	}
+	typeIdx := colIdx["Type"]
+	if v, ok := colIdx["data_type"]; ok {
+		typeIdx = v
+	}
+	for _, row := range res.Rows {
+		if nameIdx >= len(row) || row[nameIdx] == nil {
+			continue
+		}
+		col := ColumnInfo{Name: str(row, nameIdx)}
+		if hasType {
+			col.Type = str(row, typeIdx)
+		}
+		col.IsNullable = !isTruthy(row, colIdx["Null"]) // mysql: "NO" → not nullable
+		if v, ok := colIdx["is_nullable"]; ok {
+			col.IsNullable = strings.EqualFold(str(row, v), "yes")
+		}
+		if v, ok := colIdx["Key"]; ok && strings.EqualFold(str(row, v), "pri") {
+			col.IsPrimaryKey = true
+			info.PrimaryKey = col.Name
+		}
+		if v, ok := colIdx["is_primary"]; ok && isTruthy(row, v) {
+			col.IsPrimaryKey = true
+			info.PrimaryKey = col.Name
+		}
+		if v, ok := colIdx["Extra"]; ok && strings.Contains(strings.ToLower(str(row, v)), "auto_increment") {
+			col.IsAutoIncr = true
+		}
+		if v, ok := colIdx["Default"]; ok && row[v] != nil {
+			col.HasDefault = true
+			col.DefaultValue = str(row, v)
+		}
+		if v, ok := colIdx["column_default"]; ok && row[v] != nil {
+			col.HasDefault = true
+			col.DefaultValue = str(row, v)
+		}
+		info.Columns = append(info.Columns, col)
+	}
+	return info
+}
+
+// isTruthy reports whether a cell is a truthy value: non-nil and not one of the
+// common falsy spellings.
+func isTruthy(row []any, i int) bool {
+	if i < 0 || i >= len(row) || row[i] == nil {
+		return false
+	}
+	switch v := row[i].(type) {
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "", "no", "false", "off", "0":
+			return false
+		}
+	case []byte:
+		return isTruthy([]any{v}, 0) == true
+	case bool:
+		return v
+	}
+	return true
+}
+
 var autoIncrRegexp = regexp.MustCompile(`(?i)auto_increment`)

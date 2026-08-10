@@ -63,6 +63,7 @@ export const DB_TYPE_TABS: DBTypeTab[] = [
 // Table data structure
 export interface TableData {
   headers: string[];
+  columnTypes?: string[]; // per-header render category: number | string | time | blob | boolean | null
   rows: any[][];
   total: number;
 }

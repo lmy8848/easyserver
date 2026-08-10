@@ -143,7 +143,12 @@ export default function DatabasePage() {
       ]);
       const data = queryRes.data?.data;
       if (data && data.headers) {
-        setTableData({ headers: data.headers || [], rows: data.rows || [], total: data.total || 0 });
+        setTableData({
+          headers: data.headers || [],
+          columnTypes: data.column_types || [],
+          rows: data.rows || [],
+          total: data.total || 0,
+        });
       } else {
         setTableData({ headers: [], rows: [], total: 0 });
       }

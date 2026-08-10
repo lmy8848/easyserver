@@ -616,7 +616,7 @@ export const dbServerApi = {
     api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, { params: { table } }),
 
   queryTable: (instanceId: number, dbName: string, table: string, page: number = 1, pageSize: number = 50) =>
-    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/query`, { params: { table, page, page_size: pageSize } }),
+    api.get<ApiResponse<{ headers: string[]; column_types?: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/query`, { params: { table, page, page_size: pageSize } }),
 
   executeSQL: (instanceId: number, dbName: string, sql: string) =>
     api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/execute`, { sql }),
