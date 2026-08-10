@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Card, Button, Space, Select, Popconfirm, message, InputNumber, Modal,
+  Form, Input, List, Tag, Spin, Pagination, Empty, Switch,
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
@@ -8,10 +9,7 @@ import {
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
-import InstallModal from './InstallModal';
-import InstallLogModal from './InstallLogModal';
-import InstanceInfoModal from './InstanceInfoModal';
-import ServiceLogModal from './ServiceLogModal';
+import STYLES from './styles';
 import type { InstanceHeaderProps, DBInstance } from './types';
 
 // Engine brand logo + color (simple-icons). Falls back to a neutral accent for
@@ -26,11 +24,17 @@ const ENGINE_BRAND: Record<string, { Icon: typeof SiMysql; color: string }> = {
 // modal (the header no longer has a separate "安装版本" button).
 const INSTALL_VERSION = '__install_version__';
 
-// The engine header card: brand + version picker (with "＋ 安装版本" entry) +
-// the selected instance's lifecycle/ops actions, plus its modals (install /
-// install log / service log is page-level / instance info).
+// Sentinel option value in the install version Select — "更多版本" opens the
+// Docker Hub pager instead of selecting a version.
+const MORE_VERSIONS = '__more_versions__';
+
+// The engine header card: brand + version picker + the selected instance's
+// lifecycle/ops actions, plus ALL instance-level modals in one file:
+// install (with embedded Docker Hub pager), install-log (SSE), instance info,
+// and service logs (self-contained). Per-tab modals (create db/user/grant/table/
+// record) live in their own tab files.
 export default function InstanceHeader({
-  server, versions, versionsLoading, operating,
+  server, versions, operating,
   onSelectVersion, onRefreshVersions,
   onStartVersion, onStopVersion, onRestartVersion, onUninstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
@@ -42,9 +46,21 @@ export default function InstanceHeader({
 }: InstanceHeaderProps) {
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
-  // Service log — self-contained (ServiceLogModal owns the poll/follow/scroll);
-  // the header's 日志 button just sets the instance to show.
+  // Service log — self-contained (poll/follow/scroll live here); the 日志 button
+  // just sets the instance to show.
   const [logVersion, setLogVersion] = useState<DBInstance | null>(null);
+  const [logContent, setLogContent] = useState('');
+  const [logLoading, setLogLoading] = useState(false);
+  const [logFollow, setLogFollow] = useState(true);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  // Docker Hub "更多版本" pager state (install modal).
+  const DOCKER_PAGE_SIZE = 10;
+  const [dockerVisible, setDockerVisible] = useState(false);
+  const [dockerTags, setDockerTags] = useState<string[]>([]);
+  const [dockerTotal, setDockerTotal] = useState(0);
+  const [dockerPage, setDockerPage] = useState(1);
+  const [dockerLoading, setDockerLoading] = useState(false);
 
   // Instances load async; auto-select the first when the list arrives or the
   // previously selected one disappears. Always take the fresh object from the
@@ -116,6 +132,80 @@ export default function InstanceHeader({
     });
   };
 
+  // ===== Service log poll (self-contained) =====
+  useEffect(() => {
+    if (!logVersion) return;
+    setLogLoading(true);
+    let active = true;
+    const refresh = async () => {
+      try {
+        const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
+        if (active) setLogContent(res.data?.data?.logs || '(empty)');
+      } catch (error) {
+        if (active) setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error)));
+      } finally {
+        if (active) setLogLoading(false);
+      }
+    };
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => { active = false; clearInterval(timer); };
+  }, [logVersion]);
+
+  useEffect(() => {
+    if (logFollow && logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [logContent, logFollow]);
+
+  // ===== Docker Hub pager helpers (install modal) =====
+  const openDockerTags = async () => {
+    setDockerVisible(true);
+    setDockerLoading(true);
+    try {
+      const res = await dbServerApi.listDockerTags(server.db_type, 1, DOCKER_PAGE_SIZE);
+      setDockerTags(res.data?.data?.items || []);
+      setDockerTotal(res.data?.data?.total || 0);
+      setDockerPage(1);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '查询 Docker Hub 失败');
+      setDockerTags([]);
+      setDockerTotal(0);
+    } finally { setDockerLoading(false); }
+  };
+
+  const fetchDockerPage = async (page: number) => {
+    setDockerLoading(true);
+    try {
+      const res = await dbServerApi.listDockerTags(server.db_type, page, DOCKER_PAGE_SIZE);
+      setDockerTags(res.data?.data?.items || []);
+      setDockerPage(res.data?.data?.page || page);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '查询 Docker Hub 失败');
+    } finally { setDockerLoading(false); }
+  };
+
+  // Picking a published tag fills version + image into the install form; the
+  // image is the fully-qualified `docker.io/<base_image>:<tag>` so the backend
+  // never resolves (or has to resolve) short names.
+  const pickDockerTag = (tag: string) => {
+    installVersionForm.setFieldsValue({ version: tag, image: `docker.io/${server.base_image}:${tag}` });
+    setDockerVisible(false);
+  };
+
+  // ===== Instance info rows =====
+  const infoRows: Array<{ key: string; label: string; value: React.ReactNode }> = selectedVersion ? [
+    { key: 'version', label: '版本', value: <strong>{selectedVersion.version}</strong> },
+    { key: 'status', label: '状态', value: statusTag(selectedVersion.status) },
+    { key: 'port', label: '端口', value: selectedVersion.port },
+    { key: 'container_engine', label: '容器引擎', value: selectedVersion.container_engine },
+    { key: 'image', label: '镜像', value: <Tag>{selectedVersion.image}</Tag> },
+    { key: 'container_id', label: '容器ID', value: <Tag>{selectedVersion.container_id}</Tag> },
+    { key: 'volume_name', label: '数据卷', value: selectedVersion.volume_name },
+    { key: 'bind_address', label: '监听地址', value: selectedVersion.bind_address },
+    { key: 'created_at', label: '创建时间', value: selectedVersion.created_at },
+  ] : [];
+
   return (
     <>
       <Card style={{ marginBottom: 16 }}>
@@ -132,7 +222,7 @@ export default function InstanceHeader({
           </Space>
 
           {/* Right side: version picker + the selected version's status /
-              start-stop / logs / info, plus refresh & install */}
+              start-stop / logs / info */}
           <Space wrap size="middle" align="center">
             <Select
               style={{ minWidth: 150 }}
@@ -200,42 +290,188 @@ export default function InstanceHeader({
         </div>
       </Card>
 
-      {/* Modals owned by the header */}
-      <InstallModal
-        server={server}
-        visible={installVersionVisible}
-        onVisibleChange={onInstallVersionVisibleChange}
-        versionTemplates={versionTemplates}
-        form={installVersionForm}
-        busy={busy}
-        onInstall={onInstallVersion}
-        portCheck={portCheck}
-        onCheckPort={onCheckPort}
-      />
-      <InstallLogModal
-        server={server}
-        instance={installLogInstance}
-        lines={installLogLines}
-        error={installLogError}
-        done={installLogDone}
-        follow={installLogFollow}
-        ref={installLogRef}
-        onClose={onCloseInstallLog}
-        onFollowChange={onInstallLogFollowChange}
-      />
-      <InstanceInfoModal
-        server={server}
-        version={selectedVersion}
-        visible={infoVisible}
-        loading={versionsLoading}
-        onClose={() => setInfoVisible(false)}
-        statusTag={statusTag}
-      />
-      <ServiceLogModal
-        version={logVersion}
-        engineName={server.display_name}
-        onClose={() => setLogVersion(null)}
-      />
+      {/* ===== Install modal + embedded Docker Hub pager ===== */}
+      <Modal title={`安装${server.display_name}`} open={installVersionVisible} onCancel={() => onInstallVersionVisibleChange(false)}
+        onOk={onInstallVersion} okText="安装" cancelText="取消" confirmLoading={busy === 'install-version'}>
+        <Form form={installVersionForm} layout="vertical">
+          {/* image is resolved from the preset catalogue or the Docker Hub
+              picker; hidden because users never type image names. */}
+          <Form.Item name="image" hidden><Input /></Form.Item>
+          <Form.Item name="version" label="选择版本" rules={[{ required: true, message: '请选择版本' }]}>
+            <Select
+              placeholder="选择要安装的版本"
+              onChange={(v) => {
+                // "更多版本" is a sentinel: open the Docker Hub pager instead of
+                // treating it as a version, and clear the selection (empty string
+                // triggers the required rule if the user closes the pager without
+                // picking anything).
+                if (v === MORE_VERSIONS) {
+                  installVersionForm.setFieldValue('version', '');
+                  openDockerTags();
+                  return;
+                }
+                const t = versionTemplates.find(t => t.version === v);
+                installVersionForm.setFieldsValue({ image: t ? t.image : `docker.io/${server.base_image}:${v}` });
+              }}
+            >
+              {versionTemplates.map(t => (
+                <Select.Option key={t.version} value={t.version}>
+                  <strong>{t.version}</strong><span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{t.description}</span>
+                </Select.Option>
+              ))}
+              <Select.Option value={MORE_VERSIONS}>
+                <span style={{ color: '#1677ff' }}>＋ 更多版本（查询 Docker Hub）</span>
+              </Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="container_engine" label="容器引擎" initialValue="podman">
+            <Select options={[{ value: 'docker', label: 'Docker' }, { value: 'podman', label: 'Podman（rootful）' }]} />
+          </Form.Item>
+          <Form.Item name="bind_address" label="监听地址" initialValue="127.0.0.1">
+            <Select options={[
+              { value: '127.0.0.1', label: '仅本机（127.0.0.1）' },
+              { value: '0.0.0.0', label: '所有网卡（0.0.0.0）' },
+            ]} />
+          </Form.Item>
+          <Form.Item name="port" label="端口（留空使用默认）"
+            extra={portCheck && (
+              portCheck.available
+                ? <span style={{ color: '#52c41a' }}>{portCheck.message}</span>
+                : <span style={{ color: '#ff4d4f' }}>{portCheck.message}{portCheck.process && ` (${portCheck.process})`}</span>
+            )}>
+            <InputNumber min={1} max={65535} style={{ width: '100%' }}
+              onChange={(val) => val && onCheckPort(val as number)} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={`${server.display_name} - 更多版本（Docker Hub）`}
+        open={dockerVisible}
+        onCancel={() => setDockerVisible(false)}
+        footer={null}
+      >
+        {dockerLoading ? (
+          <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+        ) : dockerTags.length === 0 ? (
+          <Empty description="未获取到版本列表" />
+        ) : (
+          <>
+            <List
+              size="small"
+              bordered
+              dataSource={dockerTags}
+              renderItem={(tag) => (
+                <List.Item onClick={() => pickDockerTag(tag)} style={{ cursor: 'pointer' }}>
+                  <Space>
+                    <Tag>docker.io/{server.base_image}:{tag}</Tag>
+                    <span style={{ color: '#999', fontSize: 12 }}>点击选择此版本</span>
+                  </Space>
+                </List.Item>
+              )}
+            />
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+              <Pagination
+                align="center"
+                current={dockerPage}
+                pageSize={DOCKER_PAGE_SIZE}
+                total={dockerTotal}
+                showSizeChanger={false}
+                showQuickJumper={false}
+                onChange={fetchDockerPage}
+              />
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* ===== Install log modal (SSE stream) ===== */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>{server.display_name} {installLogInstance?.version} - 安装日志</span>
+            {!installLogDone && <Spin size="small" />}
+          </Space>
+        }
+        open={!!installLogInstance}
+        onCancel={onCloseInstallLog}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space size="small">
+              <Switch checked={installLogFollow} onChange={onInstallLogFollowChange} />
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>自动滚动</span>
+            </Space>
+            <Button size="small" onClick={onCloseInstallLog}>关闭</Button>
+          </Space>
+        }
+        width="90vw" style={{ maxWidth: 960 }}>
+        <div ref={installLogRef} style={{
+          background: '#fafafa', border: '1px solid #e8e8e8',
+          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+          fontSize: 13, lineHeight: 1.8, padding: '8px 0', borderRadius: 6,
+          maxHeight: '60vh', overflowY: 'auto', overflowX: 'auto',
+        }}>
+          {installLogLines.length === 0 && !installLogError && (
+            <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>
+              {installLogDone ? '无日志输出' : '等待日志输出…'}
+            </div>
+          )}
+          {installLogLines.map((line, i) => (
+            <div key={i} style={STYLES.logLine}>
+              <span style={STYLES.logLineNumber}>{i + 1}</span>
+              <span style={STYLES.logLineText}>{line || ' '}</span>
+            </div>
+          ))}
+          {installLogError && (
+            <div style={STYLES.logLine}>
+              <span style={STYLES.logLineNumber}>{installLogLines.length + 1}</span>
+              <span style={{ ...STYLES.logLineText, color: '#ff4d4f' }}>❌ {installLogError}</span>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* ===== Instance info modal ===== */}
+      <Modal
+        title={`${server.display_name} ${selectedVersion?.version || ''} - 实例信息`}
+        open={infoVisible}
+        onCancel={() => setInfoVisible(false)}
+        footer={<Button size="small" onClick={() => setInfoVisible(false)}>关闭</Button>}
+      >
+        {infoRows.map(row => (
+          <div key={row.key} style={{ display: 'flex', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+            <span style={{ width: 140, color: '#8c8c8c' }}>{row.label}</span>
+            <span>{row.value}</span>
+          </div>
+        ))}
+      </Modal>
+
+      {/* ===== Service log modal (self-contained) ===== */}
+      <Modal
+        title={<Space><FileTextOutlined /><span>{logVersion ? `${server.display_name} ${logVersion.version}` : ''} - 服务日志</span>{logLoading && <Spin size="small" />}</Space>}
+        open={!!logVersion}
+        onCancel={() => setLogVersion(null)}
+        footer={
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space size="small">
+              <Switch checked={logFollow} onChange={setLogFollow} />
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>自动滚动</span>
+              <span style={{ color: '#8c8c8c', fontSize: 12 }}>每 5 秒自动刷新</span>
+            </Space>
+            <Button size="small" onClick={() => setLogVersion(null)}>关闭</Button>
+          </Space>
+        }
+        width="90vw" style={{ maxWidth: 960 }}>
+        <div ref={logRef} style={{ ...STYLES.logContainer }}>
+          {logContent.split('\n').map((line, i) => (
+            <div key={i} style={STYLES.logLine}>
+              <span style={STYLES.logLineNumber}>{i + 1}</span>
+              <span style={STYLES.logLineText}>{line || ' '}</span>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </>
   );
 }

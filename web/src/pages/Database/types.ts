@@ -124,27 +124,35 @@ export interface InstanceHeaderProps {
   statusTag: (status: string) => React.ReactNode;
 }
 
-// DatabaseList props — instance detail (databases / users / config), rendered
-// directly under the InstanceHeader card. Lifecycle/log actions live in the
-// header; the service-log modal renders at the page root.
-export interface DatabaseListProps {
+// 表 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗
+export interface TablesTabProps {
   server: EngineInfo;
   version: DBInstance;
   databases: Database[];
   dbsLoading: boolean;
-  dbUsers: DBUser[];
-  usersLoading: boolean;
   busy: string;
   onEnterDatabase: (db: Database) => void;
   onRefreshDatabases: () => void;
-  onRefreshUsers: () => void;
   onDeleteDB: (dbName: string) => void;
-  onDeleteUser: (user: DBUser) => void;
   // Create DB modal
   dbModalVisible: boolean;
   onDbModalVisibleChange: (visible: boolean) => void;
   dbForm: any;
   onCreateDB: () => void;
+  // Inline table browser — non-null when a database is selected
+  tableExplorer: TableExplorerProps | null;
+}
+
+// 用户 tab — 用户列表 + 创建用户/授权弹窗
+export interface UsersTabProps {
+  server: EngineInfo;
+  version: DBInstance;
+  dbUsers: DBUser[];
+  usersLoading: boolean;
+  busy: string;
+  databases: Database[];
+  onRefreshUsers: () => void;
+  onDeleteUser: (user: DBUser) => void;
   // Create User modal
   userModalVisible: boolean;
   onUserModalVisibleChange: (visible: boolean) => void;
@@ -157,15 +165,25 @@ export interface DatabaseListProps {
   onGrantVisibleChange: (visible: boolean) => void;
   onGrant: () => void;
   onOpenGrant: (user: DBUser) => void;
-  // Config editor
+}
+
+// 配置文件 tab — 结构化参数编辑
+export interface ConfigTabProps {
+  server: EngineInfo;
   dbConfig: any;
   dbConfigLoading: boolean;
+  busy: string;
   onFetchDBConfig: () => void;
   onSaveDBConfig: () => void;
   onUpdateDBParam: (section: string, key: string, value: string) => void;
-  // Inline table browser — non-null when a database is selected; the 表 tab
-  // shows it instead of the database list (no separate screen / back level).
-  tableExplorer: TableExplorerProps | null;
+}
+
+// DatabaseList — the instance detail container: a Tabs wrapper over the three
+// per-tab components (表 / 用户 / 配置文件).
+export interface DatabaseListProps {
+  tablesTab: TablesTabProps;
+  usersTab: UsersTabProps;
+  configTab: ConfigTabProps;
 }
 
 // TableExplorer props

@@ -720,38 +720,33 @@ export default function DatabasePage() {
         />
         {selectedVersion && (
           <DatabaseList
-            server={activeEngine}
-            version={selectedVersion}
-            databases={databases}
-            dbsLoading={dbsLoading}
-            dbUsers={dbUsers}
-            usersLoading={usersLoading}
-            onEnterDatabase={enterDatabase}
-            onRefreshDatabases={() => fetchDatabases(selectedVersion.id)}
-            onRefreshUsers={() => fetchUsers(selectedVersion.id)}
-            onDeleteDB={handleDeleteDB}
-            onDeleteUser={handleDeleteUser}
-            dbModalVisible={dbModalVisible}
-            onDbModalVisibleChange={setDbModalVisible}
-            dbForm={dbForm}
-            onCreateDB={handleCreateDB}
-            userModalVisible={userModalVisible}
-            onUserModalVisibleChange={setUserModalVisible}
-            userForm={userForm}
-            onCreateUser={handleCreateUser}
-            grantVisible={grantVisible}
-            grantUser={grantUser}
-            grantForm={grantForm}
-            onGrantVisibleChange={setGrantVisible}
-            onGrant={handleGrant}
-            onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
-            dbConfig={dbConfig}
-            dbConfigLoading={dbConfigLoading}
-            busy={busy}
-            onFetchDBConfig={() => fetchDBConfig()}
-            onSaveDBConfig={handleSaveDBConfig}
-            onUpdateDBParam={updateDBParam}
-            tableExplorer={tableExplorer}
+            tablesTab={{
+              server: activeEngine,
+              version: selectedVersion,
+              databases, dbsLoading, busy,
+              onEnterDatabase: enterDatabase,
+              onRefreshDatabases: () => fetchDatabases(selectedVersion.id),
+              onDeleteDB: handleDeleteDB,
+              dbModalVisible, onDbModalVisibleChange: setDbModalVisible, dbForm, onCreateDB: handleCreateDB,
+              tableExplorer,
+            }}
+            usersTab={{
+              server: activeEngine,
+              version: selectedVersion,
+              dbUsers, usersLoading, busy, databases,
+              onRefreshUsers: () => fetchUsers(selectedVersion.id),
+              onDeleteUser: handleDeleteUser,
+              userModalVisible, onUserModalVisibleChange: setUserModalVisible, userForm, onCreateUser: handleCreateUser,
+              grantVisible, grantUser, grantForm, onGrantVisibleChange: setGrantVisible, onGrant: handleGrant,
+              onOpenGrant: (user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); },
+            }}
+            configTab={{
+              server: activeEngine,
+              dbConfig, dbConfigLoading, busy,
+              onFetchDBConfig: () => fetchDBConfig(),
+              onSaveDBConfig: handleSaveDBConfig,
+              onUpdateDBParam: updateDBParam,
+            }}
           />
         )}
       </div>
