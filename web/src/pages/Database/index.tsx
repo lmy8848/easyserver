@@ -718,7 +718,12 @@ export default function DatabasePage() {
 
     return (
       <div>
-        <InstanceHeader
+        {/* key remounts the header on engine switch — its internal selection and
+            notify-dedup state (lastNotifiedKey is `id:status`, and ids repeat
+            across engines since they share one table) must start fresh, or a new
+            engine's instance is never reported to the parent and the detail
+            tables below stay stale. */}
+        <InstanceHeader key={activeDbType}
           server={activeEngine}
           versions={versions}
           versionsLoading={versionsLoading}
