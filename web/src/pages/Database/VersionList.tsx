@@ -222,9 +222,10 @@ export default function VersionList({
                 {statusTag(selectedVersion.status)}
                 {selectedVersion.status === 'running' ? (
                   <>
-                    <Button type="primary" danger icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
+                    <Button style={{ background: '#fa8c16', borderColor: '#fa8c16', color: '#fff' }}
+                      icon={<StopOutlined />} loading={operating === `stop-${selectedVersion.id}`}
                       onClick={() => onStopVersion(selectedVersion)}>停止</Button>
-                    <Button icon={<ReloadOutlined />} loading={operating === `restart-${selectedVersion.id}`}
+                    <Button type="primary" icon={<ReloadOutlined />} loading={operating === `restart-${selectedVersion.id}`}
                       onClick={() => onRestartVersion(selectedVersion)}>重启</Button>
                   </>
                 ) : selectedVersion.status === 'provisioning' ? (
@@ -234,7 +235,8 @@ export default function VersionList({
                   <Button type="primary" ghost icon={<FileTextOutlined />}
                     onClick={() => onOpenInstallLog({ id: selectedVersion.container_id, version: selectedVersion.version })}>查看安装日志</Button>
                 ) : (
-                  <Button type="primary" icon={<PlayCircleOutlined />} loading={operating === `start-${selectedVersion.id}`}
+                  <Button style={{ background: '#52c41a', borderColor: '#52c41a', color: '#fff' }}
+                    icon={<PlayCircleOutlined />} loading={operating === `start-${selectedVersion.id}`}
                     onClick={() => onStartVersion(selectedVersion)}>启动</Button>
                 )}
                 {selectedVersion.status !== 'provisioning' && (
