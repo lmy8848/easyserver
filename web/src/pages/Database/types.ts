@@ -178,15 +178,7 @@ export interface ConfigTabProps {
   onUpdateDBParam: (section: string, key: string, value: string) => void;
 }
 
-// DatabaseList — the instance detail container: a Tabs wrapper over the three
-// per-tab components (表 / 用户 / 配置文件).
-export interface DatabaseListProps {
-  tablesTab: TablesTabProps;
-  usersTab: UsersTabProps;
-  configTab: ConfigTabProps;
-}
-
-// TableExplorer props
+// 表浏览器（内联在表 tab 中）— 选中数据库后展示
 export interface TableExplorerProps {
   server: EngineInfo;
   version: DBInstance;

@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs } from 'antd';
+import { Form, message, Modal, Tag, Tabs, Card } from 'antd';
+import { TableOutlined, UserOutlined, CodeOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
-import DatabaseList from './DatabaseList';
+import TablesTab from './TablesTab';
+import UsersTab from './UsersTab';
+import ConfigTab from './ConfigTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
 import { ENGINE_TABS } from './types';
 
@@ -650,12 +653,11 @@ export default function DatabasePage() {
   // ===== Render =====
   // The engine is a persistent top-level Tab. InstanceHeader is the header card
   // (version picker + lifecycle actions + instance-level modals). When a version
-  // is selected, DatabaseList renders its 表/用户/配置文件 tabs below — the 表 tab
-  // shows the table browser inline once a database is picked (no separate
-  // screen). Service log is self-contained in the header now.
+  // is selected, the 表/用户/配置文件 tabs render below — the 表 tab shows the
+  // table browser inline once a database is picked (no separate screen).
   const renderContent = () => {
-    // The table browser props are built once and handed to the 表 tab via the
-    // grouped `tableExplorer` prop — DatabaseList just forwards them.
+    // The table browser props are built once and handed to the 表 tab; the tab
+    // renders it inline when a database is selected.
     const tableExplorer: TableExplorerProps | null = selectedDatabase && selectedVersion ? {
       server: activeEngine,
       version: selectedVersion,
@@ -719,35 +721,66 @@ export default function DatabasePage() {
           statusTag={statusTag}
         />
         {selectedVersion && (
-          <DatabaseList
-            tablesTab={{
-              server: activeEngine,
-              version: selectedVersion,
-              databases, dbsLoading, busy,
-              onEnterDatabase: enterDatabase,
-              onRefreshDatabases: () => fetchDatabases(selectedVersion.id),
-              onDeleteDB: handleDeleteDB,
-              dbModalVisible, onDbModalVisibleChange: setDbModalVisible, dbForm, onCreateDB: handleCreateDB,
-              tableExplorer,
-            }}
-            usersTab={{
-              server: activeEngine,
-              version: selectedVersion,
-              dbUsers, usersLoading, busy, databases,
-              onRefreshUsers: () => fetchUsers(selectedVersion.id),
-              onDeleteUser: handleDeleteUser,
-              userModalVisible, onUserModalVisibleChange: setUserModalVisible, userForm, onCreateUser: handleCreateUser,
-              grantVisible, grantUser, grantForm, onGrantVisibleChange: setGrantVisible, onGrant: handleGrant,
-              onOpenGrant: (user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); },
-            }}
-            configTab={{
-              server: activeEngine,
-              dbConfig, dbConfigLoading, busy,
-              onFetchDBConfig: () => fetchDBConfig(),
-              onSaveDBConfig: handleSaveDBConfig,
-              onUpdateDBParam: updateDBParam,
-            }}
-          />
+          <Card>
+            <Tabs items={[
+              {
+                key: 'tables',
+                label: <span><TableOutlined /> 表</span>,
+                children: <TablesTab
+                  server={activeEngine}
+                  version={selectedVersion}
+                  databases={databases}
+                  dbsLoading={dbsLoading}
+                  busy={busy}
+                  onEnterDatabase={enterDatabase}
+                  onRefreshDatabases={() => fetchDatabases(selectedVersion.id)}
+                  onDeleteDB={handleDeleteDB}
+                  dbModalVisible={dbModalVisible}
+                  onDbModalVisibleChange={setDbModalVisible}
+                  dbForm={dbForm}
+                  onCreateDB={handleCreateDB}
+                  tableExplorer={tableExplorer}
+                />,
+              },
+              {
+                key: 'users',
+                label: <span><UserOutlined /> 用户</span>,
+                children: <UsersTab
+                  server={activeEngine}
+                  version={selectedVersion}
+                  dbUsers={dbUsers}
+                  usersLoading={usersLoading}
+                  busy={busy}
+                  databases={databases}
+                  onRefreshUsers={() => fetchUsers(selectedVersion.id)}
+                  onDeleteUser={handleDeleteUser}
+                  userModalVisible={userModalVisible}
+                  onUserModalVisibleChange={setUserModalVisible}
+                  userForm={userForm}
+                  onCreateUser={handleCreateUser}
+                  grantVisible={grantVisible}
+                  grantUser={grantUser}
+                  grantForm={grantForm}
+                  onGrantVisibleChange={setGrantVisible}
+                  onGrant={handleGrant}
+                  onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
+                />,
+              },
+              {
+                key: 'config',
+                label: <span><CodeOutlined /> 配置文件</span>,
+                children: <ConfigTab
+                  server={activeEngine}
+                  dbConfig={dbConfig}
+                  dbConfigLoading={dbConfigLoading}
+                  busy={busy}
+                  onFetchDBConfig={() => fetchDBConfig()}
+                  onSaveDBConfig={handleSaveDBConfig}
+                  onUpdateDBParam={updateDBParam}
+                />,
+              },
+            ]} />
+          </Card>
         )}
       </div>
     );
