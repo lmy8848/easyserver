@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty, Checkbox } from 'antd';
+import { useState, useEffect, useRef } from 'react';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty, Checkbox, Popconfirm } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance } from '../../types';
@@ -33,6 +33,8 @@ export default function DatabasePage() {
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [installVersionVisible, setInstallVersionVisible] = useState(false);
   const [installVersionForm] = Form.useForm();
+  // 安装成功后让头部 select 一次性跳转到新装版本（InstanceHeader 消费后清空）。
+  const [pendingSelectVersion, setPendingSelectVersion] = useState<string | null>(null);
 
   // Port check
   const { result: portCheck, checking: _portChecking, checkPort, clearResult: _clearPortCheck } = usePortCheck();
@@ -177,14 +179,25 @@ export default function DatabasePage() {
     setDBConfigLoading(true);
     try {
       const res = await dbServerApi.getInstanceConfig(selectedVersion.id);
-      const data = res.data?.data;
-      const section = { name: 'main', params: { content: data?.content || '' } };
-      setDBConfig({ found: true, config: { file_path: data?.file_path, sections: [section] }, sections: { main: { params: section.params, meta: [] } } });
+      // 结构化配置：每个 section 自带 params（覆盖项或编译默认值）+ meta（编辑元数据）。
+      setDBConfig({ found: true, config: res.data?.data });
     } catch (error) {
       console.error('Failed to load config:', error);
       setDBConfig(null);
     } finally { setDBConfigLoading(false); }
   };
+
+  // 切到「配置文件」tab 自动加载,无需先点「加载配置」;同一实例只加载一次
+  // (记住上次加载的实例 id,切换版本才重新拉)。加载失败时 ConfigTab 仍保留
+  // 「加载配置」按钮作为重试入口。
+  const lastConfigInstanceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (detailTab !== 'config' || !selectedVersion || selectedVersion.status !== 'running') return;
+    if (lastConfigInstanceRef.current === selectedVersion.id) return;
+    lastConfigInstanceRef.current = selectedVersion.id;
+    fetchDBConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailTab, selectedVersion]);
 
   // ===== Navigation handlers =====
   // Switching database type Tab clears all instance-scoped state and reloads.
@@ -257,6 +270,9 @@ export default function DatabasePage() {
       });
       message.success('已开始安装');
       setInstallVersionVisible(false);
+      // 安装成功后头部 select 跟随新装的版本（其 installing 行进入列表，
+      // InstanceHeader 据此跳转并显示内联安装日志）。
+      setPendingSelectVersion(values.version);
       fetchInstances(server.db_type);
       // The new "installing" row auto-selects in the header; its log panel
       // (SSE) renders inline below.
@@ -458,10 +474,12 @@ export default function DatabasePage() {
     if (!dbConfig?.config?.sections || !selectedVersion) return;
     setBusy('save-config');
     try {
-      const content = dbConfig.config.sections[0]?.params?.content || '';
-      await dbServerApi.saveInstanceConfig(selectedVersion.id, content);
-      message.success('实例配置已保存，重启后生效');
+      // 只提交 name + params；meta 是编辑元数据，服务端不落库。
+      const sections = dbConfig.config.sections.map((s: any) => ({ name: s.name, params: s.params }));
+      await dbServerApi.saveInstanceConfig(selectedVersion.id, sections);
+      message.success('配置已保存');
       fetchDBConfig();
+      fetchInstances(activeDbType);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '保存失败')); }
     finally { setBusy(''); }
   };
@@ -710,6 +728,21 @@ export default function DatabasePage() {
           onClick={() => { userForm.resetFields(); setUserModalVisible(true); }}
           disabled={selectedVersion.status !== 'running'}>创建用户</Button>
       </Space>
+    ) : detailTab === 'config' ? (
+      <Space style={{ marginRight: 8 }}>
+        <Popconfirm
+          title="将重启数据库"
+          description="保存配置后将重启实例，确定保存吗？"
+          okText="保存"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
+          onConfirm={handleSaveDBConfig}
+        >
+          <Button type="primary" loading={busy === 'save-config'}>保存配置</Button>
+        </Popconfirm>
+        <Button icon={<ReloadOutlined />} loading={dbConfigLoading}
+          onClick={() => fetchDBConfig()}>刷新</Button>
+      </Space>
     ) : null;
 
     return (
@@ -725,7 +758,6 @@ export default function DatabasePage() {
           versionsLoading={versionsLoading}
           operating={operating}
           onSelectVersion={enterVersion}
-          onRefreshVersions={() => fetchInstances(activeDbType)}
           onStartVersion={handleStartVersion}
           onStopVersion={handleStopVersion}
           onRestartVersion={handleRestartVersion}
@@ -741,6 +773,8 @@ export default function DatabasePage() {
           portCheck={portCheck}
           onCheckPort={checkPort}
           statusTag={statusTag}
+          pendingSelectVersion={pendingSelectVersion}
+          onPendingSelectConsumed={() => setPendingSelectVersion(null)}
         />
         {/* No installed version — plain placeholder with an install action. The
             installing state is no longer a placeholder: the row exists from
@@ -815,14 +849,11 @@ export default function DatabasePage() {
               },
               {
                 key: 'config',
-                label: <span><CodeOutlined /> 配置文件</span>,
+                label: <span><CodeOutlined /> 配置</span>,
                 children: <ConfigTab
                   server={activeDBTypeInfo}
                   dbConfig={dbConfig}
                   dbConfigLoading={dbConfigLoading}
-                  busy={busy}
-                  onFetchDBConfig={() => fetchDBConfig()}
-                  onSaveDBConfig={handleSaveDBConfig}
                   onUpdateDBParam={updateDBParam}
                 />,
               },

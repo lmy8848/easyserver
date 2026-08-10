@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/base64"
 	"io"
 	"os/exec"
 	"strings"
@@ -168,6 +169,42 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	}
 	if spec.Labels["com.easyserver.managed"] != "true" {
 		t.Fatalf("managed label not set: %#v", spec.Labels)
+	}
+}
+
+func TestSeedVolumeFileWritesTemplateIntoVolume(t *testing.T) {
+	fake := &runtimeFakeExecutor{}
+	runtime := NewCLIContainerRuntime(fake)
+	err := runtime.SeedVolumeFile(context.Background(), "podman", "mysql:8.0",
+		"easyserver-db-mysql-8-0-config", "easyserver.cnf", "[mysqld]\n")
+	if err != nil {
+		t.Fatalf("seed volume: %v", err)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("expected a single run call, got %d", len(fake.calls))
+	}
+	got := fake.calls[0]
+	if got.name != "podman" || got.args[0] != "run" {
+		t.Fatalf("unexpected seed call: %#v", got)
+	}
+	joined := strings.Join(got.args, " ")
+	// 内容走 base64 规避 shell 特殊字符；目标挂在 /easyserver-init —— 一个不遮蔽
+	// 镜像配置目录的路径，正式容器把卷挂到配置目录后即可读。
+	for _, want := range []string{
+		"--rm", "--name", "easyserver-db-mysql-8-0-config-seed",
+		"--volume", "easyserver-db-mysql-8-0-config:/easyserver-init",
+		"--entrypoint", "/bin/sh", "mysql:8.0", "-c",
+		"mkdir -p /easyserver-init/$(dirname easyserver.cnf) &&",
+		"| base64 -d > /easyserver-init/easyserver.cnf",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("seed args missing %q:\n%s", want, joined)
+		}
+	}
+	// base64 编码的模板应可解码回原文（含换行与 # 注释）。
+	enc := base64.StdEncoding.EncodeToString([]byte("[mysqld]\n"))
+	if !strings.Contains(joined, enc) {
+		t.Fatalf("template not base64-encoded into command:\n%s", joined)
 	}
 }
 

@@ -95,7 +95,6 @@ export interface InstanceHeaderProps {
   // Called when the selected version changes (or its status refreshes) — the
   // parent loads that instance's databases/users and renders the detail below.
   onSelectVersion: (version: DBInstance) => void;
-  onRefreshVersions: () => void;
   onStartVersion: (v: DBInstance) => void;
   onStopVersion: (v: DBInstance) => void;
   onRestartVersion: (v: DBInstance) => void;
@@ -112,6 +111,10 @@ export interface InstanceHeaderProps {
   onCheckPort: (port: number) => void;
   // Status helpers
   statusTag: (status: string) => React.ReactNode;
+  // 一次性跳转指令：安装成功后父组件带上要跟随的版本，列表刷新后自动选中它；
+  // 选中后调用 onPendingSelectConsumed 清空，避免后续刷新又跳回去。
+  pendingSelectVersion?: string | null;
+  onPendingSelectConsumed?: () => void;
 }
 
 // 数据库 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗。刷新/创建
@@ -158,14 +161,12 @@ export interface UsersTabProps {
   onOpenGrant: (user: DBUser) => void;
 }
 
-// 配置文件 tab — 结构化参数编辑
+// 配置 tab — 结构化参数编辑（无嵌套 tab、无路径）。保存/刷新按钮在父组件
+// tab 栏右侧（tabBarExtraContent，见 index.tsx），本组件只渲染参数表单。
 export interface ConfigTabProps {
   server: DBTypeInfo;
   dbConfig: any;
   dbConfigLoading: boolean;
-  busy: string;
-  onFetchDBConfig: () => void;
-  onSaveDBConfig: () => void;
   onUpdateDBParam: (section: string, key: string, value: string) => void;
 }
 

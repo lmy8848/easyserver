@@ -495,6 +495,18 @@ export interface ParamMeta {
   default: string;
 }
 
+// Structured config of one database instance (GET /db/instances/:iid/config):
+// current param values (override or compiled default) plus editing metadata.
+// The config file is generated from these params — no raw file content is exposed.
+export interface InstanceConfigSection extends ConfigSection {
+  meta: ParamMeta[];
+}
+
+export interface InstanceConfigView {
+  file_path: string;
+  sections: InstanceConfigSection[];
+}
+
 // TLS certificate info parsed from the configured cert
 export interface TLSCertInfo {
   domain: string;

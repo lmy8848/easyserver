@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
-  FileTextOutlined, DeleteOutlined, EditOutlined, DatabaseOutlined, InfoCircleOutlined, CloseOutlined,
+  FileTextOutlined, DeleteOutlined, DatabaseOutlined, InfoCircleOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/api';
@@ -35,13 +35,13 @@ const MORE_VERSIONS = '__more_versions__';
 // (InstallLogPanel) rendered by the page, not a modal here.
 export default function InstanceHeader({
   server, versions, operating,
-  onSelectVersion, onRefreshVersions,
+  onSelectVersion,
   onStartVersion, onStopVersion, onRestartVersion, onUninstallVersion,
   onCancelInstall, onReinstallVersion,
   installVersionVisible, onInstallVersionVisibleChange,
   versionTemplates, installVersionForm, busy, onInstallVersion,
   portCheck, onCheckPort,
-  statusTag,
+  statusTag, pendingSelectVersion, onPendingSelectConsumed,
 }: InstanceHeaderProps) {
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
@@ -64,17 +64,30 @@ export default function InstanceHeader({
   // Instances load async; auto-select the first when the list arrives or the
   // previously selected one disappears. Always take the fresh object from the
   // incoming list (not `prev`) — status tags/buttons must reflect the latest
-  // status (running/stopped) after a start/stop refresh.
+  // status (running/stopped) after a start/stop refresh. 安装新版本时
+  // pendingSelectVersion 优先：列表刷新后跳到新装的那一行。
   useEffect(() => {
     if (versions.length === 0) {
       setSelectedVersion(null);
       return;
     }
     setSelectedVersion(prev => {
+      if (pendingSelectVersion) {
+        const target = versions.find(v => v.version === pendingSelectVersion);
+        if (target) return target;
+      }
       const fresh = prev ? versions.find(v => v.id === prev.id) : undefined;
       return fresh ?? versions[0] ?? null;
     });
-  }, [versions]);
+  }, [versions, pendingSelectVersion]);
+
+  // 消费一次性跳转指令：目标已被选中后通知父组件清空，否则后续每次列表刷新
+  // （如 installing 轮询、手动刷新）都会跳回该版本。
+  useEffect(() => {
+    if (pendingSelectVersion && selectedVersion?.version === pendingSelectVersion) {
+      onPendingSelectConsumed?.();
+    }
+  }, [selectedVersion, pendingSelectVersion, onPendingSelectConsumed]);
 
   // Sync the local selection to the parent so the instance detail (databases /
   // users / config, rendered below) follows the selected version — and refresh
@@ -88,36 +101,6 @@ export default function InstanceHeader({
       onSelectVersion(selectedVersion);
     }
   }, [selectedVersion, onSelectVersion]);
-
-  const handleUpdatePort = (v: DBInstance) => {
-    if (v.status === 'running') {
-      message.warning('请先停止服务再修改端口');
-      return;
-    }
-    let newPort = v.port;
-    Modal.confirm({
-      title: `修改端口 - ${server.display_name} ${v.version}`,
-      content: (
-        <div>
-          <p>当前端口: {v.port}</p>
-          <InputNumber min={1} max={65535} defaultValue={v.port}
-            style={{ width: '100%' }}
-            onChange={(val) => { newPort = val as number || v.port; }} />
-        </div>
-      ),
-      onOk: async () => {
-        if (newPort > 0 && newPort !== v.port) {
-          try {
-            await dbServerApi.updateInstancePort(v.id, newPort);
-            message.success('端口已修改，启动服务后生效');
-            onRefreshVersions();
-          } catch (error: unknown) {
-            message.error((error instanceof Error ? error.message : '修改失败'));
-          }
-        }
-      },
-    });
-  };
 
   // ===== Service log poll (self-contained) =====
   useEffect(() => {
@@ -260,7 +243,6 @@ export default function InstanceHeader({
                 {selectedVersion.status !== 'installing' && selectedVersion.status !== 'failed' && (
                   <>
                     <Button icon={<FileTextOutlined />} onClick={() => setLogVersion(selectedVersion)}>日志</Button>
-                    <Button icon={<EditOutlined />} onClick={() => handleUpdatePort(selectedVersion)}>修改端口</Button>
                     <Button icon={<InfoCircleOutlined />} onClick={() => setInfoVisible(true)}>实例信息</Button>
                     <Popconfirm title={`确定卸载 ${server.display_name} ${selectedVersion.version}？`}
                       onConfirm={() => onUninstallVersion(selectedVersion)}>

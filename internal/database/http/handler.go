@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +22,6 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	dbHandler := NewDatabaseHandler(svc)
 	userHandler := NewUserHandler(svc)
 	backupHandler := NewBackupHandler(svc)
-	configHandler := NewConfigHandler()
 
 	// Instance lifecycle, scoped by database type.
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
@@ -39,7 +37,6 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.POST("/db/instances/:iid/start", instanceHandler.StartInstance)
 	protected.POST("/db/instances/:iid/stop", instanceHandler.StopInstance)
 	protected.POST("/db/instances/:iid/restart", instanceHandler.RestartInstance)
-	protected.PUT("/db/instances/:iid/port", instanceHandler.UpdateInstancePort)
 	protected.GET("/db/instances/:iid/logs", instanceHandler.GetInstanceLogs)
 	protected.GET("/db/instances/:iid/config", instanceHandler.GetInstanceConfig)
 	protected.PUT("/db/instances/:iid/config", instanceHandler.SaveInstanceConfig)
@@ -75,10 +72,6 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
 	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
-
-	protected.GET("/db/mysql/common-params", configHandler.GetMySQLCommonParams)
-	protected.GET("/db/postgresql/common-params", configHandler.GetPGCommonParams)
-	protected.GET("/db/redis/common-params", configHandler.GetRedisCommonParams)
 }
 
 // InstanceHandler handles instance lifecycle endpoints, scoped by database type.
@@ -319,39 +312,6 @@ func (h *InstanceHandler) RestartInstance(c *gin.Context) {
 	httpx.Success(c, gin.H{"status": "running"})
 }
 
-func (h *InstanceHandler) UpdateInstancePort(c *gin.Context) {
-	iid, ok := parseIID(c)
-	if !ok {
-		return
-	}
-
-	var req struct {
-		Port int `json:"port" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-	vInfo, err := h.svc.GetInstance(c.Request.Context(), iid)
-	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("数据库实例不存在"))
-		return
-	}
-	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ContainerName+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
-
-	if req.Port < 1 || req.Port > 65535 {
-		c.Error(apperror.ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
-		return
-	}
-
-	if err := h.svc.UpdateInstancePort(c.Request.Context(), iid, req.Port); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	httpx.Success(c, gin.H{"message": "端口已更新", "port": req.Port})
-}
-
 func (h *InstanceHandler) GetInstanceLogs(c *gin.Context) {
 	iid, ok := parseIID(c)
 	if !ok {
@@ -371,12 +331,12 @@ func (h *InstanceHandler) GetInstanceConfig(c *gin.Context) {
 	if !ok {
 		return
 	}
-	content, path, err := h.svc.GetInstanceConfig(c.Request.Context(), iid)
+	view, err := h.svc.GetInstanceConfig(c.Request.Context(), iid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"file_path": path, "content": content})
+	httpx.Success(c, view)
 }
 
 func (h *InstanceHandler) SaveInstanceConfig(c *gin.Context) {
@@ -385,17 +345,17 @@ func (h *InstanceHandler) SaveInstanceConfig(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Content string `json:"content" binding:"required"`
+		Sections []database.ConfigSectionView `json:"sections"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Content); err != nil {
+	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Sections); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, gin.H{"message": "实例配置已保存，重启后生效"})
+	httpx.Success(c, gin.H{"message": "配置已保存，重启后生效"})
 }
 
 // DatabaseHandler handles database CRUD, introspection, and table management endpoints.
@@ -978,291 +938,5 @@ func (h *BackupHandler) DeleteBackup(c *gin.Context) {
 	}
 
 	httpx.Success(c, gin.H{"message": "备份已删除"})
-}
 
-// ConfigHandler handles MySQL/PostgreSQL/Redis config management endpoints.
-// These use package-level functions from the service package and have no service struct dependency.
-type ConfigHandler struct{}
-
-func NewConfigHandler() *ConfigHandler {
-	return &ConfigHandler{}
-}
-
-// --- MySQL Config ---
-
-func (h *ConfigHandler) GetMySQLConfig(c *gin.Context) {
-	configPath := database.FindMySQLConfig()
-	if configPath == "" {
-		httpx.Success(c, gin.H{"found": false, "message": "未找到 MySQL 配置文件"})
-		return
-	}
-
-	config, err := database.ParseMySQLConfig(configPath)
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	// Build response with common params metadata
-	response := gin.H{
-		"found":    true,
-		"config":   config,
-		"sections": gin.H{},
-	}
-	sections := response["sections"].(gin.H)
-	for _, section := range config.Sections {
-		sections[section.Name] = gin.H{
-			"params": section.Params,
-			"meta":   database.GetCommonParams(section.Name),
-		}
-	}
-
-	httpx.Success(c, response)
-}
-
-func (h *ConfigHandler) SaveMySQLConfig(c *gin.Context) {
-	var req struct {
-		Sections []struct {
-			Name   string            `json:"name"`
-			Params map[string]string `json:"params"`
-		} `json:"sections"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-
-	middleware.AuditSummary(c, "保存 MySQL 配置")
-	configPath := database.FindMySQLConfig()
-	if configPath == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("未找到 MySQL 配置文件"))
-		return
-	}
-
-	// Handle raw text save from the raw text modal
-	if raw, ok := isRawConfigRequest(req.Sections); ok {
-		if err := saveRawConfig(configPath, raw); err != nil {
-			c.Error(apperror.WrapError(err))
-			return
-		}
-		httpx.Success(c, gin.H{"message": "配置已保存", "path": configPath})
-		return
-	}
-
-	config := &database.DBConfig{
-		FilePath: configPath,
-	}
-	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database.ConfigSection{
-			Name:   s.Name,
-			Params: s.Params,
-		})
-	}
-
-	if err := database.SaveMySQLConfig(config); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	httpx.Success(c, gin.H{"message": "配置已保存", "path": configPath})
-}
-
-func (h *ConfigHandler) GetMySQLCommonParams(c *gin.Context) {
-	section := c.DefaultQuery("section", "mysqld")
-	params := database.GetCommonParams(section)
-	httpx.Success(c, params)
-}
-
-// --- PostgreSQL Config ---
-
-func (h *ConfigHandler) GetPostgreSQLConfig(c *gin.Context) {
-	configPath := database.FindPostgreSQLConfig()
-	if configPath == "" {
-		httpx.Success(c, gin.H{"found": false, "message": "未找到 PostgreSQL 配置文件"})
-		return
-	}
-
-	config, err := database.ParsePostgreSQLConfig(configPath)
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	response := gin.H{
-		"found":    true,
-		"config":   config,
-		"sections": gin.H{},
-	}
-	sections := response["sections"].(gin.H)
-	for _, section := range config.Sections {
-		sections[section.Name] = gin.H{
-			"params": section.Params,
-			"meta":   database.GetPostgreSQLCommonParams(),
-		}
-	}
-
-	httpx.Success(c, response)
-}
-
-func (h *ConfigHandler) SavePostgreSQLConfig(c *gin.Context) {
-	var req struct {
-		Sections []struct {
-			Name   string            `json:"name"`
-			Params map[string]string `json:"params"`
-		} `json:"sections"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-
-	middleware.AuditSummary(c, "保存 PostgreSQL 配置")
-	configPath := database.FindPostgreSQLConfig()
-	if configPath == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("未找到 PostgreSQL 配置文件"))
-		return
-	}
-
-	// Handle raw text save from the raw text modal
-	if raw, ok := isRawConfigRequest(req.Sections); ok {
-		if err := saveRawConfig(configPath, raw); err != nil {
-			c.Error(apperror.WrapError(err))
-			return
-		}
-		httpx.Success(c, gin.H{"message": "配置已保存", "path": configPath})
-		return
-	}
-
-	config := &database.DBConfig{
-		FilePath: configPath,
-	}
-	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database.ConfigSection{
-			Name:   s.Name,
-			Params: s.Params,
-		})
-	}
-
-	if err := database.SavePostgreSQLConfig(config); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	httpx.Success(c, gin.H{"message": "配置已保存", "path": configPath})
-}
-
-func (h *ConfigHandler) GetPGCommonParams(c *gin.Context) {
-	params := database.GetPostgreSQLCommonParams()
-	httpx.Success(c, params)
-}
-
-// --- Redis Config ---
-
-func (h *ConfigHandler) GetRedisConfig(c *gin.Context) {
-	configPath := database.FindRedisConfig()
-	if configPath == "" {
-		httpx.Success(c, gin.H{"found": false, "message": "未找到 Redis 配置文件"})
-		return
-	}
-
-	config, err := database.ParseRedisConfig(configPath)
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	response := gin.H{
-		"found":    true,
-		"config":   config,
-		"sections": gin.H{},
-	}
-	sections := response["sections"].(gin.H)
-	for _, section := range config.Sections {
-		sections[section.Name] = gin.H{
-			"params": section.Params,
-			"meta":   database.GetRedisCommonParams(),
-		}
-	}
-
-	httpx.Success(c, response)
-}
-
-func (h *ConfigHandler) SaveRedisConfig(c *gin.Context) {
-	var req struct {
-		Sections []struct {
-			Name   string            `json:"name"`
-			Params map[string]string `json:"params"`
-		} `json:"sections"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
-	}
-
-	middleware.AuditSummary(c, "保存 Redis 配置")
-	configPath := database.FindRedisConfig()
-	if configPath == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("未找到 Redis 配置文件"))
-		return
-	}
-
-	// Handle raw text save from the raw text modal
-	if raw, ok := isRawConfigRequest(req.Sections); ok {
-		if err := saveRawConfig(configPath, raw); err != nil {
-			c.Error(apperror.WrapError(err))
-			return
-		}
-		httpx.Success(c, gin.H{"message": "配置已保存", "path": configPath})
-		return
-	}
-
-	config := &database.DBConfig{
-		FilePath: configPath,
-	}
-	for _, s := range req.Sections {
-		config.Sections = append(config.Sections, database.ConfigSection{
-			Name:   s.Name,
-			Params: s.Params,
-		})
-	}
-
-	if err := database.SaveRedisConfig(config); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-
-	httpx.Success(c, gin.H{"message": "配置已保存", "path": configPath})
-}
-
-func (h *ConfigHandler) GetRedisCommonParams(c *gin.Context) {
-	params := database.GetRedisCommonParams()
-	httpx.Success(c, params)
-}
-
-// --- Helper functions ---
-
-func saveRawConfig(filePath, content string) error {
-	backupPath := filePath + ".bak." + time.Now().Format("20060102150405")
-	if data, err := os.ReadFile(filePath); err == nil {
-		if err := os.WriteFile(backupPath, data, 0644); err != nil {
-			return fmt.Errorf("backup config: %w", err)
-		}
-	}
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-	return os.WriteFile(filePath, []byte(content), 0644)
-}
-
-func isRawConfigRequest(sections []struct {
-	Name   string            `json:"name"`
-	Params map[string]string `json:"params"`
-}) (string, bool) {
-	if len(sections) == 1 && sections[0].Name == "custom" {
-		if raw, ok := sections[0].Params["raw"]; ok {
-			return raw, true
-		}
-	}
-	return "", false
 }

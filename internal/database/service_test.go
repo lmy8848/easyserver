@@ -21,6 +21,7 @@ type fakeDBRuntime struct {
 	started     []string
 	stopped     []string
 	exists      bool // 预检 Exists 的返回值（默认 false）
+	seedCalls   []seedCall
 }
 
 func (f *fakeDBRuntime) Create(_ context.Context, spec ContainerSpec) error {
@@ -55,6 +56,26 @@ func (f *fakeDBRuntime) RemoveVolume(_ context.Context, _, volume string) error 
 }
 func (f *fakeDBRuntime) Exists(context.Context, string, string) (bool, error) {
 	return f.exists, nil
+}
+func (f *fakeDBRuntime) SeedVolumeFile(_ context.Context, _, _, volume, dest, content string) error {
+	f.seedCalls = append(f.seedCalls, seedCall{volume: volume, dest: dest, content: content})
+	return nil
+}
+func (f *fakeDBRuntime) ReadVolumeFile(_ context.Context, _, _, volume, path string) (string, error) {
+	// 回放最后一次写入该卷+路径的文件内容；无则返回空（新实例/未配置）。
+	for i := len(f.seedCalls) - 1; i >= 0; i-- {
+		if f.seedCalls[i].volume == volume && f.seedCalls[i].dest == path {
+			return f.seedCalls[i].content, nil
+		}
+	}
+	return "", nil
+}
+
+// seedCall records one SeedVolumeFile call for the structured-config test.
+type seedCall struct {
+	volume  string
+	dest    string
+	content string
 }
 
 // fakeRepo is a minimal in-memory Repository for the lifecycle tests.
@@ -210,18 +231,18 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 
 func TestPostgres18MovesDataDir(t *testing.T) {
 	// postgres:18+ moved PGDATA into a version subdir — the volume must mount the
-	// parent (/var/lib/postgresql) and config lives under the version dir. Older
-	// majors keep the classic /var/lib/postgresql/data layout. Empty dataDir skips
-	// the pgDataDir assertion (that helper is postgres-only).
+	// parent (/var/lib/postgresql) and the auto.conf override lives under the
+	// version dir. Older majors keep the classic /var/lib/postgresql/data layout.
+	// Empty dataDir skips the pgDataDir assertion (that helper is postgres-only).
 	cases := []struct {
 		image    string
 		dataDir  string
 		confPath string
 	}{
-		{"docker.io/postgres:18", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.conf"},
-		{"docker.io/postgres:18-alpine", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.conf"},
-		{"docker.io/postgres:17", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.conf"},
-		{"docker.io/postgres:16", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.conf"},
+		{"docker.io/postgres:18", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.auto.conf"},
+		{"docker.io/postgres:18-alpine", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.auto.conf"},
+		{"docker.io/postgres:17", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.auto.conf"},
+		{"docker.io/postgres:16", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.auto.conf"},
 		// config paths must survive the fully-qualified image form used at runtime
 		{"docker.io/mysql:9.7", "", "/etc/mysql/conf.d/easyserver.cnf"},
 		{"docker.io/redis:8.0-alpine", "", "/usr/local/etc/redis/redis.conf"},

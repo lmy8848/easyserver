@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -445,37 +446,8 @@ func (s *Service) RestartInstance(ctx context.Context, instanceID int64) error {
 	return s.repo.UpdateInstanceStatus(ctx, instanceID, "running")
 }
 
-// UpdateInstancePort updates the port for an instance.
-func (s *Service) UpdateInstancePort(ctx context.Context, instanceID int64, newPort int) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	v, err := s.GetInstance(ctx, instanceID)
-	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
-	}
-
-	if v.Status == "running" {
-		return fmt.Errorf("cannot change port while service is running. Stop it first")
-	}
-	if newPort < 1 || newPort > 65535 {
-		return fmt.Errorf("port must be between 1 and 65535")
-	}
-	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
-	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
-		return fmt.Errorf("remove old database container: %w", err)
-	}
-	if err := s.runtime.Create(ctx, spec); err != nil {
-		return fmt.Errorf("recreate database container: %w", err)
-	}
-	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerName); err != nil {
-		return fmt.Errorf("start database container: %w", err)
-	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
-		return err
-	}
-	return s.repo.UpdateInstancePort(ctx, instanceID, newPort)
-}
+// 修改端口是结构化配置的一部分（保存配置时端口变化触发 recreateInstanceContainer，
+// 见 SaveInstanceConfig）—— 没有独立的修改端口入口。
 
 func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, lines int) (string, error) {
 	if ctx == nil {
@@ -494,33 +466,125 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerName, lines)
 }
 
-// GetInstanceConfig reads the database configuration from inside its container.
-func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (string, string, error) {
+// GetInstanceConfig 返回实例的结构化配置：参数值（覆盖项或编译默认值）+ 编辑元数据。
+// 覆盖项存于容器配置卷（面板生成的配置文件），面板是唯一写入方；参数元数据与编译
+// 默认值定义在代码（config.go）。port 是实例级状态（DB 的 port 列），始终显示当前值。
+func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*InstanceConfigView, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return "", "", fmt.Errorf("instance not found")
+		return nil, fmt.Errorf("instance not found")
 	}
-	path := configPathForImage(v.Image)
-	out, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "cat", path)
-	return out, path, err
+	content, err := s.runtime.ReadVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v))
+	if err != nil {
+		return nil, err
+	}
+	params := effectiveParams(v.DBType, parseConfigFile(v.DBType, content))
+	params["port"] = strconv.Itoa(v.Port)
+	view := &InstanceConfigView{FilePath: configPathForImage(v.Image)}
+	view.Sections = append(view.Sections, ConfigSectionView{
+		Name:   configSectionName(v.DBType),
+		Params: params,
+		Meta:   configParams(v.DBType),
+	})
+	return view, nil
 }
 
-// SaveInstanceConfig writes database configuration inside the managed container.
-func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, content string) error {
-	if len(content) > 256*1024 {
-		return fmt.Errorf("configuration is too large")
-	}
+// SaveInstanceConfig 保存结构化配置并立即生效：
+//  1. 读容器配置卷现有覆盖项 → 合并本次修改 → 按参数生成配置文件写回卷；
+//  2. port 参数变化 → 重建容器更新端口映射（配置卷已是新文件，启动即加载）；
+//     其余参数变化且实例运行中 → 重启容器使配置生效。面板是配置唯一写入方。
+func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, sections []ConfigSectionView) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	path := configPathForImage(v.Image)
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
-		return fmt.Errorf("save configuration: %w", err)
+	content, err := s.runtime.ReadVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v))
+	if err != nil {
+		return err
+	}
+	stored := parseConfigFile(v.DBType, content)
+	for _, section := range sections {
+		for key, value := range section.Params {
+			if strings.TrimSpace(value) == "" {
+				delete(stored, key)
+				continue
+			}
+			stored[key] = strings.TrimSpace(value)
+		}
+	}
+	if err := s.runtime.SeedVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v), generateConfigFile(v.DBType, stored)); err != nil {
+		return err
+	}
+
+	// 端口：结构化参数里的值，非法/缺失回退当前实例端口。
+	newPort := v.Port
+	if raw, ok := stored["port"]; ok {
+		if p, err := strconv.Atoi(raw); err == nil && p >= 1 && p <= 65535 {
+			newPort = p
+		}
+	}
+	if newPort != v.Port {
+		return s.recreateInstanceContainer(ctx, v, newPort)
+	}
+	if v.Status == "running" {
+		return s.RestartInstance(ctx, instanceID)
 	}
 	return nil
 }
+
+// recreateInstanceContainer 用新端口重建容器（移除旧映射、按新端口 create/start），
+// 数据卷保留，配置卷在调用前已写入新内容，启动即加载。保存配置里 port 参数时调用。
+func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, newPort int) error {
+	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
+	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
+		return fmt.Errorf("remove old database container: %w", err)
+	}
+	if err := s.runtime.Create(ctx, spec); err != nil {
+		return fmt.Errorf("recreate database container: %w", err)
+	}
+	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerName); err != nil {
+		return fmt.Errorf("start database container: %w", err)
+	}
+	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
+		return err
+	}
+	return s.repo.UpdateInstancePort(ctx, v.ID, newPort)
+}
+
+// configVolumeFor 返回配置持久化卷：MySQL/Redis 用独立配置卷，PostgreSQL 的
+// 覆盖项写在数据卷的 postgresql.auto.conf（服务器启动时自动读取，无需独立卷）。
+func configVolumeFor(v *DBInstance) string {
+	if v.DBType == DBTypePostgreSQL {
+		return v.VolumeName
+	}
+	return strings.TrimSuffix(v.VolumeName, "-data") + "-config"
+}
+
+// configFileDestPath 是配置文件相对其所在卷挂载点的路径（SeedVolumeFile 把卷挂在
+// /easyserver-init，dest 是卷内相对路径）。
+func configFileDestPath(v *DBInstance) string {
+	switch v.DBType {
+	case DBTypeMySQL:
+		return "easyserver.cnf"
+	case DBTypeRedis:
+		return "redis.conf"
+	default: // postgresql — 覆盖项写进数据卷的 postgresql.auto.conf（PG 服务器启动时在
+		// postgresql.conf 之后自动读取的标准覆盖文件），不碰镜像生成的全量配置。
+		return pgConfigDestRelative(v.Image)
+	}
+}
+
+// pgConfigDestRelative 是 postgresql.auto.conf 相对数据卷挂载点的路径：PG 18+ 的
+// PGDATA 移到版本子目录，旧版在数据卷根。
+func pgConfigDestRelative(image string) string {
+	if major := postgresMajor(image); major >= 18 {
+		return fmt.Sprintf("%d/docker/postgresql.auto.conf", major)
+	}
+	return "postgresql.auto.conf"
+}
+
+// MySQL/Redis 的默认配置由 generateConfigFile 根据结构化参数（编译默认值）生成，
+// 安装时通过 SeedVolumeFile 预置进持久配置卷，见 config.go。
 
 func configPathForImage(image string) string {
 	image = strings.ToLower(image)
@@ -531,6 +595,8 @@ func configPathForImage(image string) string {
 	}
 	switch {
 	case strings.HasPrefix(image, "mysql"):
+		// 面板管理的自定义片段，位于镜像 my.cnf 自动 !includedir 的 conf.d；
+		// 安装时由 generateConfigFile 预置（镜像里无默认配置可复制）。
 		return "/etc/mysql/conf.d/easyserver.cnf"
 	case strings.HasPrefix(image, "postgres"):
 		return pgConfigPath(image)
@@ -570,31 +636,9 @@ func pgDataDir(image string) string {
 // same PGDATA the image uses, which moved to a version subdir in 18+.
 func pgConfigPath(image string) string {
 	if major := postgresMajor(image); major >= 18 {
-		return fmt.Sprintf("/var/lib/postgresql/%d/docker/postgresql.conf", major)
+		return fmt.Sprintf("/var/lib/postgresql/%d/docker/postgresql.auto.conf", major)
 	}
-	return "/var/lib/postgresql/data/postgresql.conf"
-}
-
-// seedRedisConfig writes an initial redis.conf into the freshly-created config
-// volume so `redis-server <config>` can load it on first start.
-func seedRedisConfig(ctx context.Context, runtime DatabaseRuntime, engineName, container, password string) error {
-	content := "requirepass " + password + "\n"
-	tmp, err := os.CreateTemp("", "easyserver-redis-*.conf")
-	if err != nil {
-		return fmt.Errorf("stage redis config: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write staged redis config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close staged redis config: %w", err)
-	}
-	if err := runtime.CopyTo(ctx, engineName, container, tmp.Name(), "/usr/local/etc/redis/redis.conf"); err != nil {
-		return fmt.Errorf("seed redis config: %w", err)
-	}
-	return nil
+	return "/var/lib/postgresql/data/postgresql.auto.conf"
 }
 
 // RefreshStatus refreshes instance statuses for a database type (dbType).
@@ -677,7 +721,7 @@ func containerSpec(dbType DBType, engineName, version, image, name, volume, bind
 		health = "redis-cli -a $REDIS_PASSWORD ping"
 		configVolume, configDir = name+"-config", "/usr/local/etc/redis"
 		command = []string{"redis-server", "--requirepass", password, configDir + "/redis.conf"}
-	default: // mysql
+	default: // mysql — 挂配置卷，安装时从镜像预置默认配置（见 SeedVolume 注释）
 		configVolume, configDir = name+"-config", "/etc/mysql/conf.d"
 	}
 	return ContainerSpec{ContainerEngine: engineName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
@@ -725,8 +769,10 @@ func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]D
 		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
 			"SELECT schema_name, default_character_set_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY schema_name")
 	case DBTypePostgreSQL:
+		// 列间用 SQL 拼出 tab：不依赖 psql 的 fieldsep 配置（postgres 容器里
+		// unaligned 输出分隔符可能是 |），Go 侧统一按 \t 解析。
 		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
-			"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
+			"SELECT datname || E'\\t' || pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
 	case DBTypeRedis:
 		return []Database{}, nil
 	default:

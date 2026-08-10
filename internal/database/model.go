@@ -197,3 +197,19 @@ type ParamMeta struct {
 	Options     []string `json:"options,omitempty"` // for select type
 	Default     string   `json:"default"`
 }
+
+// ConfigSectionView is one section of the structured config as served to the
+// front-end: the current param values (override or compiled default) plus the
+// editing metadata for every param. Meta is embedded per-section so the UI needs
+// no separate /common-params endpoint.
+type ConfigSectionView struct {
+	Name   string            `json:"name"`
+	Params map[string]string `json:"params"`
+	Meta   []ParamMeta       `json:"meta"`
+}
+
+// InstanceConfigView is the structured config of one instance (GET /config).
+type InstanceConfigView struct {
+	FilePath string              `json:"file_path"`
+	Sections []ConfigSectionView `json:"sections"`
+}

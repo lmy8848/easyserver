@@ -55,10 +55,19 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	}
 	log.Append("容器已创建，启动服务...")
 
-	if dbType == DBTypeRedis {
-		log.Append("写入 Redis 配置...")
-		if err := seedRedisConfig(ctx, rt, engineName, containerName, password); err != nil {
-			return fail("写入 Redis 配置失败", err)
+	// MySQL/Redis 挂配置卷，安装时用 SeedVolumeFile 预置按结构化参数（编译默认值）
+	// 生成的配置（见 config.go）。PostgreSQL 不挂配置卷：官方 entrypoint 初始化
+	// 数据卷时自动生成 postgresql.conf，天然持久。
+	switch dbType {
+	case DBTypeMySQL:
+		log.Append("预置 MySQL 默认配置...")
+		if err := rt.SeedVolumeFile(ctx, engineName, image, containerName+"-config", "easyserver.cnf", generateConfigFile(DBTypeMySQL, nil)); err != nil {
+			return fail("预置 MySQL 配置失败", err)
+		}
+	case DBTypeRedis:
+		log.Append("预置 Redis 默认配置...")
+		if err := rt.SeedVolumeFile(ctx, engineName, image, containerName+"-config", "redis.conf", generateConfigFile(DBTypeRedis, nil)); err != nil {
+			return fail("预置 Redis 配置失败", err)
 		}
 	}
 

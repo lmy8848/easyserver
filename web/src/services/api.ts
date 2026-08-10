@@ -8,7 +8,7 @@ import type {
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
-  ConfigSection, ParamMeta, AppSettings,
+  InstanceConfigView, AppSettings,
 } from '../types';
 
 const api = axios.create({
@@ -568,17 +568,14 @@ export const dbServerApi = {
   restartInstance: (iid: number) =>
     api.post<ApiResponse>(`/db/instances/${iid}/restart`),
 
-  updateInstancePort: (iid: number, port: number) =>
-    api.put<ApiResponse>(`/db/instances/${iid}/port`, { port }),
-
   getInstanceLogs: (iid: number, lines: number = 200) =>
     api.get<ApiResponse<{ logs: string }>>(`/db/instances/${iid}/logs`, { params: { lines } }),
 
   getInstanceConfig: (iid: number) =>
-    api.get<ApiResponse<{ file_path: string; content: string }>>(`/db/instances/${iid}/config`),
+    api.get<ApiResponse<InstanceConfigView>>(`/db/instances/${iid}/config`),
 
-  saveInstanceConfig: (iid: number, content: string) =>
-    api.put<ApiResponse>(`/db/instances/${iid}/config`, { content }),
+  saveInstanceConfig: (iid: number, sections: Array<{ name: string; params: Record<string, string> }>) =>
+    api.put<ApiResponse>(`/db/instances/${iid}/config`, { sections }),
 
   // Databases (instance-scoped; logical databases are live engine state, so the
   // database name is the identifier — never a persisted id)
@@ -632,36 +629,6 @@ export const dbServerApi = {
 
   deleteRecord: (instanceId: number, dbName: string, table: string, primaryKey: string, primaryVal: string | number) =>
     api.post<ApiResponse<{ success: boolean; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/delete`, { table, primary_key: primaryKey, primary_val: primaryVal }),
-
-  // MySQL config management
-  getMySQLConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db/mysql/config'),
-
-  saveMySQLConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.post<ApiResponse>('/db/mysql/config', { sections }),
-
-  getMySQLCommonParams: (section: string = 'mysqld') =>
-    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/mysql/common-params', { params: { section } }),
-
-  // PostgreSQL config management
-  getPostgreSQLConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db/postgresql/config'),
-
-  savePostgreSQLConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.post<ApiResponse>('/db/postgresql/config', { sections }),
-
-  getPGCommonParams: () =>
-    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/postgresql/common-params'),
-
-  // Redis config management
-  getRedisConfig: () =>
-    api.get<ApiResponse<{ found: boolean; config?: { file_path: string; sections: ConfigSection[] }; sections?: Record<string, { params: Record<string, string>; meta: ParamMeta[] }> }>>('/db/redis/config'),
-
-  saveRedisConfig: (sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.post<ApiResponse>('/db/redis/config', { sections }),
-
-  getRedisCommonParams: () =>
-    api.get<ApiResponse<Array<{ key: string; label: string; description: string; type: string; unit?: string; options?: string[]; default: string }>>>('/db/redis/common-params'),
 
   // Backup management (scoped by instance + database name)
   createBackup: (instanceId: number, dbName: string) =>
