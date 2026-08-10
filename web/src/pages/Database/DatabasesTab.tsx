@@ -7,16 +7,16 @@ import {
   DownloadOutlined, UndoOutlined,
   ArrowLeftOutlined, TableOutlined, ConsoleSqlOutlined, EditOutlined,
 } from '@ant-design/icons';
-import type { TablesTabProps, Database as DBType, TableExplorerProps } from './types';
+import type { DatabasesTabProps, Database as DBType, TableExplorerProps } from './types';
 
-// 表 tab — 库列表；选中一个库后在同一 tab 内联表浏览器（原 TableExplorer，
+// 数据库 tab — 库列表；选中一个库后在同一 tab 内联表浏览器（原 TableExplorer，
 // 已合并进本文件）。建库/建表/记录弹窗都随 tab 走。
-export default function TablesTab({
+export default function DatabasesTab({
   server, version, databases, dbsLoading, busy,
-  onEnterDatabase, onRefreshDatabases, onDeleteDB,
+  onEnterDatabase, onDeleteDB,
   dbModalVisible, onDbModalVisibleChange, dbForm, onCreateDB,
   tableExplorer,
-}: TablesTabProps) {
+}: DatabasesTabProps) {
   const dbColumns = [
     { title: '数据库名', dataIndex: 'name', key: 'name', render: (t: string) => <strong>{t}</strong> },
     { title: '字符集', dataIndex: 'charset', key: 'charset', width: 120, responsive: ['lg'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
@@ -36,16 +36,8 @@ export default function TablesTab({
   return (
     <div>
       {tableExplorer ? <TableExplorerView {...tableExplorer} /> : (
-        <div>
-          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Button icon={<ReloadOutlined />} loading={dbsLoading} onClick={onRefreshDatabases}>刷新</Button>
-            <Button type="primary" icon={<PlusOutlined />}
-              onClick={() => { dbForm.resetFields(); onDbModalVisibleChange(true); }}
-              disabled={version.status !== 'running'}>创建数据库</Button>
-          </div>
-          <Table columns={dbColumns} dataSource={databases} rowKey="name" loading={dbsLoading} size="small"
-            locale={{ emptyText: <Empty description="暂无数据库" /> }} />
-        </div>
+        <Table columns={dbColumns} dataSource={databases} rowKey="name" loading={dbsLoading} size="small"
+          locale={{ emptyText: <Empty description="暂无数据库" /> }} />
       )}
 
       {/* 创建数据库弹窗 */}

@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card } from 'antd';
-import { TableOutlined, UserOutlined, CodeOutlined } from '@ant-design/icons';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Space } from 'antd';
+import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
-import TablesTab from './TablesTab';
+import DatabasesTab from './DatabasesTab';
 import UsersTab from './UsersTab';
 import ConfigTab from './ConfigTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
@@ -20,6 +20,9 @@ export default function DatabasePage() {
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
+  // Active tab of the instance detail (数据库/用户/配置文件) — controls which
+  // tab's action buttons show in the tab bar's extra area.
+  const [detailTab, setDetailTab] = useState('databases');
   // busy tracks one in-flight write operation at a time (a short string key);
   // buttons/modals match on it to show their loading state.
   const [busy, setBusy] = useState('');
@@ -653,11 +656,11 @@ export default function DatabasePage() {
   // ===== Render =====
   // The engine is a persistent top-level Tab. InstanceHeader is the header card
   // (version picker + lifecycle actions + instance-level modals). When a version
-  // is selected, the 表/用户/配置文件 tabs render below — the 表 tab shows the
-  // table browser inline once a database is picked (no separate screen).
+  // is selected, the 数据库/用户/配置文件 tabs render below — the 数据库 tab shows
+  // the table browser inline once a database is picked (no separate screen).
   const renderContent = () => {
-    // The table browser props are built once and handed to the 表 tab; the tab
-    // renders it inline when a database is selected.
+    // The table browser props are built once and handed to the 数据库 tab; the
+    // tab renders it inline when a database is selected.
     const tableExplorer: TableExplorerProps | null = selectedDatabase && selectedVersion ? {
       server: activeEngine,
       version: selectedVersion,
@@ -722,18 +725,29 @@ export default function DatabasePage() {
         />
         {selectedVersion && (
           <Card>
-            <Tabs items={[
+            <Tabs
+              activeKey={detailTab}
+              onChange={setDetailTab}
+              tabBarExtraContent={detailTab === 'databases' && (
+                <Space style={{ marginRight: 8 }}>
+                  <Button icon={<ReloadOutlined />} loading={dbsLoading}
+                    onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
+                  <Button type="primary" icon={<PlusOutlined />}
+                    onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
+                    disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
+                </Space>
+              )}
+              items={[
               {
-                key: 'tables',
-                label: <span><TableOutlined /> 表</span>,
-                children: <TablesTab
+                key: 'databases',
+                label: <span><DatabaseOutlined /> 数据库</span>,
+                children: <DatabasesTab
                   server={activeEngine}
                   version={selectedVersion}
                   databases={databases}
                   dbsLoading={dbsLoading}
                   busy={busy}
                   onEnterDatabase={enterDatabase}
-                  onRefreshDatabases={() => fetchDatabases(selectedVersion.id)}
                   onDeleteDB={handleDeleteDB}
                   dbModalVisible={dbModalVisible}
                   onDbModalVisibleChange={setDbModalVisible}

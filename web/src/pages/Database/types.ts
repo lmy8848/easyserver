@@ -124,15 +124,15 @@ export interface InstanceHeaderProps {
   statusTag: (status: string) => React.ReactNode;
 }
 
-// 表 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗
-export interface TablesTabProps {
+// 数据库 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗。刷新/创建
+// 按钮在 tab 栏右侧（tabBarExtraContent），不在内容区。
+export interface DatabasesTabProps {
   server: EngineInfo;
   version: DBInstance;
   databases: Database[];
   dbsLoading: boolean;
   busy: string;
   onEnterDatabase: (db: Database) => void;
-  onRefreshDatabases: () => void;
   onDeleteDB: (dbName: string) => void;
   // Create DB modal
   dbModalVisible: boolean;
