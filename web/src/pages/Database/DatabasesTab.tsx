@@ -1,18 +1,63 @@
 import {
   Card, Button, Space, Tag, Modal, Form, Input, Select,
-  Popconfirm, Row, Col, Table, Tabs, Empty, Spin, Alert,
-  Switch,
+  Popconfirm, Row, Col, Table, Tabs, Empty, Spin, Alert, Switch,
 } from 'antd';
 import {
   DatabaseOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined,
-  DownloadOutlined,
-  FileTextOutlined, UndoOutlined,
+  DownloadOutlined, UndoOutlined,
   ArrowLeftOutlined, TableOutlined, ConsoleSqlOutlined, EditOutlined,
 } from '@ant-design/icons';
-import STYLES from './styles';
-import type { TableExplorerProps } from './types';
+import type { DatabasesTabProps, Database as DBType, TableExplorerProps } from './types';
 
-export default function TableExplorer({
+// 数据库 tab — 库列表；选中一个库后在同一 tab 内联表浏览器（原 TableExplorer，
+// 已合并进本文件）。建库/建表/记录弹窗都随 tab 走。
+export default function DatabasesTab({
+  server, version, databases, dbsLoading, busy,
+  onEnterDatabase, onDeleteDB,
+  dbModalVisible, onDbModalVisibleChange, dbForm, onCreateDB,
+  tableExplorer,
+}: DatabasesTabProps) {
+  const dbColumns = [
+    { title: '数据库名', dataIndex: 'name', key: 'name', render: (t: string) => <strong>{t}</strong> },
+    { title: '字符集', dataIndex: 'charset', key: 'charset', width: 120, responsive: ['lg'] as ('md' | 'lg' | 'xl' | 'xs' | 'sm' | 'xxl' | 'xxxl')[] },
+    {
+      title: '操作', key: 'action', width: 200,
+      render: (_: unknown, record: DBType) => (
+        <Space size="small">
+          <Button type="link" size="small" icon={<TableOutlined />} onClick={() => onEnterDatabase(record)}>管理</Button>
+          <Popconfirm title="确定删除此数据库？" onConfirm={() => onDeleteDB(record.name)}>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-db-${record.name}`}>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      {tableExplorer ? <TableExplorerView {...tableExplorer} /> : (
+        <Table columns={dbColumns} dataSource={databases} rowKey="name" loading={dbsLoading} size="small"
+          locale={{ emptyText: <Empty description="暂无数据库" /> }} />
+      )}
+
+      {/* 创建数据库弹窗 */}
+      <Modal title="创建数据库" open={dbModalVisible} onCancel={() => onDbModalVisibleChange(false)}
+        onOk={onCreateDB} okText="创建" cancelText="取消" confirmLoading={busy === 'create-db'}>
+        <Form form={dbForm} layout="vertical">
+          <Form.Item label="版本"><Input value={`${server.display_name} ${version?.version || ''}`} disabled /></Form.Item>
+          <Form.Item name="name" label="数据库名" rules={[{ required: true }]}><Input placeholder="如：my_app" /></Form.Item>
+          <Form.Item name="charset" label="字符集" initialValue="utf8mb4">
+            <Select><Select.Option value="utf8mb4">utf8mb4</Select.Option><Select.Option value="utf8">utf8</Select.Option></Select>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+}
+
+// ===== 表浏览器（原 TableExplorer.tsx，合并进本文件） =====
+
+function TableExplorerView({
   server, version, database, onBack,
   tableList, tableLoading, selectedTable, tableData, tableDataLoading, tablePage, tableInfo,
   onSelectTable, onFetchTables, onFetchTableData,
@@ -20,12 +65,9 @@ export default function TableExplorer({
   recordModalVisible, editingRecord, recordForm, recordSaving,
   onRecordModalVisibleChange, onOpenInsertModal, onOpenEditModal, onSaveRecord, onDeleteRecord,
   sqlInput, sqlResult, sqlLoading, onSqlInputChange, onExecuteSQL,
-  backups, backupsLoading, backupCreating,
+  backups, backupsLoading, backupCreating, busy,
   onCreateBackup, onDownloadBackup, onRestoreBackup, onDeleteBackup,
-  logVisible, logVersion, logContent, logLoading, logFollow, logRef,
-  onLogVisibleChange, onLogFollowChange,
 }: TableExplorerProps) {
-
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
@@ -62,7 +104,7 @@ export default function TableExplorer({
                     }}>
                     <span><TableOutlined style={{ marginRight: 8 }} />{t}</span>
                     <Popconfirm title={`确定删除表 ${t}？此操作不可恢复！`} onConfirm={(e) => { e?.stopPropagation(); onDropTable(t); }}>
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} loading={busy === `drop-table-${t}`} onClick={(e) => e.stopPropagation()} />
                     </Popconfirm>
                   </div>
                 ))
@@ -101,7 +143,7 @@ export default function TableExplorer({
                           <Space size="small">
                             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onOpenEditModal(record)}>编辑</Button>
                             <Popconfirm title="确定删除此记录？" onConfirm={() => onDeleteRecord(record)}>
-                              <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                              <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-record-${record._key}`}>删除</Button>
                             </Popconfirm>
                           </Space>
                         ),
@@ -188,14 +230,14 @@ export default function TableExplorer({
                                   下载
                                 </Button>
                                 <Popconfirm title="确定恢复此备份？这将覆盖当前数据。" onConfirm={() => onRestoreBackup(record.id)}>
-                                  <Button type="link" size="small" icon={<UndoOutlined />}>
+                                  <Button type="link" size="small" icon={<UndoOutlined />} loading={busy === `restore-${record.id}`}>
                                     恢复
                                   </Button>
                                 </Popconfirm>
                               </>
                             )}
                             <Popconfirm title="确定删除此备份？" onConfirm={() => onDeleteBackup(record.id)}>
-                              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                              <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-backup-${record.id}`}>
                                 删除
                               </Button>
                             </Popconfirm>
@@ -245,22 +287,6 @@ export default function TableExplorer({
             主键: {tableInfo?.primaryKey || tableData?.headers?.[0]} = {editingRecord[tableInfo?.primaryKey || tableData?.headers?.[0] || '']}
           </div>
         )}
-      </Modal>
-
-      {/* Log Modal */}
-      <Modal
-        title={<Space><FileTextOutlined /><span>{server.display_name} {logVersion?.version} - 服务日志</span>{logLoading && <Spin size="small" />}</Space>}
-        open={logVisible} onCancel={() => onLogVisibleChange(false)}
-        footer={<Row justify="space-between"><Col><Space><span style={{ color: '#8c8c8c', fontSize: 12 }}>每 5 秒自动刷新</span><span style={{ color: logFollow ? '#52c41a' : '#8c8c8c', fontSize: 12 }}>{logFollow ? '● 自动滚动' : '○ 已暂停'}</span></Space></Col><Col><Space><Button size="small" type={logFollow ? 'primary' : 'default'} onClick={() => onLogFollowChange(!logFollow)}>{logFollow ? 'Follow ON' : 'Follow OFF'}</Button><Button size="small" onClick={() => onLogVisibleChange(false)}>关闭</Button></Space></Col></Row>}
-        width="90vw" style={{ maxWidth: 960 }}>
-        <div ref={logRef} style={{ ...STYLES.logContainer }}>
-          {logContent.split('\n').map((line, i) => (
-            <div key={i} style={STYLES.logLine}>
-              <span style={STYLES.logLineNumber}>{i + 1}</span>
-              <span style={STYLES.logLineText}>{line || ' '}</span>
-            </div>
-          ))}
-        </div>
       </Modal>
 
       {/* Create Table Modal */}

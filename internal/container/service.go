@@ -251,6 +251,21 @@ func parseJSONRows(output string, mapRow func([]byte) (any, bool)) ([]any, error
 
 func isPodmanEngine(engine Engine) bool { return engineBinary(engine) == "podman" }
 
+// rejectManaged refuses mutating operations on EasyServer-managed database
+// containers. The generic Container resource may view but never take over,
+// edit or delete a managed database container; its lifecycle belongs to the
+// database module (PRD: generic Container cannot bypass database rules).
+func (s *Service) rejectManaged(ctx context.Context, engine Engine, id string) error {
+	out, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "inspect", "--format", "{{index .Config.Labels \"com.easyserver.managed\"}}", id)
+	if err != nil || exitCode != 0 {
+		return nil // not a managed container we can resolve; let the op fail naturally
+	}
+	if strings.TrimSpace(out) == "true" {
+		return fmt.Errorf("受管数据库容器，请通过数据库模块操作")
+	}
+	return nil
+}
+
 // --- Container operations ---
 
 // checkEngine checks if the given engine CLI is installed and accessible.
@@ -346,31 +361,49 @@ func (s *Service) containerAction(ctx context.Context, engine Engine, action, id
 
 // StartContainer starts a container.
 func (s *Service) StartContainer(ctx context.Context, engine Engine, id string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	return s.containerAction(ctx, engine, "start", id)
 }
 
 // StopContainer stops a container.
 func (s *Service) StopContainer(ctx context.Context, engine Engine, id string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	return s.containerAction(ctx, engine, "stop", id)
 }
 
 // RestartContainer restarts a container.
 func (s *Service) RestartContainer(ctx context.Context, engine Engine, id string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	return s.containerAction(ctx, engine, "restart", id)
 }
 
 // PauseContainer pauses a container.
 func (s *Service) PauseContainer(ctx context.Context, engine Engine, id string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	return s.containerAction(ctx, engine, "pause", id)
 }
 
 // UnpauseContainer unpauses a container.
 func (s *Service) UnpauseContainer(ctx context.Context, engine Engine, id string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	return s.containerAction(ctx, engine, "unpause", id)
 }
 
 // RemoveContainer removes a container.
 func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string, force bool) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	args := []string{"rm"}
 	if force {
 		args = append(args, "-f")
@@ -396,6 +429,9 @@ func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string
 
 // ExecInContainer executes a command in a running container.
 func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd string) (string, error) {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return "", err
+	}
 	if strings.ContainsRune(cmd, '\x00') {
 		return "", fmt.Errorf("command contains null byte")
 	}
@@ -683,6 +719,9 @@ func (s *Service) GetContainerTop(ctx context.Context, engine Engine, id string)
 
 // CopyToContainer copies a file from host to container.
 func (s *Service) CopyToContainer(ctx context.Context, engine Engine, id, srcPath, destPath string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("%s cp to container failed: %v", engine, err)
@@ -692,6 +731,9 @@ func (s *Service) CopyToContainer(ctx context.Context, engine Engine, id, srcPat
 
 // CopyFromContainer copies a file from container to host.
 func (s *Service) CopyFromContainer(ctx context.Context, engine Engine, id, srcPath, destPath string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath)
 	if err != nil || exitCode != 0 {
 		return fmt.Errorf("%s cp from container failed: %v", engine, err)
@@ -701,6 +743,9 @@ func (s *Service) CopyFromContainer(ctx context.Context, engine Engine, id, srcP
 
 // RenameContainer renames a container.
 func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newName string) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("container ID cannot be empty")
 	}
@@ -728,6 +773,9 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 
 // UpdateContainer updates container resource limits.
 func (s *Service) UpdateContainer(ctx context.Context, engine Engine, id string, req UpdateRequest) error {
+	if err := s.rejectManaged(ctx, engine, id); err != nil {
+		return err
+	}
 	args := []string{"update"}
 
 	if req.Memory > 0 {

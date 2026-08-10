@@ -191,7 +191,7 @@ export interface WebServer {
   config_file: string;
   sites_available: string;
   sites_enabled: string;
-  service_name: string;
+  container_name: string;
   binary_path: string;
   default_port: number;
   log_dir: string;
@@ -233,24 +233,11 @@ export interface Website {
   updated_at: string;
 }
 
-// Database Server types
-export interface DBServer {
-  id: number;
-  name: string;
-  display_name: string;
-  description: string;
-  default_port: number;
-  status: string; // not_installed, running, stopped, partial
-  version: string;
-  created_at: string;
-}
-
 // Database Backup types
 export interface DBBackup {
   id: number;
-  db_server_id: number;
+  db_type: string;
   db_version_id: number;
-  database_id: number;
   database_name: string;
   backup_type: string; // manual, scheduled
   file_path: string;
@@ -260,43 +247,40 @@ export interface DBBackup {
   created_at: string;
 }
 
-export interface DBVersion {
+export interface DBInstance {
   id: number;
-  db_server_id: number;
+  db_type: string;
   version: string;
-  service_name: string;
-  config_file: string;
-  data_dir: string;
   port: number;
-  status: string; // running, stopped
+  status: string; // running, stopped, unhealthy
   created_at: string;
-  pid?: number;
-  memory_bytes?: number;
-  uptime?: string;
-  connections?: number;
+  container_engine?: string;
+  image?: string;
+  container_id: string;
+  volume_name?: string;
+  config_dir?: string;
+  bind_address?: string;
+}
+
+// An install in progress — no instance row exists until it finishes, so the
+// front-end shows a "正在安装" entry from this instead of a DBInstance.
+export interface ActiveInstall {
+  install_id: string;
+  engine: string;
+  version: string;
+  image: string;
 }
 
 export interface Database {
-  id: number;
-  db_server_id: number;
-  db_version_id: number;
+  // Logical database inside an instance — live engine state, no persisted id.
   name: string;
   charset: string;
-  description: string;
-  size_bytes: number;
-  status: string;
-  version: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface DBUser {
-  id: number;
-  db_server_id: number;
   username: string;
-  host: string;
-  privileges: string;
-  created_at: string;
+  host: string; // MySQL only; empty for PostgreSQL
+  privileges?: string;
 }
 
 // Cron task types（systemd timer 承载，name 为唯一标识）

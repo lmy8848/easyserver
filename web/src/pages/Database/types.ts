@@ -1,11 +1,64 @@
-import type { DBServer, Database, DBUser, DBVersion } from '../../types';
+import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
 
 // Version templates from API
 export interface VersionTemplate {
   version: string;
-  package: string;
+  image: string;
   description: string;
 }
+
+// EngineInfo is what sub-pages need to know about the active engine. It is a
+// static front-end constant, not a backend catalog — the top-level tab defines
+// it, so the backend /db catalog endpoint was removed.
+export interface EngineInfo {
+  db_type: string;
+  display_name: string;
+  default_port: number;
+  // base_image is the Docker Hub official image for the engine; a custom tag
+  // picked from "更多版本" is built as `${base_image}:${tag}`.
+  base_image: string;
+}
+
+export interface EngineTab extends EngineInfo {
+  templates: VersionTemplate[];
+}
+
+// Curated presets per engine. Versions follow current mainstream releases
+// (researched 2026-08): MySQL 8.4/9.7 LTS + Innovation lines (8.0 is EOL but
+// still widely deployed), PostgreSQL 14–18, Redis 7.4/8.x. The "更多版本" flow
+// lists all published Docker Hub tags.
+export const ENGINE_TABS: EngineTab[] = [
+  {
+    db_type: 'mysql', display_name: 'MySQL', default_port: 3306, base_image: 'mysql',
+    templates: [
+      { version: '8.0', image: 'docker.io/mysql:8.0', description: 'MySQL 8.0（已 EOL，应用仍广泛）' },
+      { version: '8.4', image: 'docker.io/mysql:8.4', description: 'MySQL 8.4 LTS' },
+      { version: '9.6', image: 'docker.io/mysql:9.6', description: 'MySQL 9.6 Innovation' },
+      { version: '9.7', image: 'docker.io/mysql:9.7', description: 'MySQL 9.7 LTS（当前主线）' },
+      { version: '26.7', image: 'docker.io/mysql:26.7', description: 'MySQL 26.7 Innovation（最新）' },
+    ],
+  },
+  {
+    db_type: 'postgresql', display_name: 'PostgreSQL', default_port: 5432, base_image: 'postgres',
+    templates: [
+      { version: '14', image: 'docker.io/postgres:14', description: 'PostgreSQL 14（2026-11 EOL）' },
+      { version: '15', image: 'docker.io/postgres:15', description: 'PostgreSQL 15' },
+      { version: '16', image: 'docker.io/postgres:16', description: 'PostgreSQL 16' },
+      { version: '17', image: 'docker.io/postgres:17', description: 'PostgreSQL 17' },
+      { version: '18', image: 'docker.io/postgres:18', description: 'PostgreSQL 18（最新）' },
+    ],
+  },
+  {
+    db_type: 'redis', display_name: 'Redis', default_port: 6379, base_image: 'redis',
+    templates: [
+      { version: '7.4', image: 'docker.io/redis:7.4-alpine', description: 'Redis 7.4（上一主线）' },
+      { version: '8.0', image: 'docker.io/redis:8.0-alpine', description: 'Redis 8.0' },
+      { version: '8.4', image: 'docker.io/redis:8.4-alpine', description: 'Redis 8.4' },
+      { version: '8.8', image: 'docker.io/redis:8.8-alpine', description: 'Redis 8.8' },
+      { version: '8.10', image: 'docker.io/redis:8.10-alpine', description: 'Redis 8.10（最新）' },
+    ],
+  },
+];
 
 // Table data structure
 export interface TableData {
@@ -29,34 +82,24 @@ export interface SqlResult {
 
 // ===== Component Props =====
 
-// ServerList props
-export interface ServerListProps {
-  servers: DBServer[];
-  loading: boolean;
-  onEnterServer: (server: DBServer) => void;
-  onRefresh: () => void;
-  installVersionVisible: boolean;
-  onInstallVersionVisibleChange: (visible: boolean) => void;
-  versionTemplates: VersionTemplate[];
-  installVersionForm: any;
-  onInstallVersion: () => void;
-  portCheck: { available: boolean; message: string; process?: string } | null;
-  onCheckPort: (port: number) => void;
-}
-
-// VersionList props
-export interface VersionListProps {
-  server: DBServer;
-  versions: DBVersion[];
+// InstanceHeader props — the engine header card (brand + version picker +
+// lifecycle/ops actions) and its modals. Service-log state lives in the page
+// (InstanceHeader renders it); install-log state lives in the page
+// too so an install can auto-open it and the "正在安装" button can re-open it.
+export interface InstanceHeaderProps {
+  server: EngineInfo;
+  versions: DBInstance[];
   versionsLoading: boolean;
   operating: string;
-  onBack: () => void;
-  onEnterVersion: (version: DBVersion) => void;
+  busy: string;
+  // Called when the selected version changes (or its status refreshes) — the
+  // parent loads that instance's databases/users and renders the detail below.
+  onSelectVersion: (version: DBInstance) => void;
   onRefreshVersions: () => void;
-  onStartVersion: (v: DBVersion) => void;
-  onStopVersion: (v: DBVersion) => void;
-  onRestartVersion: (v: DBVersion) => void;
-  onUninstallVersion: (v: DBVersion) => void;
+  onStartVersion: (v: DBInstance) => void;
+  onStopVersion: (v: DBInstance) => void;
+  onRestartVersion: (v: DBInstance) => void;
+  onUninstallVersion: (v: DBInstance) => void;
   // Install version modal
   installVersionVisible: boolean;
   onInstallVersionVisibleChange: (visible: boolean) => void;
@@ -65,44 +108,52 @@ export interface VersionListProps {
   onInstallVersion: () => void;
   portCheck: { available: boolean; message: string; process?: string } | null;
   onCheckPort: (port: number) => void;
-  // Log modal
-  logVisible: boolean;
-  logVersion: DBVersion | null;
-  logContent: string;
-  logLoading: boolean;
-  logFollow: boolean;
-  logRef: React.RefObject<HTMLDivElement | null>;
-  onLogVisibleChange: (visible: boolean) => void;
-  onLogFollowChange: (follow: boolean) => void;
-  onShowLogs: (v: DBVersion) => void;
+  // Install log modal (SSE stream — state lives in the parent). Keyed by
+  // install_id (= container id), not instance id.
+  activeInstalls: ActiveInstall[];
+  installLogInstance: { id: string; version: string } | null;
+  installLogLines: string[];
+  installLogError: string;
+  installLogDone: boolean;
+  installLogFollow: boolean;
+  installLogRef: React.RefObject<HTMLDivElement | null>;
+  onOpenInstallLog: (install: { id: string; version: string }) => void;
+  onCloseInstallLog: () => void;
+  onInstallLogFollowChange: (follow: boolean) => void;
   // Status helpers
-  statusColor: (status: string) => string;
   statusTag: (status: string) => React.ReactNode;
 }
 
-// DatabaseList props
-export interface DatabaseListProps {
-  server: DBServer;
-  version: DBVersion;
+// 数据库 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗。刷新/创建
+// 按钮在 tab 栏右侧（tabBarExtraContent），不在内容区。
+export interface DatabasesTabProps {
+  server: EngineInfo;
+  // null while the engine has no installed version — the tab still renders and
+  // its table shows the built-in empty state; create-db is hidden in that case.
+  version: DBInstance | null;
   databases: Database[];
   dbsLoading: boolean;
-  dbUsers: DBUser[];
-  usersLoading: boolean;
-  operating: string;
-  onBack: () => void;
+  busy: string;
   onEnterDatabase: (db: Database) => void;
-  onRefreshDatabases: () => void;
-  onRefreshUsers: () => void;
-  onDeleteDB: (dbId: number) => void;
-  onDeleteUser: (userId: number) => void;
-  onStartVersion: (v: DBVersion) => void;
-  onStopVersion: (v: DBVersion) => void;
-  onRestartVersion: (v: DBVersion) => void;
+  onDeleteDB: (dbName: string) => void;
   // Create DB modal
   dbModalVisible: boolean;
   onDbModalVisibleChange: (visible: boolean) => void;
   dbForm: any;
   onCreateDB: () => void;
+  // Inline table browser — non-null when a database is selected
+  tableExplorer: TableExplorerProps | null;
+}
+
+// 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
+// （tabBarExtraContent，见 index.tsx），不在内容区。
+export interface UsersTabProps {
+  server: EngineInfo;
+  dbUsers: DBUser[];
+  usersLoading: boolean;
+  busy: string;
+  databases: Database[];
+  onDeleteUser: (user: DBUser) => void;
   // Create User modal
   userModalVisible: boolean;
   onUserModalVisibleChange: (visible: boolean) => void;
@@ -115,29 +166,23 @@ export interface DatabaseListProps {
   onGrantVisibleChange: (visible: boolean) => void;
   onGrant: () => void;
   onOpenGrant: (user: DBUser) => void;
-  // Config editor
+}
+
+// 配置文件 tab — 结构化参数编辑
+export interface ConfigTabProps {
+  server: EngineInfo;
   dbConfig: any;
   dbConfigLoading: boolean;
+  busy: string;
   onFetchDBConfig: () => void;
   onSaveDBConfig: () => void;
   onUpdateDBParam: (section: string, key: string, value: string) => void;
-  // Log modal
-  logVisible: boolean;
-  logVersion: DBVersion | null;
-  logContent: string;
-  logLoading: boolean;
-  logFollow: boolean;
-  logRef: React.RefObject<HTMLDivElement | null>;
-  onLogVisibleChange: (visible: boolean) => void;
-  onLogFollowChange: (follow: boolean) => void;
-  showConfig: (v: DBVersion) => void;
-  showLogs: (v: DBVersion) => void;
 }
 
-// TableExplorer props
+// 表浏览器（内联在表 tab 中）— 选中数据库后展示
 export interface TableExplorerProps {
-  server: DBServer;
-  version: DBVersion;
+  server: EngineInfo;
+  version: DBInstance;
   database: Database;
   onBack: () => void;
   // Table state
@@ -178,20 +223,12 @@ export interface TableExplorerProps {
   backups: any[];
   backupsLoading: boolean;
   backupCreating: boolean;
+  busy: string;
   onCreateBackup: () => void;
   onDownloadBackup: (backupId: number) => void;
   onRestoreBackup: (backupId: number) => void;
   onDeleteBackup: (backupId: number) => void;
-  // Log modal
-  logVisible: boolean;
-  logVersion: DBVersion | null;
-  logContent: string;
-  logLoading: boolean;
-  logFollow: boolean;
-  logRef: React.RefObject<HTMLDivElement | null>;
-  onLogVisibleChange: (visible: boolean) => void;
-  onLogFollowChange: (follow: boolean) => void;
 }
 
 // Re-export parent types for convenience
-export type { DBServer, Database, DBUser, DBVersion };
+export type { Database, DBUser, DBInstance };
