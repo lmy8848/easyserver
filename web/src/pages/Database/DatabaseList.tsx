@@ -9,7 +9,7 @@ import {
 import type { DatabaseListProps, Database as DBType, DBUser } from './types';
 
 // Instance detail (databases / users / config) — rendered directly under the
-// VersionList header card. The header's lifecycle/log actions live in the parent.
+// InstanceHeader card. The header's lifecycle/log actions live in the parent.
 export default function DatabaseList({
   server, version, databases, dbsLoading, dbUsers, usersLoading,
   onEnterDatabase, onRefreshDatabases, onRefreshUsers,

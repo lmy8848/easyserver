@@ -82,8 +82,11 @@ export interface SqlResult {
 
 // ===== Component Props =====
 
-// VersionList props
-export interface VersionListProps {
+// InstanceHeader props — the engine header card (brand + version picker +
+// lifecycle/ops actions) and its modals. Service-log state lives in the page
+// (ServiceLogModal renders at the root); install-log state lives in the page
+// too so an install can auto-open it and the "正在安装" button can re-open it.
+export interface InstanceHeaderProps {
   server: EngineInfo;
   versions: DBInstance[];
   versionsLoading: boolean;
@@ -105,19 +108,10 @@ export interface VersionListProps {
   onInstallVersion: () => void;
   portCheck: { available: boolean; message: string; process?: string } | null;
   onCheckPort: (port: number) => void;
-  // Log modal
-  logVisible: boolean;
-  logVersion: DBInstance | null;
-  logContent: string;
-  logLoading: boolean;
-  logFollow: boolean;
-  logRef: React.RefObject<HTMLDivElement | null>;
-  onLogVisibleChange: (visible: boolean) => void;
-  onLogFollowChange: (follow: boolean) => void;
+  // Service log open (modal renders at the page root)
   onShowLogs: (v: DBInstance) => void;
-  // Install log modal (SSE stream — state lives in the parent so install can
-  // auto-open it and the title-bar "正在安装" button can re-open it after
-  // refresh/close). Keyed by install_id (= container id), not instance id.
+  // Install log modal (SSE stream — state lives in the parent). Keyed by
+  // install_id (= container id), not instance id.
   activeInstalls: ActiveInstall[];
   installLogInstance: { id: string; version: string } | null;
   installLogLines: string[];
@@ -133,8 +127,8 @@ export interface VersionListProps {
 }
 
 // DatabaseList props — instance detail (databases / users / config), rendered
-// directly under the VersionList header card. Lifecycle/log actions live in the
-// parent (VersionList).
+// directly under the InstanceHeader card. Lifecycle/log actions live in the
+// header; the service-log modal renders at the page root.
 export interface DatabaseListProps {
   server: EngineInfo;
   version: DBInstance;
@@ -222,15 +216,6 @@ export interface TableExplorerProps {
   onDownloadBackup: (backupId: number) => void;
   onRestoreBackup: (backupId: number) => void;
   onDeleteBackup: (backupId: number) => void;
-  // Log modal
-  logVisible: boolean;
-  logVersion: DBInstance | null;
-  logContent: string;
-  logLoading: boolean;
-  logFollow: boolean;
-  logRef: React.RefObject<HTMLDivElement | null>;
-  onLogVisibleChange: (visible: boolean) => void;
-  onLogFollowChange: (follow: boolean) => void;
 }
 
 // Re-export parent types for convenience

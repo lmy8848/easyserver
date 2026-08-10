@@ -4,9 +4,10 @@ import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance, ActiveInstall } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
-import VersionList from './VersionList';
+import InstanceHeader from './InstanceHeader';
 import DatabaseList from './DatabaseList';
 import TableExplorer from './TableExplorer';
+import ServiceLogModal from './ServiceLogModal';
 import type { TableData, TableInfo, SqlResult } from './types';
 import { ENGINE_TABS } from './types';
 
@@ -49,16 +50,13 @@ export default function DatabasePage() {
   const [grantForm] = Form.useForm();
 
   // ===== Service logs =====
-  const [logVisible, setLogVisible] = useState(false);
+  // Only the open state lives here (null = closed); the log modal owns the
+  // 5s poll, follow switch and scroll (see ServiceLogModal).
   const [logVersion, setLogVersion] = useState<DBInstance | null>(null);
-  const [logContent, setLogContent] = useState('');
-  const [logLoading, setLogLoading] = useState(false);
-  const [logFollow, setLogFollow] = useState(true);
-  const logRef = useRef<HTMLDivElement>(null);
 
   // ===== Install log (SSE stream) =====
   // Keyed by install_id (= container id), not instance id — no instance row
-  // exists while installing. State lives here (not in VersionList) so an
+  // exists while installing. State lives here (not in InstanceHeader) so an
   // install can auto-open it, and the title-bar "正在安装" button can re-open it
   // after close/refresh.
   const [activeInstalls, setActiveInstalls] = useState<ActiveInstall[]>([]);
@@ -147,24 +145,6 @@ export default function DatabasePage() {
     }, 5000);
     return () => clearInterval(timer);
   }, [activeInstalls, activeDbType]);
-
-  useEffect(() => {
-    if (!logVisible || !logVersion) return;
-    const refresh = async () => {
-      try {
-        const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
-        setLogContent(res.data?.data?.logs || '(empty)');
-      } catch (error) { console.error('Failed to refresh logs:', error); }
-    };
-    const timer = setInterval(refresh, 5000);
-    return () => clearInterval(timer);
-  }, [logVisible, logVersion]);
-
-  useEffect(() => {
-    if (logFollow && logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [logContent, logFollow]);
 
   useEffect(() => {
     if (!installLogInstance) return;
@@ -497,18 +477,6 @@ export default function DatabasePage() {
     });
   };
 
-  // ===== Log/Config show functions =====
-  const showLogs = async (v: DBInstance) => {
-    setLogVersion(v);
-    setLogVisible(true);
-    setLogLoading(true);
-    try {
-      const res = await dbServerApi.getInstanceLogs(v.id, 200);
-      setLogContent(res.data?.data?.logs || '(empty)');
-    } catch (error: unknown) { setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error))); }
-    finally { setLogLoading(false); }
-  };
-
   // ===== Table/Record handlers =====
   const handleExecuteSQL = async () => {
     const version = selectedVersion;
@@ -687,7 +655,7 @@ export default function DatabasePage() {
   };
 
   // ===== Render =====
-  // The engine is a persistent top-level Tab. VersionList is the header card
+  // The engine is a persistent top-level Tab. InstanceHeader is the header card
   // (version picker + lifecycle actions); when a version is selected its detail
   // (databases / users / config) renders directly below it, and a database's
   // tables open via TableExplorer.
@@ -737,20 +705,12 @@ export default function DatabasePage() {
           onDownloadBackup={handleDownloadBackup}
           onRestoreBackup={handleRestoreBackup}
           onDeleteBackup={handleDeleteBackup}
-          logVisible={logVisible}
-          logVersion={logVersion}
-          logContent={logContent}
-          logLoading={logLoading}
-          logFollow={logFollow}
-          logRef={logRef}
-          onLogVisibleChange={setLogVisible}
-          onLogFollowChange={setLogFollow}
         />
       );
     }
     return (
       <div>
-        <VersionList
+        <InstanceHeader
           server={activeEngine}
           versions={versions}
           versionsLoading={versionsLoading}
@@ -769,15 +729,7 @@ export default function DatabasePage() {
           onInstallVersion={handleInstallVersion}
           portCheck={portCheck}
           onCheckPort={checkPort}
-          logVisible={logVisible}
-          logVersion={logVersion}
-          logContent={logContent}
-          logLoading={logLoading}
-          logFollow={logFollow}
-          logRef={logRef}
-          onLogVisibleChange={setLogVisible}
-          onLogFollowChange={setLogFollow}
-          onShowLogs={showLogs}
+          onShowLogs={setLogVersion}
           activeInstalls={activeInstalls}
           installLogInstance={installLogInstance}
           installLogLines={installLogLines}
@@ -837,6 +789,13 @@ export default function DatabasePage() {
         items={ENGINE_TABS.map(e => ({ key: e.db_type, label: e.display_name }))}
       />
       {renderContent()}
+      {/* Service logs render once at the root — opened from the header "日志"
+          button and reused everywhere (shared modal, no duplicated state). */}
+      <ServiceLogModal
+        version={logVersion}
+        engineName={activeEngine.display_name}
+        onClose={() => setLogVersion(null)}
+      />
     </div>
   );
 }

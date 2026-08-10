@@ -5,11 +5,9 @@ import {
 } from 'antd';
 import {
   DatabaseOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined,
-  DownloadOutlined,
-  FileTextOutlined, UndoOutlined,
+  DownloadOutlined, UndoOutlined,
   ArrowLeftOutlined, TableOutlined, ConsoleSqlOutlined, EditOutlined,
 } from '@ant-design/icons';
-import STYLES from './styles';
 import type { TableExplorerProps } from './types';
 
 export default function TableExplorer({
@@ -22,8 +20,6 @@ export default function TableExplorer({
   sqlInput, sqlResult, sqlLoading, onSqlInputChange, onExecuteSQL,
   backups, backupsLoading, backupCreating, busy,
   onCreateBackup, onDownloadBackup, onRestoreBackup, onDeleteBackup,
-  logVisible, logVersion, logContent, logLoading, logFollow, logRef,
-  onLogVisibleChange, onLogFollowChange,
 }: TableExplorerProps) {
 
   return (
@@ -245,22 +241,6 @@ export default function TableExplorer({
             主键: {tableInfo?.primaryKey || tableData?.headers?.[0]} = {editingRecord[tableInfo?.primaryKey || tableData?.headers?.[0] || '']}
           </div>
         )}
-      </Modal>
-
-      {/* Log Modal */}
-      <Modal
-        title={<Space><FileTextOutlined /><span>{server.display_name} {logVersion?.version} - 服务日志</span>{logLoading && <Spin size="small" />}</Space>}
-        open={logVisible} onCancel={() => onLogVisibleChange(false)}
-        footer={<Row justify="space-between"><Col><Space><span style={{ color: '#8c8c8c', fontSize: 12 }}>每 5 秒自动刷新</span><span style={{ color: logFollow ? '#52c41a' : '#8c8c8c', fontSize: 12 }}>{logFollow ? '● 自动滚动' : '○ 已暂停'}</span></Space></Col><Col><Space><Button size="small" type={logFollow ? 'primary' : 'default'} onClick={() => onLogFollowChange(!logFollow)}>{logFollow ? 'Follow ON' : 'Follow OFF'}</Button><Button size="small" onClick={() => onLogVisibleChange(false)}>关闭</Button></Space></Col></Row>}
-        width="90vw" style={{ maxWidth: 960 }}>
-        <div ref={logRef} style={{ ...STYLES.logContainer }}>
-          {logContent.split('\n').map((line, i) => (
-            <div key={i} style={STYLES.logLine}>
-              <span style={STYLES.logLineNumber}>{i + 1}</span>
-              <span style={STYLES.logLineText}>{line || ' '}</span>
-            </div>
-          ))}
-        </div>
       </Modal>
 
       {/* Create Table Modal */}
