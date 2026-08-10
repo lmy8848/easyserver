@@ -212,6 +212,33 @@ func TestStreamRunFeedsHookLineByLine(t *testing.T) {
 	}
 }
 
+func TestExistsTreatsNotFoundAsFalse(t *testing.T) {
+	// Exists 用 `inspect` 判存在：not-found（docker "No such object" / podman
+	// "no such container"）→ false、nil，而不是错误。
+	fake := &runtimeFakeExecutor{out: "Error: No such object: easyserver-db-mysql-8", code: 1}
+	rt := NewCLIContainerRuntime(fake)
+
+	exists, err := rt.Exists(context.Background(), "podman", "c1")
+	if err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	if exists {
+		t.Fatal("expected not-found container to report exists=false")
+	}
+}
+
+func TestExistsReportsTrueOnHit(t *testing.T) {
+	fake := &runtimeFakeExecutor{out: "c1", code: 0}
+	rt := NewCLIContainerRuntime(fake)
+	exists, err := rt.Exists(context.Background(), "docker", "c1")
+	if err != nil {
+		t.Fatalf("exists: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected existing container to report exists=true")
+	}
+}
+
 func TestStatusDoesNotPolluteOutputHook(t *testing.T) {
 	// 安装期间 waitForHealthy 每 500ms 轮询一次容器状态；Status 的
 	// `podman inspect` 输出（running|starting）绝不能经 outputHook 灌进安装日志，

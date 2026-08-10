@@ -17,13 +17,13 @@ import (
 // CreateInstance); this flips it to "running" on success / "failed" on error, or
 // removes it entirely when the user cancels. ctx is the per-task cancel context
 // from the task executor.
-func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerID, volumeName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
+func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, volumeName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
 	canceled := func() bool { return ctx.Err() != nil }
 	// removeInstance is the cancel cleanup: drop the container and the instance
 	// row — the user aborted, so nothing lingers (a failed install keeps its row
 	// for inspection; a canceled one does not).
 	removeInstance := func() {
-		_ = rt.Remove(context.Background(), engineName, containerID)
+		_ = rt.Remove(context.Background(), engineName, containerName)
 		_ = s.repo.DeleteInstance(context.Background(), id)
 	}
 	fail := func(msg string, err error) error {
@@ -57,17 +57,17 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 
 	if dbType == DBTypeRedis {
 		log.Append("写入 Redis 配置...")
-		if err := seedRedisConfig(ctx, rt, engineName, containerID, password); err != nil {
+		if err := seedRedisConfig(ctx, rt, engineName, containerName, password); err != nil {
 			return fail("写入 Redis 配置失败", err)
 		}
 	}
 
-	if err := rt.Start(ctx, engineName, containerID); err != nil {
+	if err := rt.Start(ctx, engineName, containerName); err != nil {
 		return fail("启动容器失败", err)
 	}
 	// 等待就绪不设超时：数据库初始化（尤其首次拉镜像后）没有固定时长，卡住时
 	// 由容器退出（exited 快失败）或用户取消来终止，而不是倒计时误杀。
-	if _, err := waitForHealthy(ctx, rt, engineName, containerID, 0); err != nil {
+	if _, err := waitForHealthy(ctx, rt, engineName, containerName, 0); err != nil {
 		return fail("数据库未就绪", err)
 	}
 	log.Append("✅ 安装完成，数据库已就绪")

@@ -337,7 +337,7 @@ func (h *InstanceHandler) UpdateInstancePort(c *gin.Context) {
 		c.Error(apperror.ErrNotFound.WithMessage("数据库实例不存在"))
 		return
 	}
-	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ContainerID+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
+	middleware.AuditSummary(c, "更新数据库端口 ("+vInfo.ContainerName+") "+strconv.Itoa(vInfo.Port)+" -> "+strconv.Itoa(req.Port))
 
 	if req.Port < 1 || req.Port > 65535 {
 		c.Error(apperror.ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))

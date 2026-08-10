@@ -27,7 +27,7 @@ func TestSQLiteRepositoryUsesDatabaseInstanceSchema(t *testing.T) {
 		Version:         "8.0",
 		ContainerEngine: "docker",
 		Image:           "mysql:8.0",
-		ContainerID:     "easyserver-db-mysql-8",
+		ContainerName:   "easyserver-db-mysql-8",
 		VolumeName:      "easyserver-db-mysql-8-data",
 		BindAddress:     "127.0.0.1",
 		Port:            3306,

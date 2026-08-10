@@ -7,6 +7,7 @@ package database
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -19,6 +20,7 @@ type fakeDBRuntime struct {
 	removedVol  []string
 	started     []string
 	stopped     []string
+	exists      bool // 预检 Exists 的返回值（默认 false）
 }
 
 func (f *fakeDBRuntime) Create(_ context.Context, spec ContainerSpec) error {
@@ -50,6 +52,9 @@ func (f *fakeDBRuntime) CopyTo(context.Context, string, string, string, string) 
 func (f *fakeDBRuntime) RemoveVolume(_ context.Context, _, volume string) error {
 	f.removedVol = append(f.removedVol, volume)
 	return nil
+}
+func (f *fakeDBRuntime) Exists(context.Context, string, string) (bool, error) {
+	return f.exists, nil
 }
 
 // fakeRepo is a minimal in-memory Repository for the lifecycle tests.
@@ -140,7 +145,7 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	if got.BindAddress != "127.0.0.1" {
 		t.Fatalf("expected loopback bind by default, got %q", got.BindAddress)
 	}
-	if len(rt.createSpecs) != 1 || rt.createSpecs[0].Name != got.ContainerID {
+	if len(rt.createSpecs) != 1 || rt.createSpecs[0].Name != got.ContainerName {
 		t.Fatalf("unexpected create specs: %+v", rt.createSpecs)
 	}
 	if len(rt.removed) != 0 {
@@ -192,7 +197,7 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 	if err := svc.DestroyInstance(context.Background(), got.ID); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
-	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerID {
+	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerName {
 		t.Fatalf("expected container removed, got %v", rt.removed)
 	}
 	if len(rt.removedVol) != 2 || rt.removedVol[0] != got.VolumeName {
@@ -230,6 +235,53 @@ func TestPostgres18MovesDataDir(t *testing.T) {
 		if got := configPathForImage(c.image); got != c.confPath {
 			t.Errorf("%s: config path = %q, want %q", c.image, got, c.confPath)
 		}
+	}
+}
+
+func TestValidateContainerName(t *testing.T) {
+	valid := []string{"easyserver-db-mysql-8", "my-db", "MyDB_1", "a.b-c", "0x"}
+	invalid := []string{"", "-lead", ".lead", "has space", "has/slash", "结尾-", "a:b", "Ünïcode"}
+	for _, name := range valid {
+		if err := validateContainerName(name); err != nil {
+			t.Errorf("validateContainerName(%q) = %v, want nil", name, err)
+		}
+	}
+	for _, name := range invalid {
+		if err := validateContainerName(name); err == nil {
+			t.Errorf("validateContainerName(%q) = nil, want error", name)
+		}
+	}
+	tooLong := strings.Repeat("a", maxContainerNameLen+1)
+	if err := validateContainerName(tooLong); err == nil {
+		t.Error("expected over-length name rejected")
+	}
+}
+
+func TestDefaultContainerName(t *testing.T) {
+	if got := defaultContainerName(DBTypeMySQL, "8.0", ""); got != "easyserver-db-mysql-8-0" {
+		t.Fatalf("default = %q, want easyserver-db-mysql-8-0", got)
+	}
+	if got := defaultContainerName(DBTypeMySQL, "8.0", "my-custom"); got != "my-custom" {
+		t.Fatalf("custom = %q, want my-custom", got)
+	}
+}
+
+func TestCreateInstanceRejectsTakenContainerName(t *testing.T) {
+	// 预检：同名容器已存在 → CreateInstance 报错，且不写 row、不起任务。
+	repo := newFakeRepo()
+	rt := &fakeDBRuntime{exists: true}
+	svc := NewServiceWithRuntime(repo, rt)
+
+	_, err := svc.CreateInstance(context.Background(), DBTypeMySQL,
+		&CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0", ContainerName: "taken"})
+	if err == nil {
+		t.Fatal("expected create to fail when container name is taken")
+	}
+	if len(repo.instances) != 0 {
+		t.Fatalf("no row must be written when name is taken, got %+v", repo.instances)
+	}
+	if len(rt.createSpecs) != 0 {
+		t.Fatalf("no task must start when name is taken, got %+v", rt.createSpecs)
 	}
 }
 

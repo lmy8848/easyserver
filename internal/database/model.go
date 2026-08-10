@@ -10,7 +10,7 @@ const (
 )
 
 // DBInstance is a container-backed Database Instance — the top-level resource of
-// the database module. The container is addressed by ContainerID only; each
+// the database module. The container is addressed by ContainerName only; each
 // instance owns one managed container, one named data volume, an instance-level
 // config dir, a fixed image and a fixed runtime.
 type DBInstance struct {
@@ -22,7 +22,7 @@ type DBInstance struct {
 	CreatedAt       string `json:"created_at"`
 	ContainerEngine string `json:"container_engine"`
 	Image           string `json:"image"`
-	ContainerID     string `json:"container_id"`
+	ContainerName   string `json:"container_name"`
 	VolumeName      string `json:"volume_name"`
 	ConfigDir       string `json:"config_dir"`
 	BindAddress     string `json:"bind_address"`
@@ -31,13 +31,15 @@ type DBInstance struct {
 
 // CreateDBInstanceRequest is the request for installing a new database instance.
 // Image is supplied by the client — the version/image catalogue lives in the
-// front-end, not the backend.
+// front-end, not the backend. ContainerName is optional; empty falls back to the
+// deterministic default "easyserver-db-<type>-<version>".
 type CreateDBInstanceRequest struct {
 	Version         string `json:"version" binding:"required"`
 	Image           string `json:"image" binding:"required"`
 	Port            int    `json:"port" binding:"required"`
 	ContainerEngine string `json:"container_engine"`
 	BindAddress     string `json:"bind_address"`
+	ContainerName   string `json:"container_name"`
 }
 
 // IsValidDBType reports whether t is one of the supported database type enums.

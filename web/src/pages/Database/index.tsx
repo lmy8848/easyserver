@@ -348,6 +348,7 @@ export default function DatabasePage() {
         port: v.port || server.default_port,
         container_engine: v.container_engine,
         bind_address: v.bind_address,
+        container_name: v.container_name, // 复用原容器名，卸载已删同名容器
       });
       message.success('正在重新安装…');
       fetchInstances(server.db_type);
@@ -370,7 +371,7 @@ export default function DatabasePage() {
       onOk: async () => {
         setOperating(`cancel-install-${v.id}`);
         try {
-          await dbServerApi.cancelInstall(v.container_id);
+          await dbServerApi.cancelInstall(v.container_name);
           message.success('已取消安装');
           fetchInstances(server.db_type);
         } catch (error: unknown) { message.error((error instanceof Error ? error.message : '取消失败')); }
@@ -755,13 +756,13 @@ export default function DatabasePage() {
             </Empty>
           </Card>
         ) : selectedVersion && (selectedVersion.status === 'installing' || selectedVersion.status === 'failed') ? (
-          // key=instance id: a reinstall reuses the same container id (so
-          // containerId prop is unchanged), but it is a brand-new install with a
+          // key=instance id: a reinstall reuses the same container name (so the
+          // containerName prop is unchanged), but it is a brand-new install with a
           // fresh log stream — remounting on id change resets the SSE connection
           // so the new install's log shows instead of the stale failed one.
           <InstallLogPanel
             key={selectedVersion.id}
-            containerId={selectedVersion.container_id}
+            containerName={selectedVersion.container_name}
             version={selectedVersion.version}
             onDone={() => fetchInstances(activeDbType)}
           />

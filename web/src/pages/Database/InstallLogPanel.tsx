@@ -9,9 +9,9 @@ import STYLES from './styles';
 // the outcome (installing / done / failed). The log area is capped so the whole
 // panel stays within one viewport below the header card.
 export default function InstallLogPanel({
-  containerId, version, onDone,
+  containerName, version, onDone,
 }: {
-  containerId: string;
+  containerName: string;
   version: string;
   onDone?: () => void; // install finished (success / failure / cancel)
 }) {
@@ -29,7 +29,7 @@ export default function InstallLogPanel({
   useEffect(() => {
     // SSE replay: the server sends every buffered line first (cursor starts at
     // 0), then follows live until the {type:'done'} frame.
-    const es = new EventSource(`/api/db/installs/${containerId}/log`);
+    const es = new EventSource(`/api/db/installs/${containerName}/log`);
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -46,7 +46,7 @@ export default function InstallLogPanel({
     // governs the UI. EventSource auto-reconnects otherwise.
     es.onerror = () => { setDone(true); es.close(); };
     return () => es.close();
-  }, [containerId]);
+  }, [containerName]);
 
   useEffect(() => {
     if (follow && ref.current) {

@@ -256,7 +256,7 @@ export interface DBInstance {
   created_at: string;
   container_engine?: string;
   image?: string;
-  container_id: string;
+  container_name: string;
   volume_name?: string;
   config_dir?: string;
   bind_address?: string;

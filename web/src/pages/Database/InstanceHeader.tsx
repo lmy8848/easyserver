@@ -172,14 +172,15 @@ export default function InstanceHeader({
     } finally { setDockerLoading(false); }
   };
 
-  // Picking a published tag fills version + image into the install form; the
-  // image is the fully-qualified `docker.io/<base_image>:<tag>` so the backend
-  // never resolves (or has to resolve) short names.
+  // Picking a published tag fills version + image (and regenerates the container
+  // name) into the install form; the image is the fully-qualified
+  // `docker.io/<base_image>:<tag>` so the backend never resolves (or has to
+  // resolve) short names.
   const pickDockerTag = (tag: string) => {
-    installVersionForm.setFieldsValue({ version: tag, image: `docker.io/${server.base_image}:${tag}` });
+    const generated = `easyserver-db-${server.db_type}-${String(tag).toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+    installVersionForm.setFieldsValue({ version: tag, image: `docker.io/${server.base_image}:${tag}`, container_name: generated });
     setDockerVisible(false);
   };
-
   // ===== Instance info rows =====
   const infoRows: Array<{ key: string; label: string; value: React.ReactNode }> = selectedVersion ? [
     { key: 'version', label: '版本', value: <strong>{selectedVersion.version}</strong> },
@@ -187,7 +188,7 @@ export default function InstanceHeader({
     { key: 'port', label: '端口', value: selectedVersion.port },
     { key: 'container_engine', label: '容器引擎', value: selectedVersion.container_engine },
     { key: 'image', label: '镜像', value: <Tag>{selectedVersion.image}</Tag> },
-    { key: 'container_id', label: '容器ID', value: <Tag>{selectedVersion.container_id}</Tag> },
+    { key: 'container_name', label: '容器名', value: <Tag>{selectedVersion.container_name}</Tag> },
     { key: 'volume_name', label: '数据卷', value: selectedVersion.volume_name },
     { key: 'bind_address', label: '监听地址', value: selectedVersion.bind_address },
     { key: 'created_at', label: '创建时间', value: selectedVersion.created_at },
@@ -303,7 +304,10 @@ export default function InstanceHeader({
                   return;
                 }
                 const t = versionTemplates.find(t => t.version === v);
-                installVersionForm.setFieldsValue({ image: t ? t.image : `docker.io/${server.base_image}:${v}` });
+                // 选版本即按规则预填容器名：easyserver-db-<类型>-<版本>。用户可改，
+                // 后端仍会校验；留空回退默认名。
+                const generated = `easyserver-db-${server.db_type}-${String(v).toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+                installVersionForm.setFieldsValue({ image: t ? t.image : `docker.io/${server.base_image}:${v}`, container_name: generated });
               }}
             >
               {versionTemplates.map(t => (
@@ -325,14 +329,23 @@ export default function InstanceHeader({
               { value: '0.0.0.0', label: '所有网卡（0.0.0.0）' },
             ]} />
           </Form.Item>
-          <Form.Item name="port" label="端口（留空使用默认）"
+          <Form.Item name="port" label={`端口（默认 ${server.default_port}）`}
+            rules={[{ required: true, message: '请输入端口' }]}
+            initialValue={server.default_port}
             extra={portCheck && (
               portCheck.available
                 ? <span style={{ color: '#52c41a' }}>{portCheck.message}</span>
                 : <span style={{ color: '#ff4d4f' }}>{portCheck.message}{portCheck.process && ` (${portCheck.process})`}</span>
             )}>
-            <InputNumber min={1} max={65535} style={{ width: '100%' }}
+            <InputNumber min={1} max={65535} placeholder="请输入端口" style={{ width: '100%' }}
               onChange={(val) => val && onCheckPort(val as number)} />
+          </Form.Item>
+          <Form.Item name="container_name" label="容器名"
+            rules={[
+              { required: true, message: '请输入容器名' },
+              { pattern: /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, max: 128, message: '只能包含字母、数字以及 _ . -，且必须以字母或数字开头' },
+            ]}>
+            <Input placeholder="请输入容器名" />
           </Form.Item>
         </Form>
       </Modal>

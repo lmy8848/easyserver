@@ -48,6 +48,7 @@ type DatabaseRuntime interface {
 	CopyFrom(ctx context.Context, runtime, name, source, destination string) error
 	CopyTo(ctx context.Context, runtime, name, source, destination string) error
 	RemoveVolume(ctx context.Context, runtime, volume string) error
+	Exists(ctx context.Context, runtime, name string) (bool, error)
 }
 
 // CLIContainerRuntime implements DatabaseRuntime with Docker or rootful Podman.
@@ -306,6 +307,27 @@ func (r *CLIContainerRuntime) RemoveVolume(ctx context.Context, runtime, volume 
 		return nil
 	}
 	return err
+}
+
+// Exists reports whether a container with the given name already exists in the
+// engine (running or stopped). "Not found" is treated as false, not an error.
+// Used to pre-check a user-supplied container name before install so a
+// duplicate name surfaces as a clear error instead of a cryptic `create`
+// conflict.
+func (r *CLIContainerRuntime) Exists(ctx context.Context, runtime, name string) (bool, error) {
+	if name == "" {
+		return false, fmt.Errorf("container name is required")
+	}
+	_, err := r.run(ctx, true, false, runtime, "inspect", name)
+	if err != nil {
+		// notFound 匹配小写后的错误文本，marker 用小写（docker "No such object"
+		// / podman "no such container"）。
+		if notFound(err, "no such object", "no such container") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func sortedKeys(values map[string]string) []string {

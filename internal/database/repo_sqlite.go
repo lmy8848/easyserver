@@ -27,7 +27,7 @@ const instanceColumns = `id, db_type, version, container_engine, image, containe
 // It works for both *sql.Row and *sql.Rows.
 func scanInstance(row interface{ Scan(...any) error }) (DBInstance, error) {
 	var v DBInstance
-	err := row.Scan(&v.ID, &v.DBType, &v.Version, &v.ContainerEngine, &v.Image, &v.ContainerID, &v.VolumeName,
+	err := row.Scan(&v.ID, &v.DBType, &v.Version, &v.ContainerEngine, &v.Image, &v.ContainerName, &v.VolumeName,
 		&v.ConfigDir, &v.BindAddress, &v.Port, &v.AdminPassword, &v.Status, &v.CreatedAt)
 	return v, err
 }
@@ -79,7 +79,7 @@ func (r *sqliteRepo) CreateInstance(ctx context.Context, v *DBInstance) (int64, 
 	result, err := r.db.ExecContext(ctx, `INSERT INTO database_instances
 		(db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, admin_password, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		v.DBType, v.Version, v.ContainerEngine, v.Image, v.ContainerID, v.VolumeName,
+		v.DBType, v.Version, v.ContainerEngine, v.Image, v.ContainerName, v.VolumeName,
 		v.ConfigDir, v.BindAddress, v.Port, v.AdminPassword, v.Status)
 	if err != nil {
 		return 0, err

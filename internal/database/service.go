@@ -90,7 +90,7 @@ func (s *Service) refreshInstanceStatus(ctx context.Context, v *DBInstance) {
 	if v.Status == "installing" || v.Status == "provisioning" || v.Status == "failed" {
 		return
 	}
-	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerID)
+	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerName)
 	status := containerStatus(info, err)
 	v.Status = status
 	s.repo.UpdateInstanceStatus(ctx, v.ID, status)
@@ -168,8 +168,15 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if bindAddress != "127.0.0.1" && bindAddress != "0.0.0.0" {
 		return nil, fmt.Errorf("unsupported bind address %q (only 127.0.0.1 or 0.0.0.0)", bindAddress)
 	}
-	containerID := fmt.Sprintf("easyserver-db-%s-%s", sanitizeName(string(dbType)), sanitizeName(req.Version))
-	volumeName := containerID + "-data"
+	// 自定义容器名（可选）：非空时校验格式；空则用默认名。预检必须发生在写
+	// row 之前，否则留下幽灵 installing 行。
+	if name := strings.TrimSpace(req.ContainerName); name != "" {
+		if err := validateContainerName(name); err != nil {
+			return nil, err
+		}
+	}
+	containerName := defaultContainerName(dbType, req.Version, req.ContainerName)
+	volumeName := containerName + "-data"
 	// Admin password is stored plainly: SQLite file and container environment
 	// share the host, so a static key encrypts nothing an attacker can't read
 	// next door — encryption would only add a missing-key failure mode.
@@ -178,7 +185,17 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, err
 	}
 
-	spec := containerSpec(dbType, engineName, req.Version, req.Image, containerID, volumeName, bindAddress, port, password)
+	// 安装前预检：同名容器已存在（残留或手动创建）则拒绝，避免 docker create
+	// 抛出难懂的 "name already in use"。
+	exists, err := s.runtime.Exists(ctx, engineName, containerName)
+	if err != nil {
+		return nil, fmt.Errorf("检查容器名占用失败: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("容器名 %q 已被占用", containerName)
+	}
+
+	spec := containerSpec(dbType, engineName, req.Version, req.Image, containerName, volumeName, bindAddress, port, password)
 
 	// Write the instance row up front (status "installing") — the install never
 	// has a row-less phase, and the front-end renders the "正在安装" state straight
@@ -188,14 +205,14 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	// executor; if that rejects the request, undo the just-written row.
 	row := &DBInstance{
 		DBType: dbType, Version: req.Version, Port: port, Status: "installing",
-		ContainerEngine: engineName, Image: req.Image, ContainerID: containerID,
+		ContainerEngine: engineName, Image: req.Image, ContainerName: containerName,
 		VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password,
 	}
 	id, err := s.repo.CreateInstance(ctx, row)
 	if err != nil {
 		return nil, fmt.Errorf("write instance record: %w", err)
 	}
-	if _, err := s.taskMgr.StartWithLog(containerID, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
+	if _, err := s.taskMgr.StartWithLog(containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
 		if cli, ok := rt.(*CLIContainerRuntime); ok {
 			cli.SetOutputHook(func(line string) { log.Append(line) })
@@ -204,7 +221,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		// (which is canceled once CreateInstance responds), so it must not inherit
 		// its cancellation — the per-task context from the task executor drives it,
 		// and CancelInstall cancels that.
-		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerID, volumeName, password, spec, rt, log)
+		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, volumeName, password, spec, rt, log)
 	}); err != nil {
 		// Duplicate install (same container already installing) or concurrency
 		// limit: the row was written above but no task started — remove it so the
@@ -212,7 +229,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		_ = s.repo.DeleteInstance(ctx, id)
 		return nil, err
 	}
-	return &CreateInstanceResult{InstallID: containerID, InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
+	return &CreateInstanceResult{InstallID: containerName, InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
 }
 
 // dockerTagsCache holds the full (filtered) tag list for one database type, with a TTL
@@ -302,7 +319,7 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 		return fmt.Errorf("instance not found")
 	}
 
-	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
 	if purge {
@@ -324,7 +341,7 @@ func (s *Service) DestroyInstance(ctx context.Context, instanceID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
 	if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
@@ -344,7 +361,7 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 	if err != nil || v == nil {
 		return "", fmt.Errorf("instance not found")
 	}
-	if v.ContainerEngine == "" || v.ContainerID == "" {
+	if v.ContainerEngine == "" || v.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
 	oldPassword := v.AdminPassword
@@ -356,15 +373,15 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 	case DBTypeMySQL:
 		// Same MYSQL_PWD trick as withAdminCredentials — no `-p` on the command
 		// line, so no stderr warning leaks into output.
-		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "-e", "MYSQL_PWD="+oldPassword, "mysql", "-uroot", "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "-e", "MYSQL_PWD="+oldPassword, "mysql", "-uroot", "-e", "ALTER USER 'root'@'localhost' IDENTIFIED BY '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
 			return "", fmt.Errorf("reset MySQL password: %w", err)
 		}
 	case DBTypePostgreSQL:
-		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "psql", "-U", "postgres", "-c", "ALTER USER postgres WITH PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
+		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "psql", "-U", "postgres", "-c", "ALTER USER postgres WITH PASSWORD '"+strings.ReplaceAll(password, "'", "''")+"';"); err != nil {
 			return "", fmt.Errorf("reset PostgreSQL password: %w", err)
 		}
 	case DBTypeRedis:
-		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "redis-cli", "-a", oldPassword, "CONFIG", "SET", "requirepass", password); err != nil {
+		if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "redis-cli", "-a", oldPassword, "CONFIG", "SET", "requirepass", password); err != nil {
 			return "", fmt.Errorf("reset Redis password: %w", err)
 		}
 	default:
@@ -388,10 +405,10 @@ func (s *Service) StartInstance(ctx context.Context, instanceID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("start failed: %w", err)
 	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerID, 2*time.Minute); err != nil {
+	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
 	return s.repo.UpdateInstanceStatus(ctx, instanceID, "running")
@@ -405,7 +422,7 @@ func (s *Service) StopInstance(ctx context.Context, instanceID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	if err := s.runtime.Stop(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	if err := s.runtime.Stop(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("stop failed: %w", err)
 	}
 	return s.repo.UpdateInstanceStatus(ctx, instanceID, "stopped")
@@ -419,10 +436,10 @@ func (s *Service) RestartInstance(ctx context.Context, instanceID int64) error {
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	if err := s.runtime.Restart(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	if err := s.runtime.Restart(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("restart failed: %w", err)
 	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerID, 2*time.Minute); err != nil {
+	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
 	return s.repo.UpdateInstanceStatus(ctx, instanceID, "running")
@@ -444,17 +461,17 @@ func (s *Service) UpdateInstancePort(ctx context.Context, instanceID int64, newP
 	if newPort < 1 || newPort > 65535 {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
-	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerID, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
-	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
+	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("remove old database container: %w", err)
 	}
 	if err := s.runtime.Create(ctx, spec); err != nil {
 		return fmt.Errorf("recreate database container: %w", err)
 	}
-	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerID); err != nil {
+	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("start database container: %w", err)
 	}
-	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerID, 2*time.Minute); err != nil {
+	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
 	return s.repo.UpdateInstancePort(ctx, instanceID, newPort)
@@ -474,7 +491,7 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 	if lines > maxLogLines {
 		lines = maxLogLines
 	}
-	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerID, lines)
+	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerName, lines)
 }
 
 // GetInstanceConfig reads the database configuration from inside its container.
@@ -484,7 +501,7 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (stri
 		return "", "", fmt.Errorf("instance not found")
 	}
 	path := configPathForImage(v.Image)
-	out, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "cat", path)
+	out, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "cat", path)
 	return out, path, err
 }
 
@@ -499,7 +516,7 @@ func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, cont
 	}
 	path := configPathForImage(v.Image)
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerID, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
+	if _, err := s.runtime.Exec(ctx, v.ContainerEngine, v.ContainerName, "sh", "-c", "echo "+encoded+" | base64 -d > "+path); err != nil {
 		return fmt.Errorf("save configuration: %w", err)
 	}
 	return nil
@@ -602,6 +619,33 @@ func sanitizeName(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// containerNameRe 是容器名的允许字符集（docker 与 podman 的规则交集）：
+// 首字符字母/数字，其余字母/数字/下划线/点/连字符。Docker 的 daemon 会拒绝
+// 不属于 [a-zA-Z0-9][a-zA-Z0-9_.-]* 的名字，Podman 更宽松但向下兼容该集合，
+// 因此按交集校验两个引擎都必然接受。
+var containerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+const maxContainerNameLen = 128
+
+func validateContainerName(name string) error {
+	if len(name) > maxContainerNameLen {
+		return fmt.Errorf("容器名过长（最多 %d 个字符）", maxContainerNameLen)
+	}
+	if !containerNameRe.MatchString(name) {
+		return fmt.Errorf("容器名只能包含字母、数字以及 _ . -，且必须以字母或数字开头")
+	}
+	return nil
+}
+
+// defaultContainerName 计算受管数据库容器的名字。未提供自定义名时用确定性默认
+// "easyserver-db-<type>-<version>"；提供时用用户自定义名（已 by 调用方校验）。
+func defaultContainerName(dbType DBType, version, custom string) string {
+	if name := strings.TrimSpace(custom); name != "" {
+		return name
+	}
+	return fmt.Sprintf("easyserver-db-%s-%s", sanitizeName(string(dbType)), sanitizeName(version))
 }
 
 func generateAdminPassword() (string, error) {
@@ -1100,7 +1144,7 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	}
 
 	time.Sleep(2 * time.Second)
-	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerID, "/data/dump.rdb", backup.FilePath)
+	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, "/data/dump.rdb", backup.FilePath)
 }
 
 func (s *Service) ListBackups(ctx context.Context, instanceID int64, dbName string) ([]DBBackup, error) {
@@ -1156,7 +1200,7 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 		return fmt.Errorf("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.sql"
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerID, backup.FilePath, target); err != nil {
+	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
 	if _, err := s.runInVersion(ctx, instance, "sh", "-c", "mysql "+shellQuote(backup.DatabaseName)+" < "+target); err != nil {
@@ -1171,7 +1215,7 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 		return fmt.Errorf("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.dump"
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerID, backup.FilePath, target); err != nil {
+	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
 	if _, err := s.runInVersion(ctx, instance, "pg_restore", "-d", backup.DatabaseName, "-c", target); err != nil {
@@ -1185,13 +1229,13 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	if err := s.runtime.Stop(ctx, instance.ContainerEngine, instance.ContainerID); err != nil {
+	if err := s.runtime.Stop(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("stop Redis failed: %w", err)
 	}
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerID, backup.FilePath, "/data/dump.rdb"); err != nil {
+	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, "/data/dump.rdb"); err != nil {
 		return fmt.Errorf("copy Redis backup: %w", err)
 	}
-	if err := s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerID); err != nil {
+	if err := s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("start Redis failed: %w", err)
 	}
 	return nil
@@ -1220,11 +1264,11 @@ func (s *Service) CleanOldBackups(ctx context.Context, instanceID int64, dbName 
 // --- SQL query operations ---
 
 func (s *Service) runInVersion(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
-	if instance == nil || instance.ContainerEngine == "" || instance.ContainerID == "" {
+	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
 	args = s.withAdminCredentials(instance, args)
-	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerID, args...)
+	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...)
 }
 
 func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []string {
