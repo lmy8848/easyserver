@@ -139,6 +139,74 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "镜像源已配置"})
 }
 
+// GetRegistryConfig returns the engine's mirror + insecure registries.
+func (h *ContainerHandler) GetRegistryConfig(c *gin.Context) {
+	cfg, err := h.containerService.GetRegistryConfig(c.Request.Context(), h.engineName(c))
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, cfg)
+}
+
+// SetRegistryConfig persists the engine's mirror + insecure registries.
+func (h *ContainerHandler) SetRegistryConfig(c *gin.Context) {
+	var req container.RegistryConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "配置 "+string(engine)+" 镜像仓库")
+	if err := h.containerService.SetRegistryConfig(c.Request.Context(), engine, req); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "镜像仓库配置已保存"})
+}
+
+// RegistryLogin logs into a private registry.
+func (h *ContainerHandler) RegistryLogin(c *gin.Context) {
+	var req container.RegistryAuth
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "登录 "+string(engine)+" 私有仓库 "+req.Server)
+	if err := h.containerService.RegistryLogin(c.Request.Context(), engine, req.Server, req.Username, req.Password); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "登录成功"})
+}
+
+// GetLoggedInRegistries lists the registries the engine is logged into.
+func (h *ContainerHandler) GetLoggedInRegistries(c *gin.Context) {
+	regs, err := h.containerService.GetLoggedInRegistries(c.Request.Context(), h.engineName(c))
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"registries": regs})
+}
+
+// RegistryLogout clears stored credentials for a registry.
+func (h *ContainerHandler) RegistryLogout(c *gin.Context) {
+	server := c.Query("server")
+	if server == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少 server 参数"))
+		return
+	}
+	engine := h.engineName(c)
+	middleware.AuditSummary(c, "退出 "+string(engine)+" 私有仓库 "+server)
+	if err := h.containerService.RegistryLogout(c.Request.Context(), engine, server); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "已退出登录"})
+}
+
 // ========== Container Management ==========
 
 // ListContainers returns all containers
@@ -558,8 +626,9 @@ func (h *ContainerHandler) ListVolumes(c *gin.Context) {
 // CreateVolume creates a new volume
 func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 	var req struct {
-		Name   string `json:"name" binding:"required"`
-		Driver string `json:"driver"`
+		Name   string            `json:"name" binding:"required"`
+		Driver string            `json:"driver"`
+		Labels map[string]string `json:"labels"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
@@ -567,7 +636,7 @@ func (h *ContainerHandler) CreateVolume(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "创建数据卷 "+req.Name)
-	if err := h.containerService.CreateVolume(c.Request.Context(), h.engineName(c), req.Name, req.Driver); err != nil {
+	if err := h.containerService.CreateVolume(c.Request.Context(), h.engineName(c), req.Name, req.Driver, req.Labels); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -639,6 +708,11 @@ func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Serv
 	protected.POST("/container/restart", handler.RestartEngine)
 	protected.GET("/container/info", handler.GetEngineInfo)
 	protected.POST("/container/mirror", handler.ConfigureMirror)
+	protected.GET("/container/registry", handler.GetRegistryConfig)
+	protected.POST("/container/registry", handler.SetRegistryConfig)
+	protected.GET("/container/registry/auth", handler.GetLoggedInRegistries)
+	protected.POST("/container/registry/login", handler.RegistryLogin)
+	protected.POST("/container/registry/logout", handler.RegistryLogout)
 	protected.POST("/container/socket/enable", handler.EnableSocket)
 	protected.POST("/container/socket/disable", handler.DisableSocket)
 

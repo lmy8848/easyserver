@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Container, ContainerStats, ImageCategory } from './types';
 import { formatBytes, getStatusColor, withEngine } from './types';
 
@@ -26,6 +27,8 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const [actionLoading, setActionLoading] = useState<string>('');
   const [createForm] = Form.useForm();
   const [execForm] = Form.useForm();
+  const [createLoading, runCreate] = useAsyncRun();
+  const [execLoading, runExec] = useAsyncRun();
   const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
   const loadContainers = async () => {
@@ -67,14 +70,11 @@ export default function ContainerTab({ engine }: { engine: string }) {
     }
   };
 
-  const [createLoading, setCreateLoading] = useState(false);
-
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      setCreateLoading(true);
-      const res = await api.post(withEngine('/container/instances', engine), values, { timeout: 600000 }); // 10 min: docker pull may take time
-      const resultData = res.data?.data;
+      const res = await runCreate(() => api.post(withEngine('/container/instances', engine), values, { timeout: 600000 })); // 10 min: docker pull may take time
+      const resultData = res?.data?.data;
       const createdId = resultData?.id || resultData; // Backend might return { id: ... } or string
       message.success(createdId ? `容器创建成功 (ID: ${String(createdId).substring(0, 12)})` : '容器创建成功');
       setCreateVisible(false);
@@ -84,18 +84,16 @@ export default function ContainerTab({ engine }: { engine: string }) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
       const errMsg = axiosErr.response?.data?.message || (err instanceof Error ? err.message : '创建失败');
       message.error(`创建失败: ${errMsg}`);
-    } finally {
-      setCreateLoading(false);
     }
   };
 
   const handleExec = async () => {
     try {
       const values = await execForm.validateFields();
-      const res = await api.post(withEngine(`/container/instances/${selectedContainer}/exec`, engine), values);
+      const res = await runExec(() => api.post(withEngine(`/container/instances/${selectedContainer}/exec`, engine), values));
       Modal.info({
         title: '执行结果',
-        content: <pre style={{ maxHeight: 400, overflow: 'auto' }}>{res.data?.data?.output}</pre>,
+        content: <pre style={{ maxHeight: 400, overflow: 'auto' }}>{res?.data?.data?.output}</pre>,
         width: 600,
       });
       setExecVisible(false);
@@ -269,7 +267,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
       </Modal>
 
       {/* Exec Modal */}
-      <Modal title="在容器中执行命令" open={execVisible} onOk={handleExec} onCancel={() => setExecVisible(false)} destroyOnHidden>
+      <Modal title="在容器中执行命令" open={execVisible} onOk={handleExec} onCancel={() => setExecVisible(false)} destroyOnHidden confirmLoading={execLoading}>
         <Form form={execForm} layout="vertical">
           <Form.Item name="command" label="命令" rules={[{ required: true }]}><Input placeholder="ls -la" /></Form.Item>
         </Form>

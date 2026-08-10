@@ -7,6 +7,7 @@ import {
   InfoCircleOutlined, EditOutlined,
 } from '@ant-design/icons';
 import api from '../../services/api';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { ComposeProject } from './types';
 import { withEngine } from './types';
 
@@ -18,6 +19,8 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const [configDir, setConfigDir] = useState('');
   const [logs, setLogs] = useState('');
   const [configForm] = Form.useForm();
+  const [actionLoading, setActionLoading] = useState<string>('');
+  const [saveLoading, runSaveConfig] = useAsyncRun();
 
   const loadProjects = async () => {
     try {
@@ -33,6 +36,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
   useEffect(() => { loadProjects(); }, [engine]);
 
   const handleAction = async (action: string, dir: string) => {
+    setActionLoading(`${dir}:${action}`);
     try {
       await api.post(withEngine(`/container/compose/${action}`, engine), { project_dir: dir });
       message.success(`compose ${action} 成功`);
@@ -40,6 +44,8 @@ export default function ComposeTab({ engine }: { engine: string }) {
       loadProjects();
     } catch {
       message.error(`compose ${action} 失败`);
+    } finally {
+      setActionLoading('');
     }
   };
 
@@ -68,7 +74,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const handleSaveConfig = async () => {
     try {
       const values = await configForm.validateFields();
-      await api.put(withEngine('/container/compose/config', engine), { project_dir: configDir, content: values.content });
+      await runSaveConfig(() => api.put(withEngine('/container/compose/config', engine), { project_dir: configDir, content: values.content }));
       message.success('配置已保存');
       setConfigVisible(false);
     } catch {
@@ -100,9 +106,9 @@ export default function ComposeTab({ engine }: { engine: string }) {
       key: 'action',
       render: (_: unknown, record: ComposeProject) => (
         <Space>
-          <Button size="small" icon={<PlayCircleOutlined />} onClick={() => handleAction('up', record.config_file)}>启动</Button>
-          <Button size="small" icon={<StopOutlined />} onClick={() => handleAction('down', record.config_file)}>停止</Button>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => handleAction('restart', record.config_file)}>重启</Button>
+          <Button size="small" icon={<PlayCircleOutlined />} loading={actionLoading === `${record.config_file}:up`} disabled={!!actionLoading} onClick={() => handleAction('up', record.config_file)}>启动</Button>
+          <Button size="small" icon={<StopOutlined />} loading={actionLoading === `${record.config_file}:down`} disabled={!!actionLoading} onClick={() => handleAction('down', record.config_file)}>停止</Button>
+          <Button size="small" icon={<ReloadOutlined />} loading={actionLoading === `${record.config_file}:restart`} disabled={!!actionLoading} onClick={() => handleAction('restart', record.config_file)}>重启</Button>
           <Button size="small" icon={<InfoCircleOutlined />} onClick={() => handleLogs(record.config_file)}>日志</Button>
           <Button size="small" icon={<EditOutlined />} onClick={() => handleGetConfig(record.config_file)}>配置</Button>
         </Space>
@@ -122,7 +128,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
         </pre>
       </Modal>
 
-      <Modal title="编辑 Compose 配置" open={configVisible} onOk={handleSaveConfig} onCancel={() => setConfigVisible(false)} width={800}>
+      <Modal title="编辑 Compose 配置" open={configVisible} onOk={handleSaveConfig} onCancel={() => setConfigVisible(false)} width={800} confirmLoading={saveLoading}>
         <Form form={configForm} layout="vertical">
           <Form.Item name="content" rules={[{ required: true }]}>
             <Input.TextArea rows={20} style={{ fontFamily: 'monospace' }} />

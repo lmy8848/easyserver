@@ -81,6 +81,28 @@ type DockerStatus struct {
 	SocketEnabled bool `json:"socket_enabled"`
 }
 
+// RegistryConfig is the engine's registry settings: pull mirrors and any
+// insecure (non-TLS) registries. Both engines persist these in different files
+// (Docker daemon.json, Podman registries.conf) but expose the same shape.
+type RegistryConfig struct {
+	Mirrors            []string `json:"mirrors"`
+	InsecureRegistries []string `json:"insecure_registries"`
+}
+
+// RegistryAuth holds credentials for logging into a private registry.
+type RegistryAuth struct {
+	Server   string `json:"server" binding:"required"`
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// LoggedInRegistry is a registry the engine has credentials for, with the
+// decoded username (from the base64 "username:password" auth field).
+type LoggedInRegistry struct {
+	Server   string `json:"server"`
+	Username string `json:"username"`
+}
+
 // Stats represents real-time container resource usage.
 type Stats struct {
 	CPUPercent float64 `json:"cpu_percent"`

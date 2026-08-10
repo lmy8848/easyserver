@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -40,6 +41,9 @@ type CommandOptions struct {
 	WorkDir string
 	Env     []string
 	Timeout time.Duration
+	// Stdin, when non-empty, is fed to the command's stdin (e.g. passwords via
+	// --password-stdin).
+	Stdin string
 }
 
 type OSExecutor struct{}
@@ -97,6 +101,9 @@ func (e *OSExecutor) RunCombined(ctx context.Context, name string, args ...strin
 	return result, exitCode, nil
 }
 
+// RunWithOptions runs a command with custom options (env, workdir, timeout,
+// stdin). Stdin feeds the command's stdin (e.g. --password-stdin) to keep
+// secrets out of argv/ps.
 func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (string, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -109,6 +116,9 @@ func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, na
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	applyCommandOptions(cmd, opts.WorkDir, opts.Env)
+	if opts.Stdin != "" {
+		cmd.Stdin = strings.NewReader(opts.Stdin)
+	}
 	output, err := cmd.CombinedOutput()
 	result := string(output)
 	exitCode := 0

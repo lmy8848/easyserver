@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons';
 import api from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
+import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Image, ImageCategory } from './types';
 import { withEngine } from './types';
 
@@ -14,8 +15,9 @@ export default function ImageTab({ engine }: { engine: string }) {
   const [images, setImages] = useState<Image[]>([]);
   const [loading, setLoading] = useState(true);
   const [pullVisible, setPullVisible] = useState(false);
-  const [pulling, setPulling] = useState(false);
   const [pullForm] = Form.useForm();
+  const [removing, setRemoving] = useState<string>('');
+  const [pulling, runPull] = useAsyncRun();
   const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
   const loadImages = async () => {
@@ -38,9 +40,8 @@ export default function ImageTab({ engine }: { engine: string }) {
     } catch {
       return; // 校验失败由表单自身提示，无需 loading
     }
-    setPulling(true);
     try {
-      await api.post(withEngine('/container/images/pull', engine), values);
+      await runPull(() => api.post(withEngine('/container/images/pull', engine), values));
       message.success('镜像拉取成功');
       setPullVisible(false);
       pullForm.resetFields();
@@ -48,12 +49,11 @@ export default function ImageTab({ engine }: { engine: string }) {
       loadImages();
     } catch {
       message.error('拉取失败');
-    } finally {
-      setPulling(false);
     }
   };
 
   const handleRemove = async (id: string) => {
+    setRemoving(id);
     try {
       await api.delete(withEngine(`/container/images/${id}?force=true`, engine));
       message.success('镜像已删除');
@@ -61,6 +61,8 @@ export default function ImageTab({ engine }: { engine: string }) {
       loadImages();
     } catch {
       message.error('删除失败');
+    } finally {
+      setRemoving('');
     }
   };
 
@@ -74,7 +76,7 @@ export default function ImageTab({ engine }: { engine: string }) {
       key: 'action',
       render: (_: unknown, record: Image) => (
         <Popconfirm title="确定删除此镜像？" onConfirm={() => handleRemove(record.id)} okText="删除" cancelText="取消">
-          <Button icon={<DeleteOutlined />} size="small" danger>删除</Button>
+          <Button icon={<DeleteOutlined />} size="small" danger loading={removing === record.id} disabled={!!removing}>删除</Button>
         </Popconfirm>
       ),
     },
