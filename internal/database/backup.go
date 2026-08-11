@@ -83,7 +83,7 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 		backup.ErrorMessage = err.Error()
 		log.Printf("backup failed for %s: %v", backup.DatabaseName, err)
 	} else {
-		backup.Status = "completed"
+		backup.Status = "success"
 		if info, err := os.Stat(backup.FilePath); err == nil {
 			backup.FileSize = info.Size()
 		}
@@ -168,7 +168,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 		return fmt.Errorf("backup not found: %w", err)
 	}
 
-	if backup.Status != "completed" {
+	if backup.Status != "success" {
 		return fmt.Errorf("备份不是已完成状态，无法恢复")
 	}
 
@@ -196,7 +196,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 			err = fmt.Errorf("unsupported db type: %s", dbType)
 		}
 
-		status := "completed"
+		status := "success"
 		errMsg := ""
 		if err != nil {
 			status = "failed"

@@ -865,7 +865,7 @@ func (h *BackupHandler) DownloadBackup(c *gin.Context) {
 		return
 	}
 
-	if backup.Status != "completed" {
+	if backup.Status != "success" {
 		c.Error(apperror.ErrBadRequest.WithMessage("备份未完成"))
 		return
 	}

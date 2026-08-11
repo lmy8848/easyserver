@@ -570,7 +570,7 @@ export default function DatabasePage() {
     try {
       await dbServerApi.restoreBackup(backupId);
       message.success('恢复已开始，请等待完成...');
-      // 恢复异步执行：刷新备份列表看状态（running → completed/failed）。
+      // 恢复异步执行：刷新备份列表看状态（running → success/failed）。
       setTimeout(() => {
         if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
       }, 1500);

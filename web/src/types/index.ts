@@ -242,7 +242,7 @@ export interface DBBackup {
   backup_type: string; // manual, scheduled
   file_path: string;
   file_size: number;
-  status: string; // pending, completed, failed
+  status: string; // running, success, failed
   error_message: string;
   created_at: string;
 }

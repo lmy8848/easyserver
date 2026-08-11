@@ -267,15 +267,15 @@ function TableExplorerView({
                         render: (size: number) => size ? `${(size / 1024).toFixed(1)} KB` : '-' },
                       { title: '状态', dataIndex: 'status', key: 'status', width: 100,
                         render: (status: string) => (
-                          <Tag color={status === 'completed' ? 'success' : status === 'failed' ? 'error' : 'processing'}>
-                            {status === 'completed' ? '完成' : status === 'failed' ? '失败' : '进行中'}
+                          <Tag color={status === 'success' ? 'success' : status === 'failed' ? 'error' : 'processing'}>
+                            {status === 'success' ? '成功' : status === 'failed' ? '失败' : '进行中'}
                           </Tag>
                         )},
                       { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
                       { title: '操作', key: 'action', width: 200,
                         render: (_: unknown, record: any) => (
                           <Space size="small">
-                            {record.status === 'completed' && (
+                            {record.status === 'success' && (
                               <>
                                 <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => onDownloadBackup(record.id)}>
                                   下载

@@ -92,7 +92,7 @@ type DBBackup struct {
 	BackupType   string `json:"backup_type"` // manual, scheduled
 	FilePath     string `json:"file_path"`
 	FileSize     int64  `json:"file_size"`
-	Status       string `json:"status"` // pending, completed, failed
+	Status       string `json:"status"` // running, success, failed
 	ErrorMessage string `json:"error_message"`
 	CreatedAt    string `json:"created_at"`
 }
