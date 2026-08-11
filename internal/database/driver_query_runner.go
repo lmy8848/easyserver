@@ -12,10 +12,10 @@ import (
 )
 
 // driverQueryRunner runs SQL over a direct database connection through the
-// container's mapped host port. It is the primary channel for MySQL/PostgreSQL
-// instances with a valid container_port: native result types, parameter binding
-// and connection-pool reuse. It is never used for Redis or for instances whose
-// port mapping is broken (container_port = 0).
+// container's mapped host port. It is the only SQL channel for
+// MySQL/PostgreSQL: native result types, parameter binding and connection-pool
+// reuse. Redis has no driver in scope; instances with a broken port mapping
+// (container_port = 0) surface a clear error instead of falling back.
 type driverQueryRunner struct {
 	// pools is keyed by (instance, database): PostgreSQL cannot reference
 	// tables in another database, so each database the panel operates on needs

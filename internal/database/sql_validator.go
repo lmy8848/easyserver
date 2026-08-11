@@ -291,76 +291,10 @@ func (v *SQLValidator) ValidateSQL(sql string) *ValidationResult {
 	return &ValidationResult{Valid: true, Message: "valid", SQL: sql}
 }
 
-// ParseTableInfo parses DESCRIBE output into TableInfo.
-func ParseTableInfo(dbType DBType, tableName string, describeOutput string) *TableInfo {
-	info := &TableInfo{Name: tableName, Columns: []ColumnInfo{}}
-	lines := strings.Split(strings.TrimSpace(describeOutput), "\n")
-
-	switch dbType {
-	case DBTypeMySQL:
-		for i, line := range lines {
-			if i == 0 {
-				continue
-			}
-			fields := strings.Split(line, "\t")
-			if len(fields) >= 2 {
-				col := ColumnInfo{
-					Name:       fields[0],
-					Type:       fields[1],
-					IsNullable: len(fields) < 3 || fields[2] == "YES",
-				}
-				if len(fields) >= 4 {
-					col.IsPrimaryKey = fields[3] == "PRI"
-					if col.IsPrimaryKey {
-						info.PrimaryKey = col.Name
-					}
-				}
-				if len(fields) >= 6 {
-					col.IsAutoIncr = strings.Contains(fields[5], "auto_increment")
-				}
-				if len(fields) >= 5 && fields[4] != "NULL" && fields[4] != "" {
-					col.HasDefault = true
-					col.DefaultValue = fields[4]
-				}
-				info.Columns = append(info.Columns, col)
-			}
-		}
-	case DBTypePostgreSQL:
-		for i, line := range lines {
-			if i < 2 {
-				continue
-			}
-			fields := strings.Split(line, "|")
-			if len(fields) >= 2 {
-				col := ColumnInfo{
-					Name:       strings.TrimSpace(fields[0]),
-					Type:       strings.TrimSpace(fields[1]),
-					IsNullable: len(fields) < 3 || strings.TrimSpace(fields[2]) == "YES",
-				}
-				if len(fields) >= 4 && strings.TrimSpace(fields[3]) != "" {
-					col.HasDefault = true
-					col.DefaultValue = strings.TrimSpace(fields[3])
-				}
-				if len(fields) >= 5 {
-					col.IsPrimaryKey = strings.TrimSpace(fields[4]) == "YES"
-					if col.IsPrimaryKey {
-						info.PrimaryKey = col.Name
-					}
-				}
-				if strings.Contains(col.Type, "serial") {
-					col.IsAutoIncr = true
-				}
-				info.Columns = append(info.Columns, col)
-			}
-		}
-	}
-
-	return info
-}
-
 // tableInfoFromQuery converts a structured describe query result (name, type,
 // nullable, default, pk-flag per column) into TableInfo. It is the direct-channel
-// counterpart of ParseTableInfo (which parsed psql/mysql text output).
+// equivalent of the old DESCRIBE-text parser — the driver returns the describe
+// rows structurally, so no text parsing is needed.
 func tableInfoFromQuery(dbType DBType, tableName string, res *QueryResult) *TableInfo {
 	info := &TableInfo{Name: tableName, Columns: []ColumnInfo{}}
 	// Map column name → row index so both mysql DESCRIBE and the pg

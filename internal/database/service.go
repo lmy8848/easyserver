@@ -50,16 +50,15 @@ type Service struct {
 	backupDir      string
 	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
-	queryRunner    SQLQueryRunner         // CLI fallback channel (Redis / broken mappings)
-	driver         SQLQueryRunner         // direct driver channel (MySQL/PostgreSQL with valid mapping)
+	driver         SQLQueryRunner         // direct driver channel (MySQL/PostgreSQL)
 }
 
 // NewService creates a database Service over the given Repository, driving
 // containers through the CLI Runtime seam and SQL through the direct driver
-// channel (CLI fallback for Redis / broken mappings).
+// channel.
 func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 	rt := NewCLIContainerRuntime(exec)
-	return (&Service{
+	return &Service{
 		repo:      repo,
 		runtime:   rt,
 		backupDir: DefaultBackupDir,
@@ -68,13 +67,13 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 			return NewCLIContainerRuntime(exec)
 		},
 		driver: newDriverQueryRunner(),
-	}).withCLIQueryRunner()
+	}
 }
 
 // NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
 // CLI runtime construction.
 func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
-	return (&Service{
+	return &Service{
 		repo:      repo,
 		runtime:   runtime,
 		backupDir: DefaultBackupDir,
@@ -83,23 +82,14 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 			return runtime
 		},
 		driver: newDriverQueryRunner(),
-	}).withCLIQueryRunner()
-}
-
-// withCLIQueryRunner wires the CLI fallback channel onto an existing Service.
-// Both constructors share it so the runner closure can reference s.
-func (s *Service) withCLIQueryRunner() *Service {
-	s.queryRunner = s.buildCLIQueryRunner()
-	return s
-}
-
-// runnerFor picks the SQL channel for an instance. Direct driver connection
-// needs a valid engine default port mapping; Redis has no driver in scope.
-func (s *Service) runnerFor(inst *DBInstance) SQLQueryRunner {
-	if inst != nil && (inst.DBType == DBTypeMySQL || inst.DBType == DBTypePostgreSQL) && inst.ContainerPort > 0 {
-		return s.driver
 	}
-	return s.queryRunner
+}
+
+// runnerFor returns the SQL channel for an instance. All SQL runs over the
+// direct driver connection; broken port mappings (container_port = 0) and Redis
+// surface as clear errors from the driver channel instead of falling back.
+func (s *Service) runnerFor(inst *DBInstance) SQLQueryRunner {
+	return s.driver
 }
 
 // refreshInstanceStatus queries the container runtime (by container ID) and
@@ -1362,23 +1352,15 @@ func (s *Service) CleanOldBackups(ctx context.Context, instanceID int64, dbName 
 // --- SQL query operations ---
 
 // runInVersion runs a command inside the instance's container via the CLI
-// runtime, with admin credentials injected.
+// runtime, with admin credentials injected. Used for engine-side tooling that
+// has no driver equivalent (mysqldump / pg_dump / redis-cli) and config
+// reloads — never for SQL data operations, which use the driver channel.
 func (s *Service) runInVersion(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
 	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
 	args = s.withAdminCredentials(instance, args)
 	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...)
-}
-
-// cliRunnerExec adapts (*Service).runInVersion to the cliQueryRunner exec
-// signature.
-func (s *Service) cliRunnerExec(ctx context.Context, inst *DBInstance, args ...string) (string, error) {
-	return s.runInVersion(ctx, inst, args...)
-}
-
-func (s *Service) buildCLIQueryRunner() SQLQueryRunner {
-	return &cliQueryRunner{exec: s.cliRunnerExec}
 }
 
 func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []string {

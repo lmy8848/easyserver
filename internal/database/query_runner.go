@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"strings"
-	"time"
 )
 
 // ColumnMeta describes one result column: its name plus a normalized type
@@ -32,18 +31,11 @@ type ExecResult struct {
 }
 
 // SQLQueryRunner is the seam between database logic and how SQL actually runs
-// against an instance. Two implementations:
-//
-//   - driverQueryRunner: direct database/sql connection over the mapped host
-//     port (MySQL / PostgreSQL). Structured types, parameter binding, pool reuse.
-//   - cliQueryRunner: docker/podman exec of the engine CLI + text parsing. Used
-//     for Redis (no driver in scope) and for MySQL/PostgreSQL instances whose
-//     host port mapping is broken (container_port = 0), which direct connection
-//     cannot reach.
-//
-// The Service picks per instance via runnerFor (see service.go). Callers pass
-// placeholder SQL (mysql `?`, postgres `$n`) plus args; the driver binds them,
-// the CLI runner interpolates them into the exec string.
+// against an instance. A single implementation exists today: driverQueryRunner,
+// a direct database/sql connection over the mapped host port (MySQL /
+// PostgreSQL). The Service selects it per instance via runnerFor (see
+// service.go). Callers pass placeholder SQL (mysql `?`, postgres `$n`) plus
+// args; the driver binds them.
 type SQLQueryRunner interface {
 	Query(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*QueryResult, error)
 	Exec(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*ExecResult, error)
@@ -97,20 +89,4 @@ func isNumberType(dbType DBType, rt string) bool {
 			strings.HasPrefix(rt, "numeric") || strings.HasPrefix(rt, "serial") ||
 			strings.HasPrefix(rt, "real") || strings.HasPrefix(rt, "money")
 	}
-}
-
-// classifyValue returns the render category for a driver-scanned value, used as
-// a fallback when the column type is not reported.
-func classifyValue(v any) string {
-	switch v.(type) {
-	case nil:
-		return "null"
-	case int64, int32, float64, float32, int, uint64:
-		return "number"
-	case time.Time:
-		return "time"
-	case []byte:
-		return "blob"
-	}
-	return "string"
 }
