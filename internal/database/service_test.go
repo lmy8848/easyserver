@@ -90,6 +90,7 @@ type fakeDBRuntime struct {
 	removedVol  []string
 	started     []string
 	stopped     []string
+	restarted   []string
 	exists      bool // 预检 Exists 的返回值（默认 false）
 	seedCalls   []seedCall
 }
@@ -106,7 +107,10 @@ func (f *fakeDBRuntime) Stop(_ context.Context, _, name string) error {
 	f.stopped = append(f.stopped, name)
 	return nil
 }
-func (f *fakeDBRuntime) Restart(context.Context, string, string) error { return nil }
+func (f *fakeDBRuntime) Restart(_ context.Context, _, name string) error {
+	f.restarted = append(f.restarted, name)
+	return nil
+}
 func (f *fakeDBRuntime) Remove(_ context.Context, _, name string) error {
 	f.removed = append(f.removed, name)
 	return nil
@@ -285,7 +289,8 @@ func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
 		t.Fatalf("expected running instance after install, got %+v", repo.instances)
 	}
 
-	// Uninstall with purge=true — the container, both volumes and the metadata
+	// Uninstall with purge=true — the container, the data volume (config lives in
+	// the engine's own persisted state now, no config volume) and the metadata
 	// row all go away (this is the former DestroyInstance behavior).
 	if err := svc.UninstallInstance(context.Background(), got.ID, true); err != nil {
 		t.Fatalf("uninstall(purge): %v", err)
@@ -293,8 +298,8 @@ func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
 	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerName {
 		t.Fatalf("expected container removed, got %v", rt.removed)
 	}
-	if len(rt.removedVol) != 2 || rt.removedVol[0] != got.VolumeName {
-		t.Fatalf("expected data + config volumes removed, got %v", rt.removedVol)
+	if len(rt.removedVol) != 1 || rt.removedVol[0] != got.VolumeName {
+		t.Fatalf("expected data volume removed, got %v", rt.removedVol)
 	}
 	if _, ok := repo.instances[got.ID]; ok {
 		t.Fatal("expected instance metadata deleted")
@@ -303,30 +308,20 @@ func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
 
 func TestPostgres18MovesDataDir(t *testing.T) {
 	// postgres:18+ moved PGDATA into a version subdir — the volume must mount the
-	// parent (/var/lib/postgresql) and the auto.conf override lives under the
-	// version dir. Older majors keep the classic /var/lib/postgresql/data layout.
-	// Empty dataDir skips the pgDataDir assertion (that helper is postgres-only).
+	// parent (/var/lib/postgresql). Older majors keep the classic
+	// /var/lib/postgresql/data layout.
 	cases := []struct {
-		image    string
-		dataDir  string
-		confPath string
+		image   string
+		dataDir string
 	}{
-		{"docker.io/postgres:18", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.auto.conf"},
-		{"docker.io/postgres:18-alpine", "/var/lib/postgresql", "/var/lib/postgresql/18/docker/postgresql.auto.conf"},
-		{"docker.io/postgres:17", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.auto.conf"},
-		{"docker.io/postgres:16", "/var/lib/postgresql/data", "/var/lib/postgresql/data/postgresql.auto.conf"},
-		// config paths must survive the fully-qualified image form used at runtime
-		{"docker.io/mysql:9.7", "", "/etc/mysql/conf.d/easyserver.cnf"},
-		{"docker.io/redis:8.0-alpine", "", "/usr/local/etc/redis/redis.conf"},
+		{"docker.io/postgres:18", "/var/lib/postgresql"},
+		{"docker.io/postgres:18-alpine", "/var/lib/postgresql"},
+		{"docker.io/postgres:17", "/var/lib/postgresql/data"},
+		{"docker.io/postgres:16", "/var/lib/postgresql/data"},
 	}
 	for _, c := range cases {
-		if c.dataDir != "" {
-			if got := pgDataDir(c.image); got != c.dataDir {
-				t.Errorf("%s: data dir = %q, want %q", c.image, got, c.dataDir)
-			}
-		}
-		if got := configPathForImage(c.image); got != c.confPath {
-			t.Errorf("%s: config path = %q, want %q", c.image, got, c.confPath)
+		if got := pgDataDir(c.image); got != c.dataDir {
+			t.Errorf("%s: data dir = %q, want %q", c.image, got, c.dataDir)
 		}
 	}
 }

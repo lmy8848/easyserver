@@ -278,18 +278,13 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	}
 	log.Append("容器已创建，启动服务...")
 
-	// MySQL/Redis 挂配置卷，安装时用 SeedVolumeFile 预置按结构化参数（编译默认值）
-	// 生成的配置（见 config.go）。PostgreSQL 不挂配置卷：官方 entrypoint 初始化
-	// 数据卷时自动生成 postgresql.conf，天然持久。
+	// Redis 挂配置卷并预置空 redis.conf：redis-server 启动时以该文件为配置来源，
+	// 之后配置写入走 CONFIG SET + CONFIG REWRITE（写回此文件持久化）。MySQL 与
+	// PostgreSQL 的配置由驱动持久化（SET PERSIST / ALTER SYSTEM），不挂配置卷。
 	switch dbType {
-	case DBTypeMySQL:
-		log.Append("预置 MySQL 默认配置...")
-		if err := rt.SeedVolumeFile(ctx, engineName, image, containerName+"-config", "easyserver.cnf", generateConfigFile(DBTypeMySQL, nil)); err != nil {
-			return fail("预置 MySQL 配置失败", err)
-		}
 	case DBTypeRedis:
-		log.Append("预置 Redis 默认配置...")
-		if err := rt.SeedVolumeFile(ctx, engineName, image, containerName+"-config", "redis.conf", generateConfigFile(DBTypeRedis, nil)); err != nil {
+		log.Append("预置 Redis 配置...")
+		if err := rt.SeedVolumeFile(ctx, engineName, image, containerName+"-config", "redis.conf", "# EasyServer Redis 配置（由 CONFIG REWRITE 维护）\n"); err != nil {
 			return fail("预置 Redis 配置失败", err)
 		}
 	}
@@ -604,21 +599,27 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerName, lines)
 }
 
-// GetInstanceConfig 返回实例的结构化配置：参数值（覆盖项或编译默认值）+ 编辑元数据。
-// 覆盖项存于容器配置卷（面板生成的配置文件），面板是唯一写入方；参数元数据与编译
-// 默认值定义在代码（config.go）。port 是实例级状态（DB 的 port 列），始终显示当前值。
+// GetInstanceConfig 返回实例的结构化配置：驱动读面板参数的运行时值 + 编辑元数据。
+// port 是实例级状态（DB 的 port 列，容器映射管理），始终显示当前值。配置读写都
+// 需要实例运行（驱动连接），停止的实例返回明确错误。
 func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*InstanceConfigView, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return nil, fmt.Errorf("instance not found")
 	}
-	content, err := s.runtime.ReadVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v))
+	if err := s.ensureInstanceRunning(ctx, v, "读取配置"); err != nil {
+		return nil, err
+	}
+	params := defaultParams(v.DBType) // 编译默认值基底，保证前端能渲染全部参数
+	live, err := s.readConfigValues(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	params := effectiveParams(v.DBType, parseConfigFile(v.DBType, content))
+	for k, val := range live {
+		params[k] = val // 运行时值覆盖
+	}
 	params["port"] = strconv.Itoa(v.Port)
-	view := &InstanceConfigView{FilePath: configPathForImage(v.Image)}
+	view := &InstanceConfigView{}
 	view.Sections = append(view.Sections, ConfigSectionView{
 		Name:   configSectionName(v.DBType),
 		Params: params,
@@ -628,50 +629,60 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 }
 
 // SaveInstanceConfig 保存结构化配置并立即生效：
-//  1. 读容器配置卷现有覆盖项 → 合并本次修改 → 按参数生成配置文件写回卷；
-//  2. port 参数变化 → 重建容器更新端口映射（配置卷已是新文件，启动即加载）；
-//     其余参数变化且实例运行中 → 重启容器使配置生效。面板是配置唯一写入方。
+//  1. 实例运行中（驱动持久化需要连接）——覆盖值直接写入数据库自身持久化机制
+//     （SET PERSIST / ALTER SYSTEM / CONFIG SET+REWRITE），在线生效；
+//  2. port 参数变化 → 重建容器更新端口映射（port 是容器映射，驱动改不了）；
+//  3. PG 的 postmaster 级参数 reload 不生效 → 重启容器；
+//     其余参数驱动已在线生效，不重启。
 func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, sections []ConfigSectionView) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	content, err := s.runtime.ReadVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v))
-	if err != nil {
-		return err
-	}
-	stored := parseConfigFile(v.DBType, content)
+
+	// 组装本次覆盖值：空值 = 清除覆盖（恢复默认）。port 单独处理（容器映射）。
+	params := make(map[string]string)
 	for _, section := range sections {
 		for key, value := range section.Params {
-			if strings.TrimSpace(value) == "" {
-				delete(stored, key)
-				continue
-			}
-			stored[key] = strings.TrimSpace(value)
+			params[key] = strings.TrimSpace(value)
 		}
 	}
-	if err := s.runtime.SeedVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v), generateConfigFile(v.DBType, stored)); err != nil {
-		return err
-	}
-
-	// 端口：结构化参数里的值，非法/缺失回退当前实例端口。
 	newPort := v.Port
-	if raw, ok := stored["port"]; ok {
+	if raw, ok := params["port"]; ok {
 		if p, err := strconv.Atoi(raw); err == nil && p >= 1 && p <= 65535 {
 			newPort = p
 		}
+		delete(params, "port")
+	}
+
+	if err := s.ensureInstanceRunning(ctx, v, "保存配置"); err != nil {
+		return err
+	}
+	restart, err := s.applyConfigValues(ctx, v, params)
+	if err != nil {
+		return err
 	}
 	if newPort != v.Port {
 		return s.recreateInstanceContainer(ctx, v, newPort)
 	}
-	if v.Status == "running" {
+	if restart {
 		return s.RestartInstance(ctx, instanceID)
 	}
 	return nil
 }
 
+// ensureInstanceRunning 检查实例容器在运行 —— 配置读写走驱动，连接需要端口映射
+// 可用。返回的错误含"未运行"，经 WrapError 映射为 409。
+func (s *Service) ensureInstanceRunning(ctx context.Context, v *DBInstance, action string) error {
+	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerName)
+	if err != nil || info.State != "running" {
+		return fmt.Errorf("实例未运行，无法%s（请先启动实例）", action)
+	}
+	return nil
+}
+
 // recreateInstanceContainer 用新端口重建容器（移除旧映射、按新端口 create/start），
-// 数据卷保留，配置卷在调用前已写入新内容，启动即加载。保存配置里 port 参数时调用。
+// 数据卷保留；端口是容器映射，驱动改不了，只能重建。保存配置里 port 参数时调用。
 func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, newPort int) error {
 	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
@@ -687,60 +698,6 @@ func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, 
 		return err
 	}
 	return s.repo.UpdateInstancePort(ctx, v.ID, newPort)
-}
-
-// configVolumeFor 返回配置持久化卷：MySQL/Redis 用独立配置卷，PostgreSQL 的
-// 覆盖项写在数据卷的 postgresql.auto.conf（服务器启动时自动读取，无需独立卷）。
-func configVolumeFor(v *DBInstance) string {
-	if v.DBType == DBTypePostgreSQL {
-		return v.VolumeName
-	}
-	return strings.TrimSuffix(v.VolumeName, "-data") + "-config"
-}
-
-// configFileDestPath 是配置文件相对其所在卷挂载点的路径（SeedVolumeFile 把卷挂在
-// /easyserver-init，dest 是卷内相对路径）。
-func configFileDestPath(v *DBInstance) string {
-	switch v.DBType {
-	case DBTypeMySQL:
-		return "easyserver.cnf"
-	case DBTypeRedis:
-		return "redis.conf"
-	default: // postgresql — 覆盖项写进数据卷的 postgresql.auto.conf（PG 服务器启动时在
-		// postgresql.conf 之后自动读取的标准覆盖文件），不碰镜像生成的全量配置。
-		return pgConfigDestRelative(v.Image)
-	}
-}
-
-// pgConfigDestRelative 是 postgresql.auto.conf 相对数据卷挂载点的路径：PG 18+ 的
-// PGDATA 移到版本子目录，旧版在数据卷根。
-func pgConfigDestRelative(image string) string {
-	if major := postgresMajor(image); major >= 18 {
-		return fmt.Sprintf("%d/docker/postgresql.auto.conf", major)
-	}
-	return "postgresql.auto.conf"
-}
-
-// MySQL/Redis 的默认配置由 generateConfigFile 根据结构化参数（编译默认值）生成，
-// 安装时通过 SeedVolumeFile 预置进持久配置卷，见 config.go。
-
-func configPathForImage(image string) string {
-	image = strings.ToLower(image)
-	// Images are stored fully qualified (docker.io/mysql:8.0) — match the repo
-	// basename, not the registry prefix (docker.io/… has no "mysql" prefix).
-	if i := strings.LastIndex(image, "/"); i >= 0 {
-		image = image[i+1:]
-	}
-	switch {
-	case strings.HasPrefix(image, "mysql"):
-		// 面板管理的自定义片段，位于镜像 my.cnf 自动 !includedir 的 conf.d；
-		// 安装时由 generateConfigFile 预置（镜像里无默认配置可复制）。
-		return "/etc/mysql/conf.d/easyserver.cnf"
-	case strings.HasPrefix(image, "postgres"):
-		return pgConfigPath(image)
-	default:
-		return "/usr/local/etc/redis/redis.conf"
-	}
 }
 
 // postgresMajor extracts the PostgreSQL major version from an image reference
@@ -768,15 +725,6 @@ func pgDataDir(image string) string {
 		return "/var/lib/postgresql"
 	}
 	return "/var/lib/postgresql/data"
-}
-
-// pgConfigPath is where postgresql.conf lives inside the container — under the
-// same PGDATA the image uses, which moved to a version subdir in 18+.
-func pgConfigPath(image string) string {
-	if major := postgresMajor(image); major >= 18 {
-		return fmt.Sprintf("/var/lib/postgresql/%d/docker/postgresql.auto.conf", major)
-	}
-	return "/var/lib/postgresql/data/postgresql.auto.conf"
 }
 
 // RefreshStatus refreshes instance statuses for a database type (dbType).
@@ -875,8 +823,7 @@ func containerSpec(dbType DBType, engineName, version, image, name, volume, bind
 		health = "redis-cli -a $REDIS_PASSWORD ping"
 		configVolume, configDir = name+"-config", "/usr/local/etc/redis"
 		command = []string{"redis-server", "--requirepass", password, configDir + "/redis.conf"}
-	default: // mysql — 挂配置卷，安装时从镜像预置默认配置（见 SeedVolume 注释）
-		configVolume, configDir = name+"-config", "/etc/mysql/conf.d"
+	default: // mysql — 配置由驱动持久化（SET PERSIST），不挂配置卷
 	}
 	return ContainerSpec{ContainerEngine: engineName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
 		ConfigVolume: configVolume, ConfigDir: configDir,

@@ -1,15 +1,17 @@
 package database
 
 import (
+	"context"
 	"fmt"
-	"sort"
+	"strconv"
 	"strings"
 )
 
-// 结构化配置。面板是配置参数的唯一写入方：参数元数据与编译默认值定义在下方，
-// 用户覆盖值以面板生成的配置文件形式存于容器配置卷（generateConfigFile 只写覆盖
-// 项），文件是唯一持久化，无存储漂移。默认值取自各数据库编译默认值（researched
-// 2026-08：MySQL 8.0+ / PostgreSQL 16 / Redis 7+ 官方文档）。
+// 结构化配置。面板是配置参数的唯一写入方：参数元数据与编译默认值定义在下方。
+// 配置的读写全走驱动直连（分支迁移）：读取用数据库的变量查询，持久化交给数据库
+// 自身机制 —— MySQL SET PERSIST（mysqld-auto.cnf）/ PostgreSQL ALTER SYSTEM
+// （postgresql.auto.conf）/ Redis CONFIG SET + CONFIG REWRITE（redis.conf）。
+// 不再读写容器配置卷文件。
 
 // configSectionName 是各类型结构化配置的段名：MySQL 的 [mysqld] 段（my.cnf 的
 // !includedir conf.d 合并进来），PostgreSQL/Redis 是隐式主段。
@@ -81,130 +83,188 @@ func redisConfigParams() []ParamMeta {
 	}
 }
 
-// effectiveParams 把结构化配置合并进编译默认值：无覆盖项 → 全部默认。
-func effectiveParams(dbType DBType, stored map[string]string) map[string]string {
-	params := make(map[string]string)
-	for _, meta := range configParams(dbType) {
-		params[meta.Key] = meta.Default
+// configParamKeys 返回某类型可编辑参数的 key 列表（读配置时只取这些项）。
+func configParamKeys(dbType DBType) []string {
+	metas := configParams(dbType)
+	keys := make([]string, 0, len(metas))
+	for _, m := range metas {
+		keys = append(keys, m.Key)
 	}
-	for key, value := range stored {
-		if value != "" {
-			params[key] = value
-		}
+	return keys
+}
+
+func stringSet(items []string) map[string]bool {
+	m := make(map[string]bool, len(items))
+	for _, it := range items {
+		m[it] = true
+	}
+	return m
+}
+
+// defaultParams 返回全部面板参数的编译默认值。GET 用它作基底保证返回完整，再叠加
+// 驱动读到的运行时值。
+func defaultParams(dbType DBType) map[string]string {
+	params := make(map[string]string)
+	for _, m := range configParams(dbType) {
+		params[m.Key] = m.Default
 	}
 	return params
 }
 
-// generateConfigFile 根据传入的参数生成数据库配置文件内容。只写出传入的项
-// （覆盖值；不含 key=="port"，端口由容器映射管理）——文件是面板写入的覆盖项
-// 持久化，未写出的项由服务端编译默认值兜底。
-func generateConfigFile(dbType DBType, params map[string]string) string {
-	keys := make([]string, 0, len(params))
-	for key := range params {
-		if key == "port" || params[key] == "" {
-			continue
-		}
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+// --- 驱动读写 ---
 
-	var sb strings.Builder
-	sb.WriteString("# EasyServer managed configuration — 修改后保存并重启实例生效。\n")
-	switch dbType {
+// readConfigValues 用驱动读面板参数的当前值（运行时值，数据库是权威）。port 不在
+// 其中 —— 端口由容器映射管理，见 GetInstanceConfig。
+func (s *Service) readConfigValues(ctx context.Context, v *DBInstance) (map[string]string, error) {
+	switch v.DBType {
 	case DBTypeMySQL:
-		sb.WriteString("[mysqld]\n")
-		for _, key := range keys {
-			sb.WriteString(key + " = " + params[key] + "\n")
-		}
+		return s.readMySQLConfig(ctx, v)
 	case DBTypePostgreSQL:
-		for _, key := range keys {
-			value := params[key]
-			if pgNeedsQuote(value) {
-				escaped := strings.ReplaceAll(value, "'", "''")
-				value = "'" + escaped + "'"
-			}
-			sb.WriteString(key + " = " + value + "\n")
-		}
-	default: // redis
-		for _, key := range keys {
-			if key == "save" {
-				for _, line := range strings.Split(params[key], "\n") {
-					if l := strings.TrimSpace(line); l != "" {
-						sb.WriteString("save " + l + "\n")
-					}
-				}
-				continue
-			}
-			sb.WriteString(key + " " + params[key] + "\n")
-		}
+		return s.readPostgresConfig(ctx, v)
+	default:
+		return s.readRedisConfig(ctx, v)
 	}
-	return sb.String()
 }
 
-// parseConfigFile 解析面板生成的配置文件，还原出写入的参数（覆盖项）。行内
-// 值去引号（PG）、Redis 的 save 多行合并回 \n 分隔，与 generateConfigFile 互逆。
-func parseConfigFile(dbType DBType, content string) map[string]string {
+func (s *Service) readMySQLConfig(ctx context.Context, v *DBInstance) (map[string]string, error) {
+	res, err := s.driver.Query(ctx, v, systemDBName(v.DBType), "SHOW VARIABLES")
+	if err != nil {
+		return nil, err
+	}
+	wanted := stringSet(configParamKeys(v.DBType))
 	params := make(map[string]string)
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+	for _, row := range res.Rows {
+		if len(row) >= 2 {
+			if name := str(row, 0); wanted[name] {
+				params[name] = str(row, 1)
+			}
+		}
+	}
+	return params, nil
+}
+
+func (s *Service) readPostgresConfig(ctx context.Context, v *DBInstance) (map[string]string, error) {
+	res, err := s.driver.Query(ctx, v, systemDBName(v.DBType),
+		"SELECT name, setting FROM pg_settings WHERE name = ANY($1)", configParamKeys(v.DBType))
+	if err != nil {
+		return nil, err
+	}
+	params := make(map[string]string)
+	for _, row := range res.Rows {
+		if len(row) >= 2 {
+			params[str(row, 0)] = str(row, 1)
+		}
+	}
+	return params, nil
+}
+
+func (s *Service) readRedisConfig(ctx context.Context, v *DBInstance) (map[string]string, error) {
+	raw, err := s.redisFor().ConfigGetAll(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	wanted := stringSet(configParamKeys(v.DBType))
+	params := make(map[string]string)
+	for k, val := range raw {
+		if wanted[k] {
+			params[k] = val
+		}
+	}
+	return params, nil
+}
+
+// applyConfigValues 把本次覆盖值持久化到运行中的实例。返回 restart 表示修改涉及
+// reload 不生效的参数（PG postmaster 级），调用方需重启容器；其余参数驱动已在线生效。
+// 参数名来自 configParams 白名单（安全拼入语句）；空值 = 恢复默认/清除覆盖。
+func (s *Service) applyConfigValues(ctx context.Context, v *DBInstance, params map[string]string) (restart bool, err error) {
+	switch v.DBType {
+	case DBTypeMySQL:
+		return false, s.applyMySQLConfig(ctx, v, params)
+	case DBTypePostgreSQL:
+		return s.applyPostgresConfig(ctx, v, params)
+	default:
+		return false, s.applyRedisConfig(ctx, v, params)
+	}
+}
+
+func (s *Service) applyMySQLConfig(ctx context.Context, v *DBInstance, params map[string]string) error {
+	// SET PERSIST 是 MySQL 8.0+ 语法；先查版本给明确错误而非底层语法报错。
+	res, err := s.driver.Query(ctx, v, systemDBName(v.DBType), "SELECT VERSION()")
+	if err != nil {
+		return err
+	}
+	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
+		return fmt.Errorf("无法获取 MySQL 版本")
+	}
+	major, _ := strconv.Atoi(strings.Split(str(res.Rows[0], 0), ".")[0])
+	if major < 8 {
+		return fmt.Errorf("MySQL 8.0+ 才支持在线持久化配置（SET PERSIST）")
+	}
+
+	builder := NewSQLBuilder(DBTypeMySQL)
+	sys := systemDBName(v.DBType)
+	for key, value := range params {
+		if value == "" {
+			if _, err := s.driver.Exec(ctx, v, sys, "RESET PERSIST "+builder.QuoteIdentifier(key)); err != nil {
+				return fmt.Errorf("重置参数 %s: %w", key, err)
+			}
 			continue
 		}
-		switch dbType {
-		case DBTypeMySQL, DBTypePostgreSQL:
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			if len(value) >= 2 && (value[0] == '\'' && value[len(value)-1] == '\'') {
-				value = value[1 : len(value)-1]
-			}
-			if value != "" {
-				params[key] = value
-			}
-		default: // redis
-			idx := strings.Index(line, " ")
-			if idx == -1 {
-				continue
-			}
-			key := line[:idx]
-			value := strings.TrimSpace(line[idx+1:])
-			if key == "save" {
-				if existing, ok := params["save"]; ok {
-					params["save"] = existing + "\n" + value
-				} else {
-					params["save"] = value
-				}
-				continue
-			}
-			if value != "" {
-				params[key] = value
-			}
+		if _, err := s.driver.Exec(ctx, v, sys, "SET PERSIST "+builder.QuoteIdentifier(key)+" = '"+builder.EscapeString(value)+"'"); err != nil {
+			return fmt.Errorf("设置参数 %s: %w", key, err)
 		}
 	}
-	return params
+	return nil
 }
 
-// pgNeedsQuote 判断 postgresql.conf 中该值是否需加单引号（数字与 on/off 等
-// 关键字不加，其余字符串加）。
-func pgNeedsQuote(value string) bool {
-	if _, err := fmt.Sscanf(value, "%d", new(int)); err == nil {
-		return false
-	}
-	switch strings.ToLower(value) {
-	case "on", "off", "true", "false", "yes", "no":
-		return false
-	}
-	if len(value) > 0 {
-		lastChar := value[len(value)-1]
-		if lastChar >= 'A' && lastChar <= 'Z' || lastChar >= 'a' && lastChar <= 'z' {
-			numPart := value[:len(value)-1]
-			if _, err := fmt.Sscanf(numPart, "%f", new(float64)); err == nil {
-				return false
+func (s *Service) applyPostgresConfig(ctx context.Context, v *DBInstance, params map[string]string) (bool, error) {
+	builder := NewSQLBuilder(DBTypePostgreSQL)
+	sys := systemDBName(v.DBType)
+	for key, value := range params {
+		if value == "" {
+			if _, err := s.driver.Exec(ctx, v, sys, "ALTER SYSTEM RESET "+builder.QuoteIdentifier(key)); err != nil {
+				return false, fmt.Errorf("重置参数 %s: %w", key, err)
 			}
+			continue
+		}
+		if _, err := s.driver.Exec(ctx, v, sys, "ALTER SYSTEM SET "+builder.QuoteIdentifier(key)+" = '"+strings.ReplaceAll(value, "'", "''")+"'"); err != nil {
+			return false, fmt.Errorf("设置参数 %s: %w", key, err)
 		}
 	}
-	return true
+	if _, err := s.driver.Exec(ctx, v, sys, "SELECT pg_reload_conf()"); err != nil {
+		return false, fmt.Errorf("重载配置: %w", err)
+	}
+
+	// postmaster 级参数 reload 不生效，需要重启容器 —— 从 pg_settings 判断本次
+	// 修改涉及哪些参数级别。
+	names := make([]string, 0, len(params))
+	for key := range params {
+		names = append(names, key)
+	}
+	res, err := s.driver.Query(ctx, v, sys, "SELECT name FROM pg_settings WHERE name = ANY($1) AND context = 'postmaster'", names)
+	if err != nil {
+		return false, err
+	}
+	return len(res.Rows) > 0, nil
+}
+
+func (s *Service) applyRedisConfig(ctx context.Context, v *DBInstance, params map[string]string) error {
+	defaults := make(map[string]string)
+	for _, m := range configParams(DBTypeRedis) {
+		defaults[m.Key] = m.Default
+	}
+	for key, value := range params {
+		if value == "" {
+			value = defaults[key] // Redis 无"删除覆盖"，恢复默认即回到编译默认值
+		}
+		if err := s.redisFor().ConfigSet(ctx, v, key, value); err != nil {
+			return fmt.Errorf("设置参数 %s: %w", key, err)
+		}
+	}
+	if len(params) > 0 {
+		if err := s.redisFor().ConfigRewrite(ctx, v); err != nil {
+			return fmt.Errorf("写回配置文件: %w", err)
+		}
+	}
+	return nil
 }

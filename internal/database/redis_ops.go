@@ -224,6 +224,35 @@ func (r *redisRunner) BgSave(ctx context.Context, inst *DBInstance) error {
 	return c.BgSave(ctx).Err()
 }
 
+// ConfigGetAll reads every runtime config parameter (CONFIG GET *). Used by the
+// structured-config GET to filter the panel-managed params.
+func (r *redisRunner) ConfigGetAll(ctx context.Context, inst *DBInstance) (map[string]string, error) {
+	c, err := r.clientFor(ctx, inst, 0)
+	if err != nil {
+		return nil, err
+	}
+	return c.ConfigGet(ctx, "*").Result()
+}
+
+// ConfigSet applies one config parameter online (CONFIG SET).
+func (r *redisRunner) ConfigSet(ctx context.Context, inst *DBInstance, name, value string) error {
+	c, err := r.clientFor(ctx, inst, 0)
+	if err != nil {
+		return err
+	}
+	return c.ConfigSet(ctx, name, value).Err()
+}
+
+// ConfigRewrite persists the running config back to the config file
+// (CONFIG REWRITE — the panel-seeded redis.conf on the config volume).
+func (r *redisRunner) ConfigRewrite(ctx context.Context, inst *DBInstance) error {
+	c, err := r.clientFor(ctx, inst, 0)
+	if err != nil {
+		return err
+	}
+	return c.ConfigRewrite(ctx).Err()
+}
+
 // --- Redis key browser operations ---
 //
 // Redis has no SQL: the "数据库" tab renders a key browser instead. All ops go

@@ -508,14 +508,13 @@ export interface ParamMeta {
 }
 
 // Structured config of one database instance (GET /db/instances/:iid/config):
-// current param values (override or compiled default) plus editing metadata.
-// The config file is generated from these params — no raw file content is exposed.
+// current param values (runtime or compiled default) plus editing metadata.
+// Config is read/written over the direct driver channel — no config file exposed.
 export interface InstanceConfigSection extends ConfigSection {
   meta: ParamMeta[];
 }
 
 export interface InstanceConfigView {
-  file_path: string;
   sections: InstanceConfigSection[];
 }
 

@@ -212,8 +212,8 @@ type ConfigSectionView struct {
 }
 
 // InstanceConfigView is the structured config of one instance (GET /config).
+// Config is read/written over the direct driver channel — no config file path.
 type InstanceConfigView struct {
-	FilePath string              `json:"file_path"`
 	Sections []ConfigSectionView `json:"sections"`
 }
 
