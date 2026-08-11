@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/infra"
+	"easyserver/internal/infra/task"
 )
 
 const (
@@ -45,7 +45,7 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 		DatabaseName: dbName,
 		BackupType:   "manual",
 		FilePath:     filePath,
-		Status:       "pending",
+		Status:       "running",
 	}
 
 	id, err := s.repo.CreateBackup(ctx, backup)
@@ -54,16 +54,20 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	}
 	backup.ID = id
 
-	backupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	infra.Go(func() {
-		defer cancel()
-		s.executeBackup(backupCtx, backup, dbType)
-	})
-
+	// 备份在内存任务里执行（taskMgr 去重 + 并发 + panic 恢复，无超时——大库慢
+	// 盘不受时限）。DB 行状态是内存任务的镜像：任务结束写终态，进程崩溃则靠
+	// 启动清扫把 running 标 failed。
+	key := fmt.Sprintf("backup-%d", id)
+	if _, err := s.taskMgr.Start(key, task.Options{}, func(ctx context.Context) error {
+		return s.executeBackup(ctx, backup, dbType)
+	}); err != nil {
+		_ = s.repo.UpdateBackupStatus(ctx, id, "failed", 0, err.Error())
+		return nil, err
+	}
 	return backup, nil
 }
 
-func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DBType) {
+func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DBType) error {
 	var err error
 
 	switch dbType {
@@ -89,6 +93,22 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 	if err := s.repo.UpdateBackupStatus(ctx, backup.ID, backup.Status, backup.FileSize, backup.ErrorMessage); err != nil {
 		log.Printf("failed to update backup record %d: %v", backup.ID, err)
 	}
+
+	// 保留策略：同库超过上限时删最旧的 completed 备份（保留最近 MaxBackupsPerDB 份）。
+	// 运行中的备份不参与清理（task 可能仍在写该行）。
+	if err == nil {
+		backups, lerr := s.repo.ListBackups(ctx, backup.DBInstanceID, backup.DatabaseName)
+		if lerr == nil && len(backups) > MaxBackupsPerDB {
+			for _, b := range backups[MaxBackupsPerDB:] {
+				if b.Status != "completed" {
+					continue
+				}
+				_ = os.Remove(b.FilePath)
+				_ = s.repo.DeleteBackup(ctx, b.ID)
+			}
+		}
+	}
+	return err
 }
 
 func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
@@ -144,6 +164,11 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 		return fmt.Errorf("backup not found: %w", err)
 	}
 
+	// 运行中的备份/恢复不能删：task 可能正在写该行或读该文件。
+	if backup.Status == "running" {
+		return fmt.Errorf("备份/恢复进行中，请等待完成后再删除")
+	}
+
 	if err := os.Remove(backup.FilePath); err != nil && !os.IsNotExist(err) {
 		log.Printf("failed to delete backup file %s: %v", backup.FilePath, err)
 	}
@@ -151,6 +176,8 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 	return s.repo.DeleteBackup(ctx, id)
 }
 
+// RestoreBackup 在内存任务里异步恢复：DB 行置 running，恢复成功/失败后写回终态。
+// 无超时（大库慢盘不受时限）；进程崩溃后该行由启动清扫标 failed。
 func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
@@ -158,23 +185,42 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 	}
 
 	if backup.Status != "completed" {
-		return fmt.Errorf("backup is not in completed status")
+		return fmt.Errorf("备份不是已完成状态，无法恢复")
 	}
 
 	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
-		return fmt.Errorf("backup file not found")
+		return fmt.Errorf("备份文件不存在")
 	}
 
-	switch dbType {
-	case DBTypeMySQL:
-		return s.restoreMySQL(ctx, backup)
-	case DBTypePostgreSQL:
-		return s.restorePostgreSQL(ctx, backup)
-	case DBTypeRedis:
-		return s.restoreRedis(ctx, backup)
-	default:
-		return fmt.Errorf("unsupported db type: %s", dbType)
+	key := fmt.Sprintf("restore-%d", id)
+	if _, err := s.taskMgr.Start(key, task.Options{}, func(ctx context.Context) error {
+		var err error
+		switch dbType {
+		case DBTypeMySQL:
+			err = s.restoreMySQL(ctx, backup)
+		case DBTypePostgreSQL:
+			err = s.restorePostgreSQL(ctx, backup)
+		case DBTypeRedis:
+			err = s.restoreRedis(ctx, backup)
+		default:
+			err = fmt.Errorf("unsupported db type: %s", dbType)
+		}
+
+		status := "completed"
+		errMsg := ""
+		if err != nil {
+			status = "failed"
+			errMsg = err.Error()
+			log.Printf("restore failed for backup %d: %v", backup.ID, err)
+		}
+		if uerr := s.repo.UpdateBackupStatus(context.Background(), backup.ID, status, backup.FileSize, errMsg); uerr != nil {
+			log.Printf("failed to update backup record %d: %v", backup.ID, uerr)
+		}
+		return err
+	}); err != nil {
+		return fmt.Errorf("启动恢复任务失败: %w", err)
 	}
+	return nil
 }
 
 func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
@@ -224,24 +270,21 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	return nil
 }
 
-func (s *Service) CleanOldBackups(ctx context.Context, instanceID int64, dbName string, maxBackups int) error {
-	if maxBackups <= 0 {
-		maxBackups = MaxBackupsPerDB
-	}
-
-	backups, err := s.repo.ListBackups(ctx, instanceID, dbName)
+// SweepOrphanBackups 把 DB 里卡在 running 的备份行收敛为 failed —— 这些行的内存
+// 任务已随进程崩溃丢失（task manager 无持久态），不收敛会永远显示"进行中"。
+// 启动时调用一次。
+func (s *Service) SweepOrphanBackups(ctx context.Context) {
+	rows, err := s.repo.ListAllBackups(ctx)
 	if err != nil {
-		return err
+		log.Printf("sweep orphan backups: %v", err)
+		return
 	}
-
-	if len(backups) > maxBackups {
-		for _, b := range backups[maxBackups:] {
-			os.Remove(b.FilePath)
-			s.repo.DeleteBackup(ctx, b.ID)
+	for _, b := range rows {
+		if b.Status == "running" {
+			_ = s.repo.UpdateBackupStatus(ctx, b.ID, "failed", 0, "服务重启中断")
+			log.Printf("swept orphan backup %d (running → failed)", b.ID)
 		}
 	}
-
-	return nil
 }
 
 // runInVersion runs a command inside the instance's container via the CLI

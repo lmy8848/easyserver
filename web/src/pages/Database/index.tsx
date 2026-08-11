@@ -569,8 +569,11 @@ export default function DatabasePage() {
     setBusy(`restore-${backupId}`);
     try {
       await dbServerApi.restoreBackup(backupId);
-      message.success('恢复成功');
-      if (selectedDatabase) fetchTables(version.id, selectedDatabase.name);
+      message.success('恢复已开始，请等待完成...');
+      // 恢复异步执行：刷新备份列表看状态（running → completed/failed）。
+      setTimeout(() => {
+        if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
+      }, 1500);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
     finally { setBusy(''); }
   };

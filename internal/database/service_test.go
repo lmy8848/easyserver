@@ -215,6 +215,9 @@ func (r *fakeRepo) UpdateBackupStatus(context.Context, int64, string, int64, str
 func (r *fakeRepo) ListBackups(context.Context, int64, string) ([]DBBackup, error) {
 	return nil, nil
 }
+func (r *fakeRepo) ListAllBackups(context.Context) ([]DBBackup, error) {
+	return nil, nil
+}
 func (r *fakeRepo) GetBackup(context.Context, int64) (*DBBackup, error) { return nil, nil }
 func (r *fakeRepo) DeleteBackup(context.Context, int64) error           { return nil }
 

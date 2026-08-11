@@ -153,6 +153,32 @@ func (r *sqliteRepo) ListBackups(ctx context.Context, instanceID int64, database
 	return backups, nil
 }
 
+func (r *sqliteRepo) ListAllBackups(ctx context.Context) ([]DBBackup, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT b.id, v.db_type, b.instance_id, b.database_name, b.backup_type, b.file_path, b.file_size, b.status, b.error_message, b.created_at
+		FROM instance_backups b JOIN database_instances v ON b.instance_id = v.id
+		ORDER BY b.created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var backups []DBBackup
+	for rows.Next() {
+		var b DBBackup
+		if err := rows.Scan(&b.ID, &b.DBType, &b.DBInstanceID, &b.DatabaseName,
+			&b.BackupType, &b.FilePath, &b.FileSize, &b.Status, &b.ErrorMessage, &b.CreatedAt); err != nil {
+			log.Printf("scan backup row: %v", err)
+			continue
+		}
+		backups = append(backups, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate backups: %w", err)
+	}
+	return backups, nil
+}
+
 func (r *sqliteRepo) GetBackup(ctx context.Context, id int64) (*DBBackup, error) {
 	b := &DBBackup{}
 	err := r.db.QueryRowContext(ctx,

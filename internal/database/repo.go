@@ -24,6 +24,7 @@ type Repository interface {
 	CreateBackup(ctx context.Context, backup *DBBackup) (int64, error)
 	UpdateBackupStatus(ctx context.Context, id int64, status string, fileSize int64, errorMessage string) error
 	ListBackups(ctx context.Context, instanceID int64, databaseName string) ([]DBBackup, error)
+	ListAllBackups(ctx context.Context) ([]DBBackup, error)
 	GetBackup(ctx context.Context, id int64) (*DBBackup, error)
 	DeleteBackup(ctx context.Context, id int64) error
 }

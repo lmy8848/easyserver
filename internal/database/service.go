@@ -40,7 +40,7 @@ type Service struct {
 // channel.
 func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 	rt := NewCLIContainerRuntime(exec)
-	return &Service{
+	s := &Service{
 		repo:      repo,
 		runtime:   rt,
 		backupDir: DefaultBackupDir,
@@ -51,12 +51,14 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 		driver:   newDriverSQLRunner(),
 		redisOps: newRedisRunner(),
 	}
+	s.SweepOrphanBackups(context.Background())
+	return s
 }
 
 // NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
 // CLI runtime construction.
 func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
-	return &Service{
+	s := &Service{
 		repo:      repo,
 		runtime:   runtime,
 		backupDir: DefaultBackupDir,
@@ -67,6 +69,8 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 		driver:   newDriverSQLRunner(),
 		redisOps: newRedisRunner(),
 	}
+	s.SweepOrphanBackups(context.Background())
+	return s
 }
 
 // runnerFor returns the SQL channel for an instance. All SQL runs over the

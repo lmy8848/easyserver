@@ -906,7 +906,7 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		return
 	}
 
-	httpx.Success(c, gin.H{"message": "数据库恢复成功"})
+	httpx.Success(c, gin.H{"message": "恢复已开始，请稍候查看备份状态"})
 }
 
 func (h *BackupHandler) DeleteBackup(c *gin.Context) {
