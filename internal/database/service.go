@@ -625,10 +625,11 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 }
 
 // SaveInstanceConfig 保存结构化配置并立即生效：
-//  1. 实例运行中（驱动持久化需要连接）——覆盖值直接写入数据库自身持久化机制
+//  1. 只应用传入的非空覆盖值（空值 = 无操作，前端已过滤，后端兜底跳过）；
+//  2. 实例运行中（驱动持久化需要连接）——覆盖值直接写入数据库自身持久化机制
 //     （SET PERSIST / ALTER SYSTEM / CONFIG SET+REWRITE），在线生效；
-//  2. port 参数变化 → 重建容器更新端口映射（port 是容器映射，驱动改不了）；
-//  3. PG 的 postmaster 级参数 reload 不生效 → 重启容器；
+//  3. port 参数变化 → 重建容器更新端口映射（port 是容器映射，驱动改不了）；
+//  4. PG 的 postmaster 级参数 reload 不生效 → 重启容器；
 //     其余参数驱动已在线生效，不重启。
 func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, sections []ConfigSectionView) error {
 	v, err := s.GetInstance(ctx, instanceID)
@@ -636,11 +637,13 @@ func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, sect
 		return fmt.Errorf("instance not found")
 	}
 
-	// 组装本次覆盖值：空值 = 清除覆盖（恢复默认）。port 单独处理（容器映射）。
+	// 组装本次覆盖值，空值跳过（不清覆盖、不重置 —— 保存只应用改过的字段）。
 	params := make(map[string]string)
 	for _, section := range sections {
 		for key, value := range section.Params {
-			params[key] = strings.TrimSpace(value)
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				params[key] = trimmed
+			}
 		}
 	}
 	newPort := v.Port

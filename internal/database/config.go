@@ -166,8 +166,7 @@ func (s *Service) readRedisConfig(ctx context.Context, v *DBInstance) (map[strin
 
 // applyConfigValues 把本次覆盖值持久化到运行中的实例。返回 restart 表示修改涉及
 // reload 不生效的参数（PG postmaster 级），调用方需重启容器；其余参数驱动已在线生效。
-// 参数名来自 configParams 白名单（安全拼入语句）；空值 = 清除覆盖（MySQL RESET
-// PERSIST / PG ALTER SYSTEM RESET / Redis 跳过 —— Redis 无"删除覆盖"）。
+// 参数名来自 configParams 白名单（安全拼入语句）；空值已被上层过滤，不会到这里。
 func (s *Service) applyConfigValues(ctx context.Context, v *DBInstance, params map[string]string) (restart bool, err error) {
 	switch v.DBType {
 	case DBTypeMySQL:
@@ -196,12 +195,6 @@ func (s *Service) applyMySQLConfig(ctx context.Context, v *DBInstance, params ma
 	builder := NewSQLBuilder(DBTypeMySQL)
 	sys := systemDBName(v.DBType)
 	for key, value := range params {
-		if value == "" {
-			if _, err := s.driver.Exec(ctx, v, sys, "RESET PERSIST "+builder.QuoteIdentifier(key)); err != nil {
-				return fmt.Errorf("重置参数 %s: %w", key, err)
-			}
-			continue
-		}
 		if _, err := s.driver.Exec(ctx, v, sys, "SET PERSIST "+builder.QuoteIdentifier(key)+" = '"+builder.EscapeString(value)+"'"); err != nil {
 			return fmt.Errorf("设置参数 %s: %w", key, err)
 		}
@@ -213,12 +206,6 @@ func (s *Service) applyPostgresConfig(ctx context.Context, v *DBInstance, params
 	builder := NewSQLBuilder(DBTypePostgreSQL)
 	sys := systemDBName(v.DBType)
 	for key, value := range params {
-		if value == "" {
-			if _, err := s.driver.Exec(ctx, v, sys, "ALTER SYSTEM RESET "+builder.QuoteIdentifier(key)); err != nil {
-				return false, fmt.Errorf("重置参数 %s: %w", key, err)
-			}
-			continue
-		}
 		if _, err := s.driver.Exec(ctx, v, sys, "ALTER SYSTEM SET "+builder.QuoteIdentifier(key)+" = '"+strings.ReplaceAll(value, "'", "''")+"'"); err != nil {
 			return false, fmt.Errorf("设置参数 %s: %w", key, err)
 		}
@@ -241,17 +228,12 @@ func (s *Service) applyPostgresConfig(ctx context.Context, v *DBInstance, params
 }
 
 func (s *Service) applyRedisConfig(ctx context.Context, v *DBInstance, params map[string]string) error {
-	set := 0
 	for key, value := range params {
-		if value == "" {
-			continue // Redis 无"删除覆盖"，空值不改
-		}
 		if err := s.redisFor().ConfigSet(ctx, v, key, value); err != nil {
 			return fmt.Errorf("设置参数 %s: %w", key, err)
 		}
-		set++
 	}
-	if set > 0 {
+	if len(params) > 0 {
 		if err := s.redisFor().ConfigRewrite(ctx, v); err != nil {
 			return fmt.Errorf("写回配置文件: %w", err)
 		}

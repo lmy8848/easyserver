@@ -140,15 +140,15 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 		t.Fatalf("non-port save must not recreate the container, got %v", rt.removed)
 	}
 
-	// 清空覆盖（value=""）→ RESET PERSIST。
+	// 空值不提交（前端已过滤）→ 后端兜底也不设置：空值参数不在 Exec 里出现。
 	f.execs = nil
 	if err := svc.SaveInstanceConfig(ctx, id, []ConfigSectionView{
-		{Name: "mysqld", Params: map[string]string{"max_connections": ""}},
+		{Name: "mysqld", Params: map[string]string{"max_connections": "500", "wait_timeout": ""}},
 	}); err != nil {
-		t.Fatalf("reset: %v", err)
+		t.Fatalf("save with empty value: %v", err)
 	}
-	if len(f.execs) != 1 || f.execs[0] != "RESET PERSIST `max_connections`" {
-		t.Fatalf("expected RESET PERSIST, got %v", f.execs)
+	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = '500'" {
+		t.Fatalf("empty value must be skipped, got %v", f.execs)
 	}
 
 	// 保存生效后 SHOW VARIABLES 反映新值 → GET 返回运行时值。

@@ -483,8 +483,14 @@ export default function DatabasePage() {
     if (!dbConfig?.config?.sections || !selectedVersion) return;
     setBusy('save-config');
     try {
-      // 只提交 name + params；meta 是编辑元数据，服务端不落库。
-      const sections = dbConfig.config.sections.map((s: any) => ({ name: s.name, params: s.params }));
+      // 只提交 name + params（meta 是编辑元数据，服务端不落库）；空值不提交
+      // —— 保存只应用改过的字段，清空输入框等于不改。
+      const sections = dbConfig.config.sections.map((s: any) => ({
+        name: s.name,
+        params: Object.fromEntries(
+          Object.entries(s.params || {}).filter(([, v]) => String(v ?? '').trim() !== '')
+        ),
+      }));
       await dbServerApi.saveInstanceConfig(selectedVersion.id, sections);
       message.success('配置已保存');
       fetchDBConfig();
