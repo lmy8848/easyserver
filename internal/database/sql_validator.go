@@ -2,7 +2,6 @@ package database
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -32,70 +31,9 @@ func (v *SQLValidator) ValidateIdentifier(name string) *ValidationResult {
 	return &ValidationResult{Valid: true}
 }
 
-// ValidateDatabaseName validates a database name.
-func (v *SQLValidator) ValidateDatabaseName(name string) *ValidationResult {
-	return v.ValidateIdentifier(name)
-}
-
 // ValidateTableName validates a table name.
 func (v *SQLValidator) ValidateTableName(name string) *ValidationResult {
 	return v.ValidateIdentifier(name)
-}
-
-// ValidateUsername validates a username.
-func (v *SQLValidator) ValidateUsername(name string) *ValidationResult {
-	if len(name) == 0 {
-		return &ValidationResult{Valid: false, Message: "username cannot be empty"}
-	}
-	if len(name) > 32 {
-		return &ValidationResult{Valid: false, Message: "username too long (max 32 chars)"}
-	}
-	return v.ValidateIdentifier(name)
-}
-
-// ValidateHost validates a host.
-func (v *SQLValidator) ValidateHost(host string) *ValidationResult {
-	if host == "" {
-		return &ValidationResult{Valid: false, Message: "host cannot be empty"}
-	}
-	if host == "%" || host == "localhost" {
-		return &ValidationResult{Valid: true}
-	}
-	for _, c := range host {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == ':') {
-			return &ValidationResult{Valid: false, Message: fmt.Sprintf("invalid character '%c' in host", c)}
-		}
-	}
-	return &ValidationResult{Valid: true}
-}
-
-// ValidateCharset validates a charset.
-func (v *SQLValidator) ValidateCharset(charset string) *ValidationResult {
-	validCharsets := map[string]bool{
-		"utf8mb4": true, "utf8": true, "latin1": true,
-		"ascii": true, "gbk": true, "big5": true,
-	}
-	if charset == "" {
-		return &ValidationResult{Valid: true, Message: "will use default charset"}
-	}
-	if !validCharsets[charset] {
-		return &ValidationResult{Valid: false, Message: fmt.Sprintf("unsupported charset: %s", charset)}
-	}
-	return &ValidationResult{Valid: true}
-}
-
-// ValidatePrivilege validates a privilege string.
-func (v *SQLValidator) ValidatePrivilege(priv string) *ValidationResult {
-	validPrivileges := map[string]bool{
-		"ALL PRIVILEGES": true, "SELECT": true, "INSERT": true,
-		"UPDATE": true, "DELETE": true, "CREATE": true, "DROP": true,
-		"INDEX": true, "ALTER": true, "EXECUTE": true,
-	}
-	priv = strings.TrimSpace(priv)
-	if !validPrivileges[priv] {
-		return &ValidationResult{Valid: false, Message: fmt.Sprintf("invalid privilege: %s", priv)}
-	}
-	return &ValidationResult{Valid: true}
 }
 
 // ValidateInsert validates an INSERT operation.
@@ -172,23 +110,6 @@ func stripLeadingComments(sql string) string {
 		}
 	}
 	return sql
-}
-
-func getFirstKeyword(sql string) string {
-	cleaned := stripLeadingComments(sql)
-	if cleaned == "" {
-		return ""
-	}
-	upper := strings.ToUpper(cleaned)
-
-	words := strings.Fields(upper)
-	if len(words) == 0 {
-		return ""
-	}
-	if len(words) > 3 {
-		words = words[:3]
-	}
-	return strings.Join(words, " ")
 }
 
 func validateSingleStatement(sql string) *ValidationResult {
@@ -373,5 +294,3 @@ func isTruthy(row []any, i int) bool {
 	}
 	return true
 }
-
-var autoIncrRegexp = regexp.MustCompile(`(?i)auto_increment`)

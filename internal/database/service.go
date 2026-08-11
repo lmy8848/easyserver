@@ -36,12 +36,6 @@ var validCharsets = map[string]bool{
 	"ascii": true, "gbk": true, "big5": true,
 }
 
-var validPrivileges = map[string]bool{
-	"ALL PRIVILEGES": true, "SELECT": true, "INSERT": true,
-	"UPDATE": true, "DELETE": true, "CREATE": true, "DROP": true,
-	"INDEX": true, "ALTER": true, "EXECUTE": true,
-}
-
 // Service manages the whole database domain: container-backed instances
 // (lifecycle) and the logical databases, users, backups and SQL inside them.
 type Service struct {
@@ -866,23 +860,14 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 	}
 
 	// DDL statements cannot be parameter-bound; names/hosts are already
-	// validated and passwords escaped. The system database hosts instance-level
-	// statements — including CREATE DATABASE itself, which must not run on the
-	// target database.
+	// validated and passwords escaped by the builder. The system database hosts
+	// instance-level statements — including CREATE DATABASE itself, which must
+	// not run on the target database.
+	builder := NewSQLBuilder(instance.DBType)
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
-	case DBTypeMySQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;",
-			strings.ReplaceAll(req.Name, "`", "``"), charset)); err != nil {
-			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		encoding := "UTF8"
-		if charset == "latin1" {
-			encoding = "LATIN1"
-		}
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB,
-			fmt.Sprintf("CREATE DATABASE %s ENCODING '%s';", req.Name, encoding)); err != nil {
+	case DBTypeMySQL, DBTypePostgreSQL:
+		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, builder.BuildCreateDatabase(req.Name, charset)); err != nil {
 			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
@@ -910,16 +895,11 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 		return fmt.Errorf("invalid database name")
 	}
 
+	builder := NewSQLBuilder(instance.DBType)
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
-	case DBTypeMySQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, fmt.Sprintf("DROP DATABASE `%s`;",
-			strings.ReplaceAll(dbName, "`", "``"))); err != nil {
-			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB,
-			fmt.Sprintf("DROP DATABASE %s;", dbName)); err != nil {
+	case DBTypeMySQL, DBTypePostgreSQL:
+		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, builder.BuildDropDatabase(dbName)); err != nil {
 			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
@@ -1015,16 +995,12 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 		return nil, fmt.Errorf("invalid host")
 	}
 
+	builder := NewSQLBuilder(instance.DBType)
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
-	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s';", req.Username, host, escapeMySQLString(req.Password))
+	case DBTypeMySQL, DBTypePostgreSQL:
+		sqlStr := builder.BuildCreateUser(req.Username, req.Password, host)
 		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
-			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB,
-			fmt.Sprintf("CREATE USER \"%s\" WITH PASSWORD '%s';", req.Username, escapePGString(req.Password))); err != nil {
 			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
@@ -1056,16 +1032,12 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 		return fmt.Errorf("invalid host")
 	}
 
+	builder := NewSQLBuilder(instance.DBType)
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
-	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("DROP USER '%s'@'%s';", username, host)
+	case DBTypeMySQL, DBTypePostgreSQL:
+		sqlStr := builder.BuildDropUser(username, host)
 		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
-			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB,
-			fmt.Sprintf("DROP USER \"%s\";", username)); err != nil {
 			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
@@ -1094,23 +1066,18 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 		return fmt.Errorf("invalid database name")
 	}
 
-	for _, priv := range strings.Split(req.Privileges, ",") {
-		priv = strings.TrimSpace(priv)
-		if priv != "" && !isValidPrivilege(priv) {
-			return fmt.Errorf("invalid privilege: %s", priv)
-		}
+	// ValidatePrivileges is the per-engine whitelist (MySQL and PG differ, e.g.
+	// INDEX exists only for MySQL); BuildGrant re-validates on generation.
+	validated := ValidatePrivileges(instance.DBType, req.Privileges)
+	if validated == "" {
+		return fmt.Errorf("invalid privileges: %s", req.Privileges)
 	}
 
+	builder := NewSQLBuilder(instance.DBType)
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
-	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			req.Privileges, strings.ReplaceAll(req.Database, "`", "``"), username, host)
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
-			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		sqlStr := fmt.Sprintf("GRANT %s ON DATABASE \"%s\" TO \"%s\";", req.Privileges, req.Database, username)
+	case DBTypeMySQL, DBTypePostgreSQL:
+		sqlStr := builder.BuildGrant(validated, req.Database, username, host)
 		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
 			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
 		}
@@ -1800,24 +1767,4 @@ func isValidHost(host string) bool {
 
 func isValidCharset(charset string) bool {
 	return validCharsets[charset]
-}
-
-func isValidPrivilege(priv string) bool {
-	return validPrivileges[priv]
-}
-
-func escapeMySQLString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `'`, `\'`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	s = strings.ReplaceAll(s, "\x00", `\0`)
-	s = strings.ReplaceAll(s, "\x1a", `\Z`)
-	return s
-}
-
-func escapePGString(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
 }
