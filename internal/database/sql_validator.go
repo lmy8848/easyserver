@@ -329,18 +329,20 @@ func SanitizeSQLError(raw string) string {
 
 var tableNameRegexp = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-// allowedColumnTypes is the whitelist of column types CreateTable accepts. Types
-// that appear only in one engine (SERIAL/UUID/JSONB are PG, YEAR is MySQL) are
-// listed anyway — the engine rejects what it doesn't know, the panel just guards
-// against injection-shaped input.
+// allowedColumnTypes is the whitelist of column types CreateTable accepts — a
+// union of the MySQL and PostgreSQL type sets (SERIAL/UUID/JSONB/BYTEA are PG,
+// YEAR/TINYINT/DATETIME are MySQL). Each engine rejects what it doesn't know;
+// the panel just guards against injection-shaped input. DOUBLE PRECISION covers
+// MySQL's DOUBLE alias too.
 var allowedColumnTypes = map[string]bool{
 	"INT": true, "INTEGER": true, "TINYINT": true, "SMALLINT": true, "MEDIUMINT": true, "BIGINT": true,
-	"FLOAT": true, "DOUBLE": true, "DECIMAL": true, "NUMERIC": true, "REAL": true,
-	"VARCHAR": true, "CHAR": true, "TEXT": true, "TINYTEXT": true, "MEDIUMTEXT": true, "LONGTEXT": true,
-	"BLOB": true, "TINYBLOB": true, "MEDIUMBLOB": true, "LONGBLOB": true, "BINARY": true, "VARBINARY": true,
-	"DATE": true, "TIME": true, "DATETIME": true, "TIMESTAMP": true, "YEAR": true,
+	"FLOAT": true, "DOUBLE": true, "DOUBLE PRECISION": true, "DECIMAL": true, "NUMERIC": true, "REAL": true,
+	"VARCHAR": true, "CHAR": true, "CHARACTER": true, "CHARACTER VARYING": true,
+	"TEXT": true, "TINYTEXT": true, "MEDIUMTEXT": true, "LONGTEXT": true,
+	"BLOB": true, "TINYBLOB": true, "MEDIUMBLOB": true, "LONGBLOB": true, "BINARY": true, "VARBINARY": true, "BYTEA": true,
+	"DATE": true, "TIME": true, "TIMETZ": true, "DATETIME": true, "TIMESTAMP": true, "TIMESTAMPTZ": true, "YEAR": true, "INTERVAL": true,
 	"BOOLEAN": true, "BOOL": true, "BIT": true,
-	"JSON": true, "ENUM": true, "SET": true,
+	"JSON": true, "ENUM": true, "SET": true, "MONEY": true,
 	"SERIAL": true, "BIGSERIAL": true, "SMALLSERIAL": true,
 	"UUID": true, "JSONB": true,
 }
