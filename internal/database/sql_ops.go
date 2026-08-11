@@ -463,10 +463,8 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 	if err != nil {
 		return nil, err
 	}
-	dbType := instance.DBType
 
-	validator := NewSQLValidator(dbType)
-	if r := validator.ValidateSQL(sql); !r.Valid {
+	if r := ValidateSQL(sql); !r.Valid {
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
@@ -488,17 +486,19 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
-	validator := NewSQLValidator(dbType)
-
-	if r := validator.ValidateInsert(table, data, nil); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
 
 	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: builder.BuildInsert(table, data, nil)}, nil
+		sql, err := builder.BuildInsert(table, data, nil)
+		if err != nil {
+			return &DMLResult{Success: false, Error: err.Error()}, nil
+		}
+		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	params, args := builder.BuildInsertParams(table, data, nil)
+	params, args, err := builder.BuildInsertParams(table, data, nil)
+	if err != nil {
+		return &DMLResult{Success: false, Error: err.Error()}, nil
+	}
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
@@ -516,17 +516,19 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
-	validator := NewSQLValidator(dbType)
-
-	if r := validator.ValidateUpdate(table, data, pk, pkVal); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
 
 	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: builder.BuildUpdate(table, data, pk, pkVal)}, nil
+		sql, err := builder.BuildUpdate(table, data, pk, pkVal)
+		if err != nil {
+			return &DMLResult{Success: false, Error: err.Error()}, nil
+		}
+		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	params, args := builder.BuildUpdateParams(table, data, pk, pkVal)
+	params, args, err := builder.BuildUpdateParams(table, data, pk, pkVal)
+	if err != nil {
+		return &DMLResult{Success: false, Error: err.Error()}, nil
+	}
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
@@ -544,17 +546,19 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
-	validator := NewSQLValidator(dbType)
-
-	if r := validator.ValidateDelete(table, pk, pkVal); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
 
 	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: builder.BuildDelete(table, pk, pkVal)}, nil
+		sql, err := builder.BuildDelete(table, pk, pkVal)
+		if err != nil {
+			return &DMLResult{Success: false, Error: err.Error()}, nil
+		}
+		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
-	params, args := builder.BuildDeleteParams(table, pk, pkVal)
+	params, args, err := builder.BuildDeleteParams(table, pk, pkVal)
+	if err != nil {
+		return &DMLResult{Success: false, Error: err.Error()}, nil
+	}
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
