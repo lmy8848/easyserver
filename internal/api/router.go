@@ -134,7 +134,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	containerService := container.NewService(cmdExec)
 
 	dbRepo := dbdomain.NewSQLiteRepository(db)
-	dbService := dbdomain.NewService(dbRepo, cmdExec)
+	dbService := dbdomain.NewService(dbRepo, dbdomain.NewCLIContainerRuntime(cmdExec))
 
 	deployRepo := deploy.NewSQLiteRepository(db)
 	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)

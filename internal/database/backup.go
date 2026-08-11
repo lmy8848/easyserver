@@ -14,7 +14,6 @@ import (
 
 const (
 	DefaultBackupDir = "/var/backups/easyserver/db"
-	MaxBackupsPerDB  = 10
 )
 
 // SetBackupDir sets the backup directory.
@@ -92,21 +91,6 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 
 	if err := s.repo.UpdateBackupStatus(ctx, backup.ID, backup.Status, backup.FileSize, backup.ErrorMessage); err != nil {
 		log.Printf("failed to update backup record %d: %v", backup.ID, err)
-	}
-
-	// 保留策略：同库超过上限时删最旧的 completed 备份（保留最近 MaxBackupsPerDB 份）。
-	// 运行中的备份不参与清理（task 可能仍在写该行）。
-	if err == nil {
-		backups, lerr := s.repo.ListBackups(ctx, backup.DBInstanceID, backup.DatabaseName)
-		if lerr == nil && len(backups) > MaxBackupsPerDB {
-			for _, b := range backups[MaxBackupsPerDB:] {
-				if b.Status != "completed" {
-					continue
-				}
-				_ = os.Remove(b.FilePath)
-				_ = s.repo.DeleteBackup(ctx, b.ID)
-			}
-		}
 	}
 	return err
 }
@@ -190,6 +174,12 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 
 	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
 		return fmt.Errorf("备份文件不存在")
+	}
+
+	// DB 行先置 running（任务还没起，先落状态防重复点按），再启动内存任务。
+	// 任务结束写终态；进程崩溃则靠启动清扫把 running 标 failed。
+	if err := s.repo.UpdateBackupStatus(ctx, backup.ID, "running", backup.FileSize, ""); err != nil {
+		return fmt.Errorf("标记恢复中失败: %w", err)
 	}
 
 	key := fmt.Sprintf("restore-%d", id)

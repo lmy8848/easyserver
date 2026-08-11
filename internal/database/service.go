@@ -14,7 +14,6 @@ import (
 	"time"
 	"unicode"
 
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/task"
 )
 
@@ -35,29 +34,11 @@ type Service struct {
 	redisOps       *redisRunner           // direct Redis channel (key browser ops)
 }
 
-// NewService creates a database Service over the given Repository, driving
-// containers through the CLI Runtime seam and SQL through the direct driver
-// channel.
-func NewService(repo Repository, exec executor.CommandExecutor) *Service {
-	rt := NewCLIContainerRuntime(exec)
-	s := &Service{
-		repo:      repo,
-		runtime:   rt,
-		backupDir: DefaultBackupDir,
-		taskMgr:   task.NewManager(8),
-		runtimeFactory: func() DatabaseRuntime {
-			return NewCLIContainerRuntime(exec)
-		},
-		driver:   newDriverSQLRunner(),
-		redisOps: newRedisRunner(),
-	}
-	s.SweepOrphanBackups(context.Background())
-	return s
-}
-
-// NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
-// CLI runtime construction.
-func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
+// NewService creates a database Service over the given Repository and container
+// runtime. Production passes NewCLIContainerRuntime(exec); tests pass a fake
+// DatabaseRuntime. Sweeps orphaned backup rows (running → failed) from a
+// previous crashed process.
+func NewService(repo Repository, runtime DatabaseRuntime) *Service {
 	s := &Service{
 		repo:      repo,
 		runtime:   runtime,

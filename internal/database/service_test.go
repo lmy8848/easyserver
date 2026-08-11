@@ -224,7 +224,7 @@ func (r *fakeRepo) DeleteBackup(context.Context, int64) error           { return
 func TestCreateInstanceHealthy(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
-	svc := NewServiceWithRuntime(repo, rt)
+	svc := NewService(repo, rt)
 
 	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
@@ -257,7 +257,7 @@ func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 	// container is deliberately kept for troubleshooting (its logs are lost on
 	// rm); reinstall runs "uninstall + install", and uninstall removes it.
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "exited"}}
-	svc := NewServiceWithRuntime(repo, rt)
+	svc := NewService(repo, rt)
 
 	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
@@ -278,7 +278,7 @@ func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
-	svc := NewServiceWithRuntime(repo, rt)
+	svc := NewService(repo, rt)
 
 	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
 	if err != nil {
@@ -361,7 +361,7 @@ func TestCreateInstanceRejectsTakenContainerName(t *testing.T) {
 	// 预检：同名容器已存在 → CreateInstance 报错，且不写 row、不起任务。
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{exists: true}
-	svc := NewServiceWithRuntime(repo, rt)
+	svc := NewService(repo, rt)
 
 	_, err := svc.CreateInstance(context.Background(), DBTypeMySQL,
 		&CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0", ContainerName: "taken"})

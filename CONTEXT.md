@@ -66,7 +66,9 @@ _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 
 ### 通知
 
-- **Notification** — 发送给管理员的通知消息（Webhook/邮件等）。
+- **In-App Notification（站内通知）** — 面板铃铛里的站内消息（告警触发、安全事件、管理员手动创建），管理员在面板内阅读，新消息经 SSE 实时送达。
+- **Notification（站外推送）** — 通过 Webhook/邮件等渠道发送给管理员的外部通知。
+  _Avoid_: 用 "Notification" 同时指站内铃铛与站外推送。
 - **Alert Rule** — 监控告警规则（CPU > 90% 持续 5 分钟 → 触发通知）。
 
 ### 审计与会话
