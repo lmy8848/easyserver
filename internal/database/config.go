@@ -37,50 +37,50 @@ func configParams(dbType DBType) []ParamMeta {
 
 func mysqlConfigParams() []ParamMeta {
 	return []ParamMeta{
-		{Key: "port", Label: "监听端口", Description: "MySQL 服务监听端口。修改后保存即重建容器生效", Type: "number"},
-		{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数", Type: "number"},
-		{Key: "max_allowed_packet", Label: "最大数据包", Description: "单个数据包最大大小", Type: "text", Unit: "MB"},
-		{Key: "default-storage-engine", Label: "默认存储引擎", Description: "默认存储引擎", Type: "select", Options: []string{"InnoDB", "MyISAM", "MEMORY"}},
-		{Key: "innodb_buffer_pool_size", Label: "InnoDB 缓冲池", Description: "InnoDB 缓冲池大小，生产建议内存的 70-80%", Type: "text", Unit: "MB/GB"},
-		{Key: "tmp_table_size", Label: "临时表大小", Description: "内存临时表最大大小", Type: "text", Unit: "MB"},
-		{Key: "max_heap_table_size", Label: "堆表最大大小", Description: "用户内存表最大大小", Type: "text", Unit: "MB"},
-		{Key: "sort_buffer_size", Label: "排序缓冲区", Description: "每个会话排序缓冲区", Type: "text", Unit: "KB"},
-		{Key: "join_buffer_size", Label: "JOIN 缓冲区", Description: "每个会话 JOIN 缓冲区", Type: "text", Unit: "KB"},
-		{Key: "read_buffer_size", Label: "读缓冲区", Description: "顺序扫描读缓冲区", Type: "text", Unit: "KB"},
-		{Key: "wait_timeout", Label: "非交互超时", Description: "非交互连接空闲超时（秒）", Type: "number", Unit: "秒"},
-		{Key: "interactive_timeout", Label: "交互超时", Description: "交互连接空闲超时（秒）", Type: "number", Unit: "秒"},
-		{Key: "slow_query_log", Label: "慢查询日志", Description: "是否启用慢查询日志", Type: "select", Options: []string{"ON", "OFF"}},
-		{Key: "long_query_time", Label: "慢查询阈值", Description: "超过此时间（秒）记入慢查询日志", Type: "number", Unit: "秒"},
+		{Key: "port", Label: "监听端口", Description: "MySQL 服务监听端口。修改后保存即重建容器生效"},
+		{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数"},
+		{Key: "max_allowed_packet", Label: "最大数据包", Description: "单个数据包最大大小", Unit: "MB"},
+		{Key: "default-storage-engine", Label: "默认存储引擎", Description: "默认存储引擎", Options: []string{"InnoDB", "MyISAM", "MEMORY"}},
+		{Key: "innodb_buffer_pool_size", Label: "InnoDB 缓冲池", Description: "InnoDB 缓冲池大小，生产建议内存的 70-80%", Unit: "MB/GB"},
+		{Key: "tmp_table_size", Label: "临时表大小", Description: "内存临时表最大大小", Unit: "MB"},
+		{Key: "max_heap_table_size", Label: "堆表最大大小", Description: "用户内存表最大大小", Unit: "MB"},
+		{Key: "sort_buffer_size", Label: "排序缓冲区", Description: "每个会话排序缓冲区", Unit: "KB"},
+		{Key: "join_buffer_size", Label: "JOIN 缓冲区", Description: "每个会话 JOIN 缓冲区", Unit: "KB"},
+		{Key: "read_buffer_size", Label: "读缓冲区", Description: "顺序扫描读缓冲区", Unit: "KB"},
+		{Key: "wait_timeout", Label: "非交互超时", Description: "非交互连接空闲超时（秒）", Unit: "秒"},
+		{Key: "interactive_timeout", Label: "交互超时", Description: "交互连接空闲超时（秒）", Unit: "秒"},
+		{Key: "slow_query_log", Label: "慢查询日志", Description: "是否启用慢查询日志", Options: []string{"ON", "OFF"}},
+		{Key: "long_query_time", Label: "慢查询阈值", Description: "超过此时间（秒）记入慢查询日志", Unit: "秒"},
 	}
 }
 
 func postgresConfigParams() []ParamMeta {
 	return []ParamMeta{
-		{Key: "port", Label: "监听端口", Description: "PostgreSQL 服务监听端口。修改后保存即重建容器生效", Type: "number"},
-		{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数", Type: "number"},
-		{Key: "shared_buffers", Label: "共享缓冲区", Description: "共享缓冲区大小，生产建议内存的 25%", Type: "text", Unit: "MB/GB"},
-		{Key: "work_mem", Label: "工作内存", Description: "每个排序/哈希操作的内存", Type: "text", Unit: "MB/KB"},
-		{Key: "maintenance_work_mem", Label: "维护工作内存", Description: "VACUUM/CREATE INDEX 等维护操作内存", Type: "text", Unit: "MB/GB"},
-		{Key: "wal_level", Label: "WAL 级别", Description: "Write-Ahead 日志级别", Type: "select", Options: []string{"minimal", "replica", "logical"}},
-		{Key: "max_wal_size", Label: "最大 WAL 大小", Description: "自动检查点之间最大 WAL 大小", Type: "text", Unit: "MB/GB"},
-		{Key: "min_wal_size", Label: "最小 WAL 大小", Description: "WAL 回收的最小大小", Type: "text", Unit: "MB/GB"},
-		{Key: "log_destination", Label: "日志目标", Description: "日志输出目标", Type: "select", Options: []string{"stderr", "csvlog", "syslog"}},
-		{Key: "logging_collector", Label: "日志收集器", Description: "是否启用日志收集器", Type: "select", Options: []string{"on", "off"}},
-		{Key: "ssl", Label: "SSL", Description: "是否启用 SSL", Type: "select", Options: []string{"on", "off"}},
+		{Key: "port", Label: "监听端口", Description: "PostgreSQL 服务监听端口。修改后保存即重建容器生效"},
+		{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数"},
+		{Key: "shared_buffers", Label: "共享缓冲区", Description: "共享缓冲区大小，生产建议内存的 25%", Unit: "MB/GB"},
+		{Key: "work_mem", Label: "工作内存", Description: "每个排序/哈希操作的内存", Unit: "MB/KB"},
+		{Key: "maintenance_work_mem", Label: "维护工作内存", Description: "VACUUM/CREATE INDEX 等维护操作内存", Unit: "MB/GB"},
+		{Key: "wal_level", Label: "WAL 级别", Description: "Write-Ahead 日志级别", Options: []string{"minimal", "replica", "logical"}},
+		{Key: "max_wal_size", Label: "最大 WAL 大小", Description: "自动检查点之间最大 WAL 大小", Unit: "MB/GB"},
+		{Key: "min_wal_size", Label: "最小 WAL 大小", Description: "WAL 回收的最小大小", Unit: "MB/GB"},
+		{Key: "log_destination", Label: "日志目标", Description: "日志输出目标", Options: []string{"stderr", "csvlog", "syslog"}},
+		{Key: "logging_collector", Label: "日志收集器", Description: "是否启用日志收集器", Options: []string{"on", "off"}},
+		{Key: "ssl", Label: "SSL", Description: "是否启用 SSL", Options: []string{"on", "off"}},
 	}
 }
 
 func redisConfigParams() []ParamMeta {
 	return []ParamMeta{
-		{Key: "port", Label: "监听端口", Description: "Redis 服务监听端口。修改后保存即重建容器生效", Type: "number"},
-		{Key: "protected-mode", Label: "保护模式", Description: "无密码时禁止外部访问", Type: "select", Options: []string{"yes", "no"}},
-		{Key: "maxmemory", Label: "最大内存", Description: "0 表示不限制", Type: "text", Unit: "mb/gb"},
-		{Key: "maxmemory-policy", Label: "内存淘汰策略", Description: "内存满时的 key 淘汰策略", Type: "select", Options: []string{"noeviction", "allkeys-lru", "volatile-lru", "allkeys-random", "volatile-random", "volatile-ttl"}},
-		{Key: "appendonly", Label: "AOF 持久化", Description: "是否启用 AOF 持久化", Type: "select", Options: []string{"yes", "no"}},
-		{Key: "appendfsync", Label: "AOF 同步策略", Description: "AOF 文件同步策略", Type: "select", Options: []string{"always", "everysec", "no"}},
-		{Key: "timeout", Label: "空闲超时", Description: "客户端空闲断开时间（秒），0 表示不断开", Type: "number", Unit: "秒"},
-		{Key: "databases", Label: "数据库数量", Description: "Redis 数据库数量", Type: "number"},
-		{Key: "loglevel", Label: "日志级别", Description: "Redis 日志级别", Type: "select", Options: []string{"debug", "verbose", "notice", "warning"}},
+		{Key: "port", Label: "监听端口", Description: "Redis 服务监听端口。修改后保存即重建容器生效"},
+		{Key: "protected-mode", Label: "保护模式", Description: "无密码时禁止外部访问", Options: []string{"yes", "no"}},
+		{Key: "maxmemory", Label: "最大内存", Description: "0 表示不限制", Unit: "mb/gb"},
+		{Key: "maxmemory-policy", Label: "内存淘汰策略", Description: "内存满时的 key 淘汰策略", Options: []string{"noeviction", "allkeys-lru", "volatile-lru", "allkeys-random", "volatile-random", "volatile-ttl"}},
+		{Key: "appendonly", Label: "AOF 持久化", Description: "是否启用 AOF 持久化", Options: []string{"yes", "no"}},
+		{Key: "appendfsync", Label: "AOF 同步策略", Description: "AOF 文件同步策略", Options: []string{"always", "everysec", "no"}},
+		{Key: "timeout", Label: "空闲超时", Description: "客户端空闲断开时间（秒），0 表示不断开", Unit: "秒"},
+		{Key: "databases", Label: "数据库数量", Description: "Redis 数据库数量"},
+		{Key: "loglevel", Label: "日志级别", Description: "Redis 日志级别", Options: []string{"debug", "verbose", "notice", "warning"}},
 	}
 }
 

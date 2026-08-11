@@ -1,5 +1,5 @@
 import {
-  Row, Col, Input, InputNumber, Select, Tag, Empty, Spin,
+  Row, Col, Input, Select, Tag, Empty, Spin,
 } from 'antd';
 import type { ConfigTabProps } from './types';
 
@@ -35,7 +35,7 @@ export default function ConfigTab({
               {param.unit && <Tag style={{ marginLeft: 8 }}>{param.unit}</Tag>}
             </div>
             <div style={{ color: '#666', fontSize: 12, marginBottom: 4 }}>{param.description}</div>
-            {param.type === 'select' ? (
+            {param.options?.length ? (
               <Select
                 value={params[param.key] || ''}
                 onChange={(val) => onUpdateDBParam(section.name, param.key, val)}
@@ -45,12 +45,6 @@ export default function ConfigTab({
                   <Select.Option key={opt} value={opt}>{opt}</Select.Option>
                 ))}
               </Select>
-            ) : param.type === 'number' ? (
-              <InputNumber
-                value={params[param.key] !== undefined && params[param.key] !== '' ? Number(params[param.key]) : undefined}
-                onChange={(val) => onUpdateDBParam(section.name, param.key, String(val ?? ''))}
-                style={{ width: '100%' }}
-              />
             ) : isMultiline(param.key) ? (
               <TextArea
                 value={params[param.key] || ''}

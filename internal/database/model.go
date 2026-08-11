@@ -190,14 +190,16 @@ type DBConfig struct {
 	Sections []ConfigSection `json:"sections"`
 }
 
-// ParamMeta defines UI metadata for common configuration parameters.
+// ParamMeta defines UI metadata for common configuration parameters. Values are
+// always strings (driven by the engine's own config semantics), so there is no
+// type — the editor renders Select when Options are present, a text input
+// otherwise.
 type ParamMeta struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
-	Type        string   `json:"type"`              // text, number, select, boolean
 	Unit        string   `json:"unit"`              // MB, GB, etc.
-	Options     []string `json:"options,omitempty"` // for select type
+	Options     []string `json:"options,omitempty"` // select options (presence switches the editor to a Select)
 }
 
 // ConfigSectionView is one section of the structured config as served to the

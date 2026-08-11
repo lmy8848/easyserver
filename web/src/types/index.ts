@@ -497,11 +497,13 @@ export interface ConfigSection {
   params: Record<string, string>;
 }
 
+// ParamMeta is the UI metadata for one config param. Values are always strings,
+// so there is no type — the editor renders a Select when options is present, a
+// text input otherwise.
 export interface ParamMeta {
   key: string;
   label: string;
   description: string;
-  type: string;
   unit?: string;
   options?: string[];
 }
