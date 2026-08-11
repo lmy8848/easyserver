@@ -11,9 +11,9 @@ import (
 )
 
 // driverQueryRunner tests feed sqlmock a fake *sql.DB and assert the observable
-// contract of the direct-connection channel: native result types, per-column
-// render categories, NULL/BLOB preservation, parameter binding and error
-// passthrough. No real database is needed.
+// contract of the direct-connection channel (sql_runner.go): native result
+// types, per-column render categories, NULL/BLOB preservation, parameter
+// binding and error passthrough. No real database is needed.
 
 func TestDriverQueryRunnerStructuralTypes(t *testing.T) {
 	db, mock, err := sqlmock.New()
