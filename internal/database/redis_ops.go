@@ -10,58 +10,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisDB describes one logical Redis database (0-15) that holds data.
-type RedisDB struct {
-	Index int   `json:"index"`
-	Size  int64 `json:"size"` // DBSIZE: number of keys
-}
-
-// RedisKey is one key in a logical database, with the display metadata the
-// front-end key browser shows per row (type / TTL / size).
-type RedisKey struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	TTL  int64  `json:"ttl"`  // seconds; -1 = no expiry, -2 = key gone
-	Size int64  `json:"size"` // bytes (MEMORY USAGE)
-}
-
-// RedisValue is a key's decoded value, shaped by its type. Value is a string
-// for string keys, map[string]string for hash, []string for list/set, and
-// []RedisZMember for sorted sets.
-type RedisValue struct {
-	Type  string      `json:"type"` // string | hash | list | set | zset
-	Value interface{} `json:"value"`
-}
-
-// RedisZMember is one sorted-set entry (score kept separate from member so the
-// front-end can render both).
-type RedisZMember struct {
-	Member string  `json:"member"`
-	Score  float64 `json:"score"`
-}
-
-// RedisOps is the direct-connection seam for Redis instances. It mirrors
-// SQLRunner for the SQL engines: Service talks to this interface,
-// redisRunner implements it over go-redis. Redis has no SQL, so the
-// operations are key-browser primitives instead of Query/Exec.
-type RedisOps interface {
-	ListDBs(ctx context.Context, inst *DBInstance) ([]RedisDB, error)
-	ScanKeys(ctx context.Context, inst *DBInstance, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error)
-	GetValue(ctx context.Context, inst *DBInstance, db int, key string) (*RedisValue, error)
-	SetValue(ctx context.Context, inst *DBInstance, db int, key, value string, ttl time.Duration) error
-	DelKeys(ctx context.Context, inst *DBInstance, db int, keys ...string) (int64, error)
-	Expire(ctx context.Context, inst *DBInstance, db int, key string, ttl time.Duration) error
-	Persist(ctx context.Context, inst *DBInstance, db int, key string) error
-	FlushDB(ctx context.Context, inst *DBInstance, db int) error
-	BgSave(ctx context.Context, inst *DBInstance) error
-	Close(instanceID int64)
-}
-
-// redisRunner implements RedisOps over a direct go-redis connection. The
-// client pool is keyed by (instance, logical db) — go-redis fixes the DB on
-// client construction, and Redis instances only have 0-15, so one client per
-// used db is cheap.
+// redisRunner is the direct-connection channel for Redis instances. It mirrors
+// driverSQLRunner (sql_runner.go) for the SQL engines, but Redis has no SQL —
+// the operations are key-browser primitives (list DBs, scan keys, read/write
+// values, TTL, flush) instead of Query/Exec. Service owns one and forwards the
+// key-browser methods to it.
 type redisRunner struct {
+	// conns is keyed by (instance, logical db) — go-redis fixes the DB on
+	// client construction, and Redis instances only have 0-15, so one client
+	// per used db is cheap.
 	mu    sync.Mutex
 	conns map[redisPoolKey]*redis.Client
 }
@@ -265,4 +222,134 @@ func (r *redisRunner) BgSave(ctx context.Context, inst *DBInstance) error {
 		return err
 	}
 	return c.BgSave(ctx).Err()
+}
+
+// --- Redis key browser operations ---
+//
+// Redis has no SQL: the "数据库" tab renders a key browser instead. All ops go
+// through the direct go-redis channel (s.redisOps), addressed by logical DB
+// index (0-15).
+
+// getRedisInstance loads an instance for a Redis operation and validates the
+// logical DB index.
+func (s *Service) getRedisInstance(ctx context.Context, instanceID int64, db int) (*DBInstance, error) {
+	if db < 0 || db > 15 {
+		return nil, fmt.Errorf("invalid redis db index: %d", db)
+	}
+	instance, err := s.repo.GetInstance(ctx, instanceID)
+	if err != nil || instance == nil {
+		return nil, fmt.Errorf("database instance not found")
+	}
+	return instance, nil
+}
+
+// ListRedisDBs returns the non-empty logical databases (index + key count).
+func (s *Service) ListRedisDBs(ctx context.Context, instanceID int64) ([]RedisDB, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, 0)
+	if err != nil {
+		return nil, err
+	}
+	return s.redisFor().ListDBs(ctx, instance)
+}
+
+// ScanRedisKeys pages through keys in a logical DB (SCAN cursor).
+func (s *Service) ScanRedisKeys(ctx context.Context, instanceID int64, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.redisFor().ScanKeys(ctx, instance, db, cursor, pattern, count)
+}
+
+// GetRedisValue reads one key's decoded value.
+func (s *Service) GetRedisValue(ctx context.Context, instanceID int64, db int, key string) (*RedisValue, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().GetValue(ctx, instance, db, key)
+}
+
+// SetRedisValue writes a string key (with optional TTL seconds; ttl <= 0 = no expiry).
+func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, key, value string, ttl int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().SetValue(ctx, instance, db, key, value, time.Duration(ttl)*time.Second)
+}
+
+// DeleteRedisKeys deletes one or more keys; returns the number removed.
+func (s *Service) DeleteRedisKeys(ctx context.Context, instanceID int64, db int, keys []string) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return 0, err
+	}
+	if len(keys) == 0 {
+		return 0, fmt.Errorf("no keys specified")
+	}
+	return s.redisFor().DelKeys(ctx, instance, db, keys...)
+}
+
+// ExpireRedisKey sets a key's expiry (ttl seconds; ttl <= 0 clears to none).
+func (s *Service) ExpireRedisKey(ctx context.Context, instanceID int64, db int, key string, ttl int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().Expire(ctx, instance, db, key, time.Duration(ttl)*time.Second)
+}
+
+// PersistRedisKey removes a key's expiry.
+func (s *Service) PersistRedisKey(ctx context.Context, instanceID int64, db int, key string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().Persist(ctx, instance, db, key)
+}
+
+// FlushRedisDB removes all keys from a logical DB.
+func (s *Service) FlushRedisDB(ctx context.Context, instanceID int64, db int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	return s.redisFor().FlushDB(ctx, instance, db)
 }

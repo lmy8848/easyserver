@@ -215,3 +215,33 @@ type InstanceConfigView struct {
 	FilePath string              `json:"file_path"`
 	Sections []ConfigSectionView `json:"sections"`
 }
+
+// RedisDB describes one logical Redis database (0-15) that holds data.
+type RedisDB struct {
+	Index int   `json:"index"`
+	Size  int64 `json:"size"` // DBSIZE: number of keys
+}
+
+// RedisKey is one key in a logical database, with the display metadata the
+// front-end key browser shows per row (type / TTL / size).
+type RedisKey struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	TTL  int64  `json:"ttl"`  // seconds; -1 = no expiry, -2 = key gone
+	Size int64  `json:"size"` // bytes (MEMORY USAGE)
+}
+
+// RedisValue is a key's decoded value, shaped by its type. Value is a string
+// for string keys, map[string]string for hash, []string for list/set, and
+// []RedisZMember for sorted sets.
+type RedisValue struct {
+	Type  string      `json:"type"` // string | hash | list | set | zset
+	Value interface{} `json:"value"`
+}
+
+// RedisZMember is one sorted-set entry (score kept separate from member so the
+// front-end can render both).
+type RedisZMember struct {
+	Member string  `json:"member"`
+	Score  float64 `json:"score"`
+}
