@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 )
 
 // --- Logical database CRUD (live, server-owned) ---
@@ -89,34 +88,30 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 		return nil, fmt.Errorf("database instance is not running")
 	}
 
-	if !isValidDBName(req.Name) {
-		return nil, fmt.Errorf("invalid database name")
-	}
-
+	// DDL statements cannot be parameter-bound; names/hosts are validated and
+	// passwords escaped by the builder. The system database hosts instance-level
+	// statements — including CREATE DATABASE itself, which must not run on the
+	// target database.
 	charset := req.Charset
 	if charset == "" {
 		charset = defaultCharset
 	}
-	if !isValidCharset(charset) {
-		return nil, fmt.Errorf("invalid charset: %s", charset)
-	}
-
-	// DDL statements cannot be parameter-bound; names/hosts are already
-	// validated and passwords escaped by the builder. The system database hosts
-	// instance-level statements — including CREATE DATABASE itself, which must
-	// not run on the target database.
 	builder := NewSQLBuilder(instance.DBType)
+	sqlStr, err := builder.BuildCreateDatabase(req.Name, charset)
+	if err != nil {
+		return nil, err
+	}
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
 	case DBTypeMySQL, DBTypePostgreSQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, builder.BuildCreateDatabase(req.Name, charset)); err != nil {
+		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
 			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
 		return nil, fmt.Errorf("database creation not supported for %s", instance.DBType)
 	}
 
-	return &Database{Name: req.Name, Charset: charset}, nil
+	return &Database{Name: req.Name, Charset: req.Charset}, nil
 }
 
 func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName string) error {
@@ -133,15 +128,16 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 	if instance.Status != "running" {
 		return fmt.Errorf("database instance is not running")
 	}
-	if !isValidDBName(dbName) {
-		return fmt.Errorf("invalid database name")
-	}
 
 	builder := NewSQLBuilder(instance.DBType)
+	sqlStr, err := builder.BuildDropDatabase(dbName)
+	if err != nil {
+		return err
+	}
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
 	case DBTypeMySQL, DBTypePostgreSQL:
-		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, builder.BuildDropDatabase(dbName)); err != nil {
+		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
 			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
 		}
 	default:
@@ -225,23 +221,14 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 		return nil, fmt.Errorf("database instance is not running")
 	}
 
-	if !isValidUsername(req.Username) {
-		return nil, fmt.Errorf("invalid username: only alphanumeric, underscore, hyphen, dot allowed (max %d chars)", maxUsernameLen)
-	}
-
-	host := req.Host
-	if host == "" {
-		host = "localhost"
-	}
-	if !isValidHost(host) {
-		return nil, fmt.Errorf("invalid host")
-	}
-
 	builder := NewSQLBuilder(instance.DBType)
+	sqlStr, err := builder.BuildCreateUser(req.Username, req.Password, req.Host)
+	if err != nil {
+		return nil, err
+	}
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
 	case DBTypeMySQL, DBTypePostgreSQL:
-		sqlStr := builder.BuildCreateUser(req.Username, req.Password, host)
 		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
 			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
 		}
@@ -249,6 +236,10 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 		return nil, fmt.Errorf("user creation not supported for %s", instance.DBType)
 	}
 
+	host := req.Host
+	if host == "" {
+		host = "localhost"
+	}
 	return &DBUser{Username: req.Username, Host: host}, nil
 }
 
@@ -264,21 +255,18 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 		return fmt.Errorf("database instance not found")
 	}
 
-	if !isValidUsername(username) {
-		return fmt.Errorf("invalid username")
-	}
 	if isAdminUser(instance.DBType, username) {
 		return fmt.Errorf("cannot delete the administrator user")
 	}
-	if instance.DBType == DBTypeMySQL && !isValidHost(host) {
-		return fmt.Errorf("invalid host")
-	}
 
 	builder := NewSQLBuilder(instance.DBType)
+	sqlStr, err := builder.BuildDropUser(username, host)
+	if err != nil {
+		return err
+	}
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
 	case DBTypeMySQL, DBTypePostgreSQL:
-		sqlStr := builder.BuildDropUser(username, host)
 		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
 			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
 		}
@@ -304,22 +292,14 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 		return fmt.Errorf("database instance is not running")
 	}
 
-	if !isValidDBName(req.Database) {
-		return fmt.Errorf("invalid database name")
-	}
-
-	// ValidatePrivileges is the per-engine whitelist (MySQL and PG differ, e.g.
-	// INDEX exists only for MySQL); BuildGrant re-validates on generation.
-	validated := ValidatePrivileges(instance.DBType, req.Privileges)
-	if validated == "" {
-		return fmt.Errorf("invalid privileges: %s", req.Privileges)
-	}
-
 	builder := NewSQLBuilder(instance.DBType)
+	sqlStr, err := builder.BuildGrant(req.Privileges, req.Database, username, host)
+	if err != nil {
+		return err
+	}
 	sysDB := systemDBName(instance.DBType)
 	switch instance.DBType {
 	case DBTypeMySQL, DBTypePostgreSQL:
-		sqlStr := builder.BuildGrant(validated, req.Database, username, host)
 		if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
 			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
 		}
@@ -363,16 +343,16 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 }
 
 func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, tableName string) (*DescribeResult, error) {
-	if !ValidateTableName(tableName) {
-		return nil, fmt.Errorf("无效的表名")
-	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
-	describeSQL := builder.BuildDescribeTable(tableName)
+	describeSQL, err := builder.BuildDescribeTable(tableName)
+	if err != nil {
+		return nil, err
+	}
 
 	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, describeSQL)
 	if err != nil {
@@ -404,9 +384,6 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 }
 
 func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tableName string, page, pageSize int) (*PagedQueryResult, error) {
-	if !ValidateTableName(tableName) {
-		return nil, fmt.Errorf("无效的表名")
-	}
 	if page < 1 {
 		page = 1
 	}
@@ -423,6 +400,14 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 	}
 	dbType := instance.DBType
 	builder := NewSQLBuilder(dbType)
+	countSQL, err := builder.BuildCount(tableName)
+	if err != nil {
+		return nil, err
+	}
+	selectSQL, err := builder.BuildSelect(tableName, nil, page, pageSize)
+	if err != nil {
+		return nil, err
+	}
 
 	var total int
 	var headers []string
@@ -430,11 +415,11 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 	var rows [][]interface{}
 	switch dbType {
 	case DBTypeMySQL, DBTypePostgreSQL:
-		countRes, err := s.runnerFor(instance).Query(ctx, instance, dbName, builder.BuildCount(tableName))
+		countRes, err := s.runnerFor(instance).Query(ctx, instance, dbName, countSQL)
 		if err == nil && len(countRes.Rows) > 0 {
 			fmt.Sscanf(str(countRes.Rows[0], 0), "%d", &total)
 		}
-		res, err := s.runnerFor(instance).Query(ctx, instance, dbName, builder.BuildSelect(tableName, nil, page, pageSize))
+		res, err := s.runnerFor(instance).Query(ctx, instance, dbName, selectSQL)
 		if err != nil {
 			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
 		}
@@ -476,9 +461,6 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 }
 
 func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
-	if !ValidateTableName(table) {
-		return nil, fmt.Errorf("无效的表名")
-	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -506,9 +488,6 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
-	if !ValidateTableName(table) {
-		return nil, fmt.Errorf("无效的表名")
-	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -536,9 +515,6 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
-	if !ValidateTableName(table) {
-		return nil, fmt.Errorf("无效的表名")
-	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -566,62 +542,16 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tableName string, columns []TableColumn) error {
-	if !ValidateTableName(tableName) {
-		return fmt.Errorf("无效的表名")
-	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err
 	}
 	dbType := instance.DBType
 
-	for _, col := range columns {
-		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
-		baseType = strings.TrimSpace(baseType)
-		if !allowedColumnTypes[baseType] {
-			return fmt.Errorf("不支持的列类型: %s", col.Type)
-		}
-		if !ValidateTableName(col.Name) {
-			return fmt.Errorf("无效的列名: %s", col.Name)
-		}
-	}
-
-	var sql string
-	switch dbType {
-	case DBTypeMySQL:
-		var parts []string
-		for _, col := range columns {
-			p := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
-			if col.IsPrimary {
-				p = append(p, "PRIMARY KEY")
-			}
-			if col.AutoIncr {
-				p = append(p, "AUTO_INCREMENT")
-			}
-			if !col.Nullable {
-				p = append(p, "NOT NULL")
-			}
-			parts = append(parts, strings.Join(p, " "))
-		}
-		sql = fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", tableName, strings.Join(parts, ", "))
-	case DBTypePostgreSQL:
-		var parts []string
-		for _, col := range columns {
-			p := []string{fmt.Sprintf("\"%s\"", col.Name), col.Type}
-			if col.IsPrimary {
-				p = append(p, "PRIMARY KEY")
-			}
-			if col.AutoIncr {
-				p = []string{fmt.Sprintf("\"%s\"", col.Name), "SERIAL", "PRIMARY KEY"}
-			}
-			if !col.Nullable && !col.IsPrimary {
-				p = append(p, "NOT NULL")
-			}
-			parts = append(parts, strings.Join(p, " "))
-		}
-		sql = fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", "))
-	default:
-		return fmt.Errorf("不支持的数据库类型")
+	builder := NewSQLBuilder(dbType)
+	sql, err := builder.BuildCreateTable(tableName, columns)
+	if err != nil {
+		return err
 	}
 
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, sql); execErr != nil {
@@ -631,23 +561,16 @@ func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tab
 }
 
 func (s *Service) DropTable(ctx context.Context, instanceID int64, dbName, tableName string) error {
-	if !ValidateTableName(tableName) {
-		return fmt.Errorf("无效的表名")
-	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err
 	}
 	dbType := instance.DBType
 
-	var sql string
-	switch dbType {
-	case DBTypeMySQL:
-		sql = fmt.Sprintf("DROP TABLE `%s`;", tableName)
-	case DBTypePostgreSQL:
-		sql = fmt.Sprintf("DROP TABLE \"%s\";", tableName)
-	default:
-		return fmt.Errorf("不支持的数据库类型")
+	builder := NewSQLBuilder(dbType)
+	sql, err := builder.BuildDropTable(tableName)
+	if err != nil {
+		return err
 	}
 
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, sql); execErr != nil {

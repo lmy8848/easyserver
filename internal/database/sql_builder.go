@@ -226,8 +226,12 @@ func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal interfa
 		b.QuoteIdentifier(table), b.QuoteIdentifier(pkCol), b.placeholder(1)), []any{pkVal}, nil
 }
 
-// BuildSelect generates a SELECT statement with pagination.
-func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize int) string {
+// BuildSelect generates a SELECT statement with pagination (validated table
+// name — it is quoted into the statement).
+func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize int) (string, error) {
+	if !ValidateTableName(table) {
+		return "", fmt.Errorf("无效的表名")
+	}
 	cols := "*"
 	if len(columns) > 0 {
 		quoted := make([]string, len(columns))
@@ -239,12 +243,15 @@ func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize 
 
 	offset := (page - 1) * pageSize
 	return fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d;",
-		cols, b.QuoteIdentifier(table), pageSize, offset)
+		cols, b.QuoteIdentifier(table), pageSize, offset), nil
 }
 
-// BuildCount generates a COUNT query.
-func (b *SQLBuilder) BuildCount(table string) string {
-	return fmt.Sprintf("SELECT COUNT(*) FROM %s;", b.QuoteIdentifier(table))
+// BuildCount generates a COUNT query (validated table name).
+func (b *SQLBuilder) BuildCount(table string) (string, error) {
+	if !ValidateTableName(table) {
+		return "", fmt.Errorf("无效的表名")
+	}
+	return fmt.Sprintf("SELECT COUNT(*) FROM %s;", b.QuoteIdentifier(table)), nil
 }
 
 // BuildListTables generates a query to list tables in the current database.
@@ -258,12 +265,15 @@ func (b *SQLBuilder) BuildListTables() string {
 	return ""
 }
 
-// BuildDescribeTable generates a query to describe table structure.
-// Table name must be validated before calling this function.
-func (b *SQLBuilder) BuildDescribeTable(table string) string {
+// BuildDescribeTable generates a query to describe table structure (validated
+// table name — it is interpolated into the statement).
+func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
+	if !ValidateTableName(table) {
+		return "", fmt.Errorf("无效的表名")
+	}
 	switch b.dbType {
 	case DBTypeMySQL:
-		return fmt.Sprintf("DESCRIBE %s;", b.QuoteIdentifier(table))
+		return fmt.Sprintf("DESCRIBE %s;", b.QuoteIdentifier(table)), nil
 	case DBTypePostgreSQL:
 		// Use QuoteIdentifier for safe table name quoting
 		quotedTable := b.QuoteIdentifier(table)
@@ -274,62 +284,158 @@ func (b *SQLBuilder) BuildDescribeTable(table string) string {
 				WHERE i.indrelid = %s::regclass AND i.indisprimary
 			) THEN 'YES' ELSE 'NO' END as is_primary
 			FROM information_schema.columns
-			WHERE table_name = $1 ORDER BY ordinal_position;`, quotedTable)
+			WHERE table_name = $1 ORDER BY ordinal_position;`, quotedTable), nil
 	}
-	return ""
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
-// BuildCreateDatabase generates a CREATE DATABASE statement.
-func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) string {
+// BuildCreateTable generates a CREATE TABLE statement for the columns given.
+// Column types are checked against the allowedColumnTypes whitelist; names are
+// validated and quoted per engine.
+func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (string, error) {
+	if !ValidateTableName(tableName) {
+		return "", fmt.Errorf("无效的表名")
+	}
+	for _, col := range columns {
+		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
+		baseType = strings.TrimSpace(baseType)
+		if !allowedColumnTypes[baseType] {
+			return "", fmt.Errorf("不支持的列类型: %s", col.Type)
+		}
+		if !ValidateTableName(col.Name) {
+			return "", fmt.Errorf("无效的列名: %s", col.Name)
+		}
+	}
+
 	switch b.dbType {
 	case DBTypeMySQL:
-		if charset == "" {
-			charset = "utf8mb4"
+		var parts []string
+		for _, col := range columns {
+			p := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
+			if col.IsPrimary {
+				p = append(p, "PRIMARY KEY")
+			}
+			if col.AutoIncr {
+				p = append(p, "AUTO_INCREMENT")
+			}
+			if !col.Nullable {
+				p = append(p, "NOT NULL")
+			}
+			parts = append(parts, strings.Join(p, " "))
 		}
-		return fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;", name, charset)
+		return fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", tableName, strings.Join(parts, ", ")), nil
+	case DBTypePostgreSQL:
+		var parts []string
+		for _, col := range columns {
+			p := []string{fmt.Sprintf("\"%s\"", col.Name), col.Type}
+			if col.IsPrimary {
+				p = append(p, "PRIMARY KEY")
+			}
+			if col.AutoIncr {
+				p = []string{fmt.Sprintf("\"%s\"", col.Name), "SERIAL", "PRIMARY KEY"}
+			}
+			if !col.Nullable && !col.IsPrimary {
+				p = append(p, "NOT NULL")
+			}
+			parts = append(parts, strings.Join(p, " "))
+		}
+		return fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", ")), nil
+	}
+	return "", fmt.Errorf("不支持的数据库类型")
+}
+
+// BuildDropTable generates a DROP TABLE statement (validated table name).
+func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
+	if !ValidateTableName(tableName) {
+		return "", fmt.Errorf("无效的表名")
+	}
+	switch b.dbType {
+	case DBTypeMySQL:
+		return fmt.Sprintf("DROP TABLE `%s`;", tableName), nil
+	case DBTypePostgreSQL:
+		return fmt.Sprintf("DROP TABLE \"%s\";", tableName), nil
+	}
+	return "", fmt.Errorf("不支持的数据库类型")
+}
+
+// BuildCreateDatabase generates a CREATE DATABASE statement (validated name
+// and charset).
+func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, error) {
+	if !isValidDBName(name) {
+		return "", fmt.Errorf("invalid database name")
+	}
+	if charset == "" {
+		charset = defaultCharset
+	}
+	if !isValidCharset(charset) {
+		return "", fmt.Errorf("invalid charset: %s", charset)
+	}
+	switch b.dbType {
+	case DBTypeMySQL:
+		return fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;", name, charset), nil
 	case DBTypePostgreSQL:
 		encoding := "UTF8"
 		if charset == "latin1" {
 			encoding = "LATIN1"
 		}
-		return fmt.Sprintf(`CREATE DATABASE "%s" ENCODING '%s';`, name, encoding)
+		return fmt.Sprintf(`CREATE DATABASE "%s" ENCODING '%s';`, name, encoding), nil
 	}
-	return ""
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
-// BuildDropDatabase generates a DROP DATABASE statement.
-func (b *SQLBuilder) BuildDropDatabase(name string) string {
+// BuildDropDatabase generates a DROP DATABASE statement (validated name).
+func (b *SQLBuilder) BuildDropDatabase(name string) (string, error) {
+	if !isValidDBName(name) {
+		return "", fmt.Errorf("invalid database name")
+	}
 	switch b.dbType {
 	case DBTypeMySQL:
-		return fmt.Sprintf("DROP DATABASE `%s`;", name)
+		return fmt.Sprintf("DROP DATABASE `%s`;", name), nil
 	case DBTypePostgreSQL:
-		return fmt.Sprintf(`DROP DATABASE "%s";`, name)
+		return fmt.Sprintf(`DROP DATABASE "%s";`, name), nil
 	}
-	return ""
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
-// BuildCreateUser generates a CREATE USER statement.
-func (b *SQLBuilder) BuildCreateUser(username, password, host string) string {
+// BuildCreateUser generates a CREATE USER statement (validated username/host;
+// empty host falls back to localhost).
+func (b *SQLBuilder) BuildCreateUser(username, password, host string) (string, error) {
+	if !isValidUsername(username) {
+		return "", fmt.Errorf("invalid username: only alphanumeric, underscore, hyphen, dot allowed (max %d chars)", maxUsernameLen)
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	if !isValidHost(host) {
+		return "", fmt.Errorf("invalid host")
+	}
 	switch b.dbType {
 	case DBTypeMySQL:
 		return fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s';",
-			b.EscapeString(username), b.EscapeString(host), b.EscapeString(password))
+			b.EscapeString(username), b.EscapeString(host), b.EscapeString(password)), nil
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`CREATE USER "%s" WITH PASSWORD '%s';`,
-			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(password))
+			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(password)), nil
 	}
-	return ""
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
-// BuildDropUser generates a DROP USER statement.
-func (b *SQLBuilder) BuildDropUser(username, host string) string {
+// BuildDropUser generates a DROP USER statement (validated username; host is
+// checked for MySQL, where users are address-scoped).
+func (b *SQLBuilder) BuildDropUser(username, host string) (string, error) {
+	if !isValidUsername(username) {
+		return "", fmt.Errorf("invalid username")
+	}
 	switch b.dbType {
 	case DBTypeMySQL:
-		return fmt.Sprintf("DROP USER '%s'@'%s';", b.EscapeString(username), b.EscapeString(host))
+		if !isValidHost(host) {
+			return "", fmt.Errorf("invalid host")
+		}
+		return fmt.Sprintf("DROP USER '%s'@'%s';", b.EscapeString(username), b.EscapeString(host)), nil
 	case DBTypePostgreSQL:
-		return fmt.Sprintf(`DROP USER "%s";`, strings.ReplaceAll(username, `"`, `""`))
+		return fmt.Sprintf(`DROP USER "%s";`, strings.ReplaceAll(username, `"`, `""`)), nil
 	}
-	return ""
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 // ValidMySQLPrivileges is the whitelist of valid MySQL privileges
@@ -383,24 +489,28 @@ func ValidatePrivileges(dbType DBType, privileges string) string {
 	return strings.Join(valid, ", ")
 }
 
-// BuildGrant generates a GRANT statement. Privileges are validated here — an
-// invalid privilege set yields an empty string, not a statement.
-func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) string {
-	// Validate privileges
+// BuildGrant generates a GRANT statement. Database name and privileges are
+// validated here — invalid input yields an error, not a statement.
+func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) (string, error) {
+	if !isValidDBName(database) {
+		return "", fmt.Errorf("invalid database name")
+	}
+	// ValidatePrivileges is the per-engine whitelist (MySQL and PG differ, e.g.
+	// INDEX exists only for MySQL).
 	validatedPrivs := ValidatePrivileges(b.dbType, privileges)
 	if validatedPrivs == "" {
-		return "" // Invalid privileges
+		return "", fmt.Errorf("invalid privileges: %s", privileges)
 	}
 
 	switch b.dbType {
 	case DBTypeMySQL:
 		return fmt.Sprintf("GRANT %s ON %s.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			validatedPrivs, b.QuoteIdentifier(database), b.EscapeString(username), b.EscapeString(host))
+			validatedPrivs, b.QuoteIdentifier(database), b.EscapeString(username), b.EscapeString(host)), nil
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`GRANT %s ON DATABASE %s TO %s;`,
-			validatedPrivs, b.QuoteIdentifier(database), b.QuoteIdentifier(username))
+			validatedPrivs, b.QuoteIdentifier(database), b.QuoteIdentifier(username)), nil
 	}
-	return ""
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 func (b *SQLBuilder) formatValue(val interface{}) string {
