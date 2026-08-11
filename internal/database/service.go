@@ -494,28 +494,6 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 	return s.repo.DeleteInstance(ctx, instanceID)
 }
 
-// DestroyInstance removes the managed container, its data/config volumes and metadata.
-func (s *Service) DestroyInstance(ctx context.Context, instanceID int64) error {
-	v, err := s.GetInstance(ctx, instanceID)
-	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
-	}
-	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
-		return fmt.Errorf("remove database container: %w", err)
-	}
-	s.driver.Close(instanceID)
-	s.redisOps.Close(instanceID)
-	if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
-		return fmt.Errorf("remove database volume: %w", err)
-	}
-	if v.ConfigDir != "" {
-		if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, strings.TrimSuffix(v.VolumeName, "-data")+"-config"); err != nil {
-			return fmt.Errorf("remove database config volume: %w", err)
-		}
-	}
-	return s.repo.DeleteInstance(ctx, instanceID)
-}
-
 // ResetAdminPassword rotates the administrator password and returns it once.
 func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (string, error) {
 	v, err := s.GetInstance(ctx, instanceID)

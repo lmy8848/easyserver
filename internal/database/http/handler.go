@@ -34,7 +34,6 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/installs/:iid/log", instanceHandler.InstallLogStream)
 	protected.POST("/db/installs/:iid/cancel", instanceHandler.CancelInstall)
 	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
-	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
 	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
 	protected.POST("/db/instances/:iid/start", instanceHandler.StartInstance)
 	protected.POST("/db/instances/:iid/stop", instanceHandler.StopInstance)
@@ -257,19 +256,6 @@ func (h *InstanceHandler) UninstallInstance(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, gin.H{"message": "已卸载"})
-}
-
-func (h *InstanceHandler) DestroyInstance(c *gin.Context) {
-	iid, ok := parseIID(c)
-	if !ok {
-		return
-	}
-	middleware.AuditSummary(c, "销毁数据库实例数据 #"+strconv.FormatInt(iid, 10))
-	if err := h.svc.DestroyInstance(c.Request.Context(), iid); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, gin.H{"message": "实例与数据卷已销毁"})
 }
 
 func (h *InstanceHandler) ResetAdminPassword(c *gin.Context) {

@@ -268,7 +268,7 @@ func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 	}
 }
 
-func TestDestroyRemovesContainerAndVolume(t *testing.T) {
+func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewServiceWithRuntime(repo, rt)
@@ -285,8 +285,10 @@ func TestDestroyRemovesContainerAndVolume(t *testing.T) {
 		t.Fatalf("expected running instance after install, got %+v", repo.instances)
 	}
 
-	if err := svc.DestroyInstance(context.Background(), got.ID); err != nil {
-		t.Fatalf("destroy: %v", err)
+	// Uninstall with purge=true — the container, both volumes and the metadata
+	// row all go away (this is the former DestroyInstance behavior).
+	if err := svc.UninstallInstance(context.Background(), got.ID, true); err != nil {
+		t.Fatalf("uninstall(purge): %v", err)
 	}
 	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerName {
 		t.Fatalf("expected container removed, got %v", rt.removed)

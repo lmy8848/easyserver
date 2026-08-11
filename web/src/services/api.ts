@@ -553,9 +553,6 @@ export const dbServerApi = {
   uninstallInstance: (iid: number, purge = false) =>
     api.delete<ApiResponse>(`/db/instances/${iid}`, { params: { purge: purge ? '1' : undefined } }),
 
-  destroyInstance: (iid: number) =>
-    api.delete<ApiResponse>(`/db/instances/${iid}/data`),
-
   resetAdminPassword: (iid: number) =>
     api.post<ApiResponse<{ admin_password: string }>>(`/db/instances/${iid}/reset-password`),
 
