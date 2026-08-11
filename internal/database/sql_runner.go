@@ -163,7 +163,10 @@ func openDirectDB(inst *DBInstance, dbName string) (*sql.DB, error) {
 	switch inst.DBType {
 	case DBTypeMySQL:
 		driver = "mysql"
-		dsn = fmt.Sprintf("root:%s@tcp(%s)/%s?multiStatements=true&allowPublicKeyRetrieval=true&parseTime=true&loc=Local&charset=utf8mb4&timeout=5s",
+		// allowPublicKeyRetrieval 是 JDBC 参数，go-sql-driver/mysql 不识别——会被
+		// 驱动当服务器变量 SET，MySQL 8.0 报 Unknown system variable。go 驱动原生
+		// 支持 caching_sha2_password，不需要它。
+		dsn = fmt.Sprintf("root:%s@tcp(%s)/%s?multiStatements=true&parseTime=true&loc=Local&charset=utf8mb4&timeout=5s",
 			inst.AdminPassword, addr, dbName)
 	case DBTypePostgreSQL:
 		driver = "pgx"
