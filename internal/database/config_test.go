@@ -69,7 +69,7 @@ func configInstance(dbType DBType, name string, port int) *DBInstance {
 	return &DBInstance{
 		DBType: dbType, Version: "8.0", ContainerEngine: "docker", Image: "docker.io/mysql:8.0",
 		ContainerName: name, VolumeName: name + "-data", BindAddress: "127.0.0.1",
-		Port: port, ContainerPort: port, AdminPassword: "pw", Status: "running",
+		Port: port, AdminPassword: "pw", Status: "running",
 	}
 }
 

@@ -99,8 +99,7 @@ func isNumberType(dbType DBType, rt string) bool {
 // driverSQLRunner runs SQL over a direct database connection through the
 // container's mapped host port. It is the only SQL channel for
 // MySQL/PostgreSQL: native result types, parameter binding and connection-pool
-// reuse. Redis has no driver in scope; instances with a broken port mapping
-// (container_port = 0) surface a clear error instead of falling back.
+// reuse. Redis has no driver in scope.
 type driverSQLRunner struct {
 	// pools is keyed by (instance, database): PostgreSQL cannot reference
 	// tables in another database, so each database the panel operates on needs
@@ -132,9 +131,6 @@ func (r *driverSQLRunner) Close(instanceID int64) {
 }
 
 func (r *driverSQLRunner) poolFor(ctx context.Context, inst *DBInstance, dbName string) (*sql.DB, error) {
-	if inst.ContainerPort <= 0 {
-		return nil, fmt.Errorf("实例端口映射异常（container_port=%d），无法直连，请改端口重建", inst.ContainerPort)
-	}
 	key := poolKey{instanceID: inst.ID, db: dbName}
 
 	r.mu.Lock()

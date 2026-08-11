@@ -21,14 +21,14 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 
 // instanceColumns lists database_instances columns in the exact order scanInstance
 // expects. Keeping it in one place avoids query/scan drift.
-const instanceColumns = `id, db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, container_port, admin_password, status, created_at`
+const instanceColumns = `id, db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, admin_password, status, created_at`
 
 // scanInstance scans one database_instance row/query result into a DBInstance.
 // It works for both *sql.Row and *sql.Rows.
 func scanInstance(row interface{ Scan(...any) error }) (DBInstance, error) {
 	var v DBInstance
 	err := row.Scan(&v.ID, &v.DBType, &v.Version, &v.ContainerEngine, &v.Image, &v.ContainerName, &v.VolumeName,
-		&v.ConfigDir, &v.BindAddress, &v.Port, &v.ContainerPort, &v.AdminPassword, &v.Status, &v.CreatedAt)
+		&v.ConfigDir, &v.BindAddress, &v.Port, &v.AdminPassword, &v.Status, &v.CreatedAt)
 	return v, err
 }
 
@@ -77,10 +77,10 @@ func (r *sqliteRepo) CountInstancesByDBTypeAndVersion(ctx context.Context, dbTyp
 
 func (r *sqliteRepo) CreateInstance(ctx context.Context, v *DBInstance) (int64, error) {
 	result, err := r.db.ExecContext(ctx, `INSERT INTO database_instances
-		(db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, container_port, admin_password, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, admin_password, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		v.DBType, v.Version, v.ContainerEngine, v.Image, v.ContainerName, v.VolumeName,
-		v.ConfigDir, v.BindAddress, v.Port, v.ContainerPort, v.AdminPassword, v.Status)
+		v.ConfigDir, v.BindAddress, v.Port, v.AdminPassword, v.Status)
 	if err != nil {
 		return 0, err
 	}

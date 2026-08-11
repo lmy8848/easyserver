@@ -70,8 +70,8 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 }
 
 // runnerFor returns the SQL channel for an instance. All SQL runs over the
-// direct driver connection; broken port mappings (container_port = 0) and Redis
-// surface as clear errors from the driver channel instead of falling back.
+// direct driver connection; Redis surfaces as clear errors from the channel
+// instead of falling back.
 func (s *Service) runnerFor(inst *DBInstance) SQLRunner {
 	return s.driver
 }
@@ -206,7 +206,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	// an in-flight install of the same DB type happens synchronously in the task
 	// executor; if that rejects the request, undo the just-written row.
 	row := &DBInstance{
-		DBType: dbType, Version: req.Version, Port: port, ContainerPort: containerPortForType(dbType), Status: "installing",
+		DBType: dbType, Version: req.Version, Port: port, Status: "installing",
 		ContainerEngine: engineName, Image: req.Image, ContainerName: containerName,
 		VolumeName: volumeName, ConfigDir: spec.ConfigDir, BindAddress: bindAddress, AdminPassword: password,
 	}

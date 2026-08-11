@@ -46,9 +46,6 @@ func (r *redisRunner) Close(instanceID int64) {
 }
 
 func (r *redisRunner) clientFor(ctx context.Context, inst *DBInstance, db int) (*redis.Client, error) {
-	if inst.ContainerPort <= 0 {
-		return nil, fmt.Errorf("实例端口映射异常（container_port=%d），无法直连，请改端口重建", inst.ContainerPort)
-	}
 	key := redisPoolKey{instanceID: inst.ID, db: db}
 
 	r.mu.Lock()

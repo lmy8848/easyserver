@@ -15,7 +15,6 @@ func redisTestInstance() *DBInstance {
 		ID:            1,
 		DBType:        DBTypeRedis,
 		Port:          6379,
-		ContainerPort: 6379,
 		AdminPassword: "secret",
 	}
 }
@@ -151,11 +150,14 @@ func TestRedisScanKeysFillsMeta(t *testing.T) {
 	}
 }
 
-func TestRedisBrokenMapping(t *testing.T) {
-	inst := &DBInstance{ID: 9, DBType: DBTypeRedis, Port: 6379, ContainerPort: 0}
+func TestRedisDialFailureSurfacesConnectionError(t *testing.T) {
+	// A dead container / wrong mapping surfaces as a connection error from the
+	// first command (clientFor pings on first use) — the guard that used to sit
+	// on container_port is gone, the dial error is the signal now.
+	inst := &DBInstance{ID: 9, DBType: DBTypeRedis, Port: 1}
 	runner := newRedisRunner()
 	_, err := runner.ListDBs(context.Background(), inst)
 	if err == nil {
-		t.Fatal("expected error for container_port=0 instance")
+		t.Fatal("expected dial error for unreachable instance")
 	}
 }

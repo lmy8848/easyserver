@@ -15,11 +15,10 @@ const (
 // config dir, a fixed image and a fixed runtime.
 type DBInstance struct {
 	ID              int64  `json:"id"`
-	DBType          DBType `json:"db_type"`        // mysql, postgresql, redis
-	Version         string `json:"version"`        // 5.7, 8.0, 13, 15, etc.
-	Port            int    `json:"port"`           // host mapping port, chosen by the user
-	ContainerPort   int    `json:"container_port"` // port the engine listens on inside the container — always the engine default; 0 = mapping broken/unknown
-	Status          string `json:"status"`         // running, stopped, unhealthy
+	DBType          DBType `json:"db_type"` // mysql, postgresql, redis
+	Version         string `json:"version"` // 5.7, 8.0, 13, 15, etc.
+	Port            int    `json:"port"`    // host mapping port, chosen by the user
+	Status          string `json:"status"`  // running, stopped, unhealthy
 	CreatedAt       string `json:"created_at"`
 	ContainerEngine string `json:"container_engine"`
 	Image           string `json:"image"`

@@ -22,7 +22,7 @@ func TestDriverSQLRunnerStructuralTypes(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, ContainerPort: 3306, AdminPassword: "secret"}
+	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, AdminPassword: "secret"}
 	runner := &driverSQLRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "mydb"}: db}}
 
 	// sqlmock cannot report column type names (DatabaseTypeName is always empty),
@@ -99,7 +99,7 @@ func TestDriverSQLRunnerParameterBinding(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &DBInstance{ID: 7, DBType: DBTypePostgreSQL, Port: 5432, ContainerPort: 5432, AdminPassword: "secret"}
+	inst := &DBInstance{ID: 7, DBType: DBTypePostgreSQL, Port: 5432, AdminPassword: "secret"}
 	runner := &driverSQLRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "pg"}: db}}
 
 	mock.ExpectExec("INSERT INTO t").
@@ -122,7 +122,7 @@ func TestDriverSQLRunnerErrorPassthrough(t *testing.T) {
 	}
 	defer db.Close()
 
-	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, ContainerPort: 3306, AdminPassword: "secret"}
+	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, AdminPassword: "secret"}
 	runner := &driverSQLRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "mydb"}: db}}
 
 	mock.ExpectQuery("SELECT 1").WillReturnError(errors.New("Error 1062: Duplicate entry 'x' for key 'PRIMARY'"))
@@ -133,23 +133,13 @@ func TestDriverSQLRunnerErrorPassthrough(t *testing.T) {
 	}
 }
 
-func TestDriverSQLRunnerBrokenMapping(t *testing.T) {
-	// container_port = 0 means the mapping is broken: no direct connection.
-	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3307, ContainerPort: 0}
-	runner := newDriverSQLRunner()
-	_, err := runner.Query(context.Background(), inst, "mydb", "SELECT 1")
-	if err == nil {
-		t.Fatal("expected error for container_port=0 instance")
-	}
-}
-
 func TestDriverSQLRunnerPingFailure(t *testing.T) {
 	// sql.Open does not connect; the first query must surface a dial failure as
 	// a clear "cannot connect" error, not a bare driver error. sqlmock needs the
 	// MonitorPingsOption to intercept Ping; without a mock db the driver tries a
 	// real dial and fails — which is exactly the path under test.
 	runner := newDriverSQLRunner()
-	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 1, ContainerPort: 3306, AdminPassword: "secret"}
+	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 1, AdminPassword: "secret"}
 	_, err := runner.Query(context.Background(), inst, "mydb", "SELECT 1")
 	if err == nil || !strings.Contains(err.Error(), "无法连接数据库实例") {
 		t.Fatalf("got %v, want 'cannot connect' error", err)
@@ -158,7 +148,7 @@ func TestDriverSQLRunnerPingFailure(t *testing.T) {
 
 func TestDriverSQLRunnerCloseDropsPool(t *testing.T) {
 	runner := newDriverSQLRunner()
-	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, ContainerPort: 3306, AdminPassword: "secret"}
+	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, AdminPassword: "secret"}
 
 	// After Close the pool is gone: a query no longer finds a cached pool and
 	// must not panic (it will try to dial a real MySQL, which fails — assert the
