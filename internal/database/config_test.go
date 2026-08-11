@@ -14,16 +14,18 @@ import (
 
 // fakeConfigDriver is a scripted SQLRunner for config tests.
 type fakeConfigDriver struct {
-	mysqlVars    map[string]string // SHOW VARIABLES 返回值
+	mysqlVars    map[string]string // SHOW GLOBAL VARIABLES 返回值
 	mysqlVersion string            // SELECT VERSION()
 	pgValues     map[string]string // name → setting（pg_settings 读配置）
 	pgContext    map[string]string // name → context（postmaster 判断）
 	execs        []string          // 记录的 Exec SQL
+	queries      []string          // 记录的 Query SQL
 }
 
 func (f *fakeConfigDriver) Query(_ context.Context, _ *DBInstance, _, sql string, args ...any) (*QueryResult, error) {
+	f.queries = append(f.queries, sql)
 	switch {
-	case strings.HasPrefix(sql, "SHOW VARIABLES"):
+	case strings.HasPrefix(sql, "SHOW"):
 		rows := make([][]any, 0, len(f.mysqlVars))
 		for k, v := range f.mysqlVars {
 			rows = append(rows, []any{k, v})
@@ -101,6 +103,17 @@ func TestGetConfigReadsRuntimeValues(t *testing.T) {
 	}
 	if len(view.Meta) == 0 {
 		t.Fatal("meta must be embedded for the editor")
+	}
+	// 读配置必须走 GLOBAL 作用域：SET PERSIST 写全局值，会话作用域在长连接上读到
+	// 旧值（保存后刷新"恢复原值"的根因），且 max_connections 等纯全局变量不受影响。
+	found := false
+	for _, q := range f.queries {
+		if q == "SHOW GLOBAL VARIABLES" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("config read must use SHOW GLOBAL VARIABLES, got %v", f.queries)
 	}
 }
 

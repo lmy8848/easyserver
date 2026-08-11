@@ -32,7 +32,7 @@ func mysqlConfigParams() []ParamMeta {
 		{Key: "max_connections", Label: "最大连接数", Type: "number", Description: "允许的最大并发连接数"},
 		{Key: "max_allowed_packet", Label: "最大数据包", Type: "number", Unit: "MB", Description: "单个数据包最大大小"},
 		{Key: "default_storage_engine", Label: "默认存储引擎", Type: "string", Description: "默认存储引擎", Options: []string{"InnoDB", "MyISAM", "MEMORY"}},
-		{Key: "innodb_buffer_pool_size", Label: "InnoDB 缓冲池", Type: "number", Unit: "MB/GB", Description: "InnoDB 缓冲池大小，生产建议内存的 70-80%"},
+		{Key: "innodb_buffer_pool_size", Label: "InnoDB 缓冲池", Type: "number", Unit: "MB", Description: "InnoDB 缓冲池大小，生产建议内存的 70-80%"},
 		{Key: "tmp_table_size", Label: "临时表大小", Type: "number", Unit: "MB", Description: "内存临时表最大大小"},
 		{Key: "max_heap_table_size", Label: "堆表最大大小", Type: "number", Unit: "MB", Description: "用户内存表最大大小"},
 		{Key: "sort_buffer_size", Label: "排序缓冲区", Type: "number", Unit: "KB", Description: "每个会话排序缓冲区"},
@@ -49,12 +49,15 @@ func postgresConfigParams() []ParamMeta {
 	return []ParamMeta{
 		{Key: "port", Label: "监听端口", Type: "number", Description: "PostgreSQL 服务监听端口。修改后保存即重建容器生效"},
 		{Key: "max_connections", Label: "最大连接数", Type: "number", Description: "允许的最大并发连接数"},
-		{Key: "shared_buffers", Label: "共享缓冲区", Type: "number", Unit: "MB/GB", Description: "共享缓冲区大小，生产建议内存的 25%"},
-		{Key: "work_mem", Label: "工作内存", Type: "number", Unit: "MB/KB", Description: "每个排序/哈希操作的内存"},
-		{Key: "maintenance_work_mem", Label: "维护工作内存", Type: "number", Unit: "MB/GB", Description: "VACUUM/CREATE INDEX 等维护操作内存"},
+		// PG 内存参数按 string 输入：ALTER SYSTEM 接受带单位的引号串（'128MB'），
+		// 无单位会被按 kB 解析（shared_buffers 为 8kB 块）——不能像 MySQL 那样裸
+		// 字节转换，用户在输入框直接写"128MB"最不易错。
+		{Key: "shared_buffers", Label: "共享缓冲区", Type: "string", Unit: "MB", Description: "共享缓冲区大小，生产建议内存的 25%"},
+		{Key: "work_mem", Label: "工作内存", Type: "string", Unit: "KB", Description: "每个排序/哈希操作的内存"},
+		{Key: "maintenance_work_mem", Label: "维护工作内存", Type: "string", Unit: "MB", Description: "VACUUM/CREATE INDEX 等维护操作内存"},
 		{Key: "wal_level", Label: "WAL 级别", Type: "string", Options: []string{"minimal", "replica", "logical"}, Description: "Write-Ahead 日志级别"},
-		{Key: "max_wal_size", Label: "最大 WAL 大小", Type: "number", Unit: "MB/GB", Description: "自动检查点之间最大 WAL 大小"},
-		{Key: "min_wal_size", Label: "最小 WAL 大小", Type: "number", Unit: "MB/GB", Description: "WAL 回收的最小大小"},
+		{Key: "max_wal_size", Label: "最大 WAL 大小", Type: "string", Unit: "MB", Description: "自动检查点之间最大 WAL 大小"},
+		{Key: "min_wal_size", Label: "最小 WAL 大小", Type: "string", Unit: "MB", Description: "WAL 回收的最小大小"},
 		{Key: "log_destination", Label: "日志目标", Type: "string", Options: []string{"stderr", "csvlog", "syslog"}, Description: "日志输出目标"},
 		{Key: "logging_collector", Label: "日志收集器", Type: "string", Options: []string{"on", "off"}, Description: "是否启用日志收集器"},
 		{Key: "ssl", Label: "SSL", Type: "string", Options: []string{"on", "off"}, Description: "是否启用 SSL"},
@@ -65,7 +68,7 @@ func redisConfigParams() []ParamMeta {
 	return []ParamMeta{
 		{Key: "port", Label: "监听端口", Type: "number", Description: "Redis 服务监听端口。修改后保存即重建容器生效"},
 		{Key: "protected-mode", Label: "保护模式", Type: "string", Options: []string{"yes", "no"}, Description: "无密码时禁止外部访问"},
-		{Key: "maxmemory", Label: "最大内存", Type: "number", Unit: "mb/gb", Description: "0 表示不限制"},
+		{Key: "maxmemory", Label: "最大内存", Type: "number", Unit: "MB", Description: "0 表示不限制"},
 		{Key: "maxmemory-policy", Label: "内存淘汰策略", Type: "string", Options: []string{"noeviction", "allkeys-lru", "volatile-lru", "allkeys-random", "volatile-random", "volatile-ttl"}, Description: "内存满时的 key 淘汰策略"},
 		{Key: "appendonly", Label: "AOF 持久化", Type: "string", Options: []string{"yes", "no"}, Description: "是否启用 AOF 持久化"},
 		{Key: "appendfsync", Label: "AOF 同步策略", Type: "string", Options: []string{"always", "everysec", "no"}, Description: "AOF 文件同步策略"},
@@ -119,7 +122,11 @@ func (s *Service) readConfigValues(ctx context.Context, v *DBInstance) (map[stri
 }
 
 func (s *Service) readMySQLConfig(ctx context.Context, v *DBInstance) (map[string]string, error) {
-	res, err := s.driver.Query(ctx, v, systemDBName(v.DBType), "SHOW VARIABLES")
+	// 必须读 GLOBAL 作用域：SET PERSIST 写的是全局值，而 SHOW VARIABLES（会话作用域）
+	// 在长连接上会返回会话建立时的旧值——保存后刷新"恢复原值"正是这个原因
+	// （wait_timeout/sort_buffer_size 等会话级变量；max_connections 等纯全局变量
+	// 不受影响，所以只有部分参数回退）。
+	res, err := s.driver.Query(ctx, v, systemDBName(v.DBType), "SHOW GLOBAL VARIABLES")
 	if err != nil {
 		return nil, err
 	}

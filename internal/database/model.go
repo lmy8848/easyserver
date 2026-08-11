@@ -189,18 +189,19 @@ type DBConfig struct {
 	Sections []ConfigSection `json:"sections"`
 }
 
-// ParamMeta defines UI metadata for common configuration parameters. Values are
 // ParamMeta is the UI metadata for one config param. Type reflects the engine's
 // actual variable type: "number" params are numeric variables whose SET value must
-// be a bare literal (MySQL 1232 otherwise), "string" params are quoted. Key is the
-// actual engine parameter name (zero conversion: the same string goes into SHOW
+// be a bare literal (MySQL 1232 otherwise), "string" params are quoted. For byte-size
+// number params (MySQL 内存参数 / Redis maxmemory), Unit is a canonical token (KB/MB/GB)
+// the front-end uses to render a unit dropdown and convert to bytes on save. Key is
+// the actual engine parameter name (zero conversion: the same string goes into SHOW
 // VARIABLES filter / SET PERSIST / ALTER SYSTEM / CONFIG SET).
 type ParamMeta struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
 	Type        string   `json:"type"`            // "number" | "string"
-	Unit        string   `json:"unit"`            // MB, GB, etc.
+	Unit        string   `json:"unit"`            // byte-size token for size params, display label otherwise
 	Options     []string `json:"options,omitempty"` // select options (presence switches the editor to a Select)
 }
 
