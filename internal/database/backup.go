@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"easyserver/internal/infra/task"
@@ -100,11 +99,13 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	out, err := s.runInVersion(ctx, instance, "mysqldump", "--single-transaction", "--routines", "--triggers", backup.DatabaseName)
-	if err != nil {
+	// 容器内写文件（-r），再 docker cp 出来——避免 dump 走 stdout 字符串管道
+	// （大库截断/二进制损坏风险，见 runInVersion 注释）。
+	target := "/tmp/easyserver-backup.sql"
+	if _, err := s.runInVersion(ctx, instance, "mysqldump", "-r", target, "--single-transaction", "--routines", "--triggers", backup.DatabaseName); err != nil {
 		return fmt.Errorf("mysqldump failed: %w", err)
 	}
-	return os.WriteFile(backup.FilePath, []byte(out), 0644)
+	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
 }
 
 func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
@@ -112,11 +113,12 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	out, err := s.runInVersion(ctx, instance, "pg_dump", "-Fc", backup.DatabaseName)
-	if err != nil {
+	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件再 cp 出来。
+	target := "/tmp/easyserver-backup.dump"
+	if _, err := s.runInVersion(ctx, instance, "pg_dump", "-Fc", "-f", target, backup.DatabaseName); err != nil {
 		return fmt.Errorf("pg_dump failed: %w", err)
 	}
-	return os.WriteFile(backup.FilePath, []byte(out), 0644)
+	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
 }
 
 func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
@@ -242,7 +244,8 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
-	if _, err := s.runInVersion(ctx, instance, "sh", "-c", "mysql "+shellQuote(backup.DatabaseName)+" < "+target); err != nil {
+	// mysql 客户端执行文件：库名走位置参数（--execute 分支），不拼 shell —— 无注入面。
+	if _, err := s.runInVersion(ctx, instance, "mysql", "--execute=source "+target, backup.DatabaseName); err != nil {
 		return fmt.Errorf("mysql restore failed: %w", err)
 	}
 	return nil
@@ -257,7 +260,9 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
-	if _, err := s.runInVersion(ctx, instance, "pg_restore", "-d", backup.DatabaseName, "-c", target); err != nil {
+	// --single-transaction：整个恢复包在一个事务，中途失败自动 ROLLBACK，
+	// 数据库回到恢复前状态——消除"半恢复"。
+	if _, err := s.runInVersion(ctx, instance, "pg_restore", "--single-transaction", "-d", backup.DatabaseName, "-c", target); err != nil {
 		return fmt.Errorf("pg_restore failed: %s", SanitizeSQLError(err.Error()))
 	}
 	return nil
@@ -268,10 +273,20 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
+	// AOF 开启时 Redis 启动忽略 RDB（AOF 优先），恢复 RDB 会静默失效——直接拒绝。
+	if aof, err := s.redisFor().ConfigGet(ctx, instance, "appendonly"); err == nil && aof == "yes" {
+		return fmt.Errorf("Redis 已开启 AOF（appendonly=yes），RDB 恢复会被忽略；请先在配置中关闭 AOF 再恢复")
+	}
+	// 覆盖前先留底原 dump.rdb，恢复失败能回滚。
+	rollback := backup.FilePath + ".pre-restore"
+	if err := s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, "/data/dump.rdb", rollback); err != nil {
+		log.Printf("backup existing dump.rdb for rollback failed (continuing): %v", err)
+	}
 	if err := s.runtime.Stop(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("stop Redis failed: %w", err)
 	}
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, "/data/dump.rdb"); err != nil {
+		_ = s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName)
 		return fmt.Errorf("copy Redis backup: %w", err)
 	}
 	if err := s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
@@ -326,7 +341,4 @@ func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []st
 		return append([]string{args[0], "-U", "postgres"}, args[1:]...)
 	}
 	return args
-}
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

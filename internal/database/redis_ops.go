@@ -231,6 +231,20 @@ func (r *redisRunner) ConfigGetAll(ctx context.Context, inst *DBInstance) (map[s
 	return c.ConfigGet(ctx, "*").Result()
 }
 
+// ConfigGet reads one config parameter (CONFIG GET name). Used by restoreRedis
+// to check appendonly before overwriting dump.rdb.
+func (r *redisRunner) ConfigGet(ctx context.Context, inst *DBInstance, name string) (string, error) {
+	c, err := r.clientFor(ctx, inst, 0)
+	if err != nil {
+		return "", err
+	}
+	vals, err := c.ConfigGet(ctx, name).Result()
+	if err != nil {
+		return "", err
+	}
+	return vals[name], nil
+}
+
 // ConfigSet applies one config parameter online (CONFIG SET).
 func (r *redisRunner) ConfigSet(ctx context.Context, inst *DBInstance, name, value string) error {
 	c, err := r.clientFor(ctx, inst, 0)
