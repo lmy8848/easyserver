@@ -52,10 +52,9 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	}
 	backup.ID = id
 
-	// 备份在内存任务里执行（taskMgr 去重 + 并发 + panic 恢复，无超时——大库慢
-	// 盘不受时限）。DB 行状态是内存任务的镜像：任务结束写终态，进程崩溃则靠
-	// 启动清扫把 running 标 failed。
-	key := fmt.Sprintf("backup-%d", id)
+	// 备份在内存任务里执行。key 按 (instance, db) 固定 —— taskMgr 同 key 去重，
+	// 天然保证同一个库同一时间只有一个备份在跑；重复点击会收到 ErrKeyBusy。
+	key := fmt.Sprintf("backup-%d-%s", instanceID, dbName)
 	if _, err := s.taskMgr.Start(key, task.Options{}, func(ctx context.Context) error {
 		return s.executeBackup(ctx, backup, dbType)
 	}); err != nil {
@@ -293,6 +292,25 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 		return fmt.Errorf("start Redis failed: %w", err)
 	}
 	return nil
+}
+
+// WaitBackup 返回某备份任务的完成信号（backupID → task Done channel）。
+// 成功完成的任务会被 taskMgr 即清（Get 返回 !ok），此时返回已关闭的 channel，
+// 调用方立即去读 DB 行的终态；running 任务返回其 Done，任务结束即关闭。
+// 供 SSE 状态流使用，替代轮询 DB 行。
+func (s *Service) WaitBackup(backupID int64) (<-chan struct{}, error) {
+	backup, err := s.repo.GetBackup(context.Background(), backupID)
+	if err != nil {
+		return nil, err
+	}
+	key := fmt.Sprintf("backup-%d-%s", backup.DBInstanceID, backup.DatabaseName)
+	tk, ok := s.taskMgr.Get(key)
+	if !ok {
+		done := make(chan struct{})
+		close(done)
+		return done, nil
+	}
+	return tk.Done(), nil
 }
 
 // SweepOrphanBackups 把 DB 里卡在 running 的备份行收敛为 failed —— 这些行的内存

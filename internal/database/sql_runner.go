@@ -215,11 +215,14 @@ func (r *driverSQLRunner) Query(ctx context.Context, inst *DBInstance, dbName, s
 		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}
-		// Numeric columns may come back as []byte (e.g. DECIMAL) — turn them into
-		// strings so JSON carries "123.45", not a base64 blob, while the column
-		// category still says "number" for right-aligned rendering.
+		// Text columns come back as []byte (driver scans VARCHAR/TEXT into bytes).
+		// The HTTP layer JSON-encodes results, and encoding/json turns []byte into
+		// base64 — a VARCHAR "kairo" would read back as "a2Fpcm8=". Convert every
+		// non-blob cell to string so JSON carries the literal text. Numeric DECIMAL
+		// cells keep their existing []byte→string conversion too (already covered
+		// here since the category is "number").
 		for i, v := range vals {
-			if b, ok := v.([]byte); ok && cols[i].Type == "number" {
+			if b, ok := v.([]byte); ok && cols[i].Type != "blob" {
 				vals[i] = string(b)
 			}
 		}

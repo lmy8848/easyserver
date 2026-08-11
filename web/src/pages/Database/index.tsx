@@ -14,6 +14,19 @@ import ConfigTab from './ConfigTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
 import { DB_TYPE_TABS } from './types';
 
+// antd 校验失败抛的是普通对象（{ errorFields }），不是 Error —— 统一从这里
+// 提取可读消息（如"请输入 xxx"），避免整对象 toString 成 [object Object]。
+function errMsg(err: unknown, fallback = '操作失败'): string {
+  if (err instanceof Error) return err.message;
+  const e = err as any;
+  if (Array.isArray(e?.errorFields)) {
+    const first = e.errorFields[0]?.errors?.[0];
+    if (typeof first === 'string') return first;
+  }
+  if (typeof e?.message === 'string') return e.message;
+  return fallback;
+}
+
 export default function DatabasePage() {
   // ===== Navigation state =====
   // The database type is a static front-end Tab (MySQL/PostgreSQL/Redis); the instance
@@ -149,9 +162,16 @@ export default function DatabasePage() {
       const describeData = describeRes.data?.data;
       const columns = describeData?.columns || [];
       const primaryKey = describeData?.primary_key || columns[0]?.name || 'id';
+      // 保留后端的列完整信息（类型/自增/可空/默认值），记录弹窗按列渲染输入。
       setTableInfo({
         primaryKey,
-        columns: columns.map((c: any) => ({ name: c.name, type: c.type, key: c.is_primary_key ? 'PRI' : '' })),
+        collation: describeData?.collation || '',
+        columns: columns.map((c: any) => ({
+          name: c.name, type: c.type,
+          is_primary_key: !!c.is_primary_key, is_auto_incr: !!c.is_auto_incr,
+          has_default: !!c.has_default, default: c.default || '',
+          is_nullable: !!c.is_nullable,
+        })),
       });
     } catch (error) {
       console.error('Failed to fetch table data:', error);
@@ -170,16 +190,6 @@ export default function DatabasePage() {
       setBackups([]);
     } finally { setBackupsLoading(false); }
   };
-
-  // While a backup runs (a row is "running"), poll the backup list so it flips to
-  // success/failed on completion without a manual refresh.
-  useEffect(() => {
-    if (!selectedVersion || !selectedDatabase) return;
-    if (!backups.some(b => b.status === 'running')) return;
-    const timer = setInterval(() => fetchBackups(selectedVersion.id, selectedDatabase.name), 2000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backups, selectedVersion, selectedDatabase]);
 
   const fetchDBConfig = async (serverName?: string) => {
     void serverName;
@@ -291,7 +301,7 @@ export default function DatabasePage() {
       fetchInstances(server.db_type);
       // The new "installing" row auto-selects in the header; its log panel
       // (SSE) renders inline below.
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -422,7 +432,7 @@ export default function DatabasePage() {
       message.success('数据库创建成功');
       setDbModalVisible(false);
       fetchDatabases(version.id);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -449,7 +459,7 @@ export default function DatabasePage() {
       message.success('用户创建成功');
       setUserModalVisible(false);
       fetchUsers(version.id);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -480,7 +490,7 @@ export default function DatabasePage() {
       message.success('授权成功');
       setGrantVisible(false);
       fetchUsers(version.id);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -539,18 +549,20 @@ export default function DatabasePage() {
       if (selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
         fetchTableData(version.id, selectedDatabase.name, selectedTable);
       }
-    } catch (error: unknown) { setSqlResult({ success: false, error: (error instanceof Error ? error.message : String(error)) }); }
+    } catch (error: unknown) { setSqlResult({ success: false, error: errMsg(error, '执行失败') }); }
     finally { setSqlLoading(false); }
   };
 
-  const handleCreateBackup = async () => {
+  const handleCreateBackup = async (dbName: string) => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version) return;
+    if (!version) return;
     setBackupCreating(true);
     try {
-      await dbServerApi.createBackup(version.id, selectedDatabase.name);
+      await dbServerApi.createBackup(version.id, dbName);
       message.success('备份已开始，请稍候...');
-      setTimeout(() => fetchBackups(version.id, selectedDatabase.name), 2000);
+      // 立即拉一次把 running 行带进 state；弹窗里的 SSE（/db/backups/:id/status）
+      // 会等终态到达自动刷新，无需 setTimeout 延迟轮询。
+      fetchBackups(version.id, dbName);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '备份失败')); }
     finally { setBackupCreating(false); }
   };
@@ -615,12 +627,19 @@ export default function DatabasePage() {
     setCreateTableLoading(true);
     try {
       const values = await createForm.validateFields();
-      await dbServerApi.createTable(version.id, selectedDatabase.name, { name: values.tableName, columns: values.columns || [] });
+      // PG 无表级字符集（编码在数据库级），排序规则默认留空继承；MySQL 默认 utf8mb4_0900_ai_ci。
+      const isPg = activeDBTypeInfo?.db_type === 'postgresql';
+      await dbServerApi.createTable(version.id, selectedDatabase.name, {
+        name: values.tableName,
+        columns: values.columns || [],
+        charset: isPg ? 'UTF8' : (values.charset || 'utf8mb4'),
+        collation: isPg ? (values.collation || '') : (values.collation || 'utf8mb4_0900_ai_ci'),
+      });
       message.success('表创建成功');
       setCreateTableVisible(false);
       createForm.resetFields();
       fetchTables(version.id, selectedDatabase.name);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setCreateTableLoading(false); }
   };
 
@@ -647,6 +666,13 @@ export default function DatabasePage() {
     setEditingRecord(record);
     const values: any = {};
     (tableData?.headers || []).forEach(h => { values[h] = record[h]; });
+    // 布尔列存的值可能是 1/0 或 true/false（取决于引擎），归一成 Select 的选项值。
+    (tableInfo?.columns || []).forEach(c => {
+      if (/^(BOOLEAN|BOOL|BIT)\b/i.test(c.type) && values[c.name] !== undefined) {
+        const v = values[c.name];
+        values[c.name] = (v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true') ? '1' : '0';
+      }
+    });
     recordForm.setFieldsValue(values);
     setRecordModalVisible(true);
   };
@@ -657,6 +683,10 @@ export default function DatabasePage() {
     setRecordSaving(true);
     try {
       const values = await recordForm.validateFields();
+      // 自增列由数据库生成，不提交（后端 BuildInsert 不跳过 nil 自增值）。
+      (tableInfo?.columns || [])
+        .filter(c => c.is_auto_incr)
+        .forEach(c => { delete values[c.name]; });
       if (editingRecord) {
         const pk = tableInfo?.primaryKey || tableData?.headers?.[0] || 'id';
         const pkVal = editingRecord[pk];
@@ -670,7 +700,7 @@ export default function DatabasePage() {
       }
       setRecordModalVisible(false);
       fetchTableData(version.id, selectedDatabase.name, selectedTable, tablePage);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setRecordSaving(false); }
   };
 
@@ -729,14 +759,10 @@ export default function DatabasePage() {
       onOpenEditModal: openEditModal,
       onSaveRecord: handleSaveRecord,
       onDeleteRecord: handleDeleteRecord,
+      busy,
       sqlInput, sqlResult, sqlLoading,
       onSqlInputChange: setSqlInput,
       onExecuteSQL: handleExecuteSQL,
-      backups, backupsLoading, backupCreating, busy,
-      onCreateBackup: handleCreateBackup,
-      onDownloadBackup: handleDownloadBackup,
-      onRestoreBackup: handleRestoreBackup,
-      onDeleteBackup: handleDeleteBackup,
     } : null;
 
     // Action buttons live in the inner tab bar's extra area — they follow the
@@ -859,6 +885,13 @@ export default function DatabasePage() {
                       dbForm={dbForm}
                       onCreateDB={handleCreateDB}
                       tableExplorer={tableExplorer}
+                      backups={backups}
+                      backupsLoading={backupsLoading}
+                      backupCreating={backupCreating}
+                      onFetchBackups={(dbName) => selectedVersion && fetchBackups(selectedVersion.id, dbName)}
+                      onCreateBackup={handleCreateBackup}                      onDownloadBackup={handleDownloadBackup}
+                      onRestoreBackup={handleRestoreBackup}
+                      onDeleteBackup={handleDeleteBackup}
                     />,
               },
               {

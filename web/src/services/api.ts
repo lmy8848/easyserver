@@ -603,10 +603,10 @@ export const dbServerApi = {
     api.get<ApiResponse<Array<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`),
 
   describeTable: (instanceId: number, dbName: string, table: string) =>
-    api.get<ApiResponse<{ table_name: string; primary_key: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
+    api.get<ApiResponse<{ table_name: string; primary_key: string; collation: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
 
   // Table management
-  createTable: (instanceId: number, dbName: string, data: { name: string; columns: Array<{ name: string; type: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean; unique?: boolean; default_value?: string }> }) =>
+  createTable: (instanceId: number, dbName: string, data: { name: string; charset?: string; collation?: string; columns: Array<{ name: string; type: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean; unique?: boolean; default_value?: string }> }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, data),
 
   dropTable: (instanceId: number, dbName: string, table: string) =>

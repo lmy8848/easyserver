@@ -92,6 +92,15 @@ func isValidCharset(charset string) bool {
 	return validCharsets[charset]
 }
 
+// collationRegexp — 排序规则名白名单，直接拼进 SQL（MySQL: utf8mb4_unicode_ci；
+// PostgreSQL: locale 如 C.UTF-8 / zh_CN.UTF-8，含点与连字符）。字母数字下划线
+// 点连字符，最长 64。
+var collationRegexp = regexp.MustCompile(`^[a-zA-Z0-9_.\-]{1,64}$`)
+
+func isValidCollation(collation string) bool {
+	return collationRegexp.MatchString(collation)
+}
+
 // allowedColumnTypes is the whitelist of column types BuildCreateTable accepts —
 // a union of the MySQL and PostgreSQL type sets (SERIAL/UUID/JSONB/BYTEA are PG,
 // YEAR/TINYINT/DATETIME are MySQL). Each engine rejects what it doesn't know;

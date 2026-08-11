@@ -73,6 +73,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
 	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
 	protected.GET("/db/backups/:bid/restore-status", backupHandler.RestoreStatus)
+	protected.GET("/db/backups/:bid/status", backupHandler.BackupStatusStream)
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
 
 	// Redis key browser (instance-scoped, addressed by logical DB index)
@@ -641,8 +642,10 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	}
 
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		Columns []struct {
+		Name      string `json:"name" binding:"required"`
+		Charset   string `json:"charset"`
+		Collation string `json:"collation"`
+		Columns   []struct {
 			Name         string `json:"name"`
 			Type         string `json:"type"`
 			Nullable     bool   `json:"nullable"`
@@ -671,7 +674,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 		})
 	}
 
-	if err := h.svc.CreateTable(c.Request.Context(), iid, dbName, req.Name, columns); err != nil {
+	if err := h.svc.CreateTable(c.Request.Context(), iid, dbName, req.Name, columns, req.Charset, req.Collation); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
 			c.Error(apperror.ErrBadRequest.Wrap(err))
 		} else {
@@ -960,6 +963,52 @@ func (h *BackupHandler) RestoreStatus(c *gin.Context) {
 		}
 		if status.Status != "running" {
 			send(map[string]any{"type": "done", "status": status.Status, "error": status.Error})
+			return
+		}
+	}
+}
+
+// BackupStatusStream 订阅单个备份的状态流（SSE）：等备份内存任务完成信号，
+// 终态到达即推送 done 帧并关闭。不做轮询 —— 任务 Done() 即完成。
+func (h *BackupHandler) BackupStatusStream(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的备份ID"))
+		return
+	}
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	send := func(payload map[string]any) {
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+		c.Writer.Flush()
+	}
+
+	done, err := h.svc.WaitBackup(bid)
+	if err != nil {
+		send(map[string]any{"type": "done", "error": "备份状态已丢失"})
+		return
+	}
+	// 任务运行中保持连接；10s 心跳防反向代理超时断连。终态由 Done() 通知。
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-heartbeat.C:
+			send(map[string]any{"type": "running"})
+		case <-done:
+			backup, gerr := h.svc.GetBackup(c.Request.Context(), bid)
+			if gerr != nil {
+				send(map[string]any{"type": "done", "error": "备份状态已丢失"})
+				return
+			}
+			send(map[string]any{"type": "done", "status": backup.Status, "error": backup.ErrorMessage})
 			return
 		}
 	}

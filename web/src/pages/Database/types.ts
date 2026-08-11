@@ -69,9 +69,20 @@ export interface TableData {
 }
 
 // Table info from describeTable
+export interface TableColumnInfo {
+  name: string;
+  type: string;
+  is_primary_key: boolean;
+  is_auto_incr: boolean;
+  has_default: boolean;
+  default: string;
+  is_nullable: boolean;
+}
+
 export interface TableInfo {
   primaryKey: string;
-  columns: Array<{ name: string; type: string; key?: string }>;
+  columns: TableColumnInfo[];
+  collation: string; // MySQL 表排序规则（前端据此显示字符集）
 }
 
 // SQL execution result
@@ -119,7 +130,8 @@ export interface InstanceHeaderProps {
 }
 
 // 数据库 tab — 库列表（选中库后内联表浏览器）+ 创建数据库弹窗。刷新/创建
-// 按钮在 tab 栏右侧（tabBarExtraContent），不在内容区。
+// 按钮在 tab 栏右侧（tabBarExtraContent），不在内容区。备份从库列表每行的
+// 操作列打开（弹窗展示该库备份列表 + 创建）。
 export interface DatabasesTabProps {
   server: DBTypeInfo;
   // null while the database type has no installed version — the tab still renders and
@@ -137,6 +149,15 @@ export interface DatabasesTabProps {
   onCreateDB: () => void;
   // Inline table browser — non-null when a database is selected
   tableExplorer: TableExplorerProps | null;
+  // Backup（库级，从库列表操作列打开）
+  backups: any[];
+  backupsLoading: boolean;
+  backupCreating: boolean;
+  onFetchBackups: (dbName: string) => void;
+  onCreateBackup: (dbName: string) => void;
+  onDownloadBackup: (backupId: number) => void;
+  onRestoreBackup: (backupId: number) => void;
+  onDeleteBackup: (backupId: number) => void;
 }
 
 // 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
@@ -205,21 +226,14 @@ export interface TableExplorerProps {
   onOpenEditModal: (record: any) => void;
   onSaveRecord: () => void;
   onDeleteRecord: (record: any) => void;
+  // busy 标记进行中的单行写操作（记录删除等）
+  busy: string;
   // SQL console
   sqlInput: string;
   sqlResult: SqlResult | null;
   sqlLoading: boolean;
   onSqlInputChange: (value: string) => void;
   onExecuteSQL: () => void;
-  // Backup
-  backups: any[];
-  backupsLoading: boolean;
-  backupCreating: boolean;
-  busy: string;
-  onCreateBackup: () => void;
-  onDownloadBackup: (backupId: number) => void;
-  onRestoreBackup: (backupId: number) => void;
-  onDeleteBackup: (backupId: number) => void;
 }
 
 // Re-export parent types for convenience

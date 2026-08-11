@@ -158,6 +158,7 @@ type PagedQueryResult struct {
 type DescribeResult struct {
 	TableName  string                   `json:"table_name"`
 	PrimaryKey string                   `json:"primary_key"`
+	Collation  string                   `json:"collation,omitempty"` // MySQL 表排序规则；PG 无表级字符集
 	Columns    []map[string]interface{} `json:"columns"`
 }
 

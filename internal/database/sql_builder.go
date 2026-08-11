@@ -57,14 +57,13 @@ func (b *SQLBuilder) EscapeString(s string) string {
 	return s
 }
 
-// BuildInsert generates an INSERT statement (validated table/column names,
-// non-empty data).
+// BuildInsert generates an INSERT statement (validated table/column names).
+// All columns may be omitted (e.g. a table whose only required column is the
+// auto-increment primary key) — then a defaults-insert is emitted instead of
+// failing with "no data to insert".
 func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tableInfo *TableInfo) (string, error) {
 	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
-	}
-	if len(data) == 0 {
-		return "", fmt.Errorf("no data to insert")
 	}
 	for col := range data {
 		if err := isValidColumnName(col); err != nil {
@@ -87,6 +86,9 @@ func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tabl
 	skip:
 	}
 
+	if len(cols) == 0 {
+		return b.buildInsertDefaults(table), nil
+	}
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
 		b.QuoteIdentifier(table),
 		strings.Join(cols, ", "),
@@ -99,9 +101,6 @@ func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tabl
 func (b *SQLBuilder) BuildInsertParams(table string, data map[string]interface{}, tableInfo *TableInfo) (string, []any, error) {
 	if !isValidTableName(table) {
 		return "", nil, fmt.Errorf("无效的表名")
-	}
-	if len(data) == 0 {
-		return "", nil, fmt.Errorf("no data to insert")
 	}
 	for col := range data {
 		if err := isValidColumnName(col); err != nil {
@@ -127,8 +126,21 @@ func (b *SQLBuilder) BuildInsertParams(table string, data map[string]interface{}
 		args = append(args, val)
 	skip:
 	}
+
+	if len(cols) == 0 {
+		return b.buildInsertDefaults(table), nil, nil
+	}
 	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);",
 		b.QuoteIdentifier(table), strings.Join(cols, ", "), strings.Join(ph, ", ")), args, nil
+}
+
+// buildInsertDefaults 生成只写默认值的 INSERT（全列可空且都不填、或只剩自增列时）：
+// MySQL 用 `INSERT INTO t () VALUES ();`（合法，插入全默认行），PG 用 `DEFAULT VALUES`。
+func (b *SQLBuilder) buildInsertDefaults(table string) string {
+	if b.dbType == DBTypePostgreSQL {
+		return fmt.Sprintf("INSERT INTO %s DEFAULT VALUES;", b.QuoteIdentifier(table))
+	}
+	return fmt.Sprintf("INSERT INTO %s () VALUES ();", b.QuoteIdentifier(table))
 }
 
 // BuildUpdate generates an UPDATE statement (validated table/primary-key names,
@@ -291,8 +303,11 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 
 // BuildCreateTable generates a CREATE TABLE statement for the columns given.
 // Column types are checked against the allowedColumnTypes whitelist; names are
-// validated and quoted per engine.
-func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (string, error) {
+// validated and quoted per engine. charset/collation semantics differ per engine:
+// MySQL takes table-level DEFAULT CHARSET/COLLATE; PostgreSQL has no per-table
+// charset (encoding is set at database level, UTF8 mainstream) — a chosen
+// collation (a locale like C.UTF-8) is applied per string column via COLLATE.
+func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, charset, collation string) (string, error) {
 	if !isValidTableName(tableName) {
 		return "", fmt.Errorf("无效的表名")
 	}
@@ -306,9 +321,19 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 			return "", fmt.Errorf("无效的列名: %s", col.Name)
 		}
 	}
+	if collation != "" && !isValidCollation(collation) {
+		return "", fmt.Errorf("不支持的排序规则: %s", collation)
+	}
 
 	switch b.dbType {
 	case DBTypeMySQL:
+		cs := charset
+		if cs == "" {
+			cs = defaultCharset
+		}
+		if !isValidCharset(cs) {
+			return "", fmt.Errorf("不支持的字符集: %s", cs)
+		}
 		var parts []string
 		for _, col := range columns {
 			p := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
@@ -329,7 +354,11 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 			}
 			parts = append(parts, strings.Join(p, " "))
 		}
-		return fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", tableName, strings.Join(parts, ", ")), nil
+		suffix := fmt.Sprintf("ENGINE=InnoDB DEFAULT CHARSET=%s", cs)
+		if collation != "" {
+			suffix += " COLLATE=" + collation
+		}
+		return fmt.Sprintf("CREATE TABLE `%s` (%s) %s;", tableName, strings.Join(parts, ", "), suffix), nil
 	case DBTypePostgreSQL:
 		var parts []string
 		for _, col := range columns {
@@ -343,6 +372,10 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 			if !col.Nullable && !col.IsPrimary {
 				p = append(p, "NOT NULL")
 			}
+			// collation 只对字符串列有效（locale 指定比较规则）；数字/时间列加会报错。
+			if collation != "" && isPgStringType(col.Type) {
+				p = append(p, `COLLATE "`+collation+`"`)
+			}
 			if col.Unique {
 				p = append(p, "UNIQUE")
 			}
@@ -354,6 +387,17 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 		return fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", ")), nil
 	}
 	return "", fmt.Errorf("不支持的数据库类型")
+}
+
+// isPgStringType reports whether a column type accepts a PG COLLATE clause
+// (locale applies to text comparisons; numeric/temporal/JSON types reject it).
+func isPgStringType(t string) bool {
+	switch strings.ToUpper(strings.TrimSpace(strings.Split(t, "(")[0])) {
+	case "VARCHAR", "CHAR", "CHARACTER", "CHARACTER VARYING", "TEXT",
+		"TINYTEXT", "MEDIUMTEXT", "LONGTEXT":
+		return true
+	}
+	return false
 }
 
 // formatDefault 渲染 DEFAULT 字面量：纯数字/数值表达式（含函数）不加引号，其余
@@ -572,7 +616,10 @@ func tableInfoFromQuery(dbType DBType, tableName string, res *QueryResult) *Tabl
 		if hasType {
 			col.Type = str(row, typeIdx)
 		}
-		col.IsNullable = !isTruthy(row, colIdx["Null"]) // mysql: "NO" → not nullable
+		// mysql DESCRIBE 的 Null 列: "YES" → 可空, "NO" → NOT NULL。之前多了个 !，
+		// 把两者反了：NOT NULL 列被当成可空，前端就不标必填，插入漏填报
+		// "Field doesn't have a default value"。
+		col.IsNullable = isTruthy(row, colIdx["Null"])
 		if v, ok := colIdx["is_nullable"]; ok {
 			col.IsNullable = strings.EqualFold(str(row, v), "yes")
 		}

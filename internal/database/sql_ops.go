@@ -376,11 +376,20 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 		})
 	}
 
-	return &DescribeResult{
+	result := &DescribeResult{
 		TableName:  tableName,
 		PrimaryKey: tableInfo.PrimaryKey,
 		Columns:    columns,
-	}, nil
+	}
+	// MySQL：取表级排序规则（COLLATE），前端据此显示字符集。PG 无表级字符集，跳过。
+	if instance.DBType == DBTypeMySQL {
+		collRes, qerr := s.runnerFor(instance).Query(ctx, instance, dbName,
+			"SELECT TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?", tableName)
+		if qerr == nil && len(collRes.Rows) > 0 && len(collRes.Rows[0]) > 0 {
+			result.Collation = str(collRes.Rows[0], 0)
+		}
+	}
+	return result, nil
 }
 
 func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tableName string, page, pageSize int) (*PagedQueryResult, error) {
@@ -541,7 +550,7 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 	return &DMLResult{Success: true}, nil
 }
 
-func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tableName string, columns []TableColumn) error {
+func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tableName string, columns []TableColumn, charset, collation string) error {
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err
@@ -549,7 +558,7 @@ func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tab
 	dbType := instance.DBType
 
 	builder := NewSQLBuilder(dbType)
-	sql, err := builder.BuildCreateTable(tableName, columns)
+	sql, err := builder.BuildCreateTable(tableName, columns, charset, collation)
 	if err != nil {
 		return err
 	}

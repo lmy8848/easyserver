@@ -35,6 +35,46 @@ func TestIsTruthy(t *testing.T) {
 
 // TestBuildCreateTable 覆盖建表选项：可空/唯一/默认值/自增与主键的组合，主键单行、
 // 非整数类型不挂自增。
+// TestBuildInsertEmptyData 验证空数据也能插入：全列可空且都不填（或只剩自增列）时，
+// 生成只写默认值的 INSERT，而不是报 "no data to insert"。
+func TestBuildInsertEmptyData(t *testing.T) {
+	t.Run("mysql", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypeMySQL)
+		sql, err := b.BuildInsert("users", map[string]interface{}{}, nil)
+		if err != nil {
+			t.Fatalf("BuildInsert: %v", err)
+		}
+		if want := "INSERT INTO `users` () VALUES ();"; sql != want {
+			t.Errorf("got %q, want %q", sql, want)
+		}
+	})
+	t.Run("postgres", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypePostgreSQL)
+		sql, args, err := b.BuildInsertParams("users", map[string]interface{}{}, nil)
+		if err != nil {
+			t.Fatalf("BuildInsertParams: %v", err)
+		}
+		if want := `INSERT INTO "users" DEFAULT VALUES;`; sql != want {
+			t.Errorf("got %q, want %q", sql, want)
+		}
+		if len(args) != 0 {
+			t.Errorf("expected no args, got %v", args)
+		}
+	})
+	// 只剩自增列（值为空）也应落到 defaults-insert。
+	t.Run("autoincr-only-skipped", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypeMySQL)
+		sql, err := b.BuildInsert("users", map[string]interface{}{"id": ""},
+			&TableInfo{Columns: []ColumnInfo{{Name: "id", IsAutoIncr: true}}})
+		if err != nil {
+			t.Fatalf("BuildInsert: %v", err)
+		}
+		if want := "INSERT INTO `users` () VALUES ();"; sql != want {
+			t.Errorf("got %q, want %q", sql, want)
+		}
+	})
+}
+
 func TestBuildCreateTable(t *testing.T) {
 	b := NewSQLBuilder(DBTypeMySQL)
 	sql, err := b.BuildCreateTable("users", []TableColumn{
@@ -44,17 +84,18 @@ func TestBuildCreateTable(t *testing.T) {
 		{Name: "age", Type: "INT", Nullable: true, DefaultValue: "18"},
 		{Name: "created_at", Type: "TIMESTAMP", Nullable: true, DefaultValue: "CURRENT_TIMESTAMP"},
 		{Name: "nick", Type: "VARCHAR(64)", Nullable: true, DefaultValue: "guest"},
-	})
+	}, "utf8mb4", "utf8mb4_unicode_ci")
 	if err != nil {
 		t.Fatalf("BuildCreateTable: %v", err)
 	}
 	for _, want := range []string{
-		"`id` BIGINT PRIMARY KEY AUTO_INCREMENT",           // 自增/主键
-		"`name` VARCHAR(255) UNIQUE",                       // 可空→无 NOT NULL + UNIQUE
-		"`email` VARCHAR(255) NOT NULL UNIQUE",             // 不可空 + UNIQUE
-		"`age` INT DEFAULT 18",                             // 数字默认值不加引号
-		"`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP", // 函数默认值不加引号
-		"`nick` VARCHAR(64) DEFAULT 'guest'",               // 字符串默认值加引号
+		"`id` BIGINT PRIMARY KEY AUTO_INCREMENT",             // 自增/主键
+		"`name` VARCHAR(255) UNIQUE",                         // 可空→无 NOT NULL + UNIQUE
+		"`email` VARCHAR(255) NOT NULL UNIQUE",               // 不可空 + UNIQUE
+		"`age` INT DEFAULT 18",                               // 数字默认值不加引号
+		"`created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP",   // 函数默认值不加引号
+		"`nick` VARCHAR(64) DEFAULT 'guest'",                 // 字符串默认值加引号
+		"DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", // 字符集/排序规则
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("缺少 %q\nSQL: %s", want, sql)
@@ -62,25 +103,29 @@ func TestBuildCreateTable(t *testing.T) {
 	}
 }
 
-// TestBuildCreateTablePg 验证 PG 分支：SERIAL 自增、主键不重复 NOT NULL、自增列不挂 DEFAULT。
+// TestBuildCreateTablePg 验证 PG 分支：SERIAL 自增、主键不重复 NOT NULL、自增列不挂 DEFAULT、
+// 排序规则只挂到字符串列。
 func TestBuildCreateTablePg(t *testing.T) {
 	b := NewSQLBuilder(DBTypePostgreSQL)
 	sql, err := b.BuildCreateTable("users", []TableColumn{
 		{Name: "id", Type: "SERIAL", AutoIncr: true, DefaultValue: "1"},
 		{Name: "name", Type: "TEXT", Nullable: true},
 		{Name: "age", Type: "INT", Nullable: true, DefaultValue: "0"},
-	})
+	}, "", "C.UTF-8")
 	if err != nil {
 		t.Fatalf("BuildCreateTable: %v", err)
 	}
 	for _, want := range []string{
-		`"id" SERIAL PRIMARY KEY`, // 自增覆盖主键，且不重复 PRIMARY KEY / NOT NULL / DEFAULT
-		`"name" TEXT`,
-		`"age" INT DEFAULT 0`,
+		`"id" SERIAL PRIMARY KEY`,       // 自增覆盖主键，且不重复 PRIMARY KEY / NOT NULL / DEFAULT
+		`"name" TEXT COLLATE "C.UTF-8"`, // 字符串列挂排序规则
+		`"age" INT DEFAULT 0`,           // 数字列不挂 COLLATE
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("缺少 %q\nSQL: %s", want, sql)
 		}
+	}
+	if strings.Contains(sql, "CHARSET") {
+		t.Errorf("PG 不应有 CHARSET 子句\nSQL: %s", sql)
 	}
 	if strings.Count(sql, "PRIMARY KEY") != 1 {
 		t.Errorf("PRIMARY KEY 出现 %d 次，应为 1\nSQL: %s", strings.Count(sql, "PRIMARY KEY"), sql)

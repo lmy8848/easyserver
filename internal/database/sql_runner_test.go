@@ -51,8 +51,13 @@ func TestDriverSQLRunnerStructuralTypes(t *testing.T) {
 	if s, ok := row0[1].(string); !ok || s != "alice" {
 		t.Errorf("row0 name = %#v (%T), want string alice", row0[0], row0[0])
 	}
-	if b, ok := row0[3].([]byte); !ok || len(b) != 3 {
-		t.Errorf("row0 data = %#v (%T), want []byte len 3", row0[3], row0[3])
+	// The "data" column is []byte in the mock, but sqlmock reports no column type
+	// names (DatabaseTypeName always empty → category "string"), so the channel
+	// converts it to a string — the JSON-transport contract that prevents text
+	// columns reading back as base64. Blob columns keep []byte in production,
+	// where the driver reports BLOB/bytea and the category is "blob".
+	if s, ok := row0[3].(string); !ok || s != string([]byte{0x01, 0x02, 0xAB}) {
+		t.Errorf("row0 data = %#v (%T), want string of raw bytes", row0[3], row0[3])
 	}
 	// NULL row preserved as nil, not as the string "NULL".
 	for i := range res.Rows[1] {
