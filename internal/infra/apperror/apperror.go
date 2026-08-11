@@ -167,6 +167,8 @@ var errorRegistry = []errorPattern{
 	{matches: []string{"already installed", "已安装", "已存在", "is already running", "is not running", "未运行"}, target: ErrConflict},
 	// Bad state / precondition
 	{matches: []string{"cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
+	// DB 标识符/名称校验（builder 内嵌校验的报错，路由层不再前置检查）
+	{matches: []string{"无效的表名", "无效的列名"}, target: ErrBadRequest},
 	// UNIQUE constraint violation (SQLite)
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
 	// No data available

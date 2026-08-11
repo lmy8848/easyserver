@@ -469,10 +469,6 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
-	if !database.ValidateTableName(tableName) {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的表名"))
-		return
-	}
 
 	result, err := h.svc.DescribeTable(c.Request.Context(), iid, dbName, tableName)
 	if err != nil {
@@ -496,10 +492,6 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 	tableName := c.Query("table")
 	if tableName == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("表名不能为空"))
-		return
-	}
-	if !database.ValidateTableName(tableName) {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的表名"))
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))

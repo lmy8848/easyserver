@@ -27,14 +27,14 @@ var validCharsets = map[string]bool{
 
 var tableNameRegexp = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-// ValidateTableName checks table/column name validity.
-func ValidateTableName(name string) bool {
+// isValidTableName checks table/column name validity.
+func isValidTableName(name string) bool {
 	return name != "" && len(name) <= 64 && tableNameRegexp.MatchString(name)
 }
 
-// validateColumnName checks a column name for use in DML statements. Columns
+// isValidColumnName checks a column name for use in DML statements. Columns
 // may carry a hyphen, unlike table names.
-func validateColumnName(name string) error {
+func isValidColumnName(name string) error {
 	if len(name) == 0 {
 		return fmt.Errorf("identifier cannot be empty")
 	}

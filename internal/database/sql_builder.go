@@ -59,14 +59,14 @@ func (b *SQLBuilder) EscapeString(s string) string {
 // BuildInsert generates an INSERT statement (validated table/column names,
 // non-empty data).
 func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tableInfo *TableInfo) (string, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
 	}
 	if len(data) == 0 {
 		return "", fmt.Errorf("no data to insert")
 	}
 	for col := range data {
-		if err := validateColumnName(col); err != nil {
+		if err := isValidColumnName(col); err != nil {
 			return "", fmt.Errorf("invalid column '%s': %s", col, err)
 		}
 	}
@@ -96,14 +96,14 @@ func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tabl
 // placeholders and the values come back as args for driver binding. The dry-run
 // preview still uses BuildInsert so the user sees rendered SQL.
 func (b *SQLBuilder) BuildInsertParams(table string, data map[string]interface{}, tableInfo *TableInfo) (string, []any, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", nil, fmt.Errorf("无效的表名")
 	}
 	if len(data) == 0 {
 		return "", nil, fmt.Errorf("no data to insert")
 	}
 	for col := range data {
-		if err := validateColumnName(col); err != nil {
+		if err := isValidColumnName(col); err != nil {
 			return "", nil, fmt.Errorf("invalid column '%s': %s", col, err)
 		}
 	}
@@ -133,10 +133,10 @@ func (b *SQLBuilder) BuildInsertParams(table string, data map[string]interface{}
 // BuildUpdate generates an UPDATE statement (validated table/primary-key names,
 // non-empty data, non-nil pk value).
 func (b *SQLBuilder) BuildUpdate(table string, data map[string]interface{}, pkCol string, pkVal interface{}) (string, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
 	}
-	if err := validateColumnName(pkCol); err != nil {
+	if err := isValidColumnName(pkCol); err != nil {
 		return "", fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
 	}
 	if len(data) == 0 {
@@ -163,10 +163,10 @@ func (b *SQLBuilder) BuildUpdate(table string, data map[string]interface{}, pkCo
 
 // BuildUpdateParams is the parameterized form of BuildUpdate.
 func (b *SQLBuilder) BuildUpdateParams(table string, data map[string]interface{}, pkCol string, pkVal interface{}) (string, []any, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", nil, fmt.Errorf("无效的表名")
 	}
-	if err := validateColumnName(pkCol); err != nil {
+	if err := isValidColumnName(pkCol); err != nil {
 		return "", nil, fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
 	}
 	if len(data) == 0 {
@@ -195,10 +195,10 @@ func (b *SQLBuilder) BuildUpdateParams(table string, data map[string]interface{}
 // BuildDelete generates a DELETE statement (validated table/primary-key names,
 // non-nil pk value).
 func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) (string, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
 	}
-	if err := validateColumnName(pkCol); err != nil {
+	if err := isValidColumnName(pkCol); err != nil {
 		return "", fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
 	}
 	if pkVal == nil {
@@ -212,10 +212,10 @@ func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) 
 
 // BuildDeleteParams is the parameterized form of BuildDelete.
 func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal interface{}) (string, []any, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", nil, fmt.Errorf("无效的表名")
 	}
-	if err := validateColumnName(pkCol); err != nil {
+	if err := isValidColumnName(pkCol); err != nil {
 		return "", nil, fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
 	}
 	if pkVal == nil {
@@ -228,7 +228,7 @@ func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal interfa
 // BuildSelect generates a SELECT statement with pagination (validated table
 // name — it is quoted into the statement).
 func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize int) (string, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
 	}
 	cols := "*"
@@ -247,7 +247,7 @@ func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize 
 
 // BuildCount generates a COUNT query (validated table name).
 func (b *SQLBuilder) BuildCount(table string) (string, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
 	}
 	return fmt.Sprintf("SELECT COUNT(*) FROM %s;", b.QuoteIdentifier(table)), nil
@@ -267,7 +267,7 @@ func (b *SQLBuilder) BuildListTables() string {
 // BuildDescribeTable generates a query to describe table structure (validated
 // table name — it is interpolated into the statement).
 func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
-	if !ValidateTableName(table) {
+	if !isValidTableName(table) {
 		return "", fmt.Errorf("无效的表名")
 	}
 	switch b.dbType {
@@ -292,7 +292,7 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 // Column types are checked against the allowedColumnTypes whitelist; names are
 // validated and quoted per engine.
 func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (string, error) {
-	if !ValidateTableName(tableName) {
+	if !isValidTableName(tableName) {
 		return "", fmt.Errorf("无效的表名")
 	}
 	for _, col := range columns {
@@ -301,7 +301,7 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 		if !allowedColumnTypes[baseType] {
 			return "", fmt.Errorf("不支持的列类型: %s", col.Type)
 		}
-		if !ValidateTableName(col.Name) {
+		if !isValidTableName(col.Name) {
 			return "", fmt.Errorf("无效的列名: %s", col.Name)
 		}
 	}
@@ -345,7 +345,7 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 
 // BuildDropTable generates a DROP TABLE statement (validated table name).
 func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
-	if !ValidateTableName(tableName) {
+	if !isValidTableName(tableName) {
 		return "", fmt.Errorf("无效的表名")
 	}
 	switch b.dbType {
