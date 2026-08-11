@@ -36,12 +36,12 @@ type ExecResult struct {
 	LastInsertID int64
 }
 
-// SQLQueryRunner is the seam between database logic and how SQL actually runs
-// against an instance. The Service operates on this interface; driverQueryRunner
+// SQLRunner is the seam between database logic and how SQL actually runs
+// against an instance. The Service operates on this interface; driverSQLRunner
 // is its sole implementation — a direct database/sql connection over the mapped
 // host port (MySQL / PostgreSQL). Callers pass placeholder SQL (mysql `?`,
 // postgres `$n`) plus args; the driver binds them.
-type SQLQueryRunner interface {
+type SQLRunner interface {
 	Query(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*QueryResult, error)
 	Exec(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*ExecResult, error)
 	Close(instanceID int64)
@@ -96,12 +96,12 @@ func isNumberType(dbType DBType, rt string) bool {
 	}
 }
 
-// driverQueryRunner runs SQL over a direct database connection through the
+// driverSQLRunner runs SQL over a direct database connection through the
 // container's mapped host port. It is the only SQL channel for
 // MySQL/PostgreSQL: native result types, parameter binding and connection-pool
 // reuse. Redis has no driver in scope; instances with a broken port mapping
 // (container_port = 0) surface a clear error instead of falling back.
-type driverQueryRunner struct {
+type driverSQLRunner struct {
 	// pools is keyed by (instance, database): PostgreSQL cannot reference
 	// tables in another database, so each database the panel operates on needs
 	// its own pool; the system database (postgres/mysql) hosts admin queries.
@@ -114,13 +114,13 @@ type poolKey struct {
 	db         string
 }
 
-func newDriverQueryRunner() *driverQueryRunner {
-	return &driverQueryRunner{pools: make(map[poolKey]*sql.DB)}
+func newDriverSQLRunner() *driverSQLRunner {
+	return &driverSQLRunner{pools: make(map[poolKey]*sql.DB)}
 }
 
 // Close closes every pool belonging to an instance (called when the instance is
 // uninstalled/destroyed).
-func (r *driverQueryRunner) Close(instanceID int64) {
+func (r *driverSQLRunner) Close(instanceID int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key, db := range r.pools {
@@ -131,7 +131,7 @@ func (r *driverQueryRunner) Close(instanceID int64) {
 	}
 }
 
-func (r *driverQueryRunner) poolFor(ctx context.Context, inst *DBInstance, dbName string) (*sql.DB, error) {
+func (r *driverSQLRunner) poolFor(ctx context.Context, inst *DBInstance, dbName string) (*sql.DB, error) {
 	if inst.ContainerPort <= 0 {
 		return nil, fmt.Errorf("实例端口映射异常（container_port=%d），无法直连，请改端口重建", inst.ContainerPort)
 	}
@@ -186,7 +186,7 @@ func openDirectDB(inst *DBInstance, dbName string) (*sql.DB, error) {
 	return db, nil
 }
 
-func (r *driverQueryRunner) Query(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*QueryResult, error) {
+func (r *driverSQLRunner) Query(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*QueryResult, error) {
 	db, err := r.poolFor(ctx, inst, dbName)
 	if err != nil {
 		return nil, err
@@ -232,7 +232,7 @@ func (r *driverQueryRunner) Query(ctx context.Context, inst *DBInstance, dbName,
 	return &QueryResult{Columns: cols, Rows: result}, nil
 }
 
-func (r *driverQueryRunner) Exec(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*ExecResult, error) {
+func (r *driverSQLRunner) Exec(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*ExecResult, error) {
 	db, err := r.poolFor(ctx, inst, dbName)
 	if err != nil {
 		return nil, err

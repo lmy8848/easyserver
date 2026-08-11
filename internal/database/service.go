@@ -44,7 +44,7 @@ type Service struct {
 	backupDir      string
 	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
-	driver         SQLQueryRunner         // direct driver channel (MySQL/PostgreSQL)
+	driver         SQLRunner              // direct driver channel (MySQL/PostgreSQL)
 	redisOps       RedisOps               // direct driver channel (Redis)
 }
 
@@ -61,8 +61,8 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 		runtimeFactory: func() DatabaseRuntime {
 			return NewCLIContainerRuntime(exec)
 		},
-		driver:   newDriverQueryRunner(),
-		redisOps: newRedisQueryRunner(),
+		driver:   newDriverSQLRunner(),
+		redisOps: newRedisRunner(),
 	}
 }
 
@@ -77,15 +77,15 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
-		driver:   newDriverQueryRunner(),
-		redisOps: newRedisQueryRunner(),
+		driver:   newDriverSQLRunner(),
+		redisOps: newRedisRunner(),
 	}
 }
 
 // runnerFor returns the SQL channel for an instance. All SQL runs over the
 // direct driver connection; broken port mappings (container_port = 0) and Redis
 // surface as clear errors from the driver channel instead of falling back.
-func (s *Service) runnerFor(inst *DBInstance) SQLQueryRunner {
+func (s *Service) runnerFor(inst *DBInstance) SQLRunner {
 	return s.driver
 }
 
@@ -797,7 +797,7 @@ func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Databa
 // queryDatabases lists logical databases live from the database server. Databases are
 // server-owned state — the panel never persists a mirror of them.
 func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]Database, error) {
-	var runner SQLQueryRunner
+	var runner SQLRunner
 	switch instance.DBType {
 	case DBTypeMySQL:
 		runner = s.runnerFor(instance)

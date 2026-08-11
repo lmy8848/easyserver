@@ -41,8 +41,8 @@ type RedisZMember struct {
 }
 
 // RedisOps is the direct-connection seam for Redis instances. It mirrors
-// SQLQueryRunner for the SQL engines: Service talks to this interface,
-// redisQueryRunner implements it over go-redis. Redis has no SQL, so the
+// SQLRunner for the SQL engines: Service talks to this interface,
+// redisRunner implements it over go-redis. Redis has no SQL, so the
 // operations are key-browser primitives instead of Query/Exec.
 type RedisOps interface {
 	ListDBs(ctx context.Context, inst *DBInstance) ([]RedisDB, error)
@@ -57,11 +57,11 @@ type RedisOps interface {
 	Close(instanceID int64)
 }
 
-// redisQueryRunner implements RedisOps over a direct go-redis connection. The
+// redisRunner implements RedisOps over a direct go-redis connection. The
 // client pool is keyed by (instance, logical db) — go-redis fixes the DB on
 // client construction, and Redis instances only have 0-15, so one client per
 // used db is cheap.
-type redisQueryRunner struct {
+type redisRunner struct {
 	mu    sync.Mutex
 	conns map[redisPoolKey]*redis.Client
 }
@@ -71,13 +71,13 @@ type redisPoolKey struct {
 	db         int
 }
 
-func newRedisQueryRunner() *redisQueryRunner {
-	return &redisQueryRunner{conns: make(map[redisPoolKey]*redis.Client)}
+func newRedisRunner() *redisRunner {
+	return &redisRunner{conns: make(map[redisPoolKey]*redis.Client)}
 }
 
 // Close closes every client belonging to an instance (called when the instance
 // is uninstalled/destroyed).
-func (r *redisQueryRunner) Close(instanceID int64) {
+func (r *redisRunner) Close(instanceID int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key, c := range r.conns {
@@ -88,7 +88,7 @@ func (r *redisQueryRunner) Close(instanceID int64) {
 	}
 }
 
-func (r *redisQueryRunner) clientFor(ctx context.Context, inst *DBInstance, db int) (*redis.Client, error) {
+func (r *redisRunner) clientFor(ctx context.Context, inst *DBInstance, db int) (*redis.Client, error) {
 	if inst.ContainerPort <= 0 {
 		return nil, fmt.Errorf("实例端口映射异常（container_port=%d），无法直连，请改端口重建", inst.ContainerPort)
 	}
@@ -117,7 +117,7 @@ func (r *redisQueryRunner) clientFor(ctx context.Context, inst *DBInstance, db i
 }
 
 // ListDBs reports the non-empty logical databases (DBSIZE > 0) in index order.
-func (r *redisQueryRunner) ListDBs(ctx context.Context, inst *DBInstance) ([]RedisDB, error) {
+func (r *redisRunner) ListDBs(ctx context.Context, inst *DBInstance) ([]RedisDB, error) {
 	var dbs []RedisDB
 	for i := 0; i < 16; i++ {
 		c, err := r.clientFor(ctx, inst, i)
@@ -136,7 +136,7 @@ func (r *redisQueryRunner) ListDBs(ctx context.Context, inst *DBInstance) ([]Red
 }
 
 // ScanKeys pages through keys with SCAN (type/TTL/size filled per key).
-func (r *redisQueryRunner) ScanKeys(ctx context.Context, inst *DBInstance, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error) {
+func (r *redisRunner) ScanKeys(ctx context.Context, inst *DBInstance, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error) {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return nil, 0, err
@@ -163,7 +163,7 @@ func (r *redisQueryRunner) ScanKeys(ctx context.Context, inst *DBInstance, db in
 }
 
 // GetValue reads and decodes a key's value by its type.
-func (r *redisQueryRunner) GetValue(ctx context.Context, inst *DBInstance, db int, key string) (*RedisValue, error) {
+func (r *redisRunner) GetValue(ctx context.Context, inst *DBInstance, db int, key string) (*RedisValue, error) {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return nil, err
@@ -216,7 +216,7 @@ func (r *redisQueryRunner) GetValue(ctx context.Context, inst *DBInstance, db in
 }
 
 // SetValue writes a string key (the UI only edits string values inline).
-func (r *redisQueryRunner) SetValue(ctx context.Context, inst *DBInstance, db int, key, value string, ttl time.Duration) error {
+func (r *redisRunner) SetValue(ctx context.Context, inst *DBInstance, db int, key, value string, ttl time.Duration) error {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return err
@@ -224,7 +224,7 @@ func (r *redisQueryRunner) SetValue(ctx context.Context, inst *DBInstance, db in
 	return c.Set(ctx, key, value, ttl).Err()
 }
 
-func (r *redisQueryRunner) DelKeys(ctx context.Context, inst *DBInstance, db int, keys ...string) (int64, error) {
+func (r *redisRunner) DelKeys(ctx context.Context, inst *DBInstance, db int, keys ...string) (int64, error) {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return 0, err
@@ -232,7 +232,7 @@ func (r *redisQueryRunner) DelKeys(ctx context.Context, inst *DBInstance, db int
 	return c.Del(ctx, keys...).Result()
 }
 
-func (r *redisQueryRunner) Expire(ctx context.Context, inst *DBInstance, db int, key string, ttl time.Duration) error {
+func (r *redisRunner) Expire(ctx context.Context, inst *DBInstance, db int, key string, ttl time.Duration) error {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return err
@@ -240,7 +240,7 @@ func (r *redisQueryRunner) Expire(ctx context.Context, inst *DBInstance, db int,
 	return c.Expire(ctx, key, ttl).Err()
 }
 
-func (r *redisQueryRunner) Persist(ctx context.Context, inst *DBInstance, db int, key string) error {
+func (r *redisRunner) Persist(ctx context.Context, inst *DBInstance, db int, key string) error {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return err
@@ -248,7 +248,7 @@ func (r *redisQueryRunner) Persist(ctx context.Context, inst *DBInstance, db int
 	return c.Persist(ctx, key).Err()
 }
 
-func (r *redisQueryRunner) FlushDB(ctx context.Context, inst *DBInstance, db int) error {
+func (r *redisRunner) FlushDB(ctx context.Context, inst *DBInstance, db int) error {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return err
@@ -259,7 +259,7 @@ func (r *redisQueryRunner) FlushDB(ctx context.Context, inst *DBInstance, db int
 // BgSave triggers an asynchronous persistence; the caller still copies
 // dump.rdb out of the container (a container file operation the driver cannot
 // do). Used by backupRedis.
-func (r *redisQueryRunner) BgSave(ctx context.Context, inst *DBInstance) error {
+func (r *redisRunner) BgSave(ctx context.Context, inst *DBInstance) error {
 	c, err := r.clientFor(ctx, inst, 0)
 	if err != nil {
 		return err

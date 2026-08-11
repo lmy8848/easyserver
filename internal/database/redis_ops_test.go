@@ -22,7 +22,7 @@ func redisTestInstance() *DBInstance {
 
 // runnerClientFor swaps the runner's pooled client for one backed by redismock
 // and returns the mock so tests can script expected commands.
-func runnerClientFor(t *testing.T, r *redisQueryRunner, inst *DBInstance, db int) redismock.ClientMock {
+func runnerClientFor(t *testing.T, r *redisRunner, inst *DBInstance, db int) redismock.ClientMock {
 	t.Helper()
 	client, mock := redismock.NewClientMock()
 	r.mu.Lock()
@@ -33,7 +33,7 @@ func runnerClientFor(t *testing.T, r *redisQueryRunner, inst *DBInstance, db int
 
 func TestRedisGetValueByType(t *testing.T) {
 	inst := redisTestInstance()
-	runner := newRedisQueryRunner()
+	runner := newRedisRunner()
 	defer runner.Close(inst.ID)
 	ctx := context.Background()
 
@@ -82,7 +82,7 @@ func TestRedisGetValueByType(t *testing.T) {
 
 func TestRedisSetExpirePersistFlush(t *testing.T) {
 	inst := redisTestInstance()
-	runner := newRedisQueryRunner()
+	runner := newRedisRunner()
 	defer runner.Close(inst.ID)
 	ctx := context.Background()
 
@@ -120,7 +120,7 @@ func TestRedisSetExpirePersistFlush(t *testing.T) {
 
 func TestRedisScanKeysFillsMeta(t *testing.T) {
 	inst := redisTestInstance()
-	runner := newRedisQueryRunner()
+	runner := newRedisRunner()
 	defer runner.Close(inst.ID)
 	ctx := context.Background()
 
@@ -153,7 +153,7 @@ func TestRedisScanKeysFillsMeta(t *testing.T) {
 
 func TestRedisBrokenMapping(t *testing.T) {
 	inst := &DBInstance{ID: 9, DBType: DBTypeRedis, Port: 6379, ContainerPort: 0}
-	runner := newRedisQueryRunner()
+	runner := newRedisRunner()
 	_, err := runner.ListDBs(context.Background(), inst)
 	if err == nil {
 		t.Fatal("expected error for container_port=0 instance")

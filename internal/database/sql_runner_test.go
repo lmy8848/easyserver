@@ -10,12 +10,12 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-// driverQueryRunner tests feed sqlmock a fake *sql.DB and assert the observable
+// driverSQLRunner tests feed sqlmock a fake *sql.DB and assert the observable
 // contract of the direct-connection channel (sql_runner.go): native result
 // types, per-column render categories, NULL/BLOB preservation, parameter
 // binding and error passthrough. No real database is needed.
 
-func TestDriverQueryRunnerStructuralTypes(t *testing.T) {
+func TestDriverSQLRunnerStructuralTypes(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +23,7 @@ func TestDriverQueryRunnerStructuralTypes(t *testing.T) {
 	defer db.Close()
 
 	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, ContainerPort: 3306, AdminPassword: "secret"}
-	runner := &driverQueryRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "mydb"}: db}}
+	runner := &driverSQLRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "mydb"}: db}}
 
 	// sqlmock cannot report column type names (DatabaseTypeName is always empty),
 	// so this test asserts the VALUE side: native types survive scanning and NULL
@@ -92,7 +92,7 @@ func TestClassifyColumnType(t *testing.T) {
 	}
 }
 
-func TestDriverQueryRunnerParameterBinding(t *testing.T) {
+func TestDriverSQLRunnerParameterBinding(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestDriverQueryRunnerParameterBinding(t *testing.T) {
 	defer db.Close()
 
 	inst := &DBInstance{ID: 7, DBType: DBTypePostgreSQL, Port: 5432, ContainerPort: 5432, AdminPassword: "secret"}
-	runner := &driverQueryRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "pg"}: db}}
+	runner := &driverSQLRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "pg"}: db}}
 
 	mock.ExpectExec("INSERT INTO t").
 		WithArgs("O'Brien", int64(42)).
@@ -115,7 +115,7 @@ func TestDriverQueryRunnerParameterBinding(t *testing.T) {
 	}
 }
 
-func TestDriverQueryRunnerErrorPassthrough(t *testing.T) {
+func TestDriverSQLRunnerErrorPassthrough(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestDriverQueryRunnerErrorPassthrough(t *testing.T) {
 	defer db.Close()
 
 	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, ContainerPort: 3306, AdminPassword: "secret"}
-	runner := &driverQueryRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "mydb"}: db}}
+	runner := &driverSQLRunner{pools: map[poolKey]*sql.DB{{instanceID: 7, db: "mydb"}: db}}
 
 	mock.ExpectQuery("SELECT 1").WillReturnError(errors.New("Error 1062: Duplicate entry 'x' for key 'PRIMARY'"))
 
@@ -133,22 +133,22 @@ func TestDriverQueryRunnerErrorPassthrough(t *testing.T) {
 	}
 }
 
-func TestDriverQueryRunnerBrokenMapping(t *testing.T) {
+func TestDriverSQLRunnerBrokenMapping(t *testing.T) {
 	// container_port = 0 means the mapping is broken: no direct connection.
 	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3307, ContainerPort: 0}
-	runner := newDriverQueryRunner()
+	runner := newDriverSQLRunner()
 	_, err := runner.Query(context.Background(), inst, "mydb", "SELECT 1")
 	if err == nil {
 		t.Fatal("expected error for container_port=0 instance")
 	}
 }
 
-func TestDriverQueryRunnerPingFailure(t *testing.T) {
+func TestDriverSQLRunnerPingFailure(t *testing.T) {
 	// sql.Open does not connect; the first query must surface a dial failure as
 	// a clear "cannot connect" error, not a bare driver error. sqlmock needs the
 	// MonitorPingsOption to intercept Ping; without a mock db the driver tries a
 	// real dial and fails — which is exactly the path under test.
-	runner := newDriverQueryRunner()
+	runner := newDriverSQLRunner()
 	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 1, ContainerPort: 3306, AdminPassword: "secret"}
 	_, err := runner.Query(context.Background(), inst, "mydb", "SELECT 1")
 	if err == nil || !strings.Contains(err.Error(), "无法连接数据库实例") {
@@ -156,8 +156,8 @@ func TestDriverQueryRunnerPingFailure(t *testing.T) {
 	}
 }
 
-func TestDriverQueryRunnerCloseDropsPool(t *testing.T) {
-	runner := newDriverQueryRunner()
+func TestDriverSQLRunnerCloseDropsPool(t *testing.T) {
+	runner := newDriverSQLRunner()
 	inst := &DBInstance{ID: 7, DBType: DBTypeMySQL, Port: 3306, ContainerPort: 3306, AdminPassword: "secret"}
 
 	// After Close the pool is gone: a query no longer finds a cached pool and
