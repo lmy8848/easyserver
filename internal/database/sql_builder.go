@@ -567,7 +567,10 @@ func isTruthy(row []any, i int) bool {
 			return false
 		}
 	case []byte:
-		return isTruthy([]any{v}, 0) == true
+		// []byte 是驱动对字节值的常见返回（pgx 文本/二进制、MySQL 8.0 部分列）。
+		// 不能拿 []byte 再包 []any{v} 递归——v 仍是 []byte，会无限递归直到栈溢出。
+		// 这里把字节转字符串，落到 string 分支用同一套判假逻辑。
+		return isTruthy([]any{string(v)}, 0)
 	case bool:
 		return v
 	}

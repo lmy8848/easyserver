@@ -200,8 +200,8 @@ type ParamMeta struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
-	Type        string   `json:"type"`            // "number" | "string"
-	Unit        string   `json:"unit"`            // byte-size token for size params, display label otherwise
+	Type        string   `json:"type"`              // "number" | "string"
+	Unit        string   `json:"unit"`              // byte-size token for size params, display label otherwise
 	Options     []string `json:"options,omitempty"` // select options (presence switches the editor to a Select)
 }
 
