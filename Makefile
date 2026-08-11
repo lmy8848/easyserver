@@ -1,4 +1,4 @@
-.PHONY: all build build-web clean dev deps fmt build-linux build-linux-arm64 release check check-go check-web help
+.PHONY: all build build-web clean dev deps fmt build-linux build-linux-arm64 release help
 
 # Build all (production with embedded frontend)
 all: build
@@ -17,7 +17,7 @@ build: build-web
 # Build frontend (used as dependency by build / build-linux*)
 build-web:
 	@echo "Building frontend..."
-	cd web && npm run build
+	cd web && pnpm run build
 	@echo "Copying frontend to embed location..."
 	rm -rf internal/api/web/dist
 	mkdir -p internal/api/web/dist
@@ -32,41 +32,12 @@ clean:
 # Run in development mode (backend via air + frontend via vite, parallel)
 dev:
 	@echo "Starting backend (with air) and frontend in parallel..."
-	bash -c "go run github.com/air-verse/air@latest & PID1=\$$!; cd web && npm run dev & PID2=\$$!; trap \"kill -TERM \$$PID1 \$$PID2 2>/dev/null || true\" EXIT; wait -n"
+	bash -c "go run github.com/air-verse/air@latest & PID1=\$$!; cd web && pnpm run dev & PID2=\$$!; trap \"kill -TERM \$$PID1 \$$PID2 2>/dev/null || true\" EXIT; wait -n"
 
 # Install dependencies
 deps:
 	go mod download
-	cd web && npm install
-
-# Format code
-fmt:
-	go fmt ./...
-	cd web && npm run lint -- --fix
-
-# Quick local checks — run before committing.
-# `check` runs both sides; use `check-go` / `check-web` if you only touched one.
-check: check-go check-web
-
-check-go:
-	@echo "==> gofmt"
-	@out=$$(gofmt -l cmd internal); if [ -n "$$out" ]; then echo "$$out"; exit 1; fi
-	@echo "==> go vet"
-	@go vet -tags dev ./cmd/... ./internal/...
-	@echo "==> go test"
-	@go test -tags dev ./cmd/... ./internal/...
-	@echo "==> go build"
-	@go build -tags dev -o /dev/null ./cmd/server
-	@echo "✓ 后端检查通过"
-
-check-web:
-	@echo "==> tsc"
-	@cd web && npx tsc --noEmit
-	@echo "==> eslint"
-	@cd web && npx eslint .
-	@echo "==> vite build"
-	@cd web && npm run build
-	@echo "✓ 前端检查通过"
+	cd web && pnpm install
 
 # Cross compile for Linux (CGO disabled; terminal PTY unavailable without C cross-compiler)
 build-linux: build-web
@@ -106,10 +77,6 @@ help:
 	@echo "  make dev            - Run in development mode (air + vite)"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make deps           - Install dependencies"
-	@echo "  make fmt            - Format Go + frontend code"
-	@echo "  make check          - Quick local checks (both go + web)"
-	@echo "  make check-go       - Backend checks: gofmt/vet/test/build"
-	@echo "  make check-web      - Frontend checks: tsc/eslint/build"
 	@echo "  make build-linux    - Cross compile for Linux amd64"
 	@echo "  make build-linux-arm64 - Cross compile for Linux arm64"
 	@echo "  make release        - Cut a release (patch-bump or VERSION=v1.2.3)"

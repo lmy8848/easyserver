@@ -1,0 +1,53 @@
+#!/bin/sh
+# pre-push: 推送时前后端完整检查。
+#   后端: golangci-lint + go test + go build
+#   前端: pnpm tsc --noEmit + pnpm run test + pnpm run build
+#
+# 只对本次推送涉及的文件类型触发；golangci-lint 未安装时跳过并提示（不阻塞推送）。
+# 安装: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+#
+# 启用本钩子（仓库本地，克隆后需重新执行）:
+#   git config core.hooksPath .githooks
+
+set -e
+
+GO_FILES=""
+FE_FILES=""
+
+# git push 经 stdin 传 "<local ref> <local oid> <remote ref> <remote oid>"。
+# 取本次推送的提交范围: 远端已有该分支时 diff 从远端 oid 起；新建分支从首个提交起。
+while read local_ref local_oid remote_ref remote_oid; do
+  [ -z "$local_oid" ] && continue
+  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ] || [ -z "$remote_oid" ]; then
+    base=$(git rev-list --max-parents=0 "$local_oid" 2>/dev/null | tail -1)
+    [ -z "$base" ] && base="$local_oid"
+  else
+    base="$remote_oid"
+  fi
+  GO_FILES="$GO_FILES $(git diff --name-only --diff-filter=ACM "$base".."$local_oid" -- '*.go' 2>/dev/null || true)"
+  FE_FILES="$FE_FILES $(git diff --name-only --diff-filter=ACM "$base".."$local_oid" -- '*.ts' '*.tsx' '*.js' '*.jsx' 2>/dev/null || true)"
+done
+
+# --- 后端 ---
+if [ -n "$(echo $GO_FILES | tr -d ' ')" ]; then
+  if command -v golangci-lint >/dev/null 2>&1; then
+    echo "==> golangci-lint"
+    golangci-lint run
+  else
+    echo "pre-push: golangci-lint 未安装，跳过"
+  fi
+  echo "==> go test"
+  go test -tags dev ./cmd/... ./internal/...
+  echo "==> go build"
+  go build -tags dev -o /dev/null ./cmd/server
+fi
+
+# --- 前端 ---
+if [ -n "$(echo $FE_FILES | tr -d ' ')" ]; then
+  echo "==> pnpm run test"
+  (cd web && pnpm run test)
+  echo "==> pnpm run build"
+  (cd web && pnpm run build)
+fi
+
+exit 0

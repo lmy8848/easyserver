@@ -30,25 +30,20 @@ jobs:
       - name: Stub web/dist for embed
         run: mkdir -p internal/api/web/dist && echo '<html></html>' > internal/api/web/dist/index.html
 
-      - name: Format check (gofmt)
-        run: |
-          out=$(gofmt -l .)
-          if [ -n "$out" ]; then
-            echo "::error::Files not gofmt'd:"
-            echo "$out"
-            exit 1
-          fi
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # 固定版本保证 CI 可复现（官方建议），避免上游升版导致全库突然全红。
+          # goimports 已作为 formatter 配置在 .golangci.yml，由本 step 统一检查。
+          version: v2.12.2
+
+      - name: Test
+        run: go test -race ./...
 
       - name: Build (production, CGO disabled)
         run: |
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
           CGO_ENABLED=0 go build -ldflags "-X easyserver/internal/infra/version.Version=${VERSION}" -o easyserver ./cmd/server
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test -race ./...
 
   frontend:
     name: Build Frontend
@@ -73,11 +68,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Type check
-        run: pnpm tsc --noEmit
-
       - name: Lint
         run: pnpm lint
 
+      - name: Type check
+        run: pnpm tsc --noEmit
+
+      - name: Test
+        run: pnpm test
+
       - name: Build
-        run: pnpm build
+        # pnpm build = `tsc --noEmit && vite build`，tsc 部分已在 Type check step 跑过，
+        # 这里只做打包，避免重复类型检查拖慢 CI。
+        run: pnpm exec vite build
