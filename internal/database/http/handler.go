@@ -24,10 +24,11 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	backupHandler := NewBackupHandler(svc)
 	redisHandler := NewRedisHandler(svc)
 
-	// Instance lifecycle, scoped by database type.
-	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
-	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
-	protected.GET("/db/:dbtype/docker-tags", instanceHandler.ListDockerTags)
+	// Instance lifecycle, scoped by database type (?dbtype= query; POST reads it
+	// from the body).
+	protected.GET("/db/instances", instanceHandler.ListInstances)
+	protected.POST("/db/instances", instanceHandler.CreateInstance)
+	protected.GET("/db/docker-tags", instanceHandler.ListDockerTags)
 	// Installs run without a database row until they finish; the install id is
 	// the container id. The log endpoint streams one install's log via SSE.
 	protected.GET("/db/installs/:iid/log", instanceHandler.InstallLogStream)
@@ -75,14 +76,14 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
 
 	// Redis key browser (instance-scoped, addressed by logical DB index)
-	protected.GET("/db/instances/:iid/redis/dbs", redisHandler.ListDBs)
-	protected.GET("/db/instances/:iid/redis/keys", redisHandler.ScanKeys)
-	protected.GET("/db/instances/:iid/redis/value", redisHandler.GetValue)
-	protected.POST("/db/instances/:iid/redis/value", redisHandler.SetValue)
-	protected.POST("/db/instances/:iid/redis/del", redisHandler.DelKeys)
-	protected.POST("/db/instances/:iid/redis/expire", redisHandler.Expire)
-	protected.POST("/db/instances/:iid/redis/persist", redisHandler.Persist)
-	protected.POST("/db/instances/:iid/redis/flushdb", redisHandler.FlushDB)
+	protected.GET("/db/redis/instances/:iid/dbs", redisHandler.ListDBs)
+	protected.GET("/db/redis/instances/:iid/keys", redisHandler.ScanKeys)
+	protected.GET("/db/redis/instances/:iid/value", redisHandler.GetValue)
+	protected.POST("/db/redis/instances/:iid/value", redisHandler.SetValue)
+	protected.POST("/db/redis/instances/:iid/del", redisHandler.DelKeys)
+	protected.POST("/db/redis/instances/:iid/expire", redisHandler.Expire)
+	protected.POST("/db/redis/instances/:iid/persist", redisHandler.Persist)
+	protected.POST("/db/redis/instances/:iid/flushdb", redisHandler.FlushDB)
 }
 
 // InstanceHandler handles instance lifecycle endpoints, scoped by database type.
@@ -95,7 +96,7 @@ func NewInstanceHandler(svc *database.Service) *InstanceHandler {
 }
 
 func parseDBType(c *gin.Context) (database.DBType, bool) {
-	dbType := database.DBType(c.Param("dbtype"))
+	dbType := database.DBType(c.Query("dbtype"))
 	if !database.IsValidDBType(dbType) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库类型"))
 		return "", false
@@ -224,17 +225,17 @@ func (h *InstanceHandler) CancelInstall(c *gin.Context) {
 }
 
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {
-	dbType, ok := parseDBType(c)
-	if !ok {
-		return
-	}
 	var req database.CreateDBInstanceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
+	if !database.IsValidDBType(req.DBType) {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库类型"))
+		return
+	}
 	middleware.AuditSummary(c, "创建数据库实例 "+req.Version)
-	instance, err := h.svc.CreateInstance(c.Request.Context(), dbType, &req)
+	instance, err := h.svc.CreateInstance(c.Request.Context(), req.DBType, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return

@@ -535,10 +535,10 @@ export const websiteApi = {
 export const dbServerApi = {
   // Instance lifecycle, scoped by engine enum.
   listInstances: (dbtype: string) =>
-    api.get<ApiResponse<DBInstance[]>>(`/db/${dbtype}/instances`),
+    api.get<ApiResponse<DBInstance[]>>(`/db/instances`, { params: { dbtype } }),
 
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string; container_name?: string }) =>
-    api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/${dbtype}/instances`, data),
+    api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/instances`, { ...data, dbtype }),
 
   // Cancel an in-flight install (image pull or provisioning).
   cancelInstall: (iid: string) =>
@@ -547,7 +547,7 @@ export const dbServerApi = {
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),
   // paginated — the version Select flips pages through this.
   listDockerTags: (dbtype: string, page = 1, pageSize = 10) =>
-    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/${dbtype}/docker-tags`, { params: { page, page_size: pageSize } }),
+    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/docker-tags`, { params: { dbtype, page, page_size: pageSize } }),
 
   // Uninstall the instance. purge=true also deletes the data (and config) volumes.
   uninstallInstance: (iid: number, purge = false) =>
@@ -648,28 +648,28 @@ export const dbServerApi = {
 
   // Redis key browser (instance-scoped, addressed by logical DB index)
   listRedisDBs: (instanceId: number) =>
-    api.get<ApiResponse<Array<{ index: number; size: number }>>>(`/db/instances/${instanceId}/redis/dbs`),
+    api.get<ApiResponse<Array<{ index: number; size: number }>>>(`/db/redis/instances/${instanceId}/dbs`),
 
   scanRedisKeys: (instanceId: number, db: number, cursor: number | string, pattern = '*', count = 50) =>
-    api.get<ApiResponse<{ keys: RedisKey[]; next_cursor: number | string; db: number }>>(`/db/instances/${instanceId}/redis/keys`, { params: { db, cursor, pattern, count } }),
+    api.get<ApiResponse<{ keys: RedisKey[]; next_cursor: number | string; db: number }>>(`/db/redis/instances/${instanceId}/keys`, { params: { db, cursor, pattern, count } }),
 
   getRedisValue: (instanceId: number, db: number, key: string) =>
-    api.get<ApiResponse<RedisValue>>(`/db/instances/${instanceId}/redis/value`, { params: { db, key } }),
+    api.get<ApiResponse<RedisValue>>(`/db/redis/instances/${instanceId}/value`, { params: { db, key } }),
 
   setRedisValue: (instanceId: number, data: { db: number; key: string; value: string; ttl?: number }) =>
-    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/value`, data),
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/value`, data),
 
   delRedisKeys: (instanceId: number, data: { db: number; keys: string[] }) =>
-    api.post<ApiResponse<{ deleted: number }>>(`/db/instances/${instanceId}/redis/del`, data),
+    api.post<ApiResponse<{ deleted: number }>>(`/db/redis/instances/${instanceId}/del`, data),
 
   expireRedisKey: (instanceId: number, data: { db: number; key: string; ttl: number }) =>
-    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/expire`, data),
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/expire`, data),
 
   persistRedisKey: (instanceId: number, data: { db: number; key: string }) =>
-    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/persist`, data),
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/persist`, data),
 
   flushRedisDB: (instanceId: number, data: { db: number }) =>
-    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/flushdb`, data),
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/flushdb`, data),
 };
 
 // Cron task management

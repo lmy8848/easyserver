@@ -35,6 +35,7 @@ type DBInstance struct {
 // front-end, not the backend. ContainerName is optional; empty falls back to the
 // deterministic default "easyserver-db-<type>-<version>".
 type CreateDBInstanceRequest struct {
+	DBType          DBType `json:"dbtype" binding:"required"`
 	Version         string `json:"version" binding:"required"`
 	Image           string `json:"image" binding:"required"`
 	Port            int    `json:"port" binding:"required"`
