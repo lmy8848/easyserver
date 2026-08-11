@@ -111,6 +111,15 @@ export default function DatabasePage() {
     return () => clearInterval(timer);
   }, [versions, activeDbType]);
 
+  // While a backup runs (a row is "running"), poll the backup list so it flips to
+  // success/failed on completion without a manual refresh.
+  useEffect(() => {
+    if (!selectedVersion || !selectedDatabase) return;
+    if (!backups.some(b => b.status === 'running')) return;
+    const timer = setInterval(() => fetchBackups(selectedVersion.id, selectedDatabase.name), 2000);
+    return () => clearInterval(timer);
+  }, [backups, selectedVersion, selectedDatabase]);
+
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
     try { const res = await dbServerApi.listDatabases(instanceId); setDatabases(res.data?.data || []); }
