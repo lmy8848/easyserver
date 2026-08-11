@@ -7,20 +7,11 @@ import (
 	"strings"
 )
 
-// 结构化配置。面板是配置参数的唯一写入方：参数元数据定义在下方。配置的读写全走
-// 驱动直连（分支迁移）：读取用数据库的变量查询，持久化交给数据库自身机制 ——
-// MySQL SET PERSIST（mysqld-auto.cnf）/ PostgreSQL ALTER SYSTEM
-// （postgresql.auto.conf）/ Redis CONFIG SET + CONFIG REWRITE（redis.conf）。
-// GET 读到啥返回啥（运行时值），无编译默认值合成。
-
-// configSectionName 是各类型结构化配置的段名：MySQL 的 [mysqld] 段（my.cnf 的
-// !includedir conf.d 合并进来），PostgreSQL/Redis 是隐式主段。
-func configSectionName(dbType DBType) string {
-	if dbType == DBTypeMySQL {
-		return "mysqld"
-	}
-	return "main"
-}
+// 结构化配置。面板是配置参数的唯一写入方：参数元数据定义在下方，Key 就是驱动
+// 设置时的实际参数名（零转换）。配置的读写全走驱动直连（分支迁移）：读取用
+// 数据库的变量查询，持久化交给数据库自身机制 —— MySQL SET PERSIST
+// （mysqld-auto.cnf）/ PostgreSQL ALTER SYSTEM（postgresql.auto.conf）/ Redis
+// CONFIG SET + CONFIG REWRITE（redis.conf）。GET 读到啥返回啥（运行时值）。
 
 // configParams 返回某类型可编辑的参数元数据（供 GET 渲染编辑器、SAVE 白名单与
 // 读配置过滤）。只含 label/type/options 等 UI 信息，无编译默认值。
@@ -40,7 +31,7 @@ func mysqlConfigParams() []ParamMeta {
 		{Key: "port", Label: "监听端口", Description: "MySQL 服务监听端口。修改后保存即重建容器生效"},
 		{Key: "max_connections", Label: "最大连接数", Description: "允许的最大并发连接数"},
 		{Key: "max_allowed_packet", Label: "最大数据包", Description: "单个数据包最大大小", Unit: "MB"},
-		{Key: "default-storage-engine", Label: "默认存储引擎", Description: "默认存储引擎", Options: []string{"InnoDB", "MyISAM", "MEMORY"}},
+		{Key: "default_storage_engine", Label: "默认存储引擎", Description: "默认存储引擎", Options: []string{"InnoDB", "MyISAM", "MEMORY"}},
 		{Key: "innodb_buffer_pool_size", Label: "InnoDB 缓冲池", Description: "InnoDB 缓冲池大小，生产建议内存的 70-80%", Unit: "MB/GB"},
 		{Key: "tmp_table_size", Label: "临时表大小", Description: "内存临时表最大大小", Unit: "MB"},
 		{Key: "max_heap_table_size", Label: "堆表最大大小", Description: "用户内存表最大大小", Unit: "MB"},

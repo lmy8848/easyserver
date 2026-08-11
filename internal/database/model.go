@@ -193,7 +193,9 @@ type DBConfig struct {
 // ParamMeta defines UI metadata for common configuration parameters. Values are
 // always strings (driven by the engine's own config semantics), so there is no
 // type — the editor renders Select when Options are present, a text input
-// otherwise.
+// otherwise. Key is the actual engine parameter name (zero conversion: the same
+// string goes into SHOW VARIABLES filter / SET PERSIST / ALTER SYSTEM /
+// CONFIG SET).
 type ParamMeta struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
@@ -202,20 +204,14 @@ type ParamMeta struct {
 	Options     []string `json:"options,omitempty"` // select options (presence switches the editor to a Select)
 }
 
-// ConfigSectionView is one section of the structured config as served to the
-// front-end: the current param values (override or compiled default) plus the
-// editing metadata for every param. Meta is embedded per-section so the UI needs
-// no separate /common-params endpoint.
-type ConfigSectionView struct {
-	Name   string            `json:"name"`
+// InstanceConfigView is the structured config of one instance (GET /config):
+// Params is the engine's current values for the panel-managed parameters
+// (read back from the driver channel), Meta the editor metadata. There is no
+// multi-section shape — the driver channel addresses a single config namespace
+// per engine.
+type InstanceConfigView struct {
 	Params map[string]string `json:"params"`
 	Meta   []ParamMeta       `json:"meta"`
-}
-
-// InstanceConfigView is the structured config of one instance (GET /config).
-// Config is read/written over the direct driver channel — no config file path.
-type InstanceConfigView struct {
-	Sections []ConfigSectionView `json:"sections"`
 }
 
 // RedisDB describes one logical Redis database (0-15) that holds data.

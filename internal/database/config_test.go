@@ -86,23 +86,20 @@ func TestGetConfigReadsRuntimeValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if len(view.Sections) != 1 || view.Sections[0].Name != "mysqld" {
-		t.Fatalf("unexpected sections: %+v", view.Sections)
-	}
 	// 读到啥返回啥：运行时值原样返回，未读到的参数不返回（无编译默认值合成）。
-	if view.Sections[0].Params["max_connections"] != "500" {
-		t.Fatalf("expected runtime value, got %q", view.Sections[0].Params["max_connections"])
+	if view.Params["max_connections"] != "500" {
+		t.Fatalf("expected runtime value, got %q", view.Params["max_connections"])
 	}
-	if view.Sections[0].Params["innodb_buffer_pool_size"] != "1G" {
-		t.Fatalf("expected runtime value, got %q", view.Sections[0].Params["innodb_buffer_pool_size"])
+	if view.Params["innodb_buffer_pool_size"] != "1G" {
+		t.Fatalf("expected runtime value, got %q", view.Params["innodb_buffer_pool_size"])
 	}
-	if _, ok := view.Sections[0].Params["wait_timeout"]; ok {
-		t.Fatalf("unread param must be absent, got %+v", view.Sections[0].Params)
+	if _, ok := view.Params["wait_timeout"]; ok {
+		t.Fatalf("unread param must be absent, got %+v", view.Params)
 	}
-	if view.Sections[0].Params["port"] != "3306" {
-		t.Fatalf("port should reflect instance port, got %q", view.Sections[0].Params["port"])
+	if view.Params["port"] != "3306" {
+		t.Fatalf("port should reflect instance port, got %q", view.Params["port"])
 	}
-	if len(view.Sections[0].Meta) == 0 {
+	if len(view.Meta) == 0 {
 		t.Fatal("meta must be embedded for the editor")
 	}
 }
@@ -115,9 +112,7 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 	svc := configSvc(repo, rt, f)
 	ctx := context.Background()
 
-	if err := svc.SaveInstanceConfig(ctx, id, []ConfigSectionView{
-		{Name: "mysqld", Params: map[string]string{"max_connections": "500", "wait_timeout": "100"}},
-	}); err != nil {
+	if err := svc.SaveInstanceConfig(ctx, id, map[string]string{"max_connections": "500", "wait_timeout": "100"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// 参数遍历走 map（无序），断言集合而非顺序。
@@ -142,9 +137,7 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 
 	// 空值不提交（前端已过滤）→ 后端兜底也不设置：空值参数不在 Exec 里出现。
 	f.execs = nil
-	if err := svc.SaveInstanceConfig(ctx, id, []ConfigSectionView{
-		{Name: "mysqld", Params: map[string]string{"max_connections": "500", "wait_timeout": ""}},
-	}); err != nil {
+	if err := svc.SaveInstanceConfig(ctx, id, map[string]string{"max_connections": "500", "wait_timeout": ""}); err != nil {
 		t.Fatalf("save with empty value: %v", err)
 	}
 	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = '500'" {
@@ -157,11 +150,11 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after save: %v", err)
 	}
-	if view.Sections[0].Params["max_connections"] != "500" {
-		t.Fatalf("override lost: %+v", view.Sections[0].Params)
+	if view.Params["max_connections"] != "500" {
+		t.Fatalf("override lost: %+v", view.Params)
 	}
-	if _, ok := view.Sections[0].Params["innodb_buffer_pool_size"]; ok {
-		t.Fatalf("unread param must be absent, got %+v", view.Sections[0].Params)
+	if _, ok := view.Params["innodb_buffer_pool_size"]; ok {
+		t.Fatalf("unread param must be absent, got %+v", view.Params)
 	}
 }
 
@@ -172,9 +165,7 @@ func TestSaveConfigMySQLBelow8Rejected(t *testing.T) {
 	id, _ := repo.CreateInstance(context.Background(), configInstance(DBTypeMySQL, "c1", 3306))
 	svc := configSvc(repo, rt, f)
 
-	err := svc.SaveInstanceConfig(context.Background(), id, []ConfigSectionView{
-		{Name: "mysqld", Params: map[string]string{"max_connections": "500"}},
-	})
+	err := svc.SaveInstanceConfig(context.Background(), id, map[string]string{"max_connections": "500"})
 	if err == nil {
 		t.Fatal("expected MySQL <8.0 to be rejected for SET PERSIST")
 	}
@@ -190,9 +181,7 @@ func TestSaveConfigWithPortChangeRecreatesContainer(t *testing.T) {
 	id, _ := repo.CreateInstance(context.Background(), configInstance(DBTypeMySQL, "c1", 3306))
 	svc := configSvc(repo, rt, f)
 
-	err := svc.SaveInstanceConfig(context.Background(), id, []ConfigSectionView{
-		{Name: "mysqld", Params: map[string]string{"port": "4000", "max_connections": "300"}},
-	})
+	err := svc.SaveInstanceConfig(context.Background(), id, map[string]string{"port": "4000", "max_connections": "300"})
 	if err != nil {
 		t.Fatalf("save with port change: %v", err)
 	}
@@ -225,9 +214,7 @@ func TestPostgresConfigReloadVsPostmasterRestart(t *testing.T) {
 	ctx := context.Background()
 
 	// 只改 reload 级参数（work_mem）→ ALTER SYSTEM + reload，不重启容器。
-	if err := svc.SaveInstanceConfig(ctx, id, []ConfigSectionView{
-		{Name: "main", Params: map[string]string{"work_mem": "8MB"}},
-	}); err != nil {
+	if err := svc.SaveInstanceConfig(ctx, id, map[string]string{"work_mem": "8MB"}); err != nil {
 		t.Fatalf("save reload-level: %v", err)
 	}
 	if len(rt.restarted) != 0 {
@@ -243,9 +230,7 @@ func TestPostgresConfigReloadVsPostmasterRestart(t *testing.T) {
 
 	// 改 postmaster 级参数（shared_buffers）→ 重启容器。
 	f.execs = nil
-	if err := svc.SaveInstanceConfig(ctx, id, []ConfigSectionView{
-		{Name: "main", Params: map[string]string{"shared_buffers": "256MB"}},
-	}); err != nil {
+	if err := svc.SaveInstanceConfig(ctx, id, map[string]string{"shared_buffers": "256MB"}); err != nil {
 		t.Fatalf("save postmaster-level: %v", err)
 	}
 	if len(rt.restarted) != 1 || rt.restarted[0] != "pg1" {
@@ -274,22 +259,17 @@ func TestRedisConfigGetAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if view.Sections[0].Name != "main" {
-		t.Fatalf("unexpected section: %+v", view.Sections)
+	if view.Params["maxmemory"] != "100mb" {
+		t.Fatalf("runtime value lost: %+v", view.Params)
 	}
-	if view.Sections[0].Params["maxmemory"] != "100mb" {
-		t.Fatalf("runtime value lost: %+v", view.Sections[0].Params)
-	}
-	if _, ok := view.Sections[0].Params["databases"]; ok {
-		t.Fatalf("unread param must be absent, got %+v", view.Sections[0].Params)
+	if _, ok := view.Params["databases"]; ok {
+		t.Fatalf("unread param must be absent, got %+v", view.Params)
 	}
 
 	// SAVE：CONFIG SET + CONFIG REWRITE。
 	mock.ExpectConfigSet("maxmemory", "200mb").SetVal("OK")
 	mock.ExpectConfigRewrite().SetVal("OK")
-	if err := svc.SaveInstanceConfig(ctx, id, []ConfigSectionView{
-		{Name: "main", Params: map[string]string{"maxmemory": "200mb"}},
-	}); err != nil {
+	if err := svc.SaveInstanceConfig(ctx, id, map[string]string{"maxmemory": "200mb"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

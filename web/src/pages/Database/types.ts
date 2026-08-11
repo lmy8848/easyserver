@@ -168,7 +168,7 @@ export interface ConfigTabProps {
   server: DBTypeInfo;
   dbConfig: any;
   dbConfigLoading: boolean;
-  onUpdateDBParam: (section: string, key: string, value: string) => void;
+  onUpdateDBParam: (key: string, value: string) => void;
 }
 
 // 表浏览器（内联在表 tab 中）— 选中数据库后展示

@@ -571,8 +571,8 @@ export const dbServerApi = {
   getInstanceConfig: (iid: number) =>
     api.get<ApiResponse<InstanceConfigView>>(`/db/instances/${iid}/config`),
 
-  saveInstanceConfig: (iid: number, sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.put<ApiResponse>(`/db/instances/${iid}/config`, { sections }),
+  saveInstanceConfig: (iid: number, params: Record<string, string>) =>
+    api.put<ApiResponse>(`/db/instances/${iid}/config`, { params }),
 
   // Databases (instance-scoped; logical databases are live engine state, so the
   // database name is the identifier — never a persisted id)

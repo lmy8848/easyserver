@@ -185,7 +185,7 @@ export default function DatabasePage() {
     setDBConfigLoading(true);
     try {
       const res = await dbServerApi.getInstanceConfig(selectedVersion.id);
-      // 结构化配置：每个 section 自带 params（覆盖项或编译默认值）+ meta（编辑元数据）。
+      // 结构化配置：params（引擎当前值）+ meta（编辑元数据）。
       setDBConfig({ found: true, config: res.data?.data });
     } catch (error) {
       console.error('Failed to load config:', error);
@@ -480,18 +480,15 @@ export default function DatabasePage() {
 
   // ===== Config handlers =====
   const handleSaveDBConfig = async () => {
-    if (!dbConfig?.config?.sections || !selectedVersion) return;
+    if (!dbConfig?.config?.params || !selectedVersion) return;
     setBusy('save-config');
     try {
-      // 只提交 name + params（meta 是编辑元数据，服务端不落库）；空值不提交
+      // 只提交改过的非空字段（meta 是渲染元数据，服务端不落库）；空值不提交
       // —— 保存只应用改过的字段，清空输入框等于不改。
-      const sections = dbConfig.config.sections.map((s: any) => ({
-        name: s.name,
-        params: Object.fromEntries(
-          Object.entries(s.params || {}).filter(([, v]) => String(v ?? '').trim() !== '')
-        ),
-      }));
-      await dbServerApi.saveInstanceConfig(selectedVersion.id, sections);
+      const params = Object.fromEntries(
+        Object.entries(dbConfig.config.params || {}).filter(([, v]) => String(v ?? '').trim() !== '')
+      ) as Record<string, string>;
+      await dbServerApi.saveInstanceConfig(selectedVersion.id, params);
       message.success('配置已保存');
       fetchDBConfig();
       fetchInstances(activeDbType);
@@ -499,14 +496,10 @@ export default function DatabasePage() {
     finally { setBusy(''); }
   };
 
-  const updateDBParam = (section: string, key: string, value: string) => {
+  const updateDBParam = (key: string, value: string) => {
     setDBConfig((prev: any) => {
-      if (!prev?.config?.sections) return prev;
-      const newSections = prev.config.sections.map((s: any) => {
-        if (s.name === section) return { ...s, params: { ...s.params, [key]: value } };
-        return s;
-      });
-      return { ...prev, config: { ...prev.config, sections: newSections } };
+      if (!prev?.config?.params) return prev;
+      return { ...prev, config: { ...prev.config, params: { ...prev.config.params, [key]: value } } };
     });
   };
 

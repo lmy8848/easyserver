@@ -491,15 +491,9 @@ export interface ShareFileEntry {
   is_dir: boolean;
 }
 
-// DB config
-export interface ConfigSection {
-  name: string;
-  params: Record<string, string>;
-}
-
 // ParamMeta is the UI metadata for one config param. Values are always strings,
 // so there is no type — the editor renders a Select when options is present, a
-// text input otherwise.
+// text input otherwise. key is the actual engine parameter name (zero conversion).
 export interface ParamMeta {
   key: string;
   label: string;
@@ -509,14 +503,11 @@ export interface ParamMeta {
 }
 
 // Structured config of one database instance (GET /db/instances/:iid/config):
-// current param values (runtime or compiled default) plus editing metadata.
-// Config is read/written over the direct driver channel — no config file exposed.
-export interface InstanceConfigSection extends ConfigSection {
-  meta: ParamMeta[];
-}
-
+// params = current engine values for the panel-managed params, meta = editor
+// metadata. No multi-section shape — one config namespace per engine.
 export interface InstanceConfigView {
-  sections: InstanceConfigSection[];
+  params: Record<string, string>;
+  meta: ParamMeta[];
 }
 
 // TLS certificate info parsed from the configured cert

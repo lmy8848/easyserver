@@ -615,13 +615,7 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 		return nil, err
 	}
 	params["port"] = strconv.Itoa(v.Port)
-	view := &InstanceConfigView{}
-	view.Sections = append(view.Sections, ConfigSectionView{
-		Name:   configSectionName(v.DBType),
-		Params: params,
-		Meta:   configParams(v.DBType),
-	})
-	return view, nil
+	return &InstanceConfigView{Params: params, Meta: configParams(v.DBType)}, nil
 }
 
 // SaveInstanceConfig 保存结构化配置并立即生效：
@@ -631,33 +625,31 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 //  3. port 参数变化 → 重建容器更新端口映射（port 是容器映射，驱动改不了）；
 //  4. PG 的 postmaster 级参数 reload 不生效 → 重启容器；
 //     其余参数驱动已在线生效，不重启。
-func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, sections []ConfigSectionView) error {
+func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, params map[string]string) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
 
 	// 组装本次覆盖值，空值跳过（不清覆盖、不重置 —— 保存只应用改过的字段）。
-	params := make(map[string]string)
-	for _, section := range sections {
-		for key, value := range section.Params {
-			if trimmed := strings.TrimSpace(value); trimmed != "" {
-				params[key] = trimmed
-			}
+	filtered := make(map[string]string)
+	for key, value := range params {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			filtered[key] = trimmed
 		}
 	}
 	newPort := v.Port
-	if raw, ok := params["port"]; ok {
+	if raw, ok := filtered["port"]; ok {
 		if p, err := strconv.Atoi(raw); err == nil && p >= 1 && p <= 65535 {
 			newPort = p
 		}
-		delete(params, "port")
+		delete(filtered, "port")
 	}
 
 	if err := s.ensureInstanceRunning(ctx, v, "保存配置"); err != nil {
 		return err
 	}
-	restart, err := s.applyConfigValues(ctx, v, params)
+	restart, err := s.applyConfigValues(ctx, v, filtered)
 	if err != nil {
 		return err
 	}

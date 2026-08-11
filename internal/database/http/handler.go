@@ -343,13 +343,13 @@ func (h *InstanceHandler) SaveInstanceConfig(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Sections []database.ConfigSectionView `json:"sections"`
+		Params map[string]string `json:"params"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Sections); err != nil {
+	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Params); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
