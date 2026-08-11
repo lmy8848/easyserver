@@ -274,6 +274,18 @@ export interface DBUser {
   privileges?: string;
 }
 
+export interface RedisKey {
+  name: string;
+  type: string; // string | hash | list | set | zset | ...
+  ttl: number; // seconds; -1 = no expiry
+  size: number; // bytes
+}
+
+export interface RedisValue {
+  type: string;
+  value: string | Record<string, string> | string[] | Array<{ member: string; score: number }> | null;
+}
+
 // Cron task types（systemd timer 承载，name 为唯一标识）
 export interface CronTask {
   name: string;

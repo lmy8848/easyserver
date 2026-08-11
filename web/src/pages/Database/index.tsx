@@ -8,6 +8,7 @@ import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
 import InstallLogPanel from './InstallLogPanel';
 import DatabasesTab from './DatabasesTab';
+import RedisKeysTab from './RedisKeysTab';
 import UsersTab from './UsersTab';
 import ConfigTab from './ConfigTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
@@ -227,6 +228,9 @@ export default function DatabasePage() {
     setSelectedVersion(version);
     setSelectedDatabase(null);
     if (version.status === 'running') {
+      // Redis has no SQL databases/users — its "数据库" tab is a key browser
+      // (RedisKeysTab) that loads its own state, so skip the SQL fetches.
+      if (activeDbType === 'redis') return;
       await Promise.all([fetchDatabases(version.id), fetchUsers(version.id)]);
     }
   };
@@ -718,13 +722,17 @@ export default function DatabasePage() {
     // active detail tab (数据库/用户) and are hidden until a version is selected
     // (there is no instance to act on otherwise).
     const tabExtra = !selectedVersion ? null : detailTab === 'databases' ? (
-      <Space style={{ marginRight: 8 }}>
-        <Button icon={<ReloadOutlined />} loading={dbsLoading}
-          onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
-          disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
-      </Space>
+      // Redis 的数据库 tab 是自包含 key 浏览器（自带 DB/pattern/刷新工具栏），
+      // tab 栏不重复放 SQL 的刷新/创建数据库按钮。
+      activeDbType === 'redis' ? null : (
+        <Space style={{ marginRight: 8 }}>
+          <Button icon={<ReloadOutlined />} loading={dbsLoading}
+            onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
+          <Button type="primary" icon={<PlusOutlined />}
+            onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
+            disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
+        </Space>
+      )
     ) : detailTab === 'users' ? (
       <Space style={{ marginRight: 8 }}>
         <Button icon={<ReloadOutlined />} loading={usersLoading}
@@ -815,20 +823,22 @@ export default function DatabasePage() {
               {
                 key: 'databases',
                 label: <span><DatabaseOutlined /> 数据库</span>,
-                children: <DatabasesTab
-                  server={activeDBTypeInfo}
-                  version={selectedVersion}
-                  databases={databases}
-                  dbsLoading={dbsLoading}
-                  busy={busy}
-                  onEnterDatabase={enterDatabase}
-                  onDeleteDB={handleDeleteDB}
-                  dbModalVisible={dbModalVisible}
-                  onDbModalVisibleChange={setDbModalVisible}
-                  dbForm={dbForm}
-                  onCreateDB={handleCreateDB}
-                  tableExplorer={tableExplorer}
-                />,
+                children: activeDbType === 'redis' && selectedVersion
+                  ? <RedisKeysTab instance={selectedVersion} />
+                  : <DatabasesTab
+                      server={activeDBTypeInfo}
+                      version={selectedVersion}
+                      databases={databases}
+                      dbsLoading={dbsLoading}
+                      busy={busy}
+                      onEnterDatabase={enterDatabase}
+                      onDeleteDB={handleDeleteDB}
+                      dbModalVisible={dbModalVisible}
+                      onDbModalVisibleChange={setDbModalVisible}
+                      dbForm={dbForm}
+                      onCreateDB={handleCreateDB}
+                      tableExplorer={tableExplorer}
+                    />,
               },
               {
                 key: 'users',

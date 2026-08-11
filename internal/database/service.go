@@ -45,6 +45,7 @@ type Service struct {
 	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
 	driver         SQLQueryRunner         // direct driver channel (MySQL/PostgreSQL)
+	redisOps       RedisOps               // direct driver channel (Redis)
 }
 
 // NewService creates a database Service over the given Repository, driving
@@ -60,7 +61,8 @@ func NewService(repo Repository, exec executor.CommandExecutor) *Service {
 		runtimeFactory: func() DatabaseRuntime {
 			return NewCLIContainerRuntime(exec)
 		},
-		driver: newDriverQueryRunner(),
+		driver:   newDriverQueryRunner(),
+		redisOps: newRedisQueryRunner(),
 	}
 }
 
@@ -75,7 +77,8 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
-		driver: newDriverQueryRunner(),
+		driver:   newDriverQueryRunner(),
+		redisOps: newRedisQueryRunner(),
 	}
 }
 
@@ -84,6 +87,11 @@ func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
 // surface as clear errors from the driver channel instead of falling back.
 func (s *Service) runnerFor(inst *DBInstance) SQLQueryRunner {
 	return s.driver
+}
+
+// redisFor returns the direct Redis channel for an instance (key browser ops).
+func (s *Service) redisFor() RedisOps {
+	return s.redisOps
 }
 
 // refreshInstanceStatus queries the container runtime (by container ID) and
@@ -329,6 +337,9 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
+	// Drop cached direct-connection pools so a reinstall reconnects fresh.
+	s.driver.Close(instanceID)
+	s.redisOps.Close(instanceID)
 	if purge {
 		if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
 			return fmt.Errorf("remove database volume: %w", err)
@@ -351,6 +362,8 @@ func (s *Service) DestroyInstance(ctx context.Context, instanceID int64) error {
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
+	s.driver.Close(instanceID)
+	s.redisOps.Close(instanceID)
 	if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
 		return fmt.Errorf("remove database volume: %w", err)
 	}
@@ -1193,8 +1206,9 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	_, err = s.runInVersion(ctx, instance, "redis-cli", "BGSAVE")
-	if err != nil {
+	// Trigger persistence over the direct connection; the dump file still has to
+	// be copied out of the container (a container file operation).
+	if err := s.redisFor().BgSave(ctx, instance); err != nil {
 		return fmt.Errorf("redis BGSAVE failed: %w", err)
 	}
 
@@ -1345,10 +1359,6 @@ func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []st
 		return append([]string{"-e", "MYSQL_PWD=" + password, args[0], "-uroot"}, args[1:]...)
 	case DBTypePostgreSQL:
 		return append([]string{args[0], "-U", "postgres"}, args[1:]...)
-	case DBTypeRedis:
-		if args[0] == "redis-cli" {
-			return append([]string{args[0], "-a", password}, args[1:]...)
-		}
 	}
 	return args
 }
@@ -1756,4 +1766,134 @@ func isValidHost(host string) bool {
 
 func isValidCharset(charset string) bool {
 	return validCharsets[charset]
+}
+
+// --- Redis key browser operations ---
+//
+// Redis has no SQL: the "数据库" tab renders a key browser instead. All ops go
+// through the direct go-redis channel (s.redisOps), addressed by logical DB
+// index (0-15).
+
+// getRedisInstance loads an instance for a Redis operation and validates the
+// logical DB index.
+func (s *Service) getRedisInstance(ctx context.Context, instanceID int64, db int) (*DBInstance, error) {
+	if db < 0 || db > 15 {
+		return nil, fmt.Errorf("invalid redis db index: %d", db)
+	}
+	instance, err := s.repo.GetInstance(ctx, instanceID)
+	if err != nil || instance == nil {
+		return nil, fmt.Errorf("database instance not found")
+	}
+	return instance, nil
+}
+
+// ListRedisDBs returns the non-empty logical databases (index + key count).
+func (s *Service) ListRedisDBs(ctx context.Context, instanceID int64) ([]RedisDB, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, 0)
+	if err != nil {
+		return nil, err
+	}
+	return s.redisFor().ListDBs(ctx, instance)
+}
+
+// ScanRedisKeys pages through keys in a logical DB (SCAN cursor).
+func (s *Service) ScanRedisKeys(ctx context.Context, instanceID int64, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.redisFor().ScanKeys(ctx, instance, db, cursor, pattern, count)
+}
+
+// GetRedisValue reads one key's decoded value.
+func (s *Service) GetRedisValue(ctx context.Context, instanceID int64, db int, key string) (*RedisValue, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().GetValue(ctx, instance, db, key)
+}
+
+// SetRedisValue writes a string key (with optional TTL seconds; ttl <= 0 = no expiry).
+func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, key, value string, ttl int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().SetValue(ctx, instance, db, key, value, time.Duration(ttl)*time.Second)
+}
+
+// DeleteRedisKeys deletes one or more keys; returns the number removed.
+func (s *Service) DeleteRedisKeys(ctx context.Context, instanceID int64, db int, keys []string) (int64, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return 0, err
+	}
+	if len(keys) == 0 {
+		return 0, fmt.Errorf("no keys specified")
+	}
+	return s.redisFor().DelKeys(ctx, instance, db, keys...)
+}
+
+// ExpireRedisKey sets a key's expiry (ttl seconds; ttl <= 0 clears to none).
+func (s *Service) ExpireRedisKey(ctx context.Context, instanceID int64, db int, key string, ttl int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().Expire(ctx, instance, db, key, time.Duration(ttl)*time.Second)
+}
+
+// PersistRedisKey removes a key's expiry.
+func (s *Service) PersistRedisKey(ctx context.Context, instanceID int64, db int, key string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	return s.redisFor().Persist(ctx, instance, db, key)
+}
+
+// FlushRedisDB removes all keys from a logical DB.
+func (s *Service) FlushRedisDB(ctx context.Context, instanceID int64, db int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.getRedisInstance(ctx, instanceID, db)
+	if err != nil {
+		return err
+	}
+	return s.redisFor().FlushDB(ctx, instance, db)
 }

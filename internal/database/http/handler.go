@@ -22,6 +22,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	dbHandler := NewDatabaseHandler(svc)
 	userHandler := NewUserHandler(svc)
 	backupHandler := NewBackupHandler(svc)
+	redisHandler := NewRedisHandler(svc)
 
 	// Instance lifecycle, scoped by database type.
 	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
@@ -72,6 +73,16 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
 	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
+
+	// Redis key browser (instance-scoped, addressed by logical DB index)
+	protected.GET("/db/instances/:iid/redis/dbs", redisHandler.ListDBs)
+	protected.GET("/db/instances/:iid/redis/keys", redisHandler.ScanKeys)
+	protected.GET("/db/instances/:iid/redis/value", redisHandler.GetValue)
+	protected.POST("/db/instances/:iid/redis/value", redisHandler.SetValue)
+	protected.POST("/db/instances/:iid/redis/del", redisHandler.DelKeys)
+	protected.POST("/db/instances/:iid/redis/expire", redisHandler.Expire)
+	protected.POST("/db/instances/:iid/redis/persist", redisHandler.Persist)
+	protected.POST("/db/instances/:iid/redis/flushdb", redisHandler.FlushDB)
 }
 
 // InstanceHandler handles instance lifecycle endpoints, scoped by database type.

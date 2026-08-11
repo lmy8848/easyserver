@@ -4,7 +4,7 @@ import type {
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
-  WebServer, Website, DBInstance, Database, DBUser,
+  WebServer, Website, DBInstance, Database, DBUser, RedisKey, RedisValue,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -645,6 +645,31 @@ export const dbServerApi = {
 
   deleteBackup: (backupId: number) =>
     api.delete<ApiResponse>(`/db/backups/${backupId}`),
+
+  // Redis key browser (instance-scoped, addressed by logical DB index)
+  listRedisDBs: (instanceId: number) =>
+    api.get<ApiResponse<Array<{ index: number; size: number }>>>(`/db/instances/${instanceId}/redis/dbs`),
+
+  scanRedisKeys: (instanceId: number, db: number, cursor: number | string, pattern = '*', count = 50) =>
+    api.get<ApiResponse<{ keys: RedisKey[]; next_cursor: number | string; db: number }>>(`/db/instances/${instanceId}/redis/keys`, { params: { db, cursor, pattern, count } }),
+
+  getRedisValue: (instanceId: number, db: number, key: string) =>
+    api.get<ApiResponse<RedisValue>>(`/db/instances/${instanceId}/redis/value`, { params: { db, key } }),
+
+  setRedisValue: (instanceId: number, data: { db: number; key: string; value: string; ttl?: number }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/value`, data),
+
+  delRedisKeys: (instanceId: number, data: { db: number; keys: string[] }) =>
+    api.post<ApiResponse<{ deleted: number }>>(`/db/instances/${instanceId}/redis/del`, data),
+
+  expireRedisKey: (instanceId: number, data: { db: number; key: string; ttl: number }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/expire`, data),
+
+  persistRedisKey: (instanceId: number, data: { db: number; key: string }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/persist`, data),
+
+  flushRedisDB: (instanceId: number, data: { db: number }) =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/redis/flushdb`, data),
 };
 
 // Cron task management
