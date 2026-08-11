@@ -640,10 +640,6 @@ export const dbServerApi = {
   restoreBackup: (backupId: number) =>
     api.post<ApiResponse>(`/db/backups/${backupId}/restore`, { confirm: true }),
 
-  // 恢复是纯内存任务：状态走独立端点（不写备份行 status）。
-  getRestoreStatus: (backupId: number) =>
-    api.get<ApiResponse<{ status: string; error?: string; started_at?: string }>>(`/db/backups/${backupId}/restore-status`),
-
   deleteBackup: (backupId: number) =>
     api.delete<ApiResponse>(`/db/backups/${backupId}`),
 

@@ -916,12 +916,49 @@ func (h *BackupHandler) RestoreStatus(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的备份ID"))
 		return
 	}
+	// SSE：恢复是内存异步任务，终态到达即推送并关闭连接，前端无需轮询。
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	send := func(payload map[string]any) {
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+		c.Writer.Flush()
+	}
+
+	// 恢复任务不存在（服务重启内存态丢失，或从未发起）→ 立即终结，语义与
+	// 原 404 一致，但走 SSE done 帧（EventSource 拿不到状态码）。
 	status, ok := h.svc.GetRestoreStatus(c.Request.Context(), bid)
 	if !ok {
-		c.Error(apperror.ErrNotFound.WithMessage("无进行中或最近的恢复任务"))
+		send(map[string]any{"type": "done", "error": "恢复状态已丢失（服务可能已重启），请手动确认数据"})
 		return
 	}
-	httpx.Success(c, status)
+
+	// 任务运行中保持连接；10s 心跳防反向代理超时断连，500ms 轮询检查终态。
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-heartbeat.C:
+			send(map[string]any{"type": "running"})
+			continue
+		case <-time.After(500 * time.Millisecond):
+		}
+		status, ok = h.svc.GetRestoreStatus(c.Request.Context(), bid)
+		if !ok {
+			send(map[string]any{"type": "done", "error": "恢复状态已丢失（服务可能已重启），请手动确认数据"})
+			return
+		}
+		if status.Status != "running" {
+			send(map[string]any{"type": "done", "status": status.Status, "error": status.Error})
+			return
+		}
+	}
 }
 
 func (h *BackupHandler) DeleteBackup(c *gin.Context) {

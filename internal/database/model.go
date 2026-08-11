@@ -219,7 +219,7 @@ type RedisDB struct {
 	Size  int64 `json:"size"` // DBSIZE: number of keys
 }
 
-// RestoreStatus is the in-memory state of one restore task (GET /backups/:bid/restore-status).
+// RestoreStatus is the in-memory state of one restore task (SSE via GET /backups/:bid/restore-status).
 // Restore is a pure in-memory operation — it never touches the backup row's status.
 type RestoreStatus struct {
 	Status    string `json:"status"` // running, success, failed

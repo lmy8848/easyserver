@@ -111,15 +111,6 @@ export default function DatabasePage() {
     return () => clearInterval(timer);
   }, [versions, activeDbType]);
 
-  // While a backup runs (a row is "running"), poll the backup list so it flips to
-  // success/failed on completion without a manual refresh.
-  useEffect(() => {
-    if (!selectedVersion || !selectedDatabase) return;
-    if (!backups.some(b => b.status === 'running')) return;
-    const timer = setInterval(() => fetchBackups(selectedVersion.id, selectedDatabase.name), 2000);
-    return () => clearInterval(timer);
-  }, [backups, selectedVersion, selectedDatabase]);
-
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
     try { const res = await dbServerApi.listDatabases(instanceId); setDatabases(res.data?.data || []); }
@@ -188,6 +179,16 @@ export default function DatabasePage() {
     } finally { setBackupsLoading(false); }
   };
 
+  // While a backup runs (a row is "running"), poll the backup list so it flips to
+  // success/failed on completion without a manual refresh.
+  useEffect(() => {
+    if (!selectedVersion || !selectedDatabase) return;
+    if (!backups.some(b => b.status === 'running')) return;
+    const timer = setInterval(() => fetchBackups(selectedVersion.id, selectedDatabase.name), 2000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backups, selectedVersion, selectedDatabase]);
+
   const fetchDBConfig = async (serverName?: string) => {
     void serverName;
     if (!selectedVersion) return;
@@ -213,6 +214,10 @@ export default function DatabasePage() {
     fetchDBConfig();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailTab, selectedVersion]);
+
+  // 恢复状态 SSE 连接：组件卸载时关闭，避免泄漏。
+  const restoreEsRef = useRef<EventSource | null>(null);
+  useEffect(() => () => { restoreEsRef.current?.close(); }, []);
 
   // ===== Navigation handlers =====
   // Switching database type Tab clears all instance-scoped state and reloads.
@@ -578,23 +583,26 @@ export default function DatabasePage() {
     setBusy(`restore-${backupId}`);
     try {
       await dbServerApi.restoreBackup(backupId);
-      // 恢复是异步内存任务：轮询 restore-status 直到终态，再刷新备份列表。
-      const poll = async () => {
-        try {
-          const res = await dbServerApi.getRestoreStatus(backupId);
-          const st = res.data?.data;
-          if (st?.status === 'running') { setTimeout(poll, 1500); return; }
-          if (st?.status === 'success') message.success('恢复成功');
-          else if (st?.status === 'failed') message.error(st?.error || '恢复失败');
-          if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
-        } catch {
-          // 状态端点 404（内存态丢失/未找到）→ 停止轮询，提示用户确认。
-          message.info('无法获取恢复状态（可能服务已重启），请手动确认数据');
-        }
+      // 恢复是异步内存任务：SSE 订阅 restore-status，终态到达即推送（替代轮询）。
+      const es = new EventSource(`/api/db/backups/${backupId}/restore-status`);
+      restoreEsRef.current = es;
+      es.onmessage = (e) => {
+        let ev: any;
+        try { ev = JSON.parse(e.data); } catch { return; }
+        if (ev.type !== 'done') return; // running 心跳帧忽略
+        restoreEsRef.current = null;
+        es.close();
+        setBusy('');
+        if (ev.status === 'success') message.success('恢复成功');
+        else message.error(ev.error || '恢复失败');
+        if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
       };
-      setTimeout(poll, 500);
-    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
-    finally { setBusy(''); }
+      // 连接中断不自行终结：EventSource 自动重连；服务重启内存态丢失后，
+      // 重连收到 {type:'done', error} 帧，仍能正确提示。
+    } catch (error: unknown) {
+      setBusy('');
+      message.error(error instanceof Error ? error.message : '恢复失败');
+    }
   };
 
   const handleDeleteBackup = async (backupId: number) => {
