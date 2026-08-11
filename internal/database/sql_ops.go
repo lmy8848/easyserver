@@ -571,21 +571,10 @@ func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tab
 	}
 	dbType := instance.DBType
 
-	allowedTypes := map[string]bool{
-		"INT": true, "INTEGER": true, "TINYINT": true, "SMALLINT": true, "MEDIUMINT": true, "BIGINT": true,
-		"FLOAT": true, "DOUBLE": true, "DECIMAL": true, "NUMERIC": true, "REAL": true,
-		"VARCHAR": true, "CHAR": true, "TEXT": true, "TINYTEXT": true, "MEDIUMTEXT": true, "LONGTEXT": true,
-		"BLOB": true, "TINYBLOB": true, "MEDIUMBLOB": true, "LONGBLOB": true, "BINARY": true, "VARBINARY": true,
-		"DATE": true, "TIME": true, "DATETIME": true, "TIMESTAMP": true, "YEAR": true,
-		"BOOLEAN": true, "BOOL": true, "BIT": true,
-		"JSON": true, "ENUM": true, "SET": true,
-		"SERIAL": true, "BIGSERIAL": true, "SMALLSERIAL": true,
-		"UUID": true, "JSONB": true,
-	}
 	for _, col := range columns {
 		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
 		baseType = strings.TrimSpace(baseType)
-		if !allowedTypes[baseType] {
+		if !allowedColumnTypes[baseType] {
 			return fmt.Errorf("不支持的列类型: %s", col.Type)
 		}
 		if !ValidateTableName(col.Name) {
