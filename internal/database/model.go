@@ -190,16 +190,17 @@ type DBConfig struct {
 }
 
 // ParamMeta defines UI metadata for common configuration parameters. Values are
-// always strings (driven by the engine's own config semantics), so there is no
-// type — the editor renders Select when Options are present, a text input
-// otherwise. Key is the actual engine parameter name (zero conversion: the same
-// string goes into SHOW VARIABLES filter / SET PERSIST / ALTER SYSTEM /
-// CONFIG SET).
+// ParamMeta is the UI metadata for one config param. Type reflects the engine's
+// actual variable type: "number" params are numeric variables whose SET value must
+// be a bare literal (MySQL 1232 otherwise), "string" params are quoted. Key is the
+// actual engine parameter name (zero conversion: the same string goes into SHOW
+// VARIABLES filter / SET PERSIST / ALTER SYSTEM / CONFIG SET).
 type ParamMeta struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
-	Unit        string   `json:"unit"`              // MB, GB, etc.
+	Type        string   `json:"type"`            // "number" | "string"
+	Unit        string   `json:"unit"`            // MB, GB, etc.
 	Options     []string `json:"options,omitempty"` // select options (presence switches the editor to a Select)
 }
 

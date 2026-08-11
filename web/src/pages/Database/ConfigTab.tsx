@@ -1,5 +1,5 @@
 import {
-  Row, Col, Input, Select, Tag, Empty, Spin,
+  Row, Col, Input, InputNumber, Select, Tag, Empty, Spin,
 } from 'antd';
 import type { ConfigTabProps } from './types';
 
@@ -8,7 +8,8 @@ const { TextArea } = Input;
 // 配置 tab — 结构化参数编辑。切到本 tab 时父组件自动加载配置；保存/刷新按钮
 // 在父组件 tab 栏右侧（tabBarExtraContent，见 index.tsx），本组件只渲染参数
 // 表单，参数网格化排列（多行值如 Redis save 独占一行）。配置是单段结构：params
-// （引擎当前值）+ meta（渲染元数据）。
+// （引擎当前值）+ meta（渲染元数据）。输入控件按 type 区分：number → InputNumber，
+// 有 options → Select，含换行 → TextArea，否则文本输入。
 export default function ConfigTab({
   server, dbConfig, dbConfigLoading, onUpdateDBParam,
 }: ConfigTabProps) {
@@ -24,6 +25,49 @@ export default function ConfigTab({
   // 含换行的值（如 Redis save 多行策略）用多行输入框且独占一行。
   const isMultiline = (key: string) => (params[key] || '').includes('\n');
 
+  const renderInput = (param: any) => {
+    if (param.options?.length) {
+      return (
+        <Select
+          value={params[param.key] || ''}
+          onChange={(val) => onUpdateDBParam(param.key, val)}
+          style={{ width: '100%' }}
+        >
+          {(param.options || []).map((opt: string) => (
+            <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+          ))}
+        </Select>
+      );
+    }
+    if (param.type === 'number') {
+      return (
+        <InputNumber
+          value={params[param.key]}
+          onChange={(val) => onUpdateDBParam(param.key, val == null ? '' : String(val))}
+          style={{ width: '100%' }}
+          // 裸字面量才合法：数字或数字+单位（如 1G / 512M）。输入框加校验提示。
+          stringMode
+        />
+      );
+    }
+    if (isMultiline(param.key)) {
+      return (
+        <TextArea
+          value={params[param.key] || ''}
+          onChange={(e) => onUpdateDBParam(param.key, e.target.value)}
+          rows={3}
+          style={{ width: '100%' }}
+        />
+      );
+    }
+    return (
+      <Input
+        value={params[param.key] || ''}
+        onChange={(e) => onUpdateDBParam(param.key, e.target.value)}
+      />
+    );
+  };
+
   return (
     <div>
       <Row gutter={[24, 20]}>
@@ -35,29 +79,7 @@ export default function ConfigTab({
               {param.unit && <Tag style={{ marginLeft: 8 }}>{param.unit}</Tag>}
             </div>
             <div style={{ color: '#666', fontSize: 12, marginBottom: 4 }}>{param.description}</div>
-            {param.options?.length ? (
-              <Select
-                value={params[param.key] || ''}
-                onChange={(val) => onUpdateDBParam(param.key, val)}
-                style={{ width: '100%' }}
-              >
-                {(param.options || []).map((opt: string) => (
-                  <Select.Option key={opt} value={opt}>{opt}</Select.Option>
-                ))}
-              </Select>
-            ) : isMultiline(param.key) ? (
-              <TextArea
-                value={params[param.key] || ''}
-                onChange={(e) => onUpdateDBParam(param.key, e.target.value)}
-                rows={3}
-                style={{ width: '100%' }}
-              />
-            ) : (
-              <Input
-                value={params[param.key] || ''}
-                onChange={(e) => onUpdateDBParam(param.key, e.target.value)}
-              />
-            )}
+            {renderInput(param)}
           </Col>
         ))}
       </Row>

@@ -121,8 +121,8 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 		found[e] = true
 	}
 	for _, want := range []string{
-		"SET PERSIST `max_connections` = '500'",
-		"SET PERSIST `wait_timeout` = '100'",
+		"SET PERSIST `max_connections` = 500",
+		"SET PERSIST `wait_timeout` = 100",
 	} {
 		if !found[want] {
 			t.Fatalf("missing exec %q, got %v", want, f.execs)
@@ -140,7 +140,7 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 	if err := svc.SaveInstanceConfig(ctx, id, map[string]string{"max_connections": "500", "wait_timeout": ""}); err != nil {
 		t.Fatalf("save with empty value: %v", err)
 	}
-	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = '500'" {
+	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = 500" {
 		t.Fatalf("empty value must be skipped, got %v", f.execs)
 	}
 
@@ -195,7 +195,7 @@ func TestSaveConfigWithPortChangeRecreatesContainer(t *testing.T) {
 		t.Fatalf("expected recreate with port 4000, got %+v", rt.createSpecs)
 	}
 	// port 不走驱动写；其余参数照常 SET PERSIST。
-	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = '300'" {
+	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = 300" {
 		t.Fatalf("expected only max_connections persisted, got %v", f.execs)
 	}
 }

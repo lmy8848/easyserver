@@ -491,13 +491,16 @@ export interface ShareFileEntry {
   is_dir: boolean;
 }
 
-// ParamMeta is the UI metadata for one config param. Values are always strings,
-// so there is no type — the editor renders a Select when options is present, a
-// text input otherwise. key is the actual engine parameter name (zero conversion).
+// ParamMeta is the UI metadata for one config param. type reflects the engine's
+// actual variable type: "number" params are numeric variables whose SET value must
+// be a bare literal (MySQL 1232 otherwise), "string" params are quoted. key is the
+// actual engine parameter name (zero conversion). Editor renders a Select when
+// options is present, an InputNumber when type is "number", text otherwise.
 export interface ParamMeta {
   key: string;
   label: string;
   description: string;
+  type: 'number' | 'string';
   unit?: string;
   options?: string[];
 }
