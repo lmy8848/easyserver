@@ -72,6 +72,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/instances/:iid/databases/:dbname/backups", backupHandler.ListBackups)
 	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
 	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
+	protected.GET("/db/backups/:bid/restore-status", backupHandler.RestoreStatus)
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
 
 	// Redis key browser (instance-scoped, addressed by logical DB index)
@@ -906,7 +907,21 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		return
 	}
 
-	httpx.Success(c, gin.H{"message": "恢复已开始，请稍候查看备份状态"})
+	httpx.Success(c, gin.H{"message": "恢复已开始，请轮询恢复状态"})
+}
+
+func (h *BackupHandler) RestoreStatus(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的备份ID"))
+		return
+	}
+	status, ok := h.svc.GetRestoreStatus(c.Request.Context(), bid)
+	if !ok {
+		c.Error(apperror.ErrNotFound.WithMessage("无进行中或最近的恢复任务"))
+		return
+	}
+	httpx.Success(c, status)
 }
 
 func (h *BackupHandler) DeleteBackup(c *gin.Context) {

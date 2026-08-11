@@ -148,20 +148,30 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 		return fmt.Errorf("backup not found: %w", err)
 	}
 
-	// 运行中的备份/恢复不能删：task 可能正在写该行或读该文件。
+	// 备份任务运行中不能删（task 可能正在写该行）。
 	if backup.Status == "running" {
-		return fmt.Errorf("备份/恢复进行中，请等待完成后再删除")
+		return fmt.Errorf("备份进行中，请等待完成后再删除")
 	}
 
 	if err := os.Remove(backup.FilePath); err != nil && !os.IsNotExist(err) {
 		log.Printf("failed to delete backup file %s: %v", backup.FilePath, err)
 	}
 
+	// 恢复任务若正跑该备份，删文件会让恢复失败——拒绝删除。
+	s.restoreMu.Lock()
+	_, restoring := s.restoreTask[id]
+	s.restoreMu.Unlock()
+	if restoring {
+		return fmt.Errorf("该备份正在恢复中，无法删除")
+	}
+
 	return s.repo.DeleteBackup(ctx, id)
 }
 
-// RestoreBackup 在内存任务里异步恢复：DB 行置 running，恢复成功/失败后写回终态。
-// 无超时（大库慢盘不受时限）；进程崩溃后该行由启动清扫标 failed。
+// RestoreBackup 在内存任务里异步恢复。恢复是纯内存操作：状态只存 restoreTask map
+// （GET /backups/:bid/restore-status 读取），不碰备份行的 status 列——恢复失败不
+// 表示备份坏了。无超时（大库慢盘不受时限）；进程崩溃后内存态丢失，端点 404，
+// 用户需手动确认，这是内存态的诚实语义。
 func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
@@ -176,41 +186,51 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 		return fmt.Errorf("备份文件不存在")
 	}
 
-	// DB 行先置 running（任务还没起，先落状态防重复点按），再启动内存任务。
-	// 任务结束写终态；进程崩溃则靠启动清扫把 running 标 failed。
-	if err := s.repo.UpdateBackupStatus(ctx, backup.ID, "running", backup.FileSize, ""); err != nil {
-		return fmt.Errorf("标记恢复中失败: %w", err)
-	}
-
 	key := fmt.Sprintf("restore-%d", id)
+	st := &RestoreStatus{Status: "running", StartedAt: time.Now().Format("2006-01-02 15:04:05")}
+	s.restoreMu.Lock()
+	s.restoreTask[id] = st
+	s.restoreMu.Unlock()
+
 	if _, err := s.taskMgr.Start(key, task.Options{}, func(ctx context.Context) error {
-		var err error
+		var rerr error
 		switch dbType {
 		case DBTypeMySQL:
-			err = s.restoreMySQL(ctx, backup)
+			rerr = s.restoreMySQL(ctx, backup)
 		case DBTypePostgreSQL:
-			err = s.restorePostgreSQL(ctx, backup)
+			rerr = s.restorePostgreSQL(ctx, backup)
 		case DBTypeRedis:
-			err = s.restoreRedis(ctx, backup)
+			rerr = s.restoreRedis(ctx, backup)
 		default:
-			err = fmt.Errorf("unsupported db type: %s", dbType)
+			rerr = fmt.Errorf("unsupported db type: %s", dbType)
 		}
 
-		status := "success"
-		errMsg := ""
-		if err != nil {
-			status = "failed"
-			errMsg = err.Error()
-			log.Printf("restore failed for backup %d: %v", backup.ID, err)
+		s.restoreMu.Lock()
+		if rerr != nil {
+			st.Status = "failed"
+			st.Error = rerr.Error()
+			log.Printf("restore failed for backup %d: %v", backup.ID, rerr)
+		} else {
+			st.Status = "success"
 		}
-		if uerr := s.repo.UpdateBackupStatus(context.Background(), backup.ID, status, backup.FileSize, errMsg); uerr != nil {
-			log.Printf("failed to update backup record %d: %v", backup.ID, uerr)
-		}
-		return err
+		s.restoreMu.Unlock()
+		return rerr
 	}); err != nil {
+		// 启动失败（去重/并发满）：清掉内存态，回滚到"无恢复"。
+		s.restoreMu.Lock()
+		delete(s.restoreTask, id)
+		s.restoreMu.Unlock()
 		return fmt.Errorf("启动恢复任务失败: %w", err)
 	}
 	return nil
+}
+
+// GetRestoreStatus 返回某备份的恢复任务内存态；无进行中/最近的恢复返回 ok=false。
+func (s *Service) GetRestoreStatus(_ context.Context, id int64) (*RestoreStatus, bool) {
+	s.restoreMu.Lock()
+	defer s.restoreMu.Unlock()
+	st, ok := s.restoreTask[id]
+	return st, ok
 }
 
 func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {

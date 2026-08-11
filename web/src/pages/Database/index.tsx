@@ -569,11 +569,21 @@ export default function DatabasePage() {
     setBusy(`restore-${backupId}`);
     try {
       await dbServerApi.restoreBackup(backupId);
-      message.success('恢复已开始，请等待完成...');
-      // 恢复异步执行：刷新备份列表看状态（running → success/failed）。
-      setTimeout(() => {
-        if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
-      }, 1500);
+      // 恢复是异步内存任务：轮询 restore-status 直到终态，再刷新备份列表。
+      const poll = async () => {
+        try {
+          const res = await dbServerApi.getRestoreStatus(backupId);
+          const st = res.data?.data;
+          if (st?.status === 'running') { setTimeout(poll, 1500); return; }
+          if (st?.status === 'success') message.success('恢复成功');
+          else if (st?.status === 'failed') message.error(st?.error || '恢复失败');
+          if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
+        } catch {
+          // 状态端点 404（内存态丢失/未找到）→ 停止轮询，提示用户确认。
+          message.info('无法获取恢复状态（可能服务已重启），请手动确认数据');
+        }
+      };
+      setTimeout(poll, 500);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
     finally { setBusy(''); }
   };

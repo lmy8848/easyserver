@@ -32,6 +32,9 @@ type Service struct {
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
 	driver         SQLRunner              // direct driver channel (MySQL/PostgreSQL)
 	redisOps       *redisRunner           // direct Redis channel (key browser ops)
+
+	restoreMu   sync.Mutex
+	restoreTask map[int64]*RestoreStatus // backupID → 恢复任务内存态（恢复不写备份行）
 }
 
 // NewService creates a database Service over the given Repository and container
@@ -47,8 +50,9 @@ func NewService(repo Repository, runtime DatabaseRuntime) *Service {
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
-		driver:   newDriverSQLRunner(),
-		redisOps: newRedisRunner(),
+		driver:      newDriverSQLRunner(),
+		redisOps:    newRedisRunner(),
+		restoreTask: make(map[int64]*RestoreStatus),
 	}
 	s.SweepOrphanBackups(context.Background())
 	return s
