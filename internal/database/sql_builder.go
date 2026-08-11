@@ -174,6 +174,17 @@ func (b *SQLBuilder) BuildCount(table string) string {
 	return fmt.Sprintf("SELECT COUNT(*) FROM %s;", b.QuoteIdentifier(table))
 }
 
+// BuildListTables generates a query to list tables in the current database.
+func (b *SQLBuilder) BuildListTables() string {
+	switch b.dbType {
+	case DBTypeMySQL:
+		return "SHOW TABLES;"
+	case DBTypePostgreSQL:
+		return "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+	}
+	return ""
+}
+
 // BuildDescribeTable generates a query to describe table structure.
 // Table name must be validated before calling this function.
 func (b *SQLBuilder) BuildDescribeTable(table string) string {

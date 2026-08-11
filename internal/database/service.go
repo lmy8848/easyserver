@@ -1401,24 +1401,13 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 	}
 
 	var tables []map[string]interface{}
-	switch instance.DBType {
-	case DBTypeMySQL:
-		res, err := s.runnerFor(instance).Query(ctx, instance, dbName, "SHOW TABLES")
-		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
-		}
-		for _, row := range res.Rows {
-			tables = append(tables, map[string]interface{}{"name": str(row, 0)})
-		}
-	case DBTypePostgreSQL:
-		res, err := s.runnerFor(instance).Query(ctx, instance, dbName,
-			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")
-		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
-		}
-		for _, row := range res.Rows {
-			tables = append(tables, map[string]interface{}{"name": str(row, 0)})
-		}
+	builder := NewSQLBuilder(instance.DBType)
+	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, builder.BuildListTables())
+	if err != nil {
+		return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
+	}
+	for _, row := range res.Rows {
+		tables = append(tables, map[string]interface{}{"name": str(row, 0)})
 	}
 	return tables, nil
 }
