@@ -103,14 +103,6 @@ export default function DatabasePage() {
   // ===== Effects =====
   useEffect(() => { fetchInstances('mysql'); }, []);
 
-  // While an install runs (a row is "installing"), poll the list so the version
-  // flips to running/failed on completion even if the log panel isn't open.
-  useEffect(() => {
-    if (!versions.some(v => v.status === 'installing')) return;
-    const timer = setInterval(() => fetchInstances(activeDbType), 3000);
-    return () => clearInterval(timer);
-  }, [versions, activeDbType]);
-
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
     try { const res = await dbServerApi.listDatabases(instanceId); setDatabases(res.data?.data || []); }
