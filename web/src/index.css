@@ -17,5 +17,18 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
 
 
+/* 配置页带单位 InputNumber（ConfigTab）：InputNumber 的 addonAfter 内部是
+   Space.Compact（inline-flex 内容宽），style width:100% 落不到外层——用
+   rootClassName 挂到 Compact 外层 div，强制撑满 + 输入框 flex 吃满剩余宽度。 */
+.config-unit-input {
+  display: flex !important;
+  width: 100% !important;
+}
+.config-unit-input .ant-input-number {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+
 /* Terminal styles */
 .xterm { padding: 8px; }

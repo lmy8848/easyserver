@@ -49,11 +49,12 @@ func postgresConfigParams() []ParamMeta {
 	return []ParamMeta{
 		{Key: "port", Label: "监听端口", Type: "number", Description: "PostgreSQL 服务监听端口。修改后保存即重建容器生效"},
 		{Key: "max_connections", Label: "最大连接数", Type: "number", Description: "允许的最大并发连接数"},
-		// PG 内存参数按 string 输入：ALTER SYSTEM 接受带单位的引号串（'128MB'），
-		// 无单位会被按 kB 解析（shared_buffers 为 8kB 块）——不能像 MySQL 那样裸
-		// 字节转换，用户在输入框直接写"128MB"最不易错。
+		// PG 内存参数是 string 型（ALTER SYSTEM 要带单位引号串，如 '128MB'）。
+		// Unit 是默认单位 token，前端解析值里的数字 + 单位下拉（kB/MB/GB/TB），
+		// 保存时拼回带单位字符串——不能像 MySQL 那样裸字节换算（shared_buffers
+		// 按 8kB 块解析，无单位数字语义不同）。
 		{Key: "shared_buffers", Label: "共享缓冲区", Type: "string", Unit: "MB", Description: "共享缓冲区大小，生产建议内存的 25%"},
-		{Key: "work_mem", Label: "工作内存", Type: "string", Unit: "KB", Description: "每个排序/哈希操作的内存"},
+		{Key: "work_mem", Label: "工作内存", Type: "string", Unit: "MB", Description: "每个排序/哈希操作的内存"},
 		{Key: "maintenance_work_mem", Label: "维护工作内存", Type: "string", Unit: "MB", Description: "VACUUM/CREATE INDEX 等维护操作内存"},
 		{Key: "wal_level", Label: "WAL 级别", Type: "string", Options: []string{"minimal", "replica", "logical"}, Description: "Write-Ahead 日志级别"},
 		{Key: "max_wal_size", Label: "最大 WAL 大小", Type: "string", Unit: "MB", Description: "自动检查点之间最大 WAL 大小"},
