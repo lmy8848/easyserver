@@ -22,8 +22,7 @@ export default function ConfigTab({
   if (!section) return null;
   const params = section.params || {};
   // 含换行的值（如 Redis save 多行策略）用多行输入框且独占一行。
-  const isMultiline = (key: string) =>
-    (params[key] || section.meta?.find((m: any) => m.key === key)?.default || '').includes('\n');
+  const isMultiline = (key: string) => (params[key] || '').includes('\n');
 
   return (
     <div>
@@ -38,7 +37,7 @@ export default function ConfigTab({
             <div style={{ color: '#666', fontSize: 12, marginBottom: 4 }}>{param.description}</div>
             {param.type === 'select' ? (
               <Select
-                value={params[param.key] || param.default}
+                value={params[param.key] || ''}
                 onChange={(val) => onUpdateDBParam(section.name, param.key, val)}
                 style={{ width: '100%' }}
               >
@@ -48,7 +47,7 @@ export default function ConfigTab({
               </Select>
             ) : param.type === 'number' ? (
               <InputNumber
-                value={Number(params[param.key]) || Number(param.default)}
+                value={params[param.key] !== undefined && params[param.key] !== '' ? Number(params[param.key]) : undefined}
                 onChange={(val) => onUpdateDBParam(section.name, param.key, String(val ?? ''))}
                 style={{ width: '100%' }}
               />
@@ -56,7 +55,6 @@ export default function ConfigTab({
               <TextArea
                 value={params[param.key] || ''}
                 onChange={(e) => onUpdateDBParam(section.name, param.key, e.target.value)}
-                placeholder={param.default}
                 rows={3}
                 style={{ width: '100%' }}
               />
@@ -64,7 +62,6 @@ export default function ConfigTab({
               <Input
                 value={params[param.key] || ''}
                 onChange={(e) => onUpdateDBParam(section.name, param.key, e.target.value)}
-                placeholder={param.default}
               />
             )}
           </Col>

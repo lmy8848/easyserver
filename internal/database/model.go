@@ -198,7 +198,6 @@ type ParamMeta struct {
 	Type        string   `json:"type"`              // text, number, select, boolean
 	Unit        string   `json:"unit"`              // MB, GB, etc.
 	Options     []string `json:"options,omitempty"` // for select type
-	Default     string   `json:"default"`
 }
 
 // ConfigSectionView is one section of the structured config as served to the

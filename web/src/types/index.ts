@@ -504,7 +504,6 @@ export interface ParamMeta {
   type: string;
   unit?: string;
   options?: string[];
-  default: string;
 }
 
 // Structured config of one database instance (GET /db/instances/:iid/config):

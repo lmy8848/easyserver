@@ -73,11 +73,14 @@ func configInstance(dbType DBType, name string, port int) *DBInstance {
 	}
 }
 
-func TestGetConfigDefaults(t *testing.T) {
+func TestGetConfigReadsRuntimeValues(t *testing.T) {
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
+	f := &fakeConfigDriver{mysqlVersion: "8.0.36", mysqlVars: map[string]string{
+		"max_connections": "500", "innodb_buffer_pool_size": "1G",
+	}}
 	id, _ := repo.CreateInstance(context.Background(), configInstance(DBTypeMySQL, "c1", 3306))
-	svc := configSvc(repo, rt, &fakeConfigDriver{mysqlVersion: "8.0.36"})
+	svc := configSvc(repo, rt, f)
 
 	view, err := svc.GetInstanceConfig(context.Background(), id)
 	if err != nil {
@@ -86,12 +89,15 @@ func TestGetConfigDefaults(t *testing.T) {
 	if len(view.Sections) != 1 || view.Sections[0].Name != "mysqld" {
 		t.Fatalf("unexpected sections: %+v", view.Sections)
 	}
-	// 无运行时覆盖（SHOW VARIABLES 未返回面板参数）→ 编译默认值，port 显示实例值。
-	if view.Sections[0].Params["max_connections"] != "151" {
-		t.Fatalf("expected compiled default, got %q", view.Sections[0].Params["max_connections"])
+	// 读到啥返回啥：运行时值原样返回，未读到的参数不返回（无编译默认值合成）。
+	if view.Sections[0].Params["max_connections"] != "500" {
+		t.Fatalf("expected runtime value, got %q", view.Sections[0].Params["max_connections"])
 	}
-	if view.Sections[0].Params["innodb_buffer_pool_size"] != "128M" {
-		t.Fatalf("expected compiled default, got %q", view.Sections[0].Params["innodb_buffer_pool_size"])
+	if view.Sections[0].Params["innodb_buffer_pool_size"] != "1G" {
+		t.Fatalf("expected runtime value, got %q", view.Sections[0].Params["innodb_buffer_pool_size"])
+	}
+	if _, ok := view.Sections[0].Params["wait_timeout"]; ok {
+		t.Fatalf("unread param must be absent, got %+v", view.Sections[0].Params)
 	}
 	if view.Sections[0].Params["port"] != "3306" {
 		t.Fatalf("port should reflect instance port, got %q", view.Sections[0].Params["port"])
@@ -154,8 +160,8 @@ func TestSaveConfigAppliesViaDriver(t *testing.T) {
 	if view.Sections[0].Params["max_connections"] != "500" {
 		t.Fatalf("override lost: %+v", view.Sections[0].Params)
 	}
-	if view.Sections[0].Params["innodb_buffer_pool_size"] != "128M" {
-		t.Fatalf("unset param must fall back to default: %+v", view.Sections[0].Params)
+	if _, ok := view.Sections[0].Params["innodb_buffer_pool_size"]; ok {
+		t.Fatalf("unread param must be absent, got %+v", view.Sections[0].Params)
 	}
 }
 
@@ -260,7 +266,7 @@ func TestRedisConfigGetAndSave(t *testing.T) {
 	svc.redisOps = runner
 	ctx := context.Background()
 
-	// GET：CONFIG GET * → 面板参数取运行时值，未提供的用编译默认。
+	// GET：CONFIG GET * → 面板参数取运行时值，未提供的参数不返回。
 	mock.ExpectConfigGet("*").SetVal(map[string]string{
 		"maxmemory": "100mb", "maxmemory-policy": "allkeys-lru", "appendonly": "no",
 	})
@@ -274,8 +280,8 @@ func TestRedisConfigGetAndSave(t *testing.T) {
 	if view.Sections[0].Params["maxmemory"] != "100mb" {
 		t.Fatalf("runtime value lost: %+v", view.Sections[0].Params)
 	}
-	if view.Sections[0].Params["databases"] != "16" {
-		t.Fatalf("default fallback lost: %+v", view.Sections[0].Params)
+	if _, ok := view.Sections[0].Params["databases"]; ok {
+		t.Fatalf("unread param must be absent, got %+v", view.Sections[0].Params)
 	}
 
 	// SAVE：CONFIG SET + CONFIG REWRITE。

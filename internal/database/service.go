@@ -599,9 +599,9 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerName, lines)
 }
 
-// GetInstanceConfig 返回实例的结构化配置：驱动读面板参数的运行时值 + 编辑元数据。
-// port 是实例级状态（DB 的 port 列，容器映射管理），始终显示当前值。配置读写都
-// 需要实例运行（驱动连接），停止的实例返回明确错误。
+// GetInstanceConfig 返回实例的结构化配置：驱动读面板参数的运行时值（读到啥返回啥）
+// + 编辑元数据。port 是实例级状态（DB 的 port 列，容器映射管理），始终显示当前值。
+// 配置读写都需要实例运行（驱动连接），停止的实例返回明确错误。
 func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*InstanceConfigView, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
@@ -610,13 +610,9 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 	if err := s.ensureInstanceRunning(ctx, v, "读取配置"); err != nil {
 		return nil, err
 	}
-	params := defaultParams(v.DBType) // 编译默认值基底，保证前端能渲染全部参数
-	live, err := s.readConfigValues(ctx, v)
+	params, err := s.readConfigValues(ctx, v)
 	if err != nil {
 		return nil, err
-	}
-	for k, val := range live {
-		params[k] = val // 运行时值覆盖
 	}
 	params["port"] = strconv.Itoa(v.Port)
 	view := &InstanceConfigView{}
