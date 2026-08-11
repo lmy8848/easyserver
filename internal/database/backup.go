@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	DefaultBackupDir = "/var/backups/easyserver/db"
+	DefaultBackupDir = "/opt/easyserver/backups/db"
 )
 
 // SetBackupDir sets the backup directory.
@@ -100,9 +100,9 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 		return fmt.Errorf("database instance not found")
 	}
 	// 容器内写文件（-r），再 docker cp 出来——避免 dump 走 stdout 字符串管道
-	// （大库截断/二进制损坏风险，见 runInVersion 注释）。
+	// （大库截断/二进制损坏风险，见 runInContainer 注释）。
 	target := "/tmp/easyserver-backup.sql"
-	if _, err := s.runInVersion(ctx, instance, "mysqldump", "-r", target, "--single-transaction", "--routines", "--triggers", backup.DatabaseName); err != nil {
+	if _, err := s.runInContainer(ctx, instance, "mysqldump", "-r", target, "--single-transaction", "--routines", "--triggers", backup.DatabaseName); err != nil {
 		return fmt.Errorf("mysqldump failed: %w", err)
 	}
 	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
@@ -115,7 +115,7 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 	}
 	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件再 cp 出来。
 	target := "/tmp/easyserver-backup.dump"
-	if _, err := s.runInVersion(ctx, instance, "pg_dump", "-Fc", "-f", target, backup.DatabaseName); err != nil {
+	if _, err := s.runInContainer(ctx, instance, "pg_dump", "-Fc", "-f", target, backup.DatabaseName); err != nil {
 		return fmt.Errorf("pg_dump failed: %w", err)
 	}
 	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
@@ -171,9 +171,9 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 }
 
 // RestoreBackup 在内存任务里异步恢复。恢复是纯内存操作：状态只存 restoreTask map
-// （GET /backups/:bid/restore-status 读取），不碰备份行的 status 列——恢复失败不
-// 表示备份坏了。无超时（大库慢盘不受时限）；进程崩溃后内存态丢失，端点 404，
-// 用户需手动确认，这是内存态的诚实语义。
+// （GET /backups/:bid/restore-status 以 SSE 推送），不碰备份行的 status 列——恢复失败不
+// 表示备份坏了。无超时（大库慢盘不受时限）；进程崩溃后内存态丢失，SSE 重连收到
+// done 帧提示，用户需手动确认，这是内存态的诚实语义。
 func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
@@ -245,7 +245,7 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
 	// mysql 客户端执行文件：库名走位置参数（--execute 分支），不拼 shell —— 无注入面。
-	if _, err := s.runInVersion(ctx, instance, "mysql", "--execute=source "+target, backup.DatabaseName); err != nil {
+	if _, err := s.runInContainer(ctx, instance, "mysql", "--execute=source "+target, backup.DatabaseName); err != nil {
 		return fmt.Errorf("mysql restore failed: %w", err)
 	}
 	return nil
@@ -262,7 +262,7 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 	}
 	// --single-transaction：整个恢复包在一个事务，中途失败自动 ROLLBACK，
 	// 数据库回到恢复前状态——消除"半恢复"。
-	if _, err := s.runInVersion(ctx, instance, "pg_restore", "--single-transaction", "-d", backup.DatabaseName, "-c", target); err != nil {
+	if _, err := s.runInContainer(ctx, instance, "pg_restore", "--single-transaction", "-d", backup.DatabaseName, "-c", target); err != nil {
 		return fmt.Errorf("pg_restore failed: %s", SanitizeSQLError(err.Error()))
 	}
 	return nil
@@ -312,11 +312,11 @@ func (s *Service) SweepOrphanBackups(ctx context.Context) {
 	}
 }
 
-// runInVersion runs a command inside the instance's container via the CLI
+// runInContainer runs a command inside the instance's container via the CLI
 // runtime, with admin credentials injected. Used for engine-side tooling that
 // has no driver equivalent (mysqldump / pg_dump / redis-cli) and config
 // reloads — never for SQL data operations, which use the driver channel.
-func (s *Service) runInVersion(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
+func (s *Service) runInContainer(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
 	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
 		return "", fmt.Errorf("database instance is not container-managed")
 	}
