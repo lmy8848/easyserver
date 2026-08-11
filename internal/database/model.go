@@ -163,11 +163,13 @@ type DescribeResult struct {
 
 // TableColumn describes a column for CreateTable.
 type TableColumn struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Nullable  bool   `json:"nullable"`
-	IsPrimary bool   `json:"is_primary"`
-	AutoIncr  bool   `json:"auto_incr"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Nullable     bool   `json:"nullable"`
+	IsPrimary    bool   `json:"is_primary"`
+	AutoIncr     bool   `json:"auto_incr"`
+	Unique       bool   `json:"unique"`
+	DefaultValue string `json:"default_value"`
 }
 
 // ValidationResult represents a validation result.

@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -320,6 +321,12 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 			if !col.Nullable {
 				p = append(p, "NOT NULL")
 			}
+			if col.Unique {
+				p = append(p, "UNIQUE")
+			}
+			if col.DefaultValue != "" && !col.AutoIncr {
+				p = append(p, "DEFAULT "+b.formatDefault(col.DefaultValue))
+			}
 			parts = append(parts, strings.Join(p, " "))
 		}
 		return fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", tableName, strings.Join(parts, ", ")), nil
@@ -336,11 +343,50 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn) (
 			if !col.Nullable && !col.IsPrimary {
 				p = append(p, "NOT NULL")
 			}
+			if col.Unique {
+				p = append(p, "UNIQUE")
+			}
+			if col.DefaultValue != "" && !col.AutoIncr {
+				p = append(p, "DEFAULT "+b.formatDefault(col.DefaultValue))
+			}
 			parts = append(parts, strings.Join(p, " "))
 		}
 		return fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", ")), nil
 	}
 	return "", fmt.Errorf("不支持的数据库类型")
+}
+
+// formatDefault 渲染 DEFAULT 字面量：纯数字/数值表达式（含函数）不加引号，其余
+// 字符串加引号转义（含 CURRENT_TIMESTAMP 这类无引号函数的常见拼写）。
+func (b *SQLBuilder) formatDefault(v string) string {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return ""
+	}
+	if b.isNumericOrFunc(s) {
+		return s
+	}
+	return "'" + b.EscapeString(s) + "'"
+}
+
+// isNumericOrFunc 判断默认值是否需要加引号：数字字面量、CURRENT_TIMESTAMP 等
+// SQL 函数、NOW() 括号表达式不加引号，其余视为字符串。
+func (b *SQLBuilder) isNumericOrFunc(s string) bool {
+	if s == "" {
+		return false
+	}
+	// 数字（含负数、小数、指数）
+	if _, err := strconv.ParseFloat(s, 64); err == nil {
+		return true
+	}
+	upper := strings.ToUpper(s)
+	// 常见无引号默认值函数（可带括号实参）
+	for _, fn := range []string{"CURRENT_TIMESTAMP", "NOW", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_USER", "UUID", "GEN_RANDOM_UUID"} {
+		if upper == fn || strings.HasPrefix(upper, fn+"(") {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildDropTable generates a DROP TABLE statement (validated table name).

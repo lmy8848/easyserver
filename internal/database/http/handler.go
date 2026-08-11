@@ -643,11 +643,13 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	var req struct {
 		Name    string `json:"name" binding:"required"`
 		Columns []struct {
-			Name      string `json:"name"`
-			Type      string `json:"type"`
-			Nullable  bool   `json:"nullable"`
-			IsPrimary bool   `json:"is_primary"`
-			AutoIncr  bool   `json:"auto_incr"`
+			Name         string `json:"name"`
+			Type         string `json:"type"`
+			Nullable     bool   `json:"nullable"`
+			IsPrimary    bool   `json:"is_primary"`
+			AutoIncr     bool   `json:"auto_incr"`
+			Unique       bool   `json:"unique"`
+			DefaultValue string `json:"default_value"`
 		} `json:"columns" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -659,11 +661,13 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	var columns []database.TableColumn
 	for _, col := range req.Columns {
 		columns = append(columns, database.TableColumn{
-			Name:      col.Name,
-			Type:      col.Type,
-			Nullable:  col.Nullable,
-			IsPrimary: col.IsPrimary,
-			AutoIncr:  col.AutoIncr,
+			Name:         col.Name,
+			Type:         col.Type,
+			Nullable:     col.Nullable,
+			IsPrimary:    col.IsPrimary,
+			AutoIncr:     col.AutoIncr,
+			Unique:       col.Unique,
+			DefaultValue: col.DefaultValue,
 		})
 	}
 

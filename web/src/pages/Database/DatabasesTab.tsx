@@ -106,7 +106,7 @@ function formatCellTime(v: any): string {
 }
 
 function TableExplorerView({
-  server, version, database, onBack,
+  database, onBack,
   tableList, tableLoading, selectedTable, tableData, tableDataLoading, tablePage, tableInfo,
   onSelectTable, onFetchTables, onFetchTableData,
   createTableVisible, createTableLoading, createForm, onCreateTableVisibleChange, onCreateTable, onDropTable,
@@ -116,6 +116,11 @@ function TableExplorerView({
   backups, backupsLoading, backupCreating, busy,
   onCreateBackup, onDownloadBackup, onRestoreBackup, onDeleteBackup,
 }: TableExplorerProps) {
+  // 主键单行：watch 创建表弹窗的列，存在已设主键的行时其余行的主键开关禁用
+  // （主键行本身保持可开关，取消后所有行恢复可选）。
+  const columnRows = Form.useWatch('columns', createForm) || [];
+  const hasPrimary = columnRows.some((c: any) => c?.is_primary);
+
   return (
     <div>
       <Card style={{ marginBottom: 16 }}>
@@ -124,7 +129,6 @@ function TableExplorerView({
           <DatabaseOutlined style={{ fontSize: 20 }} />
           <span style={{ fontSize: 16, fontWeight: 'bold' }}>{database.name}</span>
           <Tag>{database.charset}</Tag>
-          <Tag>{server.display_name} {version.version}</Tag>
         </Space>
       </Card>
 
@@ -358,42 +362,83 @@ function TableExplorerView({
           <Form.List name="columns">
             {(fields, { add, remove }) => (
               <>
-                {fields.map(({ key, name, ...restField }) => (
-                  <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
-                    <Col span={6}>
-                      <Form.Item {...restField} name={[name, 'name']} rules={[{ required: true, message: '列名' }]}>
-                        <Input placeholder="列名" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={6}>
-                      <Form.Item {...restField} name={[name, 'type']} rules={[{ required: true, message: '类型' }]}>
-                        <Select placeholder="类型">
-                          <Select.Option value="INT">INT</Select.Option>
-                          <Select.Option value="VARCHAR(255)">VARCHAR(255)</Select.Option>
-                          <Select.Option value="TEXT">TEXT</Select.Option>
-                          <Select.Option value="DATETIME">DATETIME</Select.Option>
-                          <Select.Option value="TIMESTAMP">TIMESTAMP</Select.Option>
-                          <Select.Option value="BOOLEAN">BOOLEAN</Select.Option>
-                          <Select.Option value="DECIMAL(10,2)">DECIMAL(10,2)</Select.Option>
-                        </Select>
-                      </Form.Item>
-                    </Col>
-                    <Col span={4}>
-                      <Form.Item {...restField} name={[name, 'is_primary']} valuePropName="checked">
-                        <Switch checkedChildren="主键" unCheckedChildren="主键" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={4}>
-                      <Form.Item {...restField} name={[name, 'auto_incr']} valuePropName="checked">
-                        <Switch checkedChildren="自增" unCheckedChildren="自增" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={2}>
-                      <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                    </Col>
-                  </Row>
-                ))}
-                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                {fields.map(({ key, name, ...restField }) => {
+                  // 当前行列的类型/主键（watch columns 数组实时取），自增只在整数类型下展示。
+                  const col = columnRows[name] || {};
+                  const isInt = /^(INT|BIGINT|SMALLINT|TINYINT|MEDIUMINT|INTEGER|SERIAL)\b/i.test(col.type || '');
+                  return (
+                    <div key={key} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '12px 12px 0', marginBottom: 12 }}>
+                      <Row gutter={8}>
+                        <Col span={10}>
+                          <Form.Item {...restField} name={[name, 'name']} rules={[{ required: true, message: '列名' }]}>
+                            <Input placeholder="列名" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                          <Form.Item {...restField} name={[name, 'type']} rules={[{ required: true, message: '类型' }]}>
+                            <Select placeholder="类型" onChange={(v: string) => {
+                              // 类型改成非整数时清掉自增，避免提交出无效 AUTO_INCREMENT。
+                              if (!/^(INT|BIGINT|SMALLINT|TINYINT|MEDIUMINT|INTEGER|SERIAL)\b/i.test(v)) {
+                                createForm.setFieldValue(['columns', name, 'auto_incr'], false);
+                              }
+                            }}>
+                              <Select.Option value="INT">INT</Select.Option>
+                              <Select.Option value="BIGINT">BIGINT</Select.Option>
+                              <Select.Option value="SMALLINT">SMALLINT</Select.Option>
+                              <Select.Option value="TINYINT">TINYINT</Select.Option>
+                              <Select.Option value="VARCHAR(255)">VARCHAR(255)</Select.Option>
+                              <Select.Option value="TEXT">TEXT</Select.Option>
+                              <Select.Option value="DATETIME">DATETIME</Select.Option>
+                              <Select.Option value="TIMESTAMP">TIMESTAMP</Select.Option>
+                              <Select.Option value="DATE">DATE</Select.Option>
+                              <Select.Option value="BOOLEAN">BOOLEAN</Select.Option>
+                              <Select.Option value="DECIMAL(10,2)">DECIMAL(10,2)</Select.Option>
+                              <Select.Option value="DOUBLE">DOUBLE</Select.Option>
+                              <Select.Option value="JSON">JSON</Select.Option>
+                            </Select>
+                          </Form.Item>
+                        </Col>
+                        <Col span={2}>
+                          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
+                        </Col>
+                      </Row>
+                      <Row gutter={8} style={{ marginBottom: 12 }}>
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'is_primary']} valuePropName="checked" style={{ marginBottom: 0 }}>
+                            <Switch checkedChildren="主键" unCheckedChildren="主键"
+                              disabled={hasPrimary && !col.is_primary} />
+                          </Form.Item>
+                        </Col>
+                        {isInt && (
+                          <Col span={4}>
+                            <Form.Item {...restField} name={[name, 'auto_incr']} valuePropName="checked" style={{ marginBottom: 0 }}>
+                              <Switch checkedChildren="自增" unCheckedChildren="自增" onChange={(v: boolean) => {
+                                // 自增必须落在键上：开启时顺带把主键也打开。
+                                if (v) createForm.setFieldValue(['columns', name, 'is_primary'], true);
+                              }} />
+                            </Form.Item>
+                          </Col>
+                        )}
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'nullable']} valuePropName="checked" style={{ marginBottom: 0 }}>
+                            <Switch checkedChildren="可空" unCheckedChildren="可空" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item {...restField} name={[name, 'unique']} valuePropName="checked" style={{ marginBottom: 0 }}>
+                            <Switch checkedChildren="唯一" unCheckedChildren="唯一" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item {...restField} name={[name, 'default_value']} style={{ marginBottom: 0 }}>
+                            <Input placeholder="默认值（如 0 / CURRENT_TIMESTAMP）" />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </div>
+                  );
+                })}
+                <Button type="dashed" onClick={() => add({ nullable: true })} block icon={<PlusOutlined />}>
                   添加列
                 </Button>
               </>
