@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Button, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tag, Empty,
+  Button, Flex, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Space, Table, Tag, Empty,
 } from 'antd';
 import {
-  PlusOutlined, ReloadOutlined, DeleteOutlined, ClearOutlined, ClockCircleOutlined,
+  PlusOutlined, ReloadOutlined, DeleteOutlined, ClearOutlined, ClockCircleOutlined, MinusCircleOutlined,
 } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { DBInstance, RedisKey } from '../../types';
@@ -44,7 +44,9 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 // Redis key 浏览器 — 数据库 tab 对 Redis 实例的渲染。SCAN 游标分页 +
-// pattern 过滤，选中 key 查看/编辑值（仅 string 可编辑），支持 DEL / EXPIRE /
+// pattern 过滤。添加键值对支持全部类型（string 用值文本域，hash 用字段对，
+// list/set 用元素列表，zset 用分值-成员对，走后端原生原子命令）；编辑仅
+// string 回显可改，集合类型打开弹窗显示"暂不支持编辑"。支持 DEL / EXPIRE /
 // PERSIST / FLUSHDB。组件自包含：自己调 API，不依赖父组件的 SQL 状态。
 export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
   // 数据库槽位数来自实例配置（CONFIG GET databases，默认 16 但可改），不是写死的
@@ -59,11 +61,13 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [busy, setBusy] = useState('');
 
-  // 添加/编辑共用弹窗：editTarget 非空 = 编辑（回显值，键/类型不可变）
+  // 添加/编辑共用弹窗：editTarget 非空 = 编辑（回显值，键/类型锁死）。
+  // 类型始终显示：string 可编辑，其他类型值区提示暂不支持。
   const [editTarget, setEditTarget] = useState<RedisKey | null>(null);
   const [addVisible, setAddVisible] = useState(false);
   const [addForm] = Form.useForm();
   const addType = Form.useWatch('type', addForm) || 'string';
+
   const [expireTarget, setExpireTarget] = useState<RedisKey | null>(null);
   const [expireVisible, setExpireVisible] = useState(false);
   const [expireForm] = Form.useForm();
@@ -104,39 +108,25 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
     } catch (e: any) { message.error(e?.message || '加载更多失败'); } finally { setLoadingMore(false); }
   };
 
-  // 编辑：拉取当前值回显到添加弹窗；键/类型锁死，值按类型填充。
+  // 编辑：所有类型都有编辑按钮。string 拉值回显可编辑；其他类型不获取值，
+  // 弹窗正常显示键和类型，值区提示"暂不支持编辑"。过期秒数默认留空 = 保持
+  // 原有过期时间，填 0 = 永久，填 N = 重设。
   const openEdit = async (k: RedisKey) => {
     setEditTarget(k);
+    if (k.type !== 'string') {
+      addForm.resetFields();
+      addForm.setFieldsValue({ key: k.name, type: k.type, value: '' });
+      setAddVisible(true);
+      return;
+    }
     try {
       const res = await dbServerApi.getRedisValue(iid, db, k.name);
       const val = res.data?.data;
-      // 回显值。直接构造 plain object 传给 setFieldsValue（Form.List 的名字就是
-      // fields/items/members）。TTL 不回显：编辑弹窗不设 TTL，到期时间归「续期」管。
-      const formVals: {
-        key: string; type: string;
-        fields?: Array<{ field: string; value: string }>;
-        items?: Array<{ value: string }>;
-        members?: Array<{ member: string; score: number }>;
-        value?: string;
-      } = {
+      addForm.setFieldsValue({
         key: k.name,
         type: k.type,
-      };
-      switch (k.type) {
-        case 'hash':
-          formVals.fields = Object.entries((val?.value as Record<string, string>) || {}).map(([field, value]) => ({ field, value }));
-          break;
-        case 'list':
-        case 'set':
-          formVals.items = ((val?.value as string[]) || []).map(value => ({ value }));
-          break;
-        case 'zset':
-          formVals.members = ((val?.value as Array<{ member: string; score: number }>) || []).map(({ member, score }) => ({ member, score }));
-          break;
-        default:
-          formVals.value = String(val?.value ?? '');
-      }
-      addForm.setFieldsValue(formVals);
+        value: String(val?.value ?? ''),
+      });
       setAddVisible(true);
     } catch (e: any) { message.error(e?.message || '读取值失败'); setEditTarget(null); }
   };
@@ -145,26 +135,26 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
     try {
       const v = await addForm.validateFields();
       const typ = editTarget ? editTarget.type : (v.type || 'string');
+      // 集合类型不支持编辑：弹窗里显示"暂不支持编辑"，提交走不到这里也兜底拦一下。
+      if (editTarget && typ !== 'string') return;
       const key = editTarget ? editTarget.name : v.key;
-      // 按类型组装 value：string 是文本，hash 是 {field:value}，list/set 是数组，
-      // zset 是 [{member,score}]。Form 里直接存这些结构，POST 原样走 JSON。
-      let value: unknown;
-      switch (typ) {
-        case 'hash': value = (v.fields || []).filter((r: any) => r?.field).reduce((m: any, r: any) => { m[r.field] = r.value ?? ''; return m; }, {}); break;
-        case 'list':
-        case 'set': value = (v.items || []).map((r: any) => r.value).filter((s: string) => s !== ''); break;
-        case 'zset': value = (v.members || []).filter((r: any) => r?.member).map((r: any) => ({ member: r.member, score: Number(r.score) || 0 })); break;
-        default: value = v.value ?? '';
+      // ttl 三态（0 已由输入框校验拦截）：留空 = 不更新；-1 = 永久；>0 = 过期 N 秒。
+      const ttl = v.ttl === undefined || v.ttl === null || v.ttl === '' ? undefined : v.ttl;
+      const payload: any = { db, key, type: typ, ttl };
+      if (typ === 'string') {
+        // SET 覆盖（编辑 = 全量替换 value）。
+        payload.value = v.value ?? '';
+      } else if (typ === 'hash') {
+        if (!v.hash_fields?.length) { message.error('请至少添加一个字段'); return; }
+        payload.hash_fields = v.hash_fields;
+      } else if (typ === 'list' || typ === 'set') {
+        if (!v.values?.length) { message.error('请至少添加一个元素'); return; }
+        payload.values = v.values;
+      } else if (typ === 'zset') {
+        if (!v.zset_members?.length) { message.error('请至少添加一个成员'); return; }
+        payload.zset_members = v.zset_members;
       }
-      if (editTarget) {
-        // 编辑 = 替换：集合类命令（RPUSH/SADD/ZADD）只会追加，先 DEL 再重建才是
-        // "编辑"语义；string 的 SET 本就覆盖。重建会清 TTL，这是预期——编辑只
-        // 管值，到期时间归「续期」按钮，职责分离。
-        await dbServerApi.delRedisKeys(iid, { db, keys: [key] });
-        await dbServerApi.setRedisValue(iid, { db, type: typ, key, value });
-      } else {
-        await dbServerApi.setRedisValue(iid, { db, type: typ, key, value, ttl: v.ttl || undefined });
-      }
+      await dbServerApi.setRedisValue(iid, payload);
       message.success(editTarget ? '已保存' : '已添加');
       setAddVisible(false); addForm.resetFields(); setEditTarget(null);
       refresh();
@@ -193,8 +183,14 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
     if (!expireTarget) return;
     try {
       const v = await expireForm.validateFields();
-      if (v.ttl) await dbServerApi.expireRedisKey(iid, { db, key: expireTarget.name, ttl: v.ttl });
-      else await dbServerApi.persistRedisKey(iid, { db, key: expireTarget.name });
+      // 留空 = 保持原样，不调用 API。
+      if (v.ttl === undefined || v.ttl === null || v.ttl === '') {
+        setExpireVisible(false); expireForm.resetFields();
+        return;
+      }
+      // 永久 = -1（与原生 TTL 一致）；0 已由输入框校验拦截，>0 = 重设过期。
+      if (v.ttl === -1) await dbServerApi.persistRedisKey(iid, { db, key: expireTarget.name });
+      else await dbServerApi.expireRedisKey(iid, { db, key: expireTarget.name, ttl: v.ttl });
       message.success('已更新过期时间');
       setExpireVisible(false); expireForm.resetFields();
       refresh();
@@ -214,12 +210,17 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
     { title: '过期时间', dataIndex: 'ttl', key: 'ttl', width: 130, render: fmtTTL },
     { title: '大小', dataIndex: 'size', key: 'size', width: 90, render: fmtSize },
     {
-      title: '操作', key: 'action', width: 190,
+      title: '操作', key: 'action', width: 200,
       render: (_: unknown, k: RedisKey) => (
         <Space size="small">
           <Button type="link" size="small" onClick={() => openEdit(k)}>编辑</Button>
           <Button type="link" size="small" icon={<ClockCircleOutlined />}
-            onClick={() => { setExpireTarget(k); expireForm.resetFields(); setExpireVisible(true); }}>续期</Button>
+            onClick={() => {
+              setExpireTarget(k);
+              // 默认留空 = 不修改；填 0 = 永久；填 N = 重设。
+              expireForm.resetFields();
+              setExpireVisible(true);
+            }}>续期</Button>
           <Popconfirm title={`确定删除键 ${k.name}？`} onConfirm={() => delKey(k)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `del-${k.name}`} />
           </Popconfirm>
@@ -248,7 +249,11 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
           allowClear
         />
         <Button icon={<ReloadOutlined />} loading={loading} onClick={refresh}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { addForm.resetFields(); setEditTarget(null); setAddVisible(true); }}>添加键值对</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+          addForm.resetFields();
+          addForm.setFieldsValue({ ttl: -1 }); // 添加：过期秒数必填，默认永久
+          setEditTarget(null); setAddVisible(true);
+        }}>添加键值对</Button>
         <Popconfirm title={`确定清空 DB ${db} 全部 key？此操作不可恢复！`} okButtonProps={{ danger: true }} onConfirm={flushDB}>
           <Button danger icon={<ClearOutlined />} loading={busy === 'flush'}>清空当前 DB</Button>
         </Popconfirm>
@@ -269,89 +274,114 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
         </div>
       )}
 
-      {/* 添加 / 编辑键值对：编辑时回显值，键/类型锁死 */}
+      {/* 添加 / 编辑键值对：编辑时回显值，键/类型锁死。类型始终显示；只有 string 可编辑。 */}
       <Modal title={editTarget ? `编辑键值对 - ${editTarget.name}` : `添加键值对 - DB ${db}`}
         open={addVisible} onCancel={() => setAddVisible(false)} onOk={submitKey}
         okText={editTarget ? '保存' : '添加'} cancelText="取消">
-        <Form form={addForm} layout="vertical">
+        <Form form={addForm} layout="vertical" initialValues={{
+          type: 'string',
+          values: [''],                                  // list / set 每行一个元素
+          hash_fields: [{ field: '', value: '' }],       // hash 每行一对字段-值
+          zset_members: [{ score: 0, member: '' }],      // zset 每行一对分值-成员
+        }}>
+          <Form.Item name="type" label="类型" initialValue="string">
+            <Select
+              options={Object.entries(TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))}
+              disabled={!!editTarget}
+            />
+          </Form.Item>
+          <Form.Item name="ttl" label="过期秒数"
+            extra={editTarget ? '留空 = 保持原有过期时间；-1 = 永久；0 无效' : '-1 = 永久；0 无效'}
+            rules={[
+              ...(editTarget ? [] : [{ required: true, message: '请填写过期秒数' }]),
+              { validator: (_: unknown, val: any) => (val === 0 ? Promise.reject(new Error('0 秒会被 Redis 立即删除，永久请填 -1')) : Promise.resolve()) },
+            ]}>
+            <InputNumber min={-1} style={{ width: '100%' }} placeholder="如 3600" />
+          </Form.Item>
           <Form.Item name="key" label="键" rules={[{ required: true, message: '请输入键' }]}>
             <Input placeholder="如 user:1" disabled={!!editTarget} />
           </Form.Item>
-          {!editTarget && (
-            <Form.Item name="ttl" label="过期秒数（留空 = 永久）">
-              <InputNumber min={1} style={{ width: '100%' }} placeholder="如 3600" />
-            </Form.Item>
-          )}
-          <Form.Item name="type" label="类型" initialValue="string">
-            <Select options={Object.entries(TYPE_LABEL).map(([v, l]) => ({ value: v, label: l }))} disabled={!!editTarget} />
-          </Form.Item>
-          {addType === 'string' && (
-            <Form.Item name="value" label="值" initialValue="">
-              <Input.TextArea rows={4} placeholder="字符串值" style={{ fontFamily: 'monospace' }} />
-            </Form.Item>
-          )}
-          {addType === 'hash' && (
-            <Form.Item label="字段" required>
-              <Form.List name="fields" initialValue={[{ field: '', value: '' }]}>
-                {(fields, { add, remove }) => (
-                  <div>
-                    {fields.map(({ key, name }) => (
-                      <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
-                        <Form.Item name={[name, 'field']} rules={[{ required: true, message: '字段名必填' }]} style={{ marginBottom: 0 }}>
-                          <Input placeholder="字段名" style={{ width: 180 }} />
-                        </Form.Item>
-                        <Form.Item name={[name, 'value']} style={{ marginBottom: 0 }}>
-                          <Input placeholder="值" style={{ width: 220 }} />
-                        </Form.Item>
-                        <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                      </Space>
-                    ))}
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ field: '', value: '' })}>添加字段</Button>
-                  </div>
-                )}
-              </Form.List>
-            </Form.Item>
-          )}
-          {(addType === 'list' || addType === 'set') && (
-            <Form.Item label={TYPE_LABEL[addType]} required>
-              <Form.List name="items" initialValue={[{ value: '' }]}>
-                {(fields, { add, remove }) => (
-                  <div>
-                    {fields.map(({ key, name }) => (
-                      <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
-                        <Form.Item name={[name, 'value']} rules={[{ required: true, message: '元素必填' }]} style={{ marginBottom: 0, flex: 1 }}>
-                          <Input placeholder="元素" style={{ width: 400 }} />
-                        </Form.Item>
-                        <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                      </Space>
-                    ))}
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ value: '' })}>添加元素</Button>
-                  </div>
-                )}
-              </Form.List>
-            </Form.Item>
-          )}
-          {addType === 'zset' && (
-            <Form.Item label="成员（分数）" required>
-              <Form.List name="members" initialValue={[{ member: '', score: 0 }]}>
-                {(fields, { add, remove }) => (
-                  <div>
-                    {fields.map(({ key, name }) => (
-                      <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
-                        <Form.Item name={[name, 'member']} rules={[{ required: true, message: '成员必填' }]} style={{ marginBottom: 0 }}>
-                          <Input placeholder="成员" style={{ width: 280 }} />
-                        </Form.Item>
-                        <Form.Item name={[name, 'score']} initialValue={0} style={{ marginBottom: 0 }}>
-                          <InputNumber placeholder="分数" style={{ width: 120 }} />
-                        </Form.Item>
-                        <Button type="text" icon={<DeleteOutlined />} onClick={() => remove(name)} />
-                      </Space>
-                    ))}
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ member: '', score: 0 })}>添加成员</Button>
-                  </div>
-                )}
-              </Form.List>
-            </Form.Item>
+          {/* 编辑：string 回显值可改；集合类型显示"暂不支持编辑"（不获取值）。
+              添加：全部类型可选，按类型切换输入组件。 */}
+          {editTarget ? (
+            editTarget.type !== 'string' ? (
+              <Empty description={`${TYPE_LABEL[editTarget.type] || editTarget.type} 类型暂不支持编辑`} style={{ padding: '24px 0' }} />
+            ) : (
+              <Form.Item name="value" label="值" initialValue="">
+                <Input.TextArea rows={4} placeholder="字符串值" style={{ fontFamily: 'monospace' }} />
+              </Form.Item>
+            )
+          ) : (
+            <>
+              {addType === 'string' && (
+                <Form.Item name="value" label="值" initialValue="">
+                  <Input.TextArea rows={4} placeholder="字符串值" style={{ fontFamily: 'monospace' }} />
+                </Form.Item>
+              )}
+              {addType === 'hash' && (
+                <Form.Item label="字段">
+                  <Form.List name="hash_fields">
+                    {(fields, { add, remove }) => (
+                      <>
+                        {fields.map((f) => (
+                          <Flex key={f.key} align="flex-start" gap={8}>
+                            <Form.Item name={[f.name, 'field']} rules={[{ required: true, message: '字段名必填' }]} style={{ flex: 1 }}>
+                              <Input placeholder="字段名" />
+                            </Form.Item>
+                            <Form.Item name={[f.name, 'value']} rules={[{ required: true, message: '值必填' }]} style={{ flex: 1 }}>
+                              <Input placeholder="字段值" />
+                            </Form.Item>
+                            <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(f.name)} />
+                          </Flex>
+                        ))}
+                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add()}>添加字段</Button>
+                      </>
+                    )}
+                  </Form.List>
+                </Form.Item>
+              )}
+              {(addType === 'list' || addType === 'set') && (
+                <Form.Item label={addType === 'list' ? '列表元素' : '集合成员'}>
+                  <Form.List name="values">
+                    {(fields, { add, remove }) => (
+                      <>
+                        {fields.map((f, i) => (
+                          <Flex key={f.key} align="flex-start" gap={8}>
+                            <Form.Item name={f.name} rules={[{ required: true, message: '元素必填' }]} style={{ flex: 1 }}>
+                              <Input placeholder={`${addType === 'list' ? '元素' : '成员'} ${i + 1}`} />
+                            </Form.Item>
+                            <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(f.name)} />
+                          </Flex>
+                        ))}
+                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add()}>添加元素</Button>
+                      </>
+                    )}
+                  </Form.List>
+                </Form.Item>
+              )}
+              {addType === 'zset' && (
+                <Form.Item label="成员">
+                  <Form.List name="zset_members">
+                    {(fields, { add, remove }) => (
+                      <>
+                        {fields.map((f) => (
+                          <Flex key={f.key} align="flex-start" gap={8}>
+                            <Form.Item name={[f.name, 'score']} rules={[{ required: true, message: '分值必填' }]}>
+                              <InputNumber step={0.1} placeholder="分值" style={{ width: 110 }} />
+                            </Form.Item>
+                            <Form.Item name={[f.name, 'member']} rules={[{ required: true, message: '成员必填' }]} style={{ flex: 1 }}>
+                              <Input placeholder="成员" />
+                            </Form.Item>
+                            <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(f.name)} />
+                          </Flex>
+                        ))}
+                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add()}>添加成员</Button>
+                      </>
+                    )}
+                  </Form.List>
+                </Form.Item>
+              )}
+            </>
           )}
         </Form>
       </Modal>
@@ -360,8 +390,9 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
       <Modal title={expireTarget ? `设置过期 - ${expireTarget.name}` : '设置过期'} open={expireVisible}
         onCancel={() => setExpireVisible(false)} onOk={saveExpire} okText="确定" cancelText="取消">
         <Form form={expireForm} layout="vertical">
-          <Form.Item name="ttl" label="过期秒数（留空 = 设为永久）" extra="注意：0 秒会被 Redis 立即删除，留空表示移除过期时间">
-            <InputNumber min={1} style={{ width: '100%' }} placeholder="如 3600" />
+          <Form.Item name="ttl" label="过期秒数" extra="留空 = 不修改；-1 = 设为永久；填值 = 重设过期时间；0 无效"
+            rules={[{ validator: (_: unknown, val: any) => (val === 0 ? Promise.reject(new Error('0 秒会被 Redis 立即删除，永久请填 -1')) : Promise.resolve()) }]}>
+            <InputNumber min={-1} style={{ width: '100%' }} placeholder="如 3600" />
           </Form.Item>
         </Form>
       </Modal>

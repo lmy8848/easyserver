@@ -86,9 +86,24 @@ func TestRedisSetExpirePersistFlush(t *testing.T) {
 	ctx := context.Background()
 
 	mock := runnerClientFor(t, runner, inst, 0)
-	mock.ExpectSet("k", "v", 0).SetVal("OK")
-	if err := runner.SetValue(ctx, inst, 0, "", "k", "v", 0); err != nil {
+	// 编辑路径（ttl=nil）：SET KEEPTTL 保留原有过期时间，不额外命令。
+	mock.ExpectSetArgs("k", "v", redis.SetArgs{KeepTTL: true}).SetVal("OK")
+	if err := runner.SetValue(ctx, inst, 0, "k", "v", nil); err != nil {
 		t.Fatalf("SetValue: %v", err)
+	}
+
+	// ttl=-1：SET 不带过期参数 = 永久（并清掉已有过期）。
+	permanent := int64(-1)
+	mock.ExpectSet("k", "v", 0).SetVal("OK")
+	if err := runner.SetValue(ctx, inst, 0, "k", "v", &permanent); err != nil {
+		t.Fatalf("SetValue permanent: %v", err)
+	}
+
+	// ttl>0：SET 带过期。
+	mock.ExpectSet("k", "v", time.Minute).SetVal("OK")
+	ttl := int64(60)
+	if err := runner.SetValue(ctx, inst, 0, "k", "v", &ttl); err != nil {
+		t.Fatalf("SetValue with ttl: %v", err)
 	}
 
 	mock.ExpectExpire("k", time.Minute).SetVal(true)
@@ -117,6 +132,79 @@ func TestRedisSetExpirePersistFlush(t *testing.T) {
 	}
 }
 
+func TestRedisSetValuePreservesExistingTTL(t *testing.T) {
+	inst := redisTestInstance()
+	runner := newRedisRunner()
+	defer runner.Close(inst.ID)
+	ctx := context.Background()
+
+	mock := runnerClientFor(t, runner, inst, 0)
+	// 编辑带过期时间的 key：走 SET KEEPTTL，不需要读 TTL / 补 EXPIRE 两条命令。
+	mock.ExpectSetArgs("k", "v", redis.SetArgs{KeepTTL: true}).SetVal("OK")
+	if err := runner.SetValue(ctx, inst, 0, "k", "v", nil); err != nil {
+		t.Fatalf("SetValue: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRedisAddValueCreatesCollectionKeys(t *testing.T) {
+	inst := redisTestInstance()
+	runner := newRedisRunner()
+	defer runner.Close(inst.ID)
+	ctx := context.Background()
+
+	mock := runnerClientFor(t, runner, inst, 0)
+
+	mock.ExpectExists("h").SetVal(0)
+	mock.ExpectHSet("h", "f1", "v1", "f2", "v2").SetVal(2)
+	if err := runner.AddValue(ctx, inst, 0, "h", "hash", 0,
+		[]RedisHashPair{{Field: "f1", Value: "v1"}, {Field: "f2", Value: "v2"}}, nil, nil); err != nil {
+		t.Fatalf("AddValue hash: %v", err)
+	}
+
+	mock.ExpectExists("l").SetVal(0)
+	mock.ExpectRPush("l", "a", "b").SetVal(2)
+	if err := runner.AddValue(ctx, inst, 0, "l", "list", 0, nil, []string{"a", "b"}, nil); err != nil {
+		t.Fatalf("AddValue list: %v", err)
+	}
+
+	mock.ExpectExists("s").SetVal(0)
+	mock.ExpectSAdd("s", "x").SetVal(1)
+	if err := runner.AddValue(ctx, inst, 0, "s", "set", 0, nil, []string{"x"}, nil); err != nil {
+		t.Fatalf("AddValue set: %v", err)
+	}
+
+	// zset：创建后 TTL>0 会补一条 EXPIRE。
+	mock.ExpectExists("z").SetVal(0)
+	mock.ExpectZAdd("z", redis.Z{Score: 1.5, Member: "m"}).SetVal(1)
+	mock.ExpectExpire("z", time.Minute).SetVal(true)
+	if err := runner.AddValue(ctx, inst, 0, "z", "zset", time.Minute, nil, nil,
+		[]RedisZMember{{Member: "m", Score: 1.5}}); err != nil {
+		t.Fatalf("AddValue zset: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRedisAddValueRefusesExistingKey(t *testing.T) {
+	inst := redisTestInstance()
+	runner := newRedisRunner()
+	defer runner.Close(inst.ID)
+	ctx := context.Background()
+
+	mock := runnerClientFor(t, runner, inst, 0)
+	mock.ExpectExists("h").SetVal(1)
+	err := runner.AddValue(ctx, inst, 0, "h", "hash", 0,
+		[]RedisHashPair{{Field: "f", Value: "v"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected error for existing key")
+	}
+}
+
 func TestRedisScanKeysFillsMeta(t *testing.T) {
 	inst := redisTestInstance()
 	runner := newRedisRunner()
@@ -126,7 +214,7 @@ func TestRedisScanKeysFillsMeta(t *testing.T) {
 	mock := runnerClientFor(t, runner, inst, 0)
 	mock.ExpectScan(0, "*", int64(50)).SetVal([]string{"a", "b"}, 100)
 	mock.ExpectType("a").SetVal("string")
-	mock.ExpectTTL("a").SetVal(-1 * time.Second) // permanent
+	mock.ExpectTTL("a").SetVal(-time.Nanosecond) // go-redis 对永久 key 返回裸 -1ns
 	mock.ExpectMemoryUsage("a", 0).SetVal(42)
 	mock.ExpectType("b").SetVal("hash")
 	mock.ExpectTTL("b").SetVal(3600 * time.Second)
@@ -144,47 +232,6 @@ func TestRedisScanKeysFillsMeta(t *testing.T) {
 	}
 	if keys[1].TTL != 3600 || keys[1].Type != "hash" {
 		t.Fatalf("unexpected second key: %+v", keys[1])
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRedisSetTypedValue(t *testing.T) {
-	inst := redisTestInstance()
-	runner := newRedisRunner()
-	defer runner.Close(inst.ID)
-	ctx := context.Background()
-	mock := runnerClientFor(t, runner, inst, 0)
-
-	// hash
-	mock.ExpectHSet("h", map[string]string{"f": "v"}).SetVal(1)
-	if err := runner.SetValue(ctx, inst, 0, "hash", "h", map[string]string{"f": "v"}, 0); err != nil {
-		t.Fatalf("hash SetValue: %v", err)
-	}
-	// list
-	mock.ExpectRPush("l", "a", "b").SetVal(2)
-	if err := runner.SetValue(ctx, inst, 0, "list", "l", []any{"a", "b"}, 0); err != nil {
-		t.Fatalf("list SetValue: %v", err)
-	}
-	// set
-	mock.ExpectSAdd("s", "x").SetVal(1)
-	if err := runner.SetValue(ctx, inst, 0, "set", "s", []string{"x"}, 0); err != nil {
-		t.Fatalf("set SetValue: %v", err)
-	}
-	// zset with TTL → ZAdd then Expire
-	mock.ExpectZAdd("z", redis.Z{Score: 1.5, Member: "m"}).SetVal(1)
-	mock.ExpectExpire("z", 10*time.Second).SetVal(true)
-	if err := runner.SetValue(ctx, inst, 0, "zset", "z", []any{map[string]any{"member": "m", "score": 1.5}}, 10*time.Second); err != nil {
-		t.Fatalf("zset SetValue: %v", err)
-	}
-	// 空 hash 拒绝
-	if err := runner.SetValue(ctx, inst, 0, "hash", "e", map[string]string{}, 0); err == nil {
-		t.Fatal("empty hash should be rejected")
-	}
-	// 未知类型拒绝
-	if err := runner.SetValue(ctx, inst, 0, "stream", "s", "v", 0); err == nil {
-		t.Fatal("unsupported type should be rejected")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -286,6 +286,17 @@ export interface RedisValue {
   value: string | Record<string, string> | string[] | Array<{ member: string; score: number }> | null;
 }
 
+// 添加 Redis key 时按类型的载荷（hash 字段对 / zset 分值-成员对）。
+export interface RedisHashField {
+  field: string;
+  value: string;
+}
+
+export interface RedisZSetMember {
+  member: string;
+  score: number;
+}
+
 // Cron task types（systemd timer 承载，name 为唯一标识）
 export interface CronTask {
   name: string;

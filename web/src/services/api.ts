@@ -5,6 +5,7 @@ import type {
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBInstance, Database, DBUser, RedisKey, RedisValue,
+  RedisHashField, RedisZSetMember,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -656,7 +657,16 @@ export const dbServerApi = {
   getRedisValue: (instanceId: number, db: number, key: string) =>
     api.get<ApiResponse<RedisValue>>(`/db/redis/instances/${instanceId}/value`, { params: { db, key } }),
 
-  setRedisValue: (instanceId: number, data: { db: number; type?: string; key: string; value: unknown; ttl?: number }) =>
+  setRedisValue: (instanceId: number, data: {
+    db: number;
+    type: 'string' | 'hash' | 'list' | 'set' | 'zset';
+    key: string;
+    value?: string;                                     // string
+    hash_fields?: RedisHashField[];                     // hash
+    values?: string[];                                  // list / set
+    zset_members?: RedisZSetMember[];                   // zset
+    ttl?: number;
+  }) =>
     api.post<ApiResponse>(`/db/redis/instances/${instanceId}/value`, data),
 
   delRedisKeys: (instanceId: number, data: { db: number; keys: string[] }) =>

@@ -98,14 +98,19 @@ func (h *RedisHandler) GetValue(c *gin.Context) {
 }
 
 type setRedisValueRequest struct {
-	DB    int    `json:"db"`
-	Type  string `json:"type"` // string | hash | list | set | zset（空 = string）
-	Key   string `json:"key" binding:"required"`
-	Value any    `json:"value"` // string / {field:value} / []string / []{member,score}
-	TTL   int64  `json:"ttl"`   // seconds; <=0 = no expiry
+	DB          int                      `json:"db"`
+	Type        string                   `json:"type"` // string | hash | list | set | zset; 空 = string
+	Key         string                   `json:"key" binding:"required"`
+	Value       string                   `json:"value"`        // string 类型的值
+	TTL         *int64                   `json:"ttl"`          // nil = 不更新（编辑保持原 TTL）；0 = 永久；>0 = 设置过期 N 秒
+	HashFields  []database.RedisHashPair `json:"hash_fields"`  // hash：字段-值对
+	Values      []string                 `json:"values"`       // list / set：元素
+	ZSetMembers []database.RedisZMember  `json:"zset_members"` // zset：分值-成员对
 }
 
-// SetValue creates a key of the requested type.
+// SetValue writes a string key (SET, 覆盖 — 编辑也走这里) or creates a
+// collection key (HSET/RPUSH/SADD/ZADD). 集合类型 = 添加新键：已有同名键由
+// 后端拒绝，前端弹窗对集合只开放添加、不开放编辑。
 func (h *RedisHandler) SetValue(c *gin.Context) {
 	iid, ok := parseIID(c)
 	if !ok {
@@ -116,8 +121,52 @@ func (h *RedisHandler) SetValue(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	middleware.AuditSummary(c, "写入 Redis key "+req.Key)
-	if err := h.svc.SetRedisValue(c.Request.Context(), iid, req.DB, req.Type, req.Key, req.Value, req.TTL); err != nil {
+	typ := req.Type
+	if typ == "" {
+		typ = "string"
+	}
+	// 0 非法：原生 EXPIRE 0 会删键、SET EX 0 报错。永久统一用 -1。
+	if req.TTL != nil && *req.TTL == 0 {
+		c.Error(apperror.ErrBadRequest.WithMessage("TTL 不能为 0；永久请用 -1"))
+		return
+	}
+	if typ == "string" {
+		middleware.AuditSummary(c, "写入 Redis key "+req.Key)
+		if err := h.svc.SetRedisValue(c.Request.Context(), iid, req.DB, req.Key, req.Value, req.TTL); err != nil {
+			c.Error(apperror.WrapError(err))
+			return
+		}
+		httpx.Success(c, nil)
+		return
+	}
+	switch typ {
+	case "hash":
+		if len(req.HashFields) == 0 {
+			c.Error(apperror.ErrBadRequest.WithMessage("hash 至少需要一个字段"))
+			return
+		}
+	case "list", "set":
+		if len(req.Values) == 0 {
+			c.Error(apperror.ErrBadRequest.WithMessage(typ + " 至少需要一个元素"))
+			return
+		}
+	case "zset":
+		if len(req.ZSetMembers) == 0 {
+			c.Error(apperror.ErrBadRequest.WithMessage("zset 至少需要一个成员"))
+			return
+		}
+	default:
+		c.Error(apperror.ErrBadRequest.WithMessage("不支持的 Redis 类型: " + typ))
+		return
+	}
+	middleware.AuditSummary(c, "添加 Redis key "+req.Key)
+	// 集合类型添加 = 新建键：ttl 缺省或 -1 视为永久（0），>0 才补 EXPIRE。
+	// 0 已在上方统一拦截。
+	ttl := int64(0)
+	if req.TTL != nil && *req.TTL > 0 {
+		ttl = *req.TTL
+	}
+	if err := h.svc.AddRedisKey(c.Request.Context(), iid, req.DB, typ, req.Key, ttl, req.HashFields, req.Values, req.ZSetMembers); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -152,7 +201,7 @@ func (h *RedisHandler) DelKeys(c *gin.Context) {
 type expireRedisKeyRequest struct {
 	DB  int    `json:"db"`
 	Key string `json:"key" binding:"required"`
-	TTL int64  `json:"ttl" binding:"required"` // seconds; <=0 = no expiry
+	TTL int64  `json:"ttl" binding:"required"` // seconds; 必须 >0（0/-1 在此 handler 拒绝）
 }
 
 // Expire sets a key's TTL.
@@ -166,9 +215,9 @@ func (h *RedisHandler) Expire(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	// EXPIRE with ttl 0 deletes the key — refuse, and point at persist instead.
+	// EXPIRE with ttl 0 deletes the key — refuse; -1 (永久) goes through persist.
 	if req.TTL <= 0 {
-		c.Error(apperror.ErrBadRequest.WithMessage("TTL 必须大于 0；移除过期请用持久化"))
+		c.Error(apperror.ErrBadRequest.WithMessage("TTL 必须大于 0；永久请用 -1（PERSIST）"))
 		return
 	}
 	middleware.AuditSummary(c, "设置 Redis key 过期 "+req.Key)

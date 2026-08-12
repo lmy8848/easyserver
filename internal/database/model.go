@@ -262,3 +262,10 @@ type RedisZMember struct {
 	Member string  `json:"member"`
 	Score  float64 `json:"score"`
 }
+
+// RedisHashPair is one field-value pair — the payload shape for creating a hash
+// key (HSET), mirrored by the add-key modal's hash field editor.
+type RedisHashPair struct {
+	Field string `json:"field"`
+	Value string `json:"value"`
+}
