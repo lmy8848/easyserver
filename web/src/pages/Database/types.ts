@@ -156,8 +156,8 @@ export interface DatabasesTabProps {
   onFetchBackups: (dbName: string) => void;
   onCreateBackup: (dbName: string) => void;
   onDownloadBackup: (backupId: number) => void;
-  onRestoreBackup: (backupId: number) => void;
-  onDeleteBackup: (backupId: number) => void;
+  onRestoreBackup: (backupId: number, dbName: string) => void;
+  onDeleteBackup: (backupId: number, dbName: string) => void;
 }
 
 // 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧

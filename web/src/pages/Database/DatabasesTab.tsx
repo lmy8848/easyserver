@@ -122,14 +122,14 @@ export default function DatabasesTab({
                       <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => onDownloadBackup(record.id)}>
                         下载
                       </Button>
-                      <Popconfirm title="确定恢复此备份？这将覆盖当前数据。" onConfirm={() => onRestoreBackup(record.id)}>
+                      <Popconfirm title="确定恢复此备份？这将覆盖当前数据。" onConfirm={() => onRestoreBackup(record.id, backupDbName)}>
                         <Button type="link" size="small" icon={<UndoOutlined />} loading={busy === `restore-${record.id}`}>
                           恢复
                         </Button>
                       </Popconfirm>
                     </>
                   )}
-                  <Popconfirm title="确定删除此备份？" onConfirm={() => onDeleteBackup(record.id)}>
+                  <Popconfirm title="确定删除此备份？" onConfirm={() => onDeleteBackup(record.id, backupDbName)}>
                     <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-backup-${record.id}`}>
                       删除
                     </Button>

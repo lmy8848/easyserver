@@ -581,9 +581,9 @@ export default function DatabasePage() {
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '下载失败')); }
   };
 
-  const handleRestoreBackup = async (backupId: number) => {
+  const handleRestoreBackup = async (backupId: number, dbName: string) => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version) return;
+    if (!version) return;
     setBusy(`restore-${backupId}`);
     try {
       await dbServerApi.restoreBackup(backupId);
@@ -599,7 +599,7 @@ export default function DatabasePage() {
         setBusy('');
         if (ev.status === 'success') message.success('恢复成功');
         else message.error(ev.error || '恢复失败');
-        if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
+        fetchBackups(version.id, dbName);
       };
       // 连接中断不自行终结：EventSource 自动重连；服务重启内存态丢失后，
       // 重连收到 {type:'done', error} 帧，仍能正确提示。
@@ -609,14 +609,14 @@ export default function DatabasePage() {
     }
   };
 
-  const handleDeleteBackup = async (backupId: number) => {
+  const handleDeleteBackup = async (backupId: number, dbName: string) => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version) return;
+    if (!version) return;
     setBusy(`delete-backup-${backupId}`);
     try {
       await dbServerApi.deleteBackup(backupId);
       message.success('备份已删除');
-      if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
+      fetchBackups(version.id, dbName);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
     finally { setBusy(''); }
   };

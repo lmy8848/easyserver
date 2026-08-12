@@ -101,7 +101,11 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	// 容器内写文件（-r），再 docker cp 出来——避免 dump 走 stdout 字符串管道
 	// （大库截断/二进制损坏风险，见 runInContainer 注释）。
 	target := "/tmp/easyserver-backup.sql"
-	if _, err := s.runInContainer(ctx, instance, "mysqldump", "-r", target, "--single-transaction", "--routines", "--triggers", backup.DatabaseName); err != nil {
+	// --set-gtid-purged=OFF：不写 SET @@GLOBAL.GTID_PURGED。GTID 模式下 mysqldump
+	// 默认(AUTO/ON)会输出该语句，恢复到已有 GTID 的实例报 3546（GTID set 不允许
+	// 与已执行 GTID 重叠/变更）。本面板的恢复目标是同一/另一实例的现有库，
+	// OFF 让备份不携带 GTID，恢复不碰 @@GLOBAL。
+	if _, err := s.runInContainer(ctx, instance, "mysqldump", "-r", target, "--single-transaction", "--set-gtid-purged=OFF", "--routines", "--triggers", backup.DatabaseName); err != nil {
 		return fmt.Errorf("mysqldump failed: %w", err)
 	}
 	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
@@ -158,11 +162,12 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 		log.Printf("failed to delete backup file %s: %v", backup.FilePath, err)
 	}
 
-	// 恢复任务若正跑该备份，删文件会让恢复失败——拒绝删除。
+	// 恢复任务若正跑该备份，删文件会让恢复失败——拒绝删除。restoreTask 保留最近
+	// 一次恢复的终态（供 SSE 查询），所以只拦 running，终态（含失败）可删。
 	s.restoreMu.Lock()
-	_, restoring := s.restoreTask[id]
+	st, restoring := s.restoreTask[id]
 	s.restoreMu.Unlock()
-	if restoring {
+	if restoring && st.Status == "running" {
 		return fmt.Errorf("该备份正在恢复中，无法删除")
 	}
 
@@ -243,8 +248,14 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
 		return fmt.Errorf("copy backup into container: %w", err)
 	}
-	// mysql 客户端执行文件：库名走位置参数（--execute 分支），不拼 shell —— 无注入面。
-	if _, err := s.runInContainer(ctx, instance, "mysql", "--execute=source "+target, backup.DatabaseName); err != nil {
+	// `--execute="source ..."` 会把 source 当 SQL 语句解析（1064）——source 是客户端
+	// 命令。改为容器内 sh 重定向：mysql db < 文件 从 stdin 喂 SQL。这里不走
+	// runInContainer：withAdminCredentials 会给任意命令追加 -uroot，sh 不认该选项
+	// 报 invalid option name；手动构造 `-e MYSQL_PWD=…`（execCommand 提升为容器
+	// exec 环境）+ `sh -c`，凭据不进命令行。库名经 isValidDBName 白名单。
+	cmd := fmt.Sprintf("mysql -uroot %s < %s", backup.DatabaseName, target)
+	args := []string{"-e", "MYSQL_PWD=" + instance.AdminPassword, "sh", "-c", cmd}
+	if _, err := s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...); err != nil {
 		return fmt.Errorf("mysql restore failed: %w", err)
 	}
 	return nil
