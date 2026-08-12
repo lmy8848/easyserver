@@ -172,7 +172,7 @@ export default function InstanceHeader({
     { key: 'container_engine', label: '容器引擎', value: selectedVersion.container_engine },
     { key: 'image', label: '镜像', value: <Tag>{selectedVersion.image}</Tag> },
     { key: 'container_name', label: '容器名', value: <Tag>{selectedVersion.container_name}</Tag> },
-    { key: 'volume_name', label: '数据卷', value: selectedVersion.volume_name },
+    { key: 'volume_name', label: '数据目录', value: selectedVersion.volume_name },
     { key: 'bind_address', label: '监听地址', value: selectedVersion.bind_address },
     { key: 'created_at', label: '创建时间', value: selectedVersion.created_at },
   ] : [];

@@ -204,8 +204,9 @@ export default function DatabasePage() {
     setDBConfigLoading(true);
     try {
       const res = await dbServerApi.getInstanceConfig(selectedVersion.id);
-      // 结构化配置：params（引擎当前值）+ meta（编辑元数据）。
-      setDBConfig({ found: true, config: res.data?.data });
+      // 结构化配置：params（引擎当前值）+ meta（编辑元数据）。originalParams 记
+      // 原始值快照，保存时对照它只提交有变化的字段。
+      setDBConfig({ found: true, config: res.data?.data, originalParams: { ...res.data?.data?.params } });
     } catch (error) {
       console.error('Failed to load config:', error);
       setDBConfig(null);
@@ -354,15 +355,15 @@ export default function DatabasePage() {
   const handleUninstallVersion = async (v: DBInstance) => {
     const server = activeDBTypeInfo;
     if (!server) return;
-    // Uninstall keeps the data volume by default so the instance can be
-    // re-installed onto it; the checkbox opts into deleting the data too.
+    // Uninstall keeps the host data directory by default so the instance can be
+    // re-installed onto it; the checkbox opts into deleting the data + backups too.
     let purge = false;
     Modal.confirm({
       title: `卸载 ${server.display_name} ${v.version}？`,
       content: (
         <div>
-          <p>卸载将删除该数据库实例。默认保留数据卷（可重新安装以恢复数据）。</p>
-          <Checkbox onChange={(e) => { purge = e.target.checked; }}>同时删除数据卷（不可恢复）</Checkbox>
+          <p>卸载将删除该数据库实例。默认保留宿主数据目录（可重新安装以恢复数据）。</p>
+          <Checkbox onChange={(e) => { purge = e.target.checked; }}>同时删除数据目录及备份文件（不可恢复）</Checkbox>
         </div>
       ),
       okText: '卸载',
@@ -373,7 +374,7 @@ export default function DatabasePage() {
         setOperating(`uninstall-${v.id}`);
         try {
           await dbServerApi.uninstallInstance(v.id, purge);
-          message.success(purge ? '已卸载并删除数据卷' : '已卸载（数据卷已保留）');
+          message.success(purge ? '已卸载并删除数据目录及备份' : '已卸载（数据目录已保留）');
           fetchInstances(server.db_type);
         } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
         finally { setOperating(''); }
@@ -521,10 +522,16 @@ export default function DatabasePage() {
     if (!dbConfig?.config?.params || !selectedVersion) return;
     setBusy('save-config');
     try {
-      // 只提交改过的非空字段（meta 是渲染元数据，服务端不落库）；空值不提交
-      // —— 保存只应用改过的字段，清空输入框等于不改。
+      // 只提交变化过的字段：对照本次加载的原始值（config 服务端返回的引擎当前值），
+      // 避免每次把全部非空字段提交出去（含 Redis 启动期参数 databases/port，
+      // 在线保存会报 immutable）。
+      const original = dbConfig.originalParams || {};
       const params = Object.fromEntries(
-        Object.entries(dbConfig.config.params || {}).filter(([, v]) => String(v ?? '').trim() !== '')
+        Object.entries(dbConfig.config.params || {}).filter(([k, v]) => {
+          const val = String(v ?? '').trim();
+          const orig = String(original[k] ?? '').trim();
+          return val !== '' && val !== orig;
+        })
       ) as Record<string, string>;
       await dbServerApi.saveInstanceConfig(selectedVersion.id, params);
       message.success('配置已保存');
@@ -948,7 +955,7 @@ export default function DatabasePage() {
                   onUpdateDBParam={updateDBParam}
                 />,
               },
-              {
+              ...(activeDbType !== 'redis' ? [{
                 key: 'sql',
                 label: <span><ConsoleSqlOutlined /> SQL 控制台</span>,
                 children: <SqlConsoleTab
@@ -963,7 +970,7 @@ export default function DatabasePage() {
                   sqlLoading={sqlLoading}
                   onExecuteSQL={handleExecuteSQL}
                 />,
-              },
+              }] : []),
             ]} />
           </Card>
         )}

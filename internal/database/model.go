@@ -11,8 +11,9 @@ const (
 
 // DBInstance is a container-backed Database Instance — the top-level resource of
 // the database module. The container is addressed by ContainerName only; each
-// instance owns one managed container, one named data volume, an instance-level
-// config dir, a fixed image and a fixed runtime.
+// instance owns one managed container, a host data directory (VolumeName, the
+// absolute /opt/easyserver/db/<dbtype>-<version>/data path mounted into the
+// container), a config dir for Redis, a fixed image and a fixed runtime.
 type DBInstance struct {
 	ID              int64  `json:"id"`
 	DBType          DBType `json:"db_type"` // mysql, postgresql, redis

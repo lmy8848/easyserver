@@ -8,6 +8,8 @@ package database
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,12 +89,10 @@ type fakeDBRuntime struct {
 	status      ContainerStatus
 	statusErr   error
 	removed     []string
-	removedVol  []string
 	started     []string
 	stopped     []string
 	restarted   []string
 	exists      bool // 预检 Exists 的返回值（默认 false）
-	seedCalls   []seedCall
 }
 
 func (f *fakeDBRuntime) Create(_ context.Context, spec ContainerSpec) error {
@@ -124,43 +124,23 @@ func (f *fakeDBRuntime) Exec(context.Context, string, string, ...string) (string
 }
 func (f *fakeDBRuntime) CopyFrom(context.Context, string, string, string, string) error { return nil }
 func (f *fakeDBRuntime) CopyTo(context.Context, string, string, string, string) error   { return nil }
-func (f *fakeDBRuntime) RemoveVolume(_ context.Context, _, volume string) error {
-	f.removedVol = append(f.removedVol, volume)
-	return nil
-}
 func (f *fakeDBRuntime) Exists(context.Context, string, string) (bool, error) {
 	return f.exists, nil
-}
-func (f *fakeDBRuntime) SeedVolumeFile(_ context.Context, _, _, volume, dest, content string) error {
-	f.seedCalls = append(f.seedCalls, seedCall{volume: volume, dest: dest, content: content})
-	return nil
-}
-func (f *fakeDBRuntime) ReadVolumeFile(_ context.Context, _, _, volume, path string) (string, error) {
-	// 回放最后一次写入该卷+路径的文件内容；无则返回空（新实例/未配置）。
-	for i := len(f.seedCalls) - 1; i >= 0; i-- {
-		if f.seedCalls[i].volume == volume && f.seedCalls[i].dest == path {
-			return f.seedCalls[i].content, nil
-		}
-	}
-	return "", nil
-}
-
-// seedCall records one SeedVolumeFile call for the structured-config test.
-type seedCall struct {
-	volume  string
-	dest    string
-	content string
 }
 
 // fakeRepo is a minimal in-memory Repository for the lifecycle tests.
 type fakeRepo struct {
-	instances map[int64]*DBInstance
-	nextID    int64
+	instances      map[int64]*DBInstance
+	nextID         int64
+	countInstances int // CountInstancesByDBTypeAndVersion 的返回值（单实例约束测试）
+	backups        map[int64]*DBBackup
+	nextBackupID   int64
 }
 
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		instances: map[int64]*DBInstance{},
+		backups:   map[int64]*DBBackup{},
 		nextID:    100,
 	}
 }
@@ -175,7 +155,7 @@ func (r *fakeRepo) GetInstance(_ context.Context, id int64) (*DBInstance, error)
 	return r.instances[id], nil
 }
 func (r *fakeRepo) CountInstancesByDBTypeAndVersion(context.Context, DBType, string) (int, error) {
-	return 0, nil
+	return r.countInstances, nil
 }
 func (r *fakeRepo) CreateInstance(_ context.Context, v *DBInstance) (int64, error) {
 	r.nextID++
@@ -208,8 +188,18 @@ func (r *fakeRepo) UpdateInstancePassword(_ context.Context, id int64, pw string
 
 // backup operations (unused by the lifecycle tests, but required by the
 // Repository interface).
-func (r *fakeRepo) CreateBackup(context.Context, *DBBackup) (int64, error) { return 0, nil }
-func (r *fakeRepo) UpdateBackupStatus(context.Context, int64, string, int64, string) error {
+func (r *fakeRepo) CreateBackup(_ context.Context, b *DBBackup) (int64, error) {
+	r.nextBackupID++
+	b.ID = r.nextBackupID
+	r.backups[b.ID] = b
+	return b.ID, nil
+}
+func (r *fakeRepo) UpdateBackupStatus(_ context.Context, id int64, status string, size int64, errMsg string) error {
+	if b := r.backups[id]; b != nil {
+		b.Status = status
+		b.FileSize = size
+		b.ErrorMessage = errMsg
+	}
 	return nil
 }
 func (r *fakeRepo) ListBackups(context.Context, int64, string) ([]DBBackup, error) {
@@ -218,10 +208,13 @@ func (r *fakeRepo) ListBackups(context.Context, int64, string) ([]DBBackup, erro
 func (r *fakeRepo) ListAllBackups(context.Context) ([]DBBackup, error) {
 	return nil, nil
 }
-func (r *fakeRepo) GetBackup(context.Context, int64) (*DBBackup, error) { return nil, nil }
-func (r *fakeRepo) DeleteBackup(context.Context, int64) error           { return nil }
+func (r *fakeRepo) GetBackup(_ context.Context, id int64) (*DBBackup, error) {
+	return r.backups[id], nil
+}
+func (r *fakeRepo) DeleteBackup(context.Context, int64) error { return nil }
 
 func TestCreateInstanceHealthy(t *testing.T) {
+	withTempHostBase(t)
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewService(repo, rt)
@@ -252,6 +245,7 @@ func TestCreateInstanceHealthy(t *testing.T) {
 }
 
 func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
+	withTempHostBase(t)
 	repo := newFakeRepo()
 	// Container exits before becoming healthy → waitForHealthy fails fast. The
 	// container is deliberately kept for troubleshooting (its logs are lost on
@@ -275,7 +269,56 @@ func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 	}
 }
 
-func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
+// withTempHostBase 把 hostDBBaseDir 指到临时目录，避免测试真实操作 /opt，用后还原。
+func withTempHostBase(t *testing.T) string {
+	t.Helper()
+	old := hostDBBaseDir
+	hostDBBaseDir = t.TempDir()
+	t.Cleanup(func() { hostDBBaseDir = old })
+	return hostDBBaseDir
+}
+
+func TestUninstallPurgeRemovesHostDataDir(t *testing.T) {
+	withTempHostBase(t)
+	repo := newFakeRepo()
+	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
+	svc := NewService(repo, rt)
+
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := svc.WaitForInstall(res.InstallID); err != nil {
+		t.Fatalf("install wait: %v", err)
+	}
+	got := findInstanceByStatus(repo, "running")
+	if got == nil {
+		t.Fatalf("expected running instance after install, got %+v", repo.instances)
+	}
+	// 宿主数据目录真实创建（安装时 prepareHostDirs）。
+	instanceDir := filepath.Join(hostDBBaseDir, "mysql-8.0")
+	if _, err := os.Stat(filepath.Join(instanceDir, "data")); err != nil {
+		t.Fatalf("host data dir should exist after install: %v", err)
+	}
+
+	// Uninstall with purge=true — the container, the host instance directory
+	// (data + config + es_backups/ backups) and the metadata row all go away.
+	if err := svc.UninstallInstance(context.Background(), got.ID, true); err != nil {
+		t.Fatalf("uninstall(purge): %v", err)
+	}
+	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerName {
+		t.Fatalf("expected container removed, got %v", rt.removed)
+	}
+	if _, err := os.Stat(instanceDir); !os.IsNotExist(err) {
+		t.Fatalf("expected host data dir removed by purge, stat err = %v", err)
+	}
+	if _, ok := repo.instances[got.ID]; ok {
+		t.Fatal("expected instance metadata deleted")
+	}
+}
+
+func TestUninstallKeepsHostDataDirWithoutPurge(t *testing.T) {
+	withTempHostBase(t)
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
 	svc := NewService(repo, rt)
@@ -292,20 +335,85 @@ func TestUninstallPurgeRemovesContainerAndVolume(t *testing.T) {
 		t.Fatalf("expected running instance after install, got %+v", repo.instances)
 	}
 
-	// Uninstall with purge=true — the container, the data volume (config lives in
-	// the engine's own persisted state now, no config volume) and the metadata
-	// row all go away (this is the former DestroyInstance behavior).
-	if err := svc.UninstallInstance(context.Background(), got.ID, true); err != nil {
-		t.Fatalf("uninstall(purge): %v", err)
+	if err := svc.UninstallInstance(context.Background(), got.ID, false); err != nil {
+		t.Fatalf("uninstall(no purge): %v", err)
 	}
-	if len(rt.removed) != 1 || rt.removed[0] != got.ContainerName {
-		t.Fatalf("expected container removed, got %v", rt.removed)
-	}
-	if len(rt.removedVol) != 1 || rt.removedVol[0] != got.VolumeName {
-		t.Fatalf("expected data volume removed, got %v", rt.removedVol)
+	// 不勾选 purge：只解除运行资源，宿主数据目录保留。
+	if _, err := os.Stat(filepath.Join(hostDBBaseDir, "mysql-8.0", "data")); err != nil {
+		t.Fatalf("host data dir should be kept without purge: %v", err)
 	}
 	if _, ok := repo.instances[got.ID]; ok {
 		t.Fatal("expected instance metadata deleted")
+	}
+}
+
+func TestCreateInstanceRejectsDuplicateTypeVersion(t *testing.T) {
+	// 单实例约束：同 <dbtype>-<version> 只能创建一个实例（数据目录唯一归属）。
+	repo := newFakeRepo()
+	repo.countInstances = 1
+	rt := &fakeDBRuntime{}
+	svc := NewService(repo, rt)
+
+	_, err := svc.CreateInstance(context.Background(), DBTypeMySQL,
+		&CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	if err == nil {
+		t.Fatal("expected duplicate type+version to be rejected")
+	}
+	if len(repo.instances) != 0 {
+		t.Fatalf("no row must be written when version already installed, got %+v", repo.instances)
+	}
+	if len(rt.createSpecs) != 0 {
+		t.Fatalf("no task must start when version already installed, got %+v", rt.createSpecs)
+	}
+}
+
+func TestRedisContainerSpecMountsHostConfigDir(t *testing.T) {
+	withTempHostBase(t)
+	spec := containerSpec(DBTypeRedis, "docker", "7.2", "redis:7.2", "easyserver-db-redis-7-2",
+		hostDataDir(DBTypeRedis, "7.2"), "127.0.0.1", 6379, "secret")
+	if spec.Volume != filepath.Join(hostDBBaseDir, "redis-7.2", "data") {
+		t.Fatalf("data volume = %q, want host data dir", spec.Volume)
+	}
+	if spec.ConfigVolume != filepath.Join(hostDBBaseDir, "redis-7.2", "config") {
+		t.Fatalf("config volume = %q, want host config dir", spec.ConfigVolume)
+	}
+	if spec.ConfigDir != "/usr/local/etc/redis" {
+		t.Fatalf("config dir = %q, want /usr/local/etc/redis", spec.ConfigDir)
+	}
+}
+
+func TestCreateBackupWritesToDataESBackups(t *testing.T) {
+	withTempHostBase(t)
+	repo := newFakeRepo()
+	rt := &fakeDBRuntime{status: ContainerStatus{State: "running", Health: "healthy"}}
+	svc := NewService(repo, rt)
+
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := svc.WaitForInstall(res.InstallID); err != nil {
+		t.Fatalf("install wait: %v", err)
+	}
+	got := findInstanceByStatus(repo, "running")
+	if got == nil {
+		t.Fatalf("expected running instance after install, got %+v", repo.instances)
+	}
+
+	backup, err := svc.CreateBackup(context.Background(), got.ID, "testdb", DBTypeMySQL)
+	if err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+	// file_path 指向宿主数据目录内 es_backups/，目录真实创建。
+	backupDir := filepath.Join(hostDBBaseDir, "mysql-8.0", "data", "es_backups")
+	if dir := filepath.Dir(backup.FilePath); dir != backupDir {
+		t.Fatalf("backup file_path = %q, want dir %q", backup.FilePath, backupDir)
+	}
+	if _, err := os.Stat(backupDir); err != nil {
+		t.Fatalf("es_backups dir should exist: %v", err)
+	}
+	if _, err := svc.WaitBackup(backup.ID); err != nil {
+		t.Fatalf("wait backup: %v", err)
 	}
 }
 
@@ -359,6 +467,7 @@ func TestDefaultContainerName(t *testing.T) {
 
 func TestCreateInstanceRejectsTakenContainerName(t *testing.T) {
 	// 预检：同名容器已存在 → CreateInstance 报错，且不写 row、不起任务。
+	withTempHostBase(t)
 	repo := newFakeRepo()
 	rt := &fakeDBRuntime{exists: true}
 	svc := NewService(repo, rt)

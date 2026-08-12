@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,8 +28,7 @@ const (
 // (lifecycle) and the logical databases, users, backups and SQL inside them.
 type Service struct {
 	repo           Repository
-	runtime        DatabaseRuntime // shared runtime for normal (non-install) ops
-	backupDir      string
+	runtime        DatabaseRuntime        // shared runtime for normal (non-install) ops
 	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
 	driver         SQLRunner              // direct driver channel (MySQL/PostgreSQL)
@@ -43,10 +44,9 @@ type Service struct {
 // previous crashed process.
 func NewService(repo Repository, runtime DatabaseRuntime) *Service {
 	s := &Service{
-		repo:      repo,
-		runtime:   runtime,
-		backupDir: DefaultBackupDir,
-		taskMgr:   task.NewManager(8),
+		repo:    repo,
+		runtime: runtime,
+		taskMgr: task.NewManager(8),
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
@@ -167,7 +167,9 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		}
 	}
 	containerName := defaultContainerName(dbType, req.Version, req.ContainerName)
-	volumeName := containerName + "-data"
+	// 数据目录是宿主绝对路径（/opt/easyserver/db/<type>-<version>/data），不再有命名卷。
+	// 同 <type>-<version> 只允许一个实例（上面已查），目录归属唯一。
+	volumeName := hostDataDir(dbType, req.Version)
 	// Admin password is stored plainly: SQLite file and container environment
 	// share the host, so a static key encrypts nothing an attacker can't read
 	// next door — encryption would only add a missing-key failure mode.
@@ -212,7 +214,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		// (which is canceled once CreateInstance responds), so it must not inherit
 		// its cancellation — the per-task context from the task executor drives it,
 		// and CancelInstall cancels that.
-		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, volumeName, password, spec, rt, log)
+		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, password, spec, rt, log)
 	}); err != nil {
 		// Duplicate install (same container already installing) or concurrency
 		// limit: the row was written above but no task started — remove it so the
@@ -229,7 +231,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 // CreateInstance); this flips it to "running" on success / "failed" on error, or
 // removes it entirely when the user cancels. ctx is the per-task cancel context
 // from the task executor.
-func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, volumeName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
+func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
 	canceled := func() bool { return ctx.Err() != nil }
 	// removeInstance is the cancel cleanup: drop the container and the instance
 	// row — the user aborted, so nothing lingers (a failed install keeps its row
@@ -252,6 +254,12 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	}
 
 	log.Append("开始安装 " + image + " ...")
+	// 数据/配置目录是宿主挂载：先建好并 chown 给容器进程（uid 999），否则容器内
+	// mysqld/redis 无法写数据目录（Redis 的 CONFIG REWRITE 也是这个原因才从命名卷
+	// 迁到宿主路径）。Redis 同时预置空 redis.conf（配置文件必须存在，见函数注释）。
+	if err := prepareHostDirs(spec); err != nil {
+		return fail("准备宿主数据目录失败", err)
+	}
 	if err := rt.Create(ctx, spec); err != nil {
 		if canceled() {
 			removeInstance()
@@ -266,17 +274,6 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 		return err
 	}
 	log.Append("容器已创建，启动服务...")
-
-	// Redis 挂配置卷并预置空 redis.conf：redis-server 启动时以该文件为配置来源，
-	// 之后配置写入走 CONFIG SET + CONFIG REWRITE（写回此文件持久化）。MySQL 与
-	// PostgreSQL 的配置由驱动持久化（SET PERSIST / ALTER SYSTEM），不挂配置卷。
-	switch dbType {
-	case DBTypeRedis:
-		log.Append("预置 Redis 配置...")
-		if err := rt.SeedVolumeFile(ctx, engineName, image, containerName+"-config", "redis.conf", "# EasyServer Redis 配置（由 CONFIG REWRITE 维护）\n"); err != nil {
-			return fail("预置 Redis 配置失败", err)
-		}
-	}
 
 	if err := rt.Start(ctx, engineName, containerName); err != nil {
 		return fail("启动容器失败", err)
@@ -448,8 +445,9 @@ func (s *Service) WaitForInstall(installID string) error {
 	return t.Err()
 }
 
-// UninstallInstance removes the managed container. The data volume is retained
-// by default so the instance can be re-installed onto it; purge deletes it too.
+// UninstallInstance removes the managed container. The host data directory is
+// retained by default so the instance can be re-installed onto it; purge
+// deletes the whole instance directory (data + config + backups) too.
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge bool) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -466,12 +464,11 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 	s.driver.Close(instanceID)
 	s.redisOps.Close(instanceID)
 	if purge {
-		if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
-			return fmt.Errorf("remove database volume: %w", err)
-		}
-		if v.ConfigDir != "" {
-			if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, strings.TrimSuffix(v.VolumeName, "-data")+"-config"); err != nil {
-				return fmt.Errorf("remove database config volume: %w", err)
+		// 数据目录是宿主路径，整目录（data + config + es_backups/ 备份）直接 RemoveAll，
+		// 不再走引擎卷删除。旧版命名卷值（非绝对路径）按"存量忽略"处理，不删。
+		if filepath.IsAbs(v.VolumeName) {
+			if err := os.RemoveAll(filepath.Dir(v.VolumeName)); err != nil {
+				return fmt.Errorf("remove database data directory: %w", err)
 			}
 		}
 	}
@@ -731,6 +728,89 @@ func sanitizeName(value string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+// hostDBBaseDir 是数据库实例数据/配置目录的宿主根。每个实例占
+// <base>/<dbtype>-<version>/{data,config}，目录与实例一一对应（同类型+版本只允许
+// 一个实例）。变量而非常量：测试改指向临时目录，避免单元测试真实操作 /opt。
+var hostDBBaseDir = "/opt/easyserver/db"
+
+// containerUID 是官方 mysql/postgres/redis 镜像内数据进程的 uid（均为 999）。
+// 宿主目录必须 chown 给它，容器内进程才能写数据目录与 CONFIG REWRITE 写回配置。
+const containerUID = 999
+
+// instanceDirKey 是某 (类型,版本) 实例在宿主上的目录段，如 mysql-8.0。
+func instanceDirKey(dbType DBType, version string) string {
+	return sanitizeName(string(dbType)) + "-" + sanitizeVersion(version)
+}
+
+// sanitizeVersion 保留版本里的点（8.0 / 18-alpine 是合法的路径段），其余
+// 非法路径字符一律压成 '-'。
+func sanitizeVersion(version string) string {
+	version = strings.ToLower(strings.TrimSpace(version))
+	var b strings.Builder
+	for _, ch := range version {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' {
+			b.WriteRune(ch)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-.")
+}
+
+func hostDataDir(dbType DBType, version string) string {
+	return filepath.Join(hostDBBaseDir, instanceDirKey(dbType, version), "data")
+}
+
+func hostConfigDir(dbType DBType, version string) string {
+	return filepath.Join(hostDBBaseDir, instanceDirKey(dbType, version), "config")
+}
+
+// prepareHostDirs 创建实例的宿主数据/配置目录并 chown 给容器进程（uid 999）。
+// Redis 还预置空的 redis.conf —— redis-server 以配置文件路径启动时文件不存在是
+// 致命错误（不是忽略），空文件 + 命令行参数即等价于"默认配置 + --requirepass"。
+func prepareHostDirs(spec ContainerSpec) error {
+	for _, dir := range []string{spec.Volume, spec.ConfigVolume} {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create data directory %s: %w", dir, err)
+		}
+		// chown 999:999 只对 root 可行（rootful Podman 是 ADR-0006 的支持模式）。
+		// 非 root（rootless / 单元测试）跳过：容器进程映射的 uid 不由面板决定，
+		// chown 也会因 EPERM 失败。
+		if os.Geteuid() == 0 {
+			if err := os.Chown(dir, containerUID, containerUID); err != nil {
+				return fmt.Errorf("chown data directory %s: %w", dir, err)
+			}
+		}
+	}
+	if spec.ConfigVolume != "" {
+		conf := filepath.Join(spec.ConfigVolume, "redis.conf")
+		if err := os.WriteFile(conf, nil, 0644); err != nil {
+			return fmt.Errorf("create redis.conf: %w", err)
+		}
+		if os.Geteuid() == 0 {
+			if err := os.Chown(conf, containerUID, containerUID); err != nil {
+				return fmt.Errorf("chown redis.conf: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// containerDataDir 返回某实例数据目录在容器内的路径（宿主挂载的落点）。备份
+// 从宿主数据目录推导 es_backups/ 后，映射回容器路径供容器内 dump 直接写入。
+func containerDataDir(instance *DBInstance) string {
+	switch instance.DBType {
+	case DBTypePostgreSQL:
+		return pgDataDir(instance.Image)
+	case DBTypeRedis:
+		return "/data"
+	}
+	return "/var/lib/mysql"
+}
+
 // containerNameRe 是容器名的允许字符集（docker 与 podman 的规则交集）：
 // 首字符字母/数字，其余字母/数字/下划线/点/连字符。Docker 的 daemon 会拒绝
 // 不属于 [a-zA-Z0-9][a-zA-Z0-9_.-]* 的名字，Podman 更宽松但向下兼容该集合，
@@ -782,6 +862,10 @@ func containerPortForType(dbType DBType) int {
 	return 3306
 }
 
+// containerSpec builds the structured create contract. volume is the host data
+// directory (DBInstance.VolumeName, /opt/easyserver/db/<type>-<version>/data);
+// Redis additionally mounts the host config directory and starts redis-server on
+// the empty redis.conf + --requirepass (see prepareHostDirs).
 func containerSpec(dbType DBType, engineName, version, image, name, volume, bind string, port int, password string) ContainerSpec {
 	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -uroot -p$MYSQL_ROOT_PASSWORD"
 	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
@@ -801,8 +885,12 @@ func containerSpec(dbType DBType, engineName, version, image, name, volume, bind
 		dataDir = "/data"
 		env = map[string]string{"REDIS_PASSWORD": password}
 		health = "redis-cli -a $REDIS_PASSWORD ping"
-		configVolume, configDir = name+"-config", "/usr/local/etc/redis"
-		command = []string{"redis-server", "--requirepass", password, configDir + "/redis.conf"}
+		// 配置卷是宿主 config/ 目录（不是命名卷）：CONFIG REWRITE 直接写回宿主可见
+		// 的 redis.conf，不再有一次性 seed 容器和 root 属主写权限问题。
+		configVolume, configDir = hostConfigDir(dbType, version), "/usr/local/etc/redis"
+		// 配置文件必须是第一个位置参数：Redis 8 会把 --requirepass 之后所有
+		// token 当作其值，选项放在配置路径后面则路径被吞成第二个参数报错。
+		command = []string{"redis-server", configDir + "/redis.conf", "--requirepass", password}
 	default: // mysql — 配置由驱动持久化（SET PERSIST），不挂配置卷
 	}
 	return ContainerSpec{ContainerEngine: engineName, Name: name, Image: image, Volume: volume, DataDir: dataDir,

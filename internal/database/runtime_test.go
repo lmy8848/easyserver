@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"encoding/base64"
 	"io"
 	"os/exec"
 	"strings"
@@ -135,7 +134,7 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 		ContainerEngine: "podman",
 		Name:            "easyserver-db-mysql-8",
 		Image:           "mysql:8.0",
-		Volume:          "easyserver-db-mysql-8-data",
+		Volume:          "/opt/easyserver/db/mysql-8.0/data",
 		DataDir:         "/var/lib/mysql",
 		BindAddress:     "127.0.0.1",
 		HostPort:        3306,
@@ -147,18 +146,23 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Only one command now — `create`; named volumes are auto-created by the
-	// engine on first mount, no explicit `volume create`.
+	// Only one command now — `create`; host dirs are prepared by the panel before
+	// create, so no engine-side `volume create` is needed.
 	if len(fake.calls) != 1 {
 		t.Fatalf("expected a single container create, got %d calls", len(fake.calls))
 	}
 	if fake.calls[0].name != "podman" || len(fake.calls[0].args) < 3 || fake.calls[0].args[0] != "create" {
 		t.Fatalf("unexpected create call: %#v", fake.calls[0])
 	}
+	// 宿主绝对路径直接挂载（不是命名卷名）。
+	joined := strings.Join(fake.calls[0].args, " ")
+	if !strings.Contains(joined, "--volume /opt/easyserver/db/mysql-8.0/data:/var/lib/mysql") {
+		t.Fatalf("host path volume mount missing:\n%s", joined)
+	}
 
 	// Assert the structured contract, not the concatenated CLI args.
 	spec := runtime.lastSpec
-	if spec.Volume != "easyserver-db-mysql-8-data" || spec.DataDir != "/var/lib/mysql" {
+	if spec.Volume != "/opt/easyserver/db/mysql-8.0/data" || spec.DataDir != "/var/lib/mysql" {
 		t.Fatalf("data volume mapping lost: volume=%q datadir=%q", spec.Volume, spec.DataDir)
 	}
 	if spec.BindAddress != "127.0.0.1" {
@@ -172,55 +176,15 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 	}
 }
 
-func TestSeedVolumeFileWritesTemplateIntoVolume(t *testing.T) {
-	fake := &runtimeFakeExecutor{}
-	runtime := NewCLIContainerRuntime(fake)
-	err := runtime.SeedVolumeFile(context.Background(), "podman", "mysql:8.0",
-		"easyserver-db-mysql-8-0-config", "easyserver.cnf", "[mysqld]\n")
-	if err != nil {
-		t.Fatalf("seed volume: %v", err)
-	}
-	if len(fake.calls) != 1 {
-		t.Fatalf("expected a single run call, got %d", len(fake.calls))
-	}
-	got := fake.calls[0]
-	if got.name != "podman" || got.args[0] != "run" {
-		t.Fatalf("unexpected seed call: %#v", got)
-	}
-	joined := strings.Join(got.args, " ")
-	// 内容走 base64 规避 shell 特殊字符；目标挂在 /easyserver-init —— 一个不遮蔽
-	// 镜像配置目录的路径，正式容器把卷挂到配置目录后即可读。
-	for _, want := range []string{
-		"--rm", "--name", "easyserver-db-mysql-8-0-config-seed",
-		"--volume", "easyserver-db-mysql-8-0-config:/easyserver-init",
-		"--entrypoint", "/bin/sh", "mysql:8.0", "-c",
-		"mkdir -p /easyserver-init/$(dirname easyserver.cnf) &&",
-		"| base64 -d > /easyserver-init/easyserver.cnf",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("seed args missing %q:\n%s", want, joined)
-		}
-	}
-	// base64 编码的模板应可解码回原文（含换行与 # 注释）。
-	enc := base64.StdEncoding.EncodeToString([]byte("[mysqld]\n"))
-	if !strings.Contains(joined, enc) {
-		t.Fatalf("template not base64-encoded into command:\n%s", joined)
-	}
-}
-
 func TestRemoveToleratesAlreadyGone(t *testing.T) {
 	mock := executor.NewMockExecutor()
-	// 失败安装回滚后重装/卸载会再次删除容器/数据卷 —— 目标资源已不存在时
-	// 应视为成功，而不是让重装流程报错。
+	// 失败安装回滚后重装/卸载会再次删除容器 —— 目标资源已不存在时应视为成功，
+	// 而不是让重装流程报错。
 	mock.SetResponse("podman rm", executor.MockResponse{ExitCode: 1, Stderr: "Error: no such container \"easyserver-db-mysql-8.0\""})
-	mock.SetResponse("podman volume", executor.MockResponse{ExitCode: 1, Stderr: "Error: no such volume \"easyserver-db-mysql-8.0-data\""})
 	rt := NewCLIContainerRuntime(mock)
 
 	if err := rt.Remove(context.Background(), "podman", "easyserver-db-mysql-8.0"); err != nil {
 		t.Fatalf("Remove of already-gone container should be a no-op: %v", err)
-	}
-	if err := rt.RemoveVolume(context.Background(), "podman", "easyserver-db-mysql-8.0-data"); err != nil {
-		t.Fatalf("RemoveVolume of already-gone volume should be a no-op: %v", err)
 	}
 }
 

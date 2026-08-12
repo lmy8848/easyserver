@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,18 +12,24 @@ import (
 	"easyserver/internal/infra/task"
 )
 
-const (
-	DefaultBackupDir = "/opt/easyserver/backups/db"
-)
-
-// SetBackupDir sets the backup directory.
-func (s *Service) SetBackupDir(dir string) {
-	s.backupDir = dir
-}
-
 func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
-	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
+	instance, err := s.repo.GetInstance(ctx, instanceID)
+	if err != nil || instance == nil {
+		return nil, fmt.Errorf("database instance not found")
+	}
+	// 备份直接落在实例宿主数据目录的 es_backups/ 子目录 —— 该目录是宿主挂载，
+	// 容器内 dump 写这里宿主直见，无需 CopyFrom 往返。chown 999 让容器内进程
+	// （pg_dump 等以 uid 999 运行）能写入。
+	backupDir := filepath.Join(instance.VolumeName, "es_backups")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
+	}
+	// chown 999 让容器内进程（pg_dump 等以 uid 999 运行）能写入；非 root 环境跳过
+	// （与 prepareHostDirs 一致，rootless/测试 chown 会 EPERM）。
+	if os.Geteuid() == 0 {
+		if err := os.Chown(backupDir, containerUID, containerUID); err != nil {
+			return nil, fmt.Errorf("chown backup dir: %w", err)
+		}
 	}
 
 	timestamp := time.Now().Format("20060102150405")
@@ -35,7 +42,7 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	default:
 		return nil, fmt.Errorf("unsupported db type: %s", dbType)
 	}
-	filePath := filepath.Join(s.backupDir, fileName)
+	filePath := filepath.Join(backupDir, fileName)
 
 	backup := &DBBackup{
 		DBInstanceID: instanceID,
@@ -98,9 +105,9 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	// 容器内写文件（-r），再 docker cp 出来——避免 dump 走 stdout 字符串管道
-	// （大库截断/二进制损坏风险，见 runInContainer 注释）。
-	target := "/tmp/easyserver-backup.sql"
+	// 容器内写文件（-r），路径映射到宿主数据目录 es_backups/（宿主挂载 → 宿主直见），
+	// 不再走 docker cp 往返。
+	target := containerDataDir(instance) + "/es_backups/" + filepath.Base(backup.FilePath)
 	// --set-gtid-purged=OFF：不写 SET @@GLOBAL.GTID_PURGED。GTID 模式下 mysqldump
 	// 默认(AUTO/ON)会输出该语句，恢复到已有 GTID 的实例报 3546（GTID set 不允许
 	// 与已执行 GTID 重叠/变更）。本面板的恢复目标是同一/另一实例的现有库，
@@ -108,7 +115,7 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	if _, err := s.runInContainer(ctx, instance, "mysqldump", "-r", target, "--single-transaction", "--set-gtid-purged=OFF", "--routines", "--triggers", backup.DatabaseName); err != nil {
 		return fmt.Errorf("mysqldump failed: %w", err)
 	}
-	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
+	return nil
 }
 
 func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
@@ -116,12 +123,13 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件再 cp 出来。
-	target := "/tmp/easyserver-backup.dump"
+	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件 —— 但目标在宿主挂载的数据
+	// 目录内，写完宿主直见，无需 cp。
+	target := containerDataDir(instance) + "/es_backups/" + filepath.Base(backup.FilePath)
 	if _, err := s.runInContainer(ctx, instance, "pg_dump", "-Fc", "-f", target, backup.DatabaseName); err != nil {
 		return fmt.Errorf("pg_dump failed: %w", err)
 	}
-	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, target, backup.FilePath)
+	return nil
 }
 
 func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
@@ -129,14 +137,37 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return fmt.Errorf("database instance not found")
 	}
-	// Trigger persistence over the direct connection; the dump file still has to
-	// be copied out of the container (a container file operation).
+	// Trigger persistence over the direct connection. dump.rdb 由 redis 进程直接写在
+	// 宿主数据目录（/data 是宿主挂载），宿主侧拷贝到 es_backups/ 即可，不经过容器
+	// 文件通道。
 	if err := s.redisFor().BgSave(ctx, instance); err != nil {
 		return fmt.Errorf("redis BGSAVE failed: %w", err)
 	}
 
 	time.Sleep(2 * time.Second)
-	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, "/data/dump.rdb", backup.FilePath)
+	src := filepath.Join(instance.VolumeName, "dump.rdb")
+	if err := copyFile(src, backup.FilePath); err != nil {
+		return fmt.Errorf("copy redis dump: %w", err)
+	}
+	return nil
+}
+
+// copyFile copies a file byte-for-byte (host-side file operation).
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func (s *Service) ListBackups(ctx context.Context, instanceID int64, dbName string) ([]DBBackup, error) {
