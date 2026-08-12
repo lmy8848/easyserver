@@ -83,17 +83,18 @@ func (s *Service) listInstalled(ctx context.Context) ([]installedPackage, error)
 		if line == "" || strings.HasPrefix(line, "Listing") {
 			continue
 		}
-		// format: name/version arch [status]
+		// format: name/archive[,archive...] version arch [status]
+		// 斜杠后第一段是归档标识（如 oldstable,now / stable,now），版本在其后。
 		parts := strings.SplitN(line, "/", 2)
 		if len(parts) < 2 {
 			continue
 		}
 		name := parts[0]
 		fields := strings.Fields(parts[1])
-		if len(fields) < 1 {
+		if len(fields) < 2 {
 			continue
 		}
-		pkgs = append(pkgs, installedPackage{Name: name, Version: fields[0]})
+		pkgs = append(pkgs, installedPackage{Name: name, Version: fields[1]})
 	}
 	return pkgs, nil
 }
