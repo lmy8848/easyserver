@@ -126,12 +126,18 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, fmt.Errorf("unsupported database type %q", dbType)
 	}
 
-	count, err := s.repo.CountInstancesByDBTypeAndVersion(ctx, dbType, req.Version)
+	// 单实例约束按"数据目录归属"判定：目录 key 是 sanitize 后的 version（8.0. 与
+	// 8.0 指向同一目录），逐个比对已存在实例的 dir key，避免原始版本写法不同
+	// 绕过约束而共享一个数据目录。
+	instances, err := s.repo.ListInstances(ctx, dbType)
 	if err != nil {
 		return nil, err
 	}
-	if count > 0 {
-		return nil, fmt.Errorf("version %s is already installed for %s", req.Version, dbType)
+	dirKey := instanceDirKey(dbType, req.Version)
+	for _, inst := range instances {
+		if instanceDirKey(inst.DBType, inst.Version) == dirKey {
+			return nil, fmt.Errorf("version %s is already installed for %s", req.Version, dbType)
+		}
 	}
 
 	// The client sends the image + version (the front-end owns the version/image

@@ -130,11 +130,10 @@ func (f *fakeDBRuntime) Exists(context.Context, string, string) (bool, error) {
 
 // fakeRepo is a minimal in-memory Repository for the lifecycle tests.
 type fakeRepo struct {
-	instances      map[int64]*DBInstance
-	nextID         int64
-	countInstances int // CountInstancesByDBTypeAndVersion 的返回值（单实例约束测试）
-	backups        map[int64]*DBBackup
-	nextBackupID   int64
+	instances    map[int64]*DBInstance
+	nextID       int64
+	backups      map[int64]*DBBackup
+	nextBackupID int64
 }
 
 func newFakeRepo() *fakeRepo {
@@ -153,9 +152,6 @@ func (r *fakeRepo) ListInstances(context.Context, DBType) ([]DBInstance, error) 
 }
 func (r *fakeRepo) GetInstance(_ context.Context, id int64) (*DBInstance, error) {
 	return r.instances[id], nil
-}
-func (r *fakeRepo) CountInstancesByDBTypeAndVersion(context.Context, DBType, string) (int, error) {
-	return r.countInstances, nil
 }
 func (r *fakeRepo) CreateInstance(_ context.Context, v *DBInstance) (int64, error) {
 	r.nextID++
@@ -349,8 +345,10 @@ func TestUninstallKeepsHostDataDirWithoutPurge(t *testing.T) {
 
 func TestCreateInstanceRejectsDuplicateTypeVersion(t *testing.T) {
 	// 单实例约束：同 <dbtype>-<version> 只能创建一个实例（数据目录唯一归属）。
+	// 约束按"目录归属"判定——预置一个版本写法不同（8.0. sanitize 后与 8.0 同
+	// 目录 key）的实例，验证不会被原始版本串绕过。
 	repo := newFakeRepo()
-	repo.countInstances = 1
+	repo.instances[1] = &DBInstance{ID: 1, DBType: DBTypeMySQL, Version: "8.0.", Status: "running"}
 	rt := &fakeDBRuntime{}
 	svc := NewService(repo, rt)
 
@@ -359,11 +357,31 @@ func TestCreateInstanceRejectsDuplicateTypeVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected duplicate type+version to be rejected")
 	}
-	if len(repo.instances) != 0 {
+	if len(repo.instances) != 1 {
 		t.Fatalf("no row must be written when version already installed, got %+v", repo.instances)
 	}
 	if len(rt.createSpecs) != 0 {
 		t.Fatalf("no task must start when version already installed, got %+v", rt.createSpecs)
+	}
+}
+
+func TestCreateBackupRejectsLegacyVolumeInstance(t *testing.T) {
+	// 存量命名卷实例（volume_name 非宿主绝对路径）在新逻辑下完全忽略：备份接口
+	// 直接拒绝，而不是把 es_backups 拼进相对路径在服务器 CWD 创建垃圾目录。
+	withTempHostBase(t)
+	repo := newFakeRepo()
+	repo.instances[1] = &DBInstance{ID: 1, DBType: DBTypeMySQL, Version: "8.0",
+		ContainerEngine: "docker", ContainerName: "legacy", VolumeName: "legacy-data", Status: "running"}
+	rt := &fakeDBRuntime{}
+	svc := NewService(repo, rt)
+
+	_, err := svc.CreateBackup(context.Background(), 1, "testdb", DBTypeMySQL)
+	if err == nil {
+		t.Fatal("expected legacy named-volume instance backup to be rejected")
+	}
+	// 不得在服务器 CWD 留下 es_backups 垃圾目录。
+	if _, statErr := os.Stat(filepath.Join("legacy-data", "es_backups")); !os.IsNotExist(statErr) {
+		t.Fatalf("must not create relative es_backups dir for legacy instance, stat err = %v", statErr)
 	}
 }
 
@@ -405,7 +423,7 @@ func TestCreateBackupWritesToDataESBackups(t *testing.T) {
 		t.Fatalf("create backup: %v", err)
 	}
 	// file_path 指向宿主数据目录内 es_backups/，目录真实创建。
-	backupDir := filepath.Join(hostDBBaseDir, "mysql-8.0", "data", "es_backups")
+	backupDir := filepath.Join(hostDBBaseDir, "mysql-8.0", "data", esBackupsDir)
 	if dir := filepath.Dir(backup.FilePath); dir != backupDir {
 		t.Fatalf("backup file_path = %q, want dir %q", backup.FilePath, backupDir)
 	}

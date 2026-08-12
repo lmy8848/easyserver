@@ -68,13 +68,6 @@ func (r *sqliteRepo) GetInstance(ctx context.Context, id int64) (*DBInstance, er
 	return &v, nil
 }
 
-func (r *sqliteRepo) CountInstancesByDBTypeAndVersion(ctx context.Context, dbType DBType, version string) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_instances WHERE db_type = ? AND version = ?",
-		dbType, version).Scan(&count)
-	return count, err
-}
-
 func (r *sqliteRepo) CreateInstance(ctx context.Context, v *DBInstance) (int64, error) {
 	result, err := r.db.ExecContext(ctx, `INSERT INTO database_instances
 		(db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, admin_password, status)

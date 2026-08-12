@@ -12,15 +12,23 @@ import (
 	"easyserver/internal/infra/task"
 )
 
+// esBackupsDir 是实例宿主数据目录内备份的子目录名（dump 直接落这里宿主直见）。
+const esBackupsDir = "es_backups"
+
 func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
 		return nil, fmt.Errorf("database instance not found")
 	}
+	// 存量命名卷实例完全忽略：volume_name 不是宿主绝对路径时直接拒绝，绝不把
+	// es_backups 拼进相对路径在服务器 CWD 创建垃圾目录。
+	if !filepath.IsAbs(instance.VolumeName) {
+		return nil, fmt.Errorf("该实例为旧版命名卷部署，不受支持，请先卸载并重新安装")
+	}
 	// 备份直接落在实例宿主数据目录的 es_backups/ 子目录 —— 该目录是宿主挂载，
 	// 容器内 dump 写这里宿主直见，无需 CopyFrom 往返。chown 999 让容器内进程
 	// （pg_dump 等以 uid 999 运行）能写入。
-	backupDir := filepath.Join(instance.VolumeName, "es_backups")
+	backupDir := filepath.Join(instance.VolumeName, esBackupsDir)
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
 	}
@@ -107,7 +115,7 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	}
 	// 容器内写文件（-r），路径映射到宿主数据目录 es_backups/（宿主挂载 → 宿主直见），
 	// 不再走 docker cp 往返。
-	target := containerDataDir(instance) + "/es_backups/" + filepath.Base(backup.FilePath)
+	target := containerDataDir(instance) + "/" + esBackupsDir + "/" + filepath.Base(backup.FilePath)
 	// --set-gtid-purged=OFF：不写 SET @@GLOBAL.GTID_PURGED。GTID 模式下 mysqldump
 	// 默认(AUTO/ON)会输出该语句，恢复到已有 GTID 的实例报 3546（GTID set 不允许
 	// 与已执行 GTID 重叠/变更）。本面板的恢复目标是同一/另一实例的现有库，
@@ -125,7 +133,7 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 	}
 	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件 —— 但目标在宿主挂载的数据
 	// 目录内，写完宿主直见，无需 cp。
-	target := containerDataDir(instance) + "/es_backups/" + filepath.Base(backup.FilePath)
+	target := containerDataDir(instance) + "/" + esBackupsDir + "/" + filepath.Base(backup.FilePath)
 	if _, err := s.runInContainer(ctx, instance, "pg_dump", "-Fc", "-f", target, backup.DatabaseName); err != nil {
 		return fmt.Errorf("pg_dump failed: %w", err)
 	}
