@@ -135,7 +135,7 @@ func (s *Service) sendAlert(rule AlertRule, value float64) {
 	message := fmt.Sprintf("⚠️ 告警：%s %s 当前 %.1f%% 超过阈值 %.1f%%（持续 %d 秒）", rule.Name, metricName, value, rule.Threshold, rule.Duration)
 
 	if s.notifSvc != nil {
-		_ = s.notifSvc.CreateIfNotExists(notification.CreateNotificationRequest{
+		_, _ = s.notifSvc.CreateIfNotExists(notification.CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "告警：" + rule.Name,
 			Message: message,

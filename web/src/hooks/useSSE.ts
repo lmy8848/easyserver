@@ -5,10 +5,14 @@ export type SSEStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnect
 interface UseSSEOptions {
   /** SSE 相对路径，如 '/api/monitor' */
   path: string;
+  /** 连接建立/重连成功时回调 */
+  onOpen?: () => void;
   /** 每个 SSE 事件（data: 行）解析后的回调 */
   onMessage?: (data: any) => void;
   /** 连接关闭（非主动）时回调 */
   onClose?: () => void;
+  /** 具名 SSE 事件回调 map，如 { notification: (data) => {}, read: (data) => {} } */
+  events?: Record<string, (data: any) => void>;
   /** 是否连接（默认 true） */
   enabled?: boolean;
   /** 断线是否自动重连（默认 true）。EventSource 原生自动重连；false 时断开即 close。 */
@@ -29,18 +33,22 @@ interface UseSSEReturn {
  * loadUser 处理，SSE 不自行判 401（EventSource 的 onerror 拿不到状态码）。
  */
 export function useSSE(options: UseSSEOptions): UseSSEReturn {
-  const { path, onMessage, onClose, enabled = true, autoReconnect = true } = options;
+  const { path, onOpen, onMessage, onClose, events, enabled = true, autoReconnect = true } = options;
 
   const [status, setStatus] = useState<SSEStatus>('disconnected');
   const esRef = useRef<EventSource | null>(null);
   const disposedRef = useRef(false);
 
   // Stable callback refs
+  const onOpenRef = useRef(onOpen);
   const onMessageRef = useRef(onMessage);
   const onCloseRef = useRef(onClose);
+  const eventsRef = useRef(events);
   useEffect(() => {
+    onOpenRef.current = onOpen;
     onMessageRef.current = onMessage;
     onCloseRef.current = onClose;
+    eventsRef.current = events;
   });
 
   useEffect(() => {
@@ -54,6 +62,7 @@ export function useSSE(options: UseSSEOptions): UseSSEReturn {
 
     es.onopen = () => {
       setStatus('connected');
+      onOpenRef.current?.();
     };
 
     es.onmessage = (e) => {
@@ -63,6 +72,22 @@ export function useSSE(options: UseSSEOptions): UseSSEReturn {
         onMessageRef.current?.(e.data);
       }
     };
+
+    const eventListeners: Array<{ name: string; listener: (e: MessageEvent) => void }> = [];
+    const currentEvents = eventsRef.current;
+    if (currentEvents) {
+      Object.keys(currentEvents).forEach((eventName) => {
+        const listener = (e: MessageEvent) => {
+          try {
+            eventsRef.current?.[eventName]?.(JSON.parse(e.data));
+          } catch {
+            eventsRef.current?.[eventName]?.(e.data);
+          }
+        };
+        es.addEventListener(eventName, listener);
+        eventListeners.push({ name: eventName, listener });
+      });
+    }
 
     es.onerror = () => {
       if (disposedRef.current) return;
@@ -81,6 +106,9 @@ export function useSSE(options: UseSSEOptions): UseSSEReturn {
 
     return () => {
       disposedRef.current = true;
+      eventListeners.forEach(({ name, listener }) => {
+        es.removeEventListener(name, listener);
+      });
       es.close();
       esRef.current = null;
       setStatus('disconnected');

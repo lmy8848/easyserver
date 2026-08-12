@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -27,11 +28,20 @@ type SystemOverview struct {
 // Service handles notification CRUD and alert detection
 type Service struct {
 	repo Repository
+	hub  *NotificationHub
 }
 
 // NewService creates a new notification Service
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{
+		repo: repo,
+		hub:  NewNotificationHub(),
+	}
+}
+
+// Hub returns the NotificationHub for SSE streaming
+func (s *Service) Hub() *NotificationHub {
+	return s.hub
 }
 
 // List returns notifications with optional filters
@@ -48,23 +58,47 @@ func (s *Service) CountUnread() (int, error) {
 }
 
 // Create adds a new notification
-func (s *Service) Create(req CreateNotificationRequest) error {
-	return s.repo.Create(context.Background(), req)
+func (s *Service) Create(req CreateNotificationRequest) (*Notification, error) {
+	n, err := s.repo.Create(context.Background(), req)
+	if err != nil || n == nil {
+		return n, err
+	}
+	if payload, err := json.Marshal(n); err == nil {
+		s.hub.Broadcast("notification", payload)
+	}
+	return n, nil
 }
 
 // CreateIfNotExists adds a notification only if a similar one doesn't exist in the last hour
-func (s *Service) CreateIfNotExists(req CreateNotificationRequest) error {
-	return s.repo.CreateIfNotExists(context.Background(), req)
+func (s *Service) CreateIfNotExists(req CreateNotificationRequest) (*Notification, error) {
+	n, err := s.repo.CreateIfNotExists(context.Background(), req)
+	if err != nil || n == nil {
+		return n, err
+	}
+	if payload, err := json.Marshal(n); err == nil {
+		s.hub.Broadcast("notification", payload)
+	}
+	return n, nil
 }
 
 // MarkAsRead marks a notification as read
 func (s *Service) MarkAsRead(id int64) error {
-	return s.repo.MarkAsRead(context.Background(), id)
+	if err := s.repo.MarkAsRead(context.Background(), id); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"ids": []int64{id}, "all": false})
+	s.hub.Broadcast("read", payload)
+	return nil
 }
 
 // MarkAllAsRead marks all notifications as read
 func (s *Service) MarkAllAsRead() error {
-	return s.repo.MarkAllAsRead(context.Background())
+	if err := s.repo.MarkAllAsRead(context.Background()); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"ids": []int64{}, "all": true})
+	s.hub.Broadcast("read", payload)
+	return nil
 }
 
 // Delete removes a notification
@@ -90,7 +124,7 @@ func (s *Service) CheckSystemAlerts(overview *SystemOverview) {
 
 	// CPU > threshold
 	if overview.CPUUsage > cpuAlertThreshold {
-		_ = s.CreateIfNotExists(CreateNotificationRequest{
+		_, _ = s.CreateIfNotExists(CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "CPU 使用率过高",
 			Message: fmt.Sprintf("当前 CPU 使用率 %.1f%%, 超过 %.0f%% 阈值", overview.CPUUsage, cpuAlertThreshold),
@@ -100,7 +134,7 @@ func (s *Service) CheckSystemAlerts(overview *SystemOverview) {
 
 	// Memory > threshold
 	if overview.MemoryUsage > memoryAlertThreshold {
-		_ = s.CreateIfNotExists(CreateNotificationRequest{
+		_, _ = s.CreateIfNotExists(CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "内存使用率过高",
 			Message: fmt.Sprintf("当前内存使用 %.1f%% (%d/%d MB), 超过 %.0f%% 阈值", overview.MemoryUsage, overview.MemoryUsed, overview.MemoryTotal, memoryAlertThreshold),

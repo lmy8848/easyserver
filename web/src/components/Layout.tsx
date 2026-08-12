@@ -6,6 +6,7 @@ import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
 import { message, Button, Badge } from 'antd';
+import { useSSE } from '../hooks/useSSE';
 import './Layout.css';
 
 const MENU_GROUPS = [
@@ -121,6 +122,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/security': '安全设置',
   '/vulnerabilities': '漏洞扫描',
   '/fim': '文件完整性',
+  '/notifications': '站内通知',
 };
 
 const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {
@@ -170,9 +172,16 @@ export default function Layout() {
 
   useEffect(() => {
     fetchNotifications();
-    const timer = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(timer);
   }, [fetchNotifications]);
+
+  useSSE({
+    path: '/api/notifications/stream',
+    onOpen: fetchNotifications,
+    events: {
+      notification: fetchNotifications,
+      read: fetchNotifications,
+    },
+  });
 
   // Cmd+K
   useEffect(() => {

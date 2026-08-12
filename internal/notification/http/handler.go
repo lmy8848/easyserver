@@ -1,6 +1,8 @@
 package http
 
 import (
+	"fmt"
+	"net/http"
 	"strconv"
 
 	"easyserver/internal/httpx"
@@ -53,11 +55,49 @@ func (h *NotificationHandler) Create(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "创建通知")
-	if err := h.ns.Create(req); err != nil {
+	if _, err := h.ns.Create(req); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
 	httpx.Success(c, gin.H{"message": "通知已创建"})
+}
+
+// HandleSSE handles notification SSE stream requests
+func (h *NotificationHandler) HandleSSE(c *gin.Context) {
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.Error(apperror.ErrInternal.WithMessage("当前连接不支持流式输出"))
+		return
+	}
+	// 连接建立即 flush 一次，确保客户端 onopen 立即触发
+	fmt.Fprint(c.Writer, ": connected\n\n")
+	flusher.Flush()
+
+	client := &notification.NotificationClient{
+		Send: make(chan []byte, 16),
+	}
+	h.ns.Hub().Register(client)
+	defer h.ns.Hub().Unregister(client)
+
+	ctx := c.Request.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-client.Send:
+			if !ok {
+				return
+			}
+			if _, err := c.Writer.Write(msg); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // MarkAsRead marks a notification as read
@@ -109,6 +149,7 @@ func RegisterRoutes(protected *gin.RouterGroup, ns *notification.Service) {
 	{
 		notifGroup.GET("", handler.List)
 		notifGroup.GET("/unread-count", handler.CountUnread)
+		notifGroup.GET("/stream", handler.HandleSSE)
 		notifGroup.POST("", handler.Create)
 		notifGroup.PUT("/:id/read", handler.MarkAsRead)
 		notifGroup.PUT("/read-all", handler.MarkAllAsRead)

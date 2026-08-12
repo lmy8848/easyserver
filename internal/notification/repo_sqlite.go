@@ -54,21 +54,42 @@ func (r *sqliteRepo) CountUnread(ctx context.Context) (int, error) {
 	return count, err
 }
 
+func (r *sqliteRepo) getByID(ctx context.Context, id int64) (*Notification, error) {
+	var n Notification
+	var isRead int
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id, type, title, message, level, is_read, COALESCE(metadata,''), created_at FROM notifications WHERE id = ?",
+		id,
+	).Scan(&n.ID, &n.Type, &n.Title, &n.Message, &n.Level, &isRead, &n.Metadata, &n.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get notification by id: %w", err)
+	}
+	n.IsRead = isRead != 0
+	return &n, nil
+}
+
 // Create adds a new notification
-func (r *sqliteRepo) Create(ctx context.Context, req CreateNotificationRequest) error {
+func (r *sqliteRepo) Create(ctx context.Context, req CreateNotificationRequest) (*Notification, error) {
 	level := req.Level
 	if level == "" {
 		level = "info"
 	}
-	_, err := r.db.ExecContext(ctx,
+	res, err := r.db.ExecContext(ctx,
 		"INSERT INTO notifications (type, title, message, level, metadata) VALUES (?, ?, ?, ?, ?)",
 		req.Type, req.Title, req.Message, level, req.Metadata,
 	)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return r.getByID(ctx, id)
 }
 
 // CreateIfNotExists adds a notification only if a similar one doesn't exist in the last hour
-func (r *sqliteRepo) CreateIfNotExists(ctx context.Context, req CreateNotificationRequest) error {
+func (r *sqliteRepo) CreateIfNotExists(ctx context.Context, req CreateNotificationRequest) (*Notification, error) {
 	level := req.Level
 	if level == "" {
 		level = "info"
@@ -81,14 +102,21 @@ func (r *sqliteRepo) CreateIfNotExists(ctx context.Context, req CreateNotificati
 	).Scan(&exists)
 
 	if exists > 0 {
-		return nil
+		return nil, nil
 	}
 
-	_, err := r.db.ExecContext(ctx,
+	res, err := r.db.ExecContext(ctx,
 		"INSERT INTO notifications (type, title, message, level, metadata) VALUES (?, ?, ?, ?, ?)",
 		req.Type, req.Title, req.Message, level, req.Metadata,
 	)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return r.getByID(ctx, id)
 }
 
 // MarkAsRead marks a notification as read

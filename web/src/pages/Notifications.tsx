@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { Notification } from '../types';
 import { notificationApi } from '../services/api';
+import { useSSE } from '../hooks/useSSE';
 
 const LEVEL_OPTIONS = [
   { label: '全部', value: '' },
@@ -69,6 +70,35 @@ export default function Notifications() {
   useEffect(() => {
     fetchNotifications();
   }, [fetchNotifications]);
+
+  useSSE({
+    path: '/api/notifications/stream',
+    onOpen: fetchNotifications,
+    events: {
+      notification: (data: Notification) => {
+        if (unreadFilter && data.is_read) return;
+        if (levelFilter && data.level !== levelFilter) return;
+        if (typeFilter && data.type !== typeFilter) return;
+
+        setNotifications(prev => {
+          if (prev.some(n => n.id === data.id)) {
+            return prev;
+          }
+          return [data, ...prev];
+        });
+      },
+      read: (data: { ids: number[]; all: boolean }) => {
+        setNotifications(prev =>
+          prev.map(n => {
+            if (data.all || data.ids.includes(n.id)) {
+              return { ...n, is_read: true };
+            }
+            return n;
+          })
+        );
+      },
+    },
+  });
 
   const handleMarkRead = async (id: number) => {
     try {

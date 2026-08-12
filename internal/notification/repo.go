@@ -6,8 +6,8 @@ import "context"
 type Repository interface {
 	List(ctx context.Context, unreadOnly bool, limit int) ([]Notification, error)
 	CountUnread(ctx context.Context) (int, error)
-	Create(ctx context.Context, req CreateNotificationRequest) error
-	CreateIfNotExists(ctx context.Context, req CreateNotificationRequest) error
+	Create(ctx context.Context, req CreateNotificationRequest) (*Notification, error)
+	CreateIfNotExists(ctx context.Context, req CreateNotificationRequest) (*Notification, error)
 	MarkAsRead(ctx context.Context, id int64) error
 	MarkAllAsRead(ctx context.Context) error
 	Delete(ctx context.Context, id int64) error
