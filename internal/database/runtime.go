@@ -2,9 +2,11 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,7 +134,7 @@ func (r *CLIContainerRuntime) run(ctx context.Context, combine, hook bool, runti
 		out, stderr, code, runErr = r.executor.Run(ctx, bin, args...)
 	}
 	if hook && r.outputHook != nil {
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				r.outputHook(line)
 			}
@@ -166,7 +168,8 @@ func (r *CLIContainerRuntime) streamRun(ctx context.Context, bin string, args ..
 		}
 	}, bin, args...)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return out, fmt.Errorf("%s exited with code %d: %s", bin, exitErr.ExitCode(), strings.TrimSpace(out))
 		}
 		return out, fmt.Errorf("%s: %w", bin, err)
@@ -176,10 +179,10 @@ func (r *CLIContainerRuntime) streamRun(ctx context.Context, bin string, args ..
 
 func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) error {
 	if spec.Name == "" || spec.Image == "" || spec.Volume == "" || spec.DataDir == "" {
-		return fmt.Errorf("container name, image, volume and data directory are required")
+		return errors.New("container name, image, volume and data directory are required")
 	}
 	if spec.HostPort < 1 || spec.HostPort > 65535 || spec.ContainerPort < 1 || spec.ContainerPort > 65535 {
-		return fmt.Errorf("invalid container port")
+		return errors.New("invalid container port")
 	}
 	if spec.Labels == nil {
 		spec.Labels = map[string]string{}
@@ -276,12 +279,12 @@ func (r *CLIContainerRuntime) Logs(ctx context.Context, runtime, name string, li
 	if lines > 5000 {
 		lines = 5000
 	}
-	return r.command(ctx, runtime, "logs", "--tail", fmt.Sprintf("%d", lines), name)
+	return r.command(ctx, runtime, "logs", "--tail", strconv.Itoa(lines), name)
 }
 
 func (r *CLIContainerRuntime) Exec(ctx context.Context, runtime, name string, args ...string) (string, error) {
 	if name == "" || len(args) == 0 {
-		return "", fmt.Errorf("container name and command are required")
+		return "", errors.New("container name and command are required")
 	}
 	return r.execCommand(ctx, runtime, name, args...)
 }
@@ -303,7 +306,7 @@ func (r *CLIContainerRuntime) CopyTo(ctx context.Context, runtime, name, source,
 // conflict.
 func (r *CLIContainerRuntime) Exists(ctx context.Context, runtime, name string) (bool, error) {
 	if name == "" {
-		return false, fmt.Errorf("container name is required")
+		return false, errors.New("container name is required")
 	}
 	_, err := r.run(ctx, true, false, runtime, "inspect", name)
 	if err != nil {
@@ -342,7 +345,7 @@ func waitForHealthy(ctx context.Context, runtime DatabaseRuntime, runtimeName, c
 			return status, nil
 		}
 		if status.State == "exited" || status.State == "dead" {
-			return status, fmt.Errorf("database container stopped before becoming healthy")
+			return status, errors.New("database container stopped before becoming healthy")
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			return status, fmt.Errorf("database container did not become healthy within %s", timeout)

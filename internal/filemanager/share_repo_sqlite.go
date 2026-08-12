@@ -69,7 +69,7 @@ func (r *sqliteShareRepo) GetByID(ctx context.Context, id int64) (*FileShare, er
 // expires_at to ”. MaxDownloads is applied only when non-nil.
 func (r *sqliteShareRepo) Update(ctx context.Context, id int64, req *UpdateShareRequest) error {
 	sets := []string{"updated_at = datetime('now')"}
-	args := []interface{}{}
+	args := []any{}
 	if req.Password != nil {
 		sets = append(sets, "password = ?")
 		args = append(args, *req.Password)
@@ -112,6 +112,9 @@ func (r *sqliteShareRepo) List(ctx context.Context, createdBy int64) ([]FileShar
 			continue
 		}
 		shares = append(shares, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list file shares: %w", err)
 	}
 	return shares, nil
 }

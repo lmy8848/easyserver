@@ -1,7 +1,9 @@
 package terminal
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -38,9 +40,9 @@ func (m *Manager) CreateSession(id string) (*Session, error) {
 		shell = "/bin/bash"
 	}
 
-	cmd := m.executor.Command(nil, executor.StartOptions{Env: []string{"TERM=xterm-256color"}}, shell)
+	cmd := m.executor.Command(context.TODO(), executor.StartOptions{Env: []string{"TERM=xterm-256color"}}, shell)
 	if cmd == nil {
-		return nil, fmt.Errorf("executor returned nil command")
+		return nil, errors.New("executor returned nil command")
 	}
 
 	ptmx, err := pty.Start(cmd)
@@ -70,12 +72,12 @@ func (s *Session) Resize(cols, rows uint16) error {
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return fmt.Errorf("session is closed")
+		return errors.New("session is closed")
 	}
 
 	ptmx, ok := s.PTY.(*os.File)
 	if !ok {
-		return fmt.Errorf("invalid PTY type")
+		return errors.New("invalid PTY type")
 	}
 
 	return pty.Setsize(ptmx, &pty.Winsize{
@@ -90,12 +92,12 @@ func (s *Session) Write(data []byte) error {
 	defer s.mu.Unlock()
 
 	if s.closed {
-		return fmt.Errorf("session is closed")
+		return errors.New("session is closed")
 	}
 
 	ptmx, ok := s.PTY.(*os.File)
 	if !ok {
-		return fmt.Errorf("invalid PTY type")
+		return errors.New("invalid PTY type")
 	}
 
 	_, err := ptmx.Write(data)
@@ -120,8 +122,8 @@ func (s *Session) Close() {
 
 	// Then kill the process
 	if cmd, ok := s.Cmd.(*exec.Cmd); ok && cmd.Process != nil {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}
 
 	// Signal readLoop and the forwarder to stop. Do NOT close s.Send: readLoop
@@ -149,7 +151,7 @@ func (s *Session) readLoop() {
 		n, err := ptmx.Read(buf)
 		if err != nil {
 			select {
-			case s.Send <- mustJSON(map[string]interface{}{"type": "exit", "code": 0}):
+			case s.Send <- mustJSON(map[string]any{"type": "exit", "code": 0}):
 			default:
 			}
 			return
@@ -157,7 +159,7 @@ func (s *Session) readLoop() {
 
 		if n > 0 {
 			select {
-			case s.Send <- mustJSON(map[string]interface{}{"type": "output", "data": string(buf[:n])}):
+			case s.Send <- mustJSON(map[string]any{"type": "output", "data": string(buf[:n])}):
 			default:
 			}
 		}
@@ -165,7 +167,7 @@ func (s *Session) readLoop() {
 }
 
 // mustJSON marshals v to JSON, returning a fallback on the (unexpected) error.
-func mustJSON(v interface{}) []byte {
+func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
 }

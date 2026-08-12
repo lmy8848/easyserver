@@ -33,6 +33,9 @@ func (r *sqliteRepo) ListEnvConfigs(ctx context.Context) ([]EnvConfig, error) {
 		}
 		configs = append(configs, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return configs, nil
 }
@@ -95,6 +98,9 @@ func (r *sqliteRepo) ListPathEntries(ctx context.Context) ([]PathEntry, error) {
 		}
 		entries = append(entries, e)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return entries, nil
 }
@@ -102,7 +108,7 @@ func (r *sqliteRepo) ListPathEntries(ctx context.Context) ([]PathEntry, error) {
 func (r *sqliteRepo) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 	// Get max order
 	var maxOrder int
-	r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(order_num), 0) FROM path_entries").Scan(&maxOrder)
+	_ = r.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(order_num), 0) FROM path_entries").Scan(&maxOrder)
 
 	result, err := r.db.ExecContext(ctx,
 		"INSERT INTO path_entries (path, enabled, order_num) VALUES (?, ?, ?)",
@@ -134,7 +140,7 @@ func (r *sqliteRepo) ReorderPathEntries(ctx context.Context, ids []int64) error 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for i, id := range ids {
 		_, err := tx.ExecContext(ctx,

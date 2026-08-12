@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // sqliteRepo implements Repository for SQLite.
@@ -128,7 +129,7 @@ func (r *sqliteRepo) WriteScriptFile(id int64, content string) error {
 		return fmt.Errorf("创建脚本目录失败: %w", err)
 	}
 	path := scriptFilePath(id)
-	tmpFile, err := os.CreateTemp(scriptsDir, "script-"+fmt.Sprint(id)+".*.tmp")
+	tmpFile, err := os.CreateTemp(scriptsDir, "script-"+strconv.FormatInt(id, 10)+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -160,7 +161,7 @@ func (r *sqliteRepo) DeleteScriptFile(id int64) error {
 
 // scriptFilePath 返回脚本落盘路径。
 func scriptFilePath(id int64) string {
-	return filepath.Join(scriptsDir, fmt.Sprint(id))
+	return filepath.Join(scriptsDir, strconv.FormatInt(id, 10))
 }
 
 // ScriptPath 导出脚本落盘路径，供 handler 判断任务是否引用某脚本。

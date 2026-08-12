@@ -8,6 +8,7 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/ssh"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -270,11 +271,7 @@ func (h *SSHHandler) GenerateKeyPair(c *gin.Context) {
 
 // Fail2banStatus returns fail2ban install/active state and jails.
 func (h *SSHHandler) Fail2banStatus(c *gin.Context) {
-	st, err := h.sshService.Fail2banStatus(c.Request.Context())
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
+	st := h.sshService.Fail2banStatus(c.Request.Context())
 	httpx.Success(c, st)
 }
 

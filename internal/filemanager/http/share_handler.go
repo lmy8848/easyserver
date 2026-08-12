@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -63,14 +64,14 @@ func parseExpiresAt(s string) (string, error) {
 	}
 	if strings.HasSuffix(s, "m") || strings.HasSuffix(s, "h") || strings.HasSuffix(s, "d") {
 		var duration time.Duration
-		if strings.HasSuffix(s, "d") {
-			val, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if before, ok := strings.CutSuffix(s, "d"); ok {
+			val, err := strconv.Atoi(before)
 			if err != nil || val <= 0 {
 				return "", fmt.Errorf("无效的过期时间: %s", s)
 			}
 			duration = time.Duration(val) * 24 * time.Hour
-		} else if strings.HasSuffix(s, "h") {
-			val, err := strconv.Atoi(strings.TrimSuffix(s, "h"))
+		} else if before, ok := strings.CutSuffix(s, "h"); ok {
+			val, err := strconv.Atoi(before)
 			if err != nil || val <= 0 {
 				return "", fmt.Errorf("无效的过期时间: %s", s)
 			}
@@ -85,7 +86,7 @@ func parseExpiresAt(s string) (string, error) {
 		return time.Now().Add(duration).Format("2006-01-02 15:04:05"), nil
 	}
 	if _, err := time.Parse("2006-01-02 15:04:05", s); err != nil {
-		return "", fmt.Errorf("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
+		return "", errors.New("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
 	}
 	return s, nil
 }
@@ -358,10 +359,7 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 		DownloadsLeft: -1,
 	}
 	if share.MaxDownloads > 0 {
-		resp.DownloadsLeft = share.MaxDownloads - share.DownloadCount
-		if resp.DownloadsLeft < 0 {
-			resp.DownloadsLeft = 0
-		}
+		resp.DownloadsLeft = max(share.MaxDownloads-share.DownloadCount, 0)
 	}
 	if share.ExpiresAt != "" {
 		if expires, perr := time.Parse("2006-01-02 15:04:05", share.ExpiresAt); perr == nil {
@@ -408,7 +406,11 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 	}
 
 	var req TicketRequest
-	c.ShouldBindJSON(&req) // ignore error, password might be empty
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 绑定失败（空 body 或非 JSON）直接返回 400；无密码分享时前端发送 {} 空对象即可
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
@@ -436,7 +438,10 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 	if share.ExpiresAt != "" {
 		expires, err := time.Parse("2006-01-02 15:04:05", share.ExpiresAt)
 		if err == nil && time.Now().After(expires) {
-			h.shareRepo.Delete(c.Request.Context(), share.ID)
+			if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
+				c.Error(apperror.ErrInternal.Wrap(delErr))
+				return
+			}
 			c.Error(apperror.ErrNotFound.WithMessage("分享链接已过期"))
 			return
 		}
@@ -450,7 +455,10 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 	}
 	_, err = os.Stat(validPath)
 	if err != nil {
-		h.shareRepo.Delete(c.Request.Context(), share.ID)
+		if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
+			c.Error(apperror.ErrInternal.Wrap(delErr))
+			return
+		}
 		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
 		return
 	}
@@ -462,7 +470,10 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 		return
 	}
 	if !allowed {
-		h.shareRepo.Delete(c.Request.Context(), share.ID)
+		if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
+			c.Error(apperror.ErrInternal.Wrap(delErr))
+			return
+		}
 		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
 		return
 	}
@@ -486,14 +497,14 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 func (h *FileShareHandler) validateTicket(share *filemanager.FileShare, ticket string) error {
 	parts := strings.Split(ticket, ".")
 	if len(parts) != 3 {
-		return fmt.Errorf("凭证无效")
+		return errors.New("凭证无效")
 	}
 	if parts[0] != strconv.FormatInt(share.ID, 10) {
-		return fmt.Errorf("凭证无效")
+		return errors.New("凭证无效")
 	}
 	exp, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || time.Now().Unix() > exp {
-		return fmt.Errorf("凭证已过期")
+		return errors.New("凭证已过期")
 	}
 
 	msg := parts[0] + "." + parts[1]
@@ -501,7 +512,7 @@ func (h *FileShareHandler) validateTicket(share *filemanager.FileShare, ticket s
 	mac.Write([]byte(msg))
 	expectedSig := hex.EncodeToString(mac.Sum(nil))
 	if subtle.ConstantTimeCompare([]byte(parts[2]), []byte(expectedSig)) != 1 {
-		return fmt.Errorf("凭证无效")
+		return errors.New("凭证无效")
 	}
 	return nil
 }
@@ -635,7 +646,8 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 		zw := archive_zip.NewWriter(c.Writer)
 		defer zw.Close()
 
-		filepath.Walk(targetPath, func(path string, winfo os.FileInfo, err error) error {
+		// 响应头已写入，无法再返回错误响应，Walk 失败只能显式忽略
+		_ = filepath.Walk(targetPath, func(path string, winfo os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}

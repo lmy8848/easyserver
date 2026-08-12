@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func generateTestToken(secret string, userID int64, username, role string, timeout time.Duration) (string, error) {
@@ -33,7 +35,7 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 	timeout := 24 * time.Hour
 
 	token, err := generateTestToken(secret, userID, username, role, timeout)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -42,7 +44,7 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"user_id": c.GetInt64("user_id")})
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
@@ -61,7 +63,7 @@ func TestJWTMiddleware_MissingHeader(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -90,7 +92,7 @@ func TestJWTMiddleware_InvalidFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/test", nil)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 			req.Header.Set("Authorization", tt.header)
 			w := httptest.NewRecorder()
 
@@ -119,7 +121,7 @@ func TestJWTMiddleware_ExpiredToken(t *testing.T) {
 	}
 	tokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	token, err := tokenObj.SignedString([]byte(secret))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -128,7 +130,7 @@ func TestJWTMiddleware_ExpiredToken(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
@@ -147,7 +149,7 @@ func TestJWTMiddleware_WrongSecret(t *testing.T) {
 
 	// Generate token with one secret
 	token, err := generateTestToken(secret, userID, username, role, timeout)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -157,7 +159,7 @@ func TestJWTMiddleware_WrongSecret(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 
@@ -174,7 +176,7 @@ func TestJWTMiddleware_InvalidSession(t *testing.T) {
 	timeout := 24 * time.Hour
 
 	token, err := generateTestToken(secret, userID, username, role, timeout)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Session validator that always rejects
 	sessionValidator := func(tokenStr string) (bool, error) {
@@ -188,7 +190,7 @@ func TestJWTMiddleware_InvalidSession(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 

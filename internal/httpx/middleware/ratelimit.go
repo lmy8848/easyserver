@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/apperror"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -103,7 +104,7 @@ func (rl *RateLimiter) evictOldest() {
 		ip   string
 		time time.Time
 	}
-	var entries []entry
+	var entries = make([]entry, 0, len(rl.visitors))
 	for ip, v := range rl.visitors {
 		entries = append(entries, entry{ip, v.windowStart})
 	}
@@ -114,11 +115,8 @@ func (rl *RateLimiter) evictOldest() {
 			}
 		}
 	}
-	toRemove := len(entries) / 10
-	if toRemove < 1 {
-		toRemove = 1
-	}
-	for i := 0; i < toRemove; i++ {
+	toRemove := max(len(entries)/10, 1)
+	for i := range toRemove {
 		delete(rl.visitors, entries[i].ip)
 	}
 }
@@ -126,7 +124,7 @@ func (rl *RateLimiter) evictOldest() {
 var rateLimiters sync.Map
 
 func StopRateLimiter() {
-	rateLimiters.Range(func(_, v interface{}) bool {
+	rateLimiters.Range(func(_, v any) bool {
 		v.(*RateLimiter).Stop()
 		return true
 	})

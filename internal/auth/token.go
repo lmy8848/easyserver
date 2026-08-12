@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,7 +58,7 @@ func GenerateTOTPTempToken(secret string, userID int64) (string, error) {
 // ValidateTOTPTempToken validates a TOTP temporary token and returns userID
 func ValidateTOTPTempToken(secret string, tokenString string) (int64, error) {
 	claims := &TOTPTempClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -68,12 +69,12 @@ func ValidateTOTPTempToken(secret string, tokenString string) (int64, error) {
 		return 0, err
 	}
 	if !token.Valid {
-		return 0, fmt.Errorf("invalid token")
+		return 0, errors.New("invalid token")
 	}
 
 	// Verify purpose
 	if claims.Purpose != "totp_pending" {
-		return 0, fmt.Errorf("invalid token purpose")
+		return 0, errors.New("invalid token purpose")
 	}
 
 	return claims.UserID, nil

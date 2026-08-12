@@ -3,6 +3,7 @@ package executor
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -58,10 +59,6 @@ type OSExecutor struct{}
 func NewOSExecutor() CommandExecutor { return &OSExecutor{} }
 
 func (e *OSExecutor) Run(ctx context.Context, name string, args ...string) (string, string, int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	cmd := exec.CommandContext(ctx, name, args...)
 	stdoutBytes, err := cmd.Output()
 	stdout := string(stdoutBytes)
@@ -69,7 +66,8 @@ func (e *OSExecutor) Run(ctx context.Context, name string, args ...string) (stri
 	exitCode := 0
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			stderr = string(exitErr.Stderr)
 			exitCode = exitErr.ExitCode()
 		} else {
@@ -80,26 +78,20 @@ func (e *OSExecutor) Run(ctx context.Context, name string, args ...string) (stri
 }
 
 func (e *OSExecutor) RunWithTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) (string, string, int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return e.Run(ctx, name, args...)
 }
 
 func (e *OSExecutor) RunCombined(ctx context.Context, name string, args ...string) (string, int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.CombinedOutput()
 	result := string(output)
 	exitCode := 0
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return result, -1, err
@@ -112,9 +104,6 @@ func (e *OSExecutor) RunCombined(ctx context.Context, name string, args ...strin
 // stdin). Stdin feeds the command's stdin (e.g. --password-stdin) to keep
 // secrets out of argv/ps.
 func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, name string, args ...string) (string, int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -131,7 +120,8 @@ func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, na
 	exitCode := 0
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return result, -1, err
@@ -145,9 +135,6 @@ func (e *OSExecutor) RunWithOptions(ctx context.Context, opts CommandOptions, na
 // pipes are set up before Start (os/exec requires it) and both are drained —
 // reading only one would block the process once the other fills its buffer.
 func (e *OSExecutor) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	so, err := cmd.StdoutPipe()
 	if err != nil {
@@ -193,7 +180,8 @@ func (e *OSExecutor) RunStream(ctx context.Context, onLine func(string), name st
 
 	code := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			code = exitErr.ExitCode()
 		}
 	}
@@ -211,9 +199,6 @@ func (p *OSProcess) Signal(sig syscall.Signal) error    { return p.cmd.Process.S
 func (p *OSProcess) Cmd() *exec.Cmd                     { return p.cmd }
 
 func (e *OSExecutor) Command(ctx context.Context, opts StartOptions, name string, args ...string) *exec.Cmd {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	applyCommandOptions(cmd, opts.WorkDir, opts.Env)
 	if opts.Setpgid {

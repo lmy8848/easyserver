@@ -38,9 +38,6 @@ func NewService(repo ServerRepository, exec executor.CommandExecutor) *Service {
 // SeedPredefinedWebServers inserts predefined web server entries if not exists.
 // Called at startup to ensure default entries are present.
 func (s *Service) SeedPredefinedWebServers(ctx context.Context) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	existing, _ := s.repo.List(ctx)
 	existingByName := make(map[string]bool, len(existing))
 	for _, ws := range existing {
@@ -49,36 +46,24 @@ func (s *Service) SeedPredefinedWebServers(ctx context.Context) {
 
 	for _, ws := range PredefinedWebServers() {
 		if !existingByName[ws.Name] {
-			s.repo.Create(ctx, &ws)
+			_ = s.repo.Create(ctx, &ws)
 		}
 	}
 }
 
 func (s *Service) List(ctx context.Context) ([]WebServer, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.List(ctx)
 }
 
 func (s *Service) Get(ctx context.Context, id int64) (*WebServer, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.Get(ctx, id)
 }
 
 func (s *Service) Create(ctx context.Context, ws *WebServer) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.Create(ctx, ws)
 }
 
 func (s *Service) Delete(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -99,9 +84,6 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 // The install command is always looked up from the predefined template to prevent
 // execution of arbitrary commands stored in the database (e.g. via SQL injection).
 func (s *Service) Install(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -120,7 +102,7 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("服务器类型 '%s' 未配置安装命令", ws.Name))
 	}
 
-	s.executor.RunCombined(ctx, "apt-get", "update", "-y")
+	_, _, _ = s.executor.RunCombined(ctx, "apt-get", "update", "-y")
 
 	parts := strings.Fields(installCmd)
 	out, _, err := s.executor.RunCombined(ctx, parts[0], parts[1:]...)
@@ -129,19 +111,16 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		s.executor.RunCombined(ctx, "systemctl", "enable", ws.ServiceName)
-		s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
+		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "enable", ws.ServiceName)
+		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
 	}
 
-	s.RefreshStatus(ctx, id)
+	_ = s.RefreshStatus(ctx, id)
 	return nil
 }
 
 // Uninstall removes the web server software
 func (s *Service) Uninstall(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -156,8 +135,8 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
-		s.executor.RunCombined(ctx, "systemctl", "disable", ws.ServiceName)
+		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
+		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "disable", ws.ServiceName)
 	}
 
 	// Always use the predefined uninstall command, never trust the database value
@@ -169,9 +148,9 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 		// Sanitize ws.Name to prevent shell injection - only allow alphanumeric, hyphens, dots
 		safeName := sanitizePackageName(ws.Name)
 		if safeName == "" {
-			return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的服务器名称：%s", ws.Name))
+			return apperror.ErrBadRequest.WithMessage("无效的服务器名称：" + ws.Name)
 		}
-		uninstallCmd = fmt.Sprintf("apt-get remove -y %s", safeName)
+		uninstallCmd = "apt-get remove -y " + safeName
 	}
 	parts := strings.Fields(uninstallCmd)
 	out, _, err := s.executor.RunCombined(ctx, parts[0], parts[1:]...)
@@ -179,15 +158,11 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 		return fmt.Errorf("uninstall failed: %s", out)
 	}
 
-	s.repo.UpdateStatus(ctx, id, "not_installed")
-	return nil
+	return s.repo.UpdateStatus(ctx, id, "not_installed")
 }
 
 // Start starts the web server service
 func (s *Service) Start(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -209,9 +184,6 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 
 // Stop stops the web server service
 func (s *Service) Stop(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -233,9 +205,6 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 
 // Restart restarts the web server service
 func (s *Service) Restart(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -257,9 +226,6 @@ func (s *Service) Restart(ctx context.Context, id int64) error {
 
 // Reload reloads the web server config without restarting
 func (s *Service) Reload(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -284,9 +250,6 @@ func (s *Service) Reload(ctx context.Context, id int64) error {
 
 // TestConfig tests the web server configuration
 func (s *Service) TestConfig(ctx context.Context, id int64) (bool, string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil || ws == nil {
 		return false, "web server not found"
@@ -349,9 +312,6 @@ func validateConfigPath(path string) error {
 
 // GetConfig reads the main config file content
 func (s *Service) GetConfig(ctx context.Context, id int64) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return "", err
@@ -375,9 +335,6 @@ func (s *Service) GetConfig(ctx context.Context, id int64) (string, error) {
 
 // SaveConfig writes content to the main config file
 func (s *Service) SaveConfig(ctx context.Context, id int64, content string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -395,7 +352,7 @@ func (s *Service) SaveConfig(ctx context.Context, id int64, content string) erro
 	// Backup current config
 	backupPath := ws.ConfigFile + ".bak." + time.Now().Format("20060102150405")
 	if data, err := os.ReadFile(ws.ConfigFile); err == nil {
-		os.WriteFile(backupPath, data, 0644)
+		_ = os.WriteFile(backupPath, data, 0644)
 	}
 
 	return os.WriteFile(ws.ConfigFile, []byte(content), 0644)
@@ -403,9 +360,6 @@ func (s *Service) SaveConfig(ctx context.Context, id int64, content string) erro
 
 // GetServiceLogs returns recent service logs via journalctl
 func (s *Service) GetServiceLogs(ctx context.Context, id int64, lines int) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return "", err
@@ -422,16 +376,13 @@ func (s *Service) GetServiceLogs(ctx context.Context, id int64, lines int) (stri
 
 	out, _, err := s.executor.RunCombined(ctx, "journalctl", "-u", ws.ServiceName, "-n", strconv.Itoa(lines), "--no-pager")
 	if err != nil {
-		return out, nil
+		return out, nil //nolint:nilerr // journalctl 失败时返回已读到的输出
 	}
 	return out, nil
 }
 
 // SetAutoStart enables/disables auto-start on boot
 func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -457,9 +408,6 @@ func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) erro
 
 // RefreshStatus detects full runtime state
 func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -523,20 +471,14 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 
 // RefreshAllStatus refreshes status for all web servers
 func (s *Service) RefreshAllStatus(ctx context.Context) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	servers, _ := s.repo.List(ctx)
 	for _, ws := range servers {
-		s.RefreshStatus(ctx, ws.ID)
+		_ = s.RefreshStatus(ctx, ws.ID)
 	}
 }
 
 // GetConnections returns active connection count (for Nginx)
 func (s *Service) GetConnections(ctx context.Context, id int64) (int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return 0, err
@@ -548,7 +490,7 @@ func (s *Service) GetConnections(ctx context.Context, id int64) (int, error) {
 	// Count connections from ss
 	out, _, _ := s.executor.RunCombined(ctx, "ss", "-tlnp")
 	count := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if ws.ServiceName != "" && strings.Contains(line, ws.ServiceName) {
 			count++
 		}
@@ -558,9 +500,6 @@ func (s *Service) GetConnections(ctx context.Context, id int64) (int, error) {
 
 // GetProcessInfo returns PID, memory, uptime for the service
 func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memBytes int64, uptime string, err error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ws, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return 0, 0, "", e
@@ -575,17 +514,17 @@ func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memByt
 	// Get main PID via systemctl
 	out, _, e := s.executor.RunCombined(ctx, "systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp")
 	if e != nil {
-		return 0, 0, "", nil
+		return 0, 0, "", nil //nolint:nilerr // systemctl 查询失败时返回零值
 	}
 
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "MainPID=") {
-			pidStr := strings.TrimPrefix(line, "MainPID=")
+	lines := strings.SplitSeq(strings.TrimSpace(out), "\n")
+	for line := range lines {
+		if after, ok := strings.CutPrefix(line, "MainPID="); ok {
+			pidStr := after
 			pid, _ = strconv.Atoi(pidStr)
 		}
-		if strings.HasPrefix(line, "ActiveEnterTimestamp=") {
-			ts := strings.TrimPrefix(line, "ActiveEnterTimestamp=")
+		if after, ok := strings.CutPrefix(line, "ActiveEnterTimestamp="); ok {
+			ts := after
 			if t, e := time.Parse("Mon 2006-01-02 15:04:05 MST", ts); e == nil {
 				d := time.Since(t)
 				if d < time.Minute {
@@ -605,7 +544,7 @@ func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memByt
 	if pid > 0 {
 		statusPath := fmt.Sprintf("/proc/%d/status", pid)
 		if data, e := os.ReadFile(statusPath); e == nil {
-			for _, line := range strings.Split(string(data), "\n") {
+			for line := range strings.SplitSeq(string(data), "\n") {
 				if strings.HasPrefix(line, "VmRSS:") {
 					fields := strings.Fields(line)
 					if len(fields) >= 2 {

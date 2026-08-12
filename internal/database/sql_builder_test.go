@@ -40,7 +40,7 @@ func TestIsTruthy(t *testing.T) {
 func TestBuildInsertEmptyData(t *testing.T) {
 	t.Run("mysql", func(t *testing.T) {
 		b := NewSQLBuilder(DBTypeMySQL)
-		sql, err := b.BuildInsert("users", map[string]interface{}{}, nil)
+		sql, err := b.BuildInsert("users", map[string]any{}, nil)
 		if err != nil {
 			t.Fatalf("BuildInsert: %v", err)
 		}
@@ -50,7 +50,7 @@ func TestBuildInsertEmptyData(t *testing.T) {
 	})
 	t.Run("postgres", func(t *testing.T) {
 		b := NewSQLBuilder(DBTypePostgreSQL)
-		sql, args, err := b.BuildInsertParams("users", map[string]interface{}{}, nil)
+		sql, args, err := b.BuildInsertParams("users", map[string]any{}, nil)
 		if err != nil {
 			t.Fatalf("BuildInsertParams: %v", err)
 		}
@@ -64,7 +64,7 @@ func TestBuildInsertEmptyData(t *testing.T) {
 	// 只剩自增列（值为空）也应落到 defaults-insert。
 	t.Run("autoincr-only-skipped", func(t *testing.T) {
 		b := NewSQLBuilder(DBTypeMySQL)
-		sql, err := b.BuildInsert("users", map[string]interface{}{"id": ""},
+		sql, err := b.BuildInsert("users", map[string]any{"id": ""},
 			&TableInfo{Columns: []ColumnInfo{{Name: "id", IsAutoIncr: true}}})
 		if err != nil {
 			t.Fatalf("BuildInsert: %v", err)

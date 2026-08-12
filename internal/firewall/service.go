@@ -2,10 +2,12 @@ package firewall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,7 +29,7 @@ type Service struct {
 func NewService(repo Repository, exec executor.CommandExecutor, panelPort ...int) *Service {
 	protected := []string{"22"} // SSH is always protected
 	if len(panelPort) > 0 && panelPort[0] > 0 {
-		protected = append(protected, fmt.Sprintf("%d", panelPort[0]))
+		protected = append(protected, strconv.Itoa(panelPort[0]))
 	}
 	return &Service{
 		repo:           repo,
@@ -66,12 +68,7 @@ func (s *Service) IsProtectedPort(ctx context.Context, port string) bool {
 	}
 
 	// Single port
-	for _, protected := range s.protectedPorts {
-		if port == protected {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.protectedPorts, port)
 }
 
 // DetectTool detects which firewall tool is available
@@ -135,8 +132,8 @@ func (s *Service) GetStatus(ctx context.Context) (*FirewallStatus, error) {
 				status.DefaultOut = "DROP"
 			}
 			// Count rules
-			lines := strings.Split(output, "\n")
-			for _, line := range lines {
+			lines := strings.SplitSeq(output, "\n")
+			for line := range lines {
 				line = strings.TrimSpace(line)
 				if line != "" && !strings.HasPrefix(line, "Status:") && !strings.HasPrefix(line, "Default:") && !strings.HasPrefix(line, "Logging:") && !strings.HasPrefix(line, "---") {
 					if strings.Contains(line, "ALLOW") || strings.Contains(line, "DENY") || strings.Contains(line, "REJECT") {
@@ -171,15 +168,17 @@ func (s *Service) GetStatus(ctx context.Context) (*FirewallStatus, error) {
 				// Detect policy
 				if strings.Contains(line, "policy") {
 					if strings.Contains(line, "policy accept") {
-						if currentChain == "INPUT" {
+						switch currentChain {
+						case "INPUT":
 							status.DefaultIn = "ACCEPT"
-						} else if currentChain == "OUTPUT" {
+						case "OUTPUT":
 							status.DefaultOut = "ACCEPT"
 						}
 					} else if strings.Contains(line, "policy drop") {
-						if currentChain == "INPUT" {
+						switch currentChain {
+						case "INPUT":
 							status.DefaultIn = "DROP"
-						} else if currentChain == "OUTPUT" {
+						case "OUTPUT":
 							status.DefaultOut = "DROP"
 						}
 					}
@@ -207,8 +206,8 @@ func (s *Service) GetStatus(ctx context.Context) (*FirewallStatus, error) {
 		output, _, err := s.executor.RunCombined(ctx, "iptables", "-L", "-n", "--line-numbers")
 		if err == nil {
 			status.Enabled = true // iptables is always "enabled" if it exists
-			lines := strings.Split(output, "\n")
-			for _, line := range lines {
+			lines := strings.SplitSeq(output, "\n")
+			for line := range lines {
 				// Parse default policy from chain header
 				// Example: Chain INPUT (policy ACCEPT)
 				if strings.HasPrefix(line, "Chain") && strings.Contains(line, "policy") {
@@ -245,8 +244,8 @@ func (s *Service) GetStatus(ctx context.Context) (*FirewallStatus, error) {
 		// Also count ip6tables rules
 		ip6Output, _, ip6Err := s.executor.RunCombined(ctx, "ip6tables", "-L", "-n", "--line-numbers")
 		if ip6Err == nil {
-			lines := strings.Split(ip6Output, "\n")
-			for _, line := range lines {
+			lines := strings.SplitSeq(ip6Output, "\n")
+			for line := range lines {
 				if strings.Contains(line, "ACCEPT") || strings.Contains(line, "DROP") || strings.Contains(line, "REJECT") {
 					if !strings.HasPrefix(line, "Chain") && !strings.HasPrefix(line, "num") && !strings.HasPrefix(line, "target") {
 						status.RuleCount++
@@ -392,7 +391,7 @@ func (s *Service) MoveRuleUp(ctx context.Context, id int64) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("rule not found")
+		return errors.New("rule not found")
 	}
 	if idx == 0 {
 		return nil // Already at top
@@ -422,7 +421,7 @@ func (s *Service) MoveRuleDown(ctx context.Context, id int64) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("rule not found")
+		return errors.New("rule not found")
 	}
 	if idx == len(rules)-1 {
 		return nil // Already at bottom
@@ -464,8 +463,12 @@ func (s *Service) EnableFirewall(ctx context.Context) error {
 	case "iptables":
 		// For iptables, ensure basic chains exist and re-apply rules for both iptables and ip6tables
 		for _, chain := range []string{"INPUT", "FORWARD", "OUTPUT"} {
-			s.executor.RunCombined(ctx, "iptables", "-N", chain)
-			s.executor.RunCombined(ctx, "ip6tables", "-N", chain)
+			if _, _, err := s.executor.RunCombined(ctx, "iptables", "-N", chain); err != nil {
+				log.Printf("firewall: create iptables chain %s failed (may already exist): %v", chain, err)
+			}
+			if _, _, err := s.executor.RunCombined(ctx, "ip6tables", "-N", chain); err != nil {
+				log.Printf("firewall: create ip6tables chain %s failed (may already exist): %v", chain, err)
+			}
 		}
 		// Re-apply all enabled rules from database
 		rules, err := s.ListRules(ctx)
@@ -497,7 +500,7 @@ func (s *Service) DisableFirewall(ctx context.Context) error {
 	case "nft":
 		// For nftables, "disable" means flushing all rules
 		if _, _, err := s.executor.RunCombined(ctx, "nft", "flush", "ruleset"); err != nil {
-			return fmt.Errorf("failed to flush nft ruleset: %v", err)
+			return fmt.Errorf("failed to flush nft ruleset: %w", err)
 		}
 	case "iptables":
 		// SAFETY: Before flushing, ensure default policy is ACCEPT to prevent lockout.
@@ -512,7 +515,7 @@ func (s *Service) DisableFirewall(ctx context.Context) error {
 		}
 		// Flush all rules for both IPv4 and IPv6
 		if _, _, err := s.executor.RunCombined(ctx, "iptables", "-F"); err != nil {
-			return fmt.Errorf("failed to flush iptables: %v", err)
+			return fmt.Errorf("failed to flush iptables: %w", err)
 		}
 		if _, _, err := s.executor.RunCombined(ctx, "ip6tables", "-F"); err != nil {
 			log.Printf("firewall: failed to flush ip6tables: %v", err)
@@ -555,7 +558,7 @@ func (s *Service) applyRuleForVersion(ctx context.Context, rule *FirewallRule, t
 	case "iptables":
 		return s.applyIptablesRule(ctx, rule)
 	default:
-		return fmt.Errorf("no firewall tool available")
+		return errors.New("no firewall tool available")
 	}
 }
 
@@ -882,7 +885,7 @@ func (s *Service) removeNftRule(ctx context.Context, rule *FirewallRule) error {
 		if rule.Port != "" {
 			portMatch := false
 			// Check for exact port match or port in set notation
-			if strings.Contains(line, fmt.Sprintf("dport %s", rule.Port)) ||
+			if strings.Contains(line, "dport "+rule.Port) ||
 				strings.Contains(line, fmt.Sprintf("dport { %s }", rule.Port)) {
 				portMatch = true
 			}
@@ -945,7 +948,7 @@ func (s *Service) GetSystemRules(ctx context.Context) ([]FirewallRule, error) {
 	case "iptables":
 		return s.getIptablesRules(ctx)
 	default:
-		return nil, fmt.Errorf("no firewall tool available")
+		return nil, errors.New("no firewall tool available")
 	}
 }
 
@@ -962,8 +965,8 @@ func (s *Service) getUfwRules(ctx context.Context) ([]FirewallRule, error) {
 	}
 
 	var rules []FirewallRule
-	lines := strings.Split(out, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(out, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Status:") || strings.HasPrefix(line, "---") {
 			continue
@@ -984,8 +987,8 @@ func (s *Service) getUfwRules(ctx context.Context) ([]FirewallRule, error) {
 			}
 
 			// Extract port
-			parts := strings.Fields(line)
-			for _, part := range parts {
+			parts := strings.FieldsSeq(line)
+			for part := range parts {
 				if strings.Contains(part, "/") {
 					rule.Port = strings.Split(part, "/")[0]
 					rule.Protocol = strings.Split(part, "/")[1]
@@ -1111,7 +1114,7 @@ func (s *Service) SetDefaultPolicy(ctx context.Context, chain, policy string) er
 
 	tool := s.DetectTool(ctx)
 	if tool == "" {
-		return fmt.Errorf("no firewall tool available")
+		return errors.New("no firewall tool available")
 	}
 
 	// Safety check: when setting INPUT to DROP, ensure protected ports have ACCEPT rules first
@@ -1147,9 +1150,11 @@ func (s *Service) SetDefaultPolicy(ctx context.Context, chain, policy string) er
 		return applyErr
 	}
 
-	// For INPUT DROP policy, verify SSH is still reachable, rollback if not
+	// For INPUT DROP policy, verify SSH is still reachable, rollback if not.
+	// 回滚是安全兜底：必须脱离请求生命周期执行（客户端断开/超时不能中断），
+	// WithoutCancel 继承 ctx 值但剥离取消。
 	if chain == "INPUT" && policy == "DROP" {
-		go s.verifyAndRollback(context.Background(), tool, chain, oldPolicy)
+		go s.verifyAndRollback(context.WithoutCancel(ctx), tool, chain, oldPolicy)
 	}
 
 	return nil
@@ -1208,7 +1213,7 @@ func (s *Service) hasAcceptRuleForPort(ctx context.Context, tool, port string) (
 	case "nft":
 		portToken, actionToken = "tcp dport "+port, "accept"
 	}
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if strings.Contains(line, portToken) && strings.Contains(line, actionToken) {
 			return true, nil
 		}
@@ -1228,7 +1233,9 @@ func (s *Service) addAcceptRuleForPort(ctx context.Context, tool, port string) e
 			return err
 		}
 		// Also add for ip6tables
-		s.executor.RunCombined(ctx, "ip6tables", "-I", "INPUT", "1", "-p", "tcp", "--dport", port, "-j", "ACCEPT")
+		if _, _, err := s.executor.RunCombined(ctx, "ip6tables", "-I", "INPUT", "1", "-p", "tcp", "--dport", port, "-j", "ACCEPT"); err != nil {
+			log.Printf("firewall: failed to add ip6tables ACCEPT rule for port %s: %v", port, err)
+		}
 		return nil
 	case "nft":
 		_, _, err := s.executor.RunCombined(ctx, "nft", "add", "rule", "inet", "filter", "INPUT", "tcp", "dport", port, "accept")
@@ -1247,7 +1254,8 @@ func (s *Service) verifyAndRollback(ctx context.Context, tool, chain, oldPolicy 
 	blocked := []string{}
 	for _, port := range s.protectedPorts {
 		addr := "127.0.0.1:" + port
-		conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+		dialer := &net.Dialer{Timeout: 3 * time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			blocked = append(blocked, port)
 			continue
@@ -1278,7 +1286,7 @@ func (s *Service) setUfwDefaultPolicy(ctx context.Context, chain, policy string)
 	case "OUTPUT":
 		direction = "outgoing"
 	default:
-		return fmt.Errorf("ufw only supports INPUT and OUTPUT chains for default policy")
+		return errors.New("ufw only supports INPUT and OUTPUT chains for default policy")
 	}
 
 	var ufwPolicy string
@@ -1320,7 +1328,9 @@ func (s *Service) setIptablesDefaultPolicy(ctx context.Context, chain, policy st
 		return fmt.Errorf("iptables default policy error: %s", out)
 	}
 	// Also set ip6tables default policy to keep IPv4/IPv6 in sync
-	s.executor.RunCombined(ctx, "ip6tables", "-P", chain, policy)
+	if _, _, err := s.executor.RunCombined(ctx, "ip6tables", "-P", chain, policy); err != nil {
+		log.Printf("firewall: failed to set ip6tables default policy for %s: %v", chain, err)
+	}
 	return nil
 }
 
@@ -1356,9 +1366,9 @@ func (s *Service) parseIptablesOutput(ctx context.Context, tool, ipVersion strin
 
 	var rules []FirewallRule
 	currentChain := ""
-	lines := strings.Split(out, "\n")
+	lines := strings.SplitSeq(out, "\n")
 
-	for _, line := range lines {
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

@@ -12,6 +12,7 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,10 +67,6 @@ func (s *AuthService) NotifyLogin(event LoginEvent) {
 }
 
 func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	_, total, err := s.userRepo.List(ctx, 0, 1)
 	if err != nil {
 		return err
@@ -82,7 +79,7 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 		}
 		if err := s.userRepo.Create(ctx, &User{
 			Username:       "admin",
-			PasswordHash:   string(hash),
+			PasswordHash:   hash,
 			Role:           RoleAdmin,
 			MustChangePass: true,
 		}); err != nil {
@@ -123,10 +120,6 @@ func generateRandomPassword(length int) string {
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (*User, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
 		return nil, errors.New("用户名或密码错误")
@@ -146,15 +139,14 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Us
 		return nil, errors.New("用户名或密码错误")
 	}
 
-	s.userRepo.ResetLoginState(ctx, user.ID, "")
+	if err := s.userRepo.ResetLoginState(ctx, user.ID, ""); err != nil {
+		log.Printf("auth: failed to reset login state: %v", err)
+	}
 
 	return user, nil
 }
 
 func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip, userAgent string) (*User, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	now := time.Now().Format(time.RFC3339)
 
 	user, err := s.Login(ctx, username, password)
@@ -189,7 +181,9 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		return nil, errors.New("account has expired")
 	}
 
-	s.userRepo.UpdateLastLoginIP(ctx, user.ID, ip)
+	if err := s.userRepo.UpdateLastLoginIP(ctx, user.ID, ip); err != nil {
+		log.Printf("auth: failed to update last login ip: %v", err)
+	}
 
 	evt := LoginEvent{Action: "LOGIN_SUCCESS", Username: username, IP: ip, UserAgent: userAgent, Success: true, Time: now}
 	if s.notifier != nil {
@@ -222,7 +216,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 		return err
 	}
 
-	return s.userRepo.UpdatePassword(ctx, userID, string(newHash))
+	return s.userRepo.UpdatePassword(ctx, userID, newHash)
 }
 
 func (s *AuthService) GetUserByID(ctx context.Context, id int64) (*User, error) {
@@ -251,7 +245,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, userID int64, newPasswo
 		return err
 	}
 
-	if err := s.userRepo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
+	if err := s.userRepo.UpdatePassword(ctx, userID, newHash); err != nil {
 		return err
 	}
 	return s.userRepo.SetMustChangePass(ctx, userID, true)
@@ -276,7 +270,7 @@ func (s *AuthService) ValidatePassword(password string) error {
 			hasDigit = true
 		}
 	}
-	if !(hasUpper && hasLower && hasDigit) {
+	if !hasUpper || !hasLower || !hasDigit {
 		return errors.New("password must contain upper, lower case and digit")
 	}
 
@@ -286,54 +280,34 @@ func (s *AuthService) ValidatePassword(password string) error {
 		"password123", "letmein123", "welcome123",
 	}
 	lower := strings.ToLower(password)
-	for _, weak := range weakPasswords {
-		if lower == weak {
-			return errors.New("password is too common")
-		}
+	if slices.Contains(weakPasswords, lower) {
+		return errors.New("password is too common")
 	}
 
 	return nil
 }
 
 func (s *AuthService) SetAccountExpiry(ctx context.Context, userID int64, expiresAt *time.Time) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.userRepo.SetAccountExpiry(ctx, userID, expiresAt)
 }
 
 func (s *AuthService) SetIPWhitelist(ctx context.Context, userID int64, whitelist string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.userRepo.SetIPWhitelist(ctx, userID, whitelist)
 }
 
 func (s *AuthService) IsTOTPEnabled(ctx context.Context, userID int64) (bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.totpRepo.IsTOTPEnabled(ctx, userID)
 }
 
 func (s *AuthService) GetTOTPSecret(ctx context.Context, userID int64) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.totpRepo.GetTOTPSecret(ctx, userID)
 }
 
 func (s *AuthService) GetIPWhitelist(ctx context.Context, userID int64) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.userRepo.GetIPWhitelist(ctx, userID)
 }
 
 func (s *AuthService) CheckIPWhitelist(ctx context.Context, userID int64, ip string) (bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	whitelist, err := s.GetIPWhitelist(ctx, userID)
 	if err != nil {
 		return false, err
@@ -348,7 +322,7 @@ func (s *AuthService) CheckIPWhitelist(ctx context.Context, userID int64, ip str
 		return false, nil
 	}
 
-	for _, allowedIP := range strings.Split(whitelist, ",") {
+	for allowedIP := range strings.SplitSeq(whitelist, ",") {
 		allowedIP = strings.TrimSpace(allowedIP)
 		if allowedIP == "*" {
 			return true, nil
@@ -372,9 +346,6 @@ func (s *AuthService) CheckIPWhitelist(ctx context.Context, userID int64, ip str
 }
 
 func (s *AuthService) IsAccountExpired(ctx context.Context, userID int64) (bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	expiresAt, err := s.userRepo.GetAccountExpiry(ctx, userID)
 	if err != nil {
 		return false, err
@@ -413,7 +384,7 @@ func (s *AuthService) GenerateTOTP(userID int64, username string) (*TOTPSetupRes
 		return nil, fmt.Errorf("generate QR code: %w", err)
 	}
 
-	qrCodeBase64 := fmt.Sprintf("data:image/png;base64,%s", base64Encode(qrCode))
+	qrCodeBase64 := "data:image/png;base64," + base64Encode(qrCode)
 
 	return &TOTPSetupResult{
 		Secret:       key.Secret(),
@@ -429,11 +400,8 @@ func (s *AuthService) VerifyTOTP(secret, code string) bool {
 
 // EnableTOTP enables 2FA for a user after verifying the code.
 func (s *AuthService) EnableTOTP(ctx context.Context, userID int64, secret, code string) ([]string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if !s.VerifyTOTP(secret, code) {
-		return nil, fmt.Errorf("invalid TOTP code")
+		return nil, errors.New("invalid TOTP code")
 	}
 
 	backupCodes, err := s.GenerateBackupCodes()
@@ -464,16 +432,13 @@ func (s *AuthService) EnableTOTP(ctx context.Context, userID int64, secret, code
 
 // DisableTOTP disables 2FA for a user after verifying the password.
 func (s *AuthService) DisableTOTP(ctx context.Context, userID int64, password string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	passwordHash, err := s.totpRepo.GetPasswordHash(ctx, userID)
 	if err != nil {
 		return err
 	}
 
 	if !verifyPassword(password, passwordHash) {
-		return fmt.Errorf("invalid password")
+		return errors.New("invalid password")
 	}
 
 	return s.totpRepo.DisableTOTP(ctx, userID)
@@ -482,7 +447,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID int64, password st
 // GenerateBackupCodes generates random backup codes.
 func (s *AuthService) GenerateBackupCodes() ([]string, error) {
 	codes := make([]string, backupCodeCount)
-	for i := 0; i < backupCodeCount; i++ {
+	for i := range backupCodeCount {
 		code, err := generateRandomCode(backupCodeLength)
 		if err != nil {
 			return nil, fmt.Errorf("generate random code: %w", err)
@@ -494,9 +459,6 @@ func (s *AuthService) GenerateBackupCodes() ([]string, error) {
 
 // VerifyBackupCode verifies and consumes a backup code.
 func (s *AuthService) VerifyBackupCode(ctx context.Context, userID int64, code string) (bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	backupCodesJSON, err := s.totpRepo.GetBackupCodes(ctx, userID)
 	if err != nil {
 		return false, err
@@ -528,17 +490,11 @@ func (s *AuthService) VerifyBackupCode(ctx context.Context, userID int64, code s
 
 // GetPendingSecret gets the pending TOTP secret for a user (during setup).
 func (s *AuthService) GetPendingSecret(ctx context.Context, userID int64) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.totpRepo.GetPendingSecret(ctx, userID)
 }
 
 // StorePendingSecret stores a TOTP secret temporarily during setup.
 func (s *AuthService) StorePendingSecret(ctx context.Context, userID int64, secret string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.totpRepo.StorePendingSecret(ctx, userID, secret)
 }
 
@@ -551,7 +507,7 @@ func base64Encode(data []byte) string {
 func generateRandomCode(length int) (string, error) {
 	const digits = "0123456789"
 	code := make([]byte, length)
-	for i := 0; i < length; i++ {
+	for i := range length {
 		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(digits))))
 		if err != nil {
 			return "", err

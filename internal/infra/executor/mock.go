@@ -87,7 +87,7 @@ func (m *MockExecutor) RunStream(ctx context.Context, onLine func(string), name 
 		combined = stdout + "\n" + stderr
 	}
 	if onLine != nil {
-		for _, line := range strings.Split(combined, "\n") {
+		for line := range strings.SplitSeq(combined, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				onLine(line)
 			}

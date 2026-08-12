@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -84,15 +85,12 @@ func (s *Service) refreshInstanceStatus(ctx context.Context, v *DBInstance) {
 	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerName)
 	status := containerStatus(info, err)
 	v.Status = status
-	s.repo.UpdateInstanceStatus(ctx, v.ID, status)
+	_ = s.repo.UpdateInstanceStatus(ctx, v.ID, status)
 }
 
 // --- Instance lifecycle ---
 
 func (s *Service) ListInstances(ctx context.Context, dbType DBType) ([]DBInstance, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if !IsValidDBType(dbType) {
 		return nil, fmt.Errorf("unsupported database type %q", dbType)
 	}
@@ -100,9 +98,6 @@ func (s *Service) ListInstances(ctx context.Context, dbType DBType) ([]DBInstanc
 }
 
 func (s *Service) GetInstance(ctx context.Context, id int64) (*DBInstance, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.GetInstance(ctx, id)
 }
 
@@ -119,9 +114,6 @@ type CreateInstanceResult struct {
 }
 
 func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *CreateDBInstanceRequest) (*CreateInstanceResult, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if !IsValidDBType(dbType) {
 		return nil, fmt.Errorf("unsupported database type %q", dbType)
 	}
@@ -143,7 +135,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	// The client sends the image + version (the front-end owns the version/image
 	// catalogue); the image is required — without it there is nothing to pull.
 	if strings.TrimSpace(req.Image) == "" {
-		return nil, fmt.Errorf("image is required")
+		return nil, errors.New("image is required")
 	}
 	engineName := strings.ToLower(strings.TrimSpace(req.ContainerEngine))
 	if engineName == "" {
@@ -156,7 +148,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	// a missing/invalid value is rejected here.
 	port := req.Port
 	if port < 1 || port > 65535 {
-		return nil, fmt.Errorf("port must be between 1 and 65535")
+		return nil, errors.New("port must be between 1 and 65535")
 	}
 	bindAddress := strings.TrimSpace(req.BindAddress)
 	if bindAddress == "" {
@@ -211,7 +203,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if err != nil {
 		return nil, fmt.Errorf("write instance record: %w", err)
 	}
-	if _, err := s.taskMgr.StartWithLog(containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
+	if _, err := s.taskMgr.StartWithLog(ctx, containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
 		if cli, ok := rt.(*CLIContainerRuntime); ok {
 			cli.SetOutputHook(func(line string) { log.Append(line) })
@@ -243,14 +235,14 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	// row — the user aborted, so nothing lingers (a failed install keeps its row
 	// for inspection; a canceled one does not).
 	removeInstance := func() {
-		_ = rt.Remove(context.Background(), engineName, containerName)
-		_ = s.repo.DeleteInstance(context.Background(), id)
+		_ = rt.Remove(ctx, engineName, containerName)
+		_ = s.repo.DeleteInstance(ctx, id)
 	}
 	fail := func(msg string, err error) error {
 		if canceled() {
 			removeInstance()
 			log.Append("❌ 安装已取消")
-			return fmt.Errorf("安装已取消")
+			return errors.New("安装已取消")
 		}
 		// 失败时保留容器，便于排查失败现场（容器日志还在）。重新安装走
 		// "卸载+安装"两步，卸载会先删掉这个残留容器，所以不会被占用卡住。
@@ -270,7 +262,7 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 		if canceled() {
 			removeInstance()
 			log.Append("❌ 安装已取消")
-			return fmt.Errorf("安装已取消")
+			return errors.New("安装已取消")
 		}
 		// No container was created — still flip the row to "failed" so the
 		// instance doesn't sit at "installing" forever (the log panel surfaces
@@ -302,7 +294,7 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 // install leaves no row behind, unlike a failed one.
 func (s *Service) CancelInstall(installID string) error {
 	if !s.taskMgr.Cancel(installID) {
-		return fmt.Errorf("安装已结束或不存在")
+		return errors.New("安装已结束或不存在")
 	}
 	return nil
 }
@@ -336,7 +328,7 @@ func (s *Service) ListDockerTags(ctx context.Context, dbType DBType, page, pageS
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 10
 	}
-	tags, err := s.dockerTags(dbType)
+	tags, err := s.dockerTags(ctx, dbType)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -344,20 +336,17 @@ func (s *Service) ListDockerTags(ctx context.Context, dbType DBType, page, pageS
 	if start >= len(tags) {
 		return []string{}, len(tags), nil
 	}
-	end := start + pageSize
-	if end > len(tags) {
-		end = len(tags)
-	}
+	end := min(start+pageSize, len(tags))
 	return tags[start:end], len(tags), nil
 }
 
-func (s *Service) dockerTags(dbType DBType) ([]string, error) {
+func (s *Service) dockerTags(ctx context.Context, dbType DBType) ([]string, error) {
 	dockerTagsCacheStore.Lock()
 	defer dockerTagsCacheStore.Unlock()
 	if c, ok := dockerTagsCacheStore.m[dbType]; ok && time.Since(c.fetched) < dockerTagsCacheTTL {
 		return c.tags, nil
 	}
-	tags, err := fetchDockerHubTags(dockerImageBase(dbType))
+	tags, err := fetchDockerHubTags(ctx, dockerImageBase(dbType))
 	if err != nil {
 		return nil, err
 	}
@@ -379,13 +368,13 @@ type dockerHubTagPage struct {
 // until exhausted; tags that don't look like a version (e.g. latest,
 // oraclelinux9) are dropped. The front-end "更多版本" flow calls this so users
 // can install any published tag, not just the curated presets.
-func fetchDockerHubTags(image string) ([]string, error) {
+func fetchDockerHubTags(ctx context.Context, image string) ([]string, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	seen := make(map[string]bool)
 	var tags []string
 	url := fmt.Sprintf("https://hub.docker.com/v2/repositories/library/%s/tags?page_size=100", image)
 	for url != "" {
-		req, err := http.NewRequest(http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -396,7 +385,7 @@ func fetchDockerHubTags(image string) ([]string, error) {
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			return nil, fmt.Errorf("Docker Hub 返回 %s", resp.Status)
+			return nil, fmt.Errorf("docker hub 返回 %s", resp.Status)
 		}
 		var page dockerHubTagPage
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
@@ -427,7 +416,7 @@ func versionLike(tag string) bool {
 	if !unicode.IsDigit([]rune(tag)[0]) {
 		return false
 	}
-	if i := strings.IndexByte(tag, '-'); i >= 0 {
+	if found := strings.Contains(tag, "-"); found {
 		return strings.HasSuffix(tag, "-alpine")
 	}
 	return true
@@ -455,12 +444,9 @@ func (s *Service) WaitForInstall(installID string) error {
 // retained by default so the instance can be re-installed onto it; purge
 // deletes the whole instance directory (data + config + backups) too.
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge bool) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
+		return errors.New("instance not found")
 	}
 
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
@@ -483,10 +469,10 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (string, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return "", fmt.Errorf("instance not found")
+		return "", errors.New("instance not found")
 	}
 	if v.ContainerEngine == "" || v.ContainerName == "" {
-		return "", fmt.Errorf("database instance is not container-managed")
+		return "", errors.New("database instance is not container-managed")
 	}
 	oldPassword := v.AdminPassword
 	password, err := generateAdminPassword()
@@ -509,7 +495,7 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 			return "", fmt.Errorf("reset Redis password: %w", err)
 		}
 	default:
-		return "", fmt.Errorf("password reset is not supported for this database type")
+		return "", errors.New("password reset is not supported for this database type")
 	}
 	if err := s.repo.UpdateInstancePassword(ctx, instanceID, password); err != nil {
 		return "", err
@@ -522,12 +508,9 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 // CreateInstance (same-host SQLite and container env, encryption adds nothing).
 
 func (s *Service) StartInstance(ctx context.Context, instanceID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
+		return errors.New("instance not found")
 	}
 	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("start failed: %w", err)
@@ -539,12 +522,9 @@ func (s *Service) StartInstance(ctx context.Context, instanceID int64) error {
 }
 
 func (s *Service) StopInstance(ctx context.Context, instanceID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
+		return errors.New("instance not found")
 	}
 	if err := s.runtime.Stop(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("stop failed: %w", err)
@@ -553,12 +533,9 @@ func (s *Service) StopInstance(ctx context.Context, instanceID int64) error {
 }
 
 func (s *Service) RestartInstance(ctx context.Context, instanceID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
+		return errors.New("instance not found")
 	}
 	if err := s.runtime.Restart(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("restart failed: %w", err)
@@ -573,12 +550,9 @@ func (s *Service) RestartInstance(ctx context.Context, instanceID int64) error {
 // 见 SaveInstanceConfig）—— 没有独立的修改端口入口。
 
 func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, lines int) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return "", fmt.Errorf("instance not found")
+		return "", errors.New("instance not found")
 	}
 	if lines <= 0 {
 		lines = defaultLogLines
@@ -595,7 +569,7 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*InstanceConfigView, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return nil, fmt.Errorf("instance not found")
+		return nil, errors.New("instance not found")
 	}
 	if err := s.ensureInstanceRunning(ctx, v, "读取配置"); err != nil {
 		return nil, err
@@ -618,7 +592,7 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, params map[string]string) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
+		return errors.New("instance not found")
 	}
 
 	// 组装本次覆盖值，空值跳过（不清覆盖、不重置 —— 保存只应用改过的字段）。
@@ -714,9 +688,6 @@ func pgDataDir(image string) string {
 
 // RefreshStatus refreshes instance statuses for a database type (dbType).
 func (s *Service) RefreshStatus(ctx context.Context, dbType DBType) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instances, _ := s.repo.ListInstances(ctx, dbType)
 	for _, v := range instances {
 		s.refreshInstanceStatus(ctx, &v)
@@ -815,8 +786,9 @@ func containerDataDir(instance *DBInstance) string {
 		return pgDataDir(instance.Image)
 	case DBTypeRedis:
 		return "/data"
+	default:
+		return "/var/lib/mysql"
 	}
-	return "/var/lib/mysql"
 }
 
 // containerNameRe 是容器名的允许字符集（docker 与 podman 的规则交集）：
@@ -832,7 +804,7 @@ func validateContainerName(name string) error {
 		return fmt.Errorf("容器名过长（最多 %d 个字符）", maxContainerNameLen)
 	}
 	if !containerNameRe.MatchString(name) {
-		return fmt.Errorf("容器名只能包含字母、数字以及 _ . -，且必须以字母或数字开头")
+		return errors.New("容器名只能包含字母、数字以及 _ . -，且必须以字母或数字开头")
 	}
 	return nil
 }
@@ -866,8 +838,9 @@ func containerPortForType(dbType DBType) int {
 		return 5432
 	case DBTypeRedis:
 		return 6379
+	default:
+		return 3306
 	}
-	return 3306
 }
 
 // containerSpec builds the structured create contract. volume is the host data

@@ -15,7 +15,7 @@ func TestFileManagerValidatePath(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	os.MkdirAll(filepath.Join(tmpDir, "subdir"), 0755)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "subdir"), 0755)
 
 	fm, err := NewManager(tmpDir)
 	if err != nil {
@@ -47,8 +47,8 @@ func TestValidatePath_TraversalAttempts(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	os.MkdirAll(filepath.Join(tmpDir, "sub", "dir"), 0755)
-	os.MkdirAll(filepath.Join(tmpDir, "a", "b", "c"), 0755)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "sub", "dir"), 0755)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "a", "b", "c"), 0755)
 
 	fm, err := NewManager(tmpDir)
 	if err != nil {
@@ -159,7 +159,7 @@ func TestFileManagerCopy(t *testing.T) {
 	}
 
 	testFile := filepath.Join(tmpDir, "test.txt")
-	os.WriteFile(testFile, []byte("hello"), 0644)
+	_ = os.WriteFile(testFile, []byte("hello"), 0644)
 
 	err = fm.Copy("test.txt", "test.txt")
 	if err == nil {

@@ -3,6 +3,7 @@ package ssh
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -134,13 +135,13 @@ func (s *Service) SaveConfig(config *Config) error {
 			newLines = append(newLines, fmt.Sprintf("Port %d", config.Port))
 			updated["Port"] = true
 		case "PermitRootLogin":
-			newLines = append(newLines, fmt.Sprintf("PermitRootLogin %s", config.PermitRootLogin))
+			newLines = append(newLines, "PermitRootLogin "+config.PermitRootLogin)
 			updated["PermitRootLogin"] = true
 		case "PasswordAuthentication":
-			newLines = append(newLines, fmt.Sprintf("PasswordAuthentication %s", config.PasswordAuthentication))
+			newLines = append(newLines, "PasswordAuthentication "+config.PasswordAuthentication)
 			updated["PasswordAuthentication"] = true
 		case "PubkeyAuthentication":
-			newLines = append(newLines, fmt.Sprintf("PubkeyAuthentication %s", config.PubkeyAuthentication))
+			newLines = append(newLines, "PubkeyAuthentication "+config.PubkeyAuthentication)
 			updated["PubkeyAuthentication"] = true
 		case "MaxAuthTries":
 			newLines = append(newLines, fmt.Sprintf("MaxAuthTries %d", config.MaxAuthTries))
@@ -156,12 +157,12 @@ func (s *Service) SaveConfig(config *Config) error {
 			updated["ClientAliveCountMax"] = true
 		case "AllowUsers":
 			if config.AllowUsers != "" {
-				newLines = append(newLines, fmt.Sprintf("AllowUsers %s", config.AllowUsers))
+				newLines = append(newLines, "AllowUsers "+config.AllowUsers)
 			}
 			updated["AllowUsers"] = true
 		case "DenyUsers":
 			if config.DenyUsers != "" {
-				newLines = append(newLines, fmt.Sprintf("DenyUsers %s", config.DenyUsers))
+				newLines = append(newLines, "DenyUsers "+config.DenyUsers)
 			}
 			updated["DenyUsers"] = true
 		default:
@@ -174,13 +175,13 @@ func (s *Service) SaveConfig(config *Config) error {
 		newLines = append(newLines, fmt.Sprintf("Port %d", config.Port))
 	}
 	if !updated["PermitRootLogin"] {
-		newLines = append(newLines, fmt.Sprintf("PermitRootLogin %s", config.PermitRootLogin))
+		newLines = append(newLines, "PermitRootLogin "+config.PermitRootLogin)
 	}
 	if !updated["PasswordAuthentication"] {
-		newLines = append(newLines, fmt.Sprintf("PasswordAuthentication %s", config.PasswordAuthentication))
+		newLines = append(newLines, "PasswordAuthentication "+config.PasswordAuthentication)
 	}
 	if !updated["PubkeyAuthentication"] {
-		newLines = append(newLines, fmt.Sprintf("PubkeyAuthentication %s", config.PubkeyAuthentication))
+		newLines = append(newLines, "PubkeyAuthentication "+config.PubkeyAuthentication)
 	}
 
 	// Write to temp file first
@@ -221,7 +222,12 @@ func (s *Service) ReloadSSH(ctx context.Context) error {
 			if msg == "" {
 				msg = output2
 			}
-			return fmt.Errorf("reload failed: %s: %v", msg, coalesceErr(err, err2))
+			// coalesceErr 可能返回 nil（executor 对非零退出码不返回 error）——
+			// nil 时拼 %w 会打出 %!w(<nil>)，单独处理。
+			if rel := coalesceErr(err, err2); rel != nil {
+				return fmt.Errorf("reload failed: %s: %w", msg, rel)
+			}
+			return fmt.Errorf("reload failed: %s", msg)
 		}
 	}
 	log.Printf("ssh: service reloaded")
@@ -345,7 +351,7 @@ func (s *Service) getLoginHistoryFromAuthLog(limit int) ([]LoginRecord, error) {
 		}
 	}
 	if file == nil {
-		return nil, fmt.Errorf("no SSH log file found (tried auth.log and secure)")
+		return nil, errors.New("no SSH log file found (tried auth.log and secure)")
 	}
 	defer file.Close()
 
@@ -453,11 +459,9 @@ func parsePSLine(line string) *Session {
 
 	loginTime := fields[8]
 
-	sessionType := "ssh"
+	sessionType := "interactive"
 	if tty == "notty" {
 		sessionType = "non-interactive"
-	} else {
-		sessionType = "interactive"
 	}
 
 	return &Session{
@@ -525,26 +529,26 @@ func parseSSHLogLine(line string) *LoginRecord {
 		return nil
 	}
 
-	if idx := strings.Index(line, "from "); idx >= 0 {
-		rest := line[idx+5:]
-		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
-			record.IP = rest[:endIdx]
+	if _, after, ok := strings.Cut(line, "from "); ok {
+		rest := after
+		if before, _, ok := strings.Cut(rest, " "); ok {
+			record.IP = before
 		}
 	}
 
-	if idx := strings.Index(line, "port "); idx >= 0 {
-		rest := line[idx+5:]
-		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
-			if port, err := strconv.Atoi(rest[:endIdx]); err == nil {
+	if _, after, ok := strings.Cut(line, "port "); ok {
+		rest := after
+		if before, _, ok := strings.Cut(rest, " "); ok {
+			if port, err := strconv.Atoi(before); err == nil {
 				record.Port = port
 			}
 		}
 	}
 
-	if idx := strings.Index(line, "for "); idx >= 0 {
-		rest := line[idx+4:]
-		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
-			record.User = rest[:endIdx]
+	if _, after, ok := strings.Cut(line, "for "); ok {
+		rest := after
+		if before, _, ok := strings.Cut(rest, " "); ok {
+			record.User = before
 		}
 	}
 
@@ -555,8 +559,8 @@ func parseSSHLogLine(line string) *LoginRecord {
 	}
 
 	// Extract full ISO timestamp (first field before space)
-	if idx := strings.Index(line, " "); idx >= 0 {
-		record.Time = line[:idx]
+	if before, _, ok := strings.Cut(line, " "); ok {
+		record.Time = before
 	}
 
 	return record

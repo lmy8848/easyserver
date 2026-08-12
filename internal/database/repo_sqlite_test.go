@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"easyserver/internal/infra/database"
+
 	_ "modernc.org/sqlite"
 )
 

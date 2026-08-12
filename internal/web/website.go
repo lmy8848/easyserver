@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"easyserver/internal/infra/apperror"
@@ -29,25 +30,16 @@ func NewWebsiteService(repo WebsiteRepository, webServerRepo ServerRepository, e
 
 // List returns websites for a specific web server
 func (s *WebsiteService) List(ctx context.Context, webServerID int64) ([]Website, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.List(ctx, webServerID)
 }
 
 // Get returns a specific website
 func (s *WebsiteService) Get(ctx context.Context, webServerID, id int64) (*Website, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.Get(ctx, webServerID, id)
 }
 
 // Create creates a new website
 func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *CreateWebsiteRequest) (*Website, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Validate domain safety
 	if err := validateDomain(req.Domain); err != nil {
 		return nil, err
@@ -156,11 +148,13 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	}
 
 	// Create root directory
-	os.MkdirAll(req.RootPath, 0755)
+	_ = os.MkdirAll(req.RootPath, 0755)
 
 	// Write Nginx config
 	website.ID = id
-	s.writeConfigForServer(webServerID, website)
+	if err := s.writeConfigForServer(ctx, webServerID, website); err != nil {
+		return nil, fmt.Errorf("failed to write config: %w", err)
+	}
 
 	return &Website{
 		ID:               id,
@@ -215,9 +209,6 @@ func recalcProxyDefaults(w *Website) {
 
 // Update updates a website
 func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req *UpdateWebsiteRequest) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
@@ -290,11 +281,13 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 
 	// If domain changed, remove old config first
 	if oldDomain != w.Domain {
-		s.removeConfigForServer(webServerID, oldDomain)
+		s.removeConfigForServer(ctx, webServerID, oldDomain)
 	}
 
 	// Write new config
-	s.writeConfigForServer(webServerID, w)
+	if err := s.writeConfigForServer(ctx, webServerID, w); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
 
 	// If site is active and domain changed, create new symlink
 	if w.Status == "active" && oldDomain != w.Domain {
@@ -302,8 +295,8 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 		if ws != nil && ws.SitesAvailable != "" && ws.SitesEnabled != "" {
 			confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 			linkPath := filepath.Join(ws.SitesEnabled, w.Domain+".conf")
-			os.MkdirAll(ws.SitesEnabled, 0755)
-			os.Symlink(confPath, linkPath)
+			_ = os.MkdirAll(ws.SitesEnabled, 0755)
+			_ = os.Symlink(confPath, linkPath)
 		}
 	}
 
@@ -318,9 +311,6 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 
 // Delete deletes a website
 func (s *WebsiteService) Delete(ctx context.Context, webServerID, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
@@ -329,15 +319,12 @@ func (s *WebsiteService) Delete(ctx context.Context, webServerID, id int64) erro
 		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
 
-	s.removeConfigForServer(webServerID, w.Domain)
+	s.removeConfigForServer(ctx, webServerID, w.Domain)
 	return s.repo.Delete(ctx, webServerID, id)
 }
 
 // Enable enables a website
 func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
@@ -359,7 +346,7 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 	}
 
 	// Write config
-	if err := s.writeConfigForServer(webServerID, w); err != nil {
+	if err := s.writeConfigForServer(ctx, webServerID, w); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -368,7 +355,7 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 		confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 		linkPath := filepath.Join(ws.SitesEnabled, w.Domain+".conf")
 		if _, err := os.Stat(linkPath); os.IsNotExist(err) {
-			os.Symlink(confPath, linkPath)
+			_ = os.Symlink(confPath, linkPath)
 		}
 	}
 
@@ -380,9 +367,6 @@ func (s *WebsiteService) Enable(ctx context.Context, webServerID, id int64) erro
 
 // Disable disables a website
 func (s *WebsiteService) Disable(ctx context.Context, webServerID, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
@@ -408,9 +392,6 @@ func (s *WebsiteService) LinkProcess(ctx context.Context, id, processID int64) e
 
 // GetLogs returns logs for a website
 func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, logType string, lines int) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return "", err
@@ -433,24 +414,21 @@ func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, log
 	// 文件不存在时给出友好提示，而不是返回 tail 的 stderr（"tail: cannot open ..."）。
 	// nginx 在网站首次有访问/错误时才会创建该日志文件。
 	if _, err := os.Stat(logPath); err != nil {
-		return fmt.Sprintf("日志文件尚不存在: %s\n（网站产生访问或错误后 nginx 会自动创建该文件）", logPath), nil
+		return fmt.Sprintf("日志文件尚不存在: %s\n（网站产生访问或错误后 nginx 会自动创建该文件）", logPath), nil //nolint:nilerr // 日志文件不存在时返回友好提示
 	}
 	if lines <= 0 {
 		lines = 200
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "tail", "-n", fmt.Sprintf("%d", lines), logPath)
+	out, _, err := s.executor.RunCombined(ctx, "tail", "-n", strconv.Itoa(lines), logPath)
 	if err != nil {
-		return fmt.Sprintf("(读取日志失败: %s)", logPath), nil
+		return fmt.Sprintf("(读取日志失败: %s)", logPath), nil //nolint:nilerr // 读取日志失败时返回友好提示
 	}
 	return out, nil
 }
 
 // ApplySSL applies SSL certificate using certbot
 func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, email string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
 		return err
@@ -489,9 +467,6 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 // UploadSSL 启用用户上传的证书：更新数据库 + 重新生成 nginx 配置(含 SSL) + reload。
 // 与 ApplySSL(certbot 申请) 不同，这里接收已写好的证书文件路径。
 func (s *WebsiteService) UploadSSL(ctx context.Context, webServerID, id int64, certPath, keyPath string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if err := s.repo.UpdateSSL(ctx, id, certPath, keyPath); err != nil {
 		return err
 	}
@@ -499,7 +474,7 @@ func (s *WebsiteService) UploadSSL(ctx context.Context, webServerID, id int64, c
 	if err != nil || w == nil {
 		return apperror.ErrNotFound.WithMessage("网站不存在")
 	}
-	if err := s.writeConfigForServer(webServerID, w); err != nil {
+	if err := s.writeConfigForServer(ctx, webServerID, w); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
@@ -519,7 +494,7 @@ func validateDomain(domain string) error {
 	// Only allow alphanumeric, hyphens, dots
 	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)
 	if !domainRegex.MatchString(domain) {
-		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的域名：%s", domain))
+		return apperror.ErrBadRequest.WithMessage("无效的域名：" + domain)
 	}
 	if len(domain) > 253 {
 		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("域名过长：%d 字符", len(domain)))
@@ -547,8 +522,8 @@ func validateRootPath(p string) error {
 	return nil
 }
 
-func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) error {
-	ws, err := s.webServerRepo.Get(context.Background(), webServerID)
+func (s *WebsiteService) writeConfigForServer(ctx context.Context, webServerID int64, w *Website) error {
+	ws, err := s.webServerRepo.Get(ctx, webServerID)
 	if err != nil || ws == nil {
 		return apperror.ErrNotFound.WithMessage("Web 服务器不存在")
 	}
@@ -558,8 +533,8 @@ func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) err
 		return nil
 	}
 
-	os.MkdirAll(ws.SitesAvailable, 0755)
-	os.MkdirAll(ws.SitesEnabled, 0755)
+	_ = os.MkdirAll(ws.SitesAvailable, 0755)
+	_ = os.MkdirAll(ws.SitesEnabled, 0755)
 
 	confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 
@@ -570,7 +545,7 @@ func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) err
 	// Fetch security config for rate limiting (nil-safe if not wired).
 	var secCfg *security.SecurityConfig
 	if s.securityRepo != nil {
-		secCfg, _ = s.securityRepo.GetConfig(context.Background(), w.ID)
+		secCfg, _ = s.securityRepo.GetConfig(ctx, w.ID)
 	}
 	rateLimitBlock := nginxRateLimitBlock(secCfg, w.ID)
 
@@ -588,8 +563,8 @@ func (s *WebsiteService) writeConfigForServer(webServerID int64, w *Website) err
 	return os.WriteFile(confPath, []byte(config), 0644)
 }
 
-func (s *WebsiteService) removeConfigForServer(webServerID int64, domain string) {
-	ws, _ := s.webServerRepo.Get(context.Background(), webServerID)
+func (s *WebsiteService) removeConfigForServer(ctx context.Context, webServerID int64, domain string) {
+	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
 		return
 	}
@@ -612,7 +587,7 @@ func (s *WebsiteService) reloadWebServer(ctx context.Context, ws *WebServer) {
 			return
 		}
 	}
-	s.executor.RunCombined(ctx, "systemctl", "reload", ws.ServiceName)
+	_, _, _ = s.executor.RunCombined(ctx, "systemctl", "reload", ws.ServiceName)
 }
 
 // Nginx config templates per project type

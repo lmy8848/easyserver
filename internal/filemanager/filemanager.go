@@ -4,16 +4,18 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 )
 
-var errSearchLimit = fmt.Errorf("search result limit reached")
+var errSearchLimit = errors.New("search result limit reached")
 
 const (
 	// MinUserUID is the minimum UID/GID allowed for chown operations.
@@ -39,7 +41,7 @@ func (m *Manager) Search(rootPath, pattern string, maxResults int) ([]SearchResu
 
 	err = filepath.Walk(validPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Walk 回调：跳过无法访问的路径继续遍历
 		}
 
 		if vErr := m.validateRealPath(path); vErr != nil {
@@ -64,7 +66,7 @@ func (m *Manager) Search(rootPath, pattern string, maxResults int) ([]SearchResu
 		return nil
 	})
 
-	if err != nil && err != errSearchLimit {
+	if err != nil && !errors.Is(err, errSearchLimit) {
 		return results, fmt.Errorf("search walk: %w", err)
 	}
 
@@ -98,7 +100,7 @@ func (m *Manager) SearchContent(rootPath, text string, maxResults int) ([]Search
 
 	err = filepath.Walk(validPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // Walk 回调：跳过无法访问的路径继续遍历
 		}
 
 		if vErr := m.validateRealPath(path); vErr != nil {
@@ -122,12 +124,12 @@ func (m *Manager) SearchContent(rootPath, text string, maxResults int) ([]Search
 		// (TOCTOU defense — the leaf could have been swapped to a symlink in the window).
 		f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // 跳过无法打开的文件继续遍历
 		}
 		data, err := io.ReadAll(io.LimitReader(f, 10*1024*1024))
 		f.Close()
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // 跳过读取失败的文件继续遍历
 		}
 
 		content := strings.ToLower(string(data))
@@ -144,7 +146,7 @@ func (m *Manager) SearchContent(rootPath, text string, maxResults int) ([]Search
 		return nil
 	})
 
-	if err != nil && err != errSearchLimit {
+	if err != nil && !errors.Is(err, errSearchLimit) {
 		return results, fmt.Errorf("content search walk: %w", err)
 	}
 
@@ -216,7 +218,7 @@ func (m *Manager) Compress(sourcePaths []string, destPath string) error {
 			// the entry itself could still be a symlink whose target is outside.
 			file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // 跳过无法打开的文件继续打包
 			}
 			_, err = io.Copy(writer, file)
 			file.Close()
@@ -362,9 +364,9 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 	defer func() {
 		if !success {
 			// Clean up created files/dirs in reverse order
-			for i := len(createdPaths) - 1; i >= 0; i-- {
-				if err := os.Remove(createdPaths[i]); err != nil {
-					log.Printf("rollback remove failed for %s: %v", createdPaths[i], err)
+			for _, v := range slices.Backward(createdPaths) {
+				if err := os.Remove(v); err != nil {
+					log.Printf("rollback remove failed for %s: %v", v, err)
 				}
 			}
 		}
@@ -452,9 +454,9 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 
 	defer func() {
 		if !success {
-			for i := len(createdPaths) - 1; i >= 0; i-- {
-				if err := os.Remove(createdPaths[i]); err != nil {
-					log.Printf("rollback remove failed for %s: %v", createdPaths[i], err)
+			for _, v := range slices.Backward(createdPaths) {
+				if err := os.Remove(v); err != nil {
+					log.Printf("rollback remove failed for %s: %v", v, err)
 				}
 			}
 		}
@@ -462,7 +464,7 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 
 	for {
 		header, err := tarReader.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -497,7 +499,7 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 			if err := m.mkdirAllWithRecord(validPath, 0755, &createdPaths); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := m.mkdirAllWithRecord(filepath.Dir(validPath), 0755, &createdPaths); err != nil {
 				return err
 			}
@@ -570,11 +572,11 @@ func (m *Manager) Chmod(path string, mode os.FileMode) error {
 	}
 
 	if mode&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
-		return fmt.Errorf("setuid/setgid/sticky bits are not allowed")
+		return errors.New("setuid/setgid/sticky bits are not allowed")
 	}
 
 	if mode.Perm()&0002 != 0 {
-		return fmt.Errorf("world-writable permissions (o+w) are not allowed")
+		return errors.New("world-writable permissions (o+w) are not allowed")
 	}
 
 	return os.Chmod(validPath, mode)
@@ -602,7 +604,7 @@ func (m *Manager) Chown(path string, uid, gid int) error {
 }
 
 // GetFileDetails returns detailed file information.
-func (m *Manager) GetFileDetails(path string) (map[string]interface{}, error) {
+func (m *Manager) GetFileDetails(path string) (map[string]any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(path)
@@ -615,7 +617,7 @@ func (m *Manager) GetFileDetails(path string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"name":        info.Name(),
 		"path":        m.toRelativePath(validPath),
 		"is_dir":      info.IsDir(),
@@ -638,7 +640,7 @@ func (m *Manager) GetFileDetails(path string) (map[string]interface{}, error) {
 }
 
 // GetDiskUsage returns disk usage information.
-func (m *Manager) GetDiskUsage(path string) (map[string]interface{}, error) {
+func (m *Manager) GetDiskUsage(path string) (map[string]any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	validPath, err := m.ValidatePath(path)
@@ -660,7 +662,7 @@ func (m *Manager) GetDiskUsage(path string) (map[string]interface{}, error) {
 		usagePercent = float64(used) / float64(total) * 100
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_bytes":   total,
 		"used_bytes":    used,
 		"free_bytes":    free,
@@ -750,8 +752,8 @@ func (m *Manager) mkdirAllWithRecord(path string, perm os.FileMode, createdPaths
 		}
 	}
 
-	for i := len(toCreate) - 1; i >= 0; i-- {
-		p := toCreate[i]
+	for _, v := range slices.Backward(toCreate) {
+		p := v
 		if err := os.Mkdir(p, perm); err != nil {
 			if !os.IsExist(err) {
 				return err

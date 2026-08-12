@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -23,7 +24,7 @@ func NewService(repo Repository, encryptionKey string) (*Service, error) {
 	}
 
 	if len(encryptionKey) < 32 {
-		return nil, fmt.Errorf("deploy encryption key must be at least 32 bytes")
+		return nil, errors.New("deploy encryption key must be at least 32 bytes")
 	}
 
 	return &Service{
@@ -35,24 +36,15 @@ func NewService(repo Repository, encryptionKey string) (*Service, error) {
 // Server CRUD
 
 func (s *Service) ListServers(ctx context.Context) ([]Server, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.ListServers(ctx)
 }
 
 func (s *Service) GetServer(ctx context.Context, id int64) (*Server, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.GetServer(ctx, id)
 }
 
 // GetServerAuthData returns the decrypted auth data for internal use only
 func (s *Service) GetServerAuthData(ctx context.Context, id int64) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	authData, err := s.repo.GetServerAuthData(ctx, id)
 	if err != nil {
 		return "", err
@@ -73,9 +65,6 @@ func (s *Service) GetServerAuthData(ctx context.Context, id int64) (string, erro
 }
 
 func (s *Service) CreateServer(ctx context.Context, srv *Server) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Encrypt auth data if encryption key is set
 	authData := srv.AuthData
 	if s.encryptionKey != nil && authData != "" {
@@ -91,9 +80,6 @@ func (s *Service) CreateServer(ctx context.Context, srv *Server) error {
 }
 
 func (s *Service) UpdateServer(ctx context.Context, srv *Server) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Encrypt auth data if encryption key is set
 	authData := srv.AuthData
 	if s.encryptionKey != nil && authData != "" {
@@ -109,9 +95,6 @@ func (s *Service) UpdateServer(ctx context.Context, srv *Server) error {
 }
 
 func (s *Service) DeleteServer(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Check for sub-resources before deleting
 	taskCount, err := s.repo.CountServerTasks(ctx, id)
 	if err != nil {
@@ -131,9 +114,6 @@ func (s *Service) DeleteServer(ctx context.Context, id int64) error {
 
 // TestConnection tests SSH connection to a server
 func (s *Service) TestConnection(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	srv, err := s.GetServer(ctx, id)
 	if err != nil {
 		return err
@@ -142,7 +122,9 @@ func (s *Service) TestConnection(ctx context.Context, id int64) error {
 	// Get auth data
 	authData, err := s.GetServerAuthData(ctx, id)
 	if err != nil {
-		s.repo.UpdateServerStatus(ctx, id, "offline", time.Now().Format(time.RFC3339))
+		if statusErr := s.repo.UpdateServerStatus(ctx, id, "offline", time.Now().Format(time.RFC3339)); statusErr != nil {
+			log.Printf("deploy: failed to mark server %d offline: %v", id, statusErr)
+		}
 		return fmt.Errorf("failed to get auth data: %w", err)
 	}
 
@@ -151,13 +133,17 @@ func (s *Service) TestConnection(ctx context.Context, id int64) error {
 	// Try SSH connection
 	client, err := NewSSHClient(srv, authData)
 	if err != nil {
-		s.repo.UpdateServerStatus(ctx, id, "offline", time.Now().Format(time.RFC3339))
+		if statusErr := s.repo.UpdateServerStatus(ctx, id, "offline", time.Now().Format(time.RFC3339)); statusErr != nil {
+			log.Printf("deploy: failed to mark server %d offline: %v", id, statusErr)
+		}
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
 	defer client.Close()
 
 	// Connection successful
-	s.repo.UpdateServerStatus(ctx, id, "online", time.Now().Format(time.RFC3339))
+	if statusErr := s.repo.UpdateServerStatus(ctx, id, "online", time.Now().Format(time.RFC3339)); statusErr != nil {
+		log.Printf("deploy: failed to mark server %d online: %v", id, statusErr)
+	}
 	log.Printf("deploy: tested connection to %s (%s:%d) - OK", srv.Name, srv.Host, srv.Port)
 	return nil
 }
@@ -165,23 +151,14 @@ func (s *Service) TestConnection(ctx context.Context, id int64) error {
 // Task CRUD
 
 func (s *Service) ListTasks(ctx context.Context) ([]Task, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.ListTasks(ctx)
 }
 
 func (s *Service) GetTask(ctx context.Context, id int64) (*Task, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.GetTask(ctx, id)
 }
 
 func (s *Service) CreateTask(ctx context.Context, task *Task) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Verify server exists
 	exists, err := s.repo.ServerExists(ctx, task.ServerID)
 	if err != nil {
@@ -195,18 +172,17 @@ func (s *Service) CreateTask(ctx context.Context, task *Task) error {
 }
 
 func (s *Service) DeleteTask(ctx context.Context, id int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.DeleteTask(ctx, id)
 }
 
-// ExecuteTask executes a deploy task
-func (s *Service) ExecuteTask(ctx context.Context, taskID int64) error {
+// ExecuteTask executes a deploy task.
+// 不接收 context：任务必须脱离调用方请求生命周期执行，客户端断开/超时不能
+// 中断状态更新导致任务卡在 "running"。DB 操作统一跑在 detached context 上。
+func (s *Service) ExecuteTask(taskID int64) error {
 	// All DB operations run on a context divorced from the client request so a
 	// cancelled request (client disconnect, timeout) cannot abort status updates
 	// and leave the task stuck in "running".
-	ctx = context.Background()
+	ctx := context.Background()
 
 	task, err := s.GetTask(ctx, taskID)
 	if err != nil {
@@ -233,11 +209,11 @@ func (s *Service) ExecuteTask(ctx context.Context, taskID int64) error {
 	var execErr error
 	switch task.Type {
 	case "sync":
-		result, execErr = s.executeSync(srv, task)
+		result, execErr = s.executeSync(ctx, srv, task)
 	case "command":
-		result, execErr = s.executeCommand(srv, task)
+		result, execErr = s.executeCommand(ctx, srv, task)
 	case "rollback":
-		result, execErr = s.executeRollback(srv, task)
+		result, execErr = s.executeRollback(ctx, srv, task)
 	default:
 		execErr = fmt.Errorf("unknown task type: %s", task.Type)
 	}
@@ -259,17 +235,17 @@ func (s *Service) ExecuteTask(ctx context.Context, taskID int64) error {
 	return nil
 }
 
-func (s *Service) executeSync(srv *Server, task *Task) (string, error) {
+func (s *Service) executeSync(ctx context.Context, srv *Server, task *Task) (string, error) {
 	// Validate inputs
 	if task.SourcePath == "" {
-		return "", fmt.Errorf("source path is required")
+		return "", errors.New("source path is required")
 	}
 	if task.DestPath == "" {
-		return "", fmt.Errorf("destination path is required")
+		return "", errors.New("destination path is required")
 	}
 
 	// Get auth data
-	authData, err := s.GetServerAuthData(context.Background(), srv.ID)
+	authData, err := s.GetServerAuthData(ctx, srv.ID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get auth data: %w", err)
 	}
@@ -283,7 +259,7 @@ func (s *Service) executeSync(srv *Server, task *Task) (string, error) {
 
 	// Ensure remote directory exists (escape path to prevent injection)
 	safePath := shellEscape(task.DestPath)
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", safePath)
+	mkdirCmd := "mkdir -p " + safePath
 	_, _, _, err = client.RunCommand(mkdirCmd, 10*time.Second)
 	if err != nil {
 		return "", fmt.Errorf("failed to create remote directory: %w", err)
@@ -300,14 +276,14 @@ func (s *Service) executeSync(srv *Server, task *Task) (string, error) {
 	return result, nil
 }
 
-func (s *Service) executeCommand(srv *Server, task *Task) (string, error) {
+func (s *Service) executeCommand(ctx context.Context, srv *Server, task *Task) (string, error) {
 	// Validate inputs
 	if task.Command == "" {
-		return "", fmt.Errorf("command is required")
+		return "", errors.New("command is required")
 	}
 	// Reject null bytes to prevent injection
 	if strings.ContainsRune(task.Command, '\x00') {
-		return "", fmt.Errorf("command contains null byte")
+		return "", errors.New("command contains null byte")
 	}
 	// Enforce max command length
 	const maxCmdLen = 8192
@@ -316,7 +292,7 @@ func (s *Service) executeCommand(srv *Server, task *Task) (string, error) {
 	}
 
 	// Get auth data
-	authData, err := s.GetServerAuthData(context.Background(), srv.ID)
+	authData, err := s.GetServerAuthData(ctx, srv.ID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get auth data: %w", err)
 	}
@@ -343,9 +319,9 @@ func (s *Service) executeCommand(srv *Server, task *Task) (string, error) {
 	return result, nil
 }
 
-func (s *Service) executeRollback(srv *Server, task *Task) (string, error) {
+func (s *Service) executeRollback(ctx context.Context, srv *Server, task *Task) (string, error) {
 	// Get auth data
-	authData, err := s.GetServerAuthData(context.Background(), srv.ID)
+	authData, err := s.GetServerAuthData(ctx, srv.ID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get auth data: %w", err)
 	}
@@ -372,32 +348,28 @@ func (s *Service) executeRollback(srv *Server, task *Task) (string, error) {
 		return result, nil
 	}
 
-	return fmt.Sprintf("Rollback completed on %s", srv.Host), nil
+	return "Rollback completed on " + srv.Host, nil
 }
 
 func (s *Service) createVersion(ctx context.Context, task *Task, result string) {
-	version := fmt.Sprintf("v%s", time.Now().Format("20060102-150405"))
-	s.repo.CreateVersion(ctx, &Version{
+	version := "v" + time.Now().Format("20060102-150405")
+	if err := s.repo.CreateVersion(ctx, &Version{
 		ServerID: task.ServerID,
 		TaskID:   task.ID,
 		Version:  version,
 		Files:    result,
-	})
+	}); err != nil {
+		log.Printf("deploy: failed to create version record for task %d: %v", task.ID, err)
+	}
 }
 
 // Version management
 
 func (s *Service) ListVersions(ctx context.Context, serverID int64) ([]Version, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.ListVersions(ctx, serverID)
 }
 
 func (s *Service) RollbackVersion(ctx context.Context, versionID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Get version info
 	ver, err := s.repo.GetVersion(ctx, versionID)
 	if err != nil {
@@ -452,13 +424,15 @@ func (s *Service) RollbackVersion(ctx context.Context, versionID int64) error {
 
 	// Create a new version record for the rollback
 	rollbackVersion := fmt.Sprintf("rollback-%s-%s", ver.Version, time.Now().Format("20060102-150405"))
-	s.repo.CreateVersion(ctx, &Version{
+	if err := s.repo.CreateVersion(ctx, &Version{
 		ServerID:   ver.ServerID,
 		TaskID:     ver.TaskID,
 		Version:    rollbackVersion,
 		Files:      ver.Files,
 		BackupPath: ver.BackupPath,
-	})
+	}); err != nil {
+		log.Printf("deploy: failed to create rollback version record: %v", err)
+	}
 
 	log.Printf("deploy: rolled back to version %s on server %s", ver.Version, srv.Name)
 	return nil

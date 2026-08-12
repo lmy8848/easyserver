@@ -1,7 +1,9 @@
 package systemd
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -66,16 +68,16 @@ func UnitName(unitFileName string) string {
 // ValidateManagedName 校验 <name> 是否合法。
 func ValidateManagedName(name string) error {
 	if name == "" {
-		return fmt.Errorf("name 不能为空")
+		return errors.New("name 不能为空")
 	}
 	if len(name) > 60 {
-		return fmt.Errorf("name 过长（最多 60 字符）")
+		return errors.New("name 过长（最多 60 字符）")
 	}
 	if strings.HasPrefix(name, managedUnitPrefix) {
 		return fmt.Errorf("name 不能以 %s 前缀开头", managedUnitPrefix)
 	}
 	if !unitNameRegex.MatchString(name) {
-		return fmt.Errorf("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
+		return errors.New("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
 	}
 	return nil
 }
@@ -91,20 +93,20 @@ func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 		return "", err
 	}
 	if spec.ExecStart == "" {
-		return "", fmt.Errorf("exec_start 不能为空")
+		return "", errors.New("exec_start 不能为空")
 	}
 	if strings.ContainsAny(spec.ExecStart, "\n\r") {
-		return "", fmt.Errorf("exec_start 不能包含换行")
+		return "", errors.New("exec_start 不能包含换行")
 	}
 	if strings.ContainsAny(spec.Dir, "\n\r") {
-		return "", fmt.Errorf("dir 不能包含换行")
+		return "", errors.New("dir 不能包含换行")
 	}
 	// 防御纵深：runtime 字段也不能含换行
 	if strings.ContainsAny(spec.RuntimeLang, "\n\r") {
-		return "", fmt.Errorf("runtime_lang 不能包含换行")
+		return "", errors.New("runtime_lang 不能包含换行")
 	}
 	if strings.ContainsAny(spec.RuntimeExact, "\n\r") {
-		return "", fmt.Errorf("runtime_exact 不能包含换行")
+		return "", errors.New("runtime_exact 不能包含换行")
 	}
 	// env key 校验：只允许合法的 shell 变量名，防注入。
 	for k := range spec.Env {
@@ -210,9 +212,7 @@ func mergeCommandEnv(user map[string]string, cmdEnv []string) map[string]string 
 		return user
 	}
 	merged := make(map[string]string, len(user)+len(cmdEnv))
-	for k, v := range user {
-		merged[k] = v
-	}
+	maps.Copy(merged, user)
 	for _, e := range cmdEnv {
 		k, v, ok := strings.Cut(e, "=")
 		if ok {
@@ -270,8 +270,8 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 
 		// [Unit] 段：注释元数据 + Description + StartLimitBurst
 		if section == "[Unit]" {
-			if strings.HasPrefix(trimmed, "# ") {
-				kv := strings.SplitN(strings.TrimPrefix(trimmed, "# "), "=", 2)
+			if after, ok := strings.CutPrefix(trimmed, "# "); ok {
+				kv := strings.SplitN(after, "=", 2)
 				if len(kv) != 2 {
 					continue
 				}
@@ -281,7 +281,7 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 				case managedMarkerKey:
 					info.Managed = val == managedMarkerValue
 				case "RuntimeVersionID":
-					fmt.Sscanf(val, "%d", &info.RuntimeVersionID)
+					_, _ = fmt.Sscanf(val, "%d", &info.RuntimeVersionID)
 				case "RuntimeLang":
 					info.RuntimeLang = val
 				case "RuntimeExact":
@@ -289,13 +289,13 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 				}
 				continue
 			}
-			if strings.HasPrefix(trimmed, "Description=") {
-				desc := strings.TrimPrefix(trimmed, "Description=")
+			if after, ok := strings.CutPrefix(trimmed, "Description="); ok {
+				desc := after
 				desc = strings.TrimPrefix(desc, "easyserver-managed: ")
 				info.Description = desc
 			}
-			if strings.HasPrefix(trimmed, "StartLimitBurst=") {
-				fmt.Sscanf(strings.TrimPrefix(trimmed, "StartLimitBurst="), "%d", &info.MaxRestarts)
+			if after, ok := strings.CutPrefix(trimmed, "StartLimitBurst="); ok {
+				_, _ = fmt.Sscanf(after, "%d", &info.MaxRestarts)
 			}
 		}
 
@@ -326,9 +326,9 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 			case trimmed == "Restart=on-failure":
 				info.AutoRestart = true
 			case strings.HasPrefix(trimmed, "RestartSec="):
-				fmt.Sscanf(strings.TrimPrefix(trimmed, "RestartSec="), "%d", &info.RestartDelay)
+				_, _ = fmt.Sscanf(strings.TrimPrefix(trimmed, "RestartSec="), "%d", &info.RestartDelay)
 			case strings.HasPrefix(trimmed, "TimeoutStopSec="):
-				fmt.Sscanf(strings.TrimPrefix(trimmed, "TimeoutStopSec="), "%d", &info.StopTimeout)
+				_, _ = fmt.Sscanf(strings.TrimPrefix(trimmed, "TimeoutStopSec="), "%d", &info.StopTimeout)
 			}
 		}
 	}
@@ -343,12 +343,12 @@ func stripMisePrefix(p mise.Provider, lang, exact, execStart string) string {
 
 // parseEnvLine 解析 Environment= 行的 "KEY=VALUE" 或 KEY="quoted value"。
 func parseEnvLine(line string) (key, val string) {
-	eq := strings.Index(line, "=")
-	if eq < 0 {
+	before, after, ok := strings.Cut(line, "=")
+	if !ok {
 		return "", ""
 	}
-	key = line[:eq]
-	val = line[eq+1:]
+	key = before
+	val = after
 	// 去掉 systemd 双引号包裹
 	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
 		val = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(val[1 : len(val)-1])

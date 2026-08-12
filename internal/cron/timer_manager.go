@@ -246,9 +246,9 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 	svcFull := systemd.CronServiceFileName(name)
 
 	// 先 disable + stop（best-effort，可能本来就未启用）
-	m.executor.RunCombined(ctx, "systemctl", "disable", timerFull)
-	m.executor.RunCombined(ctx, "systemctl", "stop", timerFull)
-	m.executor.RunCombined(ctx, "systemctl", "stop", svcFull)
+	_, _, _ = m.executor.RunCombined(ctx, "systemctl", "disable", timerFull)
+	_, _, _ = m.executor.RunCombined(ctx, "systemctl", "stop", timerFull)
+	_, _, _ = m.executor.RunCombined(ctx, "systemctl", "stop", svcFull)
 
 	if err := systemd.RemoveCronUnitFile(timerFull); err != nil {
 		return fmt.Errorf("删除 timer unit 失败: %w", err)
@@ -408,7 +408,7 @@ func (m *TimerManager) show(ctx context.Context, unit string, props ...string) m
 	args := append([]string{"show", unit}, props...)
 	out, _, _, _ := m.executor.Run(ctx, "systemctl", args...)
 	res := make(map[string]string)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok {
 			res[k] = v
 		}
@@ -421,7 +421,7 @@ func (m *TimerManager) show(ctx context.Context, unit string, props ...string) m
 // parseTimerUnit 从 .timer 文件解析 OnCalendar / Persistent / Description。
 func parseTimerUnit(content string, t *CronTask) {
 	section := ""
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = line
@@ -429,15 +429,15 @@ func parseTimerUnit(content string, t *CronTask) {
 		}
 		switch section {
 		case "[Unit]":
-			if strings.HasPrefix(line, "Description=") {
-				t.Description = strings.TrimPrefix(line, "Description=")
+			if after, ok := strings.CutPrefix(line, "Description="); ok {
+				t.Description = after
 			}
 		case "[Timer]":
-			if strings.HasPrefix(line, "OnCalendar=") {
-				t.Schedule = strings.TrimPrefix(line, "OnCalendar=")
+			if after, ok := strings.CutPrefix(line, "OnCalendar="); ok {
+				t.Schedule = after
 			}
-			if strings.HasPrefix(line, "Persistent=") {
-				t.Persistent = strings.TrimPrefix(line, "Persistent=") == "yes"
+			if after, ok := strings.CutPrefix(line, "Persistent="); ok {
+				t.Persistent = after == "yes"
 			}
 		}
 	}
@@ -446,7 +446,7 @@ func parseTimerUnit(content string, t *CronTask) {
 // parseServiceUnit 从 .service 文件解析命令/工作目录/超时/重试/runtime 注释。
 func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 	section := ""
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = line
@@ -459,7 +459,7 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 			}
 			switch strings.TrimSpace(kv[0]) {
 			case "RuntimeVersionID":
-				fmt.Sscanf(strings.TrimSpace(kv[1]), "%d", &t.RuntimeVersionID)
+				_, _ = fmt.Sscanf(strings.TrimSpace(kv[1]), "%d", &t.RuntimeVersionID)
 			case "RuntimeLang":
 				t.RuntimeLang = strings.TrimSpace(kv[1])
 			case "RuntimeExact":
@@ -497,10 +497,10 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 			}
 		case strings.HasPrefix(line, "StartLimitBurst="):
 			var burst int
-			fmt.Sscanf(strings.TrimPrefix(line, "StartLimitBurst="), "%d", &burst)
+			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "StartLimitBurst="), "%d", &burst)
 			t.MaxRetry = burst - 1
 		case strings.HasPrefix(line, "TimeoutStartSec="):
-			fmt.Sscanf(strings.TrimPrefix(line, "TimeoutStartSec="), "%d", &t.Timeout)
+			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "TimeoutStartSec="), "%d", &t.Timeout)
 		}
 	}
 	t.EnvVars = strings.TrimSpace(t.EnvVars)
@@ -509,12 +509,12 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 // parseEnvLine 解析 "KEY=VALUE" 或 KEY="quoted value"。
 func parseEnvLine(line string) (key, val string) {
 	ll := strings.TrimPrefix(line, "Environment=")
-	eq := strings.Index(ll, "=")
-	if eq < 0 {
+	before, after, ok := strings.Cut(ll, "=")
+	if !ok {
 		return "", ""
 	}
-	key = ll[:eq]
-	val = ll[eq+1:]
+	key = before
+	val = after
 	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
 		val = strings.NewReplacer(`\"`, `"`, `\\`, `\`).Replace(val[1 : len(val)-1])
 	}
@@ -527,7 +527,7 @@ func parseEnvMap(envStr string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string)
-	for _, line := range strings.Split(envStr, "\n") {
+	for line := range strings.SplitSeq(envStr, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -678,7 +678,7 @@ func parseJournalRuns(stdout string) []CronRun {
 	}
 	idx := map[string]int{}
 	var runs []CronRun
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -35,12 +36,14 @@ func Init(dbPath string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1) // SQLite only supports one writer at a time
 	db.SetMaxIdleConns(1)
 
-	if err := db.Ping(); err != nil {
+	ctx := context.Background()
+
+	if err := db.PingContext(ctx); err != nil {
 		return nil, err
 	}
 
 	// Enable foreign key enforcement (SQLite has it OFF by default)
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 

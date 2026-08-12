@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"easyserver/internal/infra/apperror"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -137,7 +138,7 @@ func UserIPWhitelistMiddleware(getWhitelist UserIPWhitelistFunc) gin.HandlerFunc
 // splitAndTrim splits a comma-separated string and trims whitespace
 func splitAndTrim(s string) []string {
 	parts := []string{}
-	for _, p := range strings.Split(s, ",") {
+	for p := range strings.SplitSeq(s, ",") {
 		p = strings.TrimSpace(p)
 		if p != "" {
 			parts = append(parts, p)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,9 +95,9 @@ func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	}
 
 	var services []ServiceInfo
-	lines := strings.Split(stdout, "\n")
+	lines := strings.SplitSeq(stdout, "\n")
 
-	for _, line := range lines {
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "UNIT") || strings.HasPrefix(line, "LOAD") {
 			continue
@@ -162,16 +163,14 @@ func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []Se
 	// Batch into groups to avoid systemd "Unknown object" errors with too many units
 	const batchSize = 50
 	for start := 0; start < len(services); start += batchSize {
-		end := start + batchSize
-		if end > len(services) {
-			end = len(services)
-		}
+		end := min(start+batchSize, len(services))
 		m.batchGetDetailedInfoChunk(ctx, services[start:end])
 	}
 }
 
 func (m *ServiceManager) batchGetDetailedInfoChunk(ctx context.Context, services []ServiceInfo) {
-	args := []string{"show"}
+	args := make([]string, 0, 1+len(services)+1)
+	args = append(args, "show")
 	for _, svc := range services {
 		args = append(args, svc.Name+".service")
 	}
@@ -185,8 +184,8 @@ func (m *ServiceManager) batchGetDetailedInfoChunk(ctx context.Context, services
 	currentName := ""
 	props := make(map[string]string)
 
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(stdout, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			if currentName != "" {
@@ -232,7 +231,7 @@ func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, pr
 	for i := range services {
 		if services[i].Name+".service" == id || services[i].Name == id {
 			if v, ok := props["MainPID"]; ok {
-				fmt.Sscanf(v, "%d", &services[i].PID)
+				_, _ = fmt.Sscanf(v, "%d", &services[i].PID)
 			}
 			if v, ok := props["MemoryCurrent"]; ok {
 				services[i].MemoryBytes = parseMemoryCurrent(v)
@@ -267,8 +266,8 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 		Name: name,
 	}
 
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(stdout, "\n")
+	for line := range lines {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			continue
@@ -283,7 +282,7 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 		case "SubState":
 			svc.SubState = value
 		case "MainPID":
-			fmt.Sscanf(value, "%d", &svc.PID)
+			_, _ = fmt.Sscanf(value, "%d", &svc.PID)
 		case "MemoryCurrent":
 			svc.MemoryBytes = parseMemoryCurrent(value)
 		case "Description":
@@ -407,7 +406,7 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 	}
 
 	if tail > 0 {
-		args = append(args, "-n", fmt.Sprintf("%d", tail))
+		args = append(args, "-n", strconv.Itoa(tail))
 	}
 
 	if since != "" {
@@ -420,9 +419,9 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 	}
 
 	var logs []LogLine
-	lines := strings.Split(stdout, "\n")
+	lines := strings.SplitSeq(stdout, "\n")
 
-	for _, line := range lines {
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -440,7 +439,7 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 		logTime := ""
 		if entry.RealtimeTimestamp != "" {
 			var usec int64
-			fmt.Sscanf(entry.RealtimeTimestamp, "%d", &usec)
+			_, _ = fmt.Sscanf(entry.RealtimeTimestamp, "%d", &usec)
 			t := time.Unix(usec/1000000, (usec%1000000)*1000)
 			logTime = t.Format("2006-01-02 15:04:05")
 		}

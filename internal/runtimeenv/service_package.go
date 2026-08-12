@@ -3,6 +3,7 @@ package runtimeenv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -120,10 +121,6 @@ func (s *PackageService) miseReshim(ctx context.Context) {
 // package manager directly. There is no DB cache — the package manager itself
 // is the source of truth.
 func (s *PackageService) ListPackages(ctx context.Context, runtimeID int64, runtimeName, runtimePath string) ([]Package, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	switch runtimeName {
 	case "node":
 		return s.scanNodePackages(ctx, runtimeID, runtimePath)
@@ -212,14 +209,14 @@ func (s *PackageService) GetRegistry(ctx context.Context, runtimeName, manager s
 		}
 		output, err := s.runManagerCmd(ctx, manager, "config", "get", "registry")
 		if err != nil {
-			return "", fmt.Errorf("%s config get registry failed: %v", manager, err)
+			return "", fmt.Errorf("%s config get registry failed: %w", manager, err)
 		}
 		return strings.TrimSpace(output), nil
 	case "python":
 		output, err := s.runManagerCmd(ctx, "pip", "config", "get", "global.index-url")
 		if err != nil {
 			// pip config get returns error if not set
-			return "", nil
+			return "", nil //nolint:nilerr // pip 未配置 index-url 时返回空串
 		}
 		return strings.TrimSpace(output), nil
 	default:
@@ -341,7 +338,7 @@ func (s *PackageService) getNpmPackageVersions(ctx context.Context, packageName 
 		return []string{}, nil
 	}
 
-	return []string{}, fmt.Errorf("无法解析 npm view 输出")
+	return []string{}, errors.New("无法解析 npm view 输出")
 }
 
 // pip package search
@@ -496,7 +493,7 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 				log.Printf("package: corepack did not produce a working %s shim (corepack: err=%v, output=%q), falling back to npm install -g", manager, corepackErr, corepackOutput)
 				installOutput, installErr := s.runManagerCmd(ctx, "npm", "install", "-g", manager)
 				if installErr != nil {
-					return fmt.Errorf("failed to auto-install %s: %v (output: %s)", manager, installErr, installOutput)
+					return fmt.Errorf("failed to auto-install %s: %w (output: %s)", manager, installErr, installOutput)
 				}
 				s.miseReshim(ctx)
 			}
@@ -645,9 +642,9 @@ func (s *PackageService) scanComposerPackages(ctx context.Context, runtimeID int
 }
 
 func (s *PackageService) installComposerPackage(ctx context.Context, req *PackageInstallRequest, runtimePath string) error {
-	return fmt.Errorf("composer package installation not yet supported")
+	return errors.New("composer package installation not yet supported")
 }
 
 func (s *PackageService) uninstallComposerPackage(ctx context.Context, req *PackageUninstallRequest, runtimePath string) error {
-	return fmt.Errorf("composer package uninstallation not yet supported")
+	return errors.New("composer package uninstallation not yet supported")
 }

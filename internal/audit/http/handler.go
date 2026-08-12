@@ -45,6 +45,7 @@ type AuditLogListResponse struct {
 
 // List returns audit logs with pagination and filtering
 func (h *AuditHandler) List(c *gin.Context) {
+	ctx := c.Request.Context()
 	// Parse query params
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
@@ -108,7 +109,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 	// Fallback to direct SQL
 	where := "1=1"
-	args := []interface{}{}
+	args := []any{}
 
 	if username != "" {
 		where += " AND username LIKE ?"
@@ -139,7 +140,8 @@ func (h *AuditHandler) List(c *gin.Context) {
 		args = append(args, logType)
 	}
 	if status != "" {
-		if logType == "request" {
+		switch logType {
+		case "request":
 			switch status {
 			case "2xx":
 				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 200 AND 299"
@@ -148,7 +150,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 			case "5xx":
 				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 500"
 			}
-		} else if logType == "operation" {
+		case "operation":
 			switch status {
 			case "success":
 				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) < 400 OR json_extract(detail, '$.success') = 1 OR (json_extract(detail, '$.status') IS NULL AND json_extract(detail, '$.success') IS NULL))"
@@ -161,7 +163,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	// Get total count
 	var total int64
 	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
-	if err := h.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+	if err := h.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -171,7 +173,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	args = append(args, pageSize, offset)
 
-	rows, err := h.db.Query(query, args...)
+	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -202,6 +204,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 // GetActions returns distinct actions for filtering
 func (h *AuditHandler) GetActions(c *gin.Context) {
+	ctx := c.Request.Context()
 	logType := c.Query("type")
 	if h.auditRepo != nil {
 		actions, err := h.auditRepo.GetActions(c.Request.Context(), logType)
@@ -216,9 +219,9 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 	var rows *sql.Rows
 	var err error
 	if logType != "" {
-		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs WHERE type = ? ORDER BY action", logType)
+		rows, err = h.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs WHERE type = ? ORDER BY action", logType)
 	} else {
-		rows, err = h.db.Query("SELECT DISTINCT action FROM audit_logs ORDER BY action")
+		rows, err = h.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs ORDER BY action")
 	}
 	if err != nil {
 		c.Error(apperror.WrapError(err))
@@ -233,12 +236,17 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 			actions = append(actions, action)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
 
 	httpx.Success(c, actions)
 }
 
 // Stats returns audit log statistics
 func (h *AuditHandler) Stats(c *gin.Context) {
+	ctx := c.Request.Context()
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
 	if days < 1 || days > 90 {
 		days = 7
@@ -246,7 +254,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 	since := time.Now().AddDate(0, 0, -days)
 
 	// 按用户统计
-	userRows, err := h.db.Query(`
+	userRows, err := h.db.QueryContext(ctx, `
 			SELECT username, COUNT(*) as cnt
 			FROM audit_logs
 			WHERE created_at >= ?
@@ -271,9 +279,13 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			userStats = append(userStats, s)
 		}
 	}
+	if err := userRows.Err(); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
 
 	// 按操作类型统计
-	actionRows, err := h.db.Query(`
+	actionRows, err := h.db.QueryContext(ctx, `
 			SELECT action, COUNT(*) as cnt
 			FROM audit_logs
 			WHERE created_at >= ?
@@ -298,9 +310,13 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			actionStats = append(actionStats, s)
 		}
 	}
+	if err := actionRows.Err(); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
 
 	// 按天统计
-	dayRows, err := h.db.Query(`
+	dayRows, err := h.db.QueryContext(ctx, `
 			SELECT DATE(created_at) as day, COUNT(*) as cnt
 			FROM audit_logs
 			WHERE created_at >= ?
@@ -324,9 +340,13 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			dayStats = append(dayStats, s)
 		}
 	}
+	if err := dayRows.Err(); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
 
 	// 按状态码统计（仅 request 日志含 status 字段）
-	statusRows, err := h.db.Query(`
+	statusRows, err := h.db.QueryContext(ctx, `
 			SELECT
 				CASE
 					WHEN CAST(json_extract(detail, '$.status') AS INTEGER) >= 500 THEN '5xx'
@@ -356,6 +376,10 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			statusStats = append(statusStats, s)
 		}
 	}
+	if err := statusRows.Err(); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
 
 	httpx.Success(c, gin.H{
 		"user_stats":   userStats,
@@ -379,9 +403,10 @@ func sanitizeCSVField(field string) string {
 
 // GetCleanPolicy returns the current clean policy
 func (h *AuditHandler) GetCleanPolicy(c *gin.Context) {
+	ctx := c.Request.Context()
 	// Check if there's a scheduled clean task
 	var count int
-	h.db.QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&count)
+	_ = h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
 
 	httpx.Success(c, gin.H{
 		"retention_days": 90,
@@ -392,6 +417,7 @@ func (h *AuditHandler) GetCleanPolicy(c *gin.Context) {
 
 // Export returns audit logs as CSV
 func (h *AuditHandler) Export(c *gin.Context) {
+	ctx := c.Request.Context()
 	username := c.Query("username")
 	action := c.Query("action")
 	resource := c.Query("resource")
@@ -401,7 +427,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	logType := c.Query("type")
 
 	where := "1=1"
-	args := []interface{}{}
+	args := []any{}
 
 	if username != "" {
 		where += " AND username LIKE ?"
@@ -434,7 +460,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 
 	query := `SELECT id, username, action, type, resource, detail, ip, created_at
 		          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
-	rows, err := h.db.Query(query, args...)
+	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -448,10 +474,10 @@ func (h *AuditHandler) Export(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 
 	// Write BOM for Excel
-	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+	_, _ = c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	// Write CSV header
-	c.Writer.WriteString("ID,用户,操作,类型,资源,详情,IP,时间\n")
+	_, _ = c.Writer.WriteString("ID,用户,操作,类型,资源,详情,IP,时间\n")
 
 	for rows.Next() {
 		var id int64
@@ -460,7 +486,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 			continue
 		}
 		// Sanitize CSV fields to prevent formula injection
-		c.Writer.WriteString(fmt.Sprintf("%d,%s,%s,%s,%s,\"%s\",%s,%s\n",
+		_, _ = fmt.Fprintf(c.Writer, "%d,%s,%s,%s,%s,\"%s\",%s,%s\n",
 			id,
 			sanitizeCSVField(username),
 			sanitizeCSVField(action),
@@ -468,12 +494,17 @@ func (h *AuditHandler) Export(c *gin.Context) {
 			sanitizeCSVField(resource),
 			strings.ReplaceAll(detail, "\"", "\"\""),
 			sanitizeCSVField(ip),
-			createdAt))
+			createdAt)
+	}
+	if err := rows.Err(); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
 	}
 }
 
 // Clean deletes audit logs older than specified days
 func (h *AuditHandler) Clean(c *gin.Context) {
+	ctx := c.Request.Context()
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "90"))
 	if days < 1 {
 		days = 90
@@ -492,7 +523,7 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 		return
 	}
 
-	result, err := h.db.Exec("DELETE FROM audit_logs WHERE created_at < ?", since)
+	result, err := h.db.ExecContext(ctx, "DELETE FROM audit_logs WHERE created_at < ?", since)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return

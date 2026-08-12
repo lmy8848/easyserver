@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -225,7 +226,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 	}
 	if req.Region != nil {
 		if !validRegions[*req.Region] {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的区域: %s", *req.Region)))
+			c.Error(apperror.ErrBadRequest.WithMessage("无效的区域: " + *req.Region))
 			return
 		}
 		h.cfg.TencentCloud.Region = *req.Region
@@ -723,17 +724,17 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
 // validateWebhookURL validates a webhook URL format
 func validateWebhookURL(rawURL string) error {
 	if rawURL == "" {
-		return fmt.Errorf("webhook URL cannot be empty")
+		return errors.New("webhook URL cannot be empty")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid webhook URL: %v", err)
+		return fmt.Errorf("invalid webhook URL: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("webhook URL must use http or https scheme")
+		return errors.New("webhook URL must use http or https scheme")
 	}
 	if u.Host == "" {
-		return fmt.Errorf("webhook URL must have a valid host")
+		return errors.New("webhook URL must have a valid host")
 	}
 	return nil
 }

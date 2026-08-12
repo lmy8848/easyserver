@@ -24,7 +24,7 @@ func BuildConfigContent(envs map[string]string) string {
 		// quoted strings for the chars Name/Value can plausibly hold.
 		// Belt-and-suspenders — even if an unsanitized key sneaks in, it
 		// can't break out of its quoted form to forge a new section.
-		buf.WriteString(fmt.Sprintf("%q = %q\n", name, value))
+		fmt.Fprintf(&buf, "%q = %q\n", name, value)
 	}
 
 	return buf.String()

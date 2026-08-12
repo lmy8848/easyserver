@@ -83,8 +83,8 @@ func printUsage() {
 
 func readPassword(prompt string) (string, error) {
 	fmt.Print(prompt)
-	if term.IsTerminal(int(syscall.Stdin)) {
-		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	if term.IsTerminal(syscall.Stdin) {
+		bytePassword, err := term.ReadPassword(syscall.Stdin)
 		fmt.Println()
 		if err != nil {
 			return "", err

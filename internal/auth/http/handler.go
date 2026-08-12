@@ -217,7 +217,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	tokenStr := c.GetString("token")
 	if tokenStr != "" && h.sessionService != nil {
 		// Remove session → sessionValidator 立即拒绝该 token
-		h.sessionService.RemoveSession(c.Request.Context(), tokenStr)
+		if err := h.sessionService.RemoveSession(c.Request.Context(), tokenStr); err != nil {
+			log.Printf("auth: failed to remove session on logout: %v", err)
+		}
 	}
 
 	// 清除登录态 cookie（幂等，web 登出必走）
@@ -832,8 +834,8 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	if err := h.qrService.Confirm(c.Request.Context(), req.QRToken, user.ID, user.Username, string(user.Role), ip, userAgent, string(payload)); err != nil {
-		switch err {
-		case qrlogin.ErrNotPending, qrlogin.ErrExpired:
+		switch {
+		case errors.Is(err, qrlogin.ErrNotPending), errors.Is(err, qrlogin.ErrExpired):
 			c.Error(apperror.ErrBadRequest.WithMessage(err.Error()))
 		default:
 			c.Error(apperror.ErrInternal.Wrap(err))

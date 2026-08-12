@@ -2,7 +2,6 @@ package apperror
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 
 func TestWrapError_NilInput(t *testing.T) {
 	result := WrapError(nil)
-	assert.Nil(t, result)
+	assert.NoError(t, result)
 }
 
 func TestWrapError_NotFound(t *testing.T) {
@@ -20,7 +19,7 @@ func TestWrapError_NotFound(t *testing.T) {
 	result := WrapError(err)
 
 	var appErr *AppError
-	require.True(t, errors.As(result, &appErr))
+	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusNotFound, appErr.HTTPStatus)
 	assert.Equal(t, CodeNotFound, appErr.Code)
 	assert.Equal(t, err.Error(), appErr.Message)
@@ -31,7 +30,7 @@ func TestWrapError_PathTraversal(t *testing.T) {
 	result := WrapError(err)
 
 	var appErr *AppError
-	require.True(t, errors.As(result, &appErr))
+	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusForbidden, appErr.HTTPStatus)
 	assert.Equal(t, CodeForbidden, appErr.Code)
 }
@@ -41,7 +40,7 @@ func TestWrapError_DockerNotInstalled(t *testing.T) {
 	result := WrapError(err)
 
 	var appErr *AppError
-	require.True(t, errors.As(result, &appErr))
+	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusBadRequest, appErr.HTTPStatus)
 	assert.Equal(t, CodeBadRequest, appErr.Code)
 	assert.Contains(t, appErr.Message, "docker is not installed")
@@ -52,7 +51,7 @@ func TestWrapError_InvalidPassword(t *testing.T) {
 	result := WrapError(err)
 
 	var appErr *AppError
-	require.True(t, errors.As(result, &appErr))
+	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusUnauthorized, appErr.HTTPStatus)
 	assert.Equal(t, CodeUnauthorized, appErr.Code)
 }
@@ -62,7 +61,7 @@ func TestWrapError_UniqueConstraint(t *testing.T) {
 	result := WrapError(err)
 
 	var appErr *AppError
-	require.True(t, errors.As(result, &appErr))
+	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusConflict, appErr.HTTPStatus)
 	assert.Equal(t, CodeConflict, appErr.Code)
 }
@@ -72,7 +71,7 @@ func TestWrapError_UnknownError(t *testing.T) {
 	result := WrapError(err)
 
 	var appErr *AppError
-	require.True(t, errors.As(result, &appErr))
+	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusInternalServerError, appErr.HTTPStatus)
 	assert.Equal(t, CodeInternalError, appErr.Code)
 	// Unknown errors should wrap the original
@@ -95,7 +94,7 @@ func TestAppError_WithMessage(t *testing.T) {
 }
 
 func TestAppError_Wrap(t *testing.T) {
-	inner := fmt.Errorf("disk full")
+	inner := errors.New("disk full")
 	wrapped := ErrInternal.Wrap(inner)
 
 	assert.Equal(t, http.StatusInternalServerError, wrapped.HTTPStatus)

@@ -11,9 +11,9 @@ import (
 )
 
 type errorResponse struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
 }
 
 // ErrorHandler is a middleware that processes errors added to the gin context

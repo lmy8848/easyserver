@@ -65,8 +65,8 @@ func TestChallenge_Copy_SrcSymlinkOut(t *testing.T) {
 func TestChallenge_Rename_SymlinkSourceOut(t *testing.T) {
 	base := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")
-	os.WriteFile(outside, []byte("OUTSIDE"), 0644)
-	os.Symlink(outside, filepath.Join(base, "link"))
+	_ = os.WriteFile(outside, []byte("OUTSIDE"), 0644)
+	_ = os.Symlink(outside, filepath.Join(base, "link"))
 
 	m, _ := NewManager(base)
 	if err := m.Rename("/link", "/renamed"); err == nil {
@@ -84,7 +84,7 @@ func TestChallenge_Rename_SymlinkSourceOut(t *testing.T) {
 func TestChallenge_Compress_SelfInclusion(t *testing.T) {
 	base := t.TempDir()
 	// Drop a 1 MB file so the zip has nontrivial content
-	os.WriteFile(filepath.Join(base, "big.bin"), bytes.Repeat([]byte{0}, 1<<20), 0644)
+	_ = os.WriteFile(filepath.Join(base, "big.bin"), bytes.Repeat([]byte{0}, 1<<20), 0644)
 
 	m, _ := NewManager(base)
 	if err := m.Compress([]string{"/"}, "/snapshot"); err != nil {
@@ -152,7 +152,7 @@ func TestChallenge_Extract_DotEntry(t *testing.T) {
 	zf, _ := os.Create(zipPath)
 	zw := zip.NewWriter(zf)
 	w, _ := zw.Create(".") // single-dot entry, NOT a dir (no trailing /)
-	w.Write([]byte("PWN"))
+	_, _ = w.Write([]byte("PWN"))
 	zw.Close()
 	zf.Close()
 
@@ -175,7 +175,7 @@ func TestChallenge_Extract_BareDotDot(t *testing.T) {
 	zf, _ := os.Create(zipPath)
 	zw := zip.NewWriter(zf)
 	w, _ := zw.Create("..")
-	w.Write([]byte("ESCAPE"))
+	_, _ = w.Write([]byte("ESCAPE"))
 	zw.Close()
 	zf.Close()
 
@@ -201,7 +201,7 @@ func TestChallenge_ExtractGzip_NoGzSuffix(t *testing.T) {
 	// switches on the extension. So this path is unreachable. Document it.
 	_ = gzPath
 	m, _ := NewManager(base)
-	os.WriteFile(filepath.Join(base, "blob"), []byte("not gzip"), 0644)
+	_ = os.WriteFile(filepath.Join(base, "blob"), []byte("not gzip"), 0644)
 	err := m.Extract("/blob", "/")
 	if err == nil {
 		t.Error("VULN: Extract accepted blob with no archive extension")
@@ -227,7 +227,7 @@ func TestChallenge_Extract_IntermediateSymlinkEscape(t *testing.T) {
 	zf, _ := os.Create(zipPath)
 	zw := zip.NewWriter(zf)
 	w, _ := zw.Create("escape/pwned")
-	io.Copy(w, strings.NewReader("OWNED-VIA-INTERMEDIATE-SYMLINK"))
+	_, _ = io.Copy(w, strings.NewReader("OWNED-VIA-INTERMEDIATE-SYMLINK"))
 	zw.Close()
 	zf.Close()
 
@@ -256,7 +256,7 @@ func TestChallenge_ExtractTarGz_IntermediateSymlinkEscape(t *testing.T) {
 		nil, nil)
 	dst := filepath.Join(base, "evil.tar.gz")
 	if data, err := os.ReadFile(tgz); err == nil {
-		os.WriteFile(dst, data, 0644)
+		_ = os.WriteFile(dst, data, 0644)
 	}
 
 	m, _ := NewManager(base)
@@ -287,7 +287,7 @@ func TestChallenge_ExtractTarGz_IntermediateSymlinkEscape(t *testing.T) {
 func TestChallenge_Upload_IntermediateSymlinkRejected(t *testing.T) {
 	base := t.TempDir()
 	outside := t.TempDir()
-	os.Symlink(outside, filepath.Join(base, "escape"))
+	_ = os.Symlink(outside, filepath.Join(base, "escape"))
 
 	m, _ := NewManager(base)
 	_, err := m.Upload(strings.NewReader("payload"), "/escape/newfile", 0)
@@ -313,12 +313,12 @@ func TestChallenge_Upload_IntermediateSymlinkRejected(t *testing.T) {
 func TestChallenge_ResolveShareSubpath_SymlinkEscape(t *testing.T) {
 	base := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "loot.txt")
-	os.WriteFile(outside, []byte("LOOT"), 0644)
+	_ = os.WriteFile(outside, []byte("LOOT"), 0644)
 
 	// shared directory contains a symlink pointing outside the sandbox
 	shareRoot := filepath.Join(base, "share")
-	os.MkdirAll(shareRoot, 0755)
-	os.Symlink(outside, filepath.Join(shareRoot, "link"))
+	_ = os.MkdirAll(shareRoot, 0755)
+	_ = os.Symlink(outside, filepath.Join(shareRoot, "link"))
 
 	m, _ := NewManager(base)
 	validRoot, err := m.ValidatePath("/share")
@@ -337,10 +337,10 @@ func TestChallenge_ResolveShareSubpath_SymlinkEscape(t *testing.T) {
 func TestChallenge_ResolveShareSubpath_Traversal(t *testing.T) {
 	base := t.TempDir()
 	// sibling dir the owner never shared
-	os.MkdirAll(filepath.Join(base, "secret"), 0755)
-	os.WriteFile(filepath.Join(base, "secret", "x.txt"), []byte("SECRET"), 0644)
+	_ = os.MkdirAll(filepath.Join(base, "secret"), 0755)
+	_ = os.WriteFile(filepath.Join(base, "secret", "x.txt"), []byte("SECRET"), 0644)
 	shareRoot := filepath.Join(base, "share")
-	os.MkdirAll(shareRoot, 0755)
+	_ = os.MkdirAll(shareRoot, 0755)
 
 	m, _ := NewManager(base)
 	validRoot, err := m.ValidatePath("/share")

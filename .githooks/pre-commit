@@ -1,10 +1,12 @@
 #!/bin/sh
 # pre-commit: 提交时前后端静态检查。
-#   后端: goimports（未安装则用 gofmt）+ go vet
+#   后端: golangci-lint --fix（自动修复，修改会重新暂存）
+#         配置见 .golangci.yml：已含 goimports / go vet（standard 组），
+#         故不再单独跑 goimports / go vet。
 #   前端: eslint --fix（自动修复，修改会重新暂存）
 #
-# 未安装 goimports 时回退 gofmt；golangci-lint 不在本钩子范围（见 pre-push）。
-# 安装: go install golang.org/x/tools/cmd/goimports@latest
+# golangci-lint 未安装时跳过并提示（不阻塞提交）。
+# 安装: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 #
 # 启用本钩子（仓库本地，克隆后需重新执行）:
 #   git config core.hooksPath .githooks
@@ -14,25 +16,15 @@ set -e
 GO_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
 FE_FILES=$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs')
 
-# --- 后端: goimports/gofmt（自动修复）+ go vet ---
+# --- 后端: golangci-lint（自动修复并重新暂存） ---
 if [ -n "$GO_FILES" ]; then
-  if command -v goimports >/dev/null 2>&1; then
-    FMT=goimports
+  if command -v golangci-lint >/dev/null 2>&1; then
+    echo "==> golangci-lint --fix"
+    golangci-lint run --fix
+    git add $GO_FILES
   else
-    FMT=gofmt
-    echo "pre-commit: goimports 未安装，用 gofmt"
+    echo "pre-commit: golangci-lint 未安装，跳过"
   fi
-  # 能自动修复的直接 -w 修复（goimports 还会整理 import 分组），再校验是否还有剩余。
-  $FMT -w $GO_FILES
-  out=$($FMT -l $GO_FILES)
-  if [ -n "$out" ]; then
-    echo "pre-commit: 以下 Go 文件仍有格式问题（$FMT -w 无法修复）:"
-    echo "$out"
-    exit 1
-  fi
-  git add $GO_FILES
-  echo "==> go vet"
-  go vet ./cmd/... ./internal/...
 fi
 
 # --- 前端: eslint --fix（自动修复并重新暂存） ---

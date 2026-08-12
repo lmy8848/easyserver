@@ -7,6 +7,7 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/security"
+
 	"github.com/gin-gonic/gin"
 )
 

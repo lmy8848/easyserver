@@ -117,8 +117,7 @@ func (h *SecurityHandler) BanIP(c *gin.Context) {
 	if req.Reason == "" {
 		req.Reason = "手动封禁"
 	}
-	var wid *int64
-	wid = &websiteID
+	wid := &websiteID
 	if err := h.svc.BanIP(c.Request.Context(), wid, req.IP, req.Reason, "manual", req.Duration); err != nil {
 		c.Error(err)
 		return

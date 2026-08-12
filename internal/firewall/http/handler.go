@@ -265,10 +265,10 @@ func parseFirewallLogLine(line string) *firewall.FirewallLogEntry {
 	entry.SrcPort = extractPort(line, "SPT=")
 
 	// Parse interface
-	if idx := strings.Index(line, "IN="); idx >= 0 {
-		rest := line[idx+3:]
-		if endIdx := strings.Index(rest, " "); endIdx >= 0 {
-			entry.Interface = rest[:endIdx]
+	if _, after, ok := strings.Cut(line, "IN="); ok {
+		rest := after
+		if before, _, ok := strings.Cut(rest, " "); ok {
+			entry.Interface = before
 		}
 	}
 
@@ -277,15 +277,15 @@ func parseFirewallLogLine(line string) *firewall.FirewallLogEntry {
 
 // extractPort extracts a port number from a log line given a prefix like "DPT="
 func extractPort(line, prefix string) int {
-	idx := strings.Index(line, prefix)
-	if idx < 0 {
+	_, after, ok := strings.Cut(line, prefix)
+	if !ok {
 		return 0
 	}
-	rest := line[idx+len(prefix):]
-	endIdx := strings.Index(rest, " ")
+	rest := after
+	before0, _, ok0 := strings.Cut(rest, " ")
 	var portStr string
-	if endIdx >= 0 {
-		portStr = rest[:endIdx]
+	if ok0 {
+		portStr = before0
 	} else {
 		portStr = rest
 	}
@@ -874,7 +874,7 @@ func (h *FirewallRuleHandler) ExportRules(c *gin.Context) {
 	}
 
 	filename := fmt.Sprintf("firewall-rules-%s.json", time.Now().Format("2006-01-02"))
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Disposition", "attachment; filename="+filename)
 	c.Header("Content-Type", "application/json")
 	httpx.Success(c, data)
 }
@@ -1067,7 +1067,7 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 		}
 	}
 	if tpl == nil {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("未找到模板: %s", req.Name)))
+		c.Error(apperror.ErrBadRequest.WithMessage("未找到模板: " + req.Name))
 		return
 	}
 

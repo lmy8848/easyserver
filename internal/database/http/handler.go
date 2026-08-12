@@ -195,11 +195,10 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) {
 		select {
 		case <-tk.Done():
 			// Flush anything that landed between the tail above and completion.
-			if lines, next := log.Tail(cursor); len(lines) > 0 {
+			if lines, _ := log.Tail(cursor); len(lines) > 0 {
 				for _, line := range lines {
 					send(map[string]string{"type": "line", "text": line})
 				}
-				cursor = next
 			}
 			errMsg := ""
 			if tk.Err() != nil {
@@ -543,8 +542,8 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
 	}
 
 	var req struct {
-		Table string                 `json:"table" binding:"required"`
-		Data  map[string]interface{} `json:"data" binding:"required"`
+		Table string         `json:"table" binding:"required"`
+		Data  map[string]any `json:"data" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
@@ -573,10 +572,10 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) {
 	}
 
 	var req struct {
-		Table      string                 `json:"table" binding:"required"`
-		Data       map[string]interface{} `json:"data" binding:"required"`
-		PrimaryKey string                 `json:"primary_key" binding:"required"`
-		PrimaryVal interface{}            `json:"primary_val" binding:"required"`
+		Table      string         `json:"table" binding:"required"`
+		Data       map[string]any `json:"data" binding:"required"`
+		PrimaryKey string         `json:"primary_key" binding:"required"`
+		PrimaryVal any            `json:"primary_val" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
@@ -605,9 +604,9 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) {
 	}
 
 	var req struct {
-		Table      string      `json:"table" binding:"required"`
-		PrimaryKey string      `json:"primary_key" binding:"required"`
-		PrimaryVal interface{} `json:"primary_val" binding:"required"`
+		Table      string `json:"table" binding:"required"`
+		PrimaryKey string `json:"primary_key" binding:"required"`
+		PrimaryVal any    `json:"primary_val" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
@@ -960,7 +959,7 @@ func (h *BackupHandler) RestoreStatus(c *gin.Context) {
 
 	// 恢复任务不存在（服务重启内存态丢失，或从未发起）→ 立即终结，语义与
 	// 原 404 一致，但走 SSE done 帧（EventSource 拿不到状态码）。
-	status, ok := h.svc.GetRestoreStatus(c.Request.Context(), bid)
+	_, ok := h.svc.GetRestoreStatus(c.Request.Context(), bid)
 	if !ok {
 		send(map[string]any{"type": "done", "error": "恢复状态已丢失（服务可能已重启），请手动确认数据"})
 		return
@@ -978,7 +977,7 @@ func (h *BackupHandler) RestoreStatus(c *gin.Context) {
 			continue
 		case <-time.After(500 * time.Millisecond):
 		}
-		status, ok = h.svc.GetRestoreStatus(c.Request.Context(), bid)
+		status, ok := h.svc.GetRestoreStatus(c.Request.Context(), bid)
 		if !ok {
 			send(map[string]any{"type": "done", "error": "恢复状态已丢失（服务可能已重启），请手动确认数据"})
 			return

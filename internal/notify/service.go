@@ -2,6 +2,7 @@ package notify
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -61,7 +62,12 @@ func (s *Service) TestWebhook() error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	resp, err := s.httpClient.Post(s.webhookURL, "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.webhookURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
@@ -109,7 +115,12 @@ func (s *Service) sendWebhook(event LoginEvent) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	resp, err := s.httpClient.Post(s.webhookURL, "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.webhookURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
@@ -142,10 +153,10 @@ func (s *Service) formatMessage(event LoginEvent) string {
 	)
 }
 
-func (s *Service) buildPayload(msg string) map[string]interface{} {
+func (s *Service) buildPayload(msg string) map[string]any {
 	switch {
 	case strings.Contains(s.webhookURL, "dingtalk.com"):
-		return map[string]interface{}{
+		return map[string]any{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
 				"title": "EasyServer 登录通知",
@@ -153,21 +164,21 @@ func (s *Service) buildPayload(msg string) map[string]interface{} {
 			},
 		}
 	case strings.Contains(s.webhookURL, "feishu.cn"):
-		return map[string]interface{}{
+		return map[string]any{
 			"msg_type": "text",
 			"content": map[string]string{
 				"text": msg,
 			},
 		}
 	case strings.Contains(s.webhookURL, "qyapi.weixin.qq.com"):
-		return map[string]interface{}{
+		return map[string]any{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
 				"content": msg,
 			},
 		}
 	default:
-		return map[string]interface{}{
+		return map[string]any{
 			"text": msg,
 		}
 	}
@@ -195,7 +206,12 @@ func (s *Service) sendAlertWebhook(event AlertEvent) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	resp, err := s.httpClient.Post(s.webhookURL, "application/json", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.webhookURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}

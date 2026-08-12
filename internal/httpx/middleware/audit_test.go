@@ -88,7 +88,7 @@ func (m *mockRequestLogger) LogRequest(ctx context.Context, userID int64, userna
 	m.requestLogs = append(m.requestLogs, reqLogEntry{userID, username, action, resource, detail, ip, userAgent})
 }
 
-func (m *mockRequestLogger) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
+func (m *mockRequestLogger) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]any, ip, userAgent string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.operationLogs = append(m.operationLogs, opLogEntry{userID, username, action, resource, extra, ip, userAgent})
@@ -109,7 +109,7 @@ func TestAuditMiddleware_OperationLoggedWhenSummarySet(t *testing.T) {
 		c.Status(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/containers/5", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/containers/5", nil)
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	if len(logger.requestLogs) != 1 {
@@ -146,7 +146,7 @@ func TestAuditMiddleware_RequestOnlyWhenNoSummary(t *testing.T) {
 	}, AuditMiddleware(logger))
 	r.POST("/api/containers/:id", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodPost, "/api/containers/5", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/containers/5", nil)
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	if len(logger.requestLogs) != 1 {
@@ -157,7 +157,7 @@ func TestAuditMiddleware_RequestOnlyWhenNoSummary(t *testing.T) {
 	}
 
 	reqDetail := logger.requestLogs[0].detail
-	var d map[string]interface{}
+	var d map[string]any
 	if err := json.Unmarshal([]byte(reqDetail), &d); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestAuditMiddleware_SkipsGET(t *testing.T) {
 	}, AuditMiddleware(logger))
 	r.GET("/api/containers", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/api/containers", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/containers", nil)
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	if len(logger.requestLogs) != 0 {

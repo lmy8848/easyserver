@@ -17,7 +17,7 @@ import (
 func Validate(cfg *Config, devMode bool) error {
 	// JWT secret - empty always rejected
 	if cfg.Auth.JWTSecret == "" {
-		return errors.New("JWT secret is empty. Set a strong secret via EASYSERVER_JWT_SECRET env var (32+ chars) or auth.jwt_secret in config.yaml.")
+		return errors.New("JWT secret is empty. Set a strong secret via EASYSERVER_JWT_SECRET env var (32+ chars) or auth.jwt_secret in config.yaml")
 	}
 	if err := rejectOrWarn(devMode, len(cfg.Auth.JWTSecret) < 32,
 		"JWT secret must be at least 32 bytes. Use: EASYSERVER_JWT_SECRET=$(openssl rand -base64 32)"); err != nil {

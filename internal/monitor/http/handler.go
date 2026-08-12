@@ -92,7 +92,7 @@ func (h *MonitorHandler) HandleHistory(c *gin.Context) {
 		return
 	}
 
-	snapshots := make([]interface{}, len(points))
+	snapshots := make([]any, len(points))
 	for i, p := range points {
 		snapshots[i] = p.ToSnapshot()
 	}
@@ -455,7 +455,8 @@ func safeListen(addr string) (net.Listener, error) {
 				err = fmt.Errorf("listen panic: %v", r)
 			}
 		}()
-		listener, err = net.Listen("tcp", addr)
+		lc := net.ListenConfig{}
+		listener, err = lc.Listen(context.Background(), "tcp", addr)
 	}()
 	return listener, err
 }
@@ -464,7 +465,8 @@ func safeListen(addr string) (net.Listener, error) {
 func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
 	defer func() {
 		if r := recover(); r != nil {
-			// Silently recover from any parsing panics
+			// 静默吞掉解析过程中的 panic，避免端口探测接口崩溃
+			_ = r
 		}
 	}()
 
@@ -482,7 +484,7 @@ func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
 
 	out, _, err = h.executor.RunCombined(ctx, "netstat", "-tlnp")
 	if err == nil {
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			if strings.Contains(line, fmt.Sprintf(":%d ", port)) || strings.Contains(line, fmt.Sprintf(":%d\t", port)) {
 				return strings.TrimSpace(line)
 			}

@@ -5,9 +5,10 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
-	"github.com/gin-gonic/gin"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 type DeployHandler struct {
@@ -236,7 +237,7 @@ func (h *DeployHandler) ExecuteTask(c *gin.Context) {
 	}
 
 	middleware.AuditSummary(c, "执行部署任务 "+c.Param("id"))
-	if err := h.deployService.ExecuteTask(c.Request.Context(), id); err != nil {
+	if err := h.deployService.ExecuteTask(id); err != nil {
 		if strings.Contains(err.Error(), "already running") {
 			c.Error(apperror.ErrConflict.Wrap(err))
 			return

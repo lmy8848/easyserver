@@ -1,8 +1,10 @@
 package mise
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -48,7 +50,7 @@ func BootstrapMise() error {
 }
 
 func checkMiseVersion() error {
-	cmd := exec.Command(BinPath, "--version")
+	cmd := exec.CommandContext(context.Background(), BinPath, "--version")
 	out, err := cmd.Output()
 	if err != nil {
 		return err
@@ -65,7 +67,7 @@ func checkMiseVersion() error {
 	// only exists to keep the auto-download SHA verifiable.
 	target := strings.TrimPrefix(targetMiseVersion, "v")
 	fallback := strings.TrimPrefix(fallbackMiseVersion, "v")
-	for _, f := range strings.Fields(verStr) {
+	for f := range strings.FieldsSeq(verStr) {
 		if f == target || f == fallback {
 			return nil
 		}
@@ -115,7 +117,11 @@ func downloadFile(filepath string, url string, expectedSha256 string) error {
 	// 总超时 3 分钟：~100MB 的 mise 二进制在慢速链路下 body 读取可能远超
 	// 拨号时间，只约束连接建立会误杀下载；3 分钟对正常下载绰绰有余。
 	client := &http.Client{Timeout: 3 * time.Minute}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -138,7 +144,7 @@ func downloadFile(filepath string, url string, expectedSha256 string) error {
 	}
 
 	if hex.EncodeToString(hasher.Sum(nil)) != expectedSha256 {
-		return fmt.Errorf("checksum mismatch")
+		return errors.New("checksum mismatch")
 	}
 	return nil
 }

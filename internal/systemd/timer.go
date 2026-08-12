@@ -1,6 +1,7 @@
 package systemd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,16 +77,16 @@ func UnitDir() string {
 // ValidateCronName 校验定时任务 <name> 是否合法（复用进程守护的命名规则）。
 func ValidateCronName(name string) error {
 	if name == "" {
-		return fmt.Errorf("name 不能为空")
+		return errors.New("name 不能为空")
 	}
 	if len(name) > 60 {
-		return fmt.Errorf("name 过长（最多 60 字符）")
+		return errors.New("name 过长（最多 60 字符）")
 	}
 	if strings.HasPrefix(name, CronTimerPrefix) {
 		return fmt.Errorf("name 不能以 %s 前缀开头", CronTimerPrefix)
 	}
 	if !unitNameRegex.MatchString(name) {
-		return fmt.Errorf("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
+		return errors.New("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
 	}
 	return nil
 }
@@ -96,10 +97,10 @@ func RenderTimer(spec *TimerSpec) (string, error) {
 		return "", err
 	}
 	if spec.OnCalendar == "" {
-		return "", fmt.Errorf("on_calendar 不能为空")
+		return "", errors.New("on_calendar 不能为空")
 	}
 	if strings.ContainsAny(spec.OnCalendar, "\n\r") {
-		return "", fmt.Errorf("on_calendar 不能包含换行")
+		return "", errors.New("on_calendar 不能包含换行")
 	}
 
 	persistent := "no"
@@ -129,19 +130,19 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 		return "", err
 	}
 	if spec.ExecStart == "" {
-		return "", fmt.Errorf("exec_start 不能为空")
+		return "", errors.New("exec_start 不能为空")
 	}
 	if strings.ContainsAny(spec.ExecStart, "\n\r") {
-		return "", fmt.Errorf("exec_start 不能包含换行")
+		return "", errors.New("exec_start 不能包含换行")
 	}
 	if strings.ContainsAny(spec.Dir, "\n\r") {
-		return "", fmt.Errorf("dir 不能包含换行")
+		return "", errors.New("dir 不能包含换行")
 	}
 	if strings.ContainsAny(spec.RuntimeLang, "\n\r") {
-		return "", fmt.Errorf("runtime_lang 不能包含换行")
+		return "", errors.New("runtime_lang 不能包含换行")
 	}
 	if strings.ContainsAny(spec.RuntimeExact, "\n\r") {
-		return "", fmt.Errorf("runtime_exact 不能包含换行")
+		return "", errors.New("runtime_exact 不能包含换行")
 	}
 	for k := range spec.Env {
 		if !envKeyRegex.MatchString(k) {
@@ -153,10 +154,7 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 	envLines := buildEnvLines(mergeCommandEnv(spec.Env, runtimeEnv))
 
 	// StartLimitBurst = MaxRetry + 1：首次执行算一次，重试 MaxRetry 次。
-	burst := spec.MaxRetry + 1
-	if burst < 1 {
-		burst = 1
-	}
+	burst := max(spec.MaxRetry+1, 1)
 	restartDelay := spec.RestartDelay
 	if restartDelay <= 0 {
 		restartDelay = 5

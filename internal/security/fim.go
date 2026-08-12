@@ -91,6 +91,9 @@ func (s *Service) CheckChanges(ctx context.Context) ([]FIMChange, error) {
 			_, _ = s.db.ExecContext(ctx, "UPDATE fim_baseline SET hash=?, updated_at=? WHERE path=?", newHash, time.Now().Format(time.RFC3339), path)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, apperror.WrapError(err)
+	}
 	return changes, nil
 }
 
@@ -122,6 +125,9 @@ func (s *Service) ListBaseline(ctx context.Context) ([]FIMBaseline, error) {
 		}
 		bl = append(bl, b)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, apperror.WrapError(err)
+	}
 	return bl, nil
 }
 
@@ -145,6 +151,9 @@ func (s *Service) ListChanges(ctx context.Context, limit int) ([]FIMChange, erro
 			continue
 		}
 		ch = append(ch, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperror.WrapError(err)
 	}
 	return ch, nil
 }

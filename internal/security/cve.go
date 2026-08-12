@@ -47,10 +47,7 @@ func (s *Service) Scan(ctx context.Context) ([]Vulnerability, error) {
 	var vulns []Vulnerability
 	// osv.dev querybatch accepts up to 1000 queries per request.
 	for i := 0; i < len(pkgs); i += 500 {
-		end := i + 500
-		if end > len(pkgs) {
-			end = len(pkgs)
-		}
+		end := min(i+500, len(pkgs))
 		results, err := s.queryOSVBatch(ctx, pkgs[i:end])
 		if err != nil {
 			return nil, apperror.ErrInternal.WithMessage("查询 osv.dev 失败: " + err.Error())
@@ -80,7 +77,7 @@ func (s *Service) listInstalled(ctx context.Context) ([]installedPackage, error)
 		return nil, err
 	}
 	var pkgs []installedPackage
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Listing") {
 			continue
@@ -130,7 +127,7 @@ func (s *Service) queryOSVBatch(ctx context.Context, pkgs []installedPackage) ([
 	}
 	body, _ := json.Marshal(map[string]any{"queries": queries})
 	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.osv.dev/v1/querybatch", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.osv.dev/v1/querybatch", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +184,7 @@ func (s *Service) PackageUpdateCount(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("apt list --upgradable: %w", err)
 	}
 	count := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Listing") {
 			continue

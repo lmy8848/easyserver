@@ -122,7 +122,7 @@ func (s *SecurityService) UnbanIP(ctx context.Context, banID int64) error {
 			needle := "网站安全封禁 " + ip
 			for _, r := range rules {
 				if r.Source == ip && strings.HasPrefix(r.Remark, needle) {
-					s.firewall.DeleteRule(ctx, r.ID)
+					_ = s.firewall.DeleteRule(ctx, r.ID)
 				}
 			}
 		}

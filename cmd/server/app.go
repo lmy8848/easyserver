@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -75,7 +76,7 @@ func (a *App) Run() {
 	errCh := make(chan error, 1)
 	go func() {
 		err := a.serve()
-		if err != nil && err != http.ErrServerClosed {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -132,7 +133,8 @@ func (a *App) acquireListener(addr string) error {
 			}
 		}
 	}
-	ln, err := net.Listen("tcp", addr)
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}

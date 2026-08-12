@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -384,7 +385,7 @@ func (h *CronHandler) GetScriptLogs(c *gin.Context) {
 // journald 不区分 stdout/stderr，统一 stream 为 stdout。
 func parseScriptJournalLogs(stdout string) []cron.ScriptLogLine {
 	var logs []cron.ScriptLogLine
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -595,7 +596,7 @@ func (h *CronHandler) RunScriptSSE(c *gin.Context) {
 			if cmd := rs.Cmd(); cmd != nil && cmd.ProcessState != nil {
 				exitCode = cmd.ProcessState.ExitCode()
 			}
-			exitMsg, _ := json.Marshal(map[string]interface{}{
+			exitMsg, _ := json.Marshal(map[string]any{
 				"type": "exit",
 				"code": exitCode,
 			})
@@ -674,7 +675,7 @@ func checkTaskNameUnique(ctx context.Context, svc *cron.Service, name, excludeNa
 
 // validateEnvVars 校验环境变量格式：每行非空须为 KEY=VALUE，且 KEY 非空。
 func validateEnvVars(envStr string) error {
-	for _, line := range strings.Split(envStr, "\n") {
+	for line := range strings.SplitSeq(envStr, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -693,7 +694,7 @@ func validateWorkDir(dir string) error {
 		return nil
 	}
 	if !filepath.IsAbs(dir) {
-		return fmt.Errorf("工作目录必须是绝对路径")
+		return errors.New("工作目录必须是绝对路径")
 	}
 	return nil
 }

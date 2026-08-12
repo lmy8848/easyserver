@@ -2,10 +2,8 @@ package database
 
 import (
 	"context"
-	"io"
 	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -37,7 +35,7 @@ func (f *runtimeFakeExecutor) RunCombined(ctx context.Context, name string, args
 func (f *runtimeFakeExecutor) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, int, error) {
 	f.calls = append(f.calls, runtimeExecCall{name: name, args: args})
 	if onLine != nil {
-		for _, l := range strings.Split(f.out, "\n") {
+		for l := range strings.SplitSeq(f.out, "\n") {
 			if l = strings.TrimSpace(l); l != "" {
 				onLine(l)
 			}
@@ -55,16 +53,6 @@ func (f *runtimeFakeExecutor) Command(context.Context, executor.StartOptions, st
 	panic("unused")
 }
 func (f *runtimeFakeExecutor) LookPath(string) (string, error) { return "", nil }
-
-type unusedProcess struct{}
-
-func (*unusedProcess) Pid() int                           { return 0 }
-func (*unusedProcess) StdoutPipe() (io.ReadCloser, error) { return nil, nil }
-func (*unusedProcess) StderrPipe() (io.ReadCloser, error) { return nil, nil }
-func (*unusedProcess) Wait() error                        { return nil }
-func (*unusedProcess) Kill() error                        { return nil }
-func (*unusedProcess) Signal(syscall.Signal) error        { return nil }
-func (*unusedProcess) Cmd() *exec.Cmd                     { return nil }
 
 func TestExecSeparatesStderrFromQueryOutput(t *testing.T) {
 	mock := executor.NewMockExecutor()

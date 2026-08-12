@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -12,8 +13,10 @@ import (
 
 // Migrate runs all pending database migrations
 func Migrate(db *sql.DB, migrationsDir string) error {
+	ctx := context.Background()
+
 	// Create migrations tracking table
-	if _, err := db.Exec(`
+	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version INTEGER PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -67,7 +70,8 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 
 // getAppliedMigrations returns a map of applied migration versions
 func getAppliedMigrations(db *sql.DB) (map[int]bool, error) {
-	rows, err := db.Query("SELECT version FROM schema_migrations")
+	ctx := context.Background()
+	rows, err := db.QueryContext(ctx, "SELECT version FROM schema_migrations")
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +85,9 @@ func getAppliedMigrations(db *sql.DB) (map[int]bool, error) {
 		}
 		applied[version] = true
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return applied, nil
 }
 
@@ -88,14 +95,15 @@ func getAppliedMigrations(db *sql.DB) (map[int]bool, error) {
 // e.g., "000001_init_schema.up.sql" -> 1
 func extractVersion(name string) int {
 	var version int
-	fmt.Sscanf(name, "%d", &version)
+	// 解析失败时 version 保持 0，符合"无版本号即 0"的兜底语义
+	_, _ = fmt.Sscanf(name, "%d", &version)
 	return version
 }
 
 // stripLeadingComments removes leading comment lines and blank lines from a SQL statement
 func stripLeadingComments(stmt string) string {
-	lines := strings.Split(stmt, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(stmt, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
 			continue
@@ -107,6 +115,7 @@ func stripLeadingComments(stmt string) string {
 
 // runMigration executes a single migration file
 func runMigration(db *sql.DB, path string, version int, name string) error {
+	ctx := context.Background()
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -115,11 +124,11 @@ func runMigration(db *sql.DB, path string, version int, name string) error {
 	// Split by semicolons and execute each statement
 	statements := splitStatements(string(content))
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
@@ -131,13 +140,13 @@ func runMigration(db *sql.DB, path string, version int, name string) error {
 		if cleaned == "" {
 			continue
 		}
-		if _, err := tx.Exec(stmt); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("exec statement: %w\nStatement: %s", err, stmt[:min(100, len(stmt))])
 		}
 	}
 
 	// Record migration
-	if _, err := tx.Exec("INSERT INTO schema_migrations (version, name) VALUES (?, ?)", version, name); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (version, name) VALUES (?, ?)", version, name); err != nil {
 		return err
 	}
 
@@ -153,7 +162,7 @@ func splitStatements(content string) []string {
 	quoteChar := byte(0)
 	inComment := false // -- line comment
 
-	for i := 0; i < len(content); i++ {
+	for i := range len(content) {
 		ch := content[i]
 
 		// Detect start of -- line comment (outside quotes)

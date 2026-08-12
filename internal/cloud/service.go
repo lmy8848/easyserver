@@ -100,9 +100,6 @@ func NewService(secretID, secretKey, region, instanceID string) (*Service, error
 
 // GetInstances returns all instances.
 func (s *Service) GetInstances(ctx context.Context) ([]InstanceInfo, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewDescribeInstancesRequest()
 	request.Limit = common.Int64Ptr(100)
 
@@ -140,9 +137,6 @@ func (s *Service) GetInstances(ctx context.Context) ([]InstanceInfo, error) {
 
 // GetInstance returns a specific instance.
 func (s *Service) GetInstance(ctx context.Context, instanceID string) (*InstanceInfo, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewDescribeInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
@@ -180,9 +174,6 @@ func (s *Service) GetInstance(ctx context.Context, instanceID string) (*Instance
 
 // StartInstance starts an instance.
 func (s *Service) StartInstance(ctx context.Context, instanceID string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewStartInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
@@ -197,9 +188,6 @@ func (s *Service) StartInstance(ctx context.Context, instanceID string) error {
 
 // StopInstance stops an instance.
 func (s *Service) StopInstance(ctx context.Context, instanceID string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewStopInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
@@ -214,9 +202,6 @@ func (s *Service) StopInstance(ctx context.Context, instanceID string) error {
 
 // RestartInstance restarts an instance.
 func (s *Service) RestartInstance(ctx context.Context, instanceID string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewRebootInstancesRequest()
 	request.InstanceIds = common.StringPtrs([]string{instanceID})
 
@@ -231,9 +216,6 @@ func (s *Service) RestartInstance(ctx context.Context, instanceID string) error 
 
 // GetFirewallRules returns firewall rules for an instance.
 func (s *Service) GetFirewallRules(ctx context.Context, instanceID string) ([]FirewallRule, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewDescribeFirewallRulesRequest()
 	request.InstanceId = common.StringPtr(instanceID)
 
@@ -264,9 +246,6 @@ func (s *Service) GetFirewallRules(ctx context.Context, instanceID string) ([]Fi
 
 // AddFirewallRule adds a firewall rule.
 func (s *Service) AddFirewallRule(ctx context.Context, instanceID string, rule FirewallRule) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewCreateFirewallRulesRequest()
 	request.InstanceId = common.StringPtr(instanceID)
 
@@ -294,9 +273,6 @@ func (s *Service) AddFirewallRule(ctx context.Context, instanceID string, rule F
 
 // DeleteFirewallRule deletes a firewall rule by its index-based ID.
 func (s *Service) DeleteFirewallRule(ctx context.Context, instanceID string, ruleID string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	describeReq := lighthouse.NewDescribeFirewallRulesRequest()
 	describeReq.InstanceId = common.StringPtr(instanceID)
 	describeReq.Limit = common.Int64Ptr(100)
@@ -343,9 +319,6 @@ func (s *Service) DeleteFirewallRule(ctx context.Context, instanceID string, rul
 
 // GetSnapshots returns snapshots for an instance.
 func (s *Service) GetSnapshots(ctx context.Context, instanceID string) ([]SnapshotInfo, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewDescribeSnapshotsRequest()
 	request.Filters = []*lighthouse.Filter{
 		{
@@ -378,9 +351,6 @@ func (s *Service) GetSnapshots(ctx context.Context, instanceID string) ([]Snapsh
 
 // CreateSnapshot creates a snapshot for an instance.
 func (s *Service) CreateSnapshot(ctx context.Context, instanceID, name string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewCreateInstanceSnapshotRequest()
 	request.InstanceId = common.StringPtr(instanceID)
 	request.SnapshotName = common.StringPtr(name)
@@ -396,9 +366,6 @@ func (s *Service) CreateSnapshot(ctx context.Context, instanceID, name string) e
 
 // ApplySnapshot applies a snapshot (rollback an instance to a snapshot).
 func (s *Service) ApplySnapshot(ctx context.Context, snapshotID string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	describeReq := lighthouse.NewDescribeSnapshotsRequest()
 	describeReq.SnapshotIds = common.StringPtrs([]string{snapshotID})
 
@@ -450,10 +417,6 @@ var metricConfig = map[string]struct {
 
 // GetMonitorData returns monitor data for an instance.
 func (s *Service) GetMonitorData(ctx context.Context, instanceID, metric string, start, end time.Time) (*MonitorData, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	mc, ok := metricConfig[metric]
 	if !ok {
 		return nil, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("不支持的监控指标：%s（支持：CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT）", metric))
@@ -521,9 +484,6 @@ func (s *Service) GetMonitorData(ctx context.Context, instanceID, metric string,
 
 // GetTraffic returns traffic package info for an instance.
 func (s *Service) GetTraffic(ctx context.Context, instanceID string) (*TrafficInfo, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	request := lighthouse.NewDescribeInstancesTrafficPackagesRequest()
 	if instanceID != "" {
 		request.InstanceIds = common.StringPtrs([]string{instanceID})

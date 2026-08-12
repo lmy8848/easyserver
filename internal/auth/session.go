@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sort"
 	"sync"
@@ -28,11 +27,9 @@ func NewSessionService(ctx context.Context, wg *sync.WaitGroup, idleTimeout, cle
 		sessions:    make(map[string]*Session),
 		idleTimeout: idleTimeout,
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		s.cleanupLoop(ctx, cleanupInterval)
-	}()
+	})
 	return s
 }
 
@@ -42,7 +39,7 @@ func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration
 	for {
 		select {
 		case <-ticker.C:
-			if err := s.CleanupExpiredSessions(context.Background()); err != nil {
+			if err := s.CleanupExpiredSessions(ctx); err != nil {
 				log.Printf("session cleanup error: %v", err)
 			}
 		case <-ctx.Done():
@@ -83,9 +80,6 @@ var ErrMobileDeviceBound = errors.New("mobile device bound by another session")
 // device_id is a client-reported soft identifier, not a security boundary; the
 // real control is "one active mobile session + panel-revocable"
 func (s *SessionService) CreateMobileSessionBound(ctx context.Context, session *Session) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mobileMu.Lock()
 	defer s.mobileMu.Unlock()
 
@@ -126,16 +120,13 @@ func (s *SessionService) UpdateActivity(ctx context.Context, token string) error
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[token]
 	if !ok {
-		return fmt.Errorf("session not found")
+		return errors.New("session not found")
 	}
 	sess.LoginAt = time.Now()
 	return nil
 }
 
 func (s *SessionService) RemoveSession(ctx context.Context, token string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, token)
@@ -143,9 +134,6 @@ func (s *SessionService) RemoveSession(ctx context.Context, token string) error 
 }
 
 func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for token, sess := range s.sessions {
@@ -160,18 +148,12 @@ func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) e
 // store the token IS the key, so this is identical to RemoveSession. Kept for
 // API compatibility with the handler's kick path.
 func (s *SessionService) RemoveSessionByStoredToken(ctx context.Context, token string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.RemoveSession(ctx, token)
 }
 
 // RemoveMobileSessions deletes all mobile sessions for a user. Used by the
 // same-device refresh path to replace the bound mobile session.
 func (s *SessionService) RemoveMobileSessions(ctx context.Context, userID int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for token, sess := range s.sessions {
@@ -183,16 +165,10 @@ func (s *SessionService) RemoveMobileSessions(ctx context.Context, userID int64)
 }
 
 func (s *SessionService) GetActiveSessions(ctx context.Context) ([]Session, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.getActiveSessions(), nil
 }
 
 func (s *SessionService) GetUserSessions(ctx context.Context, userID int64) ([]Session, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	now := time.Now()
@@ -209,9 +185,6 @@ func (s *SessionService) GetUserSessions(ctx context.Context, userID int64) ([]S
 }
 
 func (s *SessionService) CleanupExpiredSessions(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -229,9 +202,6 @@ func (s *SessionService) CleanupExpiredSessions(ctx context.Context) error {
 }
 
 func (s *SessionService) GetSessionCount(ctx context.Context) (int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return len(s.getActiveSessions()), nil
 }
 
@@ -253,16 +223,10 @@ func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool
 }
 
 func (s *SessionService) GetActiveSessionsWithToken(ctx context.Context) ([]Session, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.getActiveSessions(), nil
 }
 
 func (s *SessionService) RemoveOtherSessions(ctx context.Context, userID int64, currentToken string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for token, sess := range s.sessions {
@@ -274,14 +238,11 @@ func (s *SessionService) RemoveOtherSessions(ctx context.Context, userID int64, 
 }
 
 func (s *SessionService) IsSessionValidByToken(ctx context.Context, token string) (*Session, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	sess, ok := s.sessions[token]
 	if !ok {
-		return nil, fmt.Errorf("session not found")
+		return nil, errors.New("session not found")
 	}
 	cp := *sess
 	return &cp, nil

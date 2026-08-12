@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 )
 
 func TestMigrateFreshAppliesCronTimers(t *testing.T) {
+	ctx := context.Background()
 	migs := t.TempDir()
 	copy := func(src, dst string) {
 		b, err := os.ReadFile(src)
@@ -35,7 +37,7 @@ func TestMigrateFreshAppliesCronTimers(t *testing.T) {
 
 	// 两条迁移都应记录
 	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&n); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {
@@ -45,7 +47,7 @@ func TestMigrateFreshAppliesCronTimers(t *testing.T) {
 	// cron_tasks / cron_logs 应已删除，scripts 无 content 列
 	for _, tb := range []string{"cron_tasks", "cron_logs"} {
 		var cnt int
-		err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tb).Scan(&cnt)
+		err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", tb).Scan(&cnt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +56,7 @@ func TestMigrateFreshAppliesCronTimers(t *testing.T) {
 		}
 	}
 	var contentCol int
-	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('scripts') WHERE name='content'").Scan(&contentCol); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('scripts') WHERE name='content'").Scan(&contentCol); err != nil {
 		t.Fatal(err)
 	}
 	if contentCol != 0 {
@@ -65,7 +67,7 @@ func TestMigrateFreshAppliesCronTimers(t *testing.T) {
 	if err := Migrate(db, migs); err != nil {
 		t.Fatalf("二次 migrate: %v", err)
 	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&n); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 2 {

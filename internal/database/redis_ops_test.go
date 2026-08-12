@@ -39,7 +39,7 @@ func TestRedisGetValueByType(t *testing.T) {
 	tests := []struct {
 		name     string
 		typ      string
-		value    interface{}
+		value    any
 		wantType string
 	}{
 		{"string", "string", "hello", "string"},

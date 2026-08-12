@@ -6,10 +6,11 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
-	"github.com/gin-gonic/gin"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 type CloudHandler struct {
@@ -34,7 +35,7 @@ func (h *CloudHandler) isCurrentInstance(instanceID string) bool {
 // GetInstances returns all instances
 func (h *CloudHandler) GetInstances(c *gin.Context) {
 	if h.cloudService == nil {
-		httpx.Success(c, gin.H{"instances": []interface{}{}, "total_count": 0})
+		httpx.Success(c, gin.H{"instances": []any{}, "total_count": 0})
 		return
 	}
 
@@ -159,7 +160,7 @@ func (h *CloudHandler) GetFirewallRules(c *gin.Context) {
 	}
 
 	if h.cloudService == nil {
-		httpx.Success(c, gin.H{"rules": []interface{}{}})
+		httpx.Success(c, gin.H{"rules": []any{}})
 		return
 	}
 
@@ -242,7 +243,7 @@ func (h *CloudHandler) GetSnapshots(c *gin.Context) {
 	instanceID := c.Query("instance_id")
 
 	if h.cloudService == nil {
-		httpx.Success(c, gin.H{"snapshots": []interface{}{}})
+		httpx.Success(c, gin.H{"snapshots": []any{}})
 		return
 	}
 
@@ -316,7 +317,7 @@ func (h *CloudHandler) GetMonitorData(c *gin.Context) {
 	endStr := c.Query("end")
 
 	if h.cloudService == nil {
-		httpx.Success(c, gin.H{"metric": metric, "points": []interface{}{}})
+		httpx.Success(c, gin.H{"metric": metric, "points": []any{}})
 		return
 	}
 

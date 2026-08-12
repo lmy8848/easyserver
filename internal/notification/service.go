@@ -90,7 +90,7 @@ func (s *Service) CheckSystemAlerts(overview *SystemOverview) {
 
 	// CPU > threshold
 	if overview.CPUUsage > cpuAlertThreshold {
-		s.CreateIfNotExists(CreateNotificationRequest{
+		_ = s.CreateIfNotExists(CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "CPU 使用率过高",
 			Message: fmt.Sprintf("当前 CPU 使用率 %.1f%%, 超过 %.0f%% 阈值", overview.CPUUsage, cpuAlertThreshold),
@@ -100,7 +100,7 @@ func (s *Service) CheckSystemAlerts(overview *SystemOverview) {
 
 	// Memory > threshold
 	if overview.MemoryUsage > memoryAlertThreshold {
-		s.CreateIfNotExists(CreateNotificationRequest{
+		_ = s.CreateIfNotExists(CreateNotificationRequest{
 			Type:    "alert",
 			Title:   "内存使用率过高",
 			Message: fmt.Sprintf("当前内存使用 %.1f%% (%d/%d MB), 超过 %.0f%% 阈值", overview.MemoryUsage, overview.MemoryUsed, overview.MemoryTotal, memoryAlertThreshold),
@@ -116,7 +116,7 @@ func (s *Service) StartPeriodicCleanup(stopCh <-chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
-			s.CleanOld(30)
+			_, _ = s.CleanOld(30)
 		case <-stopCh:
 			return
 		}

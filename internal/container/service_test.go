@@ -147,10 +147,7 @@ location = "docker.io"
 insecure = false
 `))
 	s := NewService(mock)
-	got, err := s.GetRegistryConfig(context.Background(), EnginePodman)
-	if err != nil {
-		t.Fatalf("GetRegistryConfig: %v", err)
-	}
+	got := s.GetRegistryConfig(context.Background(), EnginePodman)
 	want := RegistryConfig{
 		Mirrors:            []string{"docker.io"},
 		InsecureRegistries: []string{"registry.local:5000"},

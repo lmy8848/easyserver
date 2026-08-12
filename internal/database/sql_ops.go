@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -10,15 +11,12 @@ import (
 // --- Logical database CRUD (live, server-owned) ---
 
 func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Database, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
+		return nil, errors.New("database instance not found")
 	}
 	return s.queryDatabases(ctx, instance)
 }
@@ -75,18 +73,15 @@ func str(row []any, i int) string {
 }
 
 func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *CreateDatabaseRequest) (*Database, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
+		return nil, errors.New("database instance not found")
 	}
 	if instance.Status != "running" && instance.Status != "active" {
-		return nil, fmt.Errorf("database instance is not running")
+		return nil, errors.New("database instance is not running")
 	}
 
 	// DDL statements cannot be parameter-bound; names/hosts are validated and
@@ -116,18 +111,15 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 }
 
 func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	if instance.Status != "running" {
-		return fmt.Errorf("database instance is not running")
+		return errors.New("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -151,15 +143,12 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 // --- DB User CRUD (live, server-owned) ---
 
 func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
+		return nil, errors.New("database instance not found")
 	}
 	return s.queryUsers(ctx, instance)
 }
@@ -191,7 +180,7 @@ func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUse
 		return users, nil
 	case DBTypeRedis:
 		// Redis 无用户体系（ACL 未接入），列表接口显式声明不支持，避免空列表误导。
-		return nil, fmt.Errorf("暂不支持 Redis 用户管理")
+		return nil, errors.New("暂不支持 Redis 用户管理")
 	default:
 		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
 	}
@@ -204,23 +193,21 @@ func isAdminUser(dbType DBType, username string) bool {
 		return username == "root"
 	case DBTypePostgreSQL:
 		return username == "postgres"
+	default:
+		return false
 	}
-	return false
 }
 
 func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *CreateDBUserRequest) (*DBUser, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
+		return nil, errors.New("database instance not found")
 	}
 	if instance.Status != "running" {
-		return nil, fmt.Errorf("database instance is not running")
+		return nil, errors.New("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -246,19 +233,16 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 }
 
 func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, host string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 
 	if isAdminUser(instance.DBType, username) {
-		return fmt.Errorf("cannot delete the administrator user")
+		return errors.New("cannot delete the administrator user")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -280,18 +264,15 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 }
 
 func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, username, host string, req *GrantRequest) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	if instance.Status != "running" {
-		return fmt.Errorf("database instance is not running")
+		return errors.New("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -313,18 +294,15 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 }
 
 func (s *Service) ResetPassword(ctx context.Context, instanceID int64, username, host, newPassword string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	if instance.Status != "running" {
-		return fmt.Errorf("database instance is not running")
+		return errors.New("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -345,28 +323,28 @@ func (s *Service) ResetPassword(ctx context.Context, instanceID int64, username,
 // Database names travel as URL path parameters now — no persisted db lookup.
 func (s *Service) getInstanceForSQL(ctx context.Context, instanceID int64, dbName string) (*DBInstance, error) {
 	if !isValidDBName(dbName) {
-		return nil, fmt.Errorf("无效的数据库名")
+		return nil, errors.New("无效的数据库名")
 	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, fmt.Errorf("数据库实例不存在")
+		return nil, errors.New("数据库实例不存在")
 	}
 	return instance, nil
 }
-func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName string) ([]map[string]interface{}, error) {
+func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName string) ([]map[string]any, error) {
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
 	}
 
-	var tables []map[string]interface{}
+	var tables []map[string]any
 	builder := NewSQLBuilder(instance.DBType)
 	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, builder.BuildListTables())
 	if err != nil {
 		return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
 	}
 	for _, row := range res.Rows {
-		tables = append(tables, map[string]interface{}{"name": str(row, 0)})
+		tables = append(tables, map[string]any{"name": str(row, 0)})
 	}
 	return tables, nil
 }
@@ -398,9 +376,9 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 	// default, pk-flag columns); the CLI channel parses the same shape from text.
 	tableInfo := tableInfoFromQuery(instance.DBType, tableName, res)
 
-	var columns []map[string]interface{}
+	var columns []map[string]any
 	for _, col := range tableInfo.Columns {
-		columns = append(columns, map[string]interface{}{
+		columns = append(columns, map[string]any{
 			"name":           col.Name,
 			"type":           col.Type,
 			"is_primary_key": col.IsPrimaryKey,
@@ -456,12 +434,12 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 	var total int
 	var headers []string
 	var columnTypes []string
-	var rows [][]interface{}
+	var rows [][]any
 	switch dbType {
 	case DBTypeMySQL, DBTypePostgreSQL:
 		countRes, err := s.runnerFor(instance).Query(ctx, instance, dbName, countSQL)
 		if err == nil && len(countRes.Rows) > 0 {
-			fmt.Sscanf(str(countRes.Rows[0], 0), "%d", &total)
+			_, _ = fmt.Sscanf(str(countRes.Rows[0], 0), "%d", &total)
 		}
 		res, err := s.runnerFor(instance).Query(ctx, instance, dbName, selectSQL)
 		if err != nil {
@@ -471,10 +449,10 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 			headers = append(headers, c.Name)
 			columnTypes = append(columnTypes, c.Type)
 		}
-		rows = make([][]interface{}, len(res.Rows))
-		for i, row := range res.Rows {
-			rows[i] = row
-		}
+		rows = make([][]any, len(res.Rows))
+		copy(rows, res.Rows)
+	default:
+		// Redis 不走 SQL 分页查询
 	}
 
 	return &PagedQueryResult{
@@ -512,10 +490,8 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 			headers[i] = col.Name
 			types[i] = col.Type
 		}
-		rows := make([][]interface{}, len(qres.Rows))
-		for i, r := range qres.Rows {
-			rows[i] = r
-		}
+		rows := make([][]any, len(qres.Rows))
+		copy(rows, qres.Rows)
 		return &DMLResult{Success: true, Headers: headers, ColumnTypes: types, Rows: rows}, nil
 	}
 
@@ -567,7 +543,7 @@ func isReadStatement(stmt string) bool {
 	return false
 }
 
-func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
+func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]any, dryRun bool) (*DMLResult, error) {
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -579,14 +555,14 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 	if dryRun {
 		sql, err := builder.BuildInsert(table, data, nil)
 		if err != nil {
-			return &DMLResult{Success: false, Error: err.Error()}, nil
+			return &DMLResult{Success: false, Error: err.Error()}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
 		}
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
 	params, args, err := builder.BuildInsertParams(table, data, nil)
 	if err != nil {
-		return &DMLResult{Success: false, Error: err.Error()}, nil
+		return &DMLResult{Success: false, Error: err.Error()}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
 	}
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
@@ -594,7 +570,7 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 	return &DMLResult{Success: true}, nil
 }
 
-func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
+func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]any, pk string, pkVal any, dryRun bool) (*DMLResult, error) {
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -606,14 +582,14 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 	if dryRun {
 		sql, err := builder.BuildUpdate(table, data, pk, pkVal)
 		if err != nil {
-			return &DMLResult{Success: false, Error: err.Error()}, nil
+			return &DMLResult{Success: false, Error: err.Error()}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
 		}
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
 	params, args, err := builder.BuildUpdateParams(table, data, pk, pkVal)
 	if err != nil {
-		return &DMLResult{Success: false, Error: err.Error()}, nil
+		return &DMLResult{Success: false, Error: err.Error()}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
 	}
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
@@ -621,7 +597,7 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 	return &DMLResult{Success: true}, nil
 }
 
-func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
+func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal any, dryRun bool) (*DMLResult, error) {
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -633,14 +609,14 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 	if dryRun {
 		sql, err := builder.BuildDelete(table, pk, pkVal)
 		if err != nil {
-			return &DMLResult{Success: false, Error: err.Error()}, nil
+			return &DMLResult{Success: false, Error: err.Error()}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
 		}
 		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
 	}
 
 	params, args, err := builder.BuildDeleteParams(table, pk, pkVal)
 	if err != nil {
-		return &DMLResult{Success: false, Error: err.Error()}, nil
+		return &DMLResult{Success: false, Error: err.Error()}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
 	}
 	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, params, args...); execErr != nil {
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil

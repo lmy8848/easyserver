@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"maps"
 	"sync"
 	"time"
 
@@ -29,18 +30,19 @@ type auditWriter struct {
 	finished chan struct{}
 }
 
-func newAuditWriter(repo Repository) *auditWriter {
+func newAuditWriter(ctx context.Context, repo Repository) *auditWriter {
 	w := &auditWriter{
 		repo:     repo,
 		ch:       make(chan auditEntry, 1000),
 		done:     make(chan struct{}),
 		finished: make(chan struct{}),
 	}
-	go w.run()
+	// writer 是进程级后台消费者：脱离调用方 ctx 的取消，仅继承值。
+	go w.run(context.WithoutCancel(ctx))
 	return w
 }
 
-func (w *auditWriter) run() {
+func (w *auditWriter) run(ctx context.Context) {
 	batch := make([]auditEntry, 0, 100)
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -50,13 +52,13 @@ func (w *auditWriter) run() {
 		case entry := <-w.ch:
 			batch = append(batch, entry)
 			if len(batch) >= 100 {
-				w.flush(batch)
+				w.flush(ctx, batch)
 				batch = batch[:0]
 				timer.Reset(2 * time.Second)
 			}
 		case <-timer.C:
 			if len(batch) > 0 {
-				w.flush(batch)
+				w.flush(ctx, batch)
 				batch = batch[:0]
 			}
 			timer.Reset(2 * time.Second)
@@ -67,7 +69,7 @@ func (w *auditWriter) run() {
 					batch = append(batch, entry)
 				default:
 					if len(batch) > 0 {
-						w.flush(batch)
+						w.flush(ctx, batch)
 					}
 					close(w.finished)
 					return
@@ -77,7 +79,7 @@ func (w *auditWriter) run() {
 	}
 }
 
-func (w *auditWriter) flush(batch []auditEntry) {
+func (w *auditWriter) flush(ctx context.Context, batch []auditEntry) {
 	entries := make([]AuditLog, len(batch))
 	for i, e := range batch {
 		entries[i] = AuditLog{
@@ -92,7 +94,7 @@ func (w *auditWriter) flush(batch []auditEntry) {
 			CreatedAt: e.createdAt,
 		}
 	}
-	if err := w.repo.AppendBatch(context.Background(), entries); err != nil {
+	if err := w.repo.AppendBatch(ctx, entries); err != nil {
 		log.Printf("audit: failed to flush batch: %v", err)
 	}
 }
@@ -117,14 +119,12 @@ func NewService(ctx context.Context, wg *sync.WaitGroup, auditRepo Repository, r
 
 	s := &Service{
 		auditRepo:     auditRepo,
-		writer:        newAuditWriter(auditRepo),
+		writer:        newAuditWriter(ctx, auditRepo),
 		retentionDays: retentionDays,
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		s.cleanupLoop(ctx)
-	}()
+	})
 	return s
 }
 
@@ -133,23 +133,23 @@ func (s *Service) Close() {
 }
 
 func (s *Service) cleanupLoop(ctx context.Context) {
-	s.cleanupOldRecords()
+	s.cleanupOldRecords(ctx)
 
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			s.cleanupOldRecords()
+			s.cleanupOldRecords(ctx)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (s *Service) cleanupOldRecords() {
+func (s *Service) cleanupOldRecords(ctx context.Context) {
 	since := time.Now().AddDate(0, 0, -s.retentionDays)
-	rows, err := s.auditRepo.Clean(context.Background(), since)
+	rows, err := s.auditRepo.Clean(ctx, since)
 	if err != nil {
 		log.Printf("audit: cleanup error: %v", err)
 		return
@@ -168,17 +168,12 @@ func (s *Service) enqueue(entry auditEntry) {
 }
 
 // LogOperation logs a server-level operation.
-func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func (s *Service) LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]any, ip, userAgent string) {
 	now := time.Now()
-	detailData := map[string]interface{}{
+	detailData := map[string]any{
 		"timestamp": now.Format(time.RFC3339),
 	}
-	for k, v := range extra {
-		detailData[k] = v
-	}
+	maps.Copy(detailData, extra)
 	detailJSON, _ := json.Marshal(detailData)
 	s.enqueue(auditEntry{userID, username, action, resource, string(detailJSON), ip, userAgent, now, "operation"})
 }
@@ -187,9 +182,6 @@ func (s *Service) LogOperation(ctx context.Context, userID int64, username, acti
 // detail is expected to be a complete JSON string (flat layer with status/method/...);
 // it is stored verbatim so Stats/alerts can extract fields at the top level.
 func (s *Service) LogRequest(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	now := time.Now()
 	s.enqueue(auditEntry{userID, username, action, resource, detail, ip, userAgent, now, "request"})
 }
@@ -198,11 +190,8 @@ func (s *Service) LogRequest(ctx context.Context, userID int64, username, action
 // ("认证"); the human-readable summary is carried in detail.summary.
 // Operation logs do not record IP/user-agent (request-log concern).
 func (s *Service) LogSecurityEvent(ctx context.Context, username, summary string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	now := time.Now()
-	detailJSON, _ := json.Marshal(map[string]interface{}{
+	detailJSON, _ := json.Marshal(map[string]any{
 		"summary":   summary,
 		"timestamp": now.Format(time.RFC3339),
 	})
@@ -212,11 +201,8 @@ func (s *Service) LogSecurityEvent(ctx context.Context, username, summary string
 // LogSystemEvent logs a system event. The action column is the coarse verb
 // ("其他"); the human-readable summary is carried in detail.summary.
 func (s *Service) LogSystemEvent(ctx context.Context, summary string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	now := time.Now()
-	detailJSON, _ := json.Marshal(map[string]interface{}{
+	detailJSON, _ := json.Marshal(map[string]any{
 		"summary":   summary,
 		"timestamp": now.Format(time.RFC3339),
 	})
@@ -226,11 +212,8 @@ func (s *Service) LogSystemEvent(ctx context.Context, summary string) {
 // LogLoginEvent records a login event (success/failed/blocked) as an audit
 // operation log. Satisfies auth.LoginEventLogger implicitly.
 func (s *Service) LogLoginEvent(ctx context.Context, event auth.LoginEvent) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	now := time.Now()
-	detailData := map[string]interface{}{
+	detailData := map[string]any{
 		"action":     event.Action,
 		"username":   event.Username,
 		"ip":         event.IP,

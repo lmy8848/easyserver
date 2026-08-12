@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -122,11 +123,9 @@ func NewMonitorService(ctx context.Context, wg *sync.WaitGroup, monitorRepo Repo
 	s.interval.Store(int64(interval))
 	s.retention.Store(int64(retention))
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		s.run(ctx)
-	}()
+	})
 	return s
 }
 
@@ -168,9 +167,9 @@ func (s *MonitorService) run(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				s.flushBuffer()
+				s.flushBuffer(ctx)
 			case <-ctx.Done():
-				s.flushBuffer() // Final flush before stop
+				s.flushBuffer(ctx) // Final flush before stop
 				return
 			}
 		}
@@ -180,12 +179,12 @@ func (s *MonitorService) run(ctx context.Context) {
 	defer ticker.Stop()
 
 	// First collection
-	s.collect()
+	s.collect(ctx)
 
 	for {
 		select {
 		case <-ticker.C:
-			s.collect()
+			s.collect(ctx)
 		case newInterval := <-s.intervalUpdateCh:
 			ticker.Reset(newInterval)
 		case <-ctx.Done():
@@ -194,7 +193,7 @@ func (s *MonitorService) run(ctx context.Context) {
 	}
 }
 
-func (s *MonitorService) collect() {
+func (s *MonitorService) collect(ctx context.Context) {
 	point := s.readAll()
 
 	// 性能优化：添加到环形缓冲（不直接写 DB）
@@ -203,7 +202,7 @@ func (s *MonitorService) collect() {
 	// Cleanup old data every 10 minutes
 	if time.Since(s.lastCleanup) > 10*time.Minute {
 		s.lastCleanup = time.Now()
-		s.cleanup()
+		s.cleanup(ctx)
 	}
 
 	snapshot := point.ToSnapshot()
@@ -215,10 +214,10 @@ func (s *MonitorService) collect() {
 
 	// 审计日志触发（内存/磁盘使用率 ≥ 90%）
 	if s.auditService != nil {
-		s.checkAuditThresholds(snapshot)
+		s.checkAuditThresholds(ctx, snapshot)
 	}
 
-	data, err := json.Marshal(map[string]interface{}{
+	data, err := json.Marshal(map[string]any{
 		"type": "stats",
 		"data": snapshot,
 	})
@@ -230,7 +229,7 @@ func (s *MonitorService) collect() {
 	s.hub.Broadcast(data)
 }
 
-func (s *MonitorService) checkAuditThresholds(snapshot *MonitorSnapshot) {
+func (s *MonitorService) checkAuditThresholds(ctx context.Context, snapshot *MonitorSnapshot) {
 	if s.auditService == nil {
 		return
 	}
@@ -250,7 +249,7 @@ func (s *MonitorService) checkAuditThresholds(snapshot *MonitorSnapshot) {
 		}
 
 		if shouldAlert {
-			s.auditService.LogSystemEvent(context.Background(), fmt.Sprintf("内存使用率告警：%.1f%%", snapshot.Memory.UsagePercent))
+			s.auditService.LogSystemEvent(ctx, fmt.Sprintf("内存使用率告警：%.1f%%", snapshot.Memory.UsagePercent))
 		}
 	}
 
@@ -265,7 +264,7 @@ func (s *MonitorService) checkAuditThresholds(snapshot *MonitorSnapshot) {
 			}
 
 			if shouldAlert {
-				s.auditService.LogSystemEvent(context.Background(), fmt.Sprintf("磁盘使用率告警：%s %.1f%%", p.MountPoint, p.UsagePercent))
+				s.auditService.LogSystemEvent(ctx, fmt.Sprintf("磁盘使用率告警：%s %.1f%%", p.MountPoint, p.UsagePercent))
 			}
 		}
 	}
@@ -297,7 +296,7 @@ func (s *MonitorService) addToBuffer(p *MonitorPoint) {
 }
 
 // flushBuffer writes all buffered points to the database
-func (s *MonitorService) flushBuffer() {
+func (s *MonitorService) flushBuffer(ctx context.Context) {
 	s.ringMu.Lock()
 	if s.ringCount == 0 {
 		s.ringMu.Unlock()
@@ -306,14 +305,14 @@ func (s *MonitorService) flushBuffer() {
 	// Copy points to flush
 	points := make([]*MonitorPoint, s.ringCount)
 	tail := (s.ringHead - s.ringCount + s.ringSize) % s.ringSize
-	for i := 0; i < s.ringCount; i++ {
+	for i := range s.ringCount {
 		points[i] = s.ringBuffer[(tail+i)%s.ringSize]
 	}
 	s.ringCount = 0
 	s.ringMu.Unlock()
 
 	// Batch insert using repository
-	if err := s.monitorRepo.SaveBatch(context.Background(), points); err != nil {
+	if err := s.monitorRepo.SaveBatch(ctx, points); err != nil {
 		log.Printf("monitor: flush error: %v", err)
 	}
 }
@@ -329,8 +328,7 @@ func (s *MonitorService) GetLatestPoint() *MonitorPoint {
 	return s.ringBuffer[idx]
 }
 
-func (s *MonitorService) cleanup() {
-	ctx := context.Background()
+func (s *MonitorService) cleanup(ctx context.Context) {
 	since := time.Now().UTC().Add(-time.Duration(s.retention.Load()))
 	rows, err := s.monitorRepo.Clean(ctx, since)
 	if err != nil {
@@ -353,7 +351,7 @@ func (s *MonitorService) GetCurrentStats(ctx context.Context) (*MonitorSnapshot,
 			return nil, err
 		}
 		if p == nil {
-			return nil, fmt.Errorf("no data yet")
+			return nil, errors.New("no data yet")
 		}
 	}
 	snapshot := p.ToSnapshot()
@@ -615,8 +613,8 @@ func (s *MonitorService) readSystemInfo() *SystemInfo {
 		scanner := bufio.NewScanner(strings.NewReader(string(data)))
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.HasPrefix(line, "PRETTY_NAME=") {
-				val := strings.TrimPrefix(line, "PRETTY_NAME=")
+			if after, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
+				val := after
 				val = strings.Trim(val, "\"")
 				info.OS = val
 				break
@@ -967,7 +965,7 @@ func (s *MonitorService) loadPasswd() {
 		return
 	}
 	m := make(map[string]string, 64)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		parts := strings.Split(line, ":")
 		if len(parts) >= 3 {
 			m[parts[2]] = parts[0] // uid -> username

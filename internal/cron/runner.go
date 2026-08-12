@@ -120,7 +120,7 @@ func (r *ScriptRunner) Start(script *Script) (*RunningScript, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		if catCmd != nil {
-			catCmd.Process.Kill()
+			_ = catCmd.Process.Kill()
 		}
 		r.mu.Unlock()
 		return nil, err
@@ -128,14 +128,14 @@ func (r *ScriptRunner) Start(script *Script) (*RunningScript, error) {
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		if catCmd != nil {
-			catCmd.Process.Kill()
+			_ = catCmd.Process.Kill()
 		}
 		r.mu.Unlock()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		if catCmd != nil {
-			catCmd.Process.Kill()
+			_ = catCmd.Process.Kill()
 		}
 		r.mu.Unlock()
 		return nil, err
@@ -165,7 +165,7 @@ func (r *ScriptRunner) Start(script *Script) (*RunningScript, error) {
 		}
 		rs.once.Do(func() { close(rs.done) })
 		if rs.catCmd != nil {
-			rs.catCmd.Process.Kill()
+			_ = rs.catCmd.Process.Kill()
 		}
 		r.mu.Lock()
 		if cur, ok := r.running[script.ID]; ok && cur == rs {
@@ -185,7 +185,7 @@ func (r *ScriptRunner) Stop(scriptID int64) {
 	}
 	r.mu.Unlock()
 	if ok && rs.cmd.Process != nil {
-		rs.cmd.Process.Kill()
+		_ = rs.cmd.Process.Kill()
 	}
 }
 
@@ -240,9 +240,9 @@ func (rs *RunningScript) runPumps() {
 		for scanner.Scan() {
 			line := scanner.Text()
 			now := time.Now().Format("2006-01-02 15:04:05")
-			msg, _ := json.Marshal(map[string]interface{}{
+			msg, _ := json.Marshal(map[string]any{
 				"type": "log",
-				"data": map[string]interface{}{
+				"data": map[string]any{
 					"stream":  stream,
 					"message": line,
 					"time":    now,

@@ -38,6 +38,9 @@ func (r *sqliteServerRepo) List(ctx context.Context) ([]WebServer, error) {
 		}
 		servers = append(servers, ws)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list web servers: %w", err)
+	}
 	return servers, nil
 }
 

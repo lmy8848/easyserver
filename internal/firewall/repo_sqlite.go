@@ -146,7 +146,7 @@ func (r *sqliteRepo) SwapPriorities(ctx context.Context, id1 int64, priority1 in
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, "UPDATE firewall_rules SET priority=? WHERE id=?", priority1, id1); err != nil {
 		return err

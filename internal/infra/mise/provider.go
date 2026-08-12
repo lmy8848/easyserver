@@ -2,6 +2,7 @@ package mise
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,14 +91,15 @@ func (miseProvider) ListRemoteVersions(ctx context.Context, lang string) ([]stri
 	out, err := cmd.Output()
 	if err != nil {
 		var stderr string
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			stderr = string(exitErr.Stderr)
 		}
-		return nil, fmt.Errorf("failed to fetch remote versions: %v, stderr: %s", err, stderr)
+		return nil, fmt.Errorf("failed to fetch remote versions: %w, stderr: %s", err, stderr)
 	}
 
 	var versions []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && isValidVersion(line) {
 			versions = append(versions, line)
@@ -155,10 +157,12 @@ func (miseProvider) runInstallLike(ctx context.Context, op string, lang, exact s
 
 	// 合并两路输出到 out（顺序读 stdout 后 stderr，mise 输出以 stdout 为主）。
 	// 实时写，调用方（runtimeenv）负责写 DB 与日志截断。
-	io.Copy(out, io.MultiReader(stdout, stderr))
+	// 复制失败（out 写入失败）不影响进程退出状态，真实错误由下方 cmd.Wait 决定。
+	_, _ = io.Copy(out, io.MultiReader(stdout, stderr))
 
 	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return fmt.Errorf("%s failed with exit code %d", op, exitErr.ExitCode())
 		}
 		return err
@@ -194,11 +198,11 @@ func (miseProvider) Unwrap(lang, exact, execLine string) string {
 		return execLine
 	}
 	rest := strings.TrimPrefix(execLine, prefix)
-	idx := strings.Index(rest, " -- ")
-	if idx < 0 {
+	_, after, ok := strings.Cut(rest, " -- ")
+	if !ok {
 		return execLine
 	}
-	return rest[idx+4:]
+	return after
 }
 
 // miseToolDirName 把底层 tool 标识归一为 installs/ 下的目录名。
@@ -251,13 +255,14 @@ func isValidVersion(version string) bool {
 		return false
 	}
 	for _, c := range version {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '-' || c == '+' || c == '_') {
+		if !isVersionAlphaNum(c) && c != '.' && c != '-' && c != '+' && c != '_' {
 			return false
 		}
 	}
-	first := version[0]
-	if !((first >= '0' && first <= '9') || (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')) {
-		return false
-	}
-	return true
+	return isVersionAlphaNum(rune(version[0]))
+}
+
+// isVersionAlphaNum 判断字符是否为字母或数字（版本号的首字符与整体校验共用）。
+func isVersionAlphaNum(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }

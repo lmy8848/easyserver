@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 )
@@ -59,7 +60,7 @@ func (r *sqliteRepo) GetInstance(ctx context.Context, id int64) (*DBInstance, er
 	row := r.db.QueryRowContext(ctx, `SELECT `+instanceColumns+`
 		FROM database_instances WHERE id = ?`, id)
 	v, err := scanInstance(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -179,7 +180,7 @@ func (r *sqliteRepo) GetBackup(ctx context.Context, id int64) (*DBBackup, error)
 		FROM instance_backups b JOIN database_instances v ON b.instance_id = v.id WHERE b.id = ?`, id).Scan(
 		&b.ID, &b.DBType, &b.DBInstanceID, &b.DatabaseName,
 		&b.BackupType, &b.FilePath, &b.FileSize, &b.Status, &b.ErrorMessage, &b.CreatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return b, err

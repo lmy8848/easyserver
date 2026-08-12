@@ -81,6 +81,7 @@ func buildPassword(length int, hasUpper, hasLower, hasDigit bool) string {
 // --- helpers for DB-dependent tests ---
 
 func setupTestDB(t *testing.T) *sql.DB {
+	ctx := context.Background()
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -108,7 +109,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		)`,
 	}
 	for _, q := range queries {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,16 +117,17 @@ func setupTestDB(t *testing.T) *sql.DB {
 }
 
 func createTestUser(t *testing.T, db *sql.DB, username, password string, locked bool) int64 {
+	ctx := context.Background()
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var lockedUntil interface{}
+	var lockedUntil any
 	if locked {
 		lockedUntil = time.Now().Add(1 * time.Hour).Format("2006-01-02 15:04:05")
 	}
-	result, err := db.Exec(
+	result, err := db.ExecContext(ctx,
 		"INSERT INTO users (username, password_hash, role, locked_until) VALUES (?, ?, 'admin', ?)",
 		username, string(hash), lockedUntil,
 	)
@@ -208,14 +210,14 @@ func TestLogin_AccountLocked(t *testing.T) {
 	}
 }
 
-func TestLogin_NilContext(t *testing.T) {
+func TestLogin_TODOContext(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 	svc := newTestAuthService(db)
 	createTestUser(t, db, "admin", "Admin123", false)
 
-	// Should not panic with nil context
-	user, err := svc.Login(nil, "admin", "Admin123")
+	// 显式传空 context（不传 nil，符合 SA1012）
+	user, err := svc.Login(context.TODO(), "admin", "Admin123")
 	if err != nil {
 		t.Fatalf("Login with nil context failed: %v", err)
 	}

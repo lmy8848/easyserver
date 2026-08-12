@@ -147,31 +147,31 @@ type DMLResult struct {
 	// Output carries human-readable text for write statements (Insert/Update/
 	// Delete, Exec-path ExecuteSQL). Query-path ExecuteSQL instead fills
 	// Headers/ColumnTypes/Rows with the structured result.
-	Output      string          `json:"output,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	DryRun      bool            `json:"dry_run,omitempty"`
-	SQL         string          `json:"sql,omitempty"`
-	Headers     []string        `json:"headers,omitempty"`
-	ColumnTypes []string        `json:"column_types,omitempty"`
-	Rows        [][]interface{} `json:"rows,omitempty"`
+	Output      string   `json:"output,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	DryRun      bool     `json:"dry_run,omitempty"`
+	SQL         string   `json:"sql,omitempty"`
+	Headers     []string `json:"headers,omitempty"`
+	ColumnTypes []string `json:"column_types,omitempty"`
+	Rows        [][]any  `json:"rows,omitempty"`
 }
 
 // PagedQueryResult is the response for QueryTable.
 type PagedQueryResult struct {
-	Headers     []string        `json:"headers"`
-	ColumnTypes []string        `json:"column_types"`
-	Rows        [][]interface{} `json:"rows"`
-	Total       int             `json:"total"`
-	Page        int             `json:"page"`
-	PageSize    int             `json:"page_size"`
+	Headers     []string `json:"headers"`
+	ColumnTypes []string `json:"column_types"`
+	Rows        [][]any  `json:"rows"`
+	Total       int      `json:"total"`
+	Page        int      `json:"page"`
+	PageSize    int      `json:"page_size"`
 }
 
 // DescribeResult is the response for DescribeTable.
 type DescribeResult struct {
-	TableName  string                   `json:"table_name"`
-	PrimaryKey string                   `json:"primary_key"`
-	Collation  string                   `json:"collation,omitempty"` // MySQL 表排序规则；PG 无表级字符集
-	Columns    []map[string]interface{} `json:"columns"`
+	TableName  string           `json:"table_name"`
+	PrimaryKey string           `json:"primary_key"`
+	Collation  string           `json:"collation,omitempty"` // MySQL 表排序规则；PG 无表级字符集
+	Columns    []map[string]any `json:"columns"`
 }
 
 // TableColumn describes a column for CreateTable.
@@ -252,8 +252,8 @@ type RedisKey struct {
 // for string keys, map[string]string for hash, []string for list/set, and
 // []RedisZMember for sorted sets.
 type RedisValue struct {
-	Type  string      `json:"type"` // string | hash | list | set | zset
-	Value interface{} `json:"value"`
+	Type  string `json:"type"` // string | hash | list | set | zset
+	Value any    `json:"value"`
 }
 
 // RedisZMember is one sorted-set entry (score kept separate from member so the

@@ -32,7 +32,7 @@ func waitDone(t *testing.T, task *Task) {
 func TestStartRunsAndSucceeds(t *testing.T) {
 	m := NewManager(8)
 	ran := false
-	tk, err := m.Start("k1", Options{}, func(ctx context.Context) error {
+	tk, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error {
 		ran = true
 		return nil
 	})
@@ -57,11 +57,11 @@ func TestStartRunsAndSucceeds(t *testing.T) {
 
 func TestStartReturnsSyncErrorOnDuplicateKey(t *testing.T) {
 	m := NewManager(8)
-	if _, err := m.Start("k1", Options{}, blockOnCancel); err != nil {
+	if _, err := m.Start(context.Background(), "k1", Options{}, blockOnCancel); err != nil {
 		t.Fatalf("first start: %v", err)
 	}
 	// 同 key 第二个任务立即拒绝（同步错误），且可被 errors.Is 识别。
-	_, err := m.Start("k1", Options{}, blockOnCancel)
+	_, err := m.Start(context.Background(), "k1", Options{}, blockOnCancel)
 	if err == nil {
 		t.Fatal("expected duplicate key error")
 	}
@@ -75,18 +75,18 @@ func TestStartReturnsSyncErrorOnDuplicateKey(t *testing.T) {
 func TestConcurrencyLimitRejects(t *testing.T) {
 	m := NewManager(2)
 	release := make(chan struct{})
-	_, err := m.Start("k1", Options{}, func(ctx context.Context) error {
+	_, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error {
 		<-release
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("start 1: %v", err)
 	}
-	if _, err := m.Start("k2", Options{}, blockOnCancel); err != nil {
+	if _, err := m.Start(context.Background(), "k2", Options{}, blockOnCancel); err != nil {
 		t.Fatalf("start 2: %v", err)
 	}
 	// 已占用 2 个并发槽位，第三个拒绝（即使 key 不同）。
-	if _, err := m.Start("k3", Options{}, blockOnCancel); err == nil {
+	if _, err := m.Start(context.Background(), "k3", Options{}, blockOnCancel); err == nil {
 		t.Fatal("expected concurrency limit rejection")
 	}
 	close(release)
@@ -97,7 +97,7 @@ func TestConcurrencyLimitRejects(t *testing.T) {
 func TestCancelPriorityStopsRetry(t *testing.T) {
 	m := NewManager(8)
 	attempts := int32(0)
-	tk, err := m.Start("k1", Options{MaxRetries: 3, RetryInterval: 10 * time.Millisecond},
+	tk, err := m.Start(context.Background(), "k1", Options{MaxRetries: 3, RetryInterval: 10 * time.Millisecond},
 		func(ctx context.Context) error {
 			atomic.AddInt32(&attempts, 1)
 			<-ctx.Done() // 每次尝试都挂住等取消
@@ -123,7 +123,7 @@ func TestCancelPriorityStopsRetry(t *testing.T) {
 func TestTimeoutFailsAndRetries(t *testing.T) {
 	m := NewManager(8)
 	attempts := int32(0)
-	tk, err := m.Start("k1",
+	tk, err := m.Start(context.Background(), "k1",
 		Options{Timeout: 30 * time.Millisecond, MaxRetries: 2, RetryInterval: 5 * time.Millisecond},
 		func(ctx context.Context) error {
 			atomic.AddInt32(&attempts, 1)
@@ -149,7 +149,7 @@ func TestTimeoutFailsAndRetries(t *testing.T) {
 func TestFailedTaskRetainedUntilSameKeyRestart(t *testing.T) {
 	m := NewManager(8)
 	failErr := errors.New("boom")
-	_, err := m.Start("k1", Options{MaxRetries: 0}, func(ctx context.Context) error {
+	_, err := m.Start(context.Background(), "k1", Options{MaxRetries: 0}, func(ctx context.Context) error {
 		return failErr
 	})
 	if err != nil {
@@ -167,7 +167,7 @@ func TestFailedTaskRetainedUntilSameKeyRestart(t *testing.T) {
 		t.Fatalf("err = %v, want %v", tk.Err(), failErr)
 	}
 	// 同 key 再次 Start 覆盖旧记录：旧失败任务被新任务取代，而不是共存。
-	newTk, err := m.Start("k1", Options{}, func(ctx context.Context) error { return nil })
+	newTk, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error { return nil })
 	if err != nil {
 		t.Fatalf("restart same key: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestFailedTaskRetainedUntilSameKeyRestart(t *testing.T) {
 func TestStartWithoutLogIsOptionless(t *testing.T) {
 	// 无日志任务：Start（非 StartWithLog）不产生日志、不 panic。
 	m := NewManager(8)
-	tk, err := m.Start("k1", Options{}, func(ctx context.Context) error { return nil })
+	tk, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error { return nil })
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestStartWithoutLogIsOptionless(t *testing.T) {
 func TestStartWithLogBuffersAndTail(t *testing.T) {
 	m := NewManager(8)
 	var log *TaskLog
-	tk, err := m.StartWithLog("k1", Options{}, func(ctx context.Context, l *TaskLog) error {
+	tk, err := m.StartWithLog(context.Background(), "k1", Options{}, func(ctx context.Context, l *TaskLog) error {
 		log = l
 		l.Append("first")
 		l.Append("second")
@@ -229,7 +229,7 @@ func TestRetryIntervalKeepsRunningAndActive(t *testing.T) {
 	m := NewManager(8)
 	attempts := int32(0)
 	// 第一次失败，第二次成功；间隔设长些以便在重试等待期间观察状态。
-	tk, err := m.StartWithLog("k1",
+	tk, err := m.StartWithLog(context.Background(), "k1",
 		Options{MaxRetries: 1, RetryInterval: 200 * time.Millisecond},
 		func(ctx context.Context, log *TaskLog) error {
 			if atomic.AddInt32(&attempts, 1) == 1 {
@@ -268,21 +268,21 @@ func TestRetryIntervalKeepsRunningAndActive(t *testing.T) {
 // 通过连续"成功→立即同 key 重启"循环压测竞态窗口。
 func TestSucceededCleanupDoesNotRemoveNewSameKeyTask(t *testing.T) {
 	m := NewManager(8)
-	for i := 0; i < 200; i++ {
-		tk1, err := m.Start("k", Options{}, func(ctx context.Context) error { return nil })
+	for i := range 200 {
+		tk1, err := m.Start(context.Background(), "k", Options{}, func(ctx context.Context) error { return nil })
 		if err != nil {
 			t.Fatalf("iter %d start 1: %v", i, err)
 		}
 		waitDone(t, tk1)
 		// 立刻用同 key 重启（模拟 SSE done 事件触发的重装）。
-		tk2, err := m.Start("k", Options{}, func(ctx context.Context) error { return nil })
+		tk2, err := m.Start(context.Background(), "k", Options{}, func(ctx context.Context) error { return nil })
 		if err != nil {
 			t.Fatalf("iter %d start 2 (same key after success): %v", i, err)
 		}
 		waitDone(t, tk2)
 	}
 	// 循环后再次启动必须成功（无残留终态挡住去重），且 Get 反映最新任务。
-	tk, err := m.Start("k", Options{}, blockOnCancel)
+	tk, err := m.Start(context.Background(), "k", Options{}, blockOnCancel)
 	if err != nil {
 		t.Fatalf("final start: %v", err)
 	}

@@ -144,7 +144,7 @@ func newFakeRepo() *fakeRepo {
 	}
 }
 func (r *fakeRepo) ListInstances(context.Context, DBType) ([]DBInstance, error) {
-	var out []DBInstance
+	var out = make([]DBInstance, 0, len(r.instances))
 	for _, v := range r.instances {
 		out = append(out, *v)
 	}

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,7 +19,7 @@ const esBackupsDir = "es_backups"
 func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, fmt.Errorf("database instance not found")
+		return nil, errors.New("database instance not found")
 	}
 	// 备份直接落在实例宿主数据目录的 es_backups/ 子目录 —— 该目录是宿主挂载，
 	// 容器内 dump 写这里宿主直见，无需 CopyFrom 往返。chown 999 让容器内进程
@@ -65,7 +66,7 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	// 备份在内存任务里执行。key 按 (instance, db) 固定 —— taskMgr 同 key 去重，
 	// 天然保证同一个库同一时间只有一个备份在跑；重复点击会收到 ErrKeyBusy。
 	key := fmt.Sprintf("backup-%d-%s", instanceID, dbName)
-	if _, err := s.taskMgr.Start(key, task.Options{}, func(ctx context.Context) error {
+	if _, err := s.taskMgr.Start(ctx, key, task.Options{}, func(ctx context.Context) error {
 		return s.executeBackup(ctx, backup, dbType)
 	}); err != nil {
 		_ = s.repo.UpdateBackupStatus(ctx, id, "failed", 0, err.Error())
@@ -106,7 +107,7 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	// 容器内写文件（-r），路径映射到宿主数据目录 es_backups/（宿主挂载 → 宿主直见），
 	// 不再走 docker cp 往返。
@@ -124,7 +125,7 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件 —— 但目标在宿主挂载的数据
 	// 目录内，写完宿主直见，无需 cp。
@@ -138,7 +139,7 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	// Trigger persistence over the direct connection. dump.rdb 由 redis 进程直接写在
 	// 宿主数据目录（/data 是宿主挂载），宿主侧拷贝到 es_backups/ 即可，不经过容器
@@ -189,7 +190,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 
 	// 备份任务运行中不能删（task 可能正在写该行）。
 	if backup.Status == "running" {
-		return fmt.Errorf("备份进行中，请等待完成后再删除")
+		return errors.New("备份进行中，请等待完成后再删除")
 	}
 
 	if err := os.Remove(backup.FilePath); err != nil && !os.IsNotExist(err) {
@@ -202,7 +203,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 	st, restoring := s.restoreTask[id]
 	s.restoreMu.Unlock()
 	if restoring && st.Status == "running" {
-		return fmt.Errorf("该备份正在恢复中，无法删除")
+		return errors.New("该备份正在恢复中，无法删除")
 	}
 
 	return s.repo.DeleteBackup(ctx, id)
@@ -219,11 +220,11 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 	}
 
 	if backup.Status != "success" {
-		return fmt.Errorf("备份不是已完成状态，无法恢复")
+		return errors.New("备份不是已完成状态，无法恢复")
 	}
 
 	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
-		return fmt.Errorf("备份文件不存在")
+		return errors.New("备份文件不存在")
 	}
 
 	key := fmt.Sprintf("restore-%d", id)
@@ -232,7 +233,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 	s.restoreTask[id] = st
 	s.restoreMu.Unlock()
 
-	if _, err := s.taskMgr.Start(key, task.Options{}, func(ctx context.Context) error {
+	if _, err := s.taskMgr.Start(ctx, key, task.Options{}, func(ctx context.Context) error {
 		var rerr error
 		switch dbType {
 		case DBTypeMySQL:
@@ -276,7 +277,7 @@ func (s *Service) GetRestoreStatus(_ context.Context, id int64) (*RestoreStatus,
 func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.sql"
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
@@ -298,7 +299,7 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.dump"
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
@@ -315,11 +316,11 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
+		return errors.New("database instance not found")
 	}
 	// AOF 开启时 Redis 启动忽略 RDB（AOF 优先），恢复 RDB 会静默失效——直接拒绝。
 	if aof, err := s.redisFor().ConfigGet(ctx, instance, "appendonly"); err == nil && aof == "yes" {
-		return fmt.Errorf("Redis 已开启 AOF（appendonly=yes），RDB 恢复会被忽略；请先在配置中关闭 AOF 再恢复")
+		return errors.New("redis 已开启 AOF（appendonly=yes），RDB 恢复会被忽略；请先在配置中关闭 AOF 再恢复")
 	}
 	// 覆盖前先留底原 dump.rdb，恢复失败能回滚。
 	rollback := backup.FilePath + ".pre-restore"
@@ -381,7 +382,7 @@ func (s *Service) SweepOrphanBackups(ctx context.Context) {
 // reloads — never for SQL data operations, which use the driver channel.
 func (s *Service) runInContainer(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
 	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
-		return "", fmt.Errorf("database instance is not container-managed")
+		return "", errors.New("database instance is not container-managed")
 	}
 	args = s.withAdminCredentials(instance, args)
 	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...)
@@ -402,6 +403,7 @@ func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []st
 		return append([]string{"-e", "MYSQL_PWD=" + password, args[0], "-uroot"}, args[1:]...)
 	case DBTypePostgreSQL:
 		return append([]string{args[0], "-U", "postgres"}, args[1:]...)
+	default:
+		return args
 	}
-	return args
 }

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"easyserver/internal/infra/config"
@@ -22,10 +25,15 @@ func healthcheckCmd(configPath string) {
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	url := fmt.Sprintf("http://%s:%d/health", host, cfg.Server.Port)
+	url := "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Server.Port)) + "/health"
 
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck: %s: %v\n", url, err)
+		os.Exit(1)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "healthcheck: %s: %v\n", url, err)
 		os.Exit(1)

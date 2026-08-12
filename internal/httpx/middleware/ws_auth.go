@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/apperror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -22,8 +23,8 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.Hand
 		protocols := c.GetHeader("Sec-WebSocket-Protocol")
 		if protocols != "" {
 			// Protocol format: "token, <jwt-token>" or just "<jwt-token>"
-			parts := strings.Split(protocols, ",")
-			for _, part := range parts {
+			parts := strings.SplitSeq(protocols, ",")
+			for part := range parts {
 				part = strings.TrimSpace(part)
 				if part != "" && part != "token" {
 					tokenString = part
@@ -47,7 +48,7 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.Hand
 
 		// Parse and validate JWT
 		claims := &JWTClaims{}
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}

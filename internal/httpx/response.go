@@ -14,15 +14,15 @@ import (
 
 // Response is the standard API response format
 type Response struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
 }
 
 // PaginatedData is the paginated response data
 type PaginatedData struct {
-	Total int64       `json:"total"`
-	Items interface{} `json:"items"`
+	Total int64 `json:"total"`
+	Items any   `json:"items"`
 }
 
 // ============================================================
@@ -30,7 +30,7 @@ type PaginatedData struct {
 // ============================================================
 
 // Success returns a success response
-func Success(c *gin.Context, data interface{}) {
+func Success(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, Response{
 		Code:    apperror.CodeSuccess,
 		Message: "ok",
@@ -39,7 +39,7 @@ func Success(c *gin.Context, data interface{}) {
 }
 
 // SuccessPaginated returns a paginated success response
-func SuccessPaginated(c *gin.Context, total int64, items interface{}) {
+func SuccessPaginated(c *gin.Context, total int64, items any) {
 	Success(c, PaginatedData{
 		Total: total,
 		Items: items,

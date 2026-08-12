@@ -47,7 +47,7 @@ func (r *sqliteRepo) SaveBatch(ctx context.Context, points []*MonitorPoint) erro
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO monitor_data
@@ -132,6 +132,9 @@ func (r *sqliteRepo) GetHistory(ctx context.Context, start, end time.Time) ([]Mo
 			continue
 		}
 		points = append(points, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return points, nil
 }

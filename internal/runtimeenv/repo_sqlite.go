@@ -216,6 +216,9 @@ func (r *sqliteRepo) GetConflictingReferences(ctx context.Context, runtimeID int
 				conflicts = append(conflicts, "Website: "+wname)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	return conflicts, nil
 }

@@ -1,7 +1,7 @@
 package web
 
 import (
-	"fmt"
+	"errors"
 	"regexp"
 )
 
@@ -80,10 +80,10 @@ var domainRegexp = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0
 
 func (r *CreateWebsiteRequest) ValidateDomain() error {
 	if len(r.Domain) == 0 || len(r.Domain) > 253 {
-		return fmt.Errorf("domain length must be between 1 and 253 characters")
+		return errors.New("domain length must be between 1 and 253 characters")
 	}
 	if !domainRegexp.MatchString(r.Domain) {
-		return fmt.Errorf("invalid domain format: must be a valid RFC 1123 hostname")
+		return errors.New("invalid domain format: must be a valid RFC 1123 hostname")
 	}
 	return nil
 }

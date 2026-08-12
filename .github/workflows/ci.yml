@@ -31,7 +31,7 @@ jobs:
         run: mkdir -p internal/api/web/dist && echo '<html></html>' > internal/api/web/dist/index.html
 
       - name: Lint (golangci-lint)
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           # 固定版本保证 CI 可复现（官方建议），避免上游升版导致全库突然全红。
           # goimports 已作为 formatter 配置在 .golangci.yml，由本 step 统一检查。
@@ -61,7 +61,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: web/pnpm-lock.yaml
 

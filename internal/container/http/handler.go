@@ -5,8 +5,9 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
-	"github.com/gin-gonic/gin"
 	"strconv"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ContainerHandler handles all container-related requests
@@ -141,11 +142,7 @@ func (h *ContainerHandler) ConfigureMirror(c *gin.Context) {
 
 // GetRegistryConfig returns the engine's mirror + insecure registries.
 func (h *ContainerHandler) GetRegistryConfig(c *gin.Context) {
-	cfg, err := h.containerService.GetRegistryConfig(c.Request.Context(), h.engineName(c))
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
+	cfg := h.containerService.GetRegistryConfig(c.Request.Context(), h.engineName(c))
 	httpx.Success(c, cfg)
 }
 
@@ -183,11 +180,7 @@ func (h *ContainerHandler) RegistryLogin(c *gin.Context) {
 
 // GetLoggedInRegistries lists the registries the engine is logged into.
 func (h *ContainerHandler) GetLoggedInRegistries(c *gin.Context) {
-	regs, err := h.containerService.GetLoggedInRegistries(c.Request.Context(), h.engineName(c))
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
+	regs := h.containerService.GetLoggedInRegistries(c.Request.Context(), h.engineName(c))
 	httpx.Success(c, gin.H{"registries": regs})
 }
 
@@ -500,11 +493,7 @@ func (h *ContainerHandler) RemoveImage(c *gin.Context) {
 
 // ListComposeProjects lists all compose projects
 func (h *ContainerHandler) ListComposeProjects(c *gin.Context) {
-	projects, err := h.containerService.ListProjects(c.Request.Context(), h.engineName(c))
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
+	projects := h.containerService.ListProjects(c.Request.Context(), h.engineName(c))
 	httpx.Success(c, gin.H{"projects": projects})
 }
 

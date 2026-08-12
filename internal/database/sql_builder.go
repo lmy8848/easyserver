@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -27,8 +28,9 @@ func (b *SQLBuilder) QuoteIdentifier(name string) string {
 		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 	case DBTypePostgreSQL:
 		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	default:
+		return name
 	}
-	return name
 }
 
 // placeholder returns the parameter placeholder for the n-th argument: `?` for
@@ -54,21 +56,22 @@ func (b *SQLBuilder) EscapeString(s string) string {
 		return s
 	case DBTypePostgreSQL:
 		return strings.ReplaceAll(s, "'", "''")
+	default:
+		return s
 	}
-	return s
 }
 
 // BuildInsert generates an INSERT statement (validated table/column names).
 // All columns may be omitted (e.g. a table whose only required column is the
 // auto-increment primary key) — then a defaults-insert is emitted instead of
 // failing with "no data to insert".
-func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tableInfo *TableInfo) (string, error) {
+func (b *SQLBuilder) BuildInsert(table string, data map[string]any, tableInfo *TableInfo) (string, error) {
 	if !isValidTableName(table) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	for col := range data {
 		if err := isValidColumnName(col); err != nil {
-			return "", fmt.Errorf("invalid column '%s': %s", col, err)
+			return "", fmt.Errorf("invalid column '%s': %w", col, err)
 		}
 	}
 
@@ -99,13 +102,13 @@ func (b *SQLBuilder) BuildInsert(table string, data map[string]interface{}, tabl
 // BuildInsertParams is the parameterized form of BuildInsert: the SQL carries
 // placeholders and the values come back as args for driver binding. The dry-run
 // preview still uses BuildInsert so the user sees rendered SQL.
-func (b *SQLBuilder) BuildInsertParams(table string, data map[string]interface{}, tableInfo *TableInfo) (string, []any, error) {
+func (b *SQLBuilder) BuildInsertParams(table string, data map[string]any, tableInfo *TableInfo) (string, []any, error) {
 	if !isValidTableName(table) {
-		return "", nil, fmt.Errorf("无效的表名")
+		return "", nil, errors.New("无效的表名")
 	}
 	for col := range data {
 		if err := isValidColumnName(col); err != nil {
-			return "", nil, fmt.Errorf("invalid column '%s': %s", col, err)
+			return "", nil, fmt.Errorf("invalid column '%s': %w", col, err)
 		}
 	}
 
@@ -146,18 +149,18 @@ func (b *SQLBuilder) buildInsertDefaults(table string) string {
 
 // BuildUpdate generates an UPDATE statement (validated table/primary-key names,
 // non-empty data, non-nil pk value).
-func (b *SQLBuilder) BuildUpdate(table string, data map[string]interface{}, pkCol string, pkVal interface{}) (string, error) {
+func (b *SQLBuilder) BuildUpdate(table string, data map[string]any, pkCol string, pkVal any) (string, error) {
 	if !isValidTableName(table) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	if err := isValidColumnName(pkCol); err != nil {
-		return "", fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
+		return "", fmt.Errorf("invalid primary key column '%s': %w", pkCol, err)
 	}
 	if len(data) == 0 {
-		return "", fmt.Errorf("no data to update")
+		return "", errors.New("no data to update")
 	}
 	if pkVal == nil {
-		return "", fmt.Errorf("primary key value is required")
+		return "", errors.New("primary key value is required")
 	}
 
 	var sets []string
@@ -176,18 +179,18 @@ func (b *SQLBuilder) BuildUpdate(table string, data map[string]interface{}, pkCo
 }
 
 // BuildUpdateParams is the parameterized form of BuildUpdate.
-func (b *SQLBuilder) BuildUpdateParams(table string, data map[string]interface{}, pkCol string, pkVal interface{}) (string, []any, error) {
+func (b *SQLBuilder) BuildUpdateParams(table string, data map[string]any, pkCol string, pkVal any) (string, []any, error) {
 	if !isValidTableName(table) {
-		return "", nil, fmt.Errorf("无效的表名")
+		return "", nil, errors.New("无效的表名")
 	}
 	if err := isValidColumnName(pkCol); err != nil {
-		return "", nil, fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
+		return "", nil, fmt.Errorf("invalid primary key column '%s': %w", pkCol, err)
 	}
 	if len(data) == 0 {
-		return "", nil, fmt.Errorf("no data to update")
+		return "", nil, errors.New("no data to update")
 	}
 	if pkVal == nil {
-		return "", nil, fmt.Errorf("primary key value is required")
+		return "", nil, errors.New("primary key value is required")
 	}
 
 	var sets []string
@@ -208,15 +211,15 @@ func (b *SQLBuilder) BuildUpdateParams(table string, data map[string]interface{}
 
 // BuildDelete generates a DELETE statement (validated table/primary-key names,
 // non-nil pk value).
-func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) (string, error) {
+func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal any) (string, error) {
 	if !isValidTableName(table) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	if err := isValidColumnName(pkCol); err != nil {
-		return "", fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
+		return "", fmt.Errorf("invalid primary key column '%s': %w", pkCol, err)
 	}
 	if pkVal == nil {
-		return "", fmt.Errorf("primary key value is required")
+		return "", errors.New("primary key value is required")
 	}
 	return fmt.Sprintf("DELETE FROM %s WHERE %s = %s;",
 		b.QuoteIdentifier(table),
@@ -225,15 +228,15 @@ func (b *SQLBuilder) BuildDelete(table string, pkCol string, pkVal interface{}) 
 }
 
 // BuildDeleteParams is the parameterized form of BuildDelete.
-func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal interface{}) (string, []any, error) {
+func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal any) (string, []any, error) {
 	if !isValidTableName(table) {
-		return "", nil, fmt.Errorf("无效的表名")
+		return "", nil, errors.New("无效的表名")
 	}
 	if err := isValidColumnName(pkCol); err != nil {
-		return "", nil, fmt.Errorf("invalid primary key column '%s': %s", pkCol, err)
+		return "", nil, fmt.Errorf("invalid primary key column '%s': %w", pkCol, err)
 	}
 	if pkVal == nil {
-		return "", nil, fmt.Errorf("primary key value is required")
+		return "", nil, errors.New("primary key value is required")
 	}
 	return fmt.Sprintf("DELETE FROM %s WHERE %s = %s;",
 		b.QuoteIdentifier(table), b.QuoteIdentifier(pkCol), b.placeholder(1)), []any{pkVal}, nil
@@ -243,7 +246,7 @@ func (b *SQLBuilder) BuildDeleteParams(table string, pkCol string, pkVal interfa
 // name — it is quoted into the statement).
 func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize int) (string, error) {
 	if !isValidTableName(table) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	cols := "*"
 	if len(columns) > 0 {
@@ -262,7 +265,7 @@ func (b *SQLBuilder) BuildSelect(table string, columns []string, page, pageSize 
 // BuildCount generates a COUNT query (validated table name).
 func (b *SQLBuilder) BuildCount(table string) (string, error) {
 	if !isValidTableName(table) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	return fmt.Sprintf("SELECT COUNT(*) FROM %s;", b.QuoteIdentifier(table)), nil
 }
@@ -274,15 +277,16 @@ func (b *SQLBuilder) BuildListTables() string {
 		return "SHOW TABLES;"
 	case DBTypePostgreSQL:
 		return "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+	default:
+		return ""
 	}
-	return ""
 }
 
 // BuildDescribeTable generates a query to describe table structure (validated
 // table name — it is interpolated into the statement).
 func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 	if !isValidTableName(table) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -301,8 +305,9 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 			is_identity
 			FROM information_schema.columns
 			WHERE table_name = $1 ORDER BY ordinal_position;`, nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 var baseColumnTypeRegexp = regexp.MustCompile(`^[a-zA-Z0-9_\s]+$`)
@@ -343,7 +348,7 @@ func getFullColumnType(col TableColumn) string {
 // collation (a locale like C.UTF-8) is applied per string column via COLLATE.
 func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, charset, collation string) (string, error) {
 	if !isValidTableName(tableName) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	for _, col := range columns {
 		colType := getFullColumnType(col)
@@ -388,7 +393,7 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 			}
 			parts = append(parts, strings.Join(p, " "))
 		}
-		suffix := fmt.Sprintf("ENGINE=InnoDB DEFAULT CHARSET=%s", cs)
+		suffix := "ENGINE=InnoDB DEFAULT CHARSET=" + cs
 		if collation != "" {
 			suffix += " COLLATE=" + collation
 		}
@@ -426,8 +431,9 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 			parts = append(parts, strings.Join(p, " "))
 		}
 		return fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", ")), nil
+	default:
+		return "", errors.New("不支持的数据库类型")
 	}
-	return "", fmt.Errorf("不支持的数据库类型")
 }
 
 // isPgStringType reports whether a column type accepts a PG COLLATE clause
@@ -477,22 +483,23 @@ func (b *SQLBuilder) isNumericOrFunc(s string) bool {
 // BuildDropTable generates a DROP TABLE statement (validated table name).
 func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
 	if !isValidTableName(tableName) {
-		return "", fmt.Errorf("无效的表名")
+		return "", errors.New("无效的表名")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
 		return fmt.Sprintf("DROP TABLE `%s`;", tableName), nil
 	case DBTypePostgreSQL:
 		return fmt.Sprintf("DROP TABLE \"%s\";", tableName), nil
+	default:
+		return "", errors.New("不支持的数据库类型")
 	}
-	return "", fmt.Errorf("不支持的数据库类型")
 }
 
 // BuildCreateDatabase generates a CREATE DATABASE statement (validated name
 // and charset).
 func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, error) {
 	if !isValidDBName(name) {
-		return "", fmt.Errorf("invalid database name")
+		return "", errors.New("invalid database name")
 	}
 	if charset == "" {
 		charset = defaultCharset
@@ -509,22 +516,24 @@ func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, e
 			encoding = "LATIN1"
 		}
 		return fmt.Sprintf(`CREATE DATABASE "%s" ENCODING '%s';`, name, encoding), nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 // BuildDropDatabase generates a DROP DATABASE statement (validated name).
 func (b *SQLBuilder) BuildDropDatabase(name string) (string, error) {
 	if !isValidDBName(name) {
-		return "", fmt.Errorf("invalid database name")
+		return "", errors.New("invalid database name")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
 		return fmt.Sprintf("DROP DATABASE `%s`;", name), nil
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`DROP DATABASE "%s";`, name), nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 // BuildCreateUser generates a CREATE USER statement (validated username/host;
@@ -537,7 +546,7 @@ func (b *SQLBuilder) BuildCreateUser(username, password, host string) (string, e
 		host = "localhost"
 	}
 	if !isValidHost(host) {
-		return "", fmt.Errorf("invalid host")
+		return "", errors.New("invalid host")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -546,17 +555,18 @@ func (b *SQLBuilder) BuildCreateUser(username, password, host string) (string, e
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`CREATE USER "%s" WITH PASSWORD '%s';`,
 			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(password)), nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 // BuildResetPassword generates an ALTER USER statement to change a user's password.
 func (b *SQLBuilder) BuildResetPassword(username, newPassword, host string) (string, error) {
 	if !isValidUsername(username) {
-		return "", fmt.Errorf("invalid username")
+		return "", errors.New("invalid username")
 	}
 	if newPassword == "" {
-		return "", fmt.Errorf("password cannot be empty")
+		return "", errors.New("password cannot be empty")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -564,40 +574,42 @@ func (b *SQLBuilder) BuildResetPassword(username, newPassword, host string) (str
 			host = "localhost"
 		}
 		if !isValidHost(host) {
-			return "", fmt.Errorf("invalid host")
+			return "", errors.New("invalid host")
 		}
 		return fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s';",
 			b.EscapeString(username), b.EscapeString(host), b.EscapeString(newPassword)), nil
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`ALTER USER "%s" WITH PASSWORD '%s';`,
 			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(newPassword)), nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 // BuildDropUser generates a DROP USER statement (validated username; host is
 // checked for MySQL, where users are address-scoped).
 func (b *SQLBuilder) BuildDropUser(username, host string) (string, error) {
 	if !isValidUsername(username) {
-		return "", fmt.Errorf("invalid username")
+		return "", errors.New("invalid username")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
 		if !isValidHost(host) {
-			return "", fmt.Errorf("invalid host")
+			return "", errors.New("invalid host")
 		}
 		return fmt.Sprintf("DROP USER '%s'@'%s';", b.EscapeString(username), b.EscapeString(host)), nil
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`DROP USER "%s";`, strings.ReplaceAll(username, `"`, `""`)), nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
 // BuildGrant generates a GRANT statement. Database name and privileges are
 // validated here — invalid input yields an error, not a statement.
 func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) (string, error) {
 	if !isValidDBName(database) {
-		return "", fmt.Errorf("invalid database name")
+		return "", errors.New("invalid database name")
 	}
 	// ValidatePrivileges is the per-engine whitelist (MySQL and PG differ, e.g.
 	// INDEX exists only for MySQL).
@@ -613,11 +625,12 @@ func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) (st
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`GRANT %s ON DATABASE %s TO %s;`,
 			validatedPrivs, b.QuoteIdentifier(database), b.QuoteIdentifier(username)), nil
+	default:
+		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 	}
-	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
-func (b *SQLBuilder) formatValue(val interface{}) string {
+func (b *SQLBuilder) formatValue(val any) string {
 	if val == nil {
 		return "NULL"
 	}
@@ -633,12 +646,16 @@ func (b *SQLBuilder) formatValue(val interface{}) string {
 				return "1"
 			case DBTypePostgreSQL:
 				return "true"
+			default:
+				return "true"
 			}
 		}
 		switch b.dbType {
 		case DBTypeMySQL:
 			return "0"
 		case DBTypePostgreSQL:
+			return "false"
+		default:
 			return "false"
 		}
 	}

@@ -41,6 +41,9 @@ func (r *sqliteRepo) List(ctx context.Context, unreadOnly bool, limit int) ([]No
 		n.IsRead = isRead != 0
 		result = append(result, n)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list notifications: %w", err)
+	}
 	return result, nil
 }
 
@@ -72,7 +75,7 @@ func (r *sqliteRepo) CreateIfNotExists(ctx context.Context, req CreateNotificati
 	}
 
 	var exists int
-	r.db.QueryRowContext(ctx,
+	_ = r.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM notifications WHERE type = ? AND title = ? AND created_at > datetime('now', '-1 hour')",
 		req.Type, req.Title,
 	).Scan(&exists)

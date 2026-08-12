@@ -2,9 +2,11 @@ package middleware
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"easyserver/internal/infra/apperror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -46,7 +48,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 		// preview/playback needs the token in the URL. Restricting to safe
 		// methods keeps state-changing endpoints (POST/PUT/DELETE) requiring
 		// the header, preserving CSRF protection.
-		if tokenString == "" && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+		if tokenString == "" && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 			tokenString = c.Query("access_token")
 		}
 
@@ -56,7 +58,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 			return
 		}
 		claims := &JWTClaims{}
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}

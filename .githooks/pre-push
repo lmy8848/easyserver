@@ -1,11 +1,9 @@
 #!/bin/sh
 # pre-push: 推送时前后端完整检查。
-#   后端: golangci-lint + go test + go build
+#   后端: go test + go build（golangci-lint 已移至 pre-commit）
 #   前端: pnpm tsc --noEmit + pnpm run test + pnpm run build
 #
-# 只对本次推送涉及的文件类型触发；golangci-lint 未安装时跳过并提示（不阻塞推送）。
-# 安装: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-#
+# 只对本次推送涉及的文件类型触发。
 # 启用本钩子（仓库本地，克隆后需重新执行）:
 #   git config core.hooksPath .githooks
 
@@ -30,12 +28,6 @@ done
 
 # --- 后端 ---
 if [ -n "$(echo $GO_FILES | tr -d ' ')" ]; then
-  if command -v golangci-lint >/dev/null 2>&1; then
-    echo "==> golangci-lint"
-    golangci-lint run
-  else
-    echo "pre-push: golangci-lint 未安装，跳过"
-  fi
   echo "==> go test"
   go test -tags dev ./cmd/... ./internal/...
   echo "==> go build"

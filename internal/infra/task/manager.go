@@ -128,27 +128,27 @@ func NewManager(concurrency int) *Manager {
 }
 
 // Start 启动一个无日志任务。key 是去重键也是查找句柄——同一 key 同时只运行一个
-// 任务；重复提交同步返回错误。任务体从调用方的 ctx 脱离（后台执行，由本执行器
-// 持有生命周期），fn 在派生 ctx 上运行。
-func (m *Manager) Start(key string, opts Options, fn func(ctx context.Context) error) (*Task, error) {
-	return m.start(key, opts, fn, nil)
+// 任务；重复提交同步返回错误。任务体从调用方 ctx 剥离取消（后台执行，由本执行器
+// 持有生命周期，请求断开任务继续），但继承 ctx 的值；fn 在派生 ctx 上运行。
+func (m *Manager) Start(ctx context.Context, key string, opts Options, fn func(ctx context.Context) error) (*Task, error) {
+	return m.start(ctx, key, opts, fn, nil)
 }
 
 // StartWithLog 同 Start，但给任务体注入一个 TaskLog（可选日志附件）。任务日志
 // 通过游标回放（Tail），供 SSE 等订阅者先回放再收实时行。
-func (m *Manager) StartWithLog(key string, opts Options, fn func(ctx context.Context, log *TaskLog) error) (*Task, error) {
+func (m *Manager) StartWithLog(ctx context.Context, key string, opts Options, fn func(ctx context.Context, log *TaskLog) error) (*Task, error) {
 	if fn == nil {
-		return nil, fmt.Errorf("task fn is required")
+		return nil, errors.New("task fn is required")
 	}
-	return m.start(key, opts, nil, fn)
+	return m.start(ctx, key, opts, nil, fn)
 }
 
-func (m *Manager) start(key string, opts Options, plain func(ctx context.Context) error, withLog func(ctx context.Context, log *TaskLog) error) (*Task, error) {
+func (m *Manager) start(ctx context.Context, key string, opts Options, plain func(ctx context.Context) error, withLog func(ctx context.Context, log *TaskLog) error) (*Task, error) {
 	if key == "" {
-		return nil, fmt.Errorf("task key is required")
+		return nil, errors.New("task key is required")
 	}
 	if plain == nil && withLog == nil {
-		return nil, fmt.Errorf("task fn is required")
+		return nil, errors.New("task fn is required")
 	}
 	if opts.RetryInterval == 0 {
 		opts.RetryInterval = 3 * time.Second
@@ -170,7 +170,7 @@ func (m *Manager) start(key string, opts Options, plain func(ctx context.Context
 	case m.sem <- struct{}{}:
 	default:
 		m.mu.Unlock()
-		return nil, fmt.Errorf("后台任务并发数已达上限，请稍后再试")
+		return nil, errors.New("后台任务并发数已达上限，请稍后再试")
 	}
 
 	var log *TaskLog
@@ -190,7 +190,7 @@ func (m *Manager) start(key string, opts Options, plain func(ctx context.Context
 	m.byKey[key] = tk
 	m.mu.Unlock()
 
-	go m.run(tk, opts, fn)
+	go m.run(ctx, tk, opts, fn)
 	return tk, nil
 }
 
@@ -198,9 +198,10 @@ func (m *Manager) start(key string, opts Options, plain func(ctx context.Context
 //   - 用户取消优先：canceled 是唯一非重试终态；
 //   - 超时归入失败并触发重试（每次尝试拿全新 ctx）；
 //   - 重试期间状态仍为 running（任务在 Active 视角不消失）。
-func (m *Manager) run(tk *Task, opts Options, fn func(ctx context.Context) error) {
-	// 该任务的执行 ctx 独立于调用方：从 background 派生，Cancel 时取消。
-	ctx, cancel := context.WithCancel(context.Background())
+func (m *Manager) run(parent context.Context, tk *Task, opts Options, fn func(ctx context.Context) error) {
+	// 该任务的执行 ctx 独立于调用方：WithoutCancel 剥离父 ctx 的取消（请求断开
+	// 任务照常执行），但继承其值；WithCancel 提供可被 Task.Cancel 触发的取消。
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	tk.mu.Lock()
 	tk.cancelFn = cancel
 	tk.mu.Unlock()

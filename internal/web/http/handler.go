@@ -53,7 +53,7 @@ func (h *WebServerHandler) Get(c *gin.Context) {
 		return
 	}
 
-	h.webServerService.RefreshStatus(ctx, id)
+	_ = h.webServerService.RefreshStatus(ctx, id)
 
 	server, err := h.webServerService.Get(ctx, id)
 	if err != nil {
@@ -208,7 +208,7 @@ func (h *WebServerHandler) Status(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	h.webServerService.RefreshStatus(ctx, id)
+	_ = h.webServerService.RefreshStatus(ctx, id)
 
 	server, err := h.webServerService.Get(ctx, id)
 	if err != nil {
@@ -544,7 +544,10 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) {
 	var req struct {
 		Email string `json:"email"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
 	middleware.AuditSummary(c, "应用网站SSL证书 #"+strconv.FormatInt(id, 10))
 
 	if err := h.websiteService.ApplySSL(c.Request.Context(), sid, id, req.Email); err != nil {
@@ -676,7 +679,7 @@ func (h *WebServerHandler) BrowseDirs(c *gin.Context) {
 
 	// Security: must be under allowed roots
 	if !isAllowedPath(reqPath) {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("路径必须在以下目录下: %s", strings.Join(allowedRoots, ", "))))
+		c.Error(apperror.ErrBadRequest.WithMessage("路径必须在以下目录下: " + strings.Join(allowedRoots, ", ")))
 		return
 	}
 
@@ -743,7 +746,7 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) {
 	if !isAllowedPath(reqPath) {
 		httpx.Success(c, gin.H{
 			"valid":   false,
-			"message": fmt.Sprintf("路径必须在以下目录下: %s", strings.Join(allowedRoots, ", ")),
+			"message": "路径必须在以下目录下: " + strings.Join(allowedRoots, ", "),
 		})
 		return
 	}

@@ -1,6 +1,7 @@
 package filemanager
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -54,7 +55,7 @@ func (m *Manager) BasePath() string {
 // NewManager creates a new file Manager with a required base path.
 func NewManager(basePath string) (*Manager, error) {
 	if basePath == "" {
-		return nil, fmt.Errorf("filemanager base_path is required")
+		return nil, errors.New("filemanager base_path is required")
 	}
 
 	// Expand ~ to home directory
@@ -88,7 +89,7 @@ func NewManager(basePath string) (*Manager, error) {
 // An empty path or "." is treated as basePath (root of sandbox).
 func (m *Manager) ValidatePath(path string) (string, error) {
 	if strings.Contains(path, "\x00") {
-		return "", fmt.Errorf("invalid path: contains null byte")
+		return "", errors.New("invalid path: contains null byte")
 	}
 	if path == "" || path == "." || path == "/" {
 		return m.basePath, nil
@@ -133,7 +134,7 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 	}
 
 	if !isSubPath(absBase, resolvedPath) {
-		return "", fmt.Errorf("path traversal detected: path escapes base directory")
+		return "", errors.New("path traversal detected: path escapes base directory")
 	}
 
 	return resolvedPath, nil
@@ -146,14 +147,14 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 // silently turning the symlink-escape check into dead code.
 func (m *Manager) validateRealPath(realPath string) error {
 	if strings.Contains(realPath, "\x00") {
-		return fmt.Errorf("invalid path: contains null byte")
+		return errors.New("invalid path: contains null byte")
 	}
 	resolved, err := filepath.EvalSymlinks(realPath)
 	if err != nil {
 		return fmt.Errorf("resolve symlinks: %w", err)
 	}
 	if !isSubPath(m.basePath, resolved) {
-		return fmt.Errorf("path traversal detected: path escapes base directory")
+		return errors.New("path traversal detected: path escapes base directory")
 	}
 	return nil
 }
@@ -168,7 +169,7 @@ func (m *Manager) validateRealPath(realPath string) error {
 // strings.HasPrefix check, which does not resolve symlinks and followed them out.
 func (m *Manager) ResolveShareSubpath(shareRoot, subpath string) (string, error) {
 	if strings.Contains(subpath, "\x00") {
-		return "", fmt.Errorf("invalid path: contains null byte")
+		return "", errors.New("invalid path: contains null byte")
 	}
 	cleanSub := filepath.Clean(filepath.Join("/", subpath))
 	if cleanSub == "/" {
@@ -185,10 +186,10 @@ func (m *Manager) ResolveShareSubpath(shareRoot, subpath string) (string, error)
 		return "", err
 	}
 	if !isSubPath(m.basePath, resolved) {
-		return "", fmt.Errorf("path traversal detected: path escapes base directory")
+		return "", errors.New("path traversal detected: path escapes base directory")
 	}
 	if !isSubPath(shareRoot, resolved) {
-		return "", fmt.Errorf("path traversal detected: path escapes share root")
+		return "", errors.New("path traversal detected: path escapes share root")
 	}
 	return target, nil
 }
@@ -297,7 +298,7 @@ func (m *Manager) ReadContent(path string) (*FileContent, error) {
 	}
 
 	if info.IsDir() {
-		return nil, fmt.Errorf("cannot read content of a directory")
+		return nil, errors.New("cannot read content of a directory")
 	}
 
 	if info.Size() > maxReadFileSize {
@@ -404,12 +405,12 @@ func (m *Manager) Delete(path string, recursive bool) error {
 
 	// Prevent deleting the base path itself
 	if validPath == m.basePath {
-		return fmt.Errorf("cannot delete the root data directory")
+		return errors.New("cannot delete the root data directory")
 	}
 
 	// Prevent deleting parent of base path
 	if strings.HasPrefix(m.basePath, validPath+string(os.PathSeparator)) {
-		return fmt.Errorf("cannot delete a parent of the data directory")
+		return errors.New("cannot delete a parent of the data directory")
 	}
 
 	if recursive {
@@ -462,7 +463,7 @@ func (m *Manager) Copy(src, dst string) error {
 	}
 
 	if validSrc == validDst {
-		return fmt.Errorf("source and destination are the same")
+		return errors.New("source and destination are the same")
 	}
 
 	srcFile, err := os.OpenFile(validSrc, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
@@ -477,7 +478,7 @@ func (m *Manager) Copy(src, dst string) error {
 	}
 
 	if srcInfo.IsDir() {
-		return fmt.Errorf("copying directories is not supported")
+		return errors.New("copying directories is not supported")
 	}
 
 	// Use O_NOFOLLOW to prevent symlink attacks (TOCTOU)

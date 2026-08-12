@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -34,7 +35,7 @@ func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
+			return nil, errors.New("user not found")
 		}
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (r *sqliteUserRepo) GetByUsername(ctx context.Context, username string) (*U
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
+			return nil, errors.New("user not found")
 		}
 		return nil, err
 	}
@@ -156,6 +157,9 @@ func (r *sqliteUserRepo) List(ctx context.Context, offset, limit int) ([]User, i
 		user.ExpiresAt = expiresAt
 
 		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
 	}
 
 	return users, total, nil

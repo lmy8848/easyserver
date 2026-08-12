@@ -3,6 +3,7 @@ package deploy
 import (
 	"bytes"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -39,7 +40,7 @@ type SSHClient struct {
 // authData is the decrypted password or private key content.
 func NewSSHClient(srv *Server, authData string) (*SSHClient, error) {
 	if srv == nil {
-		return nil, fmt.Errorf("ssh: deploy server is nil")
+		return nil, errors.New("ssh: deploy server is nil")
 	}
 
 	authMethod, err := parseAuthMethod(srv.AuthType, authData)
@@ -90,7 +91,7 @@ func (c *SSHClient) Close() error {
 // exit code, and any error. The command is killed after the given timeout.
 func (c *SSHClient) RunCommand(cmd string, timeout time.Duration) (stdout, stderr string, exitCode int, err error) {
 	if c == nil || c.conn == nil {
-		return "", "", -1, fmt.Errorf("ssh: client is not connected")
+		return "", "", -1, errors.New("ssh: client is not connected")
 	}
 
 	session, err := c.conn.NewSession()
@@ -121,7 +122,8 @@ func (c *SSHClient) RunCommand(cmd string, timeout time.Duration) (stdout, stder
 		stdout = outBuf.String()
 		stderr = errBuf.String()
 		if runErr != nil {
-			if exitErr, ok := runErr.(*ssh.ExitError); ok {
+			var exitErr *ssh.ExitError
+			if errors.As(runErr, &exitErr) {
 				return stdout, stderr, exitErr.ExitStatus(), nil
 			}
 			return stdout, stderr, -1, fmt.Errorf("ssh: command failed: %w", runErr)
@@ -133,7 +135,7 @@ func (c *SSHClient) RunCommand(cmd string, timeout time.Duration) (stdout, stder
 // UploadFile uploads a local file to the remote server using the SCP protocol.
 func (c *SSHClient) UploadFile(localPath, remotePath string) error {
 	if c == nil || c.conn == nil {
-		return fmt.Errorf("ssh: client is not connected")
+		return errors.New("ssh: client is not connected")
 	}
 
 	// Read local file.
@@ -165,7 +167,7 @@ func (c *SSHClient) UploadFile(localPath, remotePath string) error {
 	// Start scp in sink mode (-t = to remote). Use shellEscape (single-quote)
 	// not Go's %q, which produces a Go string literal that $/backtick still
 	// evaluate under shell double-quote-ish contexts -> command injection.
-	if err := session.Start(fmt.Sprintf("scp -t %s", shellEscape(remotePath))); err != nil {
+	if err := session.Start("scp -t " + shellEscape(remotePath)); err != nil {
 		return fmt.Errorf("ssh: failed to start scp: %w", err)
 	}
 
@@ -227,7 +229,7 @@ func (c *SSHClient) UploadFile(localPath, remotePath string) error {
 // the SCP protocol.
 func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
 	if c == nil || c.conn == nil {
-		return fmt.Errorf("ssh: client is not connected")
+		return errors.New("ssh: client is not connected")
 	}
 
 	session, err := c.conn.NewSession()
@@ -247,7 +249,7 @@ func (c *SSHClient) DownloadFile(remotePath, localPath string) error {
 	}
 
 	// Start scp in source mode (-f = from remote). shellEscape, not %q (see above).
-	if err := session.Start(fmt.Sprintf("scp -f %s", shellEscape(remotePath))); err != nil {
+	if err := session.Start("scp -f " + shellEscape(remotePath)); err != nil {
 		return fmt.Errorf("ssh: failed to start scp: %w", err)
 	}
 

@@ -47,8 +47,7 @@ func (s *Service) ensureBuildDeps(ctx context.Context, id int64, lang string) er
 	}
 	if !hasAptGet() {
 		s.appendProgress(ctx, id, 10, "deps-skip",
-			fmt.Sprintf("非 Debian/Ubuntu 系统，跳过自动安装编译依赖。如失败请手动安装：%s",
-				strings.Join(pkgs, " ")))
+			"非 Debian/Ubuntu 系统，跳过自动安装编译依赖。如失败请手动安装："+strings.Join(pkgs, " "))
 		return nil
 	}
 

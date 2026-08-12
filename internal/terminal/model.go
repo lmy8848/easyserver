@@ -12,8 +12,8 @@ import (
 // Session represents a terminal session.
 type Session struct {
 	ID           string
-	PTY          interface{} // *os.File on linux+cgo, nil on stub
-	Cmd          interface{} // *exec.Cmd on linux+cgo, nil on stub
+	PTY          any // *os.File on linux+cgo, nil on stub
+	Cmd          any // *exec.Cmd on linux+cgo, nil on stub
 	Send         chan []byte
 	done         chan struct{} // signals readLoop + forwarder to stop
 	mu           sync.Mutex
@@ -56,11 +56,9 @@ func NewManager(ctx context.Context, wg *sync.WaitGroup, exec executor.CommandEx
 		sessions: make(map[string]*Session),
 		executor: exec,
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		m.idleTimeoutLoop(ctx, idleTimeout)
-	}()
+	})
 	return m
 }
 

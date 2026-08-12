@@ -47,7 +47,7 @@ func formatDuration(d time.Duration) string {
 // OperationLogger records terminal session operations (open/close) for audit.
 // *audit.Service satisfies this interface implicitly.
 type OperationLogger interface {
-	LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string)
+	LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]any, ip, userAgent string)
 }
 
 type TerminalHandler struct {
@@ -116,14 +116,14 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	sessionStartTime := time.Now()
 	if h.auditLog != nil {
 		h.auditLog.LogOperation(c.Request.Context(), userID, username, string(middleware.ActionExecute),
-			string(middleware.ResourceTerminal), map[string]interface{}{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
+			string(middleware.ResourceTerminal), map[string]any{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
 	}
 
 	// Upgrade to WebSocket
 	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("terminal: websocket upgrade error: %v", err)
-		h.terminalManager.CloseSession(sessionID)
+		_ = h.terminalManager.CloseSession(sessionID)
 		return
 	}
 
@@ -171,7 +171,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// 3. Close wsWrite -> writePump exits
 	// 4. Wait for writePump
 	// 5. Close WebSocket
-	h.terminalManager.CloseSession(sessionID)
+	_ = h.terminalManager.CloseSession(sessionID)
 	fwdWg.Wait()
 	close(wsWrite)
 	writePumpWg.Wait()
@@ -183,7 +183,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		durationStr := formatDuration(duration)
 		h.auditLog.LogOperation(context.Background(), userID, username, string(middleware.ActionExecute),
 			string(middleware.ResourceTerminal),
-			map[string]interface{}{"summary": "终端会话已关闭", "duration": durationStr, "session_id": sessionID},
+			map[string]any{"summary": "终端会话已关闭", "duration": durationStr, "session_id": sessionID},
 			c.ClientIP(), c.Request.UserAgent())
 	}
 }
@@ -196,7 +196,7 @@ func (h *TerminalHandler) writePump(conn *gorillaWs.Conn, wsWrite <-chan []byte)
 	defer ticker.Stop()
 
 	writeMsg := func(msgType int, data []byte) bool {
-		conn.SetWriteDeadline(time.Now().Add(TermWSWriteDeadline))
+		_ = conn.SetWriteDeadline(time.Now().Add(TermWSWriteDeadline))
 		if err := conn.WriteMessage(msgType, data); err != nil {
 			return false
 		}
@@ -227,7 +227,7 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 	// Set up read deadline and pong handler
 	conn.SetReadLimit(TermWSReadLimit)
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(TermWSReadDeadline))
+		_ = conn.SetReadDeadline(time.Now().Add(TermWSReadDeadline))
 		return nil
 	})
 

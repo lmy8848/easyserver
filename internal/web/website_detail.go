@@ -101,7 +101,7 @@ func (s *WebsiteService) GetSSL(ctx context.Context, webServerID, id int64) (*SS
 	info.Issuer = cert.Issuer.CommonName
 	info.NotBefore = cert.NotBefore.Format("2006-01-02 15:04")
 	info.NotAfter = cert.NotAfter.Format("2006-01-02 15:04")
-	info.DaysRemaining = int(cert.NotAfter.Sub(time.Now()).Hours() / 24)
+	info.DaysRemaining = int(time.Until(cert.NotAfter).Hours() / 24)
 	info.Serial = cert.SerialNumber.String()
 	info.DNSNames = cert.DNSNames
 	info.SigAlg = cert.SignatureAlgorithm.String()
@@ -169,7 +169,11 @@ func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64,
 	url := fmt.Sprintf("%s://%s:%d", scheme, w.Domain, port)
 	start := time.Now()
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, apperror.WrapError(err)
+	}
+	resp, err := client.Do(req)
 	latency := time.Since(start).Milliseconds()
 	res := &HealthResult{CheckedAt: time.Now().Format(time.RFC3339), LatencyMs: latency}
 	if err != nil {
@@ -187,7 +191,7 @@ var nginxLogRe = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) [^
 
 func parseNginxLogs(raw string) []LogEntry {
 	var entries []LogEntry
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "日志文件尚不存在") || strings.HasPrefix(line, "(读取日志失败") {
 			continue
@@ -220,16 +224,16 @@ func computeStats(raw string) *WebsiteStats {
 		}
 		st.TotalRequests++
 		var b int64
-		fmt.Sscanf(e.Bytes, "%d", &b)
+		_, _ = fmt.Sscanf(e.Bytes, "%d", &b)
 		st.TotalBytes += b
-		switch {
-		case e.Status[0] == '2':
+		switch e.Status[0] {
+		case '2':
 			st.Status2xx++
-		case e.Status[0] == '3':
+		case '3':
 			st.Status3xx++
-		case e.Status[0] == '4':
+		case '4':
 			st.Status4xx++
-		case e.Status[0] == '5':
+		case '5':
 			st.Status5xx++
 		}
 		if e.IP != "" {

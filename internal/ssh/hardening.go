@@ -41,7 +41,7 @@ func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, erro
 		}
 	}
 	if opts.Port != 0 && opts.Port != cfg.Port {
-		if !portAvailable(opts.Port) {
+		if !portAvailable(ctx, opts.Port) {
 			return nil, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %d 未空闲或不可用，请更换", opts.Port))
 		}
 	}
@@ -86,8 +86,9 @@ func (s *Service) restoreBackup() error {
 }
 
 // portAvailable reports whether a TCP port is free to listen on.
-func portAvailable(port int) bool {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+func portAvailable(ctx context.Context, port int) bool {
+	lc := net.ListenConfig{}
+	ln, err := lc.Listen(ctx, "tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return false
 	}
@@ -127,7 +128,7 @@ func (s *Service) ListAuthorizedKeys() ([]AuthorizedKey, error) {
 		return nil, err
 	}
 	var keys []AuthorizedKey
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -191,7 +192,7 @@ func (s *Service) RemoveAuthorizedKey(comment string) error {
 	}
 	var kept []string
 	removed := false
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
@@ -279,10 +280,10 @@ type Jail struct {
 }
 
 // Fail2banStatus returns fail2ban state. Never errors on "not installed".
-func (s *Service) Fail2banStatus(ctx context.Context) (*Fail2banStatus, error) {
+func (s *Service) Fail2banStatus(ctx context.Context) *Fail2banStatus {
 	st := &Fail2banStatus{}
 	if _, err := exec.LookPath("fail2ban-client"); err != nil {
-		return st, nil // not installed
+		return st // fail2ban 未安装时返回未安装状态
 	}
 	st.Installed = true
 	out, _, _ := s.executor.RunCombined(ctx, "systemctl", "is-active", "fail2ban")
@@ -296,11 +297,11 @@ func (s *Service) Fail2banStatus(ctx context.Context) (*Fail2banStatus, error) {
 	// List jails.
 	out, _, err := s.executor.RunCombined(ctx, "fail2ban-client", "status")
 	if err == nil {
-		for _, line := range strings.Split(out, "\n") {
+		for line := range strings.SplitSeq(out, "\n") {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "Jail list:") {
-				jails := strings.Split(strings.TrimPrefix(line, "Jail list:"), ",")
-				for _, j := range jails {
+			if after, ok := strings.CutPrefix(line, "Jail list:"); ok {
+				jails := strings.SplitSeq(after, ",")
+				for j := range jails {
 					j = strings.TrimSpace(j)
 					if j == "" {
 						continue
@@ -312,18 +313,18 @@ func (s *Service) Fail2banStatus(ctx context.Context) (*Fail2banStatus, error) {
 		// Per-jail failed/banned counts.
 		for i := range st.Jails {
 			out, _, _ := s.executor.RunCombined(ctx, "fail2ban-client", "status", st.Jails[i].Name)
-			for _, line := range strings.Split(out, "\n") {
+			for line := range strings.SplitSeq(out, "\n") {
 				line = strings.TrimSpace(line)
 				if strings.HasPrefix(line, "Currently failed:") {
-					fmt.Sscanf(line, "Currently failed:%d", &st.Jails[i].Failed)
+					_, _ = fmt.Sscanf(line, "Currently failed:%d", &st.Jails[i].Failed)
 				}
 				if strings.HasPrefix(line, "Currently banned:") {
-					fmt.Sscanf(line, "Currently banned:%d", &st.Jails[i].Banned)
+					_, _ = fmt.Sscanf(line, "Currently banned:%d", &st.Jails[i].Banned)
 				}
 			}
 		}
 	}
-	return st, nil
+	return st
 }
 
 // InstallFail2ban installs fail2ban and enables an sshd jail.

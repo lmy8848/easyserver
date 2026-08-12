@@ -5,14 +5,14 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"io"
 )
 
 // Encrypt encrypts plaintext using AES-256-GCM
 func Encrypt(plaintext string, key []byte) (string, error) {
 	if len(key) != 32 {
-		return "", fmt.Errorf("encryption key must be 32 bytes")
+		return "", errors.New("encryption key must be 32 bytes")
 	}
 
 	block, err := aes.NewCipher(key)
@@ -37,7 +37,7 @@ func Encrypt(plaintext string, key []byte) (string, error) {
 // Decrypt decrypts ciphertext using AES-256-GCM
 func Decrypt(ciphertext string, key []byte) (string, error) {
 	if len(key) != 32 {
-		return "", fmt.Errorf("encryption key must be 32 bytes")
+		return "", errors.New("encryption key must be 32 bytes")
 	}
 
 	data, err := base64.StdEncoding.DecodeString(ciphertext)
@@ -57,7 +57,7 @@ func Decrypt(ciphertext string, key []byte) (string, error) {
 
 	nonceSize := aesGCM.NonceSize()
 	if len(data) < nonceSize {
-		return "", fmt.Errorf("ciphertext too short")
+		return "", errors.New("ciphertext too short")
 	}
 
 	nonce, ciphertextBytes := data[:nonceSize], data[nonceSize:]

@@ -272,7 +272,7 @@ func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) {
 		c.Error(apperror.ErrInternal.WithMessage("启动日志流失败"))
 		return
 	}
-	defer cmd.Process.Kill()
+	defer func() { _ = cmd.Process.Kill() }()
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -301,7 +301,7 @@ func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) {
 				Priority          string `json:"PRIORITY"`
 			}
 
-			logData := map[string]interface{}{
+			logData := map[string]any{
 				"time":     time.Now().Format("2006-01-02 15:04:05"),
 				"message":  line,
 				"priority": "info",
@@ -341,7 +341,7 @@ func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) {
 				logData["priority"] = priority
 			}
 
-			msg, _ := json.Marshal(map[string]interface{}{
+			msg, _ := json.Marshal(map[string]any{
 				"type": "log",
 				"data": logData,
 			})

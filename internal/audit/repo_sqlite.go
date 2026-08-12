@@ -30,7 +30,7 @@ func (r *sqliteRepo) Log(ctx context.Context, entry *AuditLog) error {
 
 func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []AuditLog, error) {
 	where := "1=1"
-	args := []interface{}{}
+	args := []any{}
 
 	if filter.Username != "" {
 		where += " AND username LIKE ?"
@@ -61,7 +61,8 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 		args = append(args, filter.EndDate+" 23:59:59")
 	}
 	if filter.Status != "" {
-		if filter.Type == "request" {
+		switch filter.Type {
+		case "request":
 			switch filter.Status {
 			case "2xx":
 				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) BETWEEN 200 AND 299"
@@ -70,7 +71,7 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 			case "5xx":
 				where += " AND CAST(json_extract(detail, '$.status') AS INTEGER) >= 500"
 			}
-		} else if filter.Type == "operation" {
+		case "operation":
 			switch filter.Status {
 			case "success":
 				where += " AND (CAST(json_extract(detail, '$.status') AS INTEGER) < 400 OR json_extract(detail, '$.success') = 1 OR (json_extract(detail, '$.status') IS NULL AND json_extract(detail, '$.success') IS NULL))"
@@ -81,7 +82,7 @@ func (r *sqliteRepo) Query(ctx context.Context, filter AuditFilter) (int64, []Au
 	}
 
 	var total int64
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM audit_logs WHERE %s", where)
+	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return 0, nil, err
 	}
@@ -146,7 +147,7 @@ func (r *sqliteRepo) AppendBatch(ctx context.Context, entries []AuditLog) error 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx,
 		`INSERT INTO audit_logs (user_id, username, action, resource, detail, ip, user_agent, type, created_at)

@@ -3,6 +3,7 @@ package runtimeenv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -75,9 +76,6 @@ func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 
 // ListAll returns all installed runtime environments
 func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	envs, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return nil, err
@@ -90,9 +88,6 @@ func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
 
 // ListByName returns all versions of a specific runtime environment
 func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnvironment, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	envs, err := s.repo.ListByName(ctx, name)
 	if err != nil {
 		return nil, err
@@ -105,9 +100,6 @@ func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnviron
 
 // GetByID returns a runtime environment by ID
 func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	env, err := s.repo.GetByID(ctx, id)
 	if err != nil || env == nil {
 		return env, err
@@ -118,9 +110,6 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, e
 
 // Install installs a runtime environment
 func (s *Service) Install(ctx context.Context, name, version string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if !isValidVersion(version) {
 		return fmt.Errorf("invalid version format: %s", version)
 	}
@@ -165,7 +154,9 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 		return err
 	}
 
-	go s.installRuntime(context.Background(), id, name, exactVersion)
+	// 安装脱离请求生命周期：客户端断开不能中断正在进行的安装（否则任务状态
+	// 会卡在 installing）。WithoutCancel 继承值但剥离取消。
+	go s.installRuntime(context.WithoutCancel(ctx), id, name, exactVersion)
 	return nil
 }
 
@@ -179,19 +170,19 @@ func (s *Service) installRuntime(ctx context.Context, id int64, name, exactVersi
 	if err := s.ensureBuildDeps(ctx, id, name); err != nil {
 		log.Printf("runtime: failed to ensure build deps for %s: %v", name, err)
 		s.appendProgress(ctx, id, 25, "deps-failed", fmt.Sprintf("✗ 安装编译依赖失败：%v", err))
-		s.repo.UpdateStatusToFailed(ctx, id, "编译依赖安装失败，详见日志")
+		_ = s.repo.UpdateStatusToFailed(ctx, id, "编译依赖安装失败，详见日志")
 		return
 	}
 
 	s.appendProgress(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", exactVersion))
 	if err := s.provider.Install(ctx, name, exactVersion, installWriter{s: s, id: id, step: "installing"}); err != nil {
 		log.Printf("runtime: failed to install %s %s: %v", name, exactVersion, err)
-		s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
+		_ = s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
 		return
 	}
 
 	s.appendProgress(ctx, id, 100, "done", "安装完成")
-	s.repo.UpdateStatusToInstalled(ctx, id, "")
+	_ = s.repo.UpdateStatusToInstalled(ctx, id, "")
 
 	log.Printf("runtime: installed %s %s", name, exactVersion)
 }
@@ -338,7 +329,8 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 			}
 			exitCode := 0
 			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
 					exitCode = exitErr.ExitCode()
 				} else {
 					exitCode = -1
@@ -353,7 +345,7 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 func (s *Service) updateProgress(ctx context.Context, id int64, progress int, step, logs string) {
 	// Sanitize logs to remove sensitive information
 	sanitizedLogs := sanitizeLogs(logs)
-	s.repo.UpdateProgress(ctx, id, progress, step, sanitizedLogs)
+	_ = s.repo.UpdateProgress(ctx, id, progress, step, sanitizedLogs)
 }
 
 // appendProgress updates progress/step and appends a line to the existing logs
@@ -410,31 +402,22 @@ func isValidVersion(version string) bool {
 		return false
 	}
 	for _, c := range version {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '-' || c == '+' || c == '_') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '.' && c != '-' && c != '+' && c != '_' {
 			return false
 		}
 	}
 	// Must start with a digit or a letter
 	first := version[0]
-	if !((first >= '0' && first <= '9') || (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')) {
-		return false
-	}
-	return true
+	return (first >= '0' && first <= '9') || (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')
 }
 
 // GetProgress returns the installation progress for a runtime environment
 func (s *Service) GetProgress(ctx context.Context, id int64) (int, string, string, string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.repo.GetProgress(ctx, id)
 }
 
 // Uninstall uninstalls a runtime environment
 func (s *Service) Uninstall(ctx context.Context, name, version string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	env, err := s.repo.GetByNameAndVersion(ctx, name, version)
 	if err != nil {
 		return err
@@ -468,13 +451,13 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	}
 
 	infra.Go(func() {
-		bgCtx := context.Background()
+		bgCtx := context.WithoutCancel(ctx) // 卸载脱离请求生命周期，同 install
 		uninstallErr := s.uninstallRuntime(bgCtx, env)
 		if uninstallErr != nil {
 			log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, uninstallErr)
-			s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
+			_ = s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
 		} else {
-			s.repo.Delete(bgCtx, env.ID)
+			_ = s.repo.Delete(bgCtx, env.ID)
 		}
 	})
 
@@ -487,7 +470,7 @@ func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment)
 	s.appendProgress(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", env.Version))
 
 	if err := s.provider.Uninstall(ctx, env.Name, env.Version, installWriter{s: s, id: env.ID, step: "uninstalling"}); err != nil {
-		return fmt.Errorf("卸载失败，详见日志: %v", err)
+		return fmt.Errorf("卸载失败，详见日志: %w", err)
 	}
 
 	log.Printf("runtime: uninstalled %s %s", env.Name, env.Version)
@@ -496,42 +479,5 @@ func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment)
 
 // GetRemoteVersions dynamically fetches available versions via the provider.
 func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return s.provider.ListRemoteVersions(ctx, lang)
-}
-
-// isValidUninstallPath checks if the path is safe for deletion
-// Only allows paths under /home, /opt, or /usr/local that are not system-critical
-func isValidUninstallPath(path string) bool {
-	// Reject empty or root path
-	if path == "" || path == "/" {
-		return false
-	}
-
-	// Reject system-critical paths
-	systemPaths := []string{
-		"/bin", "/sbin", "/usr", "/etc", "/var", "/tmp", "/dev", "/proc", "/sys",
-	}
-	for _, sp := range systemPaths {
-		if path == sp || strings.HasPrefix(path, sp+"/") {
-			return false
-		}
-	}
-
-	// Only allow paths under /home or /opt
-	allowedPrefixes := []string{"/home/", "/opt/"}
-	for _, prefix := range allowedPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// shellEscape escapes a string for safe use in shell commands.
-func shellEscape(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

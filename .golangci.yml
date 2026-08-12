@@ -10,6 +10,41 @@ formatters:
 
 linters:
   default: standard # errcheck / govet / ineffassign / staticcheck / unused
+  enable:
+    # 数据库直连（database/sql）专属：Rows/Stmt 泄漏与 Rows.Err() 漏检是真实
+    # 连接泄漏/静默丢错风险，standard 不覆盖。errorlint 统一 Go 1.13 错误
+    # wrap 规范（errors.Is/As、%w）。
+    - sqlclosecheck
+    - rowserrcheck
+    - errorlint
+    # Bug 检测器：context 传递断裂、HTTP 请求缺 context、err 检查后返回 nil、
+    # type switch 缺分支、赋值后从未读取、循环内 context 被覆盖。
+    - contextcheck
+    - noctx
+    - nilerr
+    - nilnesserr
+    - exhaustive
+    - wastedassign
+    - fatcontext
+    # 代码质量（多数可 auto-fix）：多余类型转换、fmt.Sprintf 性能优化、
+    # Go 1.22+ 整数 range、标准库常量替换、testify 规范用法、新标准库 API、
+    # 切片预分配。
+    - unconvert
+    - perfsprint
+    - intrange
+    - usestdlibvars
+    - testifylint
+    - modernize
+    - prealloc
+  settings:
+    errcheck:
+      # `c.Error(...)` 在 Gin handler 里是惯用法：返回值只是写入 context 的
+      # 日志错误，无人消费也无人处理。910 处逐行 `_ =` 是纯噪音，按函数排除。
+      exclude-functions:
+        - "(*github.com/gin-gonic/gin.Context).Error"
+    exhaustive:
+      # 只检查显式 enum-like type switch，default 分支视为已覆盖。
+      default-signifies-exhaustive: true
   exclusions:
     presets:
       - std-error-handling # 排除错误处理常见模式（如 fmt.Println 的返回值）

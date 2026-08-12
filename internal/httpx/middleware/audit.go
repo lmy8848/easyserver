@@ -3,6 +3,8 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"net/http"
 	"strings"
 	"time"
 
@@ -47,7 +49,7 @@ const (
 // *audit.Service satisfies this interface implicitly.
 type RequestLogger interface {
 	LogRequest(ctx context.Context, userID int64, username, action, resource, detail, ip, userAgent string)
-	LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]interface{}, ip, userAgent string)
+	LogOperation(ctx context.Context, userID int64, username, action, resource string, extra map[string]any, ip, userAgent string)
 }
 
 // AuditSummary lets a handler declare the human-readable summary of what it did.
@@ -192,7 +194,7 @@ func AuditMiddleware(logger RequestLogger) gin.HandlerFunc {
 		c.Next()
 
 		// GET requests are not audited (read-only).
-		if c.Request.Method == "GET" {
+		if c.Request.Method == http.MethodGet {
 			return
 		}
 
@@ -234,9 +236,7 @@ func AuditMiddleware(logger RequestLogger) gin.HandlerFunc {
 			}
 			if d, ok := c.Get("audit_detail"); ok {
 				if dm, ok := d.(map[string]any); ok {
-					for k, v := range dm {
-						extra[k] = v
-					}
+					maps.Copy(extra, dm)
 				}
 			}
 			if status >= 400 || len(c.Errors) > 0 {

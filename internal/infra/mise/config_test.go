@@ -38,7 +38,7 @@ func TestBuildConfigContent_Empty(t *testing.T) {
 func TestBuildConfigContent_EnvKeyInjectionEscaped(t *testing.T) {
 	got := BuildConfigContent(map[string]string{"FOO\n[tools]\nnode": "x"})
 
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if strings.HasPrefix(line, "[") && line != "[env]" {
 			t.Fatalf("forged section header leaked at line start: %q in:\n%s", line, got)
 		}

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -194,11 +195,11 @@ func (s *Service) applyMySQLConfig(ctx context.Context, v *DBInstance, params ma
 		return err
 	}
 	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
-		return fmt.Errorf("无法获取 MySQL 版本")
+		return errors.New("无法获取 MySQL 版本")
 	}
 	major, _ := strconv.Atoi(strings.Split(str(res.Rows[0], 0), ".")[0])
 	if major < 8 {
-		return fmt.Errorf("MySQL 8.0+ 才支持在线持久化配置（SET PERSIST）")
+		return errors.New("MySQL 8.0+ 才支持在线持久化配置（SET PERSIST）")
 	}
 
 	builder := NewSQLBuilder(DBTypeMySQL)

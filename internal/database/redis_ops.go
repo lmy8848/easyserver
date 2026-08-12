@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -197,7 +198,7 @@ func (r *redisRunner) AddValue(ctx context.Context, inst *DBInstance, db int, ke
 	}
 	switch typ {
 	case "hash":
-		args := make([]interface{}, 0, len(fields)*2)
+		args := make([]any, 0, len(fields)*2)
 		for _, f := range fields {
 			args = append(args, f.Field, f.Value)
 		}
@@ -205,7 +206,7 @@ func (r *redisRunner) AddValue(ctx context.Context, inst *DBInstance, db int, ke
 			return err
 		}
 	case "list":
-		elems := make([]interface{}, len(values))
+		elems := make([]any, len(values))
 		for i, v := range values {
 			elems[i] = v
 		}
@@ -213,7 +214,7 @@ func (r *redisRunner) AddValue(ctx context.Context, inst *DBInstance, db int, ke
 			return err
 		}
 	case "set":
-		elems := make([]interface{}, len(values))
+		elems := make([]any, len(values))
 		for i, v := range values {
 			elems[i] = v
 		}
@@ -337,7 +338,7 @@ func (s *Service) getRedisInstance(ctx context.Context, instanceID int64, db int
 	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, fmt.Errorf("database instance not found")
+		return nil, errors.New("database instance not found")
 	}
 	return instance, nil
 }
@@ -346,9 +347,6 @@ func (s *Service) getRedisInstance(ctx context.Context, instanceID int64, db int
 // databases, default 16 — configurable via redis.conf, exposed as a startup-only
 // param in the panel). The key-browser dropdown renders one option per slot.
 func (s *Service) RedisDBCount(ctx context.Context, instanceID int64) (int, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, 0)
 	if err != nil {
 		return 0, err
@@ -366,9 +364,6 @@ func (s *Service) RedisDBCount(ctx context.Context, instanceID int64) (int, erro
 
 // ScanRedisKeys pages through keys in a logical DB (SCAN cursor).
 func (s *Service) ScanRedisKeys(ctx context.Context, instanceID int64, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return nil, 0, err
@@ -378,15 +373,12 @@ func (s *Service) ScanRedisKeys(ctx context.Context, instanceID int64, db int, c
 
 // GetRedisValue reads one key's decoded value.
 func (s *Service) GetRedisValue(ctx context.Context, instanceID int64, db int, key string) (*RedisValue, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return nil, err
 	}
 	if key == "" {
-		return nil, fmt.Errorf("key cannot be empty")
+		return nil, errors.New("key cannot be empty")
 	}
 	return s.redisFor().GetValue(ctx, instance, db, key)
 }
@@ -395,15 +387,12 @@ func (s *Service) GetRedisValue(ctx context.Context, instanceID int64, db int, k
 // 保持原过期时间）；-1 = 永久（SET 不带过期）；>0 = 设置过期 N 秒（添加）。
 // 0 非法，handler 层已拦截。
 func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, key, value string, ttl *int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return err
 	}
 	if key == "" {
-		return fmt.Errorf("key cannot be empty")
+		return errors.New("key cannot be empty")
 	}
 	return s.redisFor().SetValue(ctx, instance, db, key, value, ttl)
 }
@@ -413,30 +402,24 @@ func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, k
 // ZADD 悄悄变成合并/追加。string 的写入走 SetRedisValue（SET 覆盖，同时服务
 // 编辑）。
 func (s *Service) AddRedisKey(ctx context.Context, instanceID int64, db int, typ, key string, ttl int64, fields []RedisHashPair, values []string, members []RedisZMember) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return err
 	}
 	if key == "" {
-		return fmt.Errorf("key cannot be empty")
+		return errors.New("key cannot be empty")
 	}
 	return s.redisFor().AddValue(ctx, instance, db, key, typ, time.Duration(ttl)*time.Second, fields, values, members)
 }
 
 // DeleteRedisKeys deletes one or more keys; returns the number removed.
 func (s *Service) DeleteRedisKeys(ctx context.Context, instanceID int64, db int, keys []string) (int64, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return 0, err
 	}
 	if len(keys) == 0 {
-		return 0, fmt.Errorf("no keys specified")
+		return 0, errors.New("no keys specified")
 	}
 	return s.redisFor().DelKeys(ctx, instance, db, keys...)
 }
@@ -444,39 +427,30 @@ func (s *Service) DeleteRedisKeys(ctx context.Context, instanceID int64, db int,
 // ExpireRedisKey sets a key's expiry (ttl seconds; 必须 >0——0/-1 由 handler 拦截，
 // 永久走 PersistRedisKey)。
 func (s *Service) ExpireRedisKey(ctx context.Context, instanceID int64, db int, key string, ttl int64) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return err
 	}
 	if key == "" {
-		return fmt.Errorf("key cannot be empty")
+		return errors.New("key cannot be empty")
 	}
 	return s.redisFor().Expire(ctx, instance, db, key, time.Duration(ttl)*time.Second)
 }
 
 // PersistRedisKey removes a key's expiry.
 func (s *Service) PersistRedisKey(ctx context.Context, instanceID int64, db int, key string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return err
 	}
 	if key == "" {
-		return fmt.Errorf("key cannot be empty")
+		return errors.New("key cannot be empty")
 	}
 	return s.redisFor().Persist(ctx, instance, db, key)
 }
 
 // FlushRedisDB removes all keys from a logical DB.
 func (s *Service) FlushRedisDB(ctx context.Context, instanceID int64, db int) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	instance, err := s.getRedisInstance(ctx, instanceID, db)
 	if err != nil {
 		return err

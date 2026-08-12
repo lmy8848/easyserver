@@ -63,7 +63,7 @@ type MonitorSnapshot struct {
 		TotalBytes   uint64  `json:"total_bytes"`
 		UsedBytes    uint64  `json:"used_bytes"`
 		UsagePercent float64 `json:"usage_percent"`
-	} `json:"swap,omitempty"`
+	} `json:"swap,omitzero"`
 	Disk struct {
 		MountPoint   string  `json:"mount_point"`
 		TotalBytes   uint64  `json:"total_bytes"`
