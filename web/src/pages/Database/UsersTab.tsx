@@ -6,14 +6,30 @@ import {
 } from '@ant-design/icons';
 import type { UsersTabProps, DBUser } from './types';
 
+const MYSQL_PRIVILEGES = [
+  'ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE',
+  'CREATE', 'DROP', 'ALTER', 'INDEX', 'REFERENCES', 'EXECUTE',
+  'CREATE VIEW', 'SHOW VIEW', 'CREATE ROUTINE', 'ALTER ROUTINE',
+  'CREATE TEMPORARY TABLES', 'LOCK TABLES', 'EVENT', 'TRIGGER', 'GRANT OPTION',
+];
+
+const PG_PRIVILEGES = [
+  'ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE',
+  'TRUNCATE', 'CREATE', 'CONNECT', 'TEMPORARY', 'EXECUTE',
+  'USAGE', 'REFERENCES', 'TRIGGER',
+];
+
 // 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
 // （tabBarExtraContent，见 index.tsx），不在本文件。
 export default function UsersTab({
-  dbUsers, usersLoading, busy, databases,
+  server, dbUsers, usersLoading, busy, databases,
   onDeleteUser,
   userModalVisible, onUserModalVisibleChange, userForm, onCreateUser,
   grantVisible, grantUser, grantForm, onGrantVisibleChange, onGrant, onOpenGrant,
 }: UsersTabProps) {
+  const isPg = server?.db_type === 'postgresql';
+  const privileges = isPg ? PG_PRIVILEGES : MYSQL_PRIVILEGES;
+
   const userColumns = [
     { title: '用户名', dataIndex: 'username', key: 'username', render: (t: string) => <strong>{t}</strong> },
     { title: '主机', dataIndex: 'host', key: 'host', width: 160, render: (t: string) => t || '-' },
@@ -56,12 +72,10 @@ export default function UsersTab({
             <Select>{databases.map(db => <Select.Option key={db.name} value={db.name}>{db.name}</Select.Option>)}</Select>
           </Form.Item>
           <Form.Item name="privileges" label="权限" rules={[{ required: true }]}>
-            <Select mode="multiple">
-              <Select.Option value="ALL PRIVILEGES">全部权限</Select.Option>
-              <Select.Option value="SELECT">SELECT</Select.Option>
-              <Select.Option value="INSERT">INSERT</Select.Option>
-              <Select.Option value="UPDATE">UPDATE</Select.Option>
-              <Select.Option value="DELETE">DELETE</Select.Option>
+            <Select mode="multiple" placeholder="请选择权限">
+              {privileges.map(p => (
+                <Select.Option key={p} value={p}>{p}</Select.Option>
+              ))}
             </Select>
           </Form.Item>
         </Form>

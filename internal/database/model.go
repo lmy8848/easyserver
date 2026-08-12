@@ -166,6 +166,7 @@ type DescribeResult struct {
 type TableColumn struct {
 	Name         string `json:"name"`
 	Type         string `json:"type"`
+	Length       string `json:"length,omitempty"`
 	Nullable     bool   `json:"nullable"`
 	IsPrimary    bool   `json:"is_primary"`
 	AutoIncr     bool   `json:"auto_incr"`

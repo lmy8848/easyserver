@@ -131,3 +131,60 @@ func TestBuildCreateTablePg(t *testing.T) {
 		t.Errorf("PRIMARY KEY 出现 %d 次，应为 1\nSQL: %s", strings.Count(sql, "PRIMARY KEY"), sql)
 	}
 }
+
+func TestBuildCreateTableWithLength(t *testing.T) {
+	b := NewSQLBuilder(DBTypeMySQL)
+	sql, err := b.BuildCreateTable("products", []TableColumn{
+		{Name: "id", Type: "BIGINT", IsPrimary: true, AutoIncr: true},
+		{Name: "title", Type: "VARCHAR", Length: "128", Nullable: false},
+		{Name: "code", Type: "CHAR", Length: "32", Nullable: false},
+		{Name: "price", Type: "DECIMAL", Length: "10, 2", Nullable: false},
+	}, "utf8mb4", "")
+	if err != nil {
+		t.Fatalf("BuildCreateTable failed: %v", err)
+	}
+
+	for _, want := range []string{
+		"`title` VARCHAR(128) NOT NULL",
+		"`code` CHAR(32) NOT NULL",
+		"`price` DECIMAL(10, 2) NOT NULL",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("缺少 %q\nSQL: %s", want, sql)
+		}
+	}
+
+	// 校验非法长度注入
+	_, err = b.BuildCreateTable("test", []TableColumn{
+		{Name: "col", Type: "VARCHAR", Length: "255); DROP TABLE products;--"},
+	}, "utf8mb4", "")
+	if err == nil {
+		t.Errorf("应拒绝注入格式的 Length 参数")
+	}
+}
+
+func TestBuildDescribeTable(t *testing.T) {
+	t.Run("mysql", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypeMySQL)
+		sql, err := b.BuildDescribeTable("test")
+		if err != nil {
+			t.Fatalf("BuildDescribeTable failed: %v", err)
+		}
+		if want := "DESCRIBE `test`;"; sql != want {
+			t.Errorf("got %q, want %q", sql, want)
+		}
+	})
+	t.Run("postgres", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypePostgreSQL)
+		sql, err := b.BuildDescribeTable("test")
+		if err != nil {
+			t.Fatalf("BuildDescribeTable failed: %v", err)
+		}
+		if !strings.Contains(sql, "'test'::regclass") || !strings.Contains(sql, "WHERE table_name = 'test'") {
+			t.Errorf("BuildDescribeTable for PG generated invalid SQL: %s", sql)
+		}
+		if strings.Contains(sql, "\"test\"::regclass") || strings.Contains(sql, "$1") {
+			t.Errorf("BuildDescribeTable for PG must not use double-quoted regclass or unbound $1: %s", sql)
+		}
+	})
+}

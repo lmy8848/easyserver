@@ -629,9 +629,30 @@ export default function DatabasePage() {
       const values = await createForm.validateFields();
       // PG 无表级字符集（编码在数据库级），排序规则默认留空继承；MySQL 默认 utf8mb4_0900_ai_ci。
       const isPg = activeDBTypeInfo?.db_type === 'postgresql';
+      const formattedColumns = (values.columns || []).map((col: any) => {
+        let type = col.type || '';
+        const length = col.length ? String(col.length).trim() : '';
+        if (length && !type.includes('(')) {
+          type = `${type}(${length})`;
+        } else if (!length && !type.includes('(')) {
+          if (type.toUpperCase() === 'VARCHAR') {
+            type = 'VARCHAR(255)';
+          }
+        }
+        return {
+          name: col.name,
+          type: type,
+          length: length || undefined,
+          nullable: !!col.nullable,
+          is_primary: !!col.is_primary,
+          auto_incr: !!col.auto_incr,
+          unique: !!col.unique,
+          default_value: col.default_value || '',
+        };
+      });
       await dbServerApi.createTable(version.id, selectedDatabase.name, {
         name: values.tableName,
-        columns: values.columns || [],
+        columns: formattedColumns,
         charset: isPg ? 'UTF8' : (values.charset || 'utf8mb4'),
         collation: isPg ? (values.collation || '') : (values.collation || 'utf8mb4_0900_ai_ci'),
       });

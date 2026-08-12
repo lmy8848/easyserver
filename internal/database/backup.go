@@ -272,7 +272,7 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 	}
 	// --single-transaction：整个恢复包在一个事务，中途失败自动 ROLLBACK，
 	// 数据库回到恢复前状态——消除"半恢复"。
-	if _, err := s.runInContainer(ctx, instance, "pg_restore", "--single-transaction", "-d", backup.DatabaseName, "-c", target); err != nil {
+	if _, err := s.runInContainer(ctx, instance, "pg_restore", "--single-transaction", "--if-exists", "-c", "-d", backup.DatabaseName, target); err != nil {
 		return fmt.Errorf("pg_restore failed: %s", SanitizeSQLError(err.Error()))
 	}
 	return nil

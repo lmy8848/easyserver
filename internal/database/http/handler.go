@@ -648,6 +648,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 		Columns   []struct {
 			Name         string `json:"name"`
 			Type         string `json:"type"`
+			Length       string `json:"length"`
 			Nullable     bool   `json:"nullable"`
 			IsPrimary    bool   `json:"is_primary"`
 			AutoIncr     bool   `json:"auto_incr"`
@@ -666,6 +667,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 		columns = append(columns, database.TableColumn{
 			Name:         col.Name,
 			Type:         col.Type,
+			Length:       col.Length,
 			Nullable:     col.Nullable,
 			IsPrimary:    col.IsPrimary,
 			AutoIncr:     col.AutoIncr,

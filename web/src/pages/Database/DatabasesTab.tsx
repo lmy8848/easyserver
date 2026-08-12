@@ -243,22 +243,54 @@ function isRecordColumnRequired(col: TableColumnInfo | undefined): boolean {
 // MySQL：字符集 + 按字符集联动的排序规则。utf8mb4_0900_ai_ci 是 MySQL 8.0+ 官方默认
 // （Unicode 9.0，比 unicode_ci 快且准）；unicode_520_ci 是 WordPress 等兼容旧系统的常用项；
 // _bin 用于精确字节匹配（token/hash）。切换字符集后排序规则重置为该字符集首选。
-const MYSQL_CHARSET_OPTIONS = ['utf8mb4', 'utf8', 'latin1', 'ascii', 'gbk', 'big5'];
+const MYSQL_CHARSET_OPTIONS = [
+  'utf8mb4', 'utf8', 'gbk', 'gb18030', 'gb2312', 'big5',
+  'latin1', 'latin2', 'ascii', 'binary', 'utf16', 'utf32', 'cp1251', 'sjis', 'euckr',
+];
 const MYSQL_COLLATIONS: Record<string, string[]> = {
   utf8mb4: ['utf8mb4_0900_ai_ci', 'utf8mb4_unicode_ci', 'utf8mb4_unicode_520_ci', 'utf8mb4_general_ci', 'utf8mb4_bin', 'utf8mb4_0900_as_cs'],
   utf8: ['utf8_unicode_ci', 'utf8_general_ci', 'utf8_bin'],
-  latin1: ['latin1_swedish_ci', 'latin1_general_ci', 'latin1_bin'],
-  ascii: ['ascii_general_ci', 'ascii_bin'],
   gbk: ['gbk_chinese_ci', 'gbk_bin'],
+  gb18030: ['gb18030_chinese_ci', 'gb18030_bin', 'gb18030_unicode_520_ci'],
+  gb2312: ['gb2312_chinese_ci', 'gb2312_bin'],
   big5: ['big5_chinese_ci', 'big5_bin'],
+  latin1: ['latin1_swedish_ci', 'latin1_general_ci', 'latin1_bin'],
+  latin2: ['latin2_general_ci', 'latin2_bin'],
+  ascii: ['ascii_general_ci', 'ascii_bin'],
+  binary: ['binary'],
+  utf16: ['utf16_unicode_ci', 'utf16_general_ci', 'utf16_bin'],
+  utf32: ['utf32_unicode_ci', 'utf32_general_ci', 'utf32_bin'],
+  cp1251: ['cp1251_bulgarian_ci', 'cp1251_ukrainian_ci', 'cp1251_bin'],
+  sjis: ['sjis_japanese_ci', 'sjis_bin'],
+  euckr: ['euckr_korean_ci', 'euckr_bin'],
 };
 // PostgreSQL：无表级字符集（编码在数据库级，UTF8 主流），排序规则是 locale ——
 // C/C.UTF-8 为字节序（快、无本地化），其余按语言。留空继承数据库默认 locale；
 // 选值会拼到字符串列的 COLLATE，容器需装有对应 locale 才生效。
 const PG_COLLATIONS = [
-  'C', 'C.UTF-8', 'POSIX',
-  'en_US.UTF-8', 'zh_CN.UTF-8', 'de_DE.UTF-8', 'fr_FR.UTF-8',
+  'C', 'C.UTF-8', 'POSIX', 'ucs_basic', 'unicode',
+  'zh_CN.UTF-8', 'zh_HK.UTF-8', 'zh_TW.UTF-8',
+  'en_US.UTF-8', 'en_GB.UTF-8',
+  'de_DE.UTF-8', 'fr_FR.UTF-8', 'es_ES.UTF-8', 'it_IT.UTF-8',
   'ja_JP.UTF-8', 'ko_KR.UTF-8', 'ru_RU.UTF-8',
+];
+
+const MYSQL_COLUMN_TYPES = [
+  'INT', 'BIGINT', 'SMALLINT', 'TINYINT', 'MEDIUMINT',
+  'VARCHAR', 'CHAR', 'TEXT', 'MEDIUMTEXT', 'LONGTEXT',
+  'DATETIME', 'TIMESTAMP', 'DATE', 'TIME', 'YEAR',
+  'DECIMAL', 'FLOAT', 'DOUBLE',
+  'BOOLEAN', 'JSON', 'BLOB', 'MEDIUMBLOB', 'LONGBLOB',
+  'VARBINARY', 'BIT', 'ENUM', 'SET',
+];
+
+const PG_COLUMN_TYPES = [
+  'INTEGER', 'BIGINT', 'SMALLINT',
+  'SERIAL', 'BIGSERIAL', 'SMALLSERIAL',
+  'VARCHAR', 'CHAR', 'TEXT',
+  'NUMERIC', 'REAL', 'DOUBLE PRECISION', 'MONEY',
+  'TIMESTAMP', 'TIMESTAMPTZ', 'DATE', 'TIME', 'TIMETZ', 'INTERVAL',
+  'BOOLEAN', 'BIT', 'JSON', 'JSONB', 'BYTEA', 'UUID', 'INET', 'CIDR', 'MACADDR',
 ];
 
 function TableExplorerView({
@@ -474,7 +506,7 @@ function TableExplorerView({
           </Form.Item>
           {isPg ? (
             <Form.Item name="collation" label="排序规则（留空继承数据库 locale）">
-              <Select allowClear placeholder="默认（继承数据库）">
+              <Select showSearch allowClear placeholder="默认（继承数据库）">
                 {PG_COLLATIONS.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
               </Select>
             </Form.Item>
@@ -482,7 +514,7 @@ function TableExplorerView({
             <Row gutter={8}>
               <Col span={12}>
                 <Form.Item name="charset" label="字符集">
-                  <Select onChange={(v: string) => {
+                  <Select showSearch onChange={(v: string) => {
                     // 字符集切换后若当前排序规则不匹配，重置为该字符集首选规则。
                     const cur = createForm.getFieldValue('collation');
                     const opts = MYSQL_COLLATIONS[v] || [];
@@ -494,7 +526,7 @@ function TableExplorerView({
               </Col>
               <Col span={12}>
                 <Form.Item name="collation" label="排序规则">
-                  <Select>
+                  <Select showSearch>
                     {collationOptions.map(c => (
                       <Select.Option key={c} value={c}>{c}</Select.Option>
                     ))}
@@ -520,26 +552,21 @@ function TableExplorerView({
                         </div>
                         <div style={{ flex: 1 }}>
                           <Form.Item {...restField} name={[name, 'type']} rules={[{ required: true, message: '类型' }]}>
-                            <Select placeholder="类型" onChange={(v: string) => {
+                            <Select placeholder="类型" showSearch onChange={(v: string) => {
                               // 类型改成非整数时清掉自增，避免提交出无效 AUTO_INCREMENT。
                               if (!/^(INT|BIGINT|SMALLINT|TINYINT|MEDIUMINT|INTEGER|SERIAL)\b/i.test(v)) {
                                 createForm.setFieldValue(['columns', name, 'auto_incr'], false);
                               }
                             }}>
-                              <Select.Option value="INT">INT</Select.Option>
-                              <Select.Option value="BIGINT">BIGINT</Select.Option>
-                              <Select.Option value="SMALLINT">SMALLINT</Select.Option>
-                              <Select.Option value="TINYINT">TINYINT</Select.Option>
-                              <Select.Option value="VARCHAR(255)">VARCHAR(255)</Select.Option>
-                              <Select.Option value="TEXT">TEXT</Select.Option>
-                              <Select.Option value="DATETIME">DATETIME</Select.Option>
-                              <Select.Option value="TIMESTAMP">TIMESTAMP</Select.Option>
-                              <Select.Option value="DATE">DATE</Select.Option>
-                              <Select.Option value="BOOLEAN">BOOLEAN</Select.Option>
-                              <Select.Option value="DECIMAL(10,2)">DECIMAL(10,2)</Select.Option>
-                              <Select.Option value="DOUBLE">DOUBLE</Select.Option>
-                              <Select.Option value="JSON">JSON</Select.Option>
+                              {(isPg ? PG_COLUMN_TYPES : MYSQL_COLUMN_TYPES).map(t => (
+                                <Select.Option key={t} value={t}>{t}</Select.Option>
+                              ))}
                             </Select>
+                          </Form.Item>
+                        </div>
+                        <div style={{ width: 140 }}>
+                          <Form.Item {...restField} name={[name, 'length']}>
+                            <Input placeholder="长度/精度" />
                           </Form.Item>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'flex-start' }}>
@@ -614,7 +641,7 @@ function TableExplorerView({
                     </div>
                   );
                 })}
-                <Button type="dashed" onClick={() => add({ nullable: true })} block icon={<PlusOutlined />}>
+                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
                   添加列
                 </Button>
               </>

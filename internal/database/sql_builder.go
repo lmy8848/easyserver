@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -287,23 +288,53 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 	case DBTypeMySQL:
 		return fmt.Sprintf("DESCRIBE %s;", b.QuoteIdentifier(table)), nil
 	case DBTypePostgreSQL:
-		// Use QuoteIdentifier for safe table name quoting
-		quotedTable := b.QuoteIdentifier(table)
+		escapedTable := b.EscapeString(table)
 		return fmt.Sprintf(`SELECT column_name, data_type, is_nullable, column_default,
 			CASE WHEN column_name IN (
 				SELECT a.attname FROM pg_index i
 				JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-				WHERE i.indrelid = %s::regclass AND i.indisprimary
-			) THEN 'YES' ELSE 'NO' END as is_primary
+				WHERE i.indrelid = '%s'::regclass AND i.indisprimary
+			) THEN 'YES' ELSE 'NO' END as is_primary,
+			is_identity
 			FROM information_schema.columns
-			WHERE table_name = $1 ORDER BY ordinal_position;`, quotedTable), nil
+			WHERE table_name = '%s' ORDER BY ordinal_position;`, escapedTable, escapedTable), nil
 	}
 	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
+var baseColumnTypeRegexp = regexp.MustCompile(`^[a-zA-Z0-9_\s]+$`)
+var colTypeParamRegexp = regexp.MustCompile(`^\(\s*(?:(?:\d+|'[^']*')\s*(?:,\s*(?:\d+|'[^']*')\s*)*)?\s*\)$`)
+
+func isValidColumnTypeSyntax(colType string) bool {
+	if colType == "" {
+		return false
+	}
+	baseType := strings.TrimSpace(strings.Split(colType, "(")[0])
+	if !baseColumnTypeRegexp.MatchString(baseType) {
+		return false
+	}
+	if idx := strings.Index(colType, "("); idx != -1 {
+		paramPart := colType[idx:]
+		if !colTypeParamRegexp.MatchString(paramPart) {
+			return false
+		}
+	}
+	return true
+}
+
+func getFullColumnType(col TableColumn) string {
+	t := strings.TrimSpace(col.Type)
+	l := strings.TrimSpace(col.Length)
+	if l != "" && !strings.Contains(t, "(") {
+		return fmt.Sprintf("%s(%s)", t, l)
+	}
+	return t
+}
+
 // BuildCreateTable generates a CREATE TABLE statement for the columns given.
-// Column types are checked against the allowedColumnTypes whitelist; names are
-// validated and quoted per engine. charset/collation semantics differ per engine:
+// Column types are validated for SQL safety (safe type identifier and optional
+// length/precision parameter format); actual type validity is enforced by the database engine.
+// charset/collation semantics differ per engine:
 // MySQL takes table-level DEFAULT CHARSET/COLLATE; PostgreSQL has no per-table
 // charset (encoding is set at database level, UTF8 mainstream) — a chosen
 // collation (a locale like C.UTF-8) is applied per string column via COLLATE.
@@ -312,10 +343,9 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 		return "", fmt.Errorf("无效的表名")
 	}
 	for _, col := range columns {
-		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
-		baseType = strings.TrimSpace(baseType)
-		if !allowedColumnTypes[baseType] {
-			return "", fmt.Errorf("不支持的列类型: %s", col.Type)
+		colType := getFullColumnType(col)
+		if !isValidColumnTypeSyntax(colType) {
+			return "", fmt.Errorf("不支持的列类型: %s", colType)
 		}
 		if !isValidTableName(col.Name) {
 			return "", fmt.Errorf("无效的列名: %s", col.Name)
@@ -336,7 +366,8 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 		}
 		var parts []string
 		for _, col := range columns {
-			p := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
+			colType := getFullColumnType(col)
+			p := []string{fmt.Sprintf("`%s`", col.Name), colType}
 			if col.IsPrimary {
 				p = append(p, "PRIMARY KEY")
 			}
@@ -362,18 +393,25 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 	case DBTypePostgreSQL:
 		var parts []string
 		for _, col := range columns {
-			p := []string{fmt.Sprintf("\"%s\"", col.Name), col.Type}
+			colType := getFullColumnType(col)
+			p := []string{fmt.Sprintf("\"%s\"", col.Name), colType}
 			if col.IsPrimary {
 				p = append(p, "PRIMARY KEY")
 			}
 			if col.AutoIncr {
-				p = []string{fmt.Sprintf("\"%s\"", col.Name), "SERIAL", "PRIMARY KEY"}
+				serialType := "SERIAL"
+				if strings.EqualFold(col.Type, "BIGINT") {
+					serialType = "BIGSERIAL"
+				} else if strings.EqualFold(col.Type, "SMALLINT") {
+					serialType = "SMALLSERIAL"
+				}
+				p = []string{fmt.Sprintf("\"%s\"", col.Name), serialType, "PRIMARY KEY"}
 			}
 			if !col.Nullable && !col.IsPrimary {
 				p = append(p, "NOT NULL")
 			}
 			// collation 只对字符串列有效（locale 指定比较规则）；数字/时间列加会报错。
-			if collation != "" && isPgStringType(col.Type) {
+			if collation != "" && isPgStringType(colType) {
 				p = append(p, `COLLATE "`+collation+`"`)
 			}
 			if col.Unique {
@@ -634,13 +672,20 @@ func tableInfoFromQuery(dbType DBType, tableName string, res *QueryResult) *Tabl
 		if v, ok := colIdx["Extra"]; ok && strings.Contains(strings.ToLower(str(row, v)), "auto_increment") {
 			col.IsAutoIncr = true
 		}
+		if v, ok := colIdx["is_identity"]; ok && strings.EqualFold(str(row, v), "yes") {
+			col.IsAutoIncr = true
+		}
 		if v, ok := colIdx["Default"]; ok && row[v] != nil {
 			col.HasDefault = true
 			col.DefaultValue = str(row, v)
 		}
 		if v, ok := colIdx["column_default"]; ok && row[v] != nil {
 			col.HasDefault = true
-			col.DefaultValue = str(row, v)
+			defVal := str(row, v)
+			col.DefaultValue = defVal
+			if strings.Contains(strings.ToLower(defVal), "nextval(") {
+				col.IsAutoIncr = true
+			}
 		}
 		info.Columns = append(info.Columns, col)
 	}
