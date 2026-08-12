@@ -231,12 +231,6 @@ type InstanceConfigView struct {
 	Meta   []ParamMeta       `json:"meta"`
 }
 
-// RedisDB describes one logical Redis database (0-15) that holds data.
-type RedisDB struct {
-	Index int   `json:"index"`
-	Size  int64 `json:"size"` // DBSIZE: number of keys
-}
-
 // RestoreStatus is the in-memory state of one restore task (SSE via GET /backups/:bid/restore-status).
 // Restore is a pure in-memory operation — it never touches the backup row's status.
 type RestoreStatus struct {

@@ -106,8 +106,12 @@ export default function DatabasesTab({
         <Form form={dbForm} layout="vertical">
           <Form.Item label="版本"><Input value={`${server.display_name} ${version?.version || ''}`} disabled /></Form.Item>
           <Form.Item name="name" label="数据库名" rules={[{ required: true }]}><Input placeholder="如：my_app" /></Form.Item>
-          <Form.Item name="charset" label="字符集" initialValue="utf8mb4">
-            <Select><Select.Option value="utf8mb4">utf8mb4</Select.Option><Select.Option value="utf8">utf8</Select.Option></Select>
+          <Form.Item name="charset" label="字符集" initialValue={server.db_type === 'mysql' ? 'utf8mb4' : 'UTF8'}>
+            <Select>
+              {(server.db_type === 'mysql' ? MYSQL_CHARSET_OPTIONS : ['UTF8', 'LATIN1']).map(cs => (
+                <Select.Option key={cs} value={cs}>{cs}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
         </Form>
       </Modal>

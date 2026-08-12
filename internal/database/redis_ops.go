@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -70,25 +71,6 @@ func (r *redisRunner) clientFor(ctx context.Context, inst *DBInstance, db int) (
 	return c, nil
 }
 
-// ListDBs reports the non-empty logical databases (DBSIZE > 0) in index order.
-func (r *redisRunner) ListDBs(ctx context.Context, inst *DBInstance) ([]RedisDB, error) {
-	var dbs []RedisDB
-	for i := 0; i < 16; i++ {
-		c, err := r.clientFor(ctx, inst, i)
-		if err != nil {
-			return nil, err
-		}
-		n, err := c.DBSize(ctx).Result()
-		if err != nil {
-			return nil, err
-		}
-		if n > 0 {
-			dbs = append(dbs, RedisDB{Index: i, Size: n})
-		}
-	}
-	return dbs, nil
-}
-
 // ScanKeys pages through keys with SCAN (type/TTL/size filled per key).
 func (r *redisRunner) ScanKeys(ctx context.Context, inst *DBInstance, db int, cursor uint64, pattern string, count int64) ([]RedisKey, uint64, error) {
 	c, err := r.clientFor(ctx, inst, db)
@@ -106,7 +88,18 @@ func (r *redisRunner) ScanKeys(ctx context.Context, inst *DBInstance, db int, cu
 			rk.Type = t
 		}
 		if d, err := c.TTL(ctx, k).Result(); err == nil {
-			rk.TTL = int64(d / time.Second) // -1 (no expiry) and -2 (gone) survive division
+			// go-redis 把 TTL 秒数包成 Duration（3600 → 3600*time.Second），
+			// -1（无过期）/ -2（key 已消失）也是 -1/-2 个 time.Second。负数直接
+			// 除 time.Second 整数除法向零截断会得 0，把"永久"误显示成"0秒"——
+			// 规范成 -1 / -2 原值。
+			switch d {
+			case -1 * time.Second:
+				rk.TTL = -1
+			case -2 * time.Second:
+				rk.TTL = -2
+			default:
+				rk.TTL = int64(d / time.Second)
+			}
 		}
 		if sz, err := c.MemoryUsage(ctx, k, 0).Result(); err == nil {
 			rk.Size = sz
@@ -169,13 +162,147 @@ func (r *redisRunner) GetValue(ctx context.Context, inst *DBInstance, db int, ke
 	}
 }
 
-// SetValue writes a string key (the UI only edits string values inline).
-func (r *redisRunner) SetValue(ctx context.Context, inst *DBInstance, db int, key, value string, ttl time.Duration) error {
+// SetValue creates a key of the given type ("" | "string" | "hash" | "list" |
+// "set" | "zset") from a JSON-decoded value. Optional TTL is applied after the
+// create (collection commands have no inline TTL, so it's a follow-up EXPIRE).
+func (r *redisRunner) SetValue(ctx context.Context, inst *DBInstance, db int, typ, key string, value any, ttl time.Duration) error {
 	c, err := r.clientFor(ctx, inst, db)
 	if err != nil {
 		return err
 	}
-	return c.Set(ctx, key, value, ttl).Err()
+	switch typ {
+	case "", "string":
+		if err := c.Set(ctx, key, fmt.Sprintf("%v", value), ttl).Err(); err != nil {
+			return err
+		}
+	case "hash":
+		m, err := redisStrMap(value)
+		if err != nil {
+			return err
+		}
+		if len(m) == 0 {
+			return fmt.Errorf("hash 至少需要一个 field")
+		}
+		if err := c.HSet(ctx, key, m).Err(); err != nil {
+			return err
+		}
+	case "list":
+		items, err := redisStrSlice(value)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("list 至少需要一个元素")
+		}
+		if err := c.RPush(ctx, key, toAny(items)...).Err(); err != nil {
+			return err
+		}
+	case "set":
+		items, err := redisStrSlice(value)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return fmt.Errorf("set 至少需要一个元素")
+		}
+		if err := c.SAdd(ctx, key, toAny(items)...).Err(); err != nil {
+			return err
+		}
+	case "zset":
+		ms, err := redisZMembers(value)
+		if err != nil {
+			return err
+		}
+		if len(ms) == 0 {
+			return fmt.Errorf("zset 至少需要一个成员")
+		}
+		zs := make([]redis.Z, 0, len(ms))
+		for _, m := range ms {
+			zs = append(zs, redis.Z{Score: m.Score, Member: m.Member})
+		}
+		if err := c.ZAdd(ctx, key, zs...).Err(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("不支持的类型: %s", typ)
+	}
+	if ttl > 0 {
+		return c.Expire(ctx, key, ttl).Err()
+	}
+	return nil
+}
+
+// redisStrMap coerces a JSON-decoded value to map[string]string (hash input).
+func redisStrMap(value any) (map[string]string, error) {
+	m := map[string]string{}
+	switch v := value.(type) {
+	case map[string]any:
+		for k, vv := range v {
+			m[k] = fmt.Sprintf("%v", vv)
+		}
+	case map[string]string:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("hash 值必须是 field/value 对象")
+	}
+	return m, nil
+}
+
+// redisStrSlice coerces a JSON-decoded value to []string (list/set input).
+func redisStrSlice(value any) ([]string, error) {
+	switch v := value.(type) {
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, it := range v {
+			out = append(out, fmt.Sprintf("%v", it))
+		}
+		return out, nil
+	case []string:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("值必须是数组")
+	}
+}
+
+// redisZMembers coerces a JSON-decoded value to []RedisZMember (zset input).
+func redisZMembers(value any) ([]RedisZMember, error) {
+	switch v := value.(type) {
+	case []any:
+		out := make([]RedisZMember, 0, len(v))
+		for _, it := range v {
+			row, ok := it.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("zset 成员必须是 {member, score} 对象")
+			}
+			out = append(out, RedisZMember{Member: fmt.Sprintf("%v", row["member"]), Score: numToFloat(row["score"])})
+		}
+		return out, nil
+	case []RedisZMember:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("zset 值必须是成员数组")
+	}
+}
+
+func numToFloat(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	}
+	return 0
+}
+
+// toAny widens []string to []interface{} for go-redis variadic commands.
+func toAny(items []string) []interface{} {
+	out := make([]interface{}, len(items))
+	for i, it := range items {
+		out[i] = it
+	}
+	return out
 }
 
 func (r *redisRunner) DelKeys(ctx context.Context, inst *DBInstance, db int, keys ...string) (int64, error) {
@@ -283,16 +410,26 @@ func (s *Service) getRedisInstance(ctx context.Context, instanceID int64, db int
 	return instance, nil
 }
 
-// ListRedisDBs returns the non-empty logical databases (index + key count).
-func (s *Service) ListRedisDBs(ctx context.Context, instanceID int64) ([]RedisDB, error) {
+// RedisDBCount returns the configured logical database slot count (CONFIG GET
+// databases, default 16 — configurable via redis.conf, exposed as a startup-only
+// param in the panel). The key-browser dropdown renders one option per slot.
+func (s *Service) RedisDBCount(ctx context.Context, instanceID int64) (int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	instance, err := s.getRedisInstance(ctx, instanceID, 0)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return s.redisFor().ListDBs(ctx, instance)
+	raw, err := s.redisFor().ConfigGet(ctx, instance, "databases")
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("无效的 Redis databases 配置: %q", raw)
+	}
+	return n, nil
 }
 
 // ScanRedisKeys pages through keys in a logical DB (SCAN cursor).
@@ -322,8 +459,9 @@ func (s *Service) GetRedisValue(ctx context.Context, instanceID int64, db int, k
 	return s.redisFor().GetValue(ctx, instance, db, key)
 }
 
-// SetRedisValue writes a string key (with optional TTL seconds; ttl <= 0 = no expiry).
-func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, key, value string, ttl int64) error {
+// SetRedisValue creates a key of the given type (string/hash/list/set/zset) with
+// optional TTL seconds (ttl <= 0 = no expiry).
+func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, typ, key string, value any, ttl int64) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -334,7 +472,7 @@ func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, k
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
-	return s.redisFor().SetValue(ctx, instance, db, key, value, time.Duration(ttl)*time.Second)
+	return s.redisFor().SetValue(ctx, instance, db, typ, key, value, time.Duration(ttl)*time.Second)
 }
 
 // DeleteRedisKeys deletes one or more keys; returns the number removed.

@@ -87,7 +87,7 @@ func TestRedisSetExpirePersistFlush(t *testing.T) {
 
 	mock := runnerClientFor(t, runner, inst, 0)
 	mock.ExpectSet("k", "v", 0).SetVal("OK")
-	if err := runner.SetValue(ctx, inst, 0, "k", "v", 0); err != nil {
+	if err := runner.SetValue(ctx, inst, 0, "", "k", "v", 0); err != nil {
 		t.Fatalf("SetValue: %v", err)
 	}
 
@@ -150,13 +150,54 @@ func TestRedisScanKeysFillsMeta(t *testing.T) {
 	}
 }
 
+func TestRedisSetTypedValue(t *testing.T) {
+	inst := redisTestInstance()
+	runner := newRedisRunner()
+	defer runner.Close(inst.ID)
+	ctx := context.Background()
+	mock := runnerClientFor(t, runner, inst, 0)
+
+	// hash
+	mock.ExpectHSet("h", map[string]string{"f": "v"}).SetVal(1)
+	if err := runner.SetValue(ctx, inst, 0, "hash", "h", map[string]string{"f": "v"}, 0); err != nil {
+		t.Fatalf("hash SetValue: %v", err)
+	}
+	// list
+	mock.ExpectRPush("l", "a", "b").SetVal(2)
+	if err := runner.SetValue(ctx, inst, 0, "list", "l", []any{"a", "b"}, 0); err != nil {
+		t.Fatalf("list SetValue: %v", err)
+	}
+	// set
+	mock.ExpectSAdd("s", "x").SetVal(1)
+	if err := runner.SetValue(ctx, inst, 0, "set", "s", []string{"x"}, 0); err != nil {
+		t.Fatalf("set SetValue: %v", err)
+	}
+	// zset with TTL → ZAdd then Expire
+	mock.ExpectZAdd("z", redis.Z{Score: 1.5, Member: "m"}).SetVal(1)
+	mock.ExpectExpire("z", 10*time.Second).SetVal(true)
+	if err := runner.SetValue(ctx, inst, 0, "zset", "z", []any{map[string]any{"member": "m", "score": 1.5}}, 10*time.Second); err != nil {
+		t.Fatalf("zset SetValue: %v", err)
+	}
+	// 空 hash 拒绝
+	if err := runner.SetValue(ctx, inst, 0, "hash", "e", map[string]string{}, 0); err == nil {
+		t.Fatal("empty hash should be rejected")
+	}
+	// 未知类型拒绝
+	if err := runner.SetValue(ctx, inst, 0, "stream", "s", "v", 0); err == nil {
+		t.Fatal("unsupported type should be rejected")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRedisDialFailureSurfacesConnectionError(t *testing.T) {
 	// A dead container / wrong mapping surfaces as a connection error from the
 	// first command (clientFor pings on first use) — the guard that used to sit
 	// on container_port is gone, the dial error is the signal now.
 	inst := &DBInstance{ID: 9, DBType: DBTypeRedis, Port: 1}
 	runner := newRedisRunner()
-	_, err := runner.ListDBs(context.Background(), inst)
+	_, _, err := runner.ScanKeys(context.Background(), inst, 0, 0, "*", 10)
 	if err == nil {
 		t.Fatal("expected dial error for unreachable instance")
 	}

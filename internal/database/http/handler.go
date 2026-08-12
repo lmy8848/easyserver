@@ -78,7 +78,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
 
 	// Redis key browser (instance-scoped, addressed by logical DB index)
-	protected.GET("/db/redis/instances/:iid/dbs", redisHandler.ListDBs)
+	protected.GET("/db/redis/instances/:iid/databases-count", redisHandler.DBCount)
 	protected.GET("/db/redis/instances/:iid/keys", redisHandler.ScanKeys)
 	protected.GET("/db/redis/instances/:iid/value", redisHandler.GetValue)
 	protected.POST("/db/redis/instances/:iid/value", redisHandler.SetValue)

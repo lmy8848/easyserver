@@ -647,8 +647,8 @@ export const dbServerApi = {
     api.delete<ApiResponse>(`/db/backups/${backupId}`),
 
   // Redis key browser (instance-scoped, addressed by logical DB index)
-  listRedisDBs: (instanceId: number) =>
-    api.get<ApiResponse<Array<{ index: number; size: number }>>>(`/db/redis/instances/${instanceId}/dbs`),
+  redisDBCount: (instanceId: number) =>
+    api.get<ApiResponse<{ databases: number }>>(`/db/redis/instances/${instanceId}/databases-count`),
 
   scanRedisKeys: (instanceId: number, db: number, cursor: number | string, pattern = '*', count = 50) =>
     api.get<ApiResponse<{ keys: RedisKey[]; next_cursor: number | string; db: number }>>(`/db/redis/instances/${instanceId}/keys`, { params: { db, cursor, pattern, count } }),
@@ -656,7 +656,7 @@ export const dbServerApi = {
   getRedisValue: (instanceId: number, db: number, key: string) =>
     api.get<ApiResponse<RedisValue>>(`/db/redis/instances/${instanceId}/value`, { params: { db, key } }),
 
-  setRedisValue: (instanceId: number, data: { db: number; key: string; value: string; ttl?: number }) =>
+  setRedisValue: (instanceId: number, data: { db: number; type?: string; key: string; value: unknown; ttl?: number }) =>
     api.post<ApiResponse>(`/db/redis/instances/${instanceId}/value`, data),
 
   delRedisKeys: (instanceId: number, data: { db: number; keys: string[] }) =>

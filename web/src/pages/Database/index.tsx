@@ -362,7 +362,7 @@ export default function DatabasePage() {
       title: `卸载 ${server.display_name} ${v.version}？`,
       content: (
         <div>
-          <p>卸载将删除该数据库实例。默认保留宿主数据目录（可重新安装以恢复数据）。</p>
+          <p>卸载将删除该数据库实例。默认保留数据目录（可重新安装以恢复数据）。</p>
           <Checkbox onChange={(e) => { purge = e.target.checked; }}>同时删除数据目录及备份文件（不可恢复）</Checkbox>
         </div>
       ),

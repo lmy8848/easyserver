@@ -202,7 +202,10 @@ export default function ConfigTab({
             okText="保存"
             okButtonProps={{ danger: true }}
             cancelText="取消"
-            onConfirm={onSaveConfig}
+            // 不直接传 async onSaveConfig：antd 会等它返回的 Promise resolve 才关弹窗，
+            // 改端口时后端重建容器要几十秒，弹窗会一直卡着。这里 fire-and-forget，
+            // 点了立即关；保存异步继续，进度看触发按钮 busy loading，结果走 message。
+            onConfirm={() => { void onSaveConfig(); }}
           >
             <Button type="primary" loading={busy === 'save-config'} disabled={version?.status !== 'running'}>保存配置</Button>
           </Popconfirm>

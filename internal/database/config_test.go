@@ -20,6 +20,7 @@ type fakeConfigDriver struct {
 	pgContext    map[string]string // name → context（postmaster 判断）
 	execs        []string          // 记录的 Exec SQL
 	queries      []string          // 记录的 Query SQL
+	closeCalls   int               // Close 调用次数（端口变更应清缓存池）
 }
 
 func (f *fakeConfigDriver) Query(_ context.Context, _ *DBInstance, _, sql string, args ...any) (*QueryResult, error) {
@@ -59,7 +60,7 @@ func (f *fakeConfigDriver) Exec(_ context.Context, _ *DBInstance, _, sql string,
 	return &ExecResult{}, nil
 }
 
-func (f *fakeConfigDriver) Close(int64) {}
+func (f *fakeConfigDriver) Close(int64) { f.closeCalls++ }
 
 // configSvc builds a Service for config tests: fakeRepo + fake runtime (running)
 // + fake driver (or redismock runner for Redis).
@@ -210,6 +211,10 @@ func TestSaveConfigWithPortChangeRecreatesContainer(t *testing.T) {
 	// port 不走驱动写；其余参数照常 SET PERSIST。
 	if len(f.execs) != 1 || f.execs[0] != "SET PERSIST `max_connections` = 300" {
 		t.Fatalf("expected only max_connections persisted, got %v", f.execs)
+	}
+	// 端口变了必须清驱动缓存池，否则下次查询仍连旧端口。
+	if f.closeCalls != 1 {
+		t.Fatalf("expected driver.Close after port change, got %d calls", f.closeCalls)
 	}
 }
 

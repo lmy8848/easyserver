@@ -180,7 +180,7 @@ func TestBuildDescribeTable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildDescribeTable failed: %v", err)
 		}
-		if !strings.Contains(sql, "$1::regclass") || !strings.Contains(sql, "WHERE table_name = $1") {
+		if !strings.Contains(sql, "to_regclass($1)") || !strings.Contains(sql, "WHERE table_name = $1") {
 			t.Errorf("BuildDescribeTable for PG must bind the table name via $1: %s", sql)
 		}
 		if strings.Contains(sql, "'test'") || strings.Contains(sql, "\"test\"") {

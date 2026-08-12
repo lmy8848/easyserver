@@ -678,6 +678,10 @@ func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, 
 	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
+	// 端口变了，缓存池（driver/redis 按 (instance, db) 缓存，DSN 固化旧端口）必须
+	// 清掉，下次查询才按新端口重连。
+	s.driver.Close(v.ID)
+	s.redisOps.Close(v.ID)
 	return s.repo.UpdateInstancePort(ctx, v.ID, newPort)
 }
 

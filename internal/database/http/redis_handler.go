@@ -24,28 +24,33 @@ func NewRedisHandler(svc *database.Service) *RedisHandler {
 
 func (h *RedisHandler) parseDB(c *gin.Context) (int, bool) {
 	db, err := strconv.Atoi(c.DefaultQuery("db", "0"))
-	if err != nil || db < 0 || db > 15 {
+	// 不设固定上限：databases 数量由 redis.conf 的 databases 指令决定（面板配置页
+	// 暴露为启动期参数），默认 16 但可改。越界索引 redis 自己回 "ERR DB index is
+	// out of range"，比硬编码 15 诚实。
+	if err != nil || db < 0 {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的 Redis DB 索引"))
 		return 0, false
 	}
 	return db, true
 }
 
-// ListDBs returns the non-empty logical databases (index + key count).
-func (h *RedisHandler) ListDBs(c *gin.Context) {
+// ScanKeys pages through keys (SCAN cursor) with type/TTL/size per key.
+
+// DBCount returns the configured logical database slot count (CONFIG GET
+// databases, default 16). The key-browser dropdown renders one option per slot,
+// so it must follow the instance's own config rather than a hardcoded 16.
+func (h *RedisHandler) DBCount(c *gin.Context) {
 	iid, ok := parseIID(c)
 	if !ok {
 		return
 	}
-	dbs, err := h.svc.ListRedisDBs(c.Request.Context(), iid)
+	n, err := h.svc.RedisDBCount(c.Request.Context(), iid)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
-	httpx.Success(c, dbs)
+	httpx.Success(c, gin.H{"databases": n})
 }
-
-// ScanKeys pages through keys (SCAN cursor) with type/TTL/size per key.
 func (h *RedisHandler) ScanKeys(c *gin.Context) {
 	iid, ok := parseIID(c)
 	if !ok {
@@ -94,12 +99,13 @@ func (h *RedisHandler) GetValue(c *gin.Context) {
 
 type setRedisValueRequest struct {
 	DB    int    `json:"db"`
+	Type  string `json:"type"` // string | hash | list | set | zset（空 = string）
 	Key   string `json:"key" binding:"required"`
-	Value string `json:"value"`
-	TTL   int64  `json:"ttl"` // seconds; <=0 = no expiry
+	Value any    `json:"value"` // string / {field:value} / []string / []{member,score}
+	TTL   int64  `json:"ttl"`   // seconds; <=0 = no expiry
 }
 
-// SetValue writes a string key.
+// SetValue creates a key of the requested type.
 func (h *RedisHandler) SetValue(c *gin.Context) {
 	iid, ok := parseIID(c)
 	if !ok {
@@ -111,7 +117,7 @@ func (h *RedisHandler) SetValue(c *gin.Context) {
 		return
 	}
 	middleware.AuditSummary(c, "写入 Redis key "+req.Key)
-	if err := h.svc.SetRedisValue(c.Request.Context(), iid, req.DB, req.Key, req.Value, req.TTL); err != nil {
+	if err := h.svc.SetRedisValue(c.Request.Context(), iid, req.DB, req.Type, req.Key, req.Value, req.TTL); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}

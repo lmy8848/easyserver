@@ -383,7 +383,13 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 		return nil, err
 	}
 
-	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, describeSQL, tableName)
+	// PG 的 describe SQL 用 $1 绑定表名，MySQL 的 DESCRIBE `table` 直接把名字内联，
+	// 没有占位符——传多余参数会报 "expected 0 arguments"。只给 PG 传参。
+	var queryArgs []any
+	if instance.DBType == DBTypePostgreSQL {
+		queryArgs = []any{tableName}
+	}
+	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, describeSQL, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(err.Error()))
 	}

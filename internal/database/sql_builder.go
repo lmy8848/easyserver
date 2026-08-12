@@ -290,11 +290,13 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 	case DBTypePostgreSQL:
 		// table name is a value here, so it goes through the driver as $1
 		// (parameterized binding) rather than being interpolated into the text.
+		// `$1::regclass` 会把参数类型推断为 regclass，外层 `table_name = $1` 就变成
+		// sql_identifier = regclass（42883 无此运算符）。to_regclass($1) 让参数保持 text。
 		return `SELECT column_name, data_type, is_nullable, column_default,
 			CASE WHEN column_name IN (
 				SELECT a.attname FROM pg_index i
 				JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-				WHERE i.indrelid = $1::regclass AND i.indisprimary
+				WHERE i.indrelid = to_regclass($1) AND i.indisprimary
 			) THEN 'YES' ELSE 'NO' END as is_primary,
 			is_identity
 			FROM information_schema.columns
