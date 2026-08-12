@@ -140,6 +140,8 @@ export interface DatabasesTabProps {
   databases: Database[];
   dbsLoading: boolean;
   busy: string;
+  onFetchDatabases: () => void;
+  onOpenCreateDB: () => void;
   onEnterDatabase: (db: Database) => void;
   onDeleteDB: (dbName: string) => void;
   // Create DB modal
@@ -147,8 +149,6 @@ export interface DatabasesTabProps {
   onDbModalVisibleChange: (visible: boolean) => void;
   dbForm: any;
   onCreateDB: () => void;
-  // Inline table browser — non-null when a database is selected
-  tableExplorer: TableExplorerProps | null;
   // Backup（库级，从库列表操作列打开）
   backups: any[];
   backupsLoading: boolean;
@@ -160,14 +160,16 @@ export interface DatabasesTabProps {
   onDeleteBackup: (backupId: number, dbName: string) => void;
 }
 
-// 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
-// （tabBarExtraContent，见 index.tsx），不在内容区。
+// 用户 tab — 用户列表 + 创建用户/授权弹窗。
 export interface UsersTabProps {
   server: DBTypeInfo;
+  version: DBInstance | null;
   dbUsers: DBUser[];
   usersLoading: boolean;
   busy: string;
   databases: Database[];
+  onFetchUsers: () => void;
+  onOpenCreateUser: () => void;
   onDeleteUser: (user: DBUser) => void;
   // Create User modal
   userModalVisible: boolean;
@@ -181,14 +183,24 @@ export interface UsersTabProps {
   onGrantVisibleChange: (visible: boolean) => void;
   onGrant: () => void;
   onOpenGrant: (user: DBUser) => void;
+  // Reset Password modal
+  resetPasswordVisible: boolean;
+  resetPasswordUser: DBUser | null;
+  resetPasswordForm: any;
+  onResetPasswordVisibleChange: (visible: boolean) => void;
+  onResetPassword: () => void;
+  onOpenResetPassword: (user: DBUser) => void;
 }
 
-// 配置 tab — 结构化参数编辑（无嵌套 tab、无路径）。保存/刷新按钮在父组件
-// tab 栏右侧（tabBarExtraContent，见 index.tsx），本组件只渲染参数表单。
+// 配置 tab — 结构化参数编辑
 export interface ConfigTabProps {
   server: DBTypeInfo;
+  version: DBInstance | null;
+  busy: string;
   dbConfig: any;
   dbConfigLoading: boolean;
+  onSaveConfig: () => void;
+  onFetchConfig: () => void;
   onUpdateDBParam: (key: string, value: string) => void;
 }
 
@@ -228,11 +240,19 @@ export interface TableExplorerProps {
   onDeleteRecord: (record: any) => void;
   // busy 标记进行中的单行写操作（记录删除等）
   busy: string;
-  // SQL console
+}
+
+// SQL 控制台 tab Props
+export interface SqlConsoleTabProps {
+  server: DBTypeInfo;
+  version: DBInstance | null;
+  databases: Database[];
+  sqlTargetDb: string;
+  onSqlTargetDbChange: (dbName: string) => void;
   sqlInput: string;
+  onSqlInputChange: (sql: string) => void;
   sqlResult: SqlResult | null;
   sqlLoading: boolean;
-  onSqlInputChange: (value: string) => void;
   onExecuteSQL: () => void;
 }
 

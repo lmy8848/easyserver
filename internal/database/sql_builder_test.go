@@ -188,3 +188,26 @@ func TestBuildDescribeTable(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildResetPassword(t *testing.T) {
+	t.Run("mysql", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypeMySQL)
+		sql, err := b.BuildResetPassword("user1", "Pass123456", "%")
+		if err != nil {
+			t.Fatalf("BuildResetPassword failed: %v", err)
+		}
+		if want := "ALTER USER 'user1'@'%' IDENTIFIED BY 'Pass123456';"; sql != want {
+			t.Errorf("got %q, want %q", sql, want)
+		}
+	})
+	t.Run("postgres", func(t *testing.T) {
+		b := NewSQLBuilder(DBTypePostgreSQL)
+		sql, err := b.BuildResetPassword("user1", "Pass123456", "")
+		if err != nil {
+			t.Fatalf("BuildResetPassword failed: %v", err)
+		}
+		if want := `ALTER USER "user1" WITH PASSWORD 'Pass123456';`; sql != want {
+			t.Errorf("got %q, want %q", sql, want)
+		}
+	})
+}

@@ -145,7 +145,7 @@ func (s *Service) readMySQLConfig(ctx context.Context, v *DBInstance) (map[strin
 
 func (s *Service) readPostgresConfig(ctx context.Context, v *DBInstance) (map[string]string, error) {
 	res, err := s.driver.Query(ctx, v, systemDBName(v.DBType),
-		"SELECT name, setting FROM pg_settings WHERE name = ANY($1)", configParamKeys(v.DBType))
+		"SELECT name, current_setting(name) FROM pg_settings WHERE name = ANY($1)", configParamKeys(v.DBType))
 	if err != nil {
 		return nil, err
 	}

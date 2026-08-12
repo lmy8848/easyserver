@@ -34,7 +34,7 @@ func (f *fakeConfigDriver) Query(_ context.Context, _ *DBInstance, _, sql string
 	case strings.Contains(sql, "VERSION()"):
 		return &QueryResult{Rows: [][]any{{f.mysqlVersion}}}, nil
 	case strings.Contains(sql, "pg_settings"):
-		if strings.Contains(sql, "name, setting") {
+		if strings.Contains(sql, "name, setting") || strings.Contains(sql, "current_setting") {
 			rows := make([][]any, 0, len(f.pgValues))
 			for name, setting := range f.pgValues {
 				rows = append(rows, []any{name, setting})

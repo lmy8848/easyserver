@@ -1,11 +1,11 @@
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select,
-  Popconfirm, Row, Col, Table, Tabs, Empty, Spin, Alert, Switch, Tooltip,
+  Popconfirm, Row, Col, Table, Empty, Spin, Switch, Tooltip,
 } from 'antd';
 import {
   DatabaseOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined,
   DownloadOutlined, UndoOutlined,
-  ArrowLeftOutlined, TableOutlined, ConsoleSqlOutlined, EditOutlined,
+  ArrowLeftOutlined, TableOutlined, EditOutlined,
 } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
@@ -16,9 +16,9 @@ import type { DatabasesTabProps, Database as DBType, TableExplorerProps, TableCo
 // 备份按钮打开弹窗（展示该库备份列表 + 创建）。
 export default function DatabasesTab({
   server, version, databases, dbsLoading, busy,
+  onFetchDatabases, onOpenCreateDB,
   onEnterDatabase, onDeleteDB,
   dbModalVisible, onDbModalVisibleChange, dbForm, onCreateDB,
-  tableExplorer,
   backups, backupsLoading, backupCreating,
   onFetchBackups, onCreateBackup, onDownloadBackup, onRestoreBackup, onDeleteBackup,
 }: DatabasesTabProps) {
@@ -66,12 +66,38 @@ export default function DatabasesTab({
     },
   ];
 
+  const [searchText, setSearchText] = useState('');
+  const filteredDatabases = databases.filter(d => d.name.toLowerCase().includes(searchText.toLowerCase()));
+
   return (
     <div>
-      {tableExplorer ? <TableExplorerView {...tableExplorer} /> : (
-        <Table columns={dbColumns} dataSource={databases} rowKey="name" loading={dbsLoading} size="small"
-          locale={{ emptyText: <Empty description="暂无数据库" /> }} />
-      )}
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space size="middle">
+          <span style={{ fontSize: 16, fontWeight: 'bold' }}>数据库列表</span>
+          <Tag color="blue">共 {filteredDatabases.length} 个</Tag>
+        </Space>
+        <Space>
+          <Input.Search
+            placeholder="搜索数据库名称"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ width: 200 }}
+            allowClear
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateDB} disabled={version?.status !== 'running'}>创建数据库</Button>
+          <Button icon={<ReloadOutlined />} loading={dbsLoading} onClick={onFetchDatabases}>刷新</Button>
+        </Space>
+      </div>
+
+      <Table
+        columns={dbColumns}
+        dataSource={filteredDatabases}
+        rowKey="name"
+        loading={dbsLoading}
+        size="small"
+        pagination={{ defaultPageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        locale={{ emptyText: <Empty description="暂无数据库" /> }}
+      />
 
       {/* 创建数据库弹窗 */}
       <Modal title="创建数据库" open={dbModalVisible} onCancel={() => onDbModalVisibleChange(false)}
@@ -293,14 +319,13 @@ const PG_COLUMN_TYPES = [
   'BOOLEAN', 'BIT', 'JSON', 'JSONB', 'BYTEA', 'UUID', 'INET', 'CIDR', 'MACADDR',
 ];
 
-function TableExplorerView({
+export function TableExplorerView({
   server, database, onBack,
   tableList, tableLoading, selectedTable, tableData, tableDataLoading, tablePage, tableInfo,
   onSelectTable, onFetchTables, onFetchTableData,
   createTableVisible, createTableLoading, createForm, onCreateTableVisibleChange, onCreateTable, onDropTable,
   recordModalVisible, editingRecord, recordForm, recordSaving,
   onRecordModalVisibleChange, onOpenInsertModal, onOpenEditModal, onSaveRecord, onDeleteRecord,
-  sqlInput, sqlResult, sqlLoading, onSqlInputChange, onExecuteSQL,
   busy,
 }: TableExplorerProps) {
   // 主键单行：watch 创建表弹窗的列，存在已设主键的行时其余行的主键开关禁用
@@ -312,20 +337,22 @@ function TableExplorerView({
   const createCharset = Form.useWatch('charset', createForm) || 'utf8mb4';
   const collationOptions = MYSQL_COLLATIONS[createCharset] || MYSQL_COLLATIONS['utf8mb4'] || [];
 
+  const [dataSearchText, setDataSearchText] = useState('');
+
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
+    <Card
+      title={
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-          <DatabaseOutlined style={{ fontSize: 20 }} />
+          <DatabaseOutlined style={{ fontSize: 18 }} />
           <span style={{ fontSize: 16, fontWeight: 'bold' }}>{database.name}</span>
           <Tag>{database.charset}</Tag>
         </Space>
-      </Card>
-
+      }
+    >
       <Row gutter={16}>
         {/* Left: Table list */}
-        <Col span={5}>
+        <Col span={6}>
           <Card title={<Space><TableOutlined /> 表列表</Space>} size="small"
             extra={
               <Space>
@@ -356,93 +383,73 @@ function TableExplorerView({
           </Card>
         </Col>
 
-        {/* Right: Data + SQL */}
-        <Col span={19}>
-          <Tabs items={[
-            {
-              key: 'data',
-              label: <span><TableOutlined /> 数据</span>,
-              children: selectedTable ? (
-                <div>
-                  <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between' }}>
-                    <Space>
-                      <strong>{selectedTable}</strong>
-                      <Tag>{(tableInfo?.collation || '').split('_')[0] || database.charset}</Tag>
-                    </Space>
-                    <Space>
-                      <Button icon={<ReloadOutlined />} loading={tableDataLoading}
-                        onClick={() => onFetchTableData(selectedTable, tablePage)}>刷新</Button>
-                      <Button type="primary" icon={<PlusOutlined />} onClick={onOpenInsertModal}>插入记录</Button>
-                    </Space>
-                  </div>
-                  <Table
-                    columns={[
-                      ...(tableData?.headers || []).map((h: string, hi: number) => ({
-                        title: h, dataIndex: h, key: h, ellipsis: true,
-                        align: ((tableData?.columnTypes || [])[hi] === 'number') ? 'right' as const : undefined,
-                        sorter: ((tableData?.columnTypes || [])[hi] === 'number') ? (a: any, b: any) => (Number(a[h]) || 0) - (Number(b[h]) || 0) : undefined,
-                        render: (v: any) => renderCell(v, (tableData?.columnTypes || [])[hi]),
-                      })),
-                      {
-                        title: '操作', key: 'action', width: 140,
-                        render: (_: unknown, record: any) => (
-                          <Space size="small">
-                            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onOpenEditModal(record)}>编辑</Button>
-                            <Popconfirm title="确定删除此记录？" onConfirm={() => onDeleteRecord(record)}>
-                              <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-record-${record._key}`}>删除</Button>
-                            </Popconfirm>
-                          </Space>
-                        ),
-                      },
-                    ]}
-                    dataSource={(tableData?.rows || []).map((row: any[], i: number) => {
-                      const obj: any = { _key: i };
-                      (tableData?.headers || []).forEach((h: string, j: number) => { obj[h] = row[j]; });
-                      return obj;
-                    })}
-                    rowKey="_key"
-                    loading={tableDataLoading}
-                    size="small"
-                    pagination={{
-                      current: tablePage,
-                      pageSize: 50,
-                      total: tableData?.total || 0,
-                      onChange: (p) => onFetchTableData(selectedTable, p),
-                      showTotal: (t) => `共 ${t} 条`,
-                    }}
+        {/* Right: Table Data */}
+        <Col span={18}>
+          {selectedTable ? (
+            <div>
+              <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space>
+                  <strong>{selectedTable}</strong>
+                  <Tag>{(tableInfo?.collation || '').split('_')[0] || database.charset}</Tag>
+                </Space>
+                <Space>
+                  <Input.Search
+                    placeholder="搜索数据"
+                    value={dataSearchText}
+                    onChange={(e) => setDataSearchText(e.target.value)}
+                    style={{ width: 200 }}
+                    allowClear
                   />
-                </div>
-              ) : <Empty description="选择左侧表查看数据" />,
-            },
-            {
-              key: 'sql',
-              label: <span><ConsoleSqlOutlined /> SQL 查询</span>,
-              children: (
-                <div>
-                  <Input.TextArea
-                    value={sqlInput}
-                    onChange={(e) => onSqlInputChange(e.target.value)}
-                    placeholder="SELECT * FROM table_name LIMIT 100;"
-                    rows={4}
-                    style={{ fontFamily: 'monospace', marginBottom: 12 }}
-                  />
-                  <Button type="primary" icon={<ConsoleSqlOutlined />}
-                    loading={sqlLoading} onClick={onExecuteSQL}
-                    disabled={!sqlInput.trim()}>执行</Button>
-                  {sqlResult && (
-                    <div style={{ marginTop: 12 }}>
-                      {sqlResult.success ? (
-                        <Input.TextArea value={sqlResult.output} readOnly rows={15}
-                          style={{ fontFamily: 'monospace', fontSize: 12, background: '#f6ffed' }} />
-                      ) : (
-                        <Alert type="error" title={sqlResult.error} />
-                      )}
-                    </div>
-                  )}
-                </div>
-              ),
-            },
-          ]} />
+                  <Button type="primary" icon={<PlusOutlined />} onClick={onOpenInsertModal}>插入记录</Button>
+                  <Button icon={<ReloadOutlined />} loading={tableDataLoading}
+                    onClick={() => onFetchTableData(selectedTable, tablePage)}>刷新</Button>
+                </Space>
+              </div>
+              <Table
+                columns={[
+                  ...(tableData?.headers || []).map((h: string, hi: number) => ({
+                    title: h, dataIndex: h, key: h, ellipsis: true,
+                    align: ((tableData?.columnTypes || [])[hi] === 'number') ? 'right' as const : undefined,
+                    sorter: ((tableData?.columnTypes || [])[hi] === 'number') ? (a: any, b: any) => (Number(a[h]) || 0) - (Number(b[h]) || 0) : undefined,
+                    render: (v: any) => renderCell(v, (tableData?.columnTypes || [])[hi]),
+                  })),
+                  {
+                    title: '操作', key: 'action', width: 140,
+                    render: (_: unknown, record: any) => (
+                      <Space size="small">
+                        <Button type="link" size="small" icon={<EditOutlined />} onClick={() => onOpenEditModal(record)}>编辑</Button>
+                        <Popconfirm title="确定删除此记录？" onConfirm={() => onDeleteRecord(record)}>
+                          <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-record-${record._key}`}>删除</Button>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                  },
+                ]}
+                dataSource={(tableData?.rows || [])
+                  .filter((row: any[]) => {
+                    if (!dataSearchText.trim()) return true;
+                    const term = dataSearchText.toLowerCase();
+                    return row.some((cell: any) => String(cell ?? '').toLowerCase().includes(term));
+                  })
+                  .map((row: any[], i: number) => {
+                    const obj: any = { _key: i };
+                    (tableData?.headers || []).forEach((h: string, j: number) => { obj[h] = row[j]; });
+                    return obj;
+                  })}
+                rowKey="_key"
+                loading={tableDataLoading}
+                size="small"
+                pagination={{
+                  current: tablePage,
+                  pageSize: 50,
+                  total: tableData?.total || 0,
+                  onChange: (p) => onFetchTableData(selectedTable, p),
+                  showTotal: (t) => `共 ${t} 条`,
+                  showSizeChanger: true,
+                }}
+              />
+            </div>
+          ) : <Empty description="选择左侧表查看数据" style={{ padding: '60px 0' }} />}
         </Col>
       </Row>
 
@@ -649,6 +656,6 @@ function TableExplorerView({
           </Form.List>
         </Form>
       </Modal>
-    </div>
+    </Card>
   );
 }

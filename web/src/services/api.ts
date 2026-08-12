@@ -598,6 +598,9 @@ export const dbServerApi = {
   grantPrivileges: (instanceId: number, username: string, data: { privileges: string; database?: string }, host: string = '%') =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/grant`, data, { params: { host } }),
 
+  resetUserPassword: (instanceId: number, username: string, data: { password: string }, host: string = '%') =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/password`, data, { params: { host } }),
+
   // Database introspection
   listTables: (instanceId: number, dbName: string) =>
     api.get<ApiResponse<Array<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`),

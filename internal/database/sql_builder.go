@@ -547,6 +547,31 @@ func (b *SQLBuilder) BuildCreateUser(username, password, host string) (string, e
 	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }
 
+// BuildResetPassword generates an ALTER USER statement to change a user's password.
+func (b *SQLBuilder) BuildResetPassword(username, newPassword, host string) (string, error) {
+	if !isValidUsername(username) {
+		return "", fmt.Errorf("invalid username")
+	}
+	if newPassword == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+	switch b.dbType {
+	case DBTypeMySQL:
+		if host == "" {
+			host = "localhost"
+		}
+		if !isValidHost(host) {
+			return "", fmt.Errorf("invalid host")
+		}
+		return fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s';",
+			b.EscapeString(username), b.EscapeString(host), b.EscapeString(newPassword)), nil
+	case DBTypePostgreSQL:
+		return fmt.Sprintf(`ALTER USER "%s" WITH PASSWORD '%s';`,
+			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(newPassword)), nil
+	}
+	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+}
+
 // BuildDropUser generates a DROP USER statement (validated username; host is
 // checked for MySQL, where users are address-scoped).
 func (b *SQLBuilder) BuildDropUser(username, host string) (string, error) {

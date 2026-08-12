@@ -1,24 +1,11 @@
 import { useState } from 'react';
 import {
-  Row, Col, Input, InputNumber, Select, Empty, Spin,
+  Row, Col, Input, InputNumber, Select, Empty, Spin, Button, Space, Popconfirm, Tag,
 } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 import type { ConfigTabProps } from './types';
 
 const { TextArea } = Input;
-
-// 配置 tab — 结构化参数编辑。切到本 tab 时父组件自动加载配置；保存/刷新按钮
-// 在父组件 tab 栏右侧（tabBarExtraContent，见 index.tsx），本组件只渲染参数
-// 表单，参数网格化排列（多行值如 Redis save 独占一行）。配置是单段结构：params
-// （引擎当前值）+ meta（渲染元数据）。输入控件统一用 InputNumber + addonAfter：
-// 可切换单位（字节类 / PG 单位串）→ addonAfter 单位下拉；单一单位（如"秒"）→
-// addonAfter 固定文本；有 options → Select，含换行 → TextArea，否则文本输入。
-//
-// 单位语义分两种：
-// - 字节换算（MySQL 内存参数 / Redis maxmemory）：引擎返回字节，UI 按单位显示，
-//   保存时换算回字节（裸字面量 SET）。
-// - 字符串拼接（PG 内存参数）：引擎返回带单位串（'128MB'），UI 解析数字 + 单位，
-//   保存时拼回带单位串（ALTER SYSTEM 要引号串，不能裸字节换算）。
-// PG 的秒/个等无单位数字仍走 number 分支。
 
 // SIZE_FACTOR: 单位 → 字节倍数（1024 进制）。
 const SIZE_FACTOR: Record<string, number> = {
@@ -39,7 +26,7 @@ const isStrUnitParam = (param: any) =>
 const factorOf = (unit: string) => SIZE_FACTOR[unit] ?? 1;
 
 export default function ConfigTab({
-  server, dbConfig, dbConfigLoading, onUpdateDBParam,
+  server, version, busy, dbConfig, dbConfigLoading, onSaveConfig, onFetchConfig, onUpdateDBParam,
 }: ConfigTabProps) {
   // 每个可切换单位参数当前选中的单位（默认取 param.unit，用户可切）。
   const [units, setUnits] = useState<Record<string, string>>({});
@@ -80,7 +67,7 @@ export default function ConfigTab({
   }
 
   const params = dbConfig.config?.params || {};
-  const meta = dbConfig.config?.meta || [];
+  const meta: any[] = dbConfig.config?.meta || [];
   // 含换行的值（如 Redis save 多行策略）用多行输入框且独占一行。
   const isMultiline = (key: string) => (params[key] || '').includes('\n');
 
@@ -141,7 +128,13 @@ export default function ConfigTab({
           addonAfter={(
             <Select
               value={unit}
-              onChange={(u) => setUnits(prev => ({ ...prev, [param.key]: u }))}
+              onChange={(u) => {
+                setUnits(prev => ({ ...prev, [param.key]: u }));
+                const num = strToNum(v);
+                if (num) {
+                  onUpdateDBParam(param.key, numToStr(num, u));
+                }
+              }}
               variant="borderless"
               style={{ width: 76 }}
             >
@@ -197,6 +190,26 @@ export default function ConfigTab({
 
   return (
     <div>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space size="middle">
+          <span style={{ fontSize: 16, fontWeight: 'bold' }}>实例参数配置</span>
+          <Tag color="default">共 {meta.length} 项</Tag>
+        </Space>
+        <Space>
+          <Popconfirm
+            title="将重启数据库"
+            description="保存配置后将重启实例，确定保存吗？"
+            okText="保存"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={onSaveConfig}
+          >
+            <Button type="primary" loading={busy === 'save-config'} disabled={version?.status !== 'running'}>保存配置</Button>
+          </Popconfirm>
+          <Button icon={<ReloadOutlined />} loading={dbConfigLoading} onClick={onFetchConfig}>刷新</Button>
+        </Space>
+      </div>
+
       <Row gutter={[24, 20]}>
         {meta.map((param: any) => (
           <Col key={param.key} xs={24} sm={12} lg={isMultiline(param.key) ? 24 : 6}>

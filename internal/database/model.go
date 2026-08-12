@@ -117,6 +117,11 @@ type GrantRequest struct {
 	Privileges string `json:"privileges" binding:"required"`
 }
 
+// ResetPasswordRequest is the request for resetting a DB user's password.
+type ResetPasswordRequest struct {
+	Password string `json:"password" binding:"required,min=6"`
+}
+
 // ColumnInfo represents a column's metadata.
 type ColumnInfo struct {
 	Name         string

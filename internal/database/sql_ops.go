@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 )
 
 // --- Logical database CRUD (live, server-owned) ---
@@ -310,6 +311,33 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 	return nil
 }
 
+func (s *Service) ResetPassword(ctx context.Context, instanceID int64, username, host, newPassword string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	instance, err := s.repo.GetInstance(ctx, instanceID)
+	if err != nil {
+		return fmt.Errorf("get instance: %w", err)
+	}
+	if instance == nil {
+		return fmt.Errorf("database instance not found")
+	}
+	if instance.Status != "running" {
+		return fmt.Errorf("database instance is not running")
+	}
+
+	builder := NewSQLBuilder(instance.DBType)
+	sqlStr, err := builder.BuildResetPassword(username, newPassword, host)
+	if err != nil {
+		return err
+	}
+	sysDB := systemDBName(instance.DBType)
+	if _, err := s.runnerFor(instance).Exec(ctx, instance, sysDB, sqlStr); err != nil {
+		return fmt.Errorf("reset password failed: %s", SanitizeSQLError(err.Error()))
+	}
+	return nil
+}
+
 // --- SQL query operations ---
 
 // getInstanceForSQL resolves the instance for a database-level SQL operation.
@@ -462,11 +490,138 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 		return &DMLResult{Success: false, Error: r.Message}, nil
 	}
 
-	if _, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, sql); execErr != nil {
-		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(execErr.Error()))
+	trimmedSQL := strings.TrimSpace(sql)
+	upperSQL := strings.ToUpper(trimmedSQL)
+
+	isQuery := strings.HasPrefix(upperSQL, "SELECT") ||
+		strings.HasPrefix(upperSQL, "SHOW") ||
+		strings.HasPrefix(upperSQL, "EXPLAIN") ||
+		strings.HasPrefix(upperSQL, "DESCRIBE") ||
+		strings.HasPrefix(upperSQL, "DESC ") ||
+		strings.HasPrefix(upperSQL, "WITH") ||
+		strings.HasPrefix(upperSQL, "PRAGMA")
+
+	if isQuery {
+		qres, queryErr := s.runnerFor(instance).Query(ctx, instance, dbName, trimmedSQL)
+		if queryErr != nil {
+			log.Printf("ExecuteSQL %s query error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(queryErr.Error()))
+			return &DMLResult{Success: false, Error: SanitizeSQLError(queryErr.Error())}, nil
+		}
+		output := formatQueryResultText(qres)
+		return &DMLResult{Success: true, Output: output}, nil
+	}
+
+	execRes, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, trimmedSQL)
+	if execErr != nil {
+		log.Printf("ExecuteSQL %s exec error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(execErr.Error()))
 		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
 	}
-	return &DMLResult{Success: true}, nil
+
+	output := "Query OK"
+	if execRes != nil {
+		if execRes.RowsAffected > 0 {
+			output = fmt.Sprintf("Query OK, %d row(s) affected", execRes.RowsAffected)
+			if execRes.LastInsertID > 0 {
+				output += fmt.Sprintf(" (Last Insert ID: %d)", execRes.LastInsertID)
+			}
+		} else if execRes.LastInsertID > 0 {
+			output = fmt.Sprintf("Query OK (Last Insert ID: %d)", execRes.LastInsertID)
+		} else {
+			output = "Query OK, 0 rows affected"
+		}
+	}
+	return &DMLResult{Success: true, Output: output}, nil
+}
+
+func formatQueryResultText(res *QueryResult) string {
+	if res == nil || len(res.Columns) == 0 {
+		return "Empty set (0 rows)"
+	}
+
+	colCount := len(res.Columns)
+	headers := make([]string, colCount)
+	widths := make([]int, colCount)
+
+	for i, col := range res.Columns {
+		headers[i] = col.Name
+		widths[i] = len(col.Name)
+	}
+
+	rows := make([][]string, len(res.Rows))
+	for rIdx, row := range res.Rows {
+		strRow := make([]string, colCount)
+		for cIdx := range res.Columns {
+			valStr := "NULL"
+			if cIdx < len(row) && row[cIdx] != nil {
+				valStr = fmt.Sprintf("%v", row[cIdx])
+			}
+			strRow[cIdx] = valStr
+			if len(valStr) > widths[cIdx] {
+				widths[cIdx] = len(valStr)
+			}
+		}
+		rows[rIdx] = strRow
+	}
+
+	for i := range widths {
+		if widths[i] > 120 {
+			widths[i] = 120
+		}
+	}
+
+	var sb strings.Builder
+
+	makeSep := func() string {
+		var sep strings.Builder
+		sep.WriteString("+")
+		for _, w := range widths {
+			sep.WriteString(strings.Repeat("-", w+2))
+			sep.WriteString("+")
+		}
+		return sep.String()
+	}
+
+	sepLine := makeSep()
+
+	sb.WriteString(sepLine)
+	sb.WriteString("\n")
+
+	sb.WriteString("|")
+	for i, h := range headers {
+		sb.WriteString(fmt.Sprintf(" %-*s |", widths[i], truncateString(h, widths[i])))
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString(sepLine)
+	sb.WriteString("\n")
+
+	if len(rows) == 0 {
+		sb.WriteString("(No rows returned)\n")
+	} else {
+		for _, row := range rows {
+			sb.WriteString("|")
+			for i, val := range row {
+				sb.WriteString(fmt.Sprintf(" %-*s |", widths[i], truncateString(val, widths[i])))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString(sepLine)
+	sb.WriteString("\n")
+	sb.WriteString(fmt.Sprintf("%d row(s) in set", len(rows)))
+
+	return sb.String()
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
 }
 
 func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {

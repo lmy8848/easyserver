@@ -53,6 +53,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.POST("/db/instances/:iid/users", userHandler.CreateDBUser)
 	protected.DELETE("/db/instances/:iid/users/:username", userHandler.DeleteDBUser)
 	protected.POST("/db/instances/:iid/users/:username/grant", userHandler.GrantPrivileges)
+	protected.POST("/db/instances/:iid/users/:username/password", userHandler.ResetPassword)
 
 	// Database introspection (instance-scoped, addressed by database name)
 	protected.GET("/db/instances/:iid/databases/:dbname/tables", dbHandler.ListTables)
@@ -800,6 +801,30 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, gin.H{"message": "权限已授予"})
+}
+
+func (h *UserHandler) ResetPassword(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	username := c.Param("username")
+	if username == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户名"))
+		return
+	}
+	host := c.DefaultQuery("host", "%")
+	var req database.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+	middleware.AuditSummary(c, "重置数据库用户密码 "+username)
+	if err := h.svc.ResetPassword(c.Request.Context(), iid, username, host, req.Password); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "密码重置成功"})
 }
 
 // BackupHandler handles database backup endpoints.

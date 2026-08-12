@@ -1,16 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty, Checkbox, Popconfirm } from 'antd';
-import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Empty, Checkbox } from 'antd';
+import { DatabaseOutlined, UserOutlined, CodeOutlined, ConsoleSqlOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
 import InstallLogPanel from './InstallLogPanel';
-import DatabasesTab from './DatabasesTab';
+import DatabasesTab, { TableExplorerView } from './DatabasesTab';
 import RedisKeysTab from './RedisKeysTab';
 import UsersTab from './UsersTab';
 import ConfigTab from './ConfigTab';
+import SqlConsoleTab from './SqlConsoleTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
 import { DB_TYPE_TABS } from './types';
 
@@ -70,6 +71,11 @@ export default function DatabasePage() {
   const [grantUser, setGrantUser] = useState<DBUser | null>(null);
   const [grantForm] = Form.useForm();
 
+  // ===== Reset password modal =====
+  const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState<DBUser | null>(null);
+  const [resetPasswordForm] = Form.useForm();
+
   // ===== Table explorer state =====
   const [tableList, setTableList] = useState<string[]>([]);
   const [tableLoading, setTableLoading] = useState(false);
@@ -81,6 +87,7 @@ export default function DatabasePage() {
   const [sqlInput, setSqlInput] = useState('');
   const [sqlResult, setSqlResult] = useState<SqlResult | null>(null);
   const [sqlLoading, setSqlLoading] = useState(false);
+  const [sqlTargetDb, setSqlTargetDb] = useState('');
 
   // ===== Backup state =====
   const [backups, setBackups] = useState<any[]>([]);
@@ -494,6 +501,21 @@ export default function DatabasePage() {
     finally { setBusy(''); }
   };
 
+  const handleResetPassword = async () => {
+    const version = selectedVersion;
+    const user = resetPasswordUser;
+    if (!version || !user) return;
+    setBusy('reset-password');
+    try {
+      const values = await resetPasswordForm.validateFields();
+      await dbServerApi.resetUserPassword(version.id, user.username, { password: values.password }, user.host || '%');
+      message.success('重置密码成功');
+      setResetPasswordVisible(false);
+      resetPasswordForm.resetFields();
+    } catch (error: unknown) { message.error(errMsg(error, '重置密码失败')); }
+    finally { setBusy(''); }
+  };
+
   // ===== Config handlers =====
   const handleSaveDBConfig = async () => {
     if (!dbConfig?.config?.params || !selectedVersion) return;
@@ -522,7 +544,8 @@ export default function DatabasePage() {
   // ===== Table/Record handlers =====
   const handleExecuteSQL = async () => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version || !sqlInput.trim()) return;
+    const targetDb = sqlTargetDb || selectedDatabase?.name || (databases?.length > 0 ? databases[0]?.name || '' : '');
+    if (!targetDb || !version || !sqlInput.trim()) return;
 
     // Confirm destructive operations before execution
     const sqlUpper = sqlInput.trim().toUpperCase();
@@ -544,9 +567,9 @@ export default function DatabasePage() {
 
     setSqlLoading(true);
     try {
-      const res = await dbServerApi.executeSQL(version.id, selectedDatabase.name, sqlInput);
+      const res = await dbServerApi.executeSQL(version.id, targetDb, sqlInput);
       setSqlResult(res.data?.data || null);
-      if (selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
+      if (selectedDatabase && selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
         fetchTableData(version.id, selectedDatabase.name, selectedTable);
       }
     } catch (error: unknown) { setSqlResult({ success: false, error: errMsg(error, '执行失败') }); }
@@ -781,51 +804,9 @@ export default function DatabasePage() {
       onSaveRecord: handleSaveRecord,
       onDeleteRecord: handleDeleteRecord,
       busy,
-      sqlInput, sqlResult, sqlLoading,
-      onSqlInputChange: setSqlInput,
-      onExecuteSQL: handleExecuteSQL,
     } : null;
 
     // Action buttons live in the inner tab bar's extra area — they follow the
-    // active detail tab (数据库/用户) and are hidden until a version is selected
-    // (there is no instance to act on otherwise).
-    const tabExtra = !selectedVersion ? null : detailTab === 'databases' ? (
-      // Redis 的数据库 tab 是自包含 key 浏览器（自带 DB/pattern/刷新工具栏），
-      // tab 栏不重复放 SQL 的刷新/创建数据库按钮。
-      activeDbType === 'redis' ? null : (
-        <Space style={{ marginRight: 8 }}>
-          <Button icon={<ReloadOutlined />} loading={dbsLoading}
-            onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />}
-            onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
-            disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
-        </Space>
-      )
-    ) : detailTab === 'users' ? (
-      <Space style={{ marginRight: 8 }}>
-        <Button icon={<ReloadOutlined />} loading={usersLoading}
-          onClick={() => fetchUsers(selectedVersion.id)}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { userForm.resetFields(); setUserModalVisible(true); }}
-          disabled={selectedVersion.status !== 'running'}>创建用户</Button>
-      </Space>
-    ) : detailTab === 'config' ? (
-      <Space style={{ marginRight: 8 }}>
-        <Popconfirm
-          title="将重启数据库"
-          description="保存配置后将重启实例，确定保存吗？"
-          okText="保存"
-          okButtonProps={{ danger: true }}
-          cancelText="取消"
-          onConfirm={handleSaveDBConfig}
-        >
-          <Button type="primary" loading={busy === 'save-config'}>保存配置</Button>
-        </Popconfirm>
-        <Button icon={<ReloadOutlined />} loading={dbConfigLoading}
-          onClick={() => fetchDBConfig()}>刷新</Button>
-      </Space>
-    ) : null;
-
     return (
       <div>
         {/* key remounts the header on database-type switch — its internal selection
@@ -881,12 +862,13 @@ export default function DatabasePage() {
             version={selectedVersion.version}
             onDone={() => fetchInstances(activeDbType)}
           />
+        ) : tableExplorer ? (
+          <TableExplorerView {...tableExplorer} />
         ) : (
           <Card>
           <Tabs
             activeKey={detailTab}
             onChange={setDetailTab}
-            tabBarExtraContent={tabExtra}
             items={[
               {
                 key: 'databases',
@@ -899,18 +881,20 @@ export default function DatabasePage() {
                       databases={databases}
                       dbsLoading={dbsLoading}
                       busy={busy}
+                      onFetchDatabases={() => selectedVersion && fetchDatabases(selectedVersion.id)}
+                      onOpenCreateDB={() => { dbForm.resetFields(); setDbModalVisible(true); }}
                       onEnterDatabase={enterDatabase}
                       onDeleteDB={handleDeleteDB}
                       dbModalVisible={dbModalVisible}
                       onDbModalVisibleChange={setDbModalVisible}
                       dbForm={dbForm}
                       onCreateDB={handleCreateDB}
-                      tableExplorer={tableExplorer}
                       backups={backups}
                       backupsLoading={backupsLoading}
                       backupCreating={backupCreating}
                       onFetchBackups={(dbName) => selectedVersion && fetchBackups(selectedVersion.id, dbName)}
-                      onCreateBackup={handleCreateBackup}                      onDownloadBackup={handleDownloadBackup}
+                      onCreateBackup={handleCreateBackup}
+                      onDownloadBackup={handleDownloadBackup}
                       onRestoreBackup={handleRestoreBackup}
                       onDeleteBackup={handleDeleteBackup}
                     />,
@@ -920,10 +904,13 @@ export default function DatabasePage() {
                 label: <span><UserOutlined /> 用户</span>,
                 children: <UsersTab
                   server={activeDBTypeInfo}
+                  version={selectedVersion}
                   dbUsers={dbUsers}
                   usersLoading={usersLoading}
                   busy={busy}
                   databases={databases}
+                  onFetchUsers={() => selectedVersion && fetchUsers(selectedVersion.id)}
+                  onOpenCreateUser={() => { userForm.resetFields(); setUserModalVisible(true); }}
                   onDeleteUser={handleDeleteUser}
                   userModalVisible={userModalVisible}
                   onUserModalVisibleChange={setUserModalVisible}
@@ -935,6 +922,12 @@ export default function DatabasePage() {
                   onGrantVisibleChange={setGrantVisible}
                   onGrant={handleGrant}
                   onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
+                  resetPasswordVisible={resetPasswordVisible}
+                  resetPasswordUser={resetPasswordUser}
+                  resetPasswordForm={resetPasswordForm}
+                  onResetPasswordVisibleChange={setResetPasswordVisible}
+                  onResetPassword={handleResetPassword}
+                  onOpenResetPassword={(user) => { setResetPasswordUser(user); resetPasswordForm.resetFields(); setResetPasswordVisible(true); }}
                 />,
               },
               {
@@ -942,9 +935,29 @@ export default function DatabasePage() {
                 label: <span><CodeOutlined /> 配置</span>,
                 children: <ConfigTab
                   server={activeDBTypeInfo}
+                  version={selectedVersion}
+                  busy={busy}
                   dbConfig={dbConfig}
                   dbConfigLoading={dbConfigLoading}
+                  onSaveConfig={handleSaveDBConfig}
+                  onFetchConfig={fetchDBConfig}
                   onUpdateDBParam={updateDBParam}
+                />,
+              },
+              {
+                key: 'sql',
+                label: <span><ConsoleSqlOutlined /> SQL 控制台</span>,
+                children: <SqlConsoleTab
+                  server={activeDBTypeInfo}
+                  version={selectedVersion}
+                  databases={databases}
+                  sqlTargetDb={sqlTargetDb}
+                  onSqlTargetDbChange={setSqlTargetDb}
+                  sqlInput={sqlInput}
+                  onSqlInputChange={setSqlInput}
+                  sqlResult={sqlResult}
+                  sqlLoading={sqlLoading}
+                  onExecuteSQL={handleExecuteSQL}
                 />,
               },
             ]} />

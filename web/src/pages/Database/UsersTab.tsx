@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import {
-  Button, Space, Modal, Form, Input, Select, Table, Empty, Popconfirm,
+  Button, Space, Modal, Form, Input, Select, Table, Empty, Popconfirm, Tag,
 } from 'antd';
 import {
-  DeleteOutlined, KeyOutlined,
+  DeleteOutlined, KeyOutlined, LockOutlined, ReloadOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import type { UsersTabProps, DBUser } from './types';
 
@@ -16,29 +17,33 @@ const MYSQL_PRIVILEGES = [
 const PG_PRIVILEGES = [
   'ALL PRIVILEGES', 'SELECT', 'INSERT', 'UPDATE', 'DELETE',
   'TRUNCATE', 'CREATE', 'CONNECT', 'TEMPORARY', 'EXECUTE',
-  'USAGE', 'REFERENCES', 'TRIGGER',
+  'USAGE', 'REFERENCES', 'TRIGGER', 'MAINTAIN',
 ];
 
-// 用户 tab — 用户列表 + 创建用户/授权弹窗。刷新/创建按钮在 tab 栏右侧
-// （tabBarExtraContent，见 index.tsx），不在本文件。
 export default function UsersTab({
-  server, dbUsers, usersLoading, busy, databases,
+  server, version, dbUsers, usersLoading, busy, databases,
+  onFetchUsers, onOpenCreateUser,
   onDeleteUser,
   userModalVisible, onUserModalVisibleChange, userForm, onCreateUser,
   grantVisible, grantUser, grantForm, onGrantVisibleChange, onGrant, onOpenGrant,
+  resetPasswordVisible, resetPasswordUser, resetPasswordForm, onResetPasswordVisibleChange, onResetPassword, onOpenResetPassword,
 }: UsersTabProps) {
   const isPg = server?.db_type === 'postgresql';
   const privileges = isPg ? PG_PRIVILEGES : MYSQL_PRIVILEGES;
+  const [searchText, setSearchText] = useState('');
+  const filteredUsers = dbUsers.filter(u => u.username.toLowerCase().includes(searchText.toLowerCase()));
 
   const userColumns = [
     { title: '用户名', dataIndex: 'username', key: 'username', render: (t: string) => <strong>{t}</strong> },
-    { title: '主机', dataIndex: 'host', key: 'host', width: 160, render: (t: string) => t || '-' },
+    ...(!isPg ? [{ title: '主机', dataIndex: 'host', key: 'host', width: 160, render: (t: string) => t || '-' }] : []),
     {
-      title: '操作', key: 'action', width: 180,
+      title: '操作', key: 'action', width: 240,
       render: (_: unknown, record: DBUser) => (
         <Space size="small">
           <Button type="link" size="small" icon={<KeyOutlined />}
             onClick={() => onOpenGrant(record)}>授权</Button>
+          <Button type="link" size="small" icon={<LockOutlined />}
+            onClick={() => onOpenResetPassword(record)}>重置密码</Button>
           <Popconfirm title="确定删除此用户？" onConfirm={() => onDeleteUser(record)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={busy === `delete-user-${record.username}@${record.host}`}>删除</Button>
           </Popconfirm>
@@ -49,8 +54,33 @@ export default function UsersTab({
 
   return (
     <div>
-      <Table columns={userColumns} dataSource={dbUsers} rowKey={(r: DBUser) => `${r.username}@${r.host}`} loading={usersLoading} size="small"
-        locale={{ emptyText: <Empty description="暂无用户" /> }} />
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space size="middle">
+          <span style={{ fontSize: 16, fontWeight: 'bold' }}>用户列表</span>
+          <Tag color="blue">共 {filteredUsers.length} 个</Tag>
+        </Space>
+        <Space>
+          <Input.Search
+            placeholder="搜索用户名"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ width: 200 }}
+            allowClear
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateUser} disabled={version?.status !== 'running'}>创建用户</Button>
+          <Button icon={<ReloadOutlined />} loading={usersLoading} onClick={onFetchUsers}>刷新</Button>
+        </Space>
+      </div>
+
+      <Table
+        columns={userColumns}
+        dataSource={filteredUsers}
+        rowKey={(r: DBUser) => `${r.username}@${r.host}`}
+        loading={usersLoading}
+        size="small"
+        pagination={{ defaultPageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        locale={{ emptyText: <Empty description="暂无用户" /> }}
+      />
 
       {/* 创建用户弹窗 */}
       <Modal title="创建用户" open={userModalVisible} onCancel={() => onUserModalVisibleChange(false)}
@@ -58,9 +88,11 @@ export default function UsersTab({
         <Form form={userForm} layout="vertical">
           <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="如：app_user" /></Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true }, { min: 6 }]}><Input.Password /></Form.Item>
-          <Form.Item name="host" label="主机" initialValue="localhost">
-            <Select><Select.Option value="localhost">localhost</Select.Option><Select.Option value="%">任意主机（%）</Select.Option></Select>
-          </Form.Item>
+          {!isPg && (
+            <Form.Item name="host" label="主机" initialValue="localhost">
+              <Select><Select.Option value="localhost">localhost</Select.Option><Select.Option value="%">任意主机（%）</Select.Option></Select>
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 
@@ -77,6 +109,16 @@ export default function UsersTab({
                 <Select.Option key={p} value={p}>{p}</Select.Option>
               ))}
             </Select>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 重置密码弹窗 */}
+      <Modal title={`重置密码 - ${resetPasswordUser?.username || ''}`} open={resetPasswordVisible} onCancel={() => onResetPasswordVisibleChange(false)}
+        onOk={onResetPassword} okText="确定" cancelText="取消" confirmLoading={busy === 'reset-password'}>
+        <Form form={resetPasswordForm} layout="vertical">
+          <Form.Item name="password" label="新密码" rules={[{ required: true, message: '请输入新密码' }, { min: 6, message: '密码至少 6 位' }]}>
+            <Input.Password placeholder="请输入新密码（至少 6 位）" />
           </Form.Item>
         </Form>
       </Modal>
