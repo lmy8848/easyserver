@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -48,10 +47,7 @@ type DatabaseRuntime interface {
 	Exec(ctx context.Context, runtime, name string, args ...string) (string, error)
 	CopyFrom(ctx context.Context, runtime, name, source, destination string) error
 	CopyTo(ctx context.Context, runtime, name, source, destination string) error
-	RemoveVolume(ctx context.Context, runtime, volume string) error
 	Exists(ctx context.Context, runtime, name string) (bool, error)
-	SeedVolumeFile(ctx context.Context, runtime, image, volume, destPath, content string) error
-	ReadVolumeFile(ctx context.Context, runtime, image, volume, path string) (string, error)
 }
 
 // CLIContainerRuntime implements DatabaseRuntime with Docker or rootful Podman.
@@ -197,8 +193,9 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 		args = append(args, "--label", key+"="+spec.Labels[key])
 	}
 	args = append(args, "--publish", fmt.Sprintf("%s:%d:%d", spec.BindAddress, spec.HostPort, spec.ContainerPort))
-	// Named volumes are auto-created by the engine on first mount — no explicit
-	// `volume create` needed (and none left orphaned on create failure).
+	// Volume/ConfigVolume are host absolute paths the panel owns (created + chowned
+	// in prepareHostDirs before create). No engine-side `volume create` needed, and
+	// no named-volume branches — everything mounts a real host directory.
 	args = append(args, "--volume", spec.Volume+":"+spec.DataDir)
 	if spec.ConfigVolume != "" && spec.ConfigDir != "" {
 		args = append(args, "--volume", spec.ConfigVolume+":"+spec.ConfigDir)
@@ -215,47 +212,6 @@ func (r *CLIContainerRuntime) Create(ctx context.Context, spec ContainerSpec) er
 		return fmt.Errorf("create database container: %w", err)
 	}
 	return nil
-}
-
-// SeedVolumeFile 在命名配置卷里写入面板生成的默认配置模板。官方 mysql/redis 镜像
-// 里没有可复制的默认配置文件（conf.d 是空目录、redis 镜像不带 redis.conf），所以
-// "从镜像复制"无从谈起；postgres 的 postgresql.conf 由 entrypoint 自动生成进数据卷。
-// 这里用一次性容器把模板写进卷（复制目标挂在不冲突的 /easyserver-init，因为空卷一
-// 旦挂到正式容器路径就会遮蔽镜像层），正式容器挂载后即可读、可持久。
-func (r *CLIContainerRuntime) SeedVolumeFile(ctx context.Context, runtime, image, volume, destPath, content string) error {
-	if volume == "" || destPath == "" {
-		return fmt.Errorf("volume and destination path are required")
-	}
-	// base64 编码规避 shell 特殊字符；--entrypoint /bin/sh 绕过镜像入口，--rm
-	// 让临时容器随命令结束自动清理，--replace 容忍残留的同名容器。mkdir -p 确保
-	// 嵌套目标目录存在（PostgreSQL 18+ 的 postgresql.conf 位于版本子目录）。
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	args := []string{"run", "--replace", "--rm", "--name", volume + "-seed",
-		"--volume", volume + ":/easyserver-init",
-		"--entrypoint", "/bin/sh",
-		image, "-c", "mkdir -p /easyserver-init/$(dirname " + destPath + ") && echo " + encoded + " | base64 -d > /easyserver-init/" + destPath}
-	if _, err := r.command(ctx, runtime, args...); err != nil {
-		return fmt.Errorf("seed config volume: %w", err)
-	}
-	return nil
-}
-
-// ReadVolumeFile 从命名配置卷读文件（一次性容器 cat）。与 SeedVolumeFile 对称，
-// 只依赖镜像+卷，不要求实例容器存在 —— 配置回显在容器停止时也能工作。
-// 文件不存在（旧实例/从未 seed）时返回空串、nil。
-func (r *CLIContainerRuntime) ReadVolumeFile(ctx context.Context, runtime, image, volume, path string) (string, error) {
-	if volume == "" || path == "" {
-		return "", fmt.Errorf("volume and path are required")
-	}
-	args := []string{"run", "--replace", "--rm", "--name", volume + "-read",
-		"--volume", volume + ":/easyserver-init",
-		"--entrypoint", "/bin/sh",
-		image, "-c", "cat /easyserver-init/" + path}
-	out, err := r.command(ctx, runtime, args...)
-	if err != nil && notFound(err, "no such file", "not found") {
-		return "", nil
-	}
-	return out, err
 }
 
 func (r *CLIContainerRuntime) Start(ctx context.Context, runtime, name string) error {
@@ -337,19 +293,6 @@ func (r *CLIContainerRuntime) CopyFrom(ctx context.Context, runtime, name, sourc
 
 func (r *CLIContainerRuntime) CopyTo(ctx context.Context, runtime, name, source, destination string) error {
 	_, err := r.command(ctx, runtime, "cp", source, name+":"+destination)
-	return err
-}
-
-func (r *CLIContainerRuntime) RemoveVolume(ctx context.Context, runtime, volume string) error {
-	if volume == "" {
-		return fmt.Errorf("volume name is required")
-	}
-	_, err := r.command(ctx, runtime, "volume", "rm", volume)
-	// The volume may never have been created (e.g. an install that failed before
-	// the container existed) — deleting a missing volume is a no-op, not an error.
-	if err != nil && notFound(err, "no such volume") {
-		return nil
-	}
 	return err
 }
 

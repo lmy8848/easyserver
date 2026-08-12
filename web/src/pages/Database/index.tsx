@@ -1,17 +1,32 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Space, Empty, Checkbox, Popconfirm } from 'antd';
-import { DatabaseOutlined, UserOutlined, CodeOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Empty, Checkbox } from 'antd';
+import { DatabaseOutlined, UserOutlined, CodeOutlined, ConsoleSqlOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { getServiceStatusColor } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
 import InstallLogPanel from './InstallLogPanel';
-import DatabasesTab from './DatabasesTab';
+import DatabasesTab, { TableExplorerView } from './DatabasesTab';
+import RedisKeysTab from './RedisKeysTab';
 import UsersTab from './UsersTab';
 import ConfigTab from './ConfigTab';
+import SqlConsoleTab from './SqlConsoleTab';
 import type { TableData, TableInfo, SqlResult, TableExplorerProps } from './types';
 import { DB_TYPE_TABS } from './types';
+
+// antd 校验失败抛的是普通对象（{ errorFields }），不是 Error —— 统一从这里
+// 提取可读消息（如"请输入 xxx"），避免整对象 toString 成 [object Object]。
+function errMsg(err: unknown, fallback = '操作失败'): string {
+  if (err instanceof Error) return err.message;
+  const e = err as any;
+  if (Array.isArray(e?.errorFields)) {
+    const first = e.errorFields[0]?.errors?.[0];
+    if (typeof first === 'string') return first;
+  }
+  if (typeof e?.message === 'string') return e.message;
+  return fallback;
+}
 
 export default function DatabasePage() {
   // ===== Navigation state =====
@@ -56,6 +71,11 @@ export default function DatabasePage() {
   const [grantUser, setGrantUser] = useState<DBUser | null>(null);
   const [grantForm] = Form.useForm();
 
+  // ===== Reset password modal =====
+  const [resetPasswordVisible, setResetPasswordVisible] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState<DBUser | null>(null);
+  const [resetPasswordForm] = Form.useForm();
+
   // ===== Table explorer state =====
   const [tableList, setTableList] = useState<string[]>([]);
   const [tableLoading, setTableLoading] = useState(false);
@@ -67,6 +87,7 @@ export default function DatabasePage() {
   const [sqlInput, setSqlInput] = useState('');
   const [sqlResult, setSqlResult] = useState<SqlResult | null>(null);
   const [sqlLoading, setSqlLoading] = useState(false);
+  const [sqlTargetDb, setSqlTargetDb] = useState('');
 
   // ===== Backup state =====
   const [backups, setBackups] = useState<any[]>([]);
@@ -102,14 +123,6 @@ export default function DatabasePage() {
   // ===== Effects =====
   useEffect(() => { fetchInstances('mysql'); }, []);
 
-  // While an install runs (a row is "installing"), poll the list so the version
-  // flips to running/failed on completion even if the log panel isn't open.
-  useEffect(() => {
-    if (!versions.some(v => v.status === 'installing')) return;
-    const timer = setInterval(() => fetchInstances(activeDbType), 3000);
-    return () => clearInterval(timer);
-  }, [versions, activeDbType]);
-
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
     try { const res = await dbServerApi.listDatabases(instanceId); setDatabases(res.data?.data || []); }
@@ -143,7 +156,12 @@ export default function DatabasePage() {
       ]);
       const data = queryRes.data?.data;
       if (data && data.headers) {
-        setTableData({ headers: data.headers || [], rows: data.rows || [], total: data.total || 0 });
+        setTableData({
+          headers: data.headers || [],
+          columnTypes: data.column_types || [],
+          rows: data.rows || [],
+          total: data.total || 0,
+        });
       } else {
         setTableData({ headers: [], rows: [], total: 0 });
       }
@@ -151,9 +169,16 @@ export default function DatabasePage() {
       const describeData = describeRes.data?.data;
       const columns = describeData?.columns || [];
       const primaryKey = describeData?.primary_key || columns[0]?.name || 'id';
+      // 保留后端的列完整信息（类型/自增/可空/默认值），记录弹窗按列渲染输入。
       setTableInfo({
         primaryKey,
-        columns: columns.map((c: any) => ({ name: c.name, type: c.type, key: c.is_primary_key ? 'PRI' : '' })),
+        collation: describeData?.collation || '',
+        columns: columns.map((c: any) => ({
+          name: c.name, type: c.type,
+          is_primary_key: !!c.is_primary_key, is_auto_incr: !!c.is_auto_incr,
+          has_default: !!c.has_default, default: c.default || '',
+          is_nullable: !!c.is_nullable,
+        })),
       });
     } catch (error) {
       console.error('Failed to fetch table data:', error);
@@ -179,8 +204,9 @@ export default function DatabasePage() {
     setDBConfigLoading(true);
     try {
       const res = await dbServerApi.getInstanceConfig(selectedVersion.id);
-      // 结构化配置：每个 section 自带 params（覆盖项或编译默认值）+ meta（编辑元数据）。
-      setDBConfig({ found: true, config: res.data?.data });
+      // 结构化配置：params（引擎当前值）+ meta（编辑元数据）。originalParams 记
+      // 原始值快照，保存时对照它只提交有变化的字段。
+      setDBConfig({ found: true, config: res.data?.data, originalParams: { ...res.data?.data?.params } });
     } catch (error) {
       console.error('Failed to load config:', error);
       setDBConfig(null);
@@ -198,6 +224,10 @@ export default function DatabasePage() {
     fetchDBConfig();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailTab, selectedVersion]);
+
+  // 恢复状态 SSE 连接：组件卸载时关闭，避免泄漏。
+  const restoreEsRef = useRef<EventSource | null>(null);
+  useEffect(() => () => { restoreEsRef.current?.close(); }, []);
 
   // ===== Navigation handlers =====
   // Switching database type Tab clears all instance-scoped state and reloads.
@@ -222,6 +252,9 @@ export default function DatabasePage() {
     setSelectedVersion(version);
     setSelectedDatabase(null);
     if (version.status === 'running') {
+      // Redis has no SQL databases/users — its "数据库" tab is a key browser
+      // (RedisKeysTab) that loads its own state, so skip the SQL fetches.
+      if (activeDbType === 'redis') return;
       await Promise.all([fetchDatabases(version.id), fetchUsers(version.id)]);
     }
   };
@@ -276,7 +309,7 @@ export default function DatabasePage() {
       fetchInstances(server.db_type);
       // The new "installing" row auto-selects in the header; its log panel
       // (SSE) renders inline below.
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -322,15 +355,15 @@ export default function DatabasePage() {
   const handleUninstallVersion = async (v: DBInstance) => {
     const server = activeDBTypeInfo;
     if (!server) return;
-    // Uninstall keeps the data volume by default so the instance can be
-    // re-installed onto it; the checkbox opts into deleting the data too.
+    // Uninstall keeps the host data directory by default so the instance can be
+    // re-installed onto it; the checkbox opts into deleting the data + backups too.
     let purge = false;
     Modal.confirm({
       title: `卸载 ${server.display_name} ${v.version}？`,
       content: (
         <div>
-          <p>卸载将删除该数据库实例。默认保留数据卷（可重新安装以恢复数据）。</p>
-          <Checkbox onChange={(e) => { purge = e.target.checked; }}>同时删除数据卷（不可恢复）</Checkbox>
+          <p>卸载将删除该数据库实例。默认保留数据目录（可重新安装以恢复数据）。</p>
+          <Checkbox onChange={(e) => { purge = e.target.checked; }}>同时删除数据目录及备份文件（不可恢复）</Checkbox>
         </div>
       ),
       okText: '卸载',
@@ -341,7 +374,7 @@ export default function DatabasePage() {
         setOperating(`uninstall-${v.id}`);
         try {
           await dbServerApi.uninstallInstance(v.id, purge);
-          message.success(purge ? '已卸载并删除数据卷' : '已卸载（数据卷已保留）');
+          message.success(purge ? '已卸载并删除数据目录及备份' : '已卸载（数据目录已保留）');
           fetchInstances(server.db_type);
         } catch (error: unknown) { message.error((error instanceof Error ? error.message : '卸载失败')); }
         finally { setOperating(''); }
@@ -407,7 +440,7 @@ export default function DatabasePage() {
       message.success('数据库创建成功');
       setDbModalVisible(false);
       fetchDatabases(version.id);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -434,7 +467,7 @@ export default function DatabasePage() {
       message.success('用户创建成功');
       setUserModalVisible(false);
       fetchUsers(version.id);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setBusy(''); }
   };
 
@@ -465,18 +498,42 @@ export default function DatabasePage() {
       message.success('授权成功');
       setGrantVisible(false);
       fetchUsers(version.id);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
+    finally { setBusy(''); }
+  };
+
+  const handleResetPassword = async () => {
+    const version = selectedVersion;
+    const user = resetPasswordUser;
+    if (!version || !user) return;
+    setBusy('reset-password');
+    try {
+      const values = await resetPasswordForm.validateFields();
+      await dbServerApi.resetUserPassword(version.id, user.username, { password: values.password }, user.host || '%');
+      message.success('重置密码成功');
+      setResetPasswordVisible(false);
+      resetPasswordForm.resetFields();
+    } catch (error: unknown) { message.error(errMsg(error, '重置密码失败')); }
     finally { setBusy(''); }
   };
 
   // ===== Config handlers =====
   const handleSaveDBConfig = async () => {
-    if (!dbConfig?.config?.sections || !selectedVersion) return;
+    if (!dbConfig?.config?.params || !selectedVersion) return;
     setBusy('save-config');
     try {
-      // 只提交 name + params；meta 是编辑元数据，服务端不落库。
-      const sections = dbConfig.config.sections.map((s: any) => ({ name: s.name, params: s.params }));
-      await dbServerApi.saveInstanceConfig(selectedVersion.id, sections);
+      // 只提交变化过的字段：对照本次加载的原始值（config 服务端返回的引擎当前值），
+      // 避免每次把全部非空字段提交出去（含 Redis 启动期参数 databases/port，
+      // 在线保存会报 immutable）。
+      const original = dbConfig.originalParams || {};
+      const params = Object.fromEntries(
+        Object.entries(dbConfig.config.params || {}).filter(([k, v]) => {
+          const val = String(v ?? '').trim();
+          const orig = String(original[k] ?? '').trim();
+          return val !== '' && val !== orig;
+        })
+      ) as Record<string, string>;
+      await dbServerApi.saveInstanceConfig(selectedVersion.id, params);
       message.success('配置已保存');
       fetchDBConfig();
       fetchInstances(activeDbType);
@@ -484,25 +541,26 @@ export default function DatabasePage() {
     finally { setBusy(''); }
   };
 
-  const updateDBParam = (section: string, key: string, value: string) => {
+  const updateDBParam = (key: string, value: string) => {
     setDBConfig((prev: any) => {
-      if (!prev?.config?.sections) return prev;
-      const newSections = prev.config.sections.map((s: any) => {
-        if (s.name === section) return { ...s, params: { ...s.params, [key]: value } };
-        return s;
-      });
-      return { ...prev, config: { ...prev.config, sections: newSections } };
+      if (!prev?.config?.params) return prev;
+      return { ...prev, config: { ...prev.config, params: { ...prev.config.params, [key]: value } } };
     });
   };
 
   // ===== Table/Record handlers =====
   const handleExecuteSQL = async () => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version || !sqlInput.trim()) return;
+    const targetDb = sqlTargetDb || selectedDatabase?.name || (databases?.length > 0 ? databases[0]?.name || '' : '');
+    if (!targetDb || !version || !sqlInput.trim()) return;
 
-    // Confirm destructive operations before execution
+    // Confirm destructive operations before execution. Covers every write
+    // prefix (not just the DDL four), plus data-modifying CTEs that start with
+    // WITH — matching the backend's isReadStatement routing.
     const sqlUpper = sqlInput.trim().toUpperCase();
-    const isDestructive = /^(DROP|DELETE|ALTER|TRUNCATE)\b/.test(sqlUpper);
+    const isWritePrefix = /^(DROP|DELETE|ALTER|TRUNCATE|UPDATE|INSERT|CREATE|GRANT)\b/.test(sqlUpper);
+    const isWriteCte = /^WITH\b/.test(sqlUpper) && /\b(INSERT INTO|UPDATE|DELETE FROM)\b/.test(sqlUpper);
+    const isDestructive = isWritePrefix || isWriteCte;
     if (isDestructive) {
       const confirmed = await new Promise<boolean>((resolve) => {
         Modal.confirm({
@@ -520,23 +578,25 @@ export default function DatabasePage() {
 
     setSqlLoading(true);
     try {
-      const res = await dbServerApi.executeSQL(version.id, selectedDatabase.name, sqlInput);
+      const res = await dbServerApi.executeSQL(version.id, targetDb, sqlInput);
       setSqlResult(res.data?.data || null);
-      if (selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
+      if (selectedDatabase && selectedTable && /^(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)/i.test(sqlInput.trim())) {
         fetchTableData(version.id, selectedDatabase.name, selectedTable);
       }
-    } catch (error: unknown) { setSqlResult({ success: false, error: (error instanceof Error ? error.message : String(error)) }); }
+    } catch (error: unknown) { setSqlResult({ success: false, error: errMsg(error, '执行失败') }); }
     finally { setSqlLoading(false); }
   };
 
-  const handleCreateBackup = async () => {
+  const handleCreateBackup = async (dbName: string) => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version) return;
+    if (!version) return;
     setBackupCreating(true);
     try {
-      await dbServerApi.createBackup(version.id, selectedDatabase.name);
+      await dbServerApi.createBackup(version.id, dbName);
       message.success('备份已开始，请稍候...');
-      setTimeout(() => fetchBackups(version.id, selectedDatabase.name), 2000);
+      // 立即拉一次把 running 行带进 state；弹窗里的 SSE（/db/backups/:id/status）
+      // 会等终态到达自动刷新，无需 setTimeout 延迟轮询。
+      fetchBackups(version.id, dbName);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '备份失败')); }
     finally { setBackupCreating(false); }
   };
@@ -555,26 +615,42 @@ export default function DatabasePage() {
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '下载失败')); }
   };
 
-  const handleRestoreBackup = async (backupId: number) => {
+  const handleRestoreBackup = async (backupId: number, dbName: string) => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version) return;
+    if (!version) return;
     setBusy(`restore-${backupId}`);
     try {
       await dbServerApi.restoreBackup(backupId);
-      message.success('恢复成功');
-      if (selectedDatabase) fetchTables(version.id, selectedDatabase.name);
-    } catch (error: unknown) { message.error((error instanceof Error ? error.message : '恢复失败')); }
-    finally { setBusy(''); }
+      // 恢复是异步内存任务：SSE 订阅 restore-status，终态到达即推送（替代轮询）。
+      const es = new EventSource(`/api/db/backups/${backupId}/restore-status`);
+      restoreEsRef.current = es;
+      es.onmessage = (e) => {
+        let ev: any;
+        try { ev = JSON.parse(e.data); } catch { return; }
+        if (ev.type !== 'done') return; // running 心跳帧忽略
+        restoreEsRef.current = null;
+        es.close();
+        setBusy('');
+        if (ev.status === 'success') message.success('恢复成功');
+        else message.error(ev.error || '恢复失败');
+        fetchBackups(version.id, dbName);
+      };
+      // 连接中断不自行终结：EventSource 自动重连；服务重启内存态丢失后，
+      // 重连收到 {type:'done', error} 帧，仍能正确提示。
+    } catch (error: unknown) {
+      setBusy('');
+      message.error(error instanceof Error ? error.message : '恢复失败');
+    }
   };
 
-  const handleDeleteBackup = async (backupId: number) => {
+  const handleDeleteBackup = async (backupId: number, dbName: string) => {
     const version = selectedVersion;
-    if (!selectedDatabase || !version) return;
+    if (!version) return;
     setBusy(`delete-backup-${backupId}`);
     try {
       await dbServerApi.deleteBackup(backupId);
       message.success('备份已删除');
-      if (selectedDatabase) fetchBackups(version.id, selectedDatabase.name);
+      fetchBackups(version.id, dbName);
     } catch (error: unknown) { message.error((error instanceof Error ? error.message : '删除失败')); }
     finally { setBusy(''); }
   };
@@ -585,12 +661,40 @@ export default function DatabasePage() {
     setCreateTableLoading(true);
     try {
       const values = await createForm.validateFields();
-      await dbServerApi.createTable(version.id, selectedDatabase.name, { name: values.tableName, columns: values.columns || [] });
+      // PG 无表级字符集（编码在数据库级），排序规则默认留空继承；MySQL 默认 utf8mb4_0900_ai_ci。
+      const isPg = activeDBTypeInfo?.db_type === 'postgresql';
+      const formattedColumns = (values.columns || []).map((col: any) => {
+        let type = col.type || '';
+        const length = col.length ? String(col.length).trim() : '';
+        if (length && !type.includes('(')) {
+          type = `${type}(${length})`;
+        } else if (!length && !type.includes('(')) {
+          if (type.toUpperCase() === 'VARCHAR') {
+            type = 'VARCHAR(255)';
+          }
+        }
+        return {
+          name: col.name,
+          type: type,
+          length: length || undefined,
+          nullable: !!col.nullable,
+          is_primary: !!col.is_primary,
+          auto_incr: !!col.auto_incr,
+          unique: !!col.unique,
+          default_value: col.default_value || '',
+        };
+      });
+      await dbServerApi.createTable(version.id, selectedDatabase.name, {
+        name: values.tableName,
+        columns: formattedColumns,
+        charset: isPg ? 'UTF8' : (values.charset || 'utf8mb4'),
+        collation: isPg ? (values.collation || '') : (values.collation || 'utf8mb4_0900_ai_ci'),
+      });
       message.success('表创建成功');
       setCreateTableVisible(false);
       createForm.resetFields();
       fetchTables(version.id, selectedDatabase.name);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setCreateTableLoading(false); }
   };
 
@@ -617,6 +721,13 @@ export default function DatabasePage() {
     setEditingRecord(record);
     const values: any = {};
     (tableData?.headers || []).forEach(h => { values[h] = record[h]; });
+    // 布尔列存的值可能是 1/0 或 true/false（取决于引擎），归一成 Select 的选项值。
+    (tableInfo?.columns || []).forEach(c => {
+      if (/^(BOOLEAN|BOOL|BIT)\b/i.test(c.type) && values[c.name] !== undefined) {
+        const v = values[c.name];
+        values[c.name] = (v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true') ? '1' : '0';
+      }
+    });
     recordForm.setFieldsValue(values);
     setRecordModalVisible(true);
   };
@@ -627,6 +738,10 @@ export default function DatabasePage() {
     setRecordSaving(true);
     try {
       const values = await recordForm.validateFields();
+      // 自增列由数据库生成，不提交（后端 BuildInsert 不跳过 nil 自增值）。
+      (tableInfo?.columns || [])
+        .filter(c => c.is_auto_incr)
+        .forEach(c => { delete values[c.name]; });
       if (editingRecord) {
         const pk = tableInfo?.primaryKey || tableData?.headers?.[0] || 'id';
         const pkVal = editingRecord[pk];
@@ -640,7 +755,7 @@ export default function DatabasePage() {
       }
       setRecordModalVisible(false);
       fetchTableData(version.id, selectedDatabase.name, selectedTable, tablePage);
-    } catch (error: unknown) { if ((error instanceof Error ? error.message : String(error))) message.error((error instanceof Error ? error.message : String(error))); }
+    } catch (error: unknown) { message.error(errMsg(error, '操作失败')); }
     finally { setRecordSaving(false); }
   };
 
@@ -699,52 +814,10 @@ export default function DatabasePage() {
       onOpenEditModal: openEditModal,
       onSaveRecord: handleSaveRecord,
       onDeleteRecord: handleDeleteRecord,
-      sqlInput, sqlResult, sqlLoading,
-      onSqlInputChange: setSqlInput,
-      onExecuteSQL: handleExecuteSQL,
-      backups, backupsLoading, backupCreating, busy,
-      onCreateBackup: handleCreateBackup,
-      onDownloadBackup: handleDownloadBackup,
-      onRestoreBackup: handleRestoreBackup,
-      onDeleteBackup: handleDeleteBackup,
+      busy,
     } : null;
 
     // Action buttons live in the inner tab bar's extra area — they follow the
-    // active detail tab (数据库/用户) and are hidden until a version is selected
-    // (there is no instance to act on otherwise).
-    const tabExtra = !selectedVersion ? null : detailTab === 'databases' ? (
-      <Space style={{ marginRight: 8 }}>
-        <Button icon={<ReloadOutlined />} loading={dbsLoading}
-          onClick={() => fetchDatabases(selectedVersion.id)}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { dbForm.resetFields(); setDbModalVisible(true); }}
-          disabled={selectedVersion.status !== 'running'}>创建数据库</Button>
-      </Space>
-    ) : detailTab === 'users' ? (
-      <Space style={{ marginRight: 8 }}>
-        <Button icon={<ReloadOutlined />} loading={usersLoading}
-          onClick={() => fetchUsers(selectedVersion.id)}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { userForm.resetFields(); setUserModalVisible(true); }}
-          disabled={selectedVersion.status !== 'running'}>创建用户</Button>
-      </Space>
-    ) : detailTab === 'config' ? (
-      <Space style={{ marginRight: 8 }}>
-        <Popconfirm
-          title="将重启数据库"
-          description="保存配置后将重启实例，确定保存吗？"
-          okText="保存"
-          okButtonProps={{ danger: true }}
-          cancelText="取消"
-          onConfirm={handleSaveDBConfig}
-        >
-          <Button type="primary" loading={busy === 'save-config'}>保存配置</Button>
-        </Popconfirm>
-        <Button icon={<ReloadOutlined />} loading={dbConfigLoading}
-          onClick={() => fetchDBConfig()}>刷新</Button>
-      </Space>
-    ) : null;
-
     return (
       <div>
         {/* key remounts the header on database-type switch — its internal selection
@@ -800,40 +873,55 @@ export default function DatabasePage() {
             version={selectedVersion.version}
             onDone={() => fetchInstances(activeDbType)}
           />
+        ) : tableExplorer ? (
+          <TableExplorerView {...tableExplorer} />
         ) : (
           <Card>
           <Tabs
             activeKey={detailTab}
             onChange={setDetailTab}
-            tabBarExtraContent={tabExtra}
             items={[
               {
                 key: 'databases',
                 label: <span><DatabaseOutlined /> 数据库</span>,
-                children: <DatabasesTab
-                  server={activeDBTypeInfo}
-                  version={selectedVersion}
-                  databases={databases}
-                  dbsLoading={dbsLoading}
-                  busy={busy}
-                  onEnterDatabase={enterDatabase}
-                  onDeleteDB={handleDeleteDB}
-                  dbModalVisible={dbModalVisible}
-                  onDbModalVisibleChange={setDbModalVisible}
-                  dbForm={dbForm}
-                  onCreateDB={handleCreateDB}
-                  tableExplorer={tableExplorer}
-                />,
+                children: activeDbType === 'redis' && selectedVersion
+                  ? <RedisKeysTab instance={selectedVersion} />
+                  : <DatabasesTab
+                      server={activeDBTypeInfo}
+                      version={selectedVersion}
+                      databases={databases}
+                      dbsLoading={dbsLoading}
+                      busy={busy}
+                      onFetchDatabases={() => selectedVersion && fetchDatabases(selectedVersion.id)}
+                      onOpenCreateDB={() => { dbForm.resetFields(); setDbModalVisible(true); }}
+                      onEnterDatabase={enterDatabase}
+                      onDeleteDB={handleDeleteDB}
+                      dbModalVisible={dbModalVisible}
+                      onDbModalVisibleChange={setDbModalVisible}
+                      dbForm={dbForm}
+                      onCreateDB={handleCreateDB}
+                      backups={backups}
+                      backupsLoading={backupsLoading}
+                      backupCreating={backupCreating}
+                      onFetchBackups={(dbName) => selectedVersion && fetchBackups(selectedVersion.id, dbName)}
+                      onCreateBackup={handleCreateBackup}
+                      onDownloadBackup={handleDownloadBackup}
+                      onRestoreBackup={handleRestoreBackup}
+                      onDeleteBackup={handleDeleteBackup}
+                    />,
               },
               {
                 key: 'users',
                 label: <span><UserOutlined /> 用户</span>,
                 children: <UsersTab
                   server={activeDBTypeInfo}
+                  version={selectedVersion}
                   dbUsers={dbUsers}
                   usersLoading={usersLoading}
                   busy={busy}
                   databases={databases}
+                  onFetchUsers={() => selectedVersion && fetchUsers(selectedVersion.id)}
+                  onOpenCreateUser={() => { userForm.resetFields(); setUserModalVisible(true); }}
                   onDeleteUser={handleDeleteUser}
                   userModalVisible={userModalVisible}
                   onUserModalVisibleChange={setUserModalVisible}
@@ -845,6 +933,12 @@ export default function DatabasePage() {
                   onGrantVisibleChange={setGrantVisible}
                   onGrant={handleGrant}
                   onOpenGrant={(user) => { setGrantUser(user); grantForm.resetFields(); setGrantVisible(true); }}
+                  resetPasswordVisible={resetPasswordVisible}
+                  resetPasswordUser={resetPasswordUser}
+                  resetPasswordForm={resetPasswordForm}
+                  onResetPasswordVisibleChange={setResetPasswordVisible}
+                  onResetPassword={handleResetPassword}
+                  onOpenResetPassword={(user) => { setResetPasswordUser(user); resetPasswordForm.resetFields(); setResetPasswordVisible(true); }}
                 />,
               },
               {
@@ -852,11 +946,31 @@ export default function DatabasePage() {
                 label: <span><CodeOutlined /> 配置</span>,
                 children: <ConfigTab
                   server={activeDBTypeInfo}
+                  version={selectedVersion}
+                  busy={busy}
                   dbConfig={dbConfig}
                   dbConfigLoading={dbConfigLoading}
+                  onSaveConfig={handleSaveDBConfig}
+                  onFetchConfig={fetchDBConfig}
                   onUpdateDBParam={updateDBParam}
                 />,
               },
+              ...(activeDbType !== 'redis' ? [{
+                key: 'sql',
+                label: <span><ConsoleSqlOutlined /> SQL 控制台</span>,
+                children: <SqlConsoleTab
+                  server={activeDBTypeInfo}
+                  version={selectedVersion}
+                  databases={databases}
+                  sqlTargetDb={sqlTargetDb}
+                  onSqlTargetDbChange={setSqlTargetDb}
+                  sqlInput={sqlInput}
+                  onSqlInputChange={setSqlInput}
+                  sqlResult={sqlResult}
+                  sqlLoading={sqlLoading}
+                  onExecuteSQL={handleExecuteSQL}
+                />,
+              }] : []),
             ]} />
           </Card>
         )}

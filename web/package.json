@@ -3,11 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "packageManager": "pnpm@11.20.0",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.5",
@@ -44,6 +46,7 @@
     "playwright": "^1.61.1",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.10"
   }
 }

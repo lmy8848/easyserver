@@ -1,16 +1,64 @@
+import { useState } from 'react';
 import {
-  Row, Col, Input, InputNumber, Select, Tag, Empty, Spin,
+  Row, Col, Input, InputNumber, Select, Empty, Spin, Button, Space, Popconfirm, Tag,
 } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 import type { ConfigTabProps } from './types';
 
 const { TextArea } = Input;
 
-// 配置 tab — 结构化参数编辑。切到本 tab 时父组件自动加载配置；保存/刷新按钮
-// 在父组件 tab 栏右侧（tabBarExtraContent，见 index.tsx），本组件只渲染参数
-// 表单，参数网格化排列（多行值如 Redis save 独占一行）。
+// SIZE_FACTOR: 单位 → 字节倍数（1024 进制）。
+const SIZE_FACTOR: Record<string, number> = {
+  B: 1,
+  KB: 1024,
+  MB: 1024 ** 2,
+  GB: 1024 ** 3,
+  TB: 1024 ** 4,
+};
+const SIZE_UNITS = Object.keys(SIZE_FACTOR);
+// 字节换算参数（number 型 + 字节单位 token）→ 显示/保存都换算字节。
+const isSizeParam = (param: any) =>
+  param.type === 'number' && !!param.unit && param.unit.toUpperCase() in SIZE_FACTOR;
+// PG 字符串单位参数（string 型 + 单位 token）→ 解析/拼接带单位串。
+const isStrUnitParam = (param: any) =>
+  param.type === 'string' && !!param.unit && param.unit.toUpperCase() in SIZE_FACTOR;
+// 单位 → 字节倍数（unknown 兜底 1，防御脏数据）。
+const factorOf = (unit: string) => SIZE_FACTOR[unit] ?? 1;
+
 export default function ConfigTab({
-  server, dbConfig, dbConfigLoading, onUpdateDBParam,
+  server, version, busy, dbConfig, dbConfigLoading, onSaveConfig, onFetchConfig, onUpdateDBParam,
 }: ConfigTabProps) {
+  // 每个可切换单位参数当前选中的单位（默认取 param.unit，用户可切）。
+  const [units, setUnits] = useState<Record<string, string>>({});
+  const unitOf = (key: string, def: string) => units[key] || def.toUpperCase();
+
+  // 引擎字节值 → 当前单位下的显示值（数值都来自 SET 过的整数，Math.round 精确）。
+  const bytesToDisplay = (bytes: string | undefined, unit: string) => {
+    const n = Number(bytes);
+    if (!bytes || !Number.isFinite(n)) return '';
+    return String(Math.round(n / factorOf(unit)));
+  };
+  // 显示值 → 字节（保存时按单位换算后传给后端）。
+  const displayToBytes = (display: string | null | undefined, unit: string) => {
+    if (display == null || display === '') return '';
+    const n = Number(display);
+    if (!Number.isFinite(n)) return '';
+    return String(Math.round(n * factorOf(unit)));
+  };
+  // PG 带单位串 "128MB" → 数字部分 "128"。解析不了（无单位）→ 原样，保存也原样。
+  const strToNum = (v: string | undefined) => {
+    if (!v) return '';
+    const m = /^(\d+)\s*([kKmMgGtT][bB])?$/.exec(v.trim());
+    return m ? m[1] : v;
+  };
+  // PG 数字 + 单位 → 带单位串（保存传给后端 ALTER SYSTEM）。
+  const numToStr = (num: string | null | undefined, unit: string) => {
+    if (num == null || num === '') return '';
+    const n = Number(num);
+    if (!Number.isFinite(n)) return '';
+    return `${Math.round(n)}${unit}`;
+  };
+
   if (dbConfigLoading && !dbConfig) {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>;
   }
@@ -18,55 +66,162 @@ export default function ConfigTab({
     return <Empty description={`读取 ${server.display_name} 配置失败，点击右上角刷新重试`} />;
   }
 
-  const section = (dbConfig.config?.sections || [])[0];
-  if (!section) return null;
-  const params = section.params || {};
+  const params = dbConfig.config?.params || {};
+  const meta: any[] = dbConfig.config?.meta || [];
   // 含换行的值（如 Redis save 多行策略）用多行输入框且独占一行。
-  const isMultiline = (key: string) =>
-    (params[key] || section.meta?.find((m: any) => m.key === key)?.default || '').includes('\n');
+  const isMultiline = (key: string) => (params[key] || '').includes('\n');
+
+  const renderInput = (param: any) => {
+    if (param.options?.length) {
+      return (
+        <Select
+          value={params[param.key] || ''}
+          onChange={(val) => onUpdateDBParam(param.key, val)}
+          style={{ width: '100%' }}
+        >
+          {(param.options || []).map((opt: string) => (
+            <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+          ))}
+        </Select>
+      );
+    }
+    if (isSizeParam(param)) {
+      const unit = unitOf(param.key, param.unit);
+      return (
+        // 可切换单位 → addonAfter 内嵌 borderless Select。addonAfter 内部是
+        // inline-flex 内容宽，靠 rootClassName + index.css 的 .config-unit-input
+        // 把外层改回 flex 撑满（见 index.css），保证与其他输入框等宽。
+        <InputNumber
+          stringMode
+          value={bytesToDisplay(params[param.key], unit)}
+          onChange={(val) => onUpdateDBParam(param.key, displayToBytes(val, unit))}
+          style={{ width: '100%' }}
+          rootClassName="config-unit-input"
+          addonAfter={(
+            <Select
+              value={unit}
+              onChange={(u) => setUnits(prev => ({ ...prev, [param.key]: u }))}
+              variant="borderless"
+              style={{ width: 76 }}
+            >
+              {SIZE_UNITS.map(u => (
+                <Select.Option key={u} value={u}>{u}</Select.Option>
+              ))}
+            </Select>
+          )}
+        />
+      );
+    }
+    if (isStrUnitParam(param)) {
+      // PG 字符串单位参数：值 "128MB" → 数字部分显示，单位可切；保存拼回 "128MB"。
+      // 初始单位优先取值里的实际单位（如 "1GB" 显示 GB），其次 param.unit。
+      const v = params[param.key] || '';
+      const vm = /^(\d+)\s*([kKmMgGtT][bB])?$/.exec(v.trim());
+      const unit = units[param.key] || (vm && vm[2] ? vm[2].toUpperCase() : param.unit.toUpperCase());
+      return (
+        <InputNumber
+          stringMode
+          value={strToNum(v)}
+          onChange={(val) => onUpdateDBParam(param.key, numToStr(val, unit))}
+          style={{ width: '100%' }}
+          rootClassName="config-unit-input"
+          addonAfter={(
+            <Select
+              value={unit}
+              onChange={(u) => {
+                setUnits(prev => ({ ...prev, [param.key]: u }));
+                const num = strToNum(v);
+                if (num) {
+                  onUpdateDBParam(param.key, numToStr(num, u));
+                }
+              }}
+              variant="borderless"
+              style={{ width: 76 }}
+            >
+              {SIZE_UNITS.map(u => (
+                <Select.Option key={u} value={u}>{u}</Select.Option>
+              ))}
+            </Select>
+          )}
+        />
+      );
+    }
+    if (param.type === 'number') {
+      // 单一单位参数（如 wait_timeout "秒"）→ addonAfter 固定单位文本（不切换）；
+      // 无单位 → 纯数字。
+      if (param.unit) {
+        return (
+          <InputNumber
+            stringMode
+            value={params[param.key]}
+            onChange={(val) => onUpdateDBParam(param.key, val == null ? '' : String(val))}
+            style={{ width: '100%' }}
+            rootClassName="config-unit-input"
+            addonAfter={<span style={{ color: '#666' }}>{param.unit}</span>}
+          />
+        );
+      }
+      return (
+        <InputNumber
+          stringMode
+          value={params[param.key]}
+          onChange={(val) => onUpdateDBParam(param.key, val == null ? '' : String(val))}
+          style={{ width: '100%' }}
+        />
+      );
+    }
+    if (isMultiline(param.key)) {
+      return (
+        <TextArea
+          value={params[param.key] || ''}
+          onChange={(e) => onUpdateDBParam(param.key, e.target.value)}
+          rows={3}
+          style={{ width: '100%' }}
+        />
+      );
+    }
+    return (
+      <Input
+        value={params[param.key] || ''}
+        onChange={(e) => onUpdateDBParam(param.key, e.target.value)}
+      />
+    );
+  };
 
   return (
     <div>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space size="middle">
+          <span style={{ fontSize: 16, fontWeight: 'bold' }}>实例参数配置</span>
+          <Tag color="default">共 {meta.length} 项</Tag>
+        </Space>
+        <Space>
+          <Popconfirm
+            title="将重启数据库"
+            description="保存配置后将重启实例，确定保存吗？"
+            okText="保存"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            // 不直接传 async onSaveConfig：antd 会等它返回的 Promise resolve 才关弹窗，
+            // 改端口时后端重建容器要几十秒，弹窗会一直卡着。这里 fire-and-forget，
+            // 点了立即关；保存异步继续，进度看触发按钮 busy loading，结果走 message。
+            onConfirm={() => { void onSaveConfig(); }}
+          >
+            <Button type="primary" loading={busy === 'save-config'} disabled={version?.status !== 'running'}>保存配置</Button>
+          </Popconfirm>
+          <Button icon={<ReloadOutlined />} loading={dbConfigLoading} onClick={onFetchConfig}>刷新</Button>
+        </Space>
+      </div>
+
       <Row gutter={[24, 20]}>
-        {(section.meta || []).map((param: any) => (
-          <Col key={param.key} xs={24} sm={12} lg={isMultiline(param.key) ? 24 : 8}>
+        {meta.map((param: any) => (
+          <Col key={param.key} xs={24} sm={12} lg={isMultiline(param.key) ? 24 : 6}>
             <div style={{ marginBottom: 4 }}>
               <strong>{param.label}</strong>
               <span style={{ color: '#8c8c8c', marginLeft: 8, fontSize: 12 }}>{param.key}</span>
-              {param.unit && <Tag style={{ marginLeft: 8 }}>{param.unit}</Tag>}
             </div>
             <div style={{ color: '#666', fontSize: 12, marginBottom: 4 }}>{param.description}</div>
-            {param.type === 'select' ? (
-              <Select
-                value={params[param.key] || param.default}
-                onChange={(val) => onUpdateDBParam(section.name, param.key, val)}
-                style={{ width: '100%' }}
-              >
-                {(param.options || []).map((opt: string) => (
-                  <Select.Option key={opt} value={opt}>{opt}</Select.Option>
-                ))}
-              </Select>
-            ) : param.type === 'number' ? (
-              <InputNumber
-                value={Number(params[param.key]) || Number(param.default)}
-                onChange={(val) => onUpdateDBParam(section.name, param.key, String(val ?? ''))}
-                style={{ width: '100%' }}
-              />
-            ) : isMultiline(param.key) ? (
-              <TextArea
-                value={params[param.key] || ''}
-                onChange={(e) => onUpdateDBParam(section.name, param.key, e.target.value)}
-                placeholder={param.default}
-                rows={3}
-                style={{ width: '100%' }}
-              />
-            ) : (
-              <Input
-                value={params[param.key] || ''}
-                onChange={(e) => onUpdateDBParam(section.name, param.key, e.target.value)}
-                placeholder={param.default}
-              />
-            )}
+            {renderInput(param)}
           </Col>
         ))}
       </Row>

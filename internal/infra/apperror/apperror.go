@@ -167,6 +167,8 @@ var errorRegistry = []errorPattern{
 	{matches: []string{"already installed", "已安装", "已存在", "is already running", "is not running", "未运行"}, target: ErrConflict},
 	// Bad state / precondition
 	{matches: []string{"cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
+	// DB 标识符/名称校验（builder 内嵌校验的报错，路由层不再前置检查）
+	{matches: []string{"无效的表名", "无效的列名"}, target: ErrBadRequest},
 	// UNIQUE constraint violation (SQLite)
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
 	// No data available
@@ -175,6 +177,8 @@ var errorRegistry = []errorPattern{
 	{matches: []string{"npm error code E404", "ERR_PNPM_FETCH_404", "ERR_PNPM_NO_MATCHING_VERSION", "is not in the npm registry", "No matching version found"}, target: ErrBadRequest},
 	// Package manager: pip 用户输入类错误（包名/版本不存在、wheel 构建失败、PEP 668 等）
 	{matches: []string{"No matching distribution found for", "Could not find a version that satisfies the requirement", "Could not build wheels for", "externally-managed-environment", "ERROR: Invalid requirement"}, target: ErrBadRequest},
+	// DB 配置驱动写入的参数/值非法（SET PERSIST 只读变量、PG 未知参数、Redis 非法值）
+	{matches: []string{"is a read only variable", "unrecognized configuration parameter", "CONFIG SET failed", "CONFIG REWRITE failed"}, target: ErrBadRequest},
 }
 
 // WrapError automatically wraps an error into the appropriate AppError

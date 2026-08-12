@@ -242,7 +242,7 @@ export interface DBBackup {
   backup_type: string; // manual, scheduled
   file_path: string;
   file_size: number;
-  status: string; // pending, completed, failed
+  status: string; // running, success, failed
   error_message: string;
   created_at: string;
 }
@@ -272,6 +272,29 @@ export interface DBUser {
   username: string;
   host: string; // MySQL only; empty for PostgreSQL
   privileges?: string;
+}
+
+export interface RedisKey {
+  name: string;
+  type: string; // string | hash | list | set | zset | ...
+  ttl: number; // seconds; -1 = no expiry
+  size: number; // bytes
+}
+
+export interface RedisValue {
+  type: string;
+  value: string | Record<string, string> | string[] | Array<{ member: string; score: number }> | null;
+}
+
+// 添加 Redis key 时按类型的载荷（hash 字段对 / zset 分值-成员对）。
+export interface RedisHashField {
+  field: string;
+  value: string;
+}
+
+export interface RedisZSetMember {
+  member: string;
+  score: number;
 }
 
 // Cron task types（systemd timer 承载，name 为唯一标识）
@@ -479,32 +502,26 @@ export interface ShareFileEntry {
   is_dir: boolean;
 }
 
-// DB config
-export interface ConfigSection {
-  name: string;
-  params: Record<string, string>;
-}
-
+// ParamMeta is the UI metadata for one config param. type reflects the engine's
+// actual variable type: "number" params are numeric variables whose SET value must
+// be a bare literal (MySQL 1232 otherwise), "string" params are quoted. key is the
+// actual engine parameter name (zero conversion). Editor renders a Select when
+// options is present, an InputNumber when type is "number", text otherwise.
 export interface ParamMeta {
   key: string;
   label: string;
   description: string;
-  type: string;
+  type: 'number' | 'string';
   unit?: string;
   options?: string[];
-  default: string;
 }
 
 // Structured config of one database instance (GET /db/instances/:iid/config):
-// current param values (override or compiled default) plus editing metadata.
-// The config file is generated from these params — no raw file content is exposed.
-export interface InstanceConfigSection extends ConfigSection {
-  meta: ParamMeta[];
-}
-
+// params = current engine values for the panel-managed params, meta = editor
+// metadata. No multi-section shape — one config namespace per engine.
 export interface InstanceConfigView {
-  file_path: string;
-  sections: InstanceConfigSection[];
+  params: Record<string, string>;
+  meta: ParamMeta[];
 }
 
 // TLS certificate info parsed from the configured cert

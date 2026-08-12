@@ -4,8 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,71 +14,60 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
-	"easyserver/internal/infra"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/task"
 )
 
 const (
-	maxDBNameLen    = 64
-	maxUsernameLen  = 32
-	maxHostLen      = 255
 	maxLogLines     = 5000
-	defaultCharset  = "utf8mb4"
 	defaultLogLines = 200
-
-	DefaultBackupDir = "/var/backups/easyserver/db"
-	MaxBackupsPerDB  = 10
 )
-
-var validCharsets = map[string]bool{
-	"utf8mb4": true, "utf8": true, "latin1": true,
-	"ascii": true, "gbk": true, "big5": true,
-}
-
-var validPrivileges = map[string]bool{
-	"ALL PRIVILEGES": true, "SELECT": true, "INSERT": true,
-	"UPDATE": true, "DELETE": true, "CREATE": true, "DROP": true,
-	"INDEX": true, "ALTER": true, "EXECUTE": true,
-}
 
 // Service manages the whole database domain: container-backed instances
 // (lifecycle) and the logical databases, users, backups and SQL inside them.
 type Service struct {
 	repo           Repository
-	runtime        DatabaseRuntime // shared runtime for normal (non-install) ops
-	backupDir      string
+	runtime        DatabaseRuntime        // shared runtime for normal (non-install) ops
 	taskMgr        *task.Manager          // background install executor (key=DBType 去重)
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
+	driver         SQLRunner              // direct driver channel (MySQL/PostgreSQL)
+	redisOps       *redisRunner           // direct Redis channel (key browser ops)
+
+	restoreMu   sync.Mutex
+	restoreTask map[int64]*RestoreStatus // backupID → 恢复任务内存态（恢复不写备份行）
 }
 
-// NewService creates a database Service over the given Repository, driving
-// containers through the CLI Runtime seam.
-func NewService(repo Repository, exec executor.CommandExecutor) *Service {
-	return &Service{
-		repo:      repo,
-		runtime:   NewCLIContainerRuntime(exec),
-		backupDir: DefaultBackupDir,
-		taskMgr:   task.NewManager(8),
-		runtimeFactory: func() DatabaseRuntime {
-			return NewCLIContainerRuntime(exec)
-		},
-	}
-}
-
-// NewServiceWithRuntime is the test seam for lifecycle behavior; it skips the
-// CLI runtime construction.
-func NewServiceWithRuntime(repo Repository, runtime DatabaseRuntime) *Service {
-	return &Service{
-		repo:      repo,
-		runtime:   runtime,
-		backupDir: DefaultBackupDir,
-		taskMgr:   task.NewManager(8),
+// NewService creates a database Service over the given Repository and container
+// runtime. Production passes NewCLIContainerRuntime(exec); tests pass a fake
+// DatabaseRuntime. Sweeps orphaned backup rows (running → failed) from a
+// previous crashed process.
+func NewService(repo Repository, runtime DatabaseRuntime) *Service {
+	s := &Service{
+		repo:    repo,
+		runtime: runtime,
+		taskMgr: task.NewManager(8),
 		runtimeFactory: func() DatabaseRuntime {
 			return runtime
 		},
+		driver:      newDriverSQLRunner(),
+		redisOps:    newRedisRunner(),
+		restoreTask: make(map[int64]*RestoreStatus),
 	}
+	s.SweepOrphanBackups(context.Background())
+	return s
+}
+
+// runnerFor returns the SQL channel for an instance. All SQL runs over the
+// direct driver connection; Redis surfaces as clear errors from the channel
+// instead of falling back.
+func (s *Service) runnerFor(inst *DBInstance) SQLRunner {
+	return s.driver
+}
+
+// redisFor returns the direct Redis channel for an instance (key browser ops).
+func (s *Service) redisFor() *redisRunner {
+	return s.redisOps
 }
 
 // refreshInstanceStatus queries the container runtime (by container ID) and
@@ -136,12 +126,18 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, fmt.Errorf("unsupported database type %q", dbType)
 	}
 
-	count, err := s.repo.CountInstancesByDBTypeAndVersion(ctx, dbType, req.Version)
+	// 单实例约束按"数据目录归属"判定：目录 key 是 sanitize 后的 version（8.0. 与
+	// 8.0 指向同一目录），逐个比对已存在实例的 dir key，避免原始版本写法不同
+	// 绕过约束而共享一个数据目录。
+	instances, err := s.repo.ListInstances(ctx, dbType)
 	if err != nil {
 		return nil, err
 	}
-	if count > 0 {
-		return nil, fmt.Errorf("version %s is already installed for %s", req.Version, dbType)
+	dirKey := instanceDirKey(dbType, req.Version)
+	for _, inst := range instances {
+		if instanceDirKey(inst.DBType, inst.Version) == dirKey {
+			return nil, fmt.Errorf("version %s is already installed for %s", req.Version, dbType)
+		}
 	}
 
 	// The client sends the image + version (the front-end owns the version/image
@@ -177,7 +173,9 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		}
 	}
 	containerName := defaultContainerName(dbType, req.Version, req.ContainerName)
-	volumeName := containerName + "-data"
+	// 数据目录是宿主绝对路径（/opt/easyserver/db/<type>-<version>/data），不再有命名卷。
+	// 同 <type>-<version> 只允许一个实例（上面已查），目录归属唯一。
+	volumeName := hostDataDir(dbType, req.Version)
 	// Admin password is stored plainly: SQLite file and container environment
 	// share the host, so a static key encrypts nothing an attacker can't read
 	// next door — encryption would only add a missing-key failure mode.
@@ -222,7 +220,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		// (which is canceled once CreateInstance responds), so it must not inherit
 		// its cancellation — the per-task context from the task executor drives it,
 		// and CancelInstall cancels that.
-		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, volumeName, password, spec, rt, log)
+		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, password, spec, rt, log)
 	}); err != nil {
 		// Duplicate install (same container already installing) or concurrency
 		// limit: the row was written above but no task started — remove it so the
@@ -231,6 +229,82 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, err
 	}
 	return &CreateInstanceResult{InstallID: containerName, InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
+}
+
+// installInstance runs the container creation pipeline and reports progress
+// into log. rt is an install-scoped runtime whose command output is hooked into
+// log. The instance row already exists (status "installing", written up front by
+// CreateInstance); this flips it to "running" on success / "failed" on error, or
+// removes it entirely when the user cancels. ctx is the per-task cancel context
+// from the task executor.
+func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
+	canceled := func() bool { return ctx.Err() != nil }
+	// removeInstance is the cancel cleanup: drop the container and the instance
+	// row — the user aborted, so nothing lingers (a failed install keeps its row
+	// for inspection; a canceled one does not).
+	removeInstance := func() {
+		_ = rt.Remove(context.Background(), engineName, containerName)
+		_ = s.repo.DeleteInstance(context.Background(), id)
+	}
+	fail := func(msg string, err error) error {
+		if canceled() {
+			removeInstance()
+			log.Append("❌ 安装已取消")
+			return fmt.Errorf("安装已取消")
+		}
+		// 失败时保留容器，便于排查失败现场（容器日志还在）。重新安装走
+		// "卸载+安装"两步，卸载会先删掉这个残留容器，所以不会被占用卡住。
+		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
+		log.Append("❌ " + msg + ": " + err.Error())
+		return err
+	}
+
+	log.Append("开始安装 " + image + " ...")
+	// 数据/配置目录是宿主挂载：先建好并 chown 给容器进程（uid 999），否则容器内
+	// mysqld/redis 无法写数据目录（Redis 的 CONFIG REWRITE 也是这个原因才从命名卷
+	// 迁到宿主路径）。Redis 同时预置空 redis.conf（配置文件必须存在，见函数注释）。
+	if err := prepareHostDirs(spec); err != nil {
+		return fail("准备宿主数据目录失败", err)
+	}
+	if err := rt.Create(ctx, spec); err != nil {
+		if canceled() {
+			removeInstance()
+			log.Append("❌ 安装已取消")
+			return fmt.Errorf("安装已取消")
+		}
+		// No container was created — still flip the row to "failed" so the
+		// instance doesn't sit at "installing" forever (the log panel surfaces
+		// the error and offers reinstall).
+		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
+		log.Append("❌ 创建容器失败: " + err.Error())
+		return err
+	}
+	log.Append("容器已创建，启动服务...")
+
+	if err := rt.Start(ctx, engineName, containerName); err != nil {
+		return fail("启动容器失败", err)
+	}
+	// 等待就绪不设超时：数据库初始化（尤其首次拉镜像后）没有固定时长，卡住时
+	// 由容器退出（exited 快失败）或用户取消来终止，而不是倒计时误杀。
+	if _, err := waitForHealthy(ctx, rt, engineName, containerName, 0); err != nil {
+		return fail("数据库未就绪", err)
+	}
+	log.Append("✅ 安装完成，数据库已就绪")
+	if err := s.repo.UpdateInstanceStatus(ctx, id, "running"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// CancelInstall aborts an in-flight install. The goroutine observes the cancel
+// at its next command boundary (image pull, create, start, health poll) and
+// removes the container and the instance row before finishing — a canceled
+// install leaves no row behind, unlike a failed one.
+func (s *Service) CancelInstall(installID string) error {
+	if !s.taskMgr.Cancel(installID) {
+		return fmt.Errorf("安装已结束或不存在")
+	}
+	return nil
 }
 
 // dockerTagsCache holds the full (filtered) tag list for one database type, with a TTL
@@ -291,6 +365,74 @@ func (s *Service) dockerTags(dbType DBType) ([]string, error) {
 	return tags, nil
 }
 
+// dockerHubTagPage mirrors one paginated tag page from hub.docker.com. Only
+// the fields the picker needs are kept.
+type dockerHubTagPage struct {
+	Next    string `json:"next"`
+	Results []struct {
+		Name string `json:"name"`
+	} `json:"results"`
+}
+
+// fetchDockerHubTags lists every published version-like tag for an official
+// Docker Hub image (library/xxx). It walks the API's pagination (page_size=100)
+// until exhausted; tags that don't look like a version (e.g. latest,
+// oraclelinux9) are dropped. The front-end "更多版本" flow calls this so users
+// can install any published tag, not just the curated presets.
+func fetchDockerHubTags(image string) ([]string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	seen := make(map[string]bool)
+	var tags []string
+	url := fmt.Sprintf("https://hub.docker.com/v2/repositories/library/%s/tags?page_size=100", image)
+	for url != "" {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", "easyserver")
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("查询 Docker Hub 失败: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("Docker Hub 返回 %s", resp.Status)
+		}
+		var page dockerHubTagPage
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("解析 Docker Hub 响应失败: %w", err)
+		}
+		resp.Body.Close()
+		for _, r := range page.Results {
+			if r.Name == "" || seen[r.Name] || !versionLike(r.Name) {
+				continue
+			}
+			seen[r.Name] = true
+			tags = append(tags, r.Name)
+		}
+		url = page.Next
+	}
+	return tags, nil
+}
+
+// versionLike reports whether a tag looks like a version number the picker
+// should offer. Plain version tags (8.4, 8.4.11) and alpine variants
+// (7-alpine, used by Redis) are kept; platform-specific tags such as
+// "8.4-oraclelinux9" or "8.4-bullseye" are noise and dropped.
+func versionLike(tag string) bool {
+	if tag == "" {
+		return false
+	}
+	if !unicode.IsDigit([]rune(tag)[0]) {
+		return false
+	}
+	if i := strings.IndexByte(tag, '-'); i >= 0 {
+		return strings.HasSuffix(tag, "-alpine")
+	}
+	return true
+}
+
 // InstallTask exposes an in-flight install's log and completion to the SSE
 // handler. Returns false when no task exists for the install id (successful
 // installs are cleaned up on completion, so this is only live/failed/canceled).
@@ -309,8 +451,9 @@ func (s *Service) WaitForInstall(installID string) error {
 	return t.Err()
 }
 
-// UninstallInstance removes the managed container. The data volume is retained
-// by default so the instance can be re-installed onto it; purge deletes it too.
+// UninstallInstance removes the managed container. The host data directory is
+// retained by default so the instance can be re-installed onto it; purge
+// deletes the whole instance directory (data + config + backups) too.
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge bool) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -323,34 +466,14 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("remove database container: %w", err)
 	}
+	// Drop cached direct-connection pools so a reinstall reconnects fresh.
+	s.driver.Close(instanceID)
+	s.redisOps.Close(instanceID)
 	if purge {
-		if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
-			return fmt.Errorf("remove database volume: %w", err)
-		}
-		if v.ConfigDir != "" {
-			if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, strings.TrimSuffix(v.VolumeName, "-data")+"-config"); err != nil {
-				return fmt.Errorf("remove database config volume: %w", err)
-			}
-		}
-	}
-	return s.repo.DeleteInstance(ctx, instanceID)
-}
-
-// DestroyInstance removes the managed container, its data/config volumes and metadata.
-func (s *Service) DestroyInstance(ctx context.Context, instanceID int64) error {
-	v, err := s.GetInstance(ctx, instanceID)
-	if err != nil || v == nil {
-		return fmt.Errorf("instance not found")
-	}
-	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
-		return fmt.Errorf("remove database container: %w", err)
-	}
-	if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, v.VolumeName); err != nil {
-		return fmt.Errorf("remove database volume: %w", err)
-	}
-	if v.ConfigDir != "" {
-		if err := s.runtime.RemoveVolume(ctx, v.ContainerEngine, strings.TrimSuffix(v.VolumeName, "-data")+"-config"); err != nil {
-			return fmt.Errorf("remove database config volume: %w", err)
+		// 数据目录是宿主路径，整目录（data + config + es_backups/ 备份）直接 RemoveAll，
+		// 不再走引擎卷删除。
+		if err := os.RemoveAll(filepath.Dir(v.VolumeName)); err != nil {
+			return fmt.Errorf("remove database data directory: %w", err)
 		}
 	}
 	return s.repo.DeleteInstance(ctx, instanceID)
@@ -466,74 +589,81 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 	return s.runtime.Logs(ctx, v.ContainerEngine, v.ContainerName, lines)
 }
 
-// GetInstanceConfig 返回实例的结构化配置：参数值（覆盖项或编译默认值）+ 编辑元数据。
-// 覆盖项存于容器配置卷（面板生成的配置文件），面板是唯一写入方；参数元数据与编译
-// 默认值定义在代码（config.go）。port 是实例级状态（DB 的 port 列），始终显示当前值。
+// GetInstanceConfig 返回实例的结构化配置：驱动读面板参数的运行时值（读到啥返回啥）
+// + 编辑元数据。port 是实例级状态（DB 的 port 列，容器映射管理），始终显示当前值。
+// 配置读写都需要实例运行（驱动连接），停止的实例返回明确错误。
 func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*InstanceConfigView, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return nil, fmt.Errorf("instance not found")
 	}
-	content, err := s.runtime.ReadVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v))
+	if err := s.ensureInstanceRunning(ctx, v, "读取配置"); err != nil {
+		return nil, err
+	}
+	params, err := s.readConfigValues(ctx, v)
 	if err != nil {
 		return nil, err
 	}
-	params := effectiveParams(v.DBType, parseConfigFile(v.DBType, content))
 	params["port"] = strconv.Itoa(v.Port)
-	view := &InstanceConfigView{FilePath: configPathForImage(v.Image)}
-	view.Sections = append(view.Sections, ConfigSectionView{
-		Name:   configSectionName(v.DBType),
-		Params: params,
-		Meta:   configParams(v.DBType),
-	})
-	return view, nil
+	return &InstanceConfigView{Params: params, Meta: configParams(v.DBType)}, nil
 }
 
 // SaveInstanceConfig 保存结构化配置并立即生效：
-//  1. 读容器配置卷现有覆盖项 → 合并本次修改 → 按参数生成配置文件写回卷；
-//  2. port 参数变化 → 重建容器更新端口映射（配置卷已是新文件，启动即加载）；
-//     其余参数变化且实例运行中 → 重启容器使配置生效。面板是配置唯一写入方。
-func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, sections []ConfigSectionView) error {
+//  1. 只应用传入的非空覆盖值（空值 = 无操作，前端已过滤，后端兜底跳过）；
+//  2. 实例运行中（驱动持久化需要连接）——覆盖值直接写入数据库自身持久化机制
+//     （SET PERSIST / ALTER SYSTEM / CONFIG SET+REWRITE），在线生效；
+//  3. port 参数变化 → 重建容器更新端口映射（port 是容器映射，驱动改不了）；
+//  4. PG 的 postmaster 级参数 reload 不生效 → 重启容器；
+//     其余参数驱动已在线生效，不重启。
+func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, params map[string]string) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
 		return fmt.Errorf("instance not found")
 	}
-	content, err := s.runtime.ReadVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v))
-	if err != nil {
-		return err
-	}
-	stored := parseConfigFile(v.DBType, content)
-	for _, section := range sections {
-		for key, value := range section.Params {
-			if strings.TrimSpace(value) == "" {
-				delete(stored, key)
-				continue
-			}
-			stored[key] = strings.TrimSpace(value)
+
+	// 组装本次覆盖值，空值跳过（不清覆盖、不重置 —— 保存只应用改过的字段）。
+	filtered := make(map[string]string)
+	for key, value := range params {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			filtered[key] = trimmed
 		}
 	}
-	if err := s.runtime.SeedVolumeFile(ctx, v.ContainerEngine, v.Image, configVolumeFor(v), configFileDestPath(v), generateConfigFile(v.DBType, stored)); err != nil {
-		return err
-	}
-
-	// 端口：结构化参数里的值，非法/缺失回退当前实例端口。
 	newPort := v.Port
-	if raw, ok := stored["port"]; ok {
+	if raw, ok := filtered["port"]; ok {
 		if p, err := strconv.Atoi(raw); err == nil && p >= 1 && p <= 65535 {
 			newPort = p
 		}
+		delete(filtered, "port")
+	}
+
+	if err := s.ensureInstanceRunning(ctx, v, "保存配置"); err != nil {
+		return err
+	}
+	restart, err := s.applyConfigValues(ctx, v, filtered)
+	if err != nil {
+		return err
 	}
 	if newPort != v.Port {
 		return s.recreateInstanceContainer(ctx, v, newPort)
 	}
-	if v.Status == "running" {
+	if restart {
 		return s.RestartInstance(ctx, instanceID)
 	}
 	return nil
 }
 
+// ensureInstanceRunning 检查实例容器在运行 —— 配置读写走驱动，连接需要端口映射
+// 可用。返回的错误含"未运行"，经 WrapError 映射为 409。
+func (s *Service) ensureInstanceRunning(ctx context.Context, v *DBInstance, action string) error {
+	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerName)
+	if err != nil || info.State != "running" {
+		return fmt.Errorf("实例未运行，无法%s（请先启动实例）", action)
+	}
+	return nil
+}
+
 // recreateInstanceContainer 用新端口重建容器（移除旧映射、按新端口 create/start），
-// 数据卷保留，配置卷在调用前已写入新内容，启动即加载。保存配置里 port 参数时调用。
+// 数据卷保留；端口是容器映射，驱动改不了，只能重建。保存配置里 port 参数时调用。
 func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, newPort int) error {
 	spec := containerSpec(v.DBType, v.ContainerEngine, v.Version, v.Image, v.ContainerName, v.VolumeName, v.BindAddress, newPort, v.AdminPassword)
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
@@ -548,61 +678,11 @@ func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, 
 	if _, err := waitForHealthy(ctx, s.runtime, v.ContainerEngine, v.ContainerName, 2*time.Minute); err != nil {
 		return err
 	}
+	// 端口变了，缓存池（driver/redis 按 (instance, db) 缓存，DSN 固化旧端口）必须
+	// 清掉，下次查询才按新端口重连。
+	s.driver.Close(v.ID)
+	s.redisOps.Close(v.ID)
 	return s.repo.UpdateInstancePort(ctx, v.ID, newPort)
-}
-
-// configVolumeFor 返回配置持久化卷：MySQL/Redis 用独立配置卷，PostgreSQL 的
-// 覆盖项写在数据卷的 postgresql.auto.conf（服务器启动时自动读取，无需独立卷）。
-func configVolumeFor(v *DBInstance) string {
-	if v.DBType == DBTypePostgreSQL {
-		return v.VolumeName
-	}
-	return strings.TrimSuffix(v.VolumeName, "-data") + "-config"
-}
-
-// configFileDestPath 是配置文件相对其所在卷挂载点的路径（SeedVolumeFile 把卷挂在
-// /easyserver-init，dest 是卷内相对路径）。
-func configFileDestPath(v *DBInstance) string {
-	switch v.DBType {
-	case DBTypeMySQL:
-		return "easyserver.cnf"
-	case DBTypeRedis:
-		return "redis.conf"
-	default: // postgresql — 覆盖项写进数据卷的 postgresql.auto.conf（PG 服务器启动时在
-		// postgresql.conf 之后自动读取的标准覆盖文件），不碰镜像生成的全量配置。
-		return pgConfigDestRelative(v.Image)
-	}
-}
-
-// pgConfigDestRelative 是 postgresql.auto.conf 相对数据卷挂载点的路径：PG 18+ 的
-// PGDATA 移到版本子目录，旧版在数据卷根。
-func pgConfigDestRelative(image string) string {
-	if major := postgresMajor(image); major >= 18 {
-		return fmt.Sprintf("%d/docker/postgresql.auto.conf", major)
-	}
-	return "postgresql.auto.conf"
-}
-
-// MySQL/Redis 的默认配置由 generateConfigFile 根据结构化参数（编译默认值）生成，
-// 安装时通过 SeedVolumeFile 预置进持久配置卷，见 config.go。
-
-func configPathForImage(image string) string {
-	image = strings.ToLower(image)
-	// Images are stored fully qualified (docker.io/mysql:8.0) — match the repo
-	// basename, not the registry prefix (docker.io/… has no "mysql" prefix).
-	if i := strings.LastIndex(image, "/"); i >= 0 {
-		image = image[i+1:]
-	}
-	switch {
-	case strings.HasPrefix(image, "mysql"):
-		// 面板管理的自定义片段，位于镜像 my.cnf 自动 !includedir 的 conf.d；
-		// 安装时由 generateConfigFile 预置（镜像里无默认配置可复制）。
-		return "/etc/mysql/conf.d/easyserver.cnf"
-	case strings.HasPrefix(image, "postgres"):
-		return pgConfigPath(image)
-	default:
-		return "/usr/local/etc/redis/redis.conf"
-	}
 }
 
 // postgresMajor extracts the PostgreSQL major version from an image reference
@@ -632,15 +712,6 @@ func pgDataDir(image string) string {
 	return "/var/lib/postgresql/data"
 }
 
-// pgConfigPath is where postgresql.conf lives inside the container — under the
-// same PGDATA the image uses, which moved to a version subdir in 18+.
-func pgConfigPath(image string) string {
-	if major := postgresMajor(image); major >= 18 {
-		return fmt.Sprintf("/var/lib/postgresql/%d/docker/postgresql.auto.conf", major)
-	}
-	return "/var/lib/postgresql/data/postgresql.auto.conf"
-}
-
 // RefreshStatus refreshes instance statuses for a database type (dbType).
 func (s *Service) RefreshStatus(ctx context.Context, dbType DBType) {
 	if ctx == nil {
@@ -663,6 +734,89 @@ func sanitizeName(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// hostDBBaseDir 是数据库实例数据/配置目录的宿主根。每个实例占
+// <base>/<dbtype>-<version>/{data,config}，目录与实例一一对应（同类型+版本只允许
+// 一个实例）。变量而非常量：测试改指向临时目录，避免单元测试真实操作 /opt。
+var hostDBBaseDir = "/opt/easyserver/db"
+
+// containerUID 是官方 mysql/postgres/redis 镜像内数据进程的 uid（均为 999）。
+// 宿主目录必须 chown 给它，容器内进程才能写数据目录与 CONFIG REWRITE 写回配置。
+const containerUID = 999
+
+// instanceDirKey 是某 (类型,版本) 实例在宿主上的目录段，如 mysql-8.0。
+func instanceDirKey(dbType DBType, version string) string {
+	return sanitizeName(string(dbType)) + "-" + sanitizeVersion(version)
+}
+
+// sanitizeVersion 保留版本里的点（8.0 / 18-alpine 是合法的路径段），其余
+// 非法路径字符一律压成 '-'。
+func sanitizeVersion(version string) string {
+	version = strings.ToLower(strings.TrimSpace(version))
+	var b strings.Builder
+	for _, ch := range version {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' {
+			b.WriteRune(ch)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-.")
+}
+
+func hostDataDir(dbType DBType, version string) string {
+	return filepath.Join(hostDBBaseDir, instanceDirKey(dbType, version), "data")
+}
+
+func hostConfigDir(dbType DBType, version string) string {
+	return filepath.Join(hostDBBaseDir, instanceDirKey(dbType, version), "config")
+}
+
+// prepareHostDirs 创建实例的宿主数据/配置目录并 chown 给容器进程（uid 999）。
+// Redis 还预置空的 redis.conf —— redis-server 以配置文件路径启动时文件不存在是
+// 致命错误（不是忽略），空文件 + 命令行参数即等价于"默认配置 + --requirepass"。
+func prepareHostDirs(spec ContainerSpec) error {
+	for _, dir := range []string{spec.Volume, spec.ConfigVolume} {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create data directory %s: %w", dir, err)
+		}
+		// chown 999:999 只对 root 可行（rootful Podman 是 ADR-0006 的支持模式）。
+		// 非 root（rootless / 单元测试）跳过：容器进程映射的 uid 不由面板决定，
+		// chown 也会因 EPERM 失败。
+		if os.Geteuid() == 0 {
+			if err := os.Chown(dir, containerUID, containerUID); err != nil {
+				return fmt.Errorf("chown data directory %s: %w", dir, err)
+			}
+		}
+	}
+	if spec.ConfigVolume != "" {
+		conf := filepath.Join(spec.ConfigVolume, "redis.conf")
+		if err := os.WriteFile(conf, nil, 0644); err != nil {
+			return fmt.Errorf("create redis.conf: %w", err)
+		}
+		if os.Geteuid() == 0 {
+			if err := os.Chown(conf, containerUID, containerUID); err != nil {
+				return fmt.Errorf("chown redis.conf: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// containerDataDir 返回某实例数据目录在容器内的路径（宿主挂载的落点）。备份
+// 从宿主数据目录推导 es_backups/ 后，映射回容器路径供容器内 dump 直接写入。
+func containerDataDir(instance *DBInstance) string {
+	switch instance.DBType {
+	case DBTypePostgreSQL:
+		return pgDataDir(instance.Image)
+	case DBTypeRedis:
+		return "/data"
+	}
+	return "/var/lib/mysql"
 }
 
 // containerNameRe 是容器名的允许字符集（docker 与 podman 的规则交集）：
@@ -700,6 +854,26 @@ func generateAdminPassword() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// containerPortForType is the port the database engine listens on INSIDE the
+// container — always the engine default (MySQL 3306 / PostgreSQL 5432 / Redis
+// 6379). The user-selected port is only the host mapping (HostPort). The old
+// code mapped the user port 1:1 onto the container port (`--publish X:X`),
+// which pointed at a container port where nothing listens — the mapping was
+// useless to any external client and unusable by the direct-connection channel.
+func containerPortForType(dbType DBType) int {
+	switch dbType {
+	case DBTypePostgreSQL:
+		return 5432
+	case DBTypeRedis:
+		return 6379
+	}
+	return 3306
+}
+
+// containerSpec builds the structured create contract. volume is the host data
+// directory (DBInstance.VolumeName, /opt/easyserver/db/<type>-<version>/data);
+// Redis additionally mounts the host config directory and starts redis-server on
+// the empty redis.conf + --requirepass (see prepareHostDirs).
 func containerSpec(dbType DBType, engineName, version, image, name, volume, bind string, port int, password string) ContainerSpec {
 	dataDir, health := "/var/lib/mysql", "mysqladmin ping -h localhost -uroot -p$MYSQL_ROOT_PASSWORD"
 	env := map[string]string{"MYSQL_ROOT_PASSWORD": password}
@@ -719,14 +893,17 @@ func containerSpec(dbType DBType, engineName, version, image, name, volume, bind
 		dataDir = "/data"
 		env = map[string]string{"REDIS_PASSWORD": password}
 		health = "redis-cli -a $REDIS_PASSWORD ping"
-		configVolume, configDir = name+"-config", "/usr/local/etc/redis"
-		command = []string{"redis-server", "--requirepass", password, configDir + "/redis.conf"}
-	default: // mysql — 挂配置卷，安装时从镜像预置默认配置（见 SeedVolume 注释）
-		configVolume, configDir = name+"-config", "/etc/mysql/conf.d"
+		// 配置卷是宿主 config/ 目录（不是命名卷）：CONFIG REWRITE 直接写回宿主可见
+		// 的 redis.conf，不再有一次性 seed 容器和 root 属主写权限问题。
+		configVolume, configDir = hostConfigDir(dbType, version), "/usr/local/etc/redis"
+		// 配置文件必须是第一个位置参数：Redis 8 会把 --requirepass 之后所有
+		// token 当作其值，选项放在配置路径后面则路径被吞成第二个参数报错。
+		command = []string{"redis-server", configDir + "/redis.conf", "--requirepass", password}
+	default: // mysql — 配置由驱动持久化（SET PERSIST），不挂配置卷
 	}
 	return ContainerSpec{ContainerEngine: engineName, Name: name, Image: image, Volume: volume, DataDir: dataDir,
 		ConfigVolume: configVolume, ConfigDir: configDir,
-		BindAddress: bind, HostPort: port, ContainerPort: port, Environment: env,
+		BindAddress: bind, HostPort: port, ContainerPort: containerPortForType(dbType), Environment: env,
 		Labels: map[string]string{"com.easyserver.dbtype": string(dbType), "com.easyserver.version": version, "com.easyserver.admin-user": adminUser}, HealthCommand: health, Command: command}
 }
 
@@ -741,1093 +918,4 @@ func containerStatus(info ContainerStatus, err error) string {
 		return "unhealthy"
 	}
 	return "stopped"
-}
-
-// --- Logical database CRUD (live, server-owned) ---
-
-func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Database, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
-	}
-	return s.queryDatabases(ctx, instance)
-}
-
-// queryDatabases lists logical databases live from the database server. Databases are
-// server-owned state — the panel never persists a mirror of them.
-func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]Database, error) {
-	var out string
-	var err error
-	switch instance.DBType {
-	case DBTypeMySQL:
-		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
-			"SELECT schema_name, default_character_set_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY schema_name")
-	case DBTypePostgreSQL:
-		// 列间用 SQL 拼出 tab：不依赖 psql 的 fieldsep 配置（postgres 容器里
-		// unaligned 输出分隔符可能是 |），Go 侧统一按 \t 解析。
-		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
-			"SELECT datname || E'\\t' || pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
-	case DBTypeRedis:
-		return []Database{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
-	}
-	if err != nil {
-		// stderr (the actual database error) is carried by err, not out — stdout
-		// is empty when the query fails.
-		return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
-	}
-	var dbs []Database
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, "\t", 2)
-		name := strings.TrimSpace(fields[0])
-		if name == "" {
-			continue
-		}
-		charset := ""
-		if len(fields) > 1 {
-			charset = strings.TrimSpace(fields[1])
-		}
-		dbs = append(dbs, Database{Name: name, Charset: charset})
-	}
-	return dbs, nil
-}
-
-func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *CreateDatabaseRequest) (*Database, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
-	}
-	if instance.Status != "running" && instance.Status != "active" {
-		return nil, fmt.Errorf("database instance is not running")
-	}
-
-	if !isValidDBName(req.Name) {
-		return nil, fmt.Errorf("invalid database name")
-	}
-
-	charset := req.Charset
-	if charset == "" {
-		charset = defaultCharset
-	}
-	if !isValidCharset(charset) {
-		return nil, fmt.Errorf("invalid charset: %s", charset)
-	}
-
-	switch instance.DBType {
-	case DBTypeMySQL:
-		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET %s;",
-			strings.ReplaceAll(req.Name, "`", "``"), charset)); err != nil {
-			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		encoding := "UTF8"
-		if charset == "latin1" {
-			encoding = "LATIN1"
-		}
-		if _, err := s.runInVersion(ctx, instance, "createdb", "-E", encoding, req.Name); err != nil {
-			return nil, fmt.Errorf("create database failed: %s", SanitizeSQLError(err.Error()))
-		}
-	default:
-		return nil, fmt.Errorf("database creation not supported for %s", instance.DBType)
-	}
-
-	return &Database{Name: req.Name, Charset: charset}, nil
-}
-
-func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	if instance.Status != "running" {
-		return fmt.Errorf("database instance is not running")
-	}
-
-	switch instance.DBType {
-	case DBTypeMySQL:
-		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", fmt.Sprintf("DROP DATABASE `%s`;",
-			strings.ReplaceAll(dbName, "`", "``"))); err != nil {
-			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		if _, err := s.runInVersion(ctx, instance, "dropdb", dbName); err != nil {
-			return fmt.Errorf("drop database failed: %s", SanitizeSQLError(err.Error()))
-		}
-	default:
-		return fmt.Errorf("database deletion not supported for %s", instance.DBType)
-	}
-
-	return nil
-}
-
-// --- DB User CRUD (live, server-owned) ---
-
-func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
-	}
-	return s.queryUsers(ctx, instance)
-}
-
-// queryUsers lists database users live from the database server (the server owns them).
-func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUser, error) {
-	var out string
-	var err error
-	switch instance.DBType {
-	case DBTypeMySQL:
-		out, err = s.runInVersion(ctx, instance, "mysql", "-N", "-B", "-e",
-			"SELECT user, host FROM mysql.user WHERE user NOT IN ('mysql.session','mysql.sys','mysql.infoschema') ORDER BY user, host")
-	case DBTypePostgreSQL:
-		out, err = s.runInVersion(ctx, instance, "psql", "-t", "-A", "-c",
-			"SELECT rolname FROM pg_roles WHERE rolcanlogin ORDER BY rolname")
-	case DBTypeRedis:
-		return []DBUser{}, nil
-	default:
-		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list users failed: %s", SanitizeSQLError(err.Error()))
-	}
-	var users []DBUser
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fields := strings.SplitN(line, "\t", 2)
-		username := strings.TrimSpace(fields[0])
-		if username == "" {
-			continue
-		}
-		host := ""
-		if len(fields) > 1 {
-			host = strings.TrimSpace(fields[1])
-		}
-		users = append(users, DBUser{Username: username, Host: host})
-	}
-	return users, nil
-}
-
-// isAdminUser reports whether username is the database's built-in administrator.
-func isAdminUser(dbType DBType, username string) bool {
-	switch dbType {
-	case DBTypeMySQL:
-		return username == "root"
-	case DBTypePostgreSQL:
-		return username == "postgres"
-	}
-	return false
-}
-
-func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *CreateDBUserRequest) (*DBUser, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return nil, fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return nil, fmt.Errorf("database instance not found")
-	}
-	if instance.Status != "running" {
-		return nil, fmt.Errorf("database instance is not running")
-	}
-
-	if !isValidUsername(req.Username) {
-		return nil, fmt.Errorf("invalid username: only alphanumeric, underscore, hyphen, dot allowed (max %d chars)", maxUsernameLen)
-	}
-
-	host := req.Host
-	if host == "" {
-		host = "localhost"
-	}
-	if !isValidHost(host) {
-		return nil, fmt.Errorf("invalid host")
-	}
-
-	switch instance.DBType {
-	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s';", req.Username, host, escapeMySQLString(req.Password))
-		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr); err != nil {
-			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		if _, err := s.runInVersion(ctx, instance, "psql", "-c",
-			fmt.Sprintf("CREATE USER \"%s\" WITH PASSWORD '%s';", req.Username, escapePGString(req.Password))); err != nil {
-			return nil, fmt.Errorf("create user failed: %s", SanitizeSQLError(err.Error()))
-		}
-	default:
-		return nil, fmt.Errorf("user creation not supported for %s", instance.DBType)
-	}
-
-	return &DBUser{Username: req.Username, Host: host}, nil
-}
-
-func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, host string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-
-	if !isValidUsername(username) {
-		return fmt.Errorf("invalid username")
-	}
-	if isAdminUser(instance.DBType, username) {
-		return fmt.Errorf("cannot delete the administrator user")
-	}
-	if instance.DBType == DBTypeMySQL && !isValidHost(host) {
-		return fmt.Errorf("invalid host")
-	}
-
-	switch instance.DBType {
-	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("DROP USER '%s'@'%s';", username, host)
-		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr); err != nil {
-			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		if _, err := s.runInVersion(ctx, instance, "psql", "-c",
-			fmt.Sprintf("DROP USER \"%s\";", username)); err != nil {
-			return fmt.Errorf("drop user failed: %s", SanitizeSQLError(err.Error()))
-		}
-	default:
-		return fmt.Errorf("user deletion not supported for %s", instance.DBType)
-	}
-
-	return nil
-}
-
-func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, username, host string, req *GrantRequest) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("get instance: %w", err)
-	}
-	if instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	if instance.Status != "running" {
-		return fmt.Errorf("database instance is not running")
-	}
-
-	if !isValidDBName(req.Database) {
-		return fmt.Errorf("invalid database name")
-	}
-
-	for _, priv := range strings.Split(req.Privileges, ",") {
-		priv = strings.TrimSpace(priv)
-		if priv != "" && !isValidPrivilege(priv) {
-			return fmt.Errorf("invalid privilege: %s", priv)
-		}
-	}
-
-	switch instance.DBType {
-	case DBTypeMySQL:
-		sqlStr := fmt.Sprintf("GRANT %s ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			req.Privileges, strings.ReplaceAll(req.Database, "`", "``"), username, host)
-		if _, err := s.runInVersion(ctx, instance, "mysql", "-e", sqlStr); err != nil {
-			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
-		}
-	case DBTypePostgreSQL:
-		sqlStr := fmt.Sprintf("GRANT %s ON DATABASE \"%s\" TO \"%s\";", req.Privileges, req.Database, username)
-		if _, err := s.runInVersion(ctx, instance, "psql", "-c", sqlStr); err != nil {
-			return fmt.Errorf("grant failed: %s", SanitizeSQLError(err.Error()))
-		}
-	default:
-		return fmt.Errorf("privilege grant not supported for %s", instance.DBType)
-	}
-
-	return nil
-}
-
-// --- Backup operations ---
-
-// SetBackupDir sets the backup directory.
-func (s *Service) SetBackupDir(dir string) {
-	s.backupDir = dir
-}
-
-func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
-	if err := os.MkdirAll(s.backupDir, 0755); err != nil {
-		return nil, fmt.Errorf("create backup dir: %w", err)
-	}
-
-	timestamp := time.Now().Format("20060102150405")
-	var fileName string
-	switch dbType {
-	case DBTypeMySQL, DBTypePostgreSQL:
-		fileName = fmt.Sprintf("%s_%s.sql", dbName, timestamp)
-	case DBTypeRedis:
-		fileName = fmt.Sprintf("dump_%s.rdb", timestamp)
-	default:
-		return nil, fmt.Errorf("unsupported db type: %s", dbType)
-	}
-	filePath := filepath.Join(s.backupDir, fileName)
-
-	backup := &DBBackup{
-		DBInstanceID: instanceID,
-		DBType:       dbType,
-		DatabaseName: dbName,
-		BackupType:   "manual",
-		FilePath:     filePath,
-		Status:       "pending",
-	}
-
-	id, err := s.repo.CreateBackup(ctx, backup)
-	if err != nil {
-		return nil, err
-	}
-	backup.ID = id
-
-	backupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	infra.Go(func() {
-		defer cancel()
-		s.executeBackup(backupCtx, backup, dbType)
-	})
-
-	return backup, nil
-}
-
-func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DBType) {
-	var err error
-
-	switch dbType {
-	case DBTypeMySQL:
-		err = s.backupMySQL(ctx, backup)
-	case DBTypePostgreSQL:
-		err = s.backupPostgreSQL(ctx, backup)
-	case DBTypeRedis:
-		err = s.backupRedis(ctx, backup)
-	}
-
-	if err != nil {
-		backup.Status = "failed"
-		backup.ErrorMessage = err.Error()
-		log.Printf("backup failed for %s: %v", backup.DatabaseName, err)
-	} else {
-		backup.Status = "completed"
-		if info, err := os.Stat(backup.FilePath); err == nil {
-			backup.FileSize = info.Size()
-		}
-	}
-
-	if err := s.repo.UpdateBackupStatus(ctx, backup.ID, backup.Status, backup.FileSize, backup.ErrorMessage); err != nil {
-		log.Printf("failed to update backup record %d: %v", backup.ID, err)
-	}
-}
-
-func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
-	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
-	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	out, err := s.runInVersion(ctx, instance, "mysqldump", "--single-transaction", "--routines", "--triggers", backup.DatabaseName)
-	if err != nil {
-		return fmt.Errorf("mysqldump failed: %w", err)
-	}
-	return os.WriteFile(backup.FilePath, []byte(out), 0644)
-}
-
-func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
-	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
-	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	out, err := s.runInVersion(ctx, instance, "pg_dump", "-Fc", backup.DatabaseName)
-	if err != nil {
-		return fmt.Errorf("pg_dump failed: %w", err)
-	}
-	return os.WriteFile(backup.FilePath, []byte(out), 0644)
-}
-
-func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
-	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
-	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	_, err = s.runInVersion(ctx, instance, "redis-cli", "BGSAVE")
-	if err != nil {
-		return fmt.Errorf("redis BGSAVE failed: %w", err)
-	}
-
-	time.Sleep(2 * time.Second)
-	return s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, "/data/dump.rdb", backup.FilePath)
-}
-
-func (s *Service) ListBackups(ctx context.Context, instanceID int64, dbName string) ([]DBBackup, error) {
-	return s.repo.ListBackups(ctx, instanceID, dbName)
-}
-
-func (s *Service) GetBackup(ctx context.Context, id int64) (*DBBackup, error) {
-	return s.repo.GetBackup(ctx, id)
-}
-
-func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
-	backup, err := s.repo.GetBackup(ctx, id)
-	if err != nil {
-		return fmt.Errorf("backup not found: %w", err)
-	}
-
-	if err := os.Remove(backup.FilePath); err != nil && !os.IsNotExist(err) {
-		log.Printf("failed to delete backup file %s: %v", backup.FilePath, err)
-	}
-
-	return s.repo.DeleteBackup(ctx, id)
-}
-
-func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) error {
-	backup, err := s.repo.GetBackup(ctx, id)
-	if err != nil {
-		return fmt.Errorf("backup not found: %w", err)
-	}
-
-	if backup.Status != "completed" {
-		return fmt.Errorf("backup is not in completed status")
-	}
-
-	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
-		return fmt.Errorf("backup file not found")
-	}
-
-	switch dbType {
-	case DBTypeMySQL:
-		return s.restoreMySQL(ctx, backup)
-	case DBTypePostgreSQL:
-		return s.restorePostgreSQL(ctx, backup)
-	case DBTypeRedis:
-		return s.restoreRedis(ctx, backup)
-	default:
-		return fmt.Errorf("unsupported db type: %s", dbType)
-	}
-}
-
-func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
-	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
-	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	target := "/tmp/easyserver-restore.sql"
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
-		return fmt.Errorf("copy backup into container: %w", err)
-	}
-	if _, err := s.runInVersion(ctx, instance, "sh", "-c", "mysql "+shellQuote(backup.DatabaseName)+" < "+target); err != nil {
-		return fmt.Errorf("mysql restore failed: %w", err)
-	}
-	return nil
-}
-
-func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error {
-	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
-	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	target := "/tmp/easyserver-restore.dump"
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
-		return fmt.Errorf("copy backup into container: %w", err)
-	}
-	if _, err := s.runInVersion(ctx, instance, "pg_restore", "-d", backup.DatabaseName, "-c", target); err != nil {
-		return fmt.Errorf("pg_restore failed: %s", SanitizeSQLError(err.Error()))
-	}
-	return nil
-}
-
-func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
-	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
-	if err != nil || instance == nil {
-		return fmt.Errorf("database instance not found")
-	}
-	if err := s.runtime.Stop(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
-		return fmt.Errorf("stop Redis failed: %w", err)
-	}
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, "/data/dump.rdb"); err != nil {
-		return fmt.Errorf("copy Redis backup: %w", err)
-	}
-	if err := s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
-		return fmt.Errorf("start Redis failed: %w", err)
-	}
-	return nil
-}
-
-func (s *Service) CleanOldBackups(ctx context.Context, instanceID int64, dbName string, maxBackups int) error {
-	if maxBackups <= 0 {
-		maxBackups = MaxBackupsPerDB
-	}
-
-	backups, err := s.repo.ListBackups(ctx, instanceID, dbName)
-	if err != nil {
-		return err
-	}
-
-	if len(backups) > maxBackups {
-		for _, b := range backups[maxBackups:] {
-			os.Remove(b.FilePath)
-			s.repo.DeleteBackup(ctx, b.ID)
-		}
-	}
-
-	return nil
-}
-
-// --- SQL query operations ---
-
-func (s *Service) runInVersion(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
-	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
-		return "", fmt.Errorf("database instance is not container-managed")
-	}
-	args = s.withAdminCredentials(instance, args)
-	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...)
-}
-
-func (s *Service) withAdminCredentials(instance *DBInstance, args []string) []string {
-	if len(args) == 0 || instance.AdminPassword == "" {
-		return args
-	}
-	password := instance.AdminPassword
-	switch instance.DBType {
-	case DBTypeMySQL:
-		// Password via MYSQL_PWD env instead of `-p` on the command line: mysql
-		// prints "Using a password on the command line interface can be insecure."
-		// to stderr on every `-p` invocation, and stderr is merged into the parsed
-		// output (RunCombined), so the warning would surface as a bogus first row
-		// in tabular listings. `exec -e` injects the env before the command.
-		return append([]string{"-e", "MYSQL_PWD=" + password, args[0], "-uroot"}, args[1:]...)
-	case DBTypePostgreSQL:
-		return append([]string{args[0], "-U", "postgres"}, args[1:]...)
-	case DBTypeRedis:
-		if args[0] == "redis-cli" {
-			return append([]string{args[0], "-a", password}, args[1:]...)
-		}
-	}
-	return args
-}
-
-// getInstanceForSQL resolves the instance for a database-level SQL operation.
-// Database names travel as URL path parameters now — no persisted db lookup.
-func (s *Service) getInstanceForSQL(ctx context.Context, instanceID int64, dbName string) (*DBInstance, error) {
-	if !isValidDBName(dbName) {
-		return nil, fmt.Errorf("无效的数据库名")
-	}
-	instance, err := s.repo.GetInstance(ctx, instanceID)
-	if err != nil || instance == nil {
-		return nil, fmt.Errorf("数据库实例不存在")
-	}
-	return instance, nil
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
-func (s *Service) execRaw(ctx context.Context, version *DBInstance, dbType DBType, dbName string, sql string) (string, error) {
-	switch dbType {
-	case DBTypeMySQL:
-		return s.runInVersion(ctx, version, "mysql", dbName, "-e", sql)
-	case DBTypePostgreSQL:
-		return s.runInVersion(ctx, version, "psql", "-d", dbName, "-c", sql)
-	}
-	return "", fmt.Errorf("不支持的数据库类型")
-}
-
-var pathPattern = regexp.MustCompile(`(?:/[\w.-]+){2,}`)
-
-// SanitizeSQLError strips sensitive information (file paths) from SQL error output.
-func SanitizeSQLError(raw string) string {
-	lines := strings.Split(raw, "\n")
-	var sanitized []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		line = pathPattern.ReplaceAllString(line, "[...]")
-		sanitized = append(sanitized, line)
-	}
-	return strings.Join(sanitized, "\n")
-}
-
-var tableNameRegexp = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
-
-// ValidateTableName checks table/column name validity.
-func ValidateTableName(name string) bool {
-	return name != "" && len(name) <= 64 && tableNameRegexp.MatchString(name)
-}
-
-func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName string) ([]map[string]interface{}, error) {
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-
-	var tables []map[string]interface{}
-	switch instance.DBType {
-	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, "SHOW TABLES;")
-		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
-		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			line = strings.TrimSpace(line)
-			if i == 0 || line == "" {
-				continue // first line is the "Tables_in_<db>" header
-			}
-			tables = append(tables, map[string]interface{}{"name": line})
-		}
-	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
-			"SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;")
-		if err != nil {
-			return nil, fmt.Errorf("获取表列表失败: %s", SanitizeSQLError(err.Error()))
-		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			line = strings.TrimSpace(line)
-			if i < 2 || line == "" || line == "(0 rows)" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "(") {
-				continue
-			}
-			tables = append(tables, map[string]interface{}{"name": line})
-		}
-	}
-	return tables, nil
-}
-
-func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, tableName string) (*DescribeResult, error) {
-	if !ValidateTableName(tableName) {
-		return nil, fmt.Errorf("无效的表名")
-	}
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-
-	builder := NewSQLBuilder(instance.DBType)
-	describeSQL := builder.BuildDescribeTable(tableName)
-
-	out, err := s.execRaw(ctx, instance, instance.DBType, dbName, describeSQL)
-	if err != nil {
-		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(err.Error()))
-	}
-
-	tableInfo := ParseTableInfo(instance.DBType, tableName, out)
-
-	var columns []map[string]interface{}
-	for _, col := range tableInfo.Columns {
-		columns = append(columns, map[string]interface{}{
-			"name":           col.Name,
-			"type":           col.Type,
-			"is_primary_key": col.IsPrimaryKey,
-			"is_auto_incr":   col.IsAutoIncr,
-			"has_default":    col.HasDefault,
-			"default":        col.DefaultValue,
-			"is_nullable":    col.IsNullable,
-		})
-	}
-
-	return &DescribeResult{
-		TableName:  tableName,
-		PrimaryKey: tableInfo.PrimaryKey,
-		Columns:    columns,
-	}, nil
-}
-
-func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tableName string, page, pageSize int) (*PagedQueryResult, error) {
-	if !ValidateTableName(tableName) {
-		return nil, fmt.Errorf("无效的表名")
-	}
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 50
-	}
-	if pageSize > 200 {
-		pageSize = 200
-	}
-	offset := (page - 1) * pageSize
-
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-	dbType := instance.DBType
-
-	var total int
-	switch dbType {
-	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName, fmt.Sprintf("SELECT COUNT(*) FROM `%s`;", tableName))
-		if err == nil {
-			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
-		}
-	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName, fmt.Sprintf("SELECT COUNT(*) FROM \"%s\";", tableName))
-		if err == nil {
-			fmt.Sscanf(strings.TrimSpace(out), "%d", &total)
-		}
-	}
-
-	var headers []string
-	var rows [][]interface{}
-	switch dbType {
-	case DBTypeMySQL:
-		out, err := s.execRaw(ctx, instance, DBTypeMySQL, dbName,
-			fmt.Sprintf("SELECT * FROM `%s` LIMIT %d OFFSET %d;", tableName, pageSize, offset))
-		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
-		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			fields := strings.Split(line, "\t")
-			if i == 0 {
-				headers = fields
-			} else {
-				var row []interface{}
-				for _, f := range fields {
-					row = append(row, f)
-				}
-				rows = append(rows, row)
-			}
-		}
-	case DBTypePostgreSQL:
-		out, err := s.execRaw(ctx, instance, DBTypePostgreSQL, dbName,
-			fmt.Sprintf("SELECT * FROM \"%s\" LIMIT %d OFFSET %d;", tableName, pageSize, offset))
-		if err != nil {
-			return nil, fmt.Errorf("查询失败: %s", SanitizeSQLError(err.Error()))
-		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		for i, line := range lines {
-			fields := strings.Split(line, "|")
-			for j := range fields {
-				fields[j] = strings.TrimSpace(fields[j])
-			}
-			if i == 0 {
-				headers = fields
-			} else if i >= 2 && !strings.HasPrefix(line, "(") && line != "" {
-				var row []interface{}
-				for _, f := range fields {
-					row = append(row, f)
-				}
-				rows = append(rows, row)
-			}
-		}
-	}
-
-	return &PagedQueryResult{
-		Headers:  headers,
-		Rows:     rows,
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
-	}, nil
-}
-
-func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql string) (*DMLResult, error) {
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-	dbType := instance.DBType
-
-	validator := NewSQLValidator(dbType)
-	if r := validator.ValidateSQL(sql); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
-
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
-		log.Printf("ExecuteSQL %s error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(execErr.Error()))
-		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
-	}
-	return &DMLResult{Success: true, Output: out}, nil
-}
-
-func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {
-	if !ValidateTableName(table) {
-		return nil, fmt.Errorf("无效的表名")
-	}
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-	dbType := instance.DBType
-
-	builder := NewSQLBuilder(dbType)
-	validator := NewSQLValidator(dbType)
-
-	if r := validator.ValidateInsert(table, data, nil); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
-
-	sql := builder.BuildInsert(table, data, nil)
-	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
-	}
-
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
-		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
-	}
-	return &DMLResult{Success: true, Output: out}, nil
-}
-
-func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
-	if !ValidateTableName(table) {
-		return nil, fmt.Errorf("无效的表名")
-	}
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-	dbType := instance.DBType
-
-	builder := NewSQLBuilder(dbType)
-	validator := NewSQLValidator(dbType)
-
-	if r := validator.ValidateUpdate(table, data, pk, pkVal); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
-
-	sql := builder.BuildUpdate(table, data, pk, pkVal)
-	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
-	}
-
-	out, execErr := s.execRaw(ctx, instance, dbType, dbName, sql)
-	if execErr != nil {
-		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
-	}
-	return &DMLResult{Success: true, Output: out}, nil
-}
-
-func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal interface{}, dryRun bool) (*DMLResult, error) {
-	if !ValidateTableName(table) {
-		return nil, fmt.Errorf("无效的表名")
-	}
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return nil, err
-	}
-	dbType := instance.DBType
-
-	builder := NewSQLBuilder(dbType)
-	validator := NewSQLValidator(dbType)
-
-	if r := validator.ValidateDelete(table, pk, pkVal); !r.Valid {
-		return &DMLResult{Success: false, Error: r.Message}, nil
-	}
-
-	sql := builder.BuildDelete(table, pk, pkVal)
-	if dryRun {
-		return &DMLResult{Success: true, DryRun: true, SQL: sql}, nil
-	}
-
-	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
-		return &DMLResult{Success: false, Error: SanitizeSQLError(execErr.Error())}, nil
-	}
-	return &DMLResult{Success: true}, nil
-}
-
-func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tableName string, columns []TableColumn) error {
-	if !ValidateTableName(tableName) {
-		return fmt.Errorf("无效的表名")
-	}
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return err
-	}
-	dbType := instance.DBType
-
-	allowedTypes := map[string]bool{
-		"INT": true, "INTEGER": true, "TINYINT": true, "SMALLINT": true, "MEDIUMINT": true, "BIGINT": true,
-		"FLOAT": true, "DOUBLE": true, "DECIMAL": true, "NUMERIC": true, "REAL": true,
-		"VARCHAR": true, "CHAR": true, "TEXT": true, "TINYTEXT": true, "MEDIUMTEXT": true, "LONGTEXT": true,
-		"BLOB": true, "TINYBLOB": true, "MEDIUMBLOB": true, "LONGBLOB": true, "BINARY": true, "VARBINARY": true,
-		"DATE": true, "TIME": true, "DATETIME": true, "TIMESTAMP": true, "YEAR": true,
-		"BOOLEAN": true, "BOOL": true, "BIT": true,
-		"JSON": true, "ENUM": true, "SET": true,
-		"SERIAL": true, "BIGSERIAL": true, "SMALLSERIAL": true,
-		"UUID": true, "JSONB": true,
-	}
-	for _, col := range columns {
-		baseType := strings.ToUpper(strings.Split(col.Type, "(")[0])
-		baseType = strings.TrimSpace(baseType)
-		if !allowedTypes[baseType] {
-			return fmt.Errorf("不支持的列类型: %s", col.Type)
-		}
-		if !ValidateTableName(col.Name) {
-			return fmt.Errorf("无效的列名: %s", col.Name)
-		}
-	}
-
-	var sql string
-	switch dbType {
-	case DBTypeMySQL:
-		var parts []string
-		for _, col := range columns {
-			p := []string{fmt.Sprintf("`%s`", col.Name), col.Type}
-			if col.IsPrimary {
-				p = append(p, "PRIMARY KEY")
-			}
-			if col.AutoIncr {
-				p = append(p, "AUTO_INCREMENT")
-			}
-			if !col.Nullable {
-				p = append(p, "NOT NULL")
-			}
-			parts = append(parts, strings.Join(p, " "))
-		}
-		sql = fmt.Sprintf("CREATE TABLE `%s` (%s) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;", tableName, strings.Join(parts, ", "))
-	case DBTypePostgreSQL:
-		var parts []string
-		for _, col := range columns {
-			p := []string{fmt.Sprintf("\"%s\"", col.Name), col.Type}
-			if col.IsPrimary {
-				p = append(p, "PRIMARY KEY")
-			}
-			if col.AutoIncr {
-				p = []string{fmt.Sprintf("\"%s\"", col.Name), "SERIAL", "PRIMARY KEY"}
-			}
-			if !col.Nullable && !col.IsPrimary {
-				p = append(p, "NOT NULL")
-			}
-			parts = append(parts, strings.Join(p, " "))
-		}
-		sql = fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", "))
-	default:
-		return fmt.Errorf("不支持的数据库类型")
-	}
-
-	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
-		return fmt.Errorf("创建表失败: %s", SanitizeSQLError(execErr.Error()))
-	}
-	return nil
-}
-
-func (s *Service) DropTable(ctx context.Context, instanceID int64, dbName, tableName string) error {
-	if !ValidateTableName(tableName) {
-		return fmt.Errorf("无效的表名")
-	}
-	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
-	if err != nil {
-		return err
-	}
-	dbType := instance.DBType
-
-	var sql string
-	switch dbType {
-	case DBTypeMySQL:
-		sql = fmt.Sprintf("DROP TABLE `%s`;", tableName)
-	case DBTypePostgreSQL:
-		sql = fmt.Sprintf("DROP TABLE \"%s\";", tableName)
-	default:
-		return fmt.Errorf("不支持的数据库类型")
-	}
-
-	if _, execErr := s.execRaw(ctx, instance, dbType, dbName, sql); execErr != nil {
-		return fmt.Errorf("删除表失败: %s", SanitizeSQLError(execErr.Error()))
-	}
-	return nil
-}
-
-// --- Validation helpers ---
-
-func isValidDBName(name string) bool {
-	if len(name) == 0 || len(name) > maxDBNameLen {
-		return false
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
-			return false
-		}
-	}
-	return true
-}
-
-func isValidUsername(name string) bool {
-	if len(name) == 0 || len(name) > maxUsernameLen {
-		return false
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
-			return false
-		}
-	}
-	return true
-}
-
-func isValidHost(host string) bool {
-	if len(host) == 0 || len(host) > maxHostLen {
-		return false
-	}
-	if host == "%" || host == "localhost" {
-		return true
-	}
-	for _, c := range host {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == ':') {
-			return false
-		}
-	}
-	return true
-}
-
-func isValidCharset(charset string) bool {
-	return validCharsets[charset]
-}
-
-func isValidPrivilege(priv string) bool {
-	return validPrivileges[priv]
-}
-
-func escapeMySQLString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `'`, `\'`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	s = strings.ReplaceAll(s, "\x00", `\0`)
-	s = strings.ReplaceAll(s, "\x1a", `\Z`)
-	return s
-}
-
-func escapePGString(s string) string {
-	return strings.ReplaceAll(s, "'", "''")
 }

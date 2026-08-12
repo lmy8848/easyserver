@@ -11,14 +11,15 @@ const (
 
 // DBInstance is a container-backed Database Instance — the top-level resource of
 // the database module. The container is addressed by ContainerName only; each
-// instance owns one managed container, one named data volume, an instance-level
-// config dir, a fixed image and a fixed runtime.
+// instance owns one managed container, a host data directory (VolumeName, the
+// absolute /opt/easyserver/db/<dbtype>-<version>/data path mounted into the
+// container), a config dir for Redis, a fixed image and a fixed runtime.
 type DBInstance struct {
 	ID              int64  `json:"id"`
 	DBType          DBType `json:"db_type"` // mysql, postgresql, redis
 	Version         string `json:"version"` // 5.7, 8.0, 13, 15, etc.
-	Port            int    `json:"port"`
-	Status          string `json:"status"` // running, stopped, unhealthy
+	Port            int    `json:"port"`    // host mapping port, chosen by the user
+	Status          string `json:"status"`  // running, stopped, unhealthy
 	CreatedAt       string `json:"created_at"`
 	ContainerEngine string `json:"container_engine"`
 	Image           string `json:"image"`
@@ -34,6 +35,7 @@ type DBInstance struct {
 // front-end, not the backend. ContainerName is optional; empty falls back to the
 // deterministic default "easyserver-db-<type>-<version>".
 type CreateDBInstanceRequest struct {
+	DBType          DBType `json:"dbtype" binding:"required"`
 	Version         string `json:"version" binding:"required"`
 	Image           string `json:"image" binding:"required"`
 	Port            int    `json:"port" binding:"required"`
@@ -91,7 +93,7 @@ type DBBackup struct {
 	BackupType   string `json:"backup_type"` // manual, scheduled
 	FilePath     string `json:"file_path"`
 	FileSize     int64  `json:"file_size"`
-	Status       string `json:"status"` // pending, completed, failed
+	Status       string `json:"status"` // running, success, failed
 	ErrorMessage string `json:"error_message"`
 	CreatedAt    string `json:"created_at"`
 }
@@ -116,6 +118,11 @@ type GrantRequest struct {
 	Privileges string `json:"privileges" binding:"required"`
 }
 
+// ResetPasswordRequest is the request for resetting a DB user's password.
+type ResetPasswordRequest struct {
+	Password string `json:"password" binding:"required,min=6"`
+}
+
 // ColumnInfo represents a column's metadata.
 type ColumnInfo struct {
 	Name         string
@@ -136,36 +143,47 @@ type TableInfo struct {
 
 // DMLResult is the response for ExecuteSQL / Insert / Update / Delete.
 type DMLResult struct {
-	Success bool   `json:"success"`
-	Output  string `json:"output,omitempty"`
-	Error   string `json:"error,omitempty"`
-	DryRun  bool   `json:"dry_run,omitempty"`
-	SQL     string `json:"sql,omitempty"`
+	Success bool `json:"success"`
+	// Output carries human-readable text for write statements (Insert/Update/
+	// Delete, Exec-path ExecuteSQL). Query-path ExecuteSQL instead fills
+	// Headers/ColumnTypes/Rows with the structured result.
+	Output      string          `json:"output,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	DryRun      bool            `json:"dry_run,omitempty"`
+	SQL         string          `json:"sql,omitempty"`
+	Headers     []string        `json:"headers,omitempty"`
+	ColumnTypes []string        `json:"column_types,omitempty"`
+	Rows        [][]interface{} `json:"rows,omitempty"`
 }
 
 // PagedQueryResult is the response for QueryTable.
 type PagedQueryResult struct {
-	Headers  []string        `json:"headers"`
-	Rows     [][]interface{} `json:"rows"`
-	Total    int             `json:"total"`
-	Page     int             `json:"page"`
-	PageSize int             `json:"page_size"`
+	Headers     []string        `json:"headers"`
+	ColumnTypes []string        `json:"column_types"`
+	Rows        [][]interface{} `json:"rows"`
+	Total       int             `json:"total"`
+	Page        int             `json:"page"`
+	PageSize    int             `json:"page_size"`
 }
 
 // DescribeResult is the response for DescribeTable.
 type DescribeResult struct {
 	TableName  string                   `json:"table_name"`
 	PrimaryKey string                   `json:"primary_key"`
+	Collation  string                   `json:"collation,omitempty"` // MySQL 表排序规则；PG 无表级字符集
 	Columns    []map[string]interface{} `json:"columns"`
 }
 
 // TableColumn describes a column for CreateTable.
 type TableColumn struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Nullable  bool   `json:"nullable"`
-	IsPrimary bool   `json:"is_primary"`
-	AutoIncr  bool   `json:"auto_incr"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Length       string `json:"length,omitempty"`
+	Nullable     bool   `json:"nullable"`
+	IsPrimary    bool   `json:"is_primary"`
+	AutoIncr     bool   `json:"auto_incr"`
+	Unique       bool   `json:"unique"`
+	DefaultValue string `json:"default_value"`
 }
 
 // ValidationResult represents a validation result.
@@ -187,29 +205,67 @@ type DBConfig struct {
 	Sections []ConfigSection `json:"sections"`
 }
 
-// ParamMeta defines UI metadata for common configuration parameters.
+// ParamMeta is the UI metadata for one config param. Type reflects the engine's
+// actual variable type: "number" params are numeric variables whose SET value must
+// be a bare literal (MySQL 1232 otherwise), "string" params are quoted. For byte-size
+// number params (MySQL 内存参数 / Redis maxmemory), Unit is a canonical token (KB/MB/GB)
+// the front-end uses to render a unit dropdown and convert to bytes on save. Key is
+// the actual engine parameter name (zero conversion: the same string goes into SHOW
+// VARIABLES filter / SET PERSIST / ALTER SYSTEM / CONFIG SET).
 type ParamMeta struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
-	Type        string   `json:"type"`              // text, number, select, boolean
-	Unit        string   `json:"unit"`              // MB, GB, etc.
-	Options     []string `json:"options,omitempty"` // for select type
-	Default     string   `json:"default"`
+	Type        string   `json:"type"`              // "number" | "string"
+	Unit        string   `json:"unit"`              // byte-size token for size params, display label otherwise
+	Options     []string `json:"options,omitempty"` // select options (presence switches the editor to a Select)
 }
 
-// ConfigSectionView is one section of the structured config as served to the
-// front-end: the current param values (override or compiled default) plus the
-// editing metadata for every param. Meta is embedded per-section so the UI needs
-// no separate /common-params endpoint.
-type ConfigSectionView struct {
-	Name   string            `json:"name"`
+// InstanceConfigView is the structured config of one instance (GET /config):
+// Params is the engine's current values for the panel-managed parameters
+// (read back from the driver channel), Meta the editor metadata. There is no
+// multi-section shape — the driver channel addresses a single config namespace
+// per engine.
+type InstanceConfigView struct {
 	Params map[string]string `json:"params"`
 	Meta   []ParamMeta       `json:"meta"`
 }
 
-// InstanceConfigView is the structured config of one instance (GET /config).
-type InstanceConfigView struct {
-	FilePath string              `json:"file_path"`
-	Sections []ConfigSectionView `json:"sections"`
+// RestoreStatus is the in-memory state of one restore task (SSE via GET /backups/:bid/restore-status).
+// Restore is a pure in-memory operation — it never touches the backup row's status.
+type RestoreStatus struct {
+	Status    string `json:"status"` // running, success, failed
+	Error     string `json:"error,omitempty"`
+	StartedAt string `json:"started_at"`
+}
+
+// RedisKey is one key in a logical database, with the display metadata the
+// front-end key browser shows per row (type / TTL / size).
+type RedisKey struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	TTL  int64  `json:"ttl"`  // seconds; -1 = no expiry, -2 = key gone
+	Size int64  `json:"size"` // bytes (MEMORY USAGE)
+}
+
+// RedisValue is a key's decoded value, shaped by its type. Value is a string
+// for string keys, map[string]string for hash, []string for list/set, and
+// []RedisZMember for sorted sets.
+type RedisValue struct {
+	Type  string      `json:"type"` // string | hash | list | set | zset
+	Value interface{} `json:"value"`
+}
+
+// RedisZMember is one sorted-set entry (score kept separate from member so the
+// front-end can render both).
+type RedisZMember struct {
+	Member string  `json:"member"`
+	Score  float64 `json:"score"`
+}
+
+// RedisHashPair is one field-value pair — the payload shape for creating a hash
+// key (HSET), mirrored by the add-key modal's hash field editor.
+type RedisHashPair struct {
+	Field string `json:"field"`
+	Value string `json:"value"`
 }

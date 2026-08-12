@@ -22,17 +22,18 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	dbHandler := NewDatabaseHandler(svc)
 	userHandler := NewUserHandler(svc)
 	backupHandler := NewBackupHandler(svc)
+	redisHandler := NewRedisHandler(svc)
 
-	// Instance lifecycle, scoped by database type.
-	protected.GET("/db/:dbtype/instances", instanceHandler.ListInstances)
-	protected.POST("/db/:dbtype/instances", instanceHandler.CreateInstance)
-	protected.GET("/db/:dbtype/docker-tags", instanceHandler.ListDockerTags)
+	// Instance lifecycle, scoped by database type (?dbtype= query; POST reads it
+	// from the body).
+	protected.GET("/db/instances", instanceHandler.ListInstances)
+	protected.POST("/db/instances", instanceHandler.CreateInstance)
+	protected.GET("/db/docker-tags", instanceHandler.ListDockerTags)
 	// Installs run without a database row until they finish; the install id is
 	// the container id. The log endpoint streams one install's log via SSE.
 	protected.GET("/db/installs/:iid/log", instanceHandler.InstallLogStream)
 	protected.POST("/db/installs/:iid/cancel", instanceHandler.CancelInstall)
 	protected.DELETE("/db/instances/:iid", instanceHandler.UninstallInstance)
-	protected.DELETE("/db/instances/:iid/data", instanceHandler.DestroyInstance)
 	protected.POST("/db/instances/:iid/reset-password", instanceHandler.ResetAdminPassword)
 	protected.POST("/db/instances/:iid/start", instanceHandler.StartInstance)
 	protected.POST("/db/instances/:iid/stop", instanceHandler.StopInstance)
@@ -52,6 +53,7 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.POST("/db/instances/:iid/users", userHandler.CreateDBUser)
 	protected.DELETE("/db/instances/:iid/users/:username", userHandler.DeleteDBUser)
 	protected.POST("/db/instances/:iid/users/:username/grant", userHandler.GrantPrivileges)
+	protected.POST("/db/instances/:iid/users/:username/password", userHandler.ResetPassword)
 
 	// Database introspection (instance-scoped, addressed by database name)
 	protected.GET("/db/instances/:iid/databases/:dbname/tables", dbHandler.ListTables)
@@ -71,7 +73,19 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/instances/:iid/databases/:dbname/backups", backupHandler.ListBackups)
 	protected.GET("/db/backups/:bid/download", backupHandler.DownloadBackup)
 	protected.POST("/db/backups/:bid/restore", backupHandler.RestoreBackup)
+	protected.GET("/db/backups/:bid/restore-status", backupHandler.RestoreStatus)
+	protected.GET("/db/backups/:bid/status", backupHandler.BackupStatusStream)
 	protected.DELETE("/db/backups/:bid", backupHandler.DeleteBackup)
+
+	// Redis key browser (instance-scoped, addressed by logical DB index)
+	protected.GET("/db/redis/instances/:iid/databases-count", redisHandler.DBCount)
+	protected.GET("/db/redis/instances/:iid/keys", redisHandler.ScanKeys)
+	protected.GET("/db/redis/instances/:iid/value", redisHandler.GetValue)
+	protected.POST("/db/redis/instances/:iid/value", redisHandler.SetValue)
+	protected.POST("/db/redis/instances/:iid/del", redisHandler.DelKeys)
+	protected.POST("/db/redis/instances/:iid/expire", redisHandler.Expire)
+	protected.POST("/db/redis/instances/:iid/persist", redisHandler.Persist)
+	protected.POST("/db/redis/instances/:iid/flushdb", redisHandler.FlushDB)
 }
 
 // InstanceHandler handles instance lifecycle endpoints, scoped by database type.
@@ -84,7 +98,7 @@ func NewInstanceHandler(svc *database.Service) *InstanceHandler {
 }
 
 func parseDBType(c *gin.Context) (database.DBType, bool) {
-	dbType := database.DBType(c.Param("dbtype"))
+	dbType := database.DBType(c.Query("dbtype"))
 	if !database.IsValidDBType(dbType) {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库类型"))
 		return "", false
@@ -213,17 +227,17 @@ func (h *InstanceHandler) CancelInstall(c *gin.Context) {
 }
 
 func (h *InstanceHandler) CreateInstance(c *gin.Context) {
-	dbType, ok := parseDBType(c)
-	if !ok {
-		return
-	}
 	var req database.CreateDBInstanceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
+	if !database.IsValidDBType(req.DBType) {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的数据库类型"))
+		return
+	}
 	middleware.AuditSummary(c, "创建数据库实例 "+req.Version)
-	instance, err := h.svc.CreateInstance(c.Request.Context(), dbType, &req)
+	instance, err := h.svc.CreateInstance(c.Request.Context(), req.DBType, &req)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -245,19 +259,6 @@ func (h *InstanceHandler) UninstallInstance(c *gin.Context) {
 		return
 	}
 	httpx.Success(c, gin.H{"message": "已卸载"})
-}
-
-func (h *InstanceHandler) DestroyInstance(c *gin.Context) {
-	iid, ok := parseIID(c)
-	if !ok {
-		return
-	}
-	middleware.AuditSummary(c, "销毁数据库实例数据 #"+strconv.FormatInt(iid, 10))
-	if err := h.svc.DestroyInstance(c.Request.Context(), iid); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
-	}
-	httpx.Success(c, gin.H{"message": "实例与数据卷已销毁"})
 }
 
 func (h *InstanceHandler) ResetAdminPassword(c *gin.Context) {
@@ -345,13 +346,13 @@ func (h *InstanceHandler) SaveInstanceConfig(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Sections []database.ConfigSectionView `json:"sections"`
+		Params map[string]string `json:"params"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperror.ErrBadRequest.Wrap(err))
 		return
 	}
-	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Sections); err != nil {
+	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Params); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -458,10 +459,6 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("表名不能为空"))
 		return
 	}
-	if !database.ValidateTableName(tableName) {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的表名"))
-		return
-	}
 
 	result, err := h.svc.DescribeTable(c.Request.Context(), iid, dbName, tableName)
 	if err != nil {
@@ -485,10 +482,6 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) {
 	tableName := c.Query("table")
 	if tableName == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("表名不能为空"))
-		return
-	}
-	if !database.ValidateTableName(tableName) {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的表名"))
 		return
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -535,12 +528,7 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		return
 	}
 
-	if !result.Success {
-		httpx.Success(c, gin.H{"success": false, "error": result.Error})
-		return
-	}
-
-	httpx.Success(c, gin.H{"success": true, "output": result.Output})
+	httpx.Success(c, result)
 }
 
 func (h *DatabaseHandler) InsertRecord(c *gin.Context) {
@@ -650,13 +638,18 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	}
 
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		Columns []struct {
-			Name      string `json:"name"`
-			Type      string `json:"type"`
-			Nullable  bool   `json:"nullable"`
-			IsPrimary bool   `json:"is_primary"`
-			AutoIncr  bool   `json:"auto_incr"`
+		Name      string `json:"name" binding:"required"`
+		Charset   string `json:"charset"`
+		Collation string `json:"collation"`
+		Columns   []struct {
+			Name         string `json:"name"`
+			Type         string `json:"type"`
+			Length       string `json:"length"`
+			Nullable     bool   `json:"nullable"`
+			IsPrimary    bool   `json:"is_primary"`
+			AutoIncr     bool   `json:"auto_incr"`
+			Unique       bool   `json:"unique"`
+			DefaultValue string `json:"default_value"`
 		} `json:"columns" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -668,15 +661,18 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) {
 	var columns []database.TableColumn
 	for _, col := range req.Columns {
 		columns = append(columns, database.TableColumn{
-			Name:      col.Name,
-			Type:      col.Type,
-			Nullable:  col.Nullable,
-			IsPrimary: col.IsPrimary,
-			AutoIncr:  col.AutoIncr,
+			Name:         col.Name,
+			Type:         col.Type,
+			Length:       col.Length,
+			Nullable:     col.Nullable,
+			IsPrimary:    col.IsPrimary,
+			AutoIncr:     col.AutoIncr,
+			Unique:       col.Unique,
+			DefaultValue: col.DefaultValue,
 		})
 	}
 
-	if err := h.svc.CreateTable(c.Request.Context(), iid, dbName, req.Name, columns); err != nil {
+	if err := h.svc.CreateTable(c.Request.Context(), iid, dbName, req.Name, columns, req.Charset, req.Collation); err != nil {
 		if strings.HasPrefix(err.Error(), "无效") || strings.HasPrefix(err.Error(), "不支持") {
 			c.Error(apperror.ErrBadRequest.Wrap(err))
 		} else {
@@ -802,6 +798,30 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "权限已授予"})
 }
 
+func (h *UserHandler) ResetPassword(c *gin.Context) {
+	iid, ok := parseIID(c)
+	if !ok {
+		return
+	}
+	username := c.Param("username")
+	if username == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的用户名"))
+		return
+	}
+	host := c.DefaultQuery("host", "%")
+	var req database.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.Wrap(err))
+		return
+	}
+	middleware.AuditSummary(c, "重置数据库用户密码 "+username)
+	if err := h.svc.ResetPassword(c.Request.Context(), iid, username, host, req.Password); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "密码重置成功"})
+}
+
 // BackupHandler handles database backup endpoints.
 type BackupHandler struct {
 	svc *database.Service
@@ -875,7 +895,7 @@ func (h *BackupHandler) DownloadBackup(c *gin.Context) {
 		return
 	}
 
-	if backup.Status != "completed" {
+	if backup.Status != "success" {
 		c.Error(apperror.ErrBadRequest.WithMessage("备份未完成"))
 		return
 	}
@@ -916,7 +936,104 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) {
 		return
 	}
 
-	httpx.Success(c, gin.H{"message": "数据库恢复成功"})
+	httpx.Success(c, gin.H{"message": "恢复已开始，请轮询恢复状态"})
+}
+
+func (h *BackupHandler) RestoreStatus(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的备份ID"))
+		return
+	}
+	// SSE：恢复是内存异步任务，终态到达即推送并关闭连接，前端无需轮询。
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	send := func(payload map[string]any) {
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+		c.Writer.Flush()
+	}
+
+	// 恢复任务不存在（服务重启内存态丢失，或从未发起）→ 立即终结，语义与
+	// 原 404 一致，但走 SSE done 帧（EventSource 拿不到状态码）。
+	status, ok := h.svc.GetRestoreStatus(c.Request.Context(), bid)
+	if !ok {
+		send(map[string]any{"type": "done", "error": "恢复状态已丢失（服务可能已重启），请手动确认数据"})
+		return
+	}
+
+	// 任务运行中保持连接；10s 心跳防反向代理超时断连，500ms 轮询检查终态。
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-heartbeat.C:
+			send(map[string]any{"type": "running"})
+			continue
+		case <-time.After(500 * time.Millisecond):
+		}
+		status, ok = h.svc.GetRestoreStatus(c.Request.Context(), bid)
+		if !ok {
+			send(map[string]any{"type": "done", "error": "恢复状态已丢失（服务可能已重启），请手动确认数据"})
+			return
+		}
+		if status.Status != "running" {
+			send(map[string]any{"type": "done", "status": status.Status, "error": status.Error})
+			return
+		}
+	}
+}
+
+// BackupStatusStream 订阅单个备份的状态流（SSE）：等备份内存任务完成信号，
+// 终态到达即推送 done 帧并关闭。不做轮询 —— 任务 Done() 即完成。
+func (h *BackupHandler) BackupStatusStream(c *gin.Context) {
+	bid, err := strconv.ParseInt(c.Param("bid"), 10, 64)
+	if err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的备份ID"))
+		return
+	}
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+
+	send := func(payload map[string]any) {
+		b, _ := json.Marshal(payload)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+		c.Writer.Flush()
+	}
+
+	done, err := h.svc.WaitBackup(bid)
+	if err != nil {
+		send(map[string]any{"type": "done", "error": "备份状态已丢失"})
+		return
+	}
+	// 任务运行中保持连接；10s 心跳防反向代理超时断连。终态由 Done() 通知。
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-heartbeat.C:
+			send(map[string]any{"type": "running"})
+		case <-done:
+			backup, gerr := h.svc.GetBackup(c.Request.Context(), bid)
+			if gerr != nil {
+				send(map[string]any{"type": "done", "error": "备份状态已丢失"})
+				return
+			}
+			send(map[string]any{"type": "done", "status": backup.Status, "error": backup.ErrorMessage})
+			return
+		}
+	}
 }
 
 func (h *BackupHandler) DeleteBackup(c *gin.Context) {

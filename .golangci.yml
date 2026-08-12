@@ -1,0 +1,22 @@
+# golangci-lint v2 配置。用 `golangci-lint run` 本地执行；CI 走
+# golangci-lint-action（.github/workflows/ci.yml），本文件同样生效。
+version: "2"
+
+# 格式化器：goimports 由 golangci-lint 统一检查，CI 不再单独跑 goimports step。
+# 本地 pre-commit 钩子的 `goimports -w` 自动修复逻辑保留，二者不冲突。
+formatters:
+  enable:
+    - goimports
+
+linters:
+  default: standard # errcheck / govet / ineffassign / staticcheck / unused
+  exclusions:
+    presets:
+      - std-error-handling # 排除错误处理常见模式（如 fmt.Println 的返回值）
+      - common-false-positives
+
+issues:
+  # 不截断报告，存量问题完整列出，便于分批修复（默认 max-issues-per-linter=50
+  # 会截断，max-same-issues=3 会折叠同文本）
+  max-issues-per-linter: 0
+  max-same-issues: 0

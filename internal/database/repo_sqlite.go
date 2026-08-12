@@ -68,13 +68,6 @@ func (r *sqliteRepo) GetInstance(ctx context.Context, id int64) (*DBInstance, er
 	return &v, nil
 }
 
-func (r *sqliteRepo) CountInstancesByDBTypeAndVersion(ctx context.Context, dbType DBType, version string) (int, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM database_instances WHERE db_type = ? AND version = ?",
-		dbType, version).Scan(&count)
-	return count, err
-}
-
 func (r *sqliteRepo) CreateInstance(ctx context.Context, v *DBInstance) (int64, error) {
 	result, err := r.db.ExecContext(ctx, `INSERT INTO database_instances
 		(db_type, version, container_engine, image, container_id, volume_name, config_dir, bind_address, port, admin_password, status)
@@ -132,6 +125,32 @@ func (r *sqliteRepo) ListBackups(ctx context.Context, instanceID int64, database
 		`SELECT b.id, v.db_type, b.instance_id, b.database_name, b.backup_type, b.file_path, b.file_size, b.status, b.error_message, b.created_at
 		FROM instance_backups b JOIN database_instances v ON b.instance_id = v.id
 		WHERE b.instance_id = ? AND b.database_name = ? ORDER BY b.created_at DESC`, instanceID, databaseName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var backups []DBBackup
+	for rows.Next() {
+		var b DBBackup
+		if err := rows.Scan(&b.ID, &b.DBType, &b.DBInstanceID, &b.DatabaseName,
+			&b.BackupType, &b.FilePath, &b.FileSize, &b.Status, &b.ErrorMessage, &b.CreatedAt); err != nil {
+			log.Printf("scan backup row: %v", err)
+			continue
+		}
+		backups = append(backups, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate backups: %w", err)
+	}
+	return backups, nil
+}
+
+func (r *sqliteRepo) ListAllBackups(ctx context.Context) ([]DBBackup, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT b.id, v.db_type, b.instance_id, b.database_name, b.backup_type, b.file_path, b.file_size, b.status, b.error_message, b.created_at
+		FROM instance_backups b JOIN database_instances v ON b.instance_id = v.id
+		ORDER BY b.created_at DESC`)
 	if err != nil {
 		return nil, err
 	}

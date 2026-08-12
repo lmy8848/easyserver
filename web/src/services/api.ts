@@ -4,7 +4,8 @@ import type {
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
   CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
-  WebServer, Website, DBInstance, Database, DBUser,
+  WebServer, Website, DBInstance, Database, DBUser, RedisKey, RedisValue,
+  RedisHashField, RedisZSetMember,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
@@ -535,10 +536,10 @@ export const websiteApi = {
 export const dbServerApi = {
   // Instance lifecycle, scoped by engine enum.
   listInstances: (dbtype: string) =>
-    api.get<ApiResponse<DBInstance[]>>(`/db/${dbtype}/instances`),
+    api.get<ApiResponse<DBInstance[]>>(`/db/instances`, { params: { dbtype } }),
 
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string; container_name?: string }) =>
-    api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/${dbtype}/instances`, data),
+    api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/instances`, { ...data, dbtype }),
 
   // Cancel an in-flight install (image pull or provisioning).
   cancelInstall: (iid: string) =>
@@ -547,14 +548,11 @@ export const dbServerApi = {
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),
   // paginated — the version Select flips pages through this.
   listDockerTags: (dbtype: string, page = 1, pageSize = 10) =>
-    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/${dbtype}/docker-tags`, { params: { page, page_size: pageSize } }),
+    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/docker-tags`, { params: { dbtype, page, page_size: pageSize } }),
 
   // Uninstall the instance. purge=true also deletes the data (and config) volumes.
   uninstallInstance: (iid: number, purge = false) =>
     api.delete<ApiResponse>(`/db/instances/${iid}`, { params: { purge: purge ? '1' : undefined } }),
-
-  destroyInstance: (iid: number) =>
-    api.delete<ApiResponse>(`/db/instances/${iid}/data`),
 
   resetAdminPassword: (iid: number) =>
     api.post<ApiResponse<{ admin_password: string }>>(`/db/instances/${iid}/reset-password`),
@@ -574,8 +572,8 @@ export const dbServerApi = {
   getInstanceConfig: (iid: number) =>
     api.get<ApiResponse<InstanceConfigView>>(`/db/instances/${iid}/config`),
 
-  saveInstanceConfig: (iid: number, sections: Array<{ name: string; params: Record<string, string> }>) =>
-    api.put<ApiResponse>(`/db/instances/${iid}/config`, { sections }),
+  saveInstanceConfig: (iid: number, params: Record<string, string>) =>
+    api.put<ApiResponse>(`/db/instances/${iid}/config`, { params }),
 
   // Databases (instance-scoped; logical databases are live engine state, so the
   // database name is the identifier — never a persisted id)
@@ -601,22 +599,25 @@ export const dbServerApi = {
   grantPrivileges: (instanceId: number, username: string, data: { privileges: string; database?: string }, host: string = '%') =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/grant`, data, { params: { host } }),
 
+  resetUserPassword: (instanceId: number, username: string, data: { password: string }, host: string = '%') =>
+    api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/password`, data, { params: { host } }),
+
   // Database introspection
   listTables: (instanceId: number, dbName: string) =>
     api.get<ApiResponse<Array<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`),
 
   describeTable: (instanceId: number, dbName: string, table: string) =>
-    api.get<ApiResponse<{ table_name: string; primary_key: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
+    api.get<ApiResponse<{ table_name: string; primary_key: string; collation: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
 
   // Table management
-  createTable: (instanceId: number, dbName: string, data: { name: string; columns: Array<{ name: string; type: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean }> }) =>
+  createTable: (instanceId: number, dbName: string, data: { name: string; charset?: string; collation?: string; columns: Array<{ name: string; type: string; length?: string; nullable?: boolean; is_primary?: boolean; auto_incr?: boolean; unique?: boolean; default_value?: string }> }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, data),
 
   dropTable: (instanceId: number, dbName: string, table: string) =>
     api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, { params: { table } }),
 
   queryTable: (instanceId: number, dbName: string, table: string, page: number = 1, pageSize: number = 50) =>
-    api.get<ApiResponse<{ headers: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/query`, { params: { table, page, page_size: pageSize } }),
+    api.get<ApiResponse<{ headers: string[]; column_types?: string[]; rows: (string | number | null)[][]; total: number; page: number; page_size: number }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/query`, { params: { table, page, page_size: pageSize } }),
 
   executeSQL: (instanceId: number, dbName: string, sql: string) =>
     api.post<ApiResponse<{ success: boolean; output?: string; error?: string }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/execute`, { sql }),
@@ -645,6 +646,40 @@ export const dbServerApi = {
 
   deleteBackup: (backupId: number) =>
     api.delete<ApiResponse>(`/db/backups/${backupId}`),
+
+  // Redis key browser (instance-scoped, addressed by logical DB index)
+  redisDBCount: (instanceId: number) =>
+    api.get<ApiResponse<{ databases: number }>>(`/db/redis/instances/${instanceId}/databases-count`),
+
+  scanRedisKeys: (instanceId: number, db: number, cursor: number | string, pattern = '*', count = 50) =>
+    api.get<ApiResponse<{ keys: RedisKey[]; next_cursor: number | string; db: number }>>(`/db/redis/instances/${instanceId}/keys`, { params: { db, cursor, pattern, count } }),
+
+  getRedisValue: (instanceId: number, db: number, key: string) =>
+    api.get<ApiResponse<RedisValue>>(`/db/redis/instances/${instanceId}/value`, { params: { db, key } }),
+
+  setRedisValue: (instanceId: number, data: {
+    db: number;
+    type: 'string' | 'hash' | 'list' | 'set' | 'zset';
+    key: string;
+    value?: string;                                     // string
+    hash_fields?: RedisHashField[];                     // hash
+    values?: string[];                                  // list / set
+    zset_members?: RedisZSetMember[];                   // zset
+    ttl?: number;
+  }) =>
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/value`, data),
+
+  delRedisKeys: (instanceId: number, data: { db: number; keys: string[] }) =>
+    api.post<ApiResponse<{ deleted: number }>>(`/db/redis/instances/${instanceId}/del`, data),
+
+  expireRedisKey: (instanceId: number, data: { db: number; key: string; ttl: number }) =>
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/expire`, data),
+
+  persistRedisKey: (instanceId: number, data: { db: number; key: string }) =>
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/persist`, data),
+
+  flushRedisDB: (instanceId: number, data: { db: number }) =>
+    api.post<ApiResponse>(`/db/redis/instances/${instanceId}/flushdb`, data),
 };
 
 // Cron task management
