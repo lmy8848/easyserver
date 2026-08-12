@@ -180,11 +180,11 @@ func TestBuildDescribeTable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildDescribeTable failed: %v", err)
 		}
-		if !strings.Contains(sql, "'test'::regclass") || !strings.Contains(sql, "WHERE table_name = 'test'") {
-			t.Errorf("BuildDescribeTable for PG generated invalid SQL: %s", sql)
+		if !strings.Contains(sql, "$1::regclass") || !strings.Contains(sql, "WHERE table_name = $1") {
+			t.Errorf("BuildDescribeTable for PG must bind the table name via $1: %s", sql)
 		}
-		if strings.Contains(sql, "\"test\"::regclass") || strings.Contains(sql, "$1") {
-			t.Errorf("BuildDescribeTable for PG must not use double-quoted regclass or unbound $1: %s", sql)
+		if strings.Contains(sql, "'test'") || strings.Contains(sql, "\"test\"") {
+			t.Errorf("BuildDescribeTable for PG must not inline the table name: %s", sql)
 		}
 	})
 }

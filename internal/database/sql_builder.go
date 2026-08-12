@@ -288,16 +288,17 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 	case DBTypeMySQL:
 		return fmt.Sprintf("DESCRIBE %s;", b.QuoteIdentifier(table)), nil
 	case DBTypePostgreSQL:
-		escapedTable := b.EscapeString(table)
-		return fmt.Sprintf(`SELECT column_name, data_type, is_nullable, column_default,
+		// table name is a value here, so it goes through the driver as $1
+		// (parameterized binding) rather than being interpolated into the text.
+		return `SELECT column_name, data_type, is_nullable, column_default,
 			CASE WHEN column_name IN (
 				SELECT a.attname FROM pg_index i
 				JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-				WHERE i.indrelid = '%s'::regclass AND i.indisprimary
+				WHERE i.indrelid = $1::regclass AND i.indisprimary
 			) THEN 'YES' ELSE 'NO' END as is_primary,
 			is_identity
 			FROM information_schema.columns
-			WHERE table_name = '%s' ORDER BY ordinal_position;`, escapedTable, escapedTable), nil
+			WHERE table_name = $1 ORDER BY ordinal_position;`, nil
 	}
 	return "", fmt.Errorf("unsupported db type: %s", b.dbType)
 }

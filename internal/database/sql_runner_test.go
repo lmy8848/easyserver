@@ -164,3 +164,43 @@ func TestDriverSQLRunnerCloseDropsPool(t *testing.T) {
 	}
 	_ = inst
 }
+
+func TestIsReadStatement(t *testing.T) {
+	cases := []struct {
+		stmt string
+		want bool
+	}{
+		{"SELECT * FROM t", true},
+		{"  select id, name from t where x = 1", true},
+		{"SHOW TABLES", true},
+		{"EXPLAIN SELECT 1", true},
+		{"DESCRIBE users", true},
+		{"DESC;", true}, // 裸 DESC 不带表名也按读语句走 Query
+		{"PRAGMA table_info(t)", true},
+		{"WITH cte AS (SELECT 1) SELECT * FROM cte", true},
+		// 写语句
+		{"DELETE FROM t WHERE id = 1", false},
+		{"INSERT INTO t (a) VALUES (1)", false},
+		{"UPDATE t SET a = 1 WHERE id = 1", false},
+		{"DROP TABLE t", false},
+		{"CREATE TABLE t (id int)", false},
+		// data-modifying CTE
+		{"WITH cte AS (DELETE FROM t RETURNING *) SELECT * FROM cte", false},
+		{"WITH cte AS (UPDATE t SET a = 1 RETURNING *) SELECT * FROM cte", false},
+		// 注释开头的语句
+		{"-- comment\nSELECT 1", true},
+		{"", false},
+		// 多行查询语句
+		{"SELECT *\nFROM users\nWHERE id = 1", true},
+		{"-- 注释\nSELECT id\nFROM users\nLIMIT 10", true},
+		// 分号在字符串字面量内
+		{"SELECT 'a;b' AS x\nFROM t", true},
+		{"SELECT ';' AS s", true},
+		{"INSERT INTO t VALUES ('a;b')", false},
+	}
+	for _, c := range cases {
+		if got := isReadStatement(c.stmt); got != c.want {
+			t.Errorf("isReadStatement(%q) = %v, want %v", c.stmt, got, c.want)
+		}
+	}
+}

@@ -1,6 +1,7 @@
-import { Space, Select, Button, Input, Alert, Empty } from 'antd';
+import { Space, Select, Button, Input, Alert, Empty, Table } from 'antd';
 import { ConsoleSqlOutlined } from '@ant-design/icons';
 import type { SqlConsoleTabProps } from './types';
+import { renderCell } from './cellRender';
 
 export default function SqlConsoleTab({
   version,
@@ -65,25 +66,46 @@ export default function SqlConsoleTab({
       />
 
       {sqlResult && (
-        <div>
+        <div style={{ overflowX: 'auto', width: '100%' }}>
           {sqlResult.success ? (
-            <pre style={{
-              fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
-              fontSize: 13,
-              lineHeight: 1.5,
-              background: '#fafafa',
-              border: '1px solid #d9d9d9',
-              borderRadius: 6,
-              padding: 16,
-              margin: 0,
-              maxHeight: 480,
-              overflowY: 'auto',
-              whiteSpace: 'pre',
-              overflowX: 'auto',
-              color: '#222',
-            }}>
-              {sqlResult.output || 'Query OK'}
-            </pre>
+            sqlResult.rows ? (
+              <Table
+                size="small"
+                bordered
+                columns={(sqlResult.headers || []).map((h: string, hi: number) => ({
+                  title: h, dataIndex: h, key: h, ellipsis: true,
+                  sorter: (sqlResult.column_types || [])[hi] === 'number'
+                    ? (a: any, b: any) => (Number(a[h]) || 0) - (Number(b[h]) || 0) : undefined,
+                  render: (v: any) => renderCell(v, (sqlResult.column_types || [])[hi]),
+                }))}
+                dataSource={(sqlResult.rows || []).map((row: any[], i: number) => {
+                  const obj: any = { _key: i };
+                  (sqlResult.headers || []).forEach((h: string, j: number) => { obj[h] = row[j]; });
+                  return obj;
+                })}
+                rowKey="_key"
+                pagination={{ pageSize: 20, showSizeChanger: true }}
+                scroll={{ y: 420 }}
+              />
+            ) : (
+              <pre style={{
+                fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+                fontSize: 13,
+                lineHeight: 1.5,
+                background: '#fafafa',
+                border: '1px solid #d9d9d9',
+                borderRadius: 6,
+                padding: 16,
+                margin: 0,
+                maxHeight: 480,
+                overflowY: 'auto',
+                whiteSpace: 'pre',
+                overflowX: 'auto',
+                color: '#222',
+              }}>
+                {sqlResult.output || 'Query OK'}
+              </pre>
+            )
           ) : (
             <Alert type="error" message="执行失败" description={sqlResult.error} showIcon />
           )}

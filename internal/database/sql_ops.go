@@ -382,7 +382,7 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 		return nil, err
 	}
 
-	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, describeSQL)
+	res, err := s.runnerFor(instance).Query(ctx, instance, dbName, describeSQL, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("获取表结构失败: %s", SanitizeSQLError(err.Error()))
 	}
@@ -491,24 +491,25 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 	}
 
 	trimmedSQL := strings.TrimSpace(sql)
-	upperSQL := strings.ToUpper(trimmedSQL)
 
-	isQuery := strings.HasPrefix(upperSQL, "SELECT") ||
-		strings.HasPrefix(upperSQL, "SHOW") ||
-		strings.HasPrefix(upperSQL, "EXPLAIN") ||
-		strings.HasPrefix(upperSQL, "DESCRIBE") ||
-		strings.HasPrefix(upperSQL, "DESC ") ||
-		strings.HasPrefix(upperSQL, "WITH") ||
-		strings.HasPrefix(upperSQL, "PRAGMA")
-
-	if isQuery {
+	// 读语句走 Query 取结果集，写语句走 Exec 报受影响行数。
+	if isReadStatement(trimmedSQL) {
 		qres, queryErr := s.runnerFor(instance).Query(ctx, instance, dbName, trimmedSQL)
 		if queryErr != nil {
 			log.Printf("ExecuteSQL %s query error [db=%s]: %s", instance.DBType, dbName, SanitizeSQLError(queryErr.Error()))
 			return &DMLResult{Success: false, Error: SanitizeSQLError(queryErr.Error())}, nil
 		}
-		output := formatQueryResultText(qres)
-		return &DMLResult{Success: true, Output: output}, nil
+		headers := make([]string, len(qres.Columns))
+		types := make([]string, len(qres.Columns))
+		for i, col := range qres.Columns {
+			headers[i] = col.Name
+			types[i] = col.Type
+		}
+		rows := make([][]interface{}, len(qres.Rows))
+		for i, r := range qres.Rows {
+			rows[i] = r
+		}
+		return &DMLResult{Success: true, Headers: headers, ColumnTypes: types, Rows: rows}, nil
 	}
 
 	execRes, execErr := s.runnerFor(instance).Exec(ctx, instance, dbName, trimmedSQL)
@@ -533,95 +534,30 @@ func (s *Service) ExecuteSQL(ctx context.Context, instanceID int64, dbName, sql 
 	return &DMLResult{Success: true, Output: output}, nil
 }
 
-func formatQueryResultText(res *QueryResult) string {
-	if res == nil || len(res.Columns) == 0 {
-		return "Empty set (0 rows)"
+// isReadStatement reports whether a statement is read-only, so ExecuteSQL
+// routes it to Query (to surface result sets) instead of Exec. A data-modifying
+// CTE (WITH ... INSERT/UPDATE/DELETE) counts as a write despite the WITH prefix.
+func isReadStatement(stmt string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(stripLeadingComments(stmt)))
+	fields := strings.Fields(upper)
+	if len(fields) == 0 {
+		return false
 	}
-
-	colCount := len(res.Columns)
-	headers := make([]string, colCount)
-	widths := make([]int, colCount)
-
-	for i, col := range res.Columns {
-		headers[i] = col.Name
-		widths[i] = len(col.Name)
-	}
-
-	rows := make([][]string, len(res.Rows))
-	for rIdx, row := range res.Rows {
-		strRow := make([]string, colCount)
-		for cIdx := range res.Columns {
-			valStr := "NULL"
-			if cIdx < len(row) && row[cIdx] != nil {
-				valStr = fmt.Sprintf("%v", row[cIdx])
-			}
-			strRow[cIdx] = valStr
-			if len(valStr) > widths[cIdx] {
-				widths[cIdx] = len(valStr)
+	switch strings.TrimRight(fields[0], ";") {
+	case "SELECT", "SHOW", "EXPLAIN", "DESCRIBE", "DESC", "PRAGMA":
+		return true
+	case "WITH":
+		// WITH cte AS (...) INSERT/UPDATE/DELETE ... is a write disguised as a
+		// SELECT-like prefix. The DML keywords are reserved, so a bare column
+		// name can't fake them in a plain SELECT.
+		for _, kw := range []string{"INSERT INTO ", "UPDATE ", "DELETE FROM "} {
+			if strings.Contains(" "+upper+" ", kw) {
+				return false
 			}
 		}
-		rows[rIdx] = strRow
+		return true
 	}
-
-	for i := range widths {
-		if widths[i] > 120 {
-			widths[i] = 120
-		}
-	}
-
-	var sb strings.Builder
-
-	makeSep := func() string {
-		var sep strings.Builder
-		sep.WriteString("+")
-		for _, w := range widths {
-			sep.WriteString(strings.Repeat("-", w+2))
-			sep.WriteString("+")
-		}
-		return sep.String()
-	}
-
-	sepLine := makeSep()
-
-	sb.WriteString(sepLine)
-	sb.WriteString("\n")
-
-	sb.WriteString("|")
-	for i, h := range headers {
-		sb.WriteString(fmt.Sprintf(" %-*s |", widths[i], truncateString(h, widths[i])))
-	}
-	sb.WriteString("\n")
-
-	sb.WriteString(sepLine)
-	sb.WriteString("\n")
-
-	if len(rows) == 0 {
-		sb.WriteString("(No rows returned)\n")
-	} else {
-		for _, row := range rows {
-			sb.WriteString("|")
-			for i, val := range row {
-				sb.WriteString(fmt.Sprintf(" %-*s |", widths[i], truncateString(val, widths[i])))
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	sb.WriteString(sepLine)
-	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%d row(s) in set", len(rows)))
-
-	return sb.String()
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
+	return false
 }
 
 func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]interface{}, dryRun bool) (*DMLResult, error) {

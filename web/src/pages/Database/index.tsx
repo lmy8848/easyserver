@@ -547,9 +547,13 @@ export default function DatabasePage() {
     const targetDb = sqlTargetDb || selectedDatabase?.name || (databases?.length > 0 ? databases[0]?.name || '' : '');
     if (!targetDb || !version || !sqlInput.trim()) return;
 
-    // Confirm destructive operations before execution
+    // Confirm destructive operations before execution. Covers every write
+    // prefix (not just the DDL four), plus data-modifying CTEs that start with
+    // WITH — matching the backend's isReadStatement routing.
     const sqlUpper = sqlInput.trim().toUpperCase();
-    const isDestructive = /^(DROP|DELETE|ALTER|TRUNCATE)\b/.test(sqlUpper);
+    const isWritePrefix = /^(DROP|DELETE|ALTER|TRUNCATE|UPDATE|INSERT|CREATE|GRANT)\b/.test(sqlUpper);
+    const isWriteCte = /^WITH\b/.test(sqlUpper) && /\b(INSERT INTO|UPDATE|DELETE FROM)\b/.test(sqlUpper);
+    const isDestructive = isWritePrefix || isWriteCte;
     if (isDestructive) {
       const confirmed = await new Promise<boolean>((resolve) => {
         Modal.confirm({

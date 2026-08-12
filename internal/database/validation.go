@@ -102,25 +102,12 @@ func ValidateSQL(sql string) *ValidationResult {
 		return &ValidationResult{Valid: false, Message: "SQL cannot be empty"}
 	}
 
-	statements := strings.Split(sql, ";")
-	for _, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-
-		cleanedStmt := stripLeadingComments(stmt)
-		if cleanedStmt == "" {
-			continue
-		}
-
-		if result := validateSingleStatement(cleanedStmt); result != nil {
-			return result
-		}
+	cleanedStmt := stripLeadingComments(sql)
+	if cleanedStmt == "" {
+		return &ValidationResult{Valid: false, Message: "SQL cannot be empty"}
 	}
-
-	if !strings.HasSuffix(sql, ";") {
-		sql += ";"
+	if result := validateSingleStatement(cleanedStmt); result != nil {
+		return result
 	}
 
 	return &ValidationResult{Valid: true, Message: "valid", SQL: sql}

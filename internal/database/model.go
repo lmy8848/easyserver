@@ -142,11 +142,17 @@ type TableInfo struct {
 
 // DMLResult is the response for ExecuteSQL / Insert / Update / Delete.
 type DMLResult struct {
-	Success bool   `json:"success"`
-	Output  string `json:"output,omitempty"`
-	Error   string `json:"error,omitempty"`
-	DryRun  bool   `json:"dry_run,omitempty"`
-	SQL     string `json:"sql,omitempty"`
+	Success bool `json:"success"`
+	// Output carries human-readable text for write statements (Insert/Update/
+	// Delete, Exec-path ExecuteSQL). Query-path ExecuteSQL instead fills
+	// Headers/ColumnTypes/Rows with the structured result.
+	Output      string          `json:"output,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	DryRun      bool            `json:"dry_run,omitempty"`
+	SQL         string          `json:"sql,omitempty"`
+	Headers     []string        `json:"headers,omitempty"`
+	ColumnTypes []string        `json:"column_types,omitempty"`
+	Rows        [][]interface{} `json:"rows,omitempty"`
 }
 
 // PagedQueryResult is the response for QueryTable.

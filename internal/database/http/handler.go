@@ -528,12 +528,7 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) {
 		return
 	}
 
-	if !result.Success {
-		httpx.Success(c, gin.H{"success": false, "error": result.Error})
-		return
-	}
-
-	httpx.Success(c, gin.H{"success": true, "output": result.Output})
+	httpx.Success(c, result)
 }
 
 func (h *DatabaseHandler) InsertRecord(c *gin.Context) {

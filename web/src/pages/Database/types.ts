@@ -90,6 +90,10 @@ export interface SqlResult {
   success: boolean;
   output?: string;
   error?: string;
+  // 查询语句的结构化结果（headers + column_types + rows），写语句只有 output
+  headers?: string[];
+  column_types?: string[];
+  rows?: any[][];
 }
 
 // ===== Component Props =====
