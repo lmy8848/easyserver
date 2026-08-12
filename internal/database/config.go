@@ -243,8 +243,16 @@ func (s *Service) applyPostgresConfig(ctx context.Context, v *DBInstance, params
 	return len(res.Rows) > 0, nil
 }
 
+// redisStartupOnly 是 Redis 启动期参数：只能写进 redis.conf 于下次启动生效，
+// 运行中的实例 CONFIG SET 会报 "can't set immutable config"。面板把这些参数
+// 定义为"修改后保存即重建容器生效"，因此在线应用时跳过（重建走 redis.conf）。
+var redisStartupOnly = map[string]bool{"port": true, "databases": true}
+
 func (s *Service) applyRedisConfig(ctx context.Context, v *DBInstance, params map[string]string) error {
 	for key, value := range params {
+		if redisStartupOnly[key] {
+			continue // 启动期参数，运行时无法 CONFIG SET，重建容器时生效
+		}
 		if err := s.redisFor().ConfigSet(ctx, v, key, value); err != nil {
 			return fmt.Errorf("设置参数 %s: %w", key, err)
 		}

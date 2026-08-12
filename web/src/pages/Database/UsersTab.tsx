@@ -29,9 +29,14 @@ export default function UsersTab({
   resetPasswordVisible, resetPasswordUser, resetPasswordForm, onResetPasswordVisibleChange, onResetPassword, onOpenResetPassword,
 }: UsersTabProps) {
   const isPg = server?.db_type === 'postgresql';
+  const isRedis = server?.db_type === 'redis';
   const privileges = isPg ? PG_PRIVILEGES : MYSQL_PRIVILEGES;
   const [searchText, setSearchText] = useState('');
   const filteredUsers = dbUsers.filter(u => u.username.toLowerCase().includes(searchText.toLowerCase()));
+
+  if (isRedis) {
+    return <Empty description="暂不支持 Redis 用户管理" />;
+  }
 
   const userColumns = [
     { title: '用户名', dataIndex: 'username', key: 'username', render: (t: string) => <strong>{t}</strong> },
