@@ -471,11 +471,9 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 	s.redisOps.Close(instanceID)
 	if purge {
 		// 数据目录是宿主路径，整目录（data + config + es_backups/ 备份）直接 RemoveAll，
-		// 不再走引擎卷删除。旧版命名卷值（非绝对路径）按"存量忽略"处理，不删。
-		if filepath.IsAbs(v.VolumeName) {
-			if err := os.RemoveAll(filepath.Dir(v.VolumeName)); err != nil {
-				return fmt.Errorf("remove database data directory: %w", err)
-			}
+		// 不再走引擎卷删除。
+		if err := os.RemoveAll(filepath.Dir(v.VolumeName)); err != nil {
+			return fmt.Errorf("remove database data directory: %w", err)
 		}
 	}
 	return s.repo.DeleteInstance(ctx, instanceID)

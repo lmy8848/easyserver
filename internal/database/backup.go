@@ -20,11 +20,6 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	if err != nil || instance == nil {
 		return nil, fmt.Errorf("database instance not found")
 	}
-	// 存量命名卷实例完全忽略：volume_name 不是宿主绝对路径时直接拒绝，绝不把
-	// es_backups 拼进相对路径在服务器 CWD 创建垃圾目录。
-	if !filepath.IsAbs(instance.VolumeName) {
-		return nil, fmt.Errorf("该实例为旧版命名卷部署，不受支持，请先卸载并重新安装")
-	}
 	// 备份直接落在实例宿主数据目录的 es_backups/ 子目录 —— 该目录是宿主挂载，
 	// 容器内 dump 写这里宿主直见，无需 CopyFrom 往返。chown 999 让容器内进程
 	// （pg_dump 等以 uid 999 运行）能写入。

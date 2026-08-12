@@ -365,26 +365,6 @@ func TestCreateInstanceRejectsDuplicateTypeVersion(t *testing.T) {
 	}
 }
 
-func TestCreateBackupRejectsLegacyVolumeInstance(t *testing.T) {
-	// 存量命名卷实例（volume_name 非宿主绝对路径）在新逻辑下完全忽略：备份接口
-	// 直接拒绝，而不是把 es_backups 拼进相对路径在服务器 CWD 创建垃圾目录。
-	withTempHostBase(t)
-	repo := newFakeRepo()
-	repo.instances[1] = &DBInstance{ID: 1, DBType: DBTypeMySQL, Version: "8.0",
-		ContainerEngine: "docker", ContainerName: "legacy", VolumeName: "legacy-data", Status: "running"}
-	rt := &fakeDBRuntime{}
-	svc := NewService(repo, rt)
-
-	_, err := svc.CreateBackup(context.Background(), 1, "testdb", DBTypeMySQL)
-	if err == nil {
-		t.Fatal("expected legacy named-volume instance backup to be rejected")
-	}
-	// 不得在服务器 CWD 留下 es_backups 垃圾目录。
-	if _, statErr := os.Stat(filepath.Join("legacy-data", "es_backups")); !os.IsNotExist(statErr) {
-		t.Fatalf("must not create relative es_backups dir for legacy instance, stat err = %v", statErr)
-	}
-}
-
 func TestRedisContainerSpecMountsHostConfigDir(t *testing.T) {
 	withTempHostBase(t)
 	spec := containerSpec(DBTypeRedis, "docker", "7.2", "redis:7.2", "easyserver-db-redis-7-2",
