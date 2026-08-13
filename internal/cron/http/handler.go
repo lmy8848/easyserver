@@ -112,17 +112,17 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 	}
 
 	task := &cron.CronTask{
-		Name:             req.Name,
-		Command:          req.Command,
-		Schedule:         onCalendar,
-		Description:      req.Description,
-		Persistent:       req.Persistent,
-		Enabled:          true,
-		Timeout:          req.Timeout,
-		MaxRetry:         req.MaxRetry,
-		EnvVars:          req.EnvVars,
-		WorkDir:          req.WorkDir,
-		RuntimeVersionID: req.RuntimeVersionID,
+		Name:        req.Name,
+		Command:     req.Command,
+		Schedule:    onCalendar,
+		Description: req.Description,
+		Persistent:  req.Persistent,
+		Enabled:     true,
+		Timeout:     req.Timeout,
+		MaxRetry:    req.MaxRetry,
+		EnvVars:     req.EnvVars,
+		WorkDir:     req.WorkDir,
+		Runtime:     req.Runtime,
 	}
 
 	if err := h.cronService.Create(c.Request.Context(), task); err != nil {
@@ -212,8 +212,8 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 		}
 		task.WorkDir = *req.WorkDir
 	}
-	if req.RuntimeVersionID != nil {
-		task.RuntimeVersionID = *req.RuntimeVersionID
+	if req.Runtime != nil {
+		task.Runtime = *req.Runtime
 	}
 
 	// Validate command required

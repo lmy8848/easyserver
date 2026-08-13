@@ -109,9 +109,7 @@ export interface Service {
   uptime_seconds: number;
   // 托管服务元数据（系统服务为零值）
   managed: boolean;
-  runtime_version_id: number;
-  runtime_lang: string;
-  runtime_exact: string;
+  runtime: string; // lang@exact，"" = 不绑定（ADR-0009 绑定键）
   // 托管服务配置回显（解析 [Unit]/[Service] 段，编辑表单用）
   exec_start: string;
   dir: string;
@@ -225,7 +223,6 @@ export interface Website {
   process_id: number;
   build_command: string;
   start_command: string;
-  runtime_version_id: number;
   access_log: string;
   error_log: string;
   status: string;
@@ -313,9 +310,7 @@ export interface CronTask {
   max_retry: number;
   env_vars: string;
   work_dir: string;
-  runtime_version_id: number;
-  runtime_lang: string;
-  runtime_exact: string;
+  runtime: string; // lang@exact，"" = 不绑定
 }
 
 export interface CronLog {
@@ -407,9 +402,7 @@ export interface ManagedServiceSpec {
   restart_delay: number;
   stop_timeout: number;
   auto_start: boolean;
-  runtime_version_id: number;
-  runtime_lang: string;
-  runtime_exact: string;
+  runtime: string; // lang@exact，"" = 不绑定
 }
 
 // System Process types

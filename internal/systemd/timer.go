@@ -21,19 +21,17 @@ const (
 // TimerSpec 是生成定时任务 .timer / .service 一对 unit 的输入配置。
 // 与 ManagedUnitSpec 同构，但字段语义针对 systemd timer（OnCalendar/Persistent）。
 type TimerSpec struct {
-	Name             string            // 不含前缀，如 "daily-backup"
-	Description      string            // 显示名，写入 Description=
-	OnCalendar       string            // 触发表达式，如 "*-*-* 03:00:00"
-	Persistent       bool              // [Timer] Persistent=<true|false>
-	ExecStart        string            // 用户命令或脚本路径（mise exec 包裹）
-	Dir              string            // WorkingDirectory
-	Env              map[string]string // Environment=
-	MaxRetry         int               // StartLimitBurst = MaxRetry + 1
-	RestartDelay     int               // RestartSec
-	Timeout          int               // TimeoutStartSec
-	RuntimeVersionID int64             // 写入注释，反查用
-	RuntimeLang      string            // mise 工具名，如 "node"
-	RuntimeExact     string            // mise 版本，如 "20.10.0"
+	Name         string            // 不含前缀，如 "daily-backup"
+	Description  string            // 显示名，写入 Description=
+	OnCalendar   string            // 触发表达式，如 "*-*-* 03:00:00"
+	Persistent   bool              // [Timer] Persistent=<true|false>
+	ExecStart    string            // 用户命令或脚本路径（mise exec 包裹）
+	Dir          string            // WorkingDirectory
+	Env          map[string]string // Environment=
+	MaxRetry     int               // StartLimitBurst = MaxRetry + 1
+	RestartDelay int               // RestartSec
+	Timeout      int               // TimeoutStartSec
+	Runtime      string            // lang@exact，"" = 不绑定（ADR-0009 绑定键）
 }
 
 // CronTimerFileName 返回 <name> 对应的 .timer 文件名。
@@ -138,11 +136,8 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 	if strings.ContainsAny(spec.Dir, "\n\r") {
 		return "", errors.New("dir 不能包含换行")
 	}
-	if strings.ContainsAny(spec.RuntimeLang, "\n\r") {
-		return "", errors.New("runtime_lang 不能包含换行")
-	}
-	if strings.ContainsAny(spec.RuntimeExact, "\n\r") {
-		return "", errors.New("runtime_exact 不能包含换行")
+	if strings.ContainsAny(spec.Runtime, "\n\r") {
+		return "", errors.New("runtime 不能包含换行")
 	}
 	for k := range spec.Env {
 		if !envKeyRegex.MatchString(k) {
@@ -150,7 +145,8 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 		}
 	}
 
-	execStart, runtimeEnv := buildCronExecStart(spec, p)
+	lang, exact := splitBinding(spec.Runtime)
+	execStart, runtimeEnv := buildCronExecStart(lang, exact, spec.ExecStart, p)
 	envLines := buildEnvLines(mergeCommandEnv(spec.Env, runtimeEnv))
 
 	// StartLimitBurst = MaxRetry + 1：首次执行算一次，重试 MaxRetry 次。
@@ -174,14 +170,11 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 	fmt.Fprintf(&b, "[Unit]\n")
 	fmt.Fprintf(&b, "Description=%s\n", cleanUnitValue(desc))
 	fmt.Fprintf(&b, "# %s=%s\n", managedMarkerKey, "easyserver-cron")
-	if spec.RuntimeVersionID > 0 {
-		fmt.Fprintf(&b, "# RuntimeVersionID=%d\n", spec.RuntimeVersionID)
+	if lang != "" {
+		fmt.Fprintf(&b, "# RuntimeLang=%s\n", lang)
 	}
-	if spec.RuntimeLang != "" {
-		fmt.Fprintf(&b, "# RuntimeLang=%s\n", spec.RuntimeLang)
-	}
-	if spec.RuntimeExact != "" {
-		fmt.Fprintf(&b, "# RuntimeExact=%s\n", spec.RuntimeExact)
+	if exact != "" {
+		fmt.Fprintf(&b, "# RuntimeExact=%s\n", exact)
 	}
 	fmt.Fprintf(&b, "StartLimitBurst=%d\n", burst)
 	fmt.Fprintf(&b, "StartLimitIntervalSec=300\n")
@@ -208,13 +201,13 @@ func RenderCronService(spec *TimerSpec, p mise.Provider) (string, error) {
 
 // buildCronExecStart 拼接 ExecStart 值，并返回底层命令所需的额外环境变量。
 // 绑定 runtime 时前置 mise 包裹（与进程守护的 buildExecStart 同逻辑）。
-func buildCronExecStart(spec *TimerSpec, p mise.Provider) (string, []string) {
-	if spec.RuntimeVersionID > 0 && spec.RuntimeLang != "" && spec.RuntimeExact != "" {
-		if c, err := p.Command(spec.RuntimeLang, spec.RuntimeExact, spec.ExecStart); err == nil {
+func buildCronExecStart(lang, exact, execStart string, p mise.Provider) (string, []string) {
+	if lang != "" && exact != "" {
+		if c, err := p.Command(lang, exact, execStart); err == nil {
 			return strings.Join(c.Exec, " "), c.Env
 		}
 	}
-	return spec.ExecStart, nil
+	return execStart, nil
 }
 
 // WriteCronUnitFile 原子写入 cron unit 文件到 managedUnitDir。

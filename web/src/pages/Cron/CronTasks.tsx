@@ -176,7 +176,7 @@ export default function CronTasks({
       max_retry: task.max_retry || 0,
       envs: parseEnvVars(task.env_vars || ''),
       work_dir: task.work_dir || '',
-      runtime_version_id: task.runtime_version_id || undefined,
+      runtime: task.runtime || undefined,
     });
     setFormDesc('');
     setNextRun('');
@@ -214,13 +214,13 @@ export default function CronTasks({
         max_retry: values.max_retry || 0,
         env_vars: serializeEnvVars(values.envs),
         work_dir: values.work_dir || '',
-        runtime_version_id: values.runtime_version_id,
+        runtime: values.runtime,
       };
       if (editingTask) {
         await cronApi.update(editingTask.name, { ...payload, name: values.name });
         message.success('任务已更新');
       } else {
-        await cronApi.create({ ...payload, name: values.name, runtime_version_id: values.runtime_version_id });
+        await cronApi.create({ ...payload, name: values.name, runtime: values.runtime });
         message.success('任务已创建');
       }
       setModalVisible(false);
@@ -471,12 +471,7 @@ export default function CronTasks({
               />
             )}
           </Form.Item>
-          <Form.Item
-            name="runtime_version_id"
-            label="运行时版本"
-            getValueFromEvent={(v?: { id: number }) => v?.id}
-            getValueProps={(v: number) => ({ value: v ? { id: v } : undefined })}
-          >
+          <Form.Item name="runtime" label="运行时版本" extra="选择已安装的运行时版本（lang@exact），留空则使用系统 PATH">
             <RuntimeVersionSelect />
           </Form.Item>
           <Form.Item name="description" label="描述">

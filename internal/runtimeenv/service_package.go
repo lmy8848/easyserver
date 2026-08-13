@@ -120,14 +120,14 @@ func (s *PackageService) miseReshim(ctx context.Context) {
 // ListPackages returns installed packages for a runtime by scanning the system
 // package manager directly. There is no DB cache — the package manager itself
 // is the source of truth.
-func (s *PackageService) ListPackages(ctx context.Context, runtimeID int64, runtimeName, runtimePath string) ([]Package, error) {
+func (s *PackageService) ListPackages(ctx context.Context, runtimeName, runtimePath string) ([]Package, error) {
 	switch runtimeName {
 	case "node":
-		return s.scanNodePackages(ctx, runtimeID, runtimePath)
+		return s.scanNodePackages(ctx, runtimePath)
 	case "python":
-		return s.scanPipPackages(ctx, runtimeID, runtimePath)
+		return s.scanPipPackages(ctx, runtimePath)
 	case "php":
-		return s.scanComposerPackages(ctx, runtimeID, runtimePath)
+		return s.scanComposerPackages(ctx, runtimePath)
 	default:
 		return []Package{}, nil
 	}
@@ -384,11 +384,11 @@ func (s *PackageService) getPipPackageVersions(ctx context.Context, packageName 
 // scanNodePackages 合并扫描 npm 与 pnpm 全局包。
 // node runtime 下两种包管理器装的包放在不同位置（npm prefix vs PNPM_HOME），
 // 必须各自查询再合并，否则 pnpm 装的包在 npm list 里看不到。
-func (s *PackageService) scanNodePackages(ctx context.Context, runtimeID int64, runtimePath string) ([]Package, error) {
-	packages, _ := s.scanNpmPackages(ctx, runtimeID, runtimePath)
+func (s *PackageService) scanNodePackages(ctx context.Context, runtimePath string) ([]Package, error) {
+	packages, _ := s.scanNpmPackages(ctx, runtimePath)
 
 	if _, err := s.executor.LookPath("pnpm"); err == nil {
-		pnpmPkgs, _ := s.scanPnpmPackages(ctx, runtimeID)
+		pnpmPkgs, _ := s.scanPnpmPackages(ctx)
 		packages = append(packages, pnpmPkgs...)
 	}
 
@@ -396,7 +396,7 @@ func (s *PackageService) scanNodePackages(ctx context.Context, runtimeID int64, 
 }
 
 // npm package management
-func (s *PackageService) scanNpmPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]Package, error) {
+func (s *PackageService) scanNpmPackages(ctx context.Context, runtimePath string) ([]Package, error) {
 	output, _, _, err := s.executor.Run(ctx, "npm", "list", "-g", "--json")
 	if err != nil {
 		log.Printf("package: npm list error: %v", err)
@@ -415,11 +415,10 @@ func (s *PackageService) scanNpmPackages(ctx context.Context, runtimeID int64, r
 	var packages []Package
 	for name, dep := range result.Dependencies {
 		packages = append(packages, Package{
-			RuntimeID: runtimeID,
-			Name:      name,
-			Version:   dep.Version,
-			Scope:     "global",
-			Source:    "npm",
+			Name:    name,
+			Version: dep.Version,
+			Scope:   "global",
+			Source:  "npm",
 		})
 	}
 
@@ -430,7 +429,7 @@ func (s *PackageService) scanNpmPackages(ctx context.Context, runtimeID int64, r
 // pnpm list -g --json 输出结构与 npm 不同：
 //
 //	[{ "path": "...", "dependencies": { "<pkg>": { "version": "x.y.z" } } }]
-func (s *PackageService) scanPnpmPackages(ctx context.Context, runtimeID int64) ([]Package, error) {
+func (s *PackageService) scanPnpmPackages(ctx context.Context) ([]Package, error) {
 	// 注入 PNPM_HOME，确保 list 看到的全局目录与 install 时一致。
 	opts := executor.CommandOptions{Env: pnpmEnv()}
 	output, _, err := s.executor.RunWithOptions(ctx, opts, "pnpm", "list", "-g", "--json")
@@ -453,11 +452,10 @@ func (s *PackageService) scanPnpmPackages(ctx context.Context, runtimeID int64) 
 	for _, entry := range result {
 		for name, dep := range entry.Dependencies {
 			packages = append(packages, Package{
-				RuntimeID: runtimeID,
-				Name:      name,
-				Version:   dep.Version,
-				Scope:     "global",
-				Source:    "pnpm",
+				Name:    name,
+				Version: dep.Version,
+				Scope:   "global",
+				Source:  "pnpm",
 			})
 		}
 	}
@@ -570,7 +568,7 @@ func (s *PackageService) updateNpmPackage(ctx context.Context, req *PackageUpdat
 }
 
 // pip package management
-func (s *PackageService) scanPipPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]Package, error) {
+func (s *PackageService) scanPipPackages(ctx context.Context, runtimePath string) ([]Package, error) {
 	output, _, _, err := s.executor.Run(ctx, "pip", "list", "--format=json")
 	if err != nil {
 		log.Printf("package: pip list error: %v", err)
@@ -588,11 +586,10 @@ func (s *PackageService) scanPipPackages(ctx context.Context, runtimeID int64, r
 	var packages []Package
 	for _, pkg := range result {
 		packages = append(packages, Package{
-			RuntimeID: runtimeID,
-			Name:      pkg.Name,
-			Version:   pkg.Version,
-			Scope:     "global",
-			Source:    "pip",
+			Name:    pkg.Name,
+			Version: pkg.Version,
+			Scope:   "global",
+			Source:  "pip",
 		})
 	}
 
@@ -637,7 +634,7 @@ func (s *PackageService) updatePipPackage(ctx context.Context, req *PackageUpdat
 }
 
 // composer package management (placeholder)
-func (s *PackageService) scanComposerPackages(ctx context.Context, runtimeID int64, runtimePath string) ([]Package, error) {
+func (s *PackageService) scanComposerPackages(ctx context.Context, runtimePath string) ([]Package, error) {
 	return []Package{}, nil
 }
 

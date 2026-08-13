@@ -12,12 +12,11 @@ import {
   UndoOutlined, CodeOutlined, ToolOutlined,
   CheckCircleOutlined, CloseCircleOutlined, FolderOutlined, ProfileOutlined,
 } from '@ant-design/icons';
-import api, { webServerApi, websiteApi } from '../../services/api';
+import { webServerApi, websiteApi } from '../../services/api';
 import DetailDrawer from './DetailDrawer';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';
 import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './types';
-import type { RuntimeEnvironment } from '../Runtime/types';
 import { ServiceStatusTag } from '../../utils/status';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
 
@@ -95,9 +94,6 @@ export default function WebsiteList({
   const [buildSuccess, setBuildSuccess] = useState<boolean | null>(null);
   const [buildLoading, setBuildLoading] = useState(false);
 
-  // Runtime versions for process linking
-  const [runtimeEnvs, setRuntimeEnvs] = useState<RuntimeEnvironment[]>([]);
-
   // Config options editor
   const [configOptionsText, setConfigOptionsText] = useState('');
 
@@ -145,18 +141,10 @@ export default function WebsiteList({
     }
   };
 
-  const fetchRuntimeEnvs = async () => {
-    try {
-      const res = await api.get('/runtime');
-      setRuntimeEnvs(res.data?.data?.environments || []);
-    } catch { /* silent */ }
-  };
-
   // Fetch websites on mount
   useEffect(() => {
     fetchWebsites();
     fetchProjectTypes();
-    fetchRuntimeEnvs();
     return () => { if (pathTimerRef.current) clearTimeout(pathTimerRef.current); };
   }, [fetchWebsites]);
 
@@ -220,7 +208,6 @@ export default function WebsiteList({
       proxy_pass: site.proxy_pass,
       build_command: site.build_command,
       start_command: site.start_command,
-      runtime_version_id: site.runtime_version_id || undefined,
       custom_config: site.custom_config,
     });
     setModalVisible(true);
@@ -232,7 +219,6 @@ export default function WebsiteList({
       const payload = {
         ...values,
         config_options: configOptionsText || undefined,
-        runtime_version_id: values.runtime_version_id || 0,
       };
       if (editingSite) {
         await websiteApi.update(selectedServer.id, editingSite.id, payload);
@@ -638,15 +624,6 @@ export default function WebsiteList({
                 </Form.Item>
               );
             }}
-          </Form.Item>
-          <Form.Item name="runtime_version_id" label="运行时版本" extra="选择项目使用的运行时版本（如 Node.js 20.x），留空则使用系统 PATH">
-            <Select allowClear placeholder="使用系统 PATH" style={{ width: '100%' }}>
-              {runtimeEnvs.filter(e => e.status === 'installed').map(env => (
-                <Select.Option key={env.id} value={env.id}>
-                  {env.name} {env.version}
-                </Select.Option>
-              ))}
-            </Select>
           </Form.Item>
           <Form.Item label="Nginx 配置选项" extra="按需开启，保存后自动生成配置">
             <Space orientation="vertical" size="small" style={{ width: '100%' }}>

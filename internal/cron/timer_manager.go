@@ -31,9 +31,9 @@ type TimerManager struct {
 	runtime  RuntimeLookup // 可 nil，绑定 runtime 时必填
 }
 
-// RuntimeLookup 查询 runtime_version 表补 lang/exact/status。
+// RuntimeLookup 校验运行时绑定：lang@exact 是否已安装（ADR-0009 目录权威）。
 type RuntimeLookup interface {
-	GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error)
+	Installed(ctx context.Context, lang, exact string) bool
 }
 
 // NewTimerManager 创建 TimerManager。
@@ -322,37 +322,33 @@ func (m *TimerManager) renderTimer(spec *CronTask) (string, error) {
 
 func (m *TimerManager) renderService(spec *CronTask) (string, error) {
 	return systemd.RenderCronService(&systemd.TimerSpec{
-		Name:             spec.Name,
-		Description:      spec.Description,
-		ExecStart:        taskCommandPath(spec.Name), // 命令已统一落盘为脚本，ExecStart 指向路径（单行）
-		Dir:              spec.WorkDir,
-		Env:              parseEnvMap(spec.EnvVars),
-		MaxRetry:         spec.MaxRetry,
-		RestartDelay:     5,
-		Timeout:          spec.Timeout,
-		RuntimeVersionID: spec.RuntimeVersionID,
-		RuntimeLang:      spec.RuntimeLang,
-		RuntimeExact:     spec.RuntimeExact,
+		Name:         spec.Name,
+		Description:  spec.Description,
+		ExecStart:    taskCommandPath(spec.Name), // 命令已统一落盘为脚本，ExecStart 指向路径（单行）
+		Dir:          spec.WorkDir,
+		Env:          parseEnvMap(spec.EnvVars),
+		MaxRetry:     spec.MaxRetry,
+		RestartDelay: 5,
+		Timeout:      spec.Timeout,
+		Runtime:      spec.Runtime,
 	}, m.provider)
 }
 
-// fillRuntime 当绑定 runtime 时查 DB 补 lang/exact，并校验已安装。
+// fillRuntime 当绑定 runtime 时校验 lang@exact 已安装。绑定键即字符串（ADR-0009）。
 func (m *TimerManager) fillRuntime(ctx context.Context, spec *CronTask) error {
-	if spec.RuntimeVersionID <= 0 {
+	if spec.Runtime == "" {
 		return nil
 	}
+	lang, exact, _ := strings.Cut(spec.Runtime, "@")
+	if lang == "" || exact == "" {
+		return fmt.Errorf("无效的运行时绑定: %s", spec.Runtime)
+	}
 	if m.runtime == nil {
-		return fmt.Errorf("runtime 查询未配置，无法绑定运行时版本 %d", spec.RuntimeVersionID)
+		return fmt.Errorf("runtime 查询未配置，无法绑定运行时 %s", spec.Runtime)
 	}
-	lang, exact, status, err := m.runtime.GetRuntime(ctx, spec.RuntimeVersionID)
-	if err != nil {
-		return fmt.Errorf("查询运行时版本 %d 失败: %w", spec.RuntimeVersionID, err)
+	if !m.runtime.Installed(ctx, lang, exact) {
+		return fmt.Errorf("运行时 %s 未安装（需先到「运行环境管理」安装）", spec.Runtime)
 	}
-	if status != "installed" {
-		return fmt.Errorf("运行时版本 %d 状态为 %s，无法绑定（需先安装）", spec.RuntimeVersionID, status)
-	}
-	spec.RuntimeLang = lang
-	spec.RuntimeExact = exact
 	return nil
 }
 
@@ -446,6 +442,7 @@ func parseTimerUnit(content string, t *CronTask) {
 // parseServiceUnit 从 .service 文件解析命令/工作目录/超时/重试/runtime 注释。
 func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 	section := ""
+	var lang, exact string
 	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
@@ -458,12 +455,10 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 				continue
 			}
 			switch strings.TrimSpace(kv[0]) {
-			case "RuntimeVersionID":
-				_, _ = fmt.Sscanf(strings.TrimSpace(kv[1]), "%d", &t.RuntimeVersionID)
 			case "RuntimeLang":
-				t.RuntimeLang = strings.TrimSpace(kv[1])
+				lang = strings.TrimSpace(kv[1])
 			case "RuntimeExact":
-				t.RuntimeExact = strings.TrimSpace(kv[1])
+				exact = strings.TrimSpace(kv[1])
 			}
 			continue
 		}
@@ -473,8 +468,8 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 		switch {
 		case strings.HasPrefix(line, "ExecStart="):
 			execStart := strings.TrimPrefix(line, "ExecStart=")
-			if t.RuntimeVersionID > 0 {
-				execStart = p.Unwrap(t.RuntimeLang, t.RuntimeExact, execStart)
+			if lang != "" && exact != "" {
+				execStart = p.Unwrap(lang, exact, execStart)
 			}
 			// ExecStart 指向任务命令脚本时，读回脚本内容作为命令（支持多行回显）。
 			if execStart == taskCommandPath(t.Name) {
@@ -504,6 +499,10 @@ func parseServiceUnit(p mise.Provider, content string, t *CronTask) {
 		}
 	}
 	t.EnvVars = strings.TrimSpace(t.EnvVars)
+	// 由 Lang/Exact 组装绑定键（ADR-0009 绑定键即字符串）。
+	if lang != "" && exact != "" {
+		t.Runtime = lang + "@" + exact
+	}
 }
 
 // parseEnvLine 解析 "KEY=VALUE" 或 KEY="quoted value"。

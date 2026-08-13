@@ -66,19 +66,17 @@ func TestRenderUnit_Minimal(t *testing.T) {
 
 func TestRenderUnit_FullWithRuntime(t *testing.T) {
 	spec := &ManagedUnitSpec{
-		Name:             "my-app",
-		Description:      "我的应用",
-		ExecStart:        "node /app/server.js --port 3000",
-		Dir:              "/app",
-		Env:              map[string]string{"NODE_ENV": "production", "PORT": "3000"},
-		AutoRestart:      true,
-		MaxRestarts:      5,
-		RestartDelay:     3,
-		StopTimeout:      15,
-		AutoStart:        true,
-		RuntimeVersionID: 7,
-		RuntimeLang:      "node",
-		RuntimeExact:     "20.10.0",
+		Name:         "my-app",
+		Description:  "我的应用",
+		ExecStart:    "node /app/server.js --port 3000",
+		Dir:          "/app",
+		Env:          map[string]string{"NODE_ENV": "production", "PORT": "3000"},
+		AutoRestart:  true,
+		MaxRestarts:  5,
+		RestartDelay: 3,
+		StopTimeout:  15,
+		AutoStart:    true,
+		Runtime:      "node@20.10.0",
 	}
 	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
@@ -86,7 +84,6 @@ func TestRenderUnit_FullWithRuntime(t *testing.T) {
 	}
 
 	mustContain(t, content, "Description=我的应用")
-	mustContain(t, content, "# RuntimeVersionID=7")
 	mustContain(t, content, "# RuntimeLang=node")
 	mustContain(t, content, "# RuntimeExact=20.10.0")
 	// mise 前置包裹
@@ -118,12 +115,10 @@ func TestRenderUnit_RejectsNewline(t *testing.T) {
 
 func TestParseUnitMeta_RoundTrip(t *testing.T) {
 	spec := &ManagedUnitSpec{
-		Name:             "my-app",
-		Description:      "测试应用",
-		ExecStart:        "node",
-		RuntimeVersionID: 42,
-		RuntimeLang:      "node",
-		RuntimeExact:     "20.11.0",
+		Name:        "my-app",
+		Description: "测试应用",
+		ExecStart:   "node",
+		Runtime:     "node@20.11.0",
 	}
 	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {
@@ -138,14 +133,8 @@ func TestParseUnitMeta_RoundTrip(t *testing.T) {
 	if info.Description != "测试应用" {
 		t.Errorf("Description 期望「测试应用」，实际 %q", info.Description)
 	}
-	if info.RuntimeVersionID != 42 {
-		t.Errorf("RuntimeVersionID 期望 42，实际 %d", info.RuntimeVersionID)
-	}
-	if info.RuntimeLang != "node" {
-		t.Errorf("RuntimeLang 期望 node，实际 %q", info.RuntimeLang)
-	}
-	if info.RuntimeExact != "20.11.0" {
-		t.Errorf("RuntimeExact 期望 20.11.0，实际 %q", info.RuntimeExact)
+	if info.Runtime != "node@20.11.0" {
+		t.Errorf("Runtime 期望 node@20.11.0，实际 %q", info.Runtime)
 	}
 }
 
@@ -244,14 +233,14 @@ func TestRenderUnit_RejectsInvalidEnvKey(t *testing.T) {
 	}
 }
 
-// 防御 runtime 字段注入：RuntimeLang/RuntimeExact 含换行应被拒绝。
+// 防御 runtime 字段注入：Runtime 绑定键含换行应被拒绝。
 func TestRenderUnit_RejectsRuntimeNewline(t *testing.T) {
 	cases := []struct {
 		field string
 		spec  *ManagedUnitSpec
 	}{
-		{"runtime_lang", &ManagedUnitSpec{Name: "foo", ExecStart: "x", RuntimeLang: "node\nExecStart=evil"}},
-		{"runtime_exact", &ManagedUnitSpec{Name: "foo", ExecStart: "x", RuntimeExact: "20.0.0\nUser=root"}},
+		{"runtime", &ManagedUnitSpec{Name: "foo", ExecStart: "x", Runtime: "node\nExecStart=evil"}},
+		{"runtime", &ManagedUnitSpec{Name: "foo", ExecStart: "x", Runtime: "20.0.0\nUser=root"}},
 	}
 	for _, c := range cases {
 		_, err := RenderUnit(c.spec, mise.NewProvider())
@@ -265,15 +254,13 @@ func TestRenderUnit_RejectsRuntimeNewline(t *testing.T) {
 // 供编辑表单回显。ExecStart 去掉 mise 前缀还原用户原始命令。
 func TestParseUnitMeta_ConfigRoundTrip(t *testing.T) {
 	spec := &ManagedUnitSpec{
-		Name:             "my-app",
-		Description:      "测试",
-		ExecStart:        `node /app/server.js --port 3000 --name "hello world"`,
-		Dir:              "/app",
-		Env:              map[string]string{"NODE_ENV": "production", "PORT": "3000", "GREETING": "hello, world"},
-		AutoRestart:      true,
-		RuntimeVersionID: 7,
-		RuntimeLang:      "node",
-		RuntimeExact:     "20.10.0",
+		Name:        "my-app",
+		Description: "测试",
+		ExecStart:   `node /app/server.js --port 3000 --name "hello world"`,
+		Dir:         "/app",
+		Env:         map[string]string{"NODE_ENV": "production", "PORT": "3000", "GREETING": "hello, world"},
+		AutoRestart: true,
+		Runtime:     "node@20.10.0",
 	}
 	content, err := RenderUnit(spec, mise.NewProvider())
 	if err != nil {

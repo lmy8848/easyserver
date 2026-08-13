@@ -212,6 +212,16 @@ func miseToolDirName(tool string) string {
 	return strings.NewReplacer(":", "-", "/", "-").Replace(tool)
 }
 
+// InstallDir 返回 lang 在 installs/ 下的目录名（ADR-0009 扫描用）。
+// 计算失败（未知 lang）返回空串。
+func InstallDir(lang string) string {
+	tool, err := toolFor(lang)
+	if err != nil {
+		return ""
+	}
+	return miseToolDirName(tool)
+}
+
 // InstallPath 返回 (lang, exact) 在 installs/ 下的预期目录。纯计算，不 stat 磁盘。
 func (miseProvider) InstallPath(lang, exact string) string {
 	tool, err := toolFor(lang)

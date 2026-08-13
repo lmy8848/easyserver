@@ -31,7 +31,7 @@ export default function PackageRegistryModal({
     if (!runtime) return;
     setLoading(true);
     try {
-      const res = await api.get(`/packages/registry?runtime_id=${runtime.id}&manager=${targetManager}`);
+      const res = await api.get(`/packages/registry?runtime=${runtime.name}@${runtime.version}&manager=${targetManager}`);
       let url = res.data.data?.registry || '';
       // UX improvement: if the registry is the npm default, show it as empty
       // so the placeholder is visible and the user intuitively sees "default"
@@ -53,7 +53,7 @@ export default function PackageRegistryModal({
     setSaving(true);
     try {
       await api.post('/packages/registry', {
-        runtime_id: runtime.id,
+        runtime: `${runtime.name}@${runtime.version}`,
         manager: manager,
         registry: registryUrl,
       });

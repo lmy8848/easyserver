@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Card, Button, Space, Modal, Tag, Progress, message } from 'antd';
-import { PlusOutlined, GlobalOutlined } from '@ant-design/icons';
+import { PlusOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
@@ -42,6 +42,8 @@ export default function Runtime() {
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsData, setLogsData] = useState<LogsData | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  // logStream 是 SSE 实时累积的日志内容（DB 的 logs 列不再存日志本体）。
+  const [logStream, setLogStream] = useState('');
   const logsContainerRef = useRef<HTMLPreElement>(null);
 
   // Auto-scroll log <pre> to bottom when new content arrives, but only if the user
@@ -53,54 +55,47 @@ export default function Runtime() {
     if (nearBottom) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [logsData?.logs]);
+  }, [logStream]);
 
+  // SSE 日志流：打开弹窗且有绑定（lang@exact）时连接 /runtime/log/stream/:lang@exact，
+  // 先回放已缓冲行再收实时行。done 帧更新状态/错误并关闭；关闭弹窗或切换目标时断开。
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const pollLogs = async () => {
-      if (!active || !logsVisible || !logsData?.id) return;
+    if (!logsVisible || !logsData?.name || !logsData?.version) return;
+    const es = new EventSource(`/api/runtime/log/stream/${logsData.name}@${logsData.version}`);
+    es.onmessage = (e) => {
       try {
-        const res = await api.get(`/runtime/logs/${logsData.id}`);
-        if (!active) return;
-        const data = res.data.data;
-        setLogsData(data);
-        if (data?.status === 'installing' || data?.status === 'uninstalling') {
-          timer = setTimeout(pollLogs, 2000);
-        }
-      } catch (e: unknown) {
-        if (!active) return;
-        const code = (e as { code?: number })?.code;
-        // Backend returns code=40400 when the row is gone. Either uninstall succeeded
-        // and the record was deleted, or it was wiped out of band. Either way, stop polling.
-        if (code === 40400) {
-          if (logsData?.status === 'uninstalling') {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'line') {
+          setLogStream(prev => prev + (prev ? '\n' : '') + msg.text);
+        } else if (msg.type === 'done') {
+          es.close();
+          // 终态成功时任务已成功即清、SSE 无日志可回放——done 带的"日志已丢失"
+          // 说明对已完成操作是误导，别覆盖已成功的状态。
+          if (msg.error) {
+            setLogsData(prev => {
+              if (!prev) return prev;
+              if (prev.status === 'installed' || prev.status === 'uninstalled') return prev;
+              return {
+                ...prev,
+                error_message: msg.error,
+                status: prev.status === 'uninstalling' ? 'uninstall_failed' : 'failed',
+              };
+            });
+          } else {
             setLogsData(prev => prev && ({
               ...prev,
-              status: 'uninstalled',
+              status: prev.status === 'uninstalling' ? 'uninstalled' : 'installed',
               progress: 100,
               progress_step: 'done',
-              logs: (prev.logs ? prev.logs + '\n' : '') + '卸载完成',
             }));
           }
-          return;
         }
-        // Other errors: keep polling silently (pre-existing behavior)
-        timer = setTimeout(pollLogs, 2000);
-      }
+      } catch { /* ignore malformed frames */ }
     };
-
-    if (logsVisible && logsData?.id && (logsData?.status === 'installing' || logsData?.status === 'uninstalling')) {
-      timer = setTimeout(pollLogs, 2000);
-    }
-
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-    };
-     
-  }, [logsVisible, logsData?.id, logsData?.status]);
+    // 服务端关闭流或瞬断：关闭，让 done 状态接管 UI（EventSource 否则自动重连）。
+    es.onerror = () => { es.close(); };
+    return () => es.close();
+  }, [logsVisible, logsData?.name, logsData?.version]);
 
   // --- Cleanup modal state ---
   const [cleanupVisible, setCleanupVisible] = useState(false);
@@ -269,10 +264,11 @@ export default function Runtime() {
 
   // ==================== Logs modal actions ====================
 
-  const handleViewLogs = async (id: number) => {
+  const handleViewLogs = async (binding: string) => {
     setLogsLoading(true);
+    setLogStream('');
     try {
-      const res = await api.get(`/runtime/logs/${id}`);
+      const res = await api.get(`/runtime/logs/${binding}`);
       setLogsData(res.data.data);
       setLogsVisible(true);
     } catch (error: unknown) {
@@ -290,10 +286,10 @@ export default function Runtime() {
 
   // ==================== Cleanup modal actions ====================
 
-  const handleViewCleanup = async (id: number) => {
+  const handleViewCleanup = async (binding: string) => {
     setCleanupLoading(true);
     try {
-      const res = await api.get(`/runtime/cleanup/${id}`);
+      const res = await api.get(`/runtime/cleanup/${binding}`);
       setCleanupData(res.data.data);
       setCleanupVisible(true);
     } catch (error: unknown) {
@@ -323,13 +319,10 @@ export default function Runtime() {
   const handleOpenPackageManager = async (runtime: RuntimeEnvironment) => {
     setSelectedRuntimeForPackage(runtime);
     setPackageVisible(true);
-    await fetchPackages(runtime.id);
+    await fetchPackages(runtime);
   };
 
-  const fetchPackages = async (runtimeId: number) => {
-    const runtime = environments.find(r => r.id === runtimeId);
-    if (!runtime) return;
-    
+  const fetchPackages = async (runtime: RuntimeEnvironment) => {
     const isSupported = catalog.find(c => c.lang === runtime.name)?.supports_global_pkgs;
     if (!isSupported) {
       setPackageData([]);
@@ -338,7 +331,7 @@ export default function Runtime() {
 
     setPackageLoading(true);
     try {
-      const res = await api.get(`/packages?runtime_id=${runtimeId}`);
+      const res = await api.get(`/packages?runtime=${runtime.name}@${runtime.version}`);
       setPackageData(res.data.data?.packages || []);
     } catch (error) {
       message.error('获取包列表失败');
@@ -354,15 +347,14 @@ export default function Runtime() {
 
     setPackageInstalling(true);
     try {
-      await api.post('/packages/install', {
-        runtime_id: selectedRuntimeForPackage.id,
+      await api.post(`/packages/install?runtime=${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}`, {
         name: values.name,
         version: values.version || '',
         scope: 'global',
         manager: values.manager || 'npm',
       });
       message.success(`${values.name} 安装成功`);
-      await fetchPackages(selectedRuntimeForPackage.id);
+      await fetchPackages(selectedRuntimeForPackage);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '安装失败'));
     } finally {
@@ -374,13 +366,12 @@ export default function Runtime() {
     if (!selectedRuntimeForPackage) return;
 
     try {
-      await api.post('/packages/uninstall', {
-        runtime_id: selectedRuntimeForPackage.id,
+      await api.post(`/packages/uninstall?runtime=${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}`, {
         name: pkg.name,
         manager: pkg.source || 'npm',
       });
       message.success(`${pkg.name} 卸载成功`);
-      await fetchPackages(selectedRuntimeForPackage.id);
+      await fetchPackages(selectedRuntimeForPackage);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '卸载失败'));
     }
@@ -390,13 +381,12 @@ export default function Runtime() {
     if (!selectedRuntimeForPackage) return;
     setUpdatingPackageName(pkg.name);
     try {
-      await api.post('/packages/update', {
-        runtime_id: selectedRuntimeForPackage.id,
+      await api.post(`/packages/update?runtime=${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}`, {
         name: pkg.name,
         manager: pkg.source || 'npm',
       });
       message.success(`${pkg.name} 更新成功`);
-      await fetchPackages(selectedRuntimeForPackage.id);
+      await fetchPackages(selectedRuntimeForPackage);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '更新失败'));
     } finally {
@@ -418,7 +408,7 @@ export default function Runtime() {
 
     setPackageSearchLoading(true);
     try {
-      const res = await api.get(`/packages/search?runtime_id=${selectedRuntimeForPackage.id}&q=${query}`);
+      const res = await api.get(`/packages/search?runtime=${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}&q=${query}`);
       setPackageSearchResults(res.data.data?.packages || []);
     } catch (error: unknown) {
       console.error('Search failed:', error);
@@ -436,7 +426,7 @@ export default function Runtime() {
 
     setPackageVersionsLoading(true);
     try {
-      const res = await api.get(`/packages/versions/${packageName}?runtime_id=${selectedRuntimeForPackage.id}`);
+      const res = await api.get(`/packages/versions/${packageName}?runtime=${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}`);
       setPackageVersions(res.data.data?.versions || []);
     } catch (error: unknown) {
       console.error('Get versions failed:', error);
@@ -460,6 +450,9 @@ export default function Runtime() {
         title="运行环境管理"
         extra={
           <Space>
+            <Button icon={<ReloadOutlined />} onClick={fetchEnvironments} loading={loading}>
+              刷新
+            </Button>
             <Button icon={<GlobalOutlined />} onClick={() => setMirrorVisible(true)}>
               镜像源配置
             </Button>
@@ -514,7 +507,7 @@ export default function Runtime() {
           (logsData?.status === 'uninstalling'
             || logsData?.status === 'uninstalled'
             || logsData?.status === 'uninstall_failed'
-            || logsData?.logs?.includes('正在卸载'))
+            || logStream.includes('正在卸载'))
             ? '卸载日志'
             : '安装日志'
         }
@@ -569,7 +562,7 @@ export default function Runtime() {
                 {logsData.progress_step && <span style={{ color: '#999' }}>{logsData.progress_step}</span>}
               </div>
             )}
-            {logsData.logs && (
+            {logStream && (
               <div style={{ marginBottom: 16 }}>
                 <strong>日志:</strong>
                 <pre
@@ -584,7 +577,7 @@ export default function Runtime() {
                     fontFamily: 'Consolas, Monaco, monospace',
                   }}
                 >
-                  {logsData.logs}
+                  {logStream}
                 </pre>
               </div>
             )}
@@ -642,37 +635,6 @@ export default function Runtime() {
               </Tag>
             </div>
 
-            {cleanupData.will_cleanup?.env_configs_count > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <strong>将清理以下环境变量：</strong>
-                <ul style={{ marginTop: 8 }}>
-                  {cleanupData.env_configs?.map((config) => (
-                    <li key={config.id}>
-                      <Tag color="orange">{config.name}</Tag> = {config.value}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {cleanupData.will_cleanup?.path_entries_count > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <strong>将清理以下 PATH 条目：</strong>
-                <ul style={{ marginTop: 8 }}>
-                  {cleanupData.path_entries?.map((entry) => (
-                    <li key={entry.id}>
-                      <Tag color="orange">{entry.path}</Tag>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {cleanupData.will_cleanup?.env_configs_count === 0 &&
-             cleanupData.will_cleanup?.path_entries_count === 0 && (
-              <p style={{ color: '#999' }}>没有关联的环境变量或 PATH 条目需要清理</p>
-            )}
-
             <div style={{ marginTop: 16, padding: 12, background: '#fff7e6', borderRadius: 4 }}>
               <strong style={{ color: '#fa8c16' }}>注意：</strong>
               <span> 此操作将删除运行环境及其关联的配置，卸载后需要重新安装。</span>
@@ -711,7 +673,7 @@ export default function Runtime() {
           setPackageVersions([]);
         }}
         onRefreshPackages={async () => {
-          if (selectedRuntimeForPackage) await fetchPackages(selectedRuntimeForPackage.id);
+          if (selectedRuntimeForPackage) await fetchPackages(selectedRuntimeForPackage);
         }}
         onConfigRegistry={handleConfigRegistry}
         onInstallPackage={handleInstallPackage}

@@ -3,9 +3,11 @@ package runtimeenv
 import (
 	"context"
 	"fmt"
-	"log"
+	stdlog "log"
 	"os"
 	"strings"
+
+	"easyserver/internal/infra/task"
 )
 
 // buildDepsApt 列出在 Debian/Ubuntu 上从源码编译指定运行时所需的系统包。
@@ -32,43 +34,41 @@ func hasAptGet() bool {
 }
 
 // ensureBuildDeps 在调用 mise install 前确保系统级编译依赖到位。
-// 整个过程的输出由 runStreaming 流式写入运行环境的安装日志，前端"查看
-// 日志"可见。
+// 整个过程输出由 runStreaming/installWriter 写进任务日志（内存流），前端
+// SSE 实时可见。
 //
 // 行为：
 //   - lang 不在 buildDepsApt 中（node/go/java）→ 直接返回 nil
 //   - 非 apt 系统 → 写入跳过提示后返回 nil，让 mise install 继续尝试
 //   - apt-get update 失败 → 记一条 warning，不中断（往往只是部分镜像超时）
 //   - apt-get install 失败 → 返回 error，installRuntime 据此把状态置为 failed
-func (s *Service) ensureBuildDeps(ctx context.Context, id int64, lang string) error {
+func (s *Service) ensureBuildDeps(ctx context.Context, lang string, log *task.TaskLog) error {
 	pkgs, ok := buildDepsApt[lang]
 	if !ok {
 		return nil
 	}
 	if !hasAptGet() {
-		s.appendProgress(ctx, id, 10, "deps-skip",
-			"非 Debian/Ubuntu 系统，跳过自动安装编译依赖。如失败请手动安装："+strings.Join(pkgs, " "))
+		log.Append("非 Debian/Ubuntu 系统，跳过自动安装编译依赖。如失败请手动安装：" + strings.Join(pkgs, " "))
 		return nil
 	}
 
 	// apt-get update：包索引过期时 install 会报 "Unable to locate package"。
 	// -qq 静默普通进度。失败不中断——常见原因是个别镜像超时，后续 install
 	// 仍可用本地缓存的索引完成。
-	if _, exitCode, err := s.runStreaming(ctx, id, 5, "apt-update",
-		"更新 apt 软件包索引 (apt-get update)",
+	if _, exitCode, err := s.runStreaming(ctx,
+		"更新 apt 软件包索引 (apt-get update)", log,
 		"/usr/bin/apt-get", "update", "-qq"); err != nil || exitCode != 0 {
-		s.appendProgress(ctx, id, 10, "apt-update",
-			fmt.Sprintf("⚠ apt-get update 失败 (exit %d, err=%v)，继续尝试 install", exitCode, err))
+		log.Append(fmt.Sprintf("⚠ apt-get update 失败 (exit %d, err=%v)，继续尝试 install", exitCode, err))
 	}
 
 	// -y 跳过确认；-q 减噪。已装的包会被 apt 当成"已是最新"快速跳过，
 	// 因此对老服务器和新服务器是同一份代码。
 	args := append([]string{"install", "-y", "-q"}, pkgs...)
-	output, exitCode, err := s.runStreaming(ctx, id, 15, "apt-install",
-		fmt.Sprintf("安装 %s 编译依赖 (%d 个包: %s)", lang, len(pkgs), strings.Join(pkgs, " ")),
+	output, exitCode, err := s.runStreaming(ctx,
+		fmt.Sprintf("安装 %s 编译依赖 (%d 个包: %s)", lang, len(pkgs), strings.Join(pkgs, " ")), log,
 		"/usr/bin/apt-get", args...)
 	if err != nil || exitCode != 0 {
-		log.Printf("runtime: apt-get install %s failed (exit %d): %v", lang, exitCode, err)
+		stdlog.Printf("runtime: apt-get install %s failed (exit %d): %v", lang, exitCode, err)
 		return fmt.Errorf("apt-get install %s 失败 (exit %d): %s",
 			lang, exitCode, tailLines(output, 8))
 	}

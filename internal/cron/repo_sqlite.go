@@ -19,34 +19,6 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-// GetRuntimeVersionStatus reads the status of a runtime_version row.
-func (r *sqliteRepo) GetRuntimeVersionStatus(ctx context.Context, runtimeVersionID int64) (string, error) {
-	var status string
-	err := r.db.QueryRowContext(ctx,
-		"SELECT status FROM runtime_version WHERE id = ?", runtimeVersionID).Scan(&status)
-	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("runtime_version %d not found", runtimeVersionID)
-	}
-	if err != nil {
-		return "", err
-	}
-	return status, nil
-}
-
-// GetRuntime 返回 runtime_version 行的 lang/exact/status。
-func (r *sqliteRepo) GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error) {
-	err = r.db.QueryRowContext(ctx,
-		"SELECT lang, exact, status FROM runtime_version WHERE id = ?", id).
-		Scan(&lang, &exact, &status)
-	if err == sql.ErrNoRows {
-		return "", "", "", fmt.Errorf("runtime_version %d not found", id)
-	}
-	if err != nil {
-		return "", "", "", err
-	}
-	return lang, exact, status, nil
-}
-
 func (r *sqliteRepo) ListScripts(ctx context.Context) ([]Script, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, name, description, created_at, updated_at
