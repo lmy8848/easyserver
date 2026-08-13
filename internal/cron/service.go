@@ -26,15 +26,16 @@ type Service struct {
 }
 
 // NewService creates a new cron Service.
-func NewService(repo Repository, exec executor.CommandExecutor, provider mise.Provider) *Service {
-	return NewServiceWithSink(repo, exec, provider, nil)
+func NewService(repo Repository, exec executor.CommandExecutor, provider mise.Provider, runtime RuntimeLookup) *Service {
+	return NewServiceWithSink(repo, exec, provider, runtime, nil)
 }
 
 // NewServiceWithSink 在 NewService 基础上附加通知 sink（nil 时失败巡检不发送）。
-func NewServiceWithSink(repo Repository, exec executor.CommandExecutor, provider mise.Provider, sink notification.Sink) *Service {
+// runtime 提供"已安装运行环境"校验（ADR-0009），由 router 注入 runtimeenv.Service。
+func NewServiceWithSink(repo Repository, exec executor.CommandExecutor, provider mise.Provider, runtime RuntimeLookup, sink notification.Sink) *Service {
 	return &Service{
 		repo:      repo,
-		tm:        NewTimerManager(exec, provider, repo),
+		tm:        NewTimerManager(exec, provider, runtime),
 		lastSeen:  make(map[string]string),
 		notifSink: sink,
 	}

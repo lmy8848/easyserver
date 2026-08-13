@@ -194,6 +194,33 @@ func TestStartWithoutLogIsOptionless(t *testing.T) {
 	}
 }
 
+func TestTaskPanicRecoversAsFailed(t *testing.T) {
+	// 任务体 panic 不拖垮执行器：归为 failed、done 关闭、同 key 可重提覆盖。
+	m := NewManager(8)
+	tk, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error {
+		panic("boom")
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	waitDone(t, tk)
+	if tk.Status() != StatusFailed {
+		t.Fatalf("status = %v, want %v", tk.Status(), StatusFailed)
+	}
+	if tk.Err() == nil || !strings.Contains(tk.Err().Error(), "panicked") {
+		t.Fatalf("err = %v, want a panicked error", tk.Err())
+	}
+	// 同 key 重提不受 panic 残留影响：failed 记录可被覆盖。
+	newTk, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error { return nil })
+	if err != nil {
+		t.Fatalf("restart after panic: %v", err)
+	}
+	waitDone(t, newTk)
+	if newTk.Status() != StatusSucceeded {
+		t.Fatalf("new task status = %v, want %v", newTk.Status(), StatusSucceeded)
+	}
+}
+
 func TestStartWithLogBuffersAndTail(t *testing.T) {
 	m := NewManager(8)
 	var log *TaskLog

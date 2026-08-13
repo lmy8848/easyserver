@@ -15,8 +15,8 @@ interface RuntimeListProps {
   cleanupLoading: boolean;
   onDeleteRecord: (name: string, version: string) => void;
   onRetry: (name: string, version: string) => void;
-  onViewLogs: (id: number) => void;
-  onViewCleanup: (id: number) => void;
+  onViewLogs: (binding: string) => void;
+  onViewCleanup: (binding: string) => void;
   onOpenPackageManager: (runtime: RuntimeEnvironment) => void;
 }
 
@@ -124,7 +124,7 @@ export default function RuntimeList({
                 size="small"
                 danger
                 icon={<DeleteOutlined />}
-                onClick={() => onViewCleanup(record.id)}
+                onClick={() => onViewCleanup(`${record.name}@${record.version}`)}
                 loading={cleanupLoading}
               >
                 卸载
@@ -135,7 +135,7 @@ export default function RuntimeList({
             <Button
               type="link"
               size="small"
-              onClick={() => onViewLogs(record.id)}
+              onClick={() => onViewLogs(`${record.name}@${record.version}`)}
               loading={logsLoading}
             >
               查看日志
@@ -146,7 +146,7 @@ export default function RuntimeList({
               <Button
                 type="link"
                 size="small"
-                onClick={() => onViewLogs(record.id)}
+                onClick={() => onViewLogs(`${record.name}@${record.version}`)}
                 loading={logsLoading}
               >
                 查看日志
@@ -174,7 +174,7 @@ export default function RuntimeList({
               <Button
                 type="link"
                 size="small"
-                onClick={() => onViewLogs(record.id)}
+                onClick={() => onViewLogs(`${record.name}@${record.version}`)}
                 loading={logsLoading}
               >
                 查看日志
@@ -198,7 +198,7 @@ export default function RuntimeList({
     <Table
       columns={columns}
       dataSource={environments}
-      rowKey="id"
+      rowKey={(r) => `${r.name}@${r.version}`}
       loading={loading}
       pagination={false}
     />

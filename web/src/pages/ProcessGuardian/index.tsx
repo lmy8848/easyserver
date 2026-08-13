@@ -20,11 +20,11 @@ const { TextArea } = Input;
 
 const MODAL_TOP_OFFSET = 40;
 
-// 表单中间类型：env 是 JSON 字符串（TextArea），runtime 是 {id,lang,exact} 对象。
-// 提交时 handleSubmit 再转成 ManagedServiceSpec（env -> object, runtime -> 三字段）。
-type ManagedServiceForm = Omit<ManagedServiceSpec, 'env' | 'runtime_version_id' | 'runtime_lang' | 'runtime_exact'> & {
+// 表单中间类型：env 是 JSON 字符串（TextArea），runtime 是 lang@exact 字符串。
+// 提交时 handleSubmit 再转成 ManagedServiceSpec（env -> object）。
+type ManagedServiceForm = Omit<ManagedServiceSpec, 'env' | 'runtime'> & {
   env: string;
-  runtime?: { id: number; lang: string; exact: string };
+  runtime?: string; // lang@exact（ADR-0009 绑定键）
 };
 
 const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
@@ -269,9 +269,7 @@ function ManagedTab() {
       restart_delay: s.restart_delay ?? 5,
       stop_timeout: s.stop_timeout ?? 10,
       auto_start: s.enabled,
-      runtime: (s.runtime_version_id && s.runtime_lang && s.runtime_exact)
-        ? { id: s.runtime_version_id, lang: s.runtime_lang, exact: s.runtime_exact }
-        : undefined,
+      runtime: s.runtime || undefined,
     });
     setModalVisible(true);
   };
@@ -290,8 +288,8 @@ function ManagedTab() {
         }
       }
       setSubmitting(true);
-      // runtime 表单存的是 {id,lang,exact} 对象，拆成三字段给后端。
-      const rt = values.runtime as { id: number; lang: string; exact: string } | undefined;
+      // runtime 表单存 lang@exact 字符串（ADR-0009 绑定键）。
+      const rt = values.runtime as string | undefined;
       const spec: ManagedServiceSpec = {
         name: values.name, // 后端 Create 会 TrimPrefix 归一化短名
         description: values.description,
@@ -303,9 +301,7 @@ function ManagedTab() {
         restart_delay: values.restart_delay,
         stop_timeout: values.stop_timeout,
         auto_start: values.auto_start,
-        runtime_version_id: rt?.id || 0,
-        runtime_lang: rt?.lang || '',
-        runtime_exact: rt?.exact || '',
+        runtime: rt || '',
       };
       if (editing) {
         await serviceApi.update(editing.name, spec);
@@ -479,8 +475,8 @@ function ManagedTab() {
                 <Text code copyable style={{ fontSize: 12, wordBreak: 'break-all' }}>{detailService.exec_start || '-'}</Text>
               </Descriptions.Item>
               {detailService.dir && <Descriptions.Item label="工作目录">{detailService.dir}</Descriptions.Item>}
-              {detailService.runtime_version_id > 0 && (
-                <Descriptions.Item label="运行时">{detailService.runtime_lang}@{detailService.runtime_exact}</Descriptions.Item>
+              {detailService.runtime && (
+                <Descriptions.Item label="运行时">{detailService.runtime}</Descriptions.Item>
               )}
               {detailService.env && Object.keys(detailService.env).length > 0 && (
                 <Descriptions.Item label="环境变量">

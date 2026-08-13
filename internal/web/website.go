@@ -124,22 +124,21 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	errorLog := fmt.Sprintf("/var/log/nginx/%s_error.log", req.Domain)
 
 	website := &Website{
-		WebServerID:      webServerID,
-		Name:             req.Name,
-		Domain:           req.Domain,
-		RootPath:         req.RootPath,
-		Port:             port,
-		ProjectType:      projectType,
-		AppPort:          appPort,
-		ProxyEnabled:     proxyEnabled,
-		ProxyPass:        proxyPass,
-		CustomConfig:     req.CustomConfig,
-		ConfigOptions:    req.ConfigOptions,
-		BuildCommand:     req.BuildCommand,
-		StartCommand:     req.StartCommand,
-		RuntimeVersionID: req.RuntimeVersionID,
-		AccessLog:        accessLog,
-		ErrorLog:         errorLog,
+		WebServerID:   webServerID,
+		Name:          req.Name,
+		Domain:        req.Domain,
+		RootPath:      req.RootPath,
+		Port:          port,
+		ProjectType:   projectType,
+		AppPort:       appPort,
+		ProxyEnabled:  proxyEnabled,
+		ProxyPass:     proxyPass,
+		CustomConfig:  req.CustomConfig,
+		ConfigOptions: req.ConfigOptions,
+		BuildCommand:  req.BuildCommand,
+		StartCommand:  req.StartCommand,
+		AccessLog:     accessLog,
+		ErrorLog:      errorLog,
 	}
 
 	id, err := s.repo.Create(ctx, website)
@@ -157,18 +156,17 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	}
 
 	return &Website{
-		ID:               id,
-		WebServerID:      webServerID,
-		Name:             req.Name,
-		Domain:           req.Domain,
-		RootPath:         req.RootPath,
-		Port:             port,
-		ProjectType:      projectType,
-		AppPort:          appPort,
-		BuildCommand:     req.BuildCommand,
-		StartCommand:     req.StartCommand,
-		RuntimeVersionID: req.RuntimeVersionID,
-		Status:           "active",
+		ID:           id,
+		WebServerID:  webServerID,
+		Name:         req.Name,
+		Domain:       req.Domain,
+		RootPath:     req.RootPath,
+		Port:         port,
+		ProjectType:  projectType,
+		AppPort:      appPort,
+		BuildCommand: req.BuildCommand,
+		StartCommand: req.StartCommand,
+		Status:       "active",
 	}, nil
 }
 
@@ -267,9 +265,6 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	}
 	if req.StartCommand != nil {
 		w.StartCommand = *req.StartCommand
-	}
-	if req.RuntimeVersionID != nil {
-		w.RuntimeVersionID = *req.RuntimeVersionID
 	}
 	if req.ProcessID != nil {
 		w.ProcessID = *req.ProcessID

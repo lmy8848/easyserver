@@ -39,7 +39,8 @@ _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 ### 运行时
 
 - **Runtime** — 编程语言运行时（PHP、Node.js、Python 等）。一期纳管：node / python / go / java / php。
-- **Runtime Version** — 由 `mise` 接管安装的精确版本号（如 `20.11.0`）。版本号一旦落库不漂移；"升级到最新补丁"会产生新记录。
+- **Runtime Version** — 由 `mise` 接管安装的精确版本号（如 `20.11.0`）。权威来源是 `$MISE_DATA_DIR/installs/<tool>/<version>/` 目录；面板安装成功会写入 `.easyserver-ok` 完成标记，扫描只认带标记的目录。手动 `mise install` 的版本不带标记，面板不显示（见 ADR-0009）。
+- **Runtime Binding（运行时绑定）** — 用 `lang@exact`（如 `node@20.11.0`）唯一确定一个已安装版本，cron/进程守护通过它绑定执行环境。持久化形态是 systemd unit 文件的 `RuntimeLang`/`RuntimeExact` 注释；面板前端 Select 的值即此字符串（见 ADR-0009）。
 - **Global Default** — 通过 `/etc/mise/config.toml` 写入的系统级默认版本，仅服务 SSH 登录用户与未受面板控制的脚本；面板自身的执行流不依赖。
 - **Execution Shim** — 面板主动发起的执行（Process、Cron）强制包裹为 `mise exec <lang>@<exact> -- <cmd>`，彻底隔离 PATH。托管 systemd unit（进程守护、定时任务）的 ExecStart 由面板生成时即带有此包裹。
 - **Mirror Profile** — 存于 DB 的镜像 env 表（淘宝 / 华为 / 清华为默认 seed），生效后写入 `/etc/mise/config.toml` 的 `[env]` 段供 mise 读取，UI 可编辑。

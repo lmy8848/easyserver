@@ -21,7 +21,7 @@ func (r *sqliteWebsiteRepo) List(ctx context.Context, webServerID int64) ([]Webs
 	rows, err := r.db.QueryContext(ctx, `SELECT id, web_server_id, name, domain, root_path, port,
 				project_type, app_port, ssl_enabled, ssl_cert_path, ssl_key_path, proxy_enabled, proxy_pass,
 				custom_config, config_options, process_id, build_command, start_command,
-				runtime_version_id, access_log, error_log, status, created_at, updated_at
+				access_log, error_log, status, created_at, updated_at
 				FROM websites WHERE web_server_id = ? ORDER BY id DESC`, webServerID)
 	if err != nil {
 		return nil, fmt.Errorf("list websites: %w", err)
@@ -34,7 +34,7 @@ func (r *sqliteWebsiteRepo) List(ctx context.Context, webServerID int64) ([]Webs
 		if err := rows.Scan(&w.ID, &w.WebServerID, &w.Name, &w.Domain, &w.RootPath, &w.Port,
 			&w.ProjectType, &w.AppPort, &w.SSLEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.ProxyEnabled, &w.ProxyPass,
 			&w.CustomConfig, &w.ConfigOptions, &w.ProcessID, &w.BuildCommand, &w.StartCommand,
-			&w.RuntimeVersionID, &w.AccessLog, &w.ErrorLog, &w.Status, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			&w.AccessLog, &w.ErrorLog, &w.Status, &w.CreatedAt, &w.UpdatedAt); err != nil {
 			continue
 		}
 		sites = append(sites, w)
@@ -51,12 +51,12 @@ func (r *sqliteWebsiteRepo) Get(ctx context.Context, webServerID, id int64) (*We
 	err := r.db.QueryRowContext(ctx, `SELECT id, web_server_id, name, domain, root_path, port,
 				project_type, app_port, ssl_enabled, ssl_cert_path, ssl_key_path, proxy_enabled, proxy_pass,
 				custom_config, config_options, process_id, build_command, start_command,
-				runtime_version_id, access_log, error_log, status, created_at, updated_at
+				access_log, error_log, status, created_at, updated_at
 				FROM websites WHERE id = ? AND web_server_id = ?`, id, webServerID).Scan(
 		&w.ID, &w.WebServerID, &w.Name, &w.Domain, &w.RootPath, &w.Port,
 		&w.ProjectType, &w.AppPort, &w.SSLEnabled, &w.SSLCertPath, &w.SSLKeyPath, &w.ProxyEnabled, &w.ProxyPass,
 		&w.CustomConfig, &w.ConfigOptions, &w.ProcessID, &w.BuildCommand, &w.StartCommand,
-		&w.RuntimeVersionID, &w.AccessLog, &w.ErrorLog, &w.Status, &w.CreatedAt, &w.UpdatedAt)
+		&w.AccessLog, &w.ErrorLog, &w.Status, &w.CreatedAt, &w.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -71,11 +71,11 @@ func (r *sqliteWebsiteRepo) Create(ctx context.Context, w *Website) (int64, erro
 	result, err := r.db.ExecContext(ctx, `INSERT INTO websites
 				(web_server_id, name, domain, root_path, port, project_type, app_port,
 				proxy_enabled, proxy_pass, custom_config, config_options, process_id,
-				build_command, start_command, runtime_version_id, access_log, error_log)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				build_command, start_command, access_log, error_log)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.WebServerID, w.Name, w.Domain, w.RootPath, w.Port, w.ProjectType, w.AppPort,
 		w.ProxyEnabled, w.ProxyPass, w.CustomConfig, w.ConfigOptions, w.ProcessID,
-		w.BuildCommand, w.StartCommand, w.RuntimeVersionID, w.AccessLog, w.ErrorLog)
+		w.BuildCommand, w.StartCommand, w.AccessLog, w.ErrorLog)
 	if err != nil {
 		return 0, fmt.Errorf("create website: %w", err)
 	}
@@ -88,12 +88,12 @@ func (r *sqliteWebsiteRepo) Update(ctx context.Context, w *Website) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE websites SET
 				name = ?, domain = ?, root_path = ?, port = ?, project_type = ?, app_port = ?,
 				proxy_enabled = ?, proxy_pass = ?, custom_config = ?, config_options = ?,
-				process_id = ?, build_command = ?, start_command = ?, runtime_version_id = ?,
+				process_id = ?, build_command = ?, start_command = ?,
 				updated_at = datetime('now')
 				WHERE id = ? AND web_server_id = ?`,
 		w.Name, w.Domain, w.RootPath, w.Port, w.ProjectType, w.AppPort,
 		w.ProxyEnabled, w.ProxyPass, w.CustomConfig, w.ConfigOptions, w.ProcessID,
-		w.BuildCommand, w.StartCommand, w.RuntimeVersionID, w.ID, w.WebServerID)
+		w.BuildCommand, w.StartCommand, w.ID, w.WebServerID)
 	return err
 }
 

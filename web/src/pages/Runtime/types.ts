@@ -1,12 +1,11 @@
 export interface RuntimeEnvironment {
-  id: number;
-  name: string;
-  version: string;
+  name: string;          // lang: node / python / ...
+  version: string;       // exact: 20.11.0
   path: string;
-  status: string;
-  progress: number;
-  progress_step: string;
-  error_message: string;
+  status: string;        // 恒 'installed'（目录扫描权威，ADR-0009）
+  progress: number;      // 恒 100
+  progress_step: string; // 恒 'done'
+  error_message: string; // 恒空
   installed_at: string;
 }
 
@@ -23,9 +22,8 @@ export interface PackageInfo {
 }
 
 export interface LogsData {
-  id: number;
-  name: string;
-  version: string;
+  name: string;          // lang
+  version: string;       // exact
   status: string;
   progress: number;
   progress_step: string;
@@ -38,12 +36,6 @@ export interface CleanupData {
     name: string;
     version: string;
   };
-  will_cleanup: {
-    env_configs_count: number;
-    path_entries_count: number;
-  };
-  env_configs: Array<{ id: number; name: string; value: string }>;
-  path_entries: Array<{ id: number; path: string }>;
 }
 
 export interface PackageSearchResult {

@@ -32,10 +32,8 @@ type ServiceInfo struct {
 	UptimeSeconds int64   `json:"uptime_seconds"`
 
 	// 托管服务元数据（解析 unit 文件注释得到；系统服务为零值）
-	Managed          bool   `json:"managed"`
-	RuntimeVersionID int64  `json:"runtime_version_id"`
-	RuntimeLang      string `json:"runtime_lang"`
-	RuntimeExact     string `json:"runtime_exact"`
+	Managed bool   `json:"managed"`
+	Runtime string `json:"runtime"` // lang@exact，"" = 不绑定（ADR-0009 绑定键）
 
 	// 托管服务配置回显（解析 [Unit]/[Service] 段得到；编辑表单用）
 	ExecStart    string            `json:"exec_start"`
@@ -63,12 +61,11 @@ type journalEntry struct {
 	Transport         string `json:"_TRANSPORT"`
 }
 
-// RuntimeLookup 查询 runtime_version 表，补 lang/exact/status。
-// 由 cron 包实现（systemd 包不反向依赖 cron），在 app.go 注入。
+// RuntimeLookup 校验运行时绑定：lang@exact 是否已安装（ADR-0009 目录权威）。
+// 由 runtimeenv.Service 实现，在 app.go 注入。
 type RuntimeLookup interface {
-	// GetRuntime 返回 runtime_version 行的 lang/exact/status。
-	// 不存在返回错误。
-	GetRuntime(ctx context.Context, id int64) (lang, exact, status string, err error)
+	// Installed 判断 lang@exact 是否已安装。
+	Installed(ctx context.Context, lang, exact string) bool
 }
 
 // ServiceManager manages systemd services.
@@ -553,7 +550,7 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 		return err
 	}
 
-	// runtime 补全：前端只传 runtime_version_id，后端查 DB 补 lang/exact。
+	// runtime 绑定校验：lang@exact 已安装（ADR-0009），并拆 Lang/Exact。
 	if err := m.fillRuntime(ctx, spec); err != nil {
 		return err
 	}
@@ -711,25 +708,22 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 	return m.daemonReload(ctx)
 }
 
-// fillRuntime 当 spec.RuntimeVersionID > 0 时查 DB 补 RuntimeLang/RuntimeExact，
-// 并校验 runtime 状态为 installed。前端只传 ID，lang/exact 由后端补全，
-// 避免前端传错或不一致。
+// fillRuntime 当 spec.Runtime 绑定 lang@exact 时校验已安装。
+// 绑定键即字符串（ADR-0009），Lang/Exact 由渲染时拆分；校验由 RuntimeLookup 完成。
 func (m *ServiceManager) fillRuntime(ctx context.Context, spec *ManagedUnitSpec) error {
-	if spec.RuntimeVersionID <= 0 {
+	if spec.Runtime == "" {
 		return nil
 	}
+	lang, exact, _ := strings.Cut(spec.Runtime, "@")
+	if lang == "" || exact == "" {
+		return fmt.Errorf("无效的运行时绑定: %s", spec.Runtime)
+	}
 	if m.runtime == nil {
-		return fmt.Errorf("runtime 查询未配置，无法绑定运行时版本 %d", spec.RuntimeVersionID)
+		return fmt.Errorf("runtime 查询未配置，无法绑定运行时 %s", spec.Runtime)
 	}
-	lang, exact, status, err := m.runtime.GetRuntime(ctx, spec.RuntimeVersionID)
-	if err != nil {
-		return fmt.Errorf("查询运行时版本 %d 失败: %w", spec.RuntimeVersionID, err)
+	if !m.runtime.Installed(ctx, lang, exact) {
+		return fmt.Errorf("运行时 %s 未安装（需先到「运行环境管理」安装）", spec.Runtime)
 	}
-	if status != "installed" {
-		return fmt.Errorf("运行时版本 %d 状态为 %s，无法绑定（需先安装）", spec.RuntimeVersionID, status)
-	}
-	spec.RuntimeLang = lang
-	spec.RuntimeExact = exact
 	return nil
 }
 

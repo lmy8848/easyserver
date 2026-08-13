@@ -6,19 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	stdlog "log"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"easyserver/internal/envconfig"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/infra/task"
 )
 
 // EnvConfigProvider provides read access to environment configurations.
@@ -28,31 +28,34 @@ type EnvConfigProvider interface {
 	ListEnvConfigs(ctx context.Context) ([]envconfig.EnvConfig, error)
 }
 
-type Service struct {
-	repo         Repository
-	executor     executor.CommandExecutor
-	envConfigs   EnvConfigProvider
-	provider     mise.Provider
-	installLocks sync.Map
+// RuntimeLookup 提供"已安装运行环境"的只读查询（ADR-0009：installs/ 文件系统权威）。
+// 由 cron/systemd 消费：绑定 lang@exact 时校验对应安装目录存在。
+type RuntimeLookup interface {
+	// Installed 判断 lang@exact 是否已安装（目录存在且带完成标记）。
+	Installed(ctx context.Context, lang, exact string) bool
 }
 
-func NewService(repo Repository, exec executor.CommandExecutor, envConfigs EnvConfigProvider, provider mise.Provider) *Service {
+type Service struct {
+	executor   executor.CommandExecutor
+	envConfigs EnvConfigProvider
+	provider   mise.Provider
+	taskMgr    *task.Manager // 后台 install/uninstall 执行器（key=runtime:<id> 互斥）
+}
+
+func NewService(exec executor.CommandExecutor, envConfigs EnvConfigProvider, provider mise.Provider) *Service {
 	return &Service{
-		repo:       repo,
 		executor:   exec,
 		envConfigs: envConfigs,
 		provider:   provider,
+		taskMgr:    task.NewManager(8),
 	}
 }
 
-// Init performs boot-time initialization: heals interrupted states and
-// regenerates the panel-private mise config.toml from the current env config + defaults.
+// Init performs boot-time initialization: regenerates the panel-private mise
+// config.toml from the current env config + defaults. 无 DB 状态可 heal（ADR-0009）。
 func (s *Service) Init(ctx context.Context) error {
-	if err := s.repo.HealState(ctx); err != nil {
-		log.Printf("runtime: failed to heal state: %v", err)
-	}
 	if err := s.GenerateMiseConfig(ctx); err != nil {
-		log.Printf("runtime: failed to generate mise config on boot: %v", err)
+		stdlog.Printf("runtime: failed to generate mise config on boot: %v", err)
 		return err
 	}
 	return nil
@@ -74,41 +77,57 @@ func (s *Service) GenerateMiseConfig(ctx context.Context) error {
 	return s.provider.WriteConfig(ctx, envs)
 }
 
-// ListAll returns all installed runtime environments
+// Installed 判断 lang@exact 是否已安装（目录存在且带完成标记）。
+// 实现 RuntimeLookup，供 cron/systemd 绑定校验。
+func (s *Service) Installed(ctx context.Context, lang, exact string) bool {
+	return Installed(ctx, lang, exact)
+}
+
+// Installed 包级函数：磁盘判定，纯只读。cron/systemd 经 RuntimeLookup 用，
+// runtimeenv 内部（install 去重、uninstall 存在性）直接调。
+func Installed(ctx context.Context, lang, exact string) bool {
+	_, err := os.Stat(markerPath(lang, exact))
+	return err == nil
+}
+
+// ListAll returns all installed runtime environments（扫描 installs/ 目录）。
 func (s *Service) ListAll(ctx context.Context) ([]RuntimeEnvironment, error) {
-	envs, err := s.repo.ListAll(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for i := range envs {
-		envs[i].Path = s.provider.InstallPath(envs[i].Name, envs[i].Version)
-	}
-	return envs, nil
+	return ScanInstalled(ctx)
 }
 
-// ListByName returns all versions of a specific runtime environment
+// ListByName returns all versions of a specific runtime environment.
 func (s *Service) ListByName(ctx context.Context, name string) ([]RuntimeEnvironment, error) {
-	envs, err := s.repo.ListByName(ctx, name)
+	envs, err := ScanInstalled(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for i := range envs {
-		envs[i].Path = s.provider.InstallPath(envs[i].Name, envs[i].Version)
+	var filtered []RuntimeEnvironment
+	for _, e := range envs {
+		if e.Name == name {
+			filtered = append(filtered, e)
+		}
 	}
-	return envs, nil
+	return filtered, nil
 }
 
-// GetByID returns a runtime environment by ID
-func (s *Service) GetByID(ctx context.Context, id int64) (*RuntimeEnvironment, error) {
-	env, err := s.repo.GetByID(ctx, id)
-	if err != nil || env == nil {
-		return env, err
+// GetByLangExact returns a runtime environment by lang@exact.
+func (s *Service) GetByLangExact(ctx context.Context, lang, exact string) (*RuntimeEnvironment, error) {
+	if !Installed(ctx, lang, exact) {
+		return nil, nil
 	}
-	env.Path = s.provider.InstallPath(env.Name, env.Version)
-	return env, nil
+	envs, err := ScanInstalled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range envs {
+		if e.Name == lang && e.Version == exact {
+			return &e, nil
+		}
+	}
+	return nil, nil
 }
 
-// Install installs a runtime environment
+// Install installs a runtime environment.
 func (s *Service) Install(ctx context.Context, name, version string) error {
 	if !isValidVersion(version) {
 		return fmt.Errorf("invalid version format: %s", version)
@@ -127,109 +146,73 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 		return err
 	}
 
-	lockKey := name + "@" + exactVersion
-	if _, loaded := s.installLocks.LoadOrStore(lockKey, true); loaded {
-		return fmt.Errorf("installation of %s is already in progress", lockKey)
-	}
-
-	var id int64
-	defer func() {
-		// Only remove lock if we fail BEFORE starting background routine.
-		// Background routine handles its own cleanup.
-		if id == 0 {
-			s.installLocks.Delete(lockKey)
-		}
-	}()
-
-	exists, err := s.repo.ExistsByNameAndVersion(ctx, name, exactVersion)
-	if err != nil {
-		return err
-	}
-	if exists {
+	// 已安装判定走磁盘（目录 + 完成标记），而非 DB 行。
+	if Installed(ctx, name, exactVersion) {
 		return fmt.Errorf("%s %s is already installed", name, exactVersion)
 	}
 
-	id, err = s.repo.Create(ctx, name, version, exactVersion, "installing")
-	if err != nil {
+	// 安装脱离请求生命周期：task 执行器内部用 WithoutCancel 剥离取消，请求断开
+	// 任务照常执行。同 runtime 的安装与卸载共用同一 key 互斥（key=lang@exact），
+	// 重复提交/并发超限同步返回错误。日志进 TaskLog 内存流，由 SSE 端点回放。
+	// 安装失败不再有 DB 行可查（ADR-0009）：列表不会显示失败记录。
+	if _, err := s.taskMgr.StartWithLog(ctx, runtimeTaskKey(name, exactVersion), task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
+		return s.installRuntime(ctx, name, exactVersion, log)
+	}); err != nil {
 		return err
 	}
-
-	// 安装脱离请求生命周期：客户端断开不能中断正在进行的安装（否则任务状态
-	// 会卡在 installing）。WithoutCancel 继承值但剥离取消。
-	go s.installRuntime(context.WithoutCancel(ctx), id, name, exactVersion)
 	return nil
 }
 
-// installRuntime performs the actual installation
-func (s *Service) installRuntime(ctx context.Context, id int64, name, exactVersion string) {
-	defer s.installLocks.Delete(name + "@" + exactVersion)
+// runtimeTaskKey 生成 install/uninstall 的 task key：同一 lang@exact 的安装与
+// 卸载共用同一 key，task 执行器据此保证二者互斥。
+func runtimeTaskKey(lang, exact string) string {
+	return "runtime:" + lang + "@" + exact
+}
 
+// installRuntime performs the actual installation.
+func (s *Service) installRuntime(ctx context.Context, name, exactVersion string, log *task.TaskLog) error {
 	// PHP / Python 是源码编译，必须先把 autoconf / libxml2-dev 等系统级
 	// 编译依赖装上，否则 mise install 会卡在 buildconf 阶段并报错。
 	// node / go / java 走预编译二进制，ensureBuildDeps 对它们是 no-op。
-	if err := s.ensureBuildDeps(ctx, id, name); err != nil {
-		log.Printf("runtime: failed to ensure build deps for %s: %v", name, err)
-		s.appendProgress(ctx, id, 25, "deps-failed", fmt.Sprintf("✗ 安装编译依赖失败：%v", err))
-		_ = s.repo.UpdateStatusToFailed(ctx, id, "编译依赖安装失败，详见日志")
-		return
+	if err := s.ensureBuildDeps(ctx, name, log); err != nil {
+		stdlog.Printf("runtime: failed to ensure build deps for %s: %v", name, err)
+		return err
 	}
 
-	s.appendProgress(ctx, id, 30, "installing", fmt.Sprintf("正在安装 %s...", exactVersion))
-	if err := s.provider.Install(ctx, name, exactVersion, installWriter{s: s, id: id, step: "installing"}); err != nil {
-		log.Printf("runtime: failed to install %s %s: %v", name, exactVersion, err)
-		_ = s.repo.UpdateStatusToFailed(ctx, id, "安装失败，详见日志")
-		return
+	log.Append(fmt.Sprintf("正在安装 %s...", exactVersion))
+	if err := s.provider.Install(ctx, name, exactVersion, installWriter{log: log}); err != nil {
+		stdlog.Printf("runtime: failed to install %s %s: %v", name, exactVersion, err)
+		return fmt.Errorf("安装失败: %w", err)
 	}
 
-	s.appendProgress(ctx, id, 100, "done", "安装完成")
-	_ = s.repo.UpdateStatusToInstalled(ctx, id, "")
+	// 安装成功后写完成标记；卸载删除目录时一并消失。
+	if err := os.WriteFile(markerPath(name, exactVersion), []byte("ok\n"), 0644); err != nil {
+		stdlog.Printf("runtime: failed to write marker for %s %s: %v", name, exactVersion, err)
+		return fmt.Errorf("安装完成但写入标记失败: %w", err)
+	}
 
-	log.Printf("runtime: installed %s %s", name, exactVersion)
+	log.Append("安装完成")
+	stdlog.Printf("runtime: installed %s %s", name, exactVersion)
+	return nil
 }
 
-// installWriter 把 provider.Install/Uninstall 的实时输出追加进运行环境日志。
-// 单写者前提（一个 install/uninstall goroutine），由 Install/Uninstall 入口保证。
+// installWriter 把 provider.Install/Uninstall 的实时输出写进任务日志
+// （TaskLog 内存流）。写前 sanitize，防密钥类日志外泄。
 type installWriter struct {
-	s    *Service
-	id   int64
-	step string
+	log *task.TaskLog
 }
 
 func (w installWriter) Write(p []byte) (int, error) {
-	w.s.appendProgress(context.Background(), w.id, 30, w.step, string(p))
+	if w.log != nil {
+		w.log.Append(sanitizeLogs(string(p)))
+	}
 	return len(p), nil
 }
 
-// runStreaming runs a command and streams its output to the database.
-// Prior logs in the row are captured up-front and prepended to every write, so
-// multi-stage installers (e.g. apt → yum fallback, nvm install → node install)
-// don't lose earlier command output. Assumes a single writer per id (one install
-// goroutine), which the Install entry point guarantees.
-func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step, initialMsg, name string, args ...string) (string, int, error) {
-	var prefix string
-	if _, _, cur, _, err := s.repo.GetProgress(ctx, id); err != nil {
-		log.Printf("runtime: runStreaming failed to read prior logs for id=%d: %v", id, err)
-	} else if cur != "" {
-		// Bound prefix growth: keep the tail (UTF-8 aware) when it gets too long,
-		// matching outputBuf's truncation policy so total DB logs stay roughly ≤ 1MB.
-		if len(cur) > 500000 {
-			targetStart := len(cur) - 400000
-			idx := strings.IndexByte(cur[targetStart:], '\n')
-			if idx >= 0 {
-				idx++ // skip past the newline so the tail doesn't start with a blank line
-			} else {
-				// no newline found — advance to the next valid UTF-8 boundary
-				idx = 0
-				for idx < len(cur)-targetStart && !utf8.RuneStart(cur[targetStart+idx]) {
-					idx++
-				}
-			}
-			cur = "..." + cur[targetStart+idx:]
-		}
-		prefix = cur + "\n"
-	}
-
-	s.updateProgress(ctx, id, progress, step, prefix+initialMsg)
+// runStreaming runs a command and streams its output to the task log
+// (TaskLog memory ring buffer). 返回完整输出（供错误消息）、退出码与 wait 错误。
+func (s *Service) runStreaming(ctx context.Context, initialMsg string, log *task.TaskLog, name string, args ...string) (string, int, error) {
+	log.Append(initialMsg)
 
 	cmd := s.executor.Command(ctx, executor.StartOptions{}, name, args...)
 	// DEBIAN_FRONTEND=noninteractive 防止 ensureBuildDeps 里的 apt-get install
@@ -252,7 +235,6 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 	var outputBuf bytes.Buffer
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	var changed bool
 
 	writeFn := func(r io.Reader) {
 		defer wg.Done()
@@ -260,9 +242,9 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
+				log.Append(sanitizeLogs(string(buf[:n])))
 				mu.Lock()
 				outputBuf.Write(buf[:n])
-				changed = true
 				// truncate buffer to avoid OOM, leave roughly 100KB headroom
 				if outputBuf.Len() > 500000 {
 					b := outputBuf.Bytes()
@@ -303,68 +285,26 @@ func (s *Service) runStreaming(ctx context.Context, id int64, progress int, step
 		errChan <- cmd.Wait()
 	})
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			mu.Lock()
-			hasChanged := changed
-			changed = false
-			var currentLog string
-			if hasChanged {
-				currentLog = outputBuf.String()
-			}
-			mu.Unlock()
-			if hasChanged && currentLog != "" {
-				s.updateProgress(ctx, id, progress, step, prefix+initialMsg+"\n"+currentLog)
-			}
-		case err := <-errChan:
-			mu.Lock()
-			finalOutput := outputBuf.String()
-			mu.Unlock()
-			if finalOutput != "" {
-				s.updateProgress(ctx, id, progress, step, prefix+initialMsg+"\n"+finalOutput)
-			}
-			exitCode := 0
-			if err != nil {
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
-					exitCode = exitErr.ExitCode()
-				} else {
-					exitCode = -1
-				}
-			}
-			return finalOutput, exitCode, err
+	err = <-errChan
+	mu.Lock()
+	finalOutput := outputBuf.String()
+	mu.Unlock()
+	exitCode := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
 		}
 	}
+	return finalOutput, exitCode, err
 }
 
-// updateProgress updates the installation progress
-func (s *Service) updateProgress(ctx context.Context, id int64, progress int, step, logs string) {
-	// Sanitize logs to remove sensitive information
-	sanitizedLogs := sanitizeLogs(logs)
-	_ = s.repo.UpdateProgress(ctx, id, progress, step, sanitizedLogs)
-}
-
-// appendProgress updates progress/step and appends a line to the existing logs
-// instead of overwriting them, so the install command's full output is preserved.
-// Caller must guarantee no concurrent writer on the same id (runStreaming has returned).
-func (s *Service) appendProgress(ctx context.Context, id int64, progress int, step, line string) {
-	_, _, cur, _, err := s.repo.GetProgress(ctx, id)
-	if err != nil {
-		// Reading logs failed — don't blow away whatever is there. The status update
-		// that follows will still mark the runtime as installed; the user just won't
-		// see the final "安装完成" line.
-		log.Printf("runtime: appendProgress failed to read current logs for id=%d: %v", id, err)
-		return
-	}
-	if cur == "" {
-		s.updateProgress(ctx, id, progress, step, line)
-		return
-	}
-	s.updateProgress(ctx, id, progress, step, cur+"\n"+line)
+// InstallTask 返回后台 install/uninstall 任务句柄（key=runtime:<lang@exact>），
+// 供 SSE 端点回放日志。任务不存在（成功即清或面板重启后内存态已失）时 ok=false。
+func (s *Service) InstallTask(lang, exact string) (*task.Task, bool) {
+	return s.taskMgr.Get(runtimeTaskKey(lang, exact))
 }
 
 // sensitivePatterns matches lines that look like actual secrets, not just any word match
@@ -411,69 +351,42 @@ func isValidVersion(version string) bool {
 	return (first >= '0' && first <= '9') || (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')
 }
 
-// GetProgress returns the installation progress for a runtime environment
-func (s *Service) GetProgress(ctx context.Context, id int64) (int, string, string, string, error) {
-	return s.repo.GetProgress(ctx, id)
-}
-
-// Uninstall uninstalls a runtime environment
+// Uninstall uninstalls a runtime environment.
 func (s *Service) Uninstall(ctx context.Context, name, version string) error {
-	env, err := s.repo.GetByNameAndVersion(ctx, name, version)
-	if err != nil {
-		return err
-	}
-	if env == nil {
+	// 存在性判定走磁盘（目录 + 完成标记）。
+	if !Installed(ctx, name, version) {
 		return fmt.Errorf("%s %s not found", name, version)
 	}
 
-	if env.Status == "installing" || env.Status == "uninstalling" {
-		return fmt.Errorf("operation in progress: currently %s", env.Status)
+	// 正在安装/卸载同一版本 → 拒绝（task 互斥，但显式报错更友好）。
+	if _, busy := s.taskMgr.Get(runtimeTaskKey(name, version)); busy {
+		return fmt.Errorf("operation in progress: %s@%s", name, version)
 	}
 
-	conflicts, err := s.repo.GetConflictingReferences(ctx, env.ID)
-	if err != nil {
-		return fmt.Errorf("failed to check conflicts: %w", err)
-	}
-
-	if len(conflicts) > 0 {
-		return fmt.Errorf("conflict: %s", strings.Join(conflicts, ", "))
-	}
-
-	if env.Status == "failed" {
-		if err := s.repo.Delete(ctx, env.ID); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if err := s.repo.UpdateStatus(ctx, env.ID, "uninstalling"); err != nil {
-		return fmt.Errorf("failed to update status: %w", err)
-	}
-
-	infra.Go(func() {
-		bgCtx := context.WithoutCancel(ctx) // 卸载脱离请求生命周期，同 install
-		uninstallErr := s.uninstallRuntime(bgCtx, env)
+	// 卸载与安装共用同一 task key（lang@exact），task 执行器保证互斥。任务体
+	// 脱离请求生命周期（WithoutCancel），成功删除目录 + 标记，失败仅内存态。
+	if _, err := s.taskMgr.StartWithLog(ctx, runtimeTaskKey(name, version), task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
+		uninstallErr := s.uninstallRuntime(ctx, name, version, log)
 		if uninstallErr != nil {
-			log.Printf("runtime: failed to uninstall %s %s: %v", env.Name, env.Version, uninstallErr)
-			_ = s.repo.UpdateStatusToUninstallFailed(bgCtx, env.ID, uninstallErr.Error())
-		} else {
-			_ = s.repo.Delete(bgCtx, env.ID)
+			stdlog.Printf("runtime: failed to uninstall %s %s: %v", name, version, uninstallErr)
+			return uninstallErr
 		}
-	})
-
+		// 卸载后标记随目录删除；此处显式删标记防目录残留半截。
+		_ = os.Remove(markerPath(name, version))
+		return nil
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
-// uninstallRuntime performs the actual uninstallation
-func (s *Service) uninstallRuntime(ctx context.Context, env *RuntimeEnvironment) error {
-	s.updateProgress(ctx, env.ID, 0, "uninstalling", "")
-	s.appendProgress(ctx, env.ID, 30, "uninstalling", fmt.Sprintf("正在卸载 %s...", env.Version))
-
-	if err := s.provider.Uninstall(ctx, env.Name, env.Version, installWriter{s: s, id: env.ID, step: "uninstalling"}); err != nil {
-		return fmt.Errorf("卸载失败，详见日志: %w", err)
+// uninstallRuntime performs the actual uninstallation.
+func (s *Service) uninstallRuntime(ctx context.Context, name, version string, log *task.TaskLog) error {
+	log.Append(fmt.Sprintf("正在卸载 %s...", version))
+	if err := s.provider.Uninstall(ctx, name, version, installWriter{log: log}); err != nil {
+		return fmt.Errorf("卸载失败: %w", err)
 	}
-
-	log.Printf("runtime: uninstalled %s %s", env.Name, env.Version)
+	stdlog.Printf("runtime: uninstalled %s %s", name, version)
 	return nil
 }
 

@@ -131,9 +131,20 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	// ── Domain services (no background goroutines) ──
 
 	cronRepo := cron.NewSQLiteRepository(db)
-	cronService := cron.NewServiceWithSink(cronRepo, cmdExec, miseProvider, notificationService)
 
-	serviceManager := systemd.NewServiceManager(cmdExec, cronRepo, miseProvider)
+	envConfigRepo := envconfig.NewSQLiteRepository(db)
+	envConfigService := envconfig.NewService(envConfigRepo)
+
+	// runtimeService 必须先建：cron/systemd 用它校验运行时绑定（ADR-0009 目录权威）。
+	runtimeService := runtimeenv.NewService(cmdExec, envConfigService, miseProvider)
+	if err := runtimeService.Init(ctx); err != nil {
+		log.Printf("ERROR: Failed to init runtime service: %v", err)
+	}
+	packageManagerService := runtimeenv.NewPackageService(cmdExec, miseProvider)
+
+	cronService := cron.NewServiceWithSink(cronRepo, cmdExec, miseProvider, runtimeService, notificationService)
+
+	serviceManager := systemd.NewServiceManager(cmdExec, runtimeService, miseProvider)
 
 	container.SetAuthEnv()
 	containerService := container.NewService(cmdExec)
@@ -147,18 +158,8 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 		log.Fatalf("init deploy service: %v", err)
 	}
 
-	envConfigRepo := envconfig.NewSQLiteRepository(db)
-	envConfigService := envconfig.NewService(envConfigRepo)
-
 	firewallRepo := firewall.NewSQLiteRepository(db)
 	firewallService := firewall.NewService(firewallRepo, cmdExec, cfg.Server.Port)
-
-	runtimeRepo := runtimeenv.NewSQLiteRepository(db)
-	runtimeService := runtimeenv.NewService(runtimeRepo, cmdExec, envConfigService, miseProvider)
-	if err := runtimeService.Init(ctx); err != nil {
-		log.Printf("ERROR: Failed to init runtime service: %v", err)
-	}
-	packageManagerService := runtimeenv.NewPackageService(cmdExec, miseProvider)
 
 	sshConfigService := ssh.NewService(cmdExec)
 

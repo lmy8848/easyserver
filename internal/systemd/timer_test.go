@@ -73,22 +73,19 @@ func TestRenderTimer_Invalid(t *testing.T) {
 
 func TestRenderCronService(t *testing.T) {
 	content, err := RenderCronService(&TimerSpec{
-		Name:             "daily-backup",
-		Description:      "每日备份",
-		ExecStart:        "backup.sh --all",
-		MaxRetry:         3,
-		Timeout:          120,
-		RuntimeVersionID: 7,
-		RuntimeLang:      "node",
-		RuntimeExact:     "20.11.0",
-		Env:              map[string]string{"FOO": "bar baz"},
+		Name:        "daily-backup",
+		Description: "每日备份",
+		ExecStart:   "backup.sh --all",
+		MaxRetry:    3,
+		Timeout:     120,
+		Runtime:     "node@20.11.0",
+		Env:         map[string]string{"FOO": "bar baz"},
 	}, mise.NewProvider())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, want := range []string{
 		"Type=oneshot",
-		"# RuntimeVersionID=7",
 		"# RuntimeLang=node",
 		"# RuntimeExact=20.11.0",
 		"StartLimitBurst=4", // MaxRetry+1

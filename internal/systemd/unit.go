@@ -35,19 +35,17 @@ var envKeyRegex = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // ManagedUnitSpec 是创建/更新托管服务的输入配置。
 // 对应原 internal/process 的 CreateProcessRequest 字段子集（去掉了 group/log_file/startup_timeout）。
 type ManagedUnitSpec struct {
-	Name             string            `json:"name"`               // 不含前缀，如 "my-app"
-	Description      string            `json:"description"`        // 显示名，写入 Description=
-	ExecStart        string            `json:"exec_start"`         // 完整启动命令，如 "node /app/server.js --port 3000"
-	Dir              string            `json:"dir"`                // WorkingDirectory
-	Env              map[string]string `json:"env"`                // Environment=
-	AutoRestart      bool              `json:"auto_restart"`       // Restart=on-failure
-	MaxRestarts      int               `json:"max_restarts"`       // StartLimitBurst=
-	RestartDelay     int               `json:"restart_delay"`      // RestartSec=
-	StopTimeout      int               `json:"stop_timeout"`       // TimeoutStopSec=
-	AutoStart        bool              `json:"auto_start"`         // [Install] + systemctl enable
-	RuntimeVersionID int64             `json:"runtime_version_id"` // 写入注释，反查用
-	RuntimeLang      string            `json:"runtime_lang"`       // mise 工具名，如 "node"
-	RuntimeExact     string            `json:"runtime_exact"`      // mise 版本，如 "20.10.0"
+	Name         string            `json:"name"`          // 不含前缀，如 "my-app"
+	Description  string            `json:"description"`   // 显示名，写入 Description=
+	ExecStart    string            `json:"exec_start"`    // 完整启动命令，如 "node /app/server.js --port 3000"
+	Dir          string            `json:"dir"`           // WorkingDirectory
+	Env          map[string]string `json:"env"`           // Environment=
+	AutoRestart  bool              `json:"auto_restart"`  // Restart=on-failure
+	MaxRestarts  int               `json:"max_restarts"`  // StartLimitBurst=
+	RestartDelay int               `json:"restart_delay"` // RestartSec=
+	StopTimeout  int               `json:"stop_timeout"`  // TimeoutStopSec=
+	AutoStart    bool              `json:"auto_start"`    // [Install] + systemctl enable
+	Runtime      string            `json:"runtime"`       // lang@exact，"" = 不绑定（ADR-0009 绑定键）
 }
 
 // UnitFilePath 返回托管 unit 的绝对路径。
@@ -101,12 +99,9 @@ func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 	if strings.ContainsAny(spec.Dir, "\n\r") {
 		return "", errors.New("dir 不能包含换行")
 	}
-	// 防御纵深：runtime 字段也不能含换行
-	if strings.ContainsAny(spec.RuntimeLang, "\n\r") {
-		return "", errors.New("runtime_lang 不能包含换行")
-	}
-	if strings.ContainsAny(spec.RuntimeExact, "\n\r") {
-		return "", errors.New("runtime_exact 不能包含换行")
+	// 防御纵深：runtime 绑定键也不能含换行（会被写入注释）
+	if strings.ContainsAny(spec.Runtime, "\n\r") {
+		return "", errors.New("runtime 不能包含换行")
 	}
 	// env key 校验：只允许合法的 shell 变量名，防注入。
 	for k := range spec.Env {
@@ -118,10 +113,9 @@ func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 	spec.Description = cleanUnitValue(spec.Description)
 	spec.ExecStart = cleanUnitValue(spec.ExecStart)
 	spec.Dir = cleanUnitValue(spec.Dir)
-	spec.RuntimeLang = cleanUnitValue(spec.RuntimeLang)
-	spec.RuntimeExact = cleanUnitValue(spec.RuntimeExact)
 
-	execStart, runtimeEnv := buildExecStart(spec, p)
+	lang, exact := splitBinding(spec.Runtime)
+	execStart, runtimeEnv := buildExecStart(lang, exact, spec.ExecStart, p)
 	envLines := buildEnvLines(mergeCommandEnv(spec.Env, runtimeEnv))
 
 	restartLine := ""
@@ -152,14 +146,11 @@ func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 	fmt.Fprintf(&b, "[Unit]\n")
 	fmt.Fprintf(&b, "Description=%s\n", desc)
 	fmt.Fprintf(&b, "# %s=%s\n", managedMarkerKey, managedMarkerValue)
-	if spec.RuntimeVersionID > 0 {
-		fmt.Fprintf(&b, "# RuntimeVersionID=%d\n", spec.RuntimeVersionID)
+	if lang != "" {
+		fmt.Fprintf(&b, "# RuntimeLang=%s\n", lang)
 	}
-	if spec.RuntimeLang != "" {
-		fmt.Fprintf(&b, "# RuntimeLang=%s\n", spec.RuntimeLang)
-	}
-	if spec.RuntimeExact != "" {
-		fmt.Fprintf(&b, "# RuntimeExact=%s\n", spec.RuntimeExact)
+	if exact != "" {
+		fmt.Fprintf(&b, "# RuntimeExact=%s\n", exact)
 	}
 	fmt.Fprintf(&b, "StartLimitBurst=%d\n", maxRestarts)
 	fmt.Fprintf(&b, "StartLimitIntervalSec=300\n")
@@ -194,15 +185,21 @@ func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 
 // buildExecStart 拼接 ExecStart 值，并返回底层命令所需的额外环境变量。
 // 绑定 runtime 时前置底层执行包装（如 mise exec <lang>@<exact> --）。
-// spec.ExecStart 是用户填的完整命令（如 "node /app/server.js --port 3000"），
+// execStart 是用户填的完整命令（如 "node /app/server.js --port 3000"），
 // 底层包装不拆分 command/args。
-func buildExecStart(spec *ManagedUnitSpec, p mise.Provider) (string, []string) {
-	if spec.RuntimeVersionID > 0 && spec.RuntimeLang != "" && spec.RuntimeExact != "" {
-		if c, err := p.Command(spec.RuntimeLang, spec.RuntimeExact, spec.ExecStart); err == nil {
+func buildExecStart(lang, exact, execStart string, p mise.Provider) (string, []string) {
+	if lang != "" && exact != "" {
+		if c, err := p.Command(lang, exact, execStart); err == nil {
 			return strings.Join(c.Exec, " "), c.Env
 		}
 	}
-	return spec.ExecStart, nil
+	return execStart, nil
+}
+
+// splitBinding 把 "lang@exact" 拆成 (lang, exact)。"" 或非法格式返回空串。
+func splitBinding(s string) (lang, exact string) {
+	lang, exact, _ = strings.Cut(s, "@")
+	return
 }
 
 // mergeCommandEnv 把底层命令的额外 env（Command.Env，如 MISE_DATA_DIR）并入
@@ -261,6 +258,7 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 
 	scanner := strings.Split(content, "\n")
 	section := ""
+	var lang, exact string
 	for _, line := range scanner {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
@@ -280,12 +278,10 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 				switch key {
 				case managedMarkerKey:
 					info.Managed = val == managedMarkerValue
-				case "RuntimeVersionID":
-					_, _ = fmt.Sscanf(val, "%d", &info.RuntimeVersionID)
 				case "RuntimeLang":
-					info.RuntimeLang = val
+					lang = val
 				case "RuntimeExact":
-					info.RuntimeExact = val
+					exact = val
 				}
 				continue
 			}
@@ -305,8 +301,8 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 			case strings.HasPrefix(trimmed, "ExecStart="):
 				execStart := strings.TrimPrefix(trimmed, "ExecStart=")
 				// 若绑定了 runtime，去掉 mise 包裹前缀，还原用户原始命令。
-				if info.RuntimeVersionID > 0 {
-					execStart = stripMisePrefix(p, info.RuntimeLang, info.RuntimeExact, execStart)
+				if lang != "" && exact != "" {
+					execStart = stripMisePrefix(p, lang, exact, execStart)
 				}
 				info.ExecStart = execStart
 			case strings.HasPrefix(trimmed, "WorkingDirectory="):
@@ -331,6 +327,10 @@ func ParseUnitMeta(p mise.Provider, content string, info *ServiceInfo) {
 				_, _ = fmt.Sscanf(strings.TrimPrefix(trimmed, "TimeoutStopSec="), "%d", &info.StopTimeout)
 			}
 		}
+	}
+	// 组装绑定键（ADR-0009 绑定键即字符串）。
+	if lang != "" && exact != "" {
+		info.Runtime = lang + "@" + exact
 	}
 }
 

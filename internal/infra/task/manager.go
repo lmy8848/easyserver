@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -77,8 +79,9 @@ type Task struct {
 	log    *TaskLog
 	done   chan struct{}
 
-	mu       sync.Mutex
-	cancelFn context.CancelFunc // Cancel() 触发；nil = 任务已完成或无需取消
+	mu        sync.Mutex
+	closeOnce sync.Once
+	cancelFn  context.CancelFunc // Cancel() 触发；nil = 任务已完成或无需取消
 }
 
 // Done 在任务完成（成功/失败/取消）时关闭。
@@ -199,6 +202,20 @@ func (m *Manager) start(ctx context.Context, key string, opts Options, plain fun
 //   - 超时归入失败并触发重试（每次尝试拿全新 ctx）；
 //   - 重试期间状态仍为 running（任务在 Active 视角不消失）。
 func (m *Manager) run(parent context.Context, tk *Task, opts Options, fn func(ctx context.Context) error) {
+	// panic 恢复：后台任务不该让一个 panic 拖垮整个面板（safego 语义）。
+	// 恢复后任务归为 failed 并留栈；succeeded 即清（sem 清理的 defer）不受影响，
+	// failed 记录保留至同 key 下次 Start，与正常失败路径一致。
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("task: recovered panic in %q: %v\n%s", tk.key, r, debug.Stack())
+			tk.mu.Lock()
+			tk.status = StatusFailed
+			tk.err = fmt.Errorf("task panicked: %v", r)
+			tk.mu.Unlock()
+			tk.closeOnce.Do(func() { close(tk.done) })
+		}
+	}()
+
 	// 该任务的执行 ctx 独立于调用方：WithoutCancel 剥离父 ctx 的取消（请求断开
 	// 任务照常执行），但继承其值；WithCancel 提供可被 Task.Cancel 触发的取消。
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
@@ -242,7 +259,7 @@ func (m *Manager) run(parent context.Context, tk *Task, opts Options, fn func(ct
 			tk.status = StatusCanceled
 			tk.err = err
 			tk.mu.Unlock()
-			close(tk.done)
+			tk.closeOnce.Do(func() { close(tk.done) })
 			return
 		}
 
@@ -251,7 +268,7 @@ func (m *Manager) run(parent context.Context, tk *Task, opts Options, fn func(ct
 			tk.mu.Lock()
 			tk.status = StatusSucceeded
 			tk.mu.Unlock()
-			close(tk.done)
+			tk.closeOnce.Do(func() { close(tk.done) })
 			return
 		}
 
@@ -261,7 +278,7 @@ func (m *Manager) run(parent context.Context, tk *Task, opts Options, fn func(ct
 			tk.status = StatusFailed
 			tk.err = err
 			tk.mu.Unlock()
-			close(tk.done)
+			tk.closeOnce.Do(func() { close(tk.done) })
 			return
 		}
 
@@ -278,7 +295,7 @@ func (m *Manager) run(parent context.Context, tk *Task, opts Options, fn func(ct
 			tk.status = StatusCanceled
 			tk.err = context.Canceled
 			tk.mu.Unlock()
-			close(tk.done)
+			tk.closeOnce.Do(func() { close(tk.done) })
 			return
 		case <-time.After(opts.RetryInterval):
 		}
