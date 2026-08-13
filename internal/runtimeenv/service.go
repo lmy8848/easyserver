@@ -9,8 +9,6 @@ import (
 	stdlog "log"
 	"os"
 	"os/exec"
-	"regexp"
-	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -197,14 +195,15 @@ func (s *Service) installRuntime(ctx context.Context, name, exactVersion string,
 }
 
 // installWriter 把 provider.Install/Uninstall 的实时输出写进任务日志
-// （TaskLog 内存流）。写前 sanitize，防密钥类日志外泄。
+// （TaskLog 内存流）。provider 接口要 io.Writer，TaskLog 是 Append(string)，
+// 这里做最小桥接。
 type installWriter struct {
 	log *task.TaskLog
 }
 
 func (w installWriter) Write(p []byte) (int, error) {
 	if w.log != nil {
-		w.log.Append(sanitizeLogs(string(p)))
+		w.log.Append(string(p))
 	}
 	return len(p), nil
 }
@@ -242,7 +241,7 @@ func (s *Service) runStreaming(ctx context.Context, initialMsg string, log *task
 		for {
 			n, err := r.Read(buf)
 			if n > 0 {
-				log.Append(sanitizeLogs(string(buf[:n])))
+				log.Append(string(buf[:n]))
 				mu.Lock()
 				outputBuf.Write(buf[:n])
 				// truncate buffer to avoid OOM, leave roughly 100KB headroom
@@ -305,34 +304,6 @@ func (s *Service) runStreaming(ctx context.Context, initialMsg string, log *task
 // 供 SSE 端点回放日志。任务不存在（成功即清或面板重启后内存态已失）时 ok=false。
 func (s *Service) InstallTask(lang, exact string) (*task.Task, bool) {
 	return s.taskMgr.Get(runtimeTaskKey(lang, exact))
-}
-
-// sensitivePatterns matches lines that look like actual secrets, not just any word match
-var sensitivePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)password\s*[:=]\s*\S`),
-	regexp.MustCompile(`(?i)secret\s*[:=]\s*\S`),
-	regexp.MustCompile(`(?i)api[_-]?key\s*[:=]\s*\S`),
-	regexp.MustCompile(`(?i)access[_-]?token\s*[:=]\s*\S`),
-	regexp.MustCompile(`(?i)credential\s*[:=]\s*\S`),
-}
-
-// sanitizeLogs removes sensitive information from logs
-func sanitizeLogs(logs string) string {
-	lines := strings.Split(logs, "\n")
-	var sanitized []string
-	for _, line := range lines {
-		isSensitive := false
-		for _, pat := range sensitivePatterns {
-			if pat.MatchString(line) {
-				isSensitive = true
-				break
-			}
-		}
-		if !isSensitive {
-			sanitized = append(sanitized, line)
-		}
-	}
-	return strings.Join(sanitized, "\n")
 }
 
 // isValidVersion validates version string to prevent command injection
