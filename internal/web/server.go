@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 )
 
 // sanitizePackageName allows only alphanumeric characters, hyphens, dots, and plus signs
@@ -27,12 +27,11 @@ func sanitizePackageName(name string) string {
 
 // Service manages web server lifecycle (install, start/stop, config).
 type Service struct {
-	repo     ServerRepository
-	executor executor.CommandExecutor
+	repo ServerRepository
 }
 
-func NewService(repo ServerRepository, exec executor.CommandExecutor) *Service {
-	return &Service{repo: repo, executor: exec}
+func NewService(repo ServerRepository) *Service {
+	return &Service{repo: repo}
 }
 
 // SeedPredefinedWebServers inserts predefined web server entries if not exists.
@@ -102,17 +101,17 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("服务器类型 '%s' 未配置安装命令", ws.Name))
 	}
 
-	_, _, _ = s.executor.RunCombined(ctx, "apt-get", "update", "-y")
+	_, _ = exec.CommandContext(ctx, "apt-get", "update", "-y").CombinedOutput()
 
 	parts := strings.Fields(installCmd)
-	out, _, err := s.executor.RunCombined(ctx, parts[0], parts[1:]...)
+	out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("install failed: %s", out)
 	}
 
 	if ws.ServiceName != "" {
-		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "enable", ws.ServiceName)
-		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
+		_, _ = exec.CommandContext(ctx, "systemctl", "enable", ws.ServiceName).CombinedOutput()
+		_, _ = exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
 	}
 
 	_ = s.RefreshStatus(ctx, id)
@@ -135,8 +134,8 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
-		_, _, _ = s.executor.RunCombined(ctx, "systemctl", "disable", ws.ServiceName)
+		_, _ = exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
+		_, _ = exec.CommandContext(ctx, "systemctl", "disable", ws.ServiceName).CombinedOutput()
 	}
 
 	// Always use the predefined uninstall command, never trust the database value
@@ -153,7 +152,7 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 		uninstallCmd = "apt-get remove -y " + safeName
 	}
 	parts := strings.Fields(uninstallCmd)
-	out, _, err := s.executor.RunCombined(ctx, parts[0], parts[1:]...)
+	out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("uninstall failed: %s", out)
 	}
@@ -174,7 +173,7 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", "start", ws.ServiceName)
+	out, err := exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("start failed: %s", out)
 	}
@@ -195,7 +194,7 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", "stop", ws.ServiceName)
+	out, err := exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("stop failed: %s", out)
 	}
@@ -216,7 +215,7 @@ func (s *Service) Restart(ctx context.Context, id int64) error {
 		return apperror.ErrBadRequest.WithMessage("未配置服务名称")
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", "restart", ws.ServiceName)
+	out, err := exec.CommandContext(ctx, "systemctl", "restart", ws.ServiceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("restart failed: %s", out)
 	}
@@ -240,7 +239,7 @@ func (s *Service) Reload(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		out, _, err := s.executor.RunCombined(ctx, "systemctl", "reload", ws.ServiceName)
+		out, err := exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("reload failed: %s", out)
 		}
@@ -257,22 +256,22 @@ func (s *Service) TestConfig(ctx context.Context, id int64) (bool, string) {
 
 	switch ws.Name {
 	case "nginx":
-		out, _, err := s.executor.RunCombined(ctx, "nginx", "-t")
-		msg := strings.TrimSpace(out)
+		out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput()
+		msg := strings.TrimSpace(string(out))
 		if err != nil {
 			return false, msg
 		}
 		return true, msg
 	case "apache":
-		out, _, err := s.executor.RunCombined(ctx, "apache2ctl", "configtest")
-		msg := strings.TrimSpace(out)
+		out, err := exec.CommandContext(ctx, "apache2ctl", "configtest").CombinedOutput()
+		msg := strings.TrimSpace(string(out))
 		if err != nil {
 			return false, msg
 		}
 		return true, msg
 	case "caddy":
-		out, _, err := s.executor.RunCombined(ctx, "caddy", "validate", "--config", ws.ConfigFile)
-		msg := strings.TrimSpace(out)
+		out, err := exec.CommandContext(ctx, "caddy", "validate", "--config", ws.ConfigFile).CombinedOutput()
+		msg := strings.TrimSpace(string(out))
 		if err != nil {
 			return false, msg
 		}
@@ -374,11 +373,11 @@ func (s *Service) GetServiceLogs(ctx context.Context, id int64, lines int) (stri
 		lines = 100
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "journalctl", "-u", ws.ServiceName, "-n", strconv.Itoa(lines), "--no-pager")
+	out, err := exec.CommandContext(ctx, "journalctl", "-u", ws.ServiceName, "-n", strconv.Itoa(lines), "--no-pager").CombinedOutput()
 	if err != nil {
-		return out, nil //nolint:nilerr // journalctl 失败时返回已读到的输出
+		return string(out), nil //nolint:nilerr // journalctl 失败时返回已读到的输出
 	}
-	return out, nil
+	return string(out), nil
 }
 
 // SetAutoStart enables/disables auto-start on boot
@@ -399,7 +398,7 @@ func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) erro
 		action = "enable"
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "systemctl", action, ws.ServiceName)
+	out, err := exec.CommandContext(ctx, "systemctl", action, ws.ServiceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("systemctl %s failed: %s", action, out)
 	}
@@ -421,16 +420,16 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 
 	switch ws.Name {
 	case "nginx":
-		if _, err := s.executor.LookPath("nginx"); err == nil {
+		if _, err := exec.LookPath("nginx"); err == nil {
 			installed = true
-			out, _, _ := s.executor.RunCombined(ctx, "nginx", "-v")
-			version = strings.TrimSpace(out)
+			out, _ := exec.CommandContext(ctx, "nginx", "-v").CombinedOutput()
+			version = strings.TrimSpace(string(out))
 		}
 	case "apache":
-		if _, err := s.executor.LookPath("apache2"); err == nil {
+		if _, err := exec.LookPath("apache2"); err == nil {
 			installed = true
-			out, _, _ := s.executor.RunCombined(ctx, "apache2", "-v")
-			lines := strings.Split(strings.TrimSpace(out), "\n")
+			out, _ := exec.CommandContext(ctx, "apache2", "-v").CombinedOutput()
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 			if len(lines) > 0 {
 				version = strings.TrimSpace(lines[0])
 			}
@@ -441,10 +440,10 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 			version = "tomcat9"
 		}
 	case "caddy":
-		if _, err := s.executor.LookPath("caddy"); err == nil {
+		if _, err := exec.LookPath("caddy"); err == nil {
 			installed = true
-			out, _, _ := s.executor.RunCombined(ctx, "caddy", "version")
-			version = strings.TrimSpace(out)
+			out, _ := exec.CommandContext(ctx, "caddy", "version").CombinedOutput()
+			version = strings.TrimSpace(string(out))
 		}
 	default:
 		if ws.BinaryPath != "" {
@@ -459,8 +458,8 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 	if installed {
 		status = "stopped"
 		if ws.ServiceName != "" {
-			out, _, _ := s.executor.RunCombined(ctx, "systemctl", "is-active", ws.ServiceName)
-			if strings.TrimSpace(out) == "active" {
+			out, _ := exec.CommandContext(ctx, "systemctl", "is-active", ws.ServiceName).CombinedOutput()
+			if strings.TrimSpace(string(out)) == "active" {
 				status = "running"
 			}
 		}
@@ -488,9 +487,9 @@ func (s *Service) GetConnections(ctx context.Context, id int64) (int, error) {
 	}
 
 	// Count connections from ss
-	out, _, _ := s.executor.RunCombined(ctx, "ss", "-tlnp")
+	out, _ := exec.CommandContext(ctx, "ss", "-tlnp").CombinedOutput()
 	count := 0
-	for line := range strings.SplitSeq(out, "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if ws.ServiceName != "" && strings.Contains(line, ws.ServiceName) {
 			count++
 		}
@@ -512,12 +511,12 @@ func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memByt
 	}
 
 	// Get main PID via systemctl
-	out, _, e := s.executor.RunCombined(ctx, "systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp")
+	out, e := exec.CommandContext(ctx, "systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp").CombinedOutput()
 	if e != nil {
 		return 0, 0, "", nil //nolint:nilerr // systemctl 查询失败时返回零值
 	}
 
-	lines := strings.SplitSeq(strings.TrimSpace(out), "\n")
+	lines := strings.SplitSeq(strings.TrimSpace(string(out)), "\n")
 	for line := range lines {
 		if after, ok := strings.CutPrefix(line, "MainPID="); ok {
 			pidStr := after

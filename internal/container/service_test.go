@@ -1,12 +1,9 @@
 package container
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
-
-	"easyserver/internal/infra/executor"
 )
 
 func TestParsePortsString(t *testing.T) {
@@ -133,9 +130,8 @@ func TestExpandImageRef(t *testing.T) {
 	}
 }
 
-func TestGetPodmanRegistryConfig(t *testing.T) {
-	mock := executor.NewMockExecutor()
-	mock.SetResponse("cat /etc/containers/registries.conf", executor.MockSuccess(`
+func TestParseRegistriesConf(t *testing.T) {
+	got := parseRegistriesConf(`
 unqualified-search-registries = ["docker.io"]
 
 [[registry]]
@@ -145,9 +141,7 @@ insecure = true
 [[registry]]
 location = "docker.io"
 insecure = false
-`))
-	s := NewService(mock)
-	got := s.GetRegistryConfig(context.Background(), EnginePodman)
+`)
 	want := RegistryConfig{
 		Mirrors:            []string{"docker.io"},
 		InsecureRegistries: []string{"registry.local:5000"},

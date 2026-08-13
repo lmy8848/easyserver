@@ -6,23 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 )
 
 // Service provides security-audit operations (CVE scanning, kernel status,
 // file integrity monitoring).
 type Service struct {
-	exec executor.CommandExecutor
-	db   *sql.DB
+	db *sql.DB
 }
 
 // NewService creates a security Service.
-func NewService(exec executor.CommandExecutor, db *sql.DB) *Service {
-	return &Service{exec: exec, db: db}
+func NewService(db *sql.DB) *Service {
+	return &Service{db: db}
 }
 
 // Vulnerability is one installed package with known CVEs.
@@ -72,12 +71,12 @@ func (s *Service) Scan(ctx context.Context) ([]Vulnerability, error) {
 
 // listInstalled parses `apt list --installed` output.
 func (s *Service) listInstalled(ctx context.Context) ([]installedPackage, error) {
-	out, _, err := s.exec.RunCombined(ctx, "apt", "list", "--installed")
+	out, err := exec.CommandContext(ctx, "apt", "list", "--installed").CombinedOutput()
 	if err != nil {
 		return nil, err
 	}
 	var pkgs []installedPackage
-	for line := range strings.SplitSeq(out, "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Listing") {
 			continue
@@ -150,11 +149,11 @@ func (s *Service) Upgrade(ctx context.Context, packages []string) (string, error
 		return "", apperror.ErrBadRequest.WithMessage("未指定升级的包")
 	}
 	args := append([]string{"install", "--only-upgrade", "-y"}, packages...)
-	out, _, err := s.exec.RunCombined(ctx, "apt-get", args...)
+	out, err := exec.CommandContext(ctx, "apt-get", args...).CombinedOutput()
 	if err != nil {
-		return out, apperror.ErrInternal.WithMessage("升级失败: " + err.Error())
+		return string(out), apperror.ErrInternal.WithMessage("升级失败: " + err.Error())
 	}
-	return out, nil
+	return string(out), nil
 }
 
 // KernelStatus reports the running kernel vs the latest installed kernel.
@@ -166,10 +165,10 @@ type KernelStatus struct {
 
 // KernelStatus returns running kernel and latest installed kernel.
 func (s *Service) KernelStatus(ctx context.Context) (*KernelStatus, error) {
-	out, _, _ := s.exec.RunCombined(ctx, "uname", "-r")
-	current := strings.TrimSpace(out)
-	out, _, _ = s.exec.RunCombined(ctx, "bash", "-c", "dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | sed 's/linux-image-//' | sort -V | tail -1")
-	latest := strings.TrimSpace(out)
+	out, _ := exec.CommandContext(ctx, "uname", "-r").CombinedOutput()
+	current := strings.TrimSpace(string(out))
+	out, _ = exec.CommandContext(ctx, "bash", "-c", "dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | sed 's/linux-image-//' | sort -V | tail -1").CombinedOutput()
+	latest := strings.TrimSpace(string(out))
 	return &KernelStatus{
 		Current:     current,
 		Latest:      latest,
@@ -179,12 +178,12 @@ func (s *Service) KernelStatus(ctx context.Context) (*KernelStatus, error) {
 
 // PackageUpdateCount returns pending apt upgrades (apt list --upgradable).
 func (s *Service) PackageUpdateCount(ctx context.Context) (int, error) {
-	out, _, err := s.exec.RunCombined(ctx, "apt", "list", "--upgradable")
+	out, err := exec.CommandContext(ctx, "apt", "list", "--upgradable").CombinedOutput()
 	if err != nil {
 		return 0, fmt.Errorf("apt list --upgradable: %w", err)
 	}
 	count := 0
-	for line := range strings.SplitSeq(out, "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Listing") {
 			continue

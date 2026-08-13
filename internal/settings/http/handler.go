@@ -21,7 +21,6 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -38,16 +37,14 @@ type SettingsHandler struct {
 	configPath     string
 	alertService   *alert.Service
 	monitorService MonitorUpdater
-	executor       executor.CommandExecutor
 	sig            *infra.Signal
 }
 
-func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, exec executor.CommandExecutor, sig *infra.Signal) *SettingsHandler {
+func NewSettingsHandler(cfg *config.Config, configPath string, alertService *alert.Service, sig *infra.Signal) *SettingsHandler {
 	return &SettingsHandler{
 		cfg:          cfg,
 		configPath:   configPath,
 		alertService: alertService,
-		executor:     exec,
 		sig:          sig,
 	}
 }
@@ -948,8 +945,8 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 	httpx.Success(c, gin.H{"message": "面板正在重启..."})
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, monitorSvc MonitorUpdater, exec executor.CommandExecutor, sig *infra.Signal) {
-	handler := NewSettingsHandler(cfg, configPath, alertService, exec, sig)
+func RegisterRoutes(protected *gin.RouterGroup, cfg *config.Config, configPath string, alertService *alert.Service, monitorSvc MonitorUpdater, sig *infra.Signal) {
+	handler := NewSettingsHandler(cfg, configPath, alertService, sig)
 	handler.SetMonitorService(monitorSvc)
 	protected.GET("/settings", handler.GetSettings)
 	protected.GET("/settings/system", handler.GetSystemInfo)

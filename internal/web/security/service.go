@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"easyserver/internal/firewall"
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 )
 
 const (
@@ -22,11 +22,10 @@ const (
 type SecurityService struct {
 	repo     SecurityRepository
 	firewall *firewall.Service
-	executor executor.CommandExecutor
 }
 
-func NewSecurityService(repo SecurityRepository, fw *firewall.Service, exec executor.CommandExecutor) *SecurityService {
-	return &SecurityService{repo: repo, firewall: fw, executor: exec}
+func NewSecurityService(repo SecurityRepository, fw *firewall.Service) *SecurityService {
+	return &SecurityService{repo: repo, firewall: fw}
 }
 
 // --- Config ---
@@ -198,13 +197,11 @@ func (s *SecurityService) refreshNginxBanFile(ctx context.Context) error {
 	}
 
 	// Reload nginx (graceful, no downtime).
-	if s.executor != nil {
-		if _, exitCode, err := s.executor.RunCombined(ctx, "nginx", "-t"); err != nil || exitCode != 0 {
-			return apperror.ErrInternal.WithMessage("nginx 配置测试失败，未重载")
-		}
-		if _, exitCode, err := s.executor.RunCombined(ctx, "nginx", "-s", "reload"); err != nil || exitCode != 0 {
-			return apperror.ErrInternal.WithMessage("nginx 重载失败")
-		}
+	if _, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput(); err != nil {
+		return apperror.ErrInternal.WithMessage("nginx 配置测试失败，未重载")
+	}
+	if _, err := exec.CommandContext(ctx, "nginx", "-s", "reload").CombinedOutput(); err != nil {
+		return apperror.ErrInternal.WithMessage("nginx 重载失败")
 	}
 	return nil
 }

@@ -8,14 +8,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	"easyserver/internal/infra/executor"
 )
 
 // 容器管理常量
@@ -39,13 +38,11 @@ func engineBinary(engine Engine) string {
 }
 
 // Service manages Docker containers, images, compose, volumes, and networks.
-type Service struct {
-	executor executor.CommandExecutor
-}
+type Service struct{}
 
 // NewService creates a new container Service.
-func NewService(exec executor.CommandExecutor) *Service {
-	return &Service{executor: exec}
+func NewService() *Service {
+	return &Service{}
 }
 
 // dockerPSRow mirrors the uppercase-keyed JSON emitted by `docker ps --format json`,
@@ -251,11 +248,11 @@ func isPodmanEngine(engine Engine) bool { return engineBinary(engine) == "podman
 // edit or delete a managed database container; its lifecycle belongs to the
 // database module (PRD: generic Container cannot bypass database rules).
 func (s *Service) rejectManaged(ctx context.Context, engine Engine, id string) error {
-	out, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "inspect", "--format", "{{index .Config.Labels \"com.easyserver.managed\"}}", id)
-	if err != nil || exitCode != 0 {
+	out, err := exec.CommandContext(ctx, engineBinary(engine), "inspect", "--format", "{{index .Config.Labels \"com.easyserver.managed\"}}", id).CombinedOutput()
+	if err != nil {
 		return nil //nolint:nilerr // 非受管容器时返回 nil，让操作自然失败
 	}
-	if strings.TrimSpace(out) == "true" {
+	if strings.TrimSpace(string(out)) == "true" {
 		return errors.New("受管数据库容器，请通过数据库模块操作")
 	}
 	return nil
@@ -267,8 +264,8 @@ func (s *Service) rejectManaged(ctx context.Context, engine Engine, id string) e
 // Uses `--version` (client-only, no daemon) so a stopped Docker daemon is not
 // misreported as "not installed".
 func (s *Service) checkEngine(ctx context.Context, engine Engine) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "--version")
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), "--version").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s is not installed or not accessible", engine)
 	}
 	return nil
@@ -285,12 +282,12 @@ func (s *Service) ListContainers(ctx context.Context, engine Engine, all bool) (
 		args = append(args, "-a")
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s ps failed: %s", engine, output)
 	}
 
-	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
+	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
 		if isPodmanEngine(engine) {
 			var d podmanPSRow
 			if err := json.Unmarshal(line, &d); err != nil {
@@ -319,12 +316,12 @@ func (s *Service) ListContainers(ctx context.Context, engine Engine, all bool) (
 
 // GetContainer returns details of a specific container.
 func (s *Service) GetContainer(ctx context.Context, engine Engine, id string) (*Container, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "inspect", "--format", "{{json .}}", id)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "inspect", "--format", "{{json .}}", id).CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s inspect failed: %s", engine, output)
 	}
 
-	trimmed := strings.TrimSpace(output)
+	trimmed := strings.TrimSpace(string(output))
 	var rows []dockerPSRow
 	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
 		var d dockerPSRow
@@ -344,9 +341,9 @@ func (s *Service) GetContainer(ctx context.Context, engine Engine, id string) (*
 }
 
 func (s *Service) containerAction(ctx context.Context, engine Engine, action, id string) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), action, id)
-	if err != nil || exitCode != 0 {
-		if output != "" {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), action, id).CombinedOutput()
+	if err != nil {
+		if len(output) != 0 {
 			return fmt.Errorf("%s %s failed: %s", engine, action, output)
 		}
 		return fmt.Errorf("%s %s failed: %w", engine, action, err)
@@ -405,8 +402,8 @@ func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string,
 	}
 	args = append(args, id)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s rm failed: %w", engine, err)
 	}
 	return nil
@@ -415,11 +412,11 @@ func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string,
 // GetContainerLogs returns container logs.
 func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string, tail int) (string, error) {
 	args := []string{"logs", "--tail", strconv.Itoa(tail), id}
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return "", fmt.Errorf("%s logs failed: %s", engine, output)
 	}
-	return output, nil
+	return string(output), nil
 }
 
 // ExecInContainer executes a command in a running container.
@@ -438,11 +435,11 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 		return "", errors.New("command cannot be empty")
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "exec", id, "sh", "-c", cmd)
-	if err != nil || exitCode != 0 {
-		return output, fmt.Errorf("%s exec failed: %s", engine, output)
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "exec", id, "sh", "-c", cmd).CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("%s exec failed: %s", engine, output)
 	}
-	return output, nil
+	return string(output), nil
 }
 
 // CreateContainer creates a new container.
@@ -504,12 +501,12 @@ func (s *Service) CreateContainer(ctx context.Context, engine Engine, req Create
 		args = append(args, strings.Fields(req.Command)...)
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return "", fmt.Errorf("%s create failed: %s", engine, output)
 	}
 
-	return strings.TrimSpace(output), nil
+	return strings.TrimSpace(string(output)), nil
 }
 
 // ListImages returns all images for the given engine.
@@ -518,12 +515,12 @@ func (s *Service) ListImages(ctx context.Context, engine Engine) ([]Image, error
 		return nil, err
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "images", "--format", "json")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "images", "--format", "json").CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s images failed: %s", engine, output)
 	}
 
-	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
+	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
 		if isPodmanEngine(engine) {
 			var d podmanImageRow
 			if err := json.Unmarshal(line, &d); err != nil {
@@ -552,8 +549,10 @@ func (s *Service) ListImages(ctx context.Context, engine Engine) ([]Image, error
 
 // PullImage pulls an image.
 func (s *Service) PullImage(ctx context.Context, engine Engine, image string) error {
-	_, _, exitCode, err := s.executor.RunWithTimeout(ctx, ImagePullTimeout, engineBinary(engine), "pull", image)
-	if err != nil || exitCode != 0 {
+	pullCtx, cancel := context.WithTimeout(ctx, ImagePullTimeout)
+	defer cancel()
+	_, err := exec.CommandContext(pullCtx, engineBinary(engine), "pull", image).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s pull failed: %w", engine, err)
 	}
 	return nil
@@ -567,8 +566,8 @@ func (s *Service) RemoveImage(ctx context.Context, engine Engine, id string, for
 	}
 	args = append(args, id)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s rmi failed: %w", engine, err)
 	}
 	return nil
@@ -576,9 +575,9 @@ func (s *Service) RemoveImage(ctx context.Context, engine Engine, id string, for
 
 // GetContainerStats returns real-time resource usage stats for a container.
 func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id string) (*Stats, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "stats", id, "--no-stream", "--format",
-		`{"cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}","mem_percent":"{{.MemPerc}}","net_rx":"{{.NetIO}}","block_read":"{{.BlockIO}}","pids":"{{.PIDs}}"}`)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "stats", id, "--no-stream", "--format",
+		`{"cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}","mem_percent":"{{.MemPerc}}","net_rx":"{{.NetIO}}","block_read":"{{.BlockIO}}","pids":"{{.PIDs}}"}`).CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s stats failed: %s", engine, output)
 	}
 
@@ -591,7 +590,7 @@ func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id strin
 		PIDs       string `json:"pids"`
 	}
 
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &raw); err != nil {
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &raw); err != nil {
 		return nil, fmt.Errorf("parse stats: %w", err)
 	}
 
@@ -679,12 +678,12 @@ func parseBytes(s string) int64 {
 
 // GetContainerTop returns the list of processes running inside a container.
 func (s *Service) GetContainerTop(ctx context.Context, engine Engine, id string) ([]ProcessInfo, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm").CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s top failed: %s", engine, output)
 	}
 
-	lines := strings.Split(strings.TrimSpace(output), "\n")
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) < 2 {
 		return []ProcessInfo{}, nil
 	}
@@ -719,8 +718,8 @@ func (s *Service) CopyToContainer(ctx context.Context, engine Engine, id, srcPat
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s cp to container failed: %w", engine, err)
 	}
 	return nil
@@ -731,8 +730,8 @@ func (s *Service) CopyFromContainer(ctx context.Context, engine Engine, id, srcP
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s cp from container failed: %w", engine, err)
 	}
 	return nil
@@ -761,8 +760,8 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 		return fmt.Errorf("container name cannot start with '%c'", newName[0])
 	}
 
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "rename", id, newName)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), "rename", id, newName).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s rename failed: %w", engine, err)
 	}
 	return nil
@@ -787,8 +786,8 @@ func (s *Service) UpdateContainer(ctx context.Context, engine Engine, id string,
 
 	args = append(args, id)
 
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s update failed: %s", engine, output)
 	}
 	return nil
@@ -806,13 +805,13 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 
 	if isPodmanEngine(engine) {
 		// Podman is self-contained (no daemon): CLI present = usable.
-		stdout, exitCode, err := s.executor.RunCombined(ctx, bin, "--version")
-		if err != nil || exitCode != 0 {
+		stdout, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
+		if err != nil {
 			status.Installed = false
 			return status, nil //nolint:nilerr // 引擎未安装时返回未安装状态
 		}
 		status.Installed = true
-		status.Version = extractVersion(stdout)
+		status.Version = extractVersion(string(stdout))
 		status.Running = true
 		status.SocketEnabled = s.socketEnabled(ctx)
 	} else {
@@ -835,23 +834,23 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 // dockerServerVersion returns the Docker daemon (server) version. Only
 // meaningful while the daemon is running.
 func (s *Service) dockerServerVersion(ctx context.Context) string {
-	stdout, exitCode, err := s.executor.RunCombined(ctx, engineBinary(EngineDocker), "version", "--format", "{{.Server.Version}}")
-	if err != nil || exitCode != 0 {
+	stdout, err := exec.CommandContext(ctx, engineBinary(EngineDocker), "version", "--format", "{{.Server.Version}}").CombinedOutput()
+	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(stdout)
+	return strings.TrimSpace(string(stdout))
 }
 
 // unitExists reports whether a systemd unit file is present.
 func (s *Service) unitExists(ctx context.Context, unit string) bool {
-	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "cat", unit)
-	return err == nil && exitCode == 0
+	_, err := exec.CommandContext(ctx, "systemctl", "cat", unit).CombinedOutput()
+	return err == nil
 }
 
 // unitActive reports whether a systemd unit is currently active.
 func (s *Service) unitActive(ctx context.Context, unit string) bool {
-	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "is-active", "--quiet", unit)
-	return err == nil && exitCode == 0
+	_, err := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit).CombinedOutput()
+	return err == nil
 }
 
 // versionRE extracts a semver from `docker --version` / `podman --version`
@@ -908,12 +907,12 @@ func humanSize(b int64) string {
 }
 
 func (s *Service) detectOS(ctx context.Context) string {
-	stdout, _, err := s.executor.RunCombined(ctx, "cat", "/etc/os-release")
+	stdout, err := exec.CommandContext(ctx, "cat", "/etc/os-release").CombinedOutput()
 	if err != nil {
 		return "unknown"
 	}
 
-	lower := strings.ToLower(stdout)
+	lower := strings.ToLower(string(stdout))
 	switch {
 	case strings.Contains(lower, "debian"):
 		return "debian"
@@ -946,38 +945,42 @@ func (s *Service) Install(ctx context.Context, engine Engine) error {
 func (s *Service) installDocker(ctx context.Context) error {
 	log.Println("docker: starting installation...")
 
-	_, exitCode, err := s.executor.RunCombined(ctx, "which", "curl")
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, "which", "curl").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("curl 未安装，请先安装 curl: %w", err)
 	}
 
 	log.Println("docker: downloading install script...")
-	output, _, exitCode, err := s.executor.RunWithTimeout(ctx, 2*time.Minute, "bash", "-c",
-		"curl -fsSL https://get.docker.com -o /tmp/get-docker.sh")
-	if err != nil || exitCode != 0 {
-		return fmt.Errorf("下载 Docker 安装脚本失败 (exit=%d): %s", exitCode, truncateOutput(output, 500))
+	dlCtx, dlCancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer dlCancel()
+	output, err := exec.CommandContext(dlCtx, "bash", "-c",
+		"curl -fsSL https://get.docker.com -o /tmp/get-docker.sh").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("下载 Docker 安装脚本失败: %s", truncateOutput(string(output), 500))
 	}
 
 	log.Println("docker: running install script...")
-	output, _, exitCode, err = s.executor.RunWithTimeout(ctx, 10*time.Minute, "sh", "/tmp/get-docker.sh")
-	if err != nil || exitCode != 0 {
+	runCtx, runCancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer runCancel()
+	output, err = exec.CommandContext(runCtx, "sh", "/tmp/get-docker.sh").CombinedOutput()
+	if err != nil {
 		log.Printf("docker: installation failed: %s", output)
-		return fmt.Errorf("docker 安装脚本执行失败 (exit=%d): %s", exitCode, truncateOutput(output, 500))
+		return fmt.Errorf("docker 安装脚本执行失败: %s", truncateOutput(string(output), 500))
 	}
 	log.Printf("docker: installation script completed")
 
 	log.Println("docker: enabling service...")
-	output, exitCode, err = s.executor.RunCombined(ctx, "systemctl", "enable", "docker")
-	if err != nil || exitCode != 0 {
+	output, err = exec.CommandContext(ctx, "systemctl", "enable", "docker").CombinedOutput()
+	if err != nil {
 		log.Printf("docker: enable failed: %s", output)
-		return fmt.Errorf("启用 Docker 服务失败: %s", truncateOutput(output, 200))
+		return fmt.Errorf("启用 Docker 服务失败: %s", truncateOutput(string(output), 200))
 	}
 
 	log.Println("docker: starting service...")
-	output, exitCode, err = s.executor.RunCombined(ctx, "systemctl", "start", "docker")
-	if err != nil || exitCode != 0 {
+	output, err = exec.CommandContext(ctx, "systemctl", "start", "docker").CombinedOutput()
+	if err != nil {
 		log.Printf("docker: start failed: %s", output)
-		return fmt.Errorf("启动 Docker 服务失败: %s", truncateOutput(output, 200))
+		return fmt.Errorf("启动 Docker 服务失败: %s", truncateOutput(string(output), 200))
 	}
 
 	log.Println("docker: installation completed successfully")
@@ -1002,9 +1005,11 @@ func (s *Service) installPodman(ctx context.Context) error {
 	}
 
 	log.Println("podman: starting installation...")
-	output, _, exitCode, err := s.executor.RunWithTimeout(ctx, 10*time.Minute, "bash", "-c", pkgCmd)
-	if err != nil || exitCode != 0 {
-		return fmt.Errorf("podman 安装失败 (exit=%d): %s", exitCode, truncateOutput(output, 500))
+	pkgCtx, pkgCancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer pkgCancel()
+	output, err := exec.CommandContext(pkgCtx, "bash", "-c", pkgCmd).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman 安装失败: %s", truncateOutput(string(output), 500))
 	}
 	log.Printf("podman: installation completed")
 	return nil
@@ -1028,8 +1033,8 @@ func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
 		return fmt.Errorf("%s 无守护进程，不支持启停", engine)
 	}
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "start", serviceUnit(engine))
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "start", serviceUnit(engine)).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to start %s: %s", engine, output)
 	}
 	return nil
@@ -1040,8 +1045,8 @@ func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
 		return fmt.Errorf("%s 无守护进程，不支持启停", engine)
 	}
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "stop", serviceUnit(engine))
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "stop", serviceUnit(engine)).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to stop %s: %s", engine, output)
 	}
 	return nil
@@ -1052,8 +1057,8 @@ func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
 		return fmt.Errorf("%s 无守护进程，不支持启停", engine)
 	}
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "restart", serviceUnit(engine))
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "restart", serviceUnit(engine)).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to restart %s: %s", engine, output)
 	}
 	return nil
@@ -1065,8 +1070,8 @@ const enableSocketUnit = "podman.socket"
 
 // socketEnabled reports whether Podman's API socket unit is enabled at boot.
 func (s *Service) socketEnabled(ctx context.Context) bool {
-	_, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "is-enabled", enableSocketUnit)
-	return err == nil && exitCode == 0
+	_, err := exec.CommandContext(ctx, "systemctl", "is-enabled", enableSocketUnit).CombinedOutput()
+	return err == nil
 }
 
 // EnableSocket enables Podman's API socket unit at boot.
@@ -1074,8 +1079,8 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
 	}
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "enable", enableSocketUnit)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "enable", enableSocketUnit).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to enable %s socket: %s", engine, output)
 	}
 	return nil
@@ -1086,8 +1091,8 @@ func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
 	}
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "disable", enableSocketUnit)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "disable", enableSocketUnit).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to disable %s socket: %s", engine, output)
 	}
 	return nil
@@ -1095,13 +1100,13 @@ func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 
 // GetInfo returns the engine's system info as a map.
 func (s *Service) GetInfo(ctx context.Context, engine Engine) (map[string]any, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "info", "--format", "{{json .}}")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "info", "--format", "{{json .}}").CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s info failed: %s", engine, output)
 	}
 
 	var info map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &info); err != nil {
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &info); err != nil {
 		return nil, fmt.Errorf("parse %s info: %w", engine, err)
 	}
 
@@ -1134,9 +1139,9 @@ func (s *Service) SetRegistryConfig(ctx context.Context, engine Engine, cfg Regi
 
 func (s *Service) getDockerRegistryConfig(ctx context.Context) RegistryConfig {
 	var cfg RegistryConfig
-	stdout, _, _ := s.executor.RunCombined(ctx, "cat", "/etc/docker/daemon.json")
+	stdout, _ := exec.CommandContext(ctx, "cat", "/etc/docker/daemon.json").CombinedOutput()
 	var config map[string]any
-	if err := json.Unmarshal([]byte(stdout), &config); err != nil {
+	if err := json.Unmarshal(stdout, &config); err != nil {
 		return cfg // daemon.json 不可解析时返回默认配置
 	}
 	if mirrors, ok := config["registry-mirrors"].([]any); ok {
@@ -1154,9 +1159,9 @@ func (s *Service) getDockerRegistryConfig(ctx context.Context) RegistryConfig {
 
 func (s *Service) setDockerRegistryConfig(ctx context.Context, cfg RegistryConfig) error {
 	existing := "{}"
-	stdout, exitCode, err := s.executor.RunCombined(ctx, "cat", "/etc/docker/daemon.json")
-	if err == nil && exitCode == 0 {
-		existing = strings.TrimSpace(stdout)
+	stdout, err := exec.CommandContext(ctx, "cat", "/etc/docker/daemon.json").CombinedOutput()
+	if err == nil {
+		existing = strings.TrimSpace(string(stdout))
 		if existing == "" {
 			existing = "{}"
 		}
@@ -1185,8 +1190,8 @@ func (s *Service) setDockerRegistryConfig(ctx context.Context, cfg RegistryConfi
 
 	encoded := base64.StdEncoding.EncodeToString(newConfig)
 	writeCmd := fmt.Sprintf("mkdir -p /etc/docker && echo '%s' | base64 -d > /etc/docker/daemon.json", encoded)
-	_, exitCode, err = s.executor.RunCombined(ctx, "bash", "-c", writeCmd)
-	if err != nil || exitCode != 0 {
+	_, err = exec.CommandContext(ctx, "bash", "-c", writeCmd).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to write daemon.json: %w", err)
 	}
 
@@ -1197,14 +1202,20 @@ func (s *Service) setDockerRegistryConfig(ctx context.Context, cfg RegistryConfi
 var registriesConfInsecure = regexp.MustCompile(`location\s*=\s*"([^"]*)"`)
 
 func (s *Service) getPodmanRegistryConfig(ctx context.Context) RegistryConfig {
+	stdout, _ := exec.CommandContext(ctx, "cat", "/etc/containers/registries.conf").CombinedOutput()
+	return parseRegistriesConf(string(stdout))
+}
+
+// parseRegistriesConf 解析 /etc/containers/registries.conf：mirror（unqualified
+// search 列表）与 insecure registry（带 insecure=true 的 [[registry]] 块）。
+func parseRegistriesConf(content string) RegistryConfig {
 	var cfg RegistryConfig
-	stdout, _, _ := s.executor.RunCombined(ctx, "cat", "/etc/containers/registries.conf")
-	if m := regexp.MustCompile(`unqualified-search-registries\s*=\s*\[(.*?)\]`).FindStringSubmatch(stdout); len(m) == 2 {
+	if m := regexp.MustCompile(`unqualified-search-registries\s*=\s*\[(.*?)\]`).FindStringSubmatch(content); len(m) == 2 {
 		for _, item := range regexp.MustCompile(`"([^"]*)"`).FindAllStringSubmatch(m[1], -1) {
 			cfg.Mirrors = append(cfg.Mirrors, item[1])
 		}
 	}
-	for _, seg := range strings.Split(stdout, "[[registry]]")[1:] {
+	for _, seg := range strings.Split(content, "[[registry]]")[1:] {
 		if !regexp.MustCompile(`insecure\s*=\s*true`).MatchString(seg) {
 			continue
 		}
@@ -1234,8 +1245,8 @@ func (s *Service) setPodmanRegistryConfig(ctx context.Context, cfg RegistryConfi
 	}
 	encoded := base64.StdEncoding.EncodeToString([]byte(b.String()))
 	writeCmd := fmt.Sprintf("mkdir -p /etc/containers && echo '%s' | base64 -d > /etc/containers/registries.conf", encoded)
-	_, exitCode, err := s.executor.RunCombined(ctx, "bash", "-c", writeCmd)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, "bash", "-c", writeCmd).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to write registries.conf: %w", err)
 	}
 	return nil
@@ -1273,13 +1284,13 @@ func SetAuthEnv() {
 // in ~/.config/containers/auth.json — both under the "auths" key at authPath().
 // Each entry's "auth" holds base64("username:password").
 func (s *Service) GetLoggedInRegistries(ctx context.Context, engine Engine) []LoggedInRegistry {
-	stdout, _, _ := s.executor.RunCombined(ctx, "cat", authPath(engine))
+	stdout, _ := exec.CommandContext(ctx, "cat", authPath(engine)).CombinedOutput()
 	var auth struct {
 		Auths map[string]struct {
 			Auth string `json:"auth"`
 		} `json:"auths"`
 	}
-	if err := json.Unmarshal([]byte(stdout), &auth); err != nil {
+	if err := json.Unmarshal(stdout, &auth); err != nil {
 		return []LoggedInRegistry{} // auth.json 不可解析时返回空列表
 	}
 	out := make([]LoggedInRegistry, 0, len(auth.Auths))
@@ -1299,20 +1310,20 @@ func (s *Service) GetLoggedInRegistries(ctx context.Context, engine Engine) []Lo
 // RegistryLogin authenticates to a private registry. Password goes over stdin
 // (--password-stdin) so it never appears in argv/ps.
 func (s *Service) RegistryLogin(ctx context.Context, engine Engine, server, username, password string) error {
-	output, exitCode, err := s.executor.RunWithOptions(ctx,
-		executor.CommandOptions{Stdin: password + "\n"},
-		engineBinary(engine), "login", server, "--username", username, "--password-stdin")
-	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s login failed: %s", engine, truncateOutput(output, 500))
+	cmd := exec.CommandContext(ctx, engineBinary(engine), "login", server, "--username", username, "--password-stdin")
+	cmd.Stdin = strings.NewReader(password + "\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s login failed: %s", engine, truncateOutput(string(out), 500))
 	}
 	return nil
 }
 
 // RegistryLogout clears stored credentials for a registry.
 func (s *Service) RegistryLogout(ctx context.Context, engine Engine, server string) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "logout", server)
-	if err != nil || exitCode != 0 {
-		return fmt.Errorf("%s logout failed: %s", engine, truncateOutput(output, 500))
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "logout", server).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s logout failed: %s", engine, truncateOutput(string(output), 500))
 	}
 	return nil
 }
@@ -1349,16 +1360,16 @@ func (s *Service) ListProjects(ctx context.Context, engine Engine) []ComposeProj
 		return []ComposeProject{}
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "compose", "ls", "--format", "json")
-	if err != nil || exitCode != 0 {
-		output, exitCode, err = s.executor.RunCombined(ctx, "docker-compose", "ls", "--format", "json")
-		if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "docker", "compose", "ls", "--format", "json").CombinedOutput()
+	if err != nil {
+		output, err = exec.CommandContext(ctx, "docker-compose", "ls", "--format", "json").CombinedOutput()
+		if err != nil {
 			return []ComposeProject{} // docker compose 未安装时返回空列表
 		}
 	}
 
 	var projects []ComposeProject
-	trimmed := strings.TrimSpace(output)
+	trimmed := strings.TrimSpace(string(output))
 	if trimmed == "" {
 		return []ComposeProject{}
 	}
@@ -1397,13 +1408,13 @@ func (s *Service) getProjectServices(ctx context.Context, name, configFile strin
 		return nil
 	}
 
-	output, exitCode, err := s.executor.RunCombined(ctx, "docker", "compose", "-f", configFile, "config", "--services")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "docker", "compose", "-f", configFile, "config", "--services").CombinedOutput()
+	if err != nil {
 		return nil
 	}
 
 	var services []string
-	for line := range strings.SplitSeq(strings.TrimSpace(output), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			services = append(services, line)
@@ -1418,8 +1429,8 @@ func (s *Service) ComposeUp(ctx context.Context, engine Engine, projectDir strin
 	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "up", "-d")
 
-	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("compose up failed: %s", output)
 	}
 	return nil
@@ -1431,8 +1442,8 @@ func (s *Service) ComposeDown(ctx context.Context, engine Engine, projectDir str
 	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "down")
 
-	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("compose down failed: %s", output)
 	}
 	return nil
@@ -1444,8 +1455,8 @@ func (s *Service) ComposeRestart(ctx context.Context, engine Engine, projectDir 
 	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "restart")
 
-	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("compose restart failed: %s", output)
 	}
 	return nil
@@ -1457,11 +1468,11 @@ func (s *Service) ComposeGetLogs(ctx context.Context, engine Engine, projectDir 
 	bin, args := s.composeCommand(engine, composeFile)
 	args = append(args, "logs", "--tail", strconv.Itoa(tail))
 
-	output, exitCode, err := s.executor.RunCombined(ctx, bin, args...)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
 		return "", fmt.Errorf("compose logs failed: %s", output)
 	}
-	return output, nil
+	return string(output), nil
 }
 
 // ComposeGetConfig reads the compose file content.
@@ -1512,12 +1523,12 @@ func (s *Service) findComposeFile(projectDir string) string {
 
 // ListVolumes returns all volumes for the given engine.
 func (s *Service) ListVolumes(ctx context.Context, engine Engine) ([]Volume, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "volume", "ls", "--format", "json")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "volume", "ls", "--format", "json").CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s volume ls failed: %s", engine, output)
 	}
 
-	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
+	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
 		// Podman uses lowercase "name"/"driver"/"mountpoint"; Go's decoder is
 		// case-insensitive, so the lowercase tags match both.
 		var raw struct {
@@ -1558,8 +1569,8 @@ func (s *Service) CreateVolume(ctx context.Context, engine Engine, name, driver 
 	}
 	args = append(args, name)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s volume create failed: %w", engine, err)
 	}
 	return nil
@@ -1573,8 +1584,8 @@ func (s *Service) RemoveVolume(ctx context.Context, engine Engine, name string, 
 	}
 	args = append(args, name)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s volume rm failed: %w", engine, err)
 	}
 	return nil
@@ -1589,12 +1600,12 @@ type networkDetails struct {
 
 // ListNetworks returns all networks for the given engine.
 func (s *Service) ListNetworks(ctx context.Context, engine Engine) ([]Network, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "network", "ls", "--format", "json")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "network", "ls", "--format", "json").CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("%s network ls failed: %s", engine, output)
 	}
 
-	rows, err := parseJSONRows(output, func(line []byte) (any, bool) {
+	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
 		// Podman uses lowercase "id"/"name"/"driver"/"scope"; case-insensitive
 		// unmarshal lets lowercase tags match both.
 		var raw struct {
@@ -1632,8 +1643,8 @@ func (s *Service) ListNetworks(ctx context.Context, engine Engine) ([]Network, e
 }
 
 func (s *Service) inspectNetwork(ctx context.Context, engine Engine, id string) *networkDetails {
-	output, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "network", "inspect", "--format", "{{json .IPAM}}", id)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, engineBinary(engine), "network", "inspect", "--format", "{{json .IPAM}}", id).CombinedOutput()
+	if err != nil {
 		return nil
 	}
 
@@ -1643,7 +1654,7 @@ func (s *Service) inspectNetwork(ctx context.Context, engine Engine, id string) 
 			Gateway string `json:"Gateway"`
 		} `json:"Config"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &ipam); err != nil {
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &ipam); err != nil {
 		return nil
 	}
 
@@ -1664,8 +1675,8 @@ func (s *Service) CreateNetwork(ctx context.Context, engine Engine, name, driver
 	}
 	args = append(args, name)
 
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), args...)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s network create failed: %w", engine, err)
 	}
 	return nil
@@ -1673,8 +1684,8 @@ func (s *Service) CreateNetwork(ctx context.Context, engine Engine, name, driver
 
 // RemoveNetwork removes a network.
 func (s *Service) RemoveNetwork(ctx context.Context, engine Engine, id string) error {
-	_, exitCode, err := s.executor.RunCombined(ctx, engineBinary(engine), "network", "rm", id)
-	if err != nil || exitCode != 0 {
+	_, err := exec.CommandContext(ctx, engineBinary(engine), "network", "rm", id).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("%s network rm failed: %w", engine, err)
 	}
 	return nil

@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/web/security"
 )
 
@@ -20,12 +20,11 @@ import (
 type WebsiteService struct {
 	repo          WebsiteRepository
 	webServerRepo ServerRepository
-	executor      executor.CommandExecutor
 	securityRepo  security.SecurityRepository
 }
 
-func NewWebsiteService(repo WebsiteRepository, webServerRepo ServerRepository, exec executor.CommandExecutor, securityRepo security.SecurityRepository) *WebsiteService {
-	return &WebsiteService{repo: repo, webServerRepo: webServerRepo, executor: exec, securityRepo: securityRepo}
+func NewWebsiteService(repo WebsiteRepository, webServerRepo ServerRepository, securityRepo security.SecurityRepository) *WebsiteService {
+	return &WebsiteService{repo: repo, webServerRepo: webServerRepo, securityRepo: securityRepo}
 }
 
 // List returns websites for a specific web server
@@ -415,11 +414,11 @@ func (s *WebsiteService) GetLogs(ctx context.Context, webServerID, id int64, log
 		lines = 200
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "tail", "-n", strconv.Itoa(lines), logPath)
+	out, err := exec.CommandContext(ctx, "tail", "-n", strconv.Itoa(lines), logPath).CombinedOutput()
 	if err != nil {
 		return fmt.Sprintf("(读取日志失败: %s)", logPath), nil //nolint:nilerr // 读取日志失败时返回友好提示
 	}
-	return out, nil
+	return string(out), nil
 }
 
 // ApplySSL applies SSL certificate using certbot
@@ -438,7 +437,7 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 		return apperror.ErrBadRequest.WithMessage("无法申请 SSL：Web 服务器未运行")
 	}
 
-	if _, err := s.executor.LookPath("certbot"); err != nil {
+	if _, err := exec.LookPath("certbot"); err != nil {
 		return apperror.ErrBadRequest.WithMessage("certbot 未安装，请运行: apt install certbot python3-certbot-nginx")
 	}
 
@@ -449,7 +448,7 @@ func (s *WebsiteService) ApplySSL(ctx context.Context, webServerID, id int64, em
 		args = append(args, "--register-unsafely-without-email")
 	}
 
-	out, _, err := s.executor.RunCombined(ctx, "certbot", args...)
+	out, err := exec.CommandContext(ctx, "certbot", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("certbot failed: %s", out)
 	}
@@ -577,12 +576,12 @@ func (s *WebsiteService) reloadWebServer(ctx context.Context, ws *WebServer) {
 	}
 	// Test config first (for Nginx)
 	if ws.Name == "nginx" {
-		if out, _, err := s.executor.RunCombined(ctx, "nginx", "-t"); err != nil {
+		if out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput(); err != nil {
 			log.Printf("website: nginx config test failed: %s", out)
 			return
 		}
 	}
-	_, _, _ = s.executor.RunCombined(ctx, "systemctl", "reload", ws.ServiceName)
+	_, _ = exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
 }
 
 // Nginx config templates per project type

@@ -1,16 +1,18 @@
 package database
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"easyserver/internal/infra/executor"
 )
 
 // ContainerSpec describes a database container without exposing CLI details to callers.
@@ -52,9 +54,34 @@ type DatabaseRuntime interface {
 	Exists(ctx context.Context, runtime, name string) (bool, error)
 }
 
+// runCmdFunc 执行一条容器 CLI 命令，返回分离的 stdout/stderr、退出码与错误。
+// 语义：非零退出 → err=nil + exitCode>0（run() 据此区分「启动失败」与「非零退出」）；
+// 启动失败 → err 非 nil + exitCode=-1。字段可注入，测试用它捕获参数与返回固定输出。
+type runCmdFunc func(ctx context.Context, name string, args ...string) (stdout, stderr string, exitCode int, err error)
+
+// defaultRunCmd 是 runCmd 的默认实现：分离 stdout/stderr（mysql 警告不得混入
+// 查询结果），非零退出语义见 runCmdFunc 注释。
+func defaultRunCmd(ctx context.Context, name string, args ...string) (string, string, int, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	var so, se bytes.Buffer
+	cmd.Stdout = &so
+	cmd.Stderr = &se
+	err := cmd.Run()
+	stdout, stderr := so.String(), se.String()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return stdout, stderr, exitErr.ExitCode(), nil
+		}
+		return stdout, stderr, -1, err
+	}
+	return stdout, stderr, 0, nil
+}
+
 // CLIContainerRuntime implements DatabaseRuntime with Docker or rootful Podman.
 type CLIContainerRuntime struct {
-	executor executor.CommandExecutor
+	// runCmd 执行容器 CLI；默认 defaultRunCmd，测试注入 fake 捕获参数。
+	runCmd runCmdFunc
 	// lastSpec records the most recent Create spec, exposed for tests to assert
 	// the structured contract (label, volume, port binding) without inspecting
 	// command concatenation.
@@ -64,8 +91,11 @@ type CLIContainerRuntime struct {
 	outputHook func(string)
 }
 
-func NewCLIContainerRuntime(exec executor.CommandExecutor) *CLIContainerRuntime {
-	return &CLIContainerRuntime{executor: exec}
+func NewCLIContainerRuntime(runCmd runCmdFunc) *CLIContainerRuntime {
+	if runCmd == nil {
+		runCmd = defaultRunCmd
+	}
+	return &CLIContainerRuntime{runCmd: runCmd}
 }
 
 // SetOutputHook installs a per-line callback for all command output. Used by
@@ -125,13 +155,10 @@ func (r *CLIContainerRuntime) run(ctx context.Context, combine, hook bool, runti
 	if combine && hook && r.outputHook != nil {
 		return r.streamRun(ctx, bin, args...)
 	}
-	var out, stderr string
-	var code int
-	var runErr error
-	if combine {
-		out, code, runErr = r.executor.RunCombined(ctx, bin, args...)
-	} else {
-		out, stderr, code, runErr = r.executor.Run(ctx, bin, args...)
+	stdout, stderr, code, runErr := r.runCmd(ctx, bin, args...)
+	out := stdout
+	if combine && stderr != "" {
+		out = strings.TrimRight(stdout, "\n") + "\n" + stderr
 	}
 	if hook && r.outputHook != nil {
 		for line := range strings.SplitSeq(out, "\n") {
@@ -162,17 +189,56 @@ func (r *CLIContainerRuntime) run(ctx context.Context, combine, hook bool, runti
 // long-running, so their progress should stream, not replay when the command
 // finishes. Returns the full merged output with the same error shape as run.
 func (r *CLIContainerRuntime) streamRun(ctx context.Context, bin string, args ...string) (string, error) {
-	out, _, err := r.executor.RunStream(ctx, func(line string) {
-		if t := strings.TrimSpace(line); t != "" && r.outputHook != nil {
-			r.outputHook(t)
-		}
-	}, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	so, err := cmd.StdoutPipe()
 	if err != nil {
+		return "", err
+	}
+	se, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	lines := make(chan string, 256)
+	var wg sync.WaitGroup
+	read := func(rc io.ReadCloser) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(rc)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}
+	wg.Add(2)
+	go read(so)
+	go read(se)
+	go func() { wg.Wait(); close(lines) }()
+
+	var sb strings.Builder
+	collect := make(chan struct{})
+	go func() {
+		defer close(collect)
+		for line := range lines {
+			sb.WriteString(line)
+			sb.WriteString("\n")
+			if t := strings.TrimSpace(line); t != "" && r.outputHook != nil {
+				r.outputHook(t)
+			}
+		}
+	}()
+
+	waitErr := cmd.Wait()
+	<-collect
+
+	out := sb.String()
+	if waitErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
 			return out, fmt.Errorf("%s exited with code %d: %s", bin, exitErr.ExitCode(), strings.TrimSpace(out))
 		}
-		return out, fmt.Errorf("%s: %w", bin, err)
+		return out, fmt.Errorf("%s: %w", bin, waitErr)
 	}
 	return out, nil
 }

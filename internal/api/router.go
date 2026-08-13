@@ -32,7 +32,6 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
 	"easyserver/internal/monitor"
 	monitorhttp "easyserver/internal/monitor/http"
@@ -73,7 +72,6 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 		log.Fatalf("init database: %v", err)
 	}
 
-	cmdExec := executor.NewOSExecutor()
 	miseProvider := mise.NewProvider()
 
 	// ── Shared services (depended upon by others) ──
@@ -126,7 +124,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	// ── Terminal ──
 
-	terminalManager := terminal.NewManager(ctx, &wg, cmdExec, cfg.Auth.IdleTimeout)
+	terminalManager := terminal.NewManager(ctx, &wg, cfg.Auth.IdleTimeout)
 
 	// ── Domain services (no background goroutines) ──
 
@@ -136,21 +134,21 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	envConfigService := envconfig.NewService(envConfigRepo)
 
 	// runtimeService 必须先建：cron/systemd 用它校验运行时绑定（ADR-0009 目录权威）。
-	runtimeService := runtimeenv.NewService(cmdExec, envConfigService, miseProvider)
+	runtimeService := runtimeenv.NewService(envConfigService, miseProvider)
 	if err := runtimeService.Init(ctx); err != nil {
 		log.Printf("ERROR: Failed to init runtime service: %v", err)
 	}
-	packageManagerService := runtimeenv.NewPackageService(cmdExec, miseProvider)
+	packageManagerService := runtimeenv.NewPackageService(miseProvider)
 
-	cronService := cron.NewServiceWithSink(cronRepo, cmdExec, miseProvider, runtimeService, notificationService)
+	cronService := cron.NewServiceWithSink(cronRepo, miseProvider, runtimeService, notificationService)
 
-	serviceManager := systemd.NewServiceManager(cmdExec, runtimeService, miseProvider)
+	serviceManager := systemd.NewServiceManager(runtimeService, miseProvider)
 
 	container.SetAuthEnv()
-	containerService := container.NewService(cmdExec)
+	containerService := container.NewService()
 
 	dbRepo := dbdomain.NewSQLiteRepository(db)
-	dbService := dbdomain.NewServiceWithSink(dbRepo, dbdomain.NewCLIContainerRuntime(cmdExec), notificationService)
+	dbService := dbdomain.NewServiceWithSink(dbRepo, dbdomain.NewCLIContainerRuntime(nil), notificationService)
 
 	deployRepo := deploy.NewSQLiteRepository(db)
 	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)
@@ -159,18 +157,18 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	}
 
 	firewallRepo := firewall.NewSQLiteRepository(db)
-	firewallService := firewall.NewService(firewallRepo, cmdExec, cfg.Server.Port)
+	firewallService := firewall.NewService(firewallRepo, cfg.Server.Port)
 
-	sshConfigService := ssh.NewService(cmdExec)
+	sshConfigService := ssh.NewService()
 
 	webServerRepo := web.NewSQLiteServerRepository(db)
 	websiteRepo := web.NewSQLiteWebsiteRepository(db)
-	webServerSvc := web.NewService(webServerRepo, cmdExec)
+	webServerSvc := web.NewService(webServerRepo)
 	webServerSvc.SeedPredefinedWebServers(ctx)
 
 	securityRepo := websecurity.NewSQLiteSecurityRepository(db)
-	securitySvc := websecurity.NewSecurityService(securityRepo, firewallService, cmdExec)
-	websiteSvc := web.NewWebsiteService(websiteRepo, webServerRepo, cmdExec, securityRepo)
+	securitySvc := websecurity.NewSecurityService(securityRepo, firewallService)
+	websiteSvc := web.NewWebsiteService(websiteRepo, webServerRepo, securityRepo)
 
 	fileManager, err := filemanager.NewManager(cfg.FileManager.BasePath)
 	if err != nil {
@@ -204,24 +202,24 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	// Domain route registration
 	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout, cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval, cfg)
-	monitorhttp.RegisterRoutes(g.Protected, g.WS, monitorSvc, cmdExec, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
-	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cmdExec, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	monitorhttp.RegisterRoutes(g.Protected, g.WS, monitorSvc, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(g.Protected, g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo)
-	settingshttp.RegisterRoutes(g.Protected, cfg, configPath, alertService, monitorSvc, cmdExec, sig)
+	settingshttp.RegisterRoutes(g.Protected, cfg, configPath, alertService, monitorSvc, sig)
 	cloudhttp.RegisterRoutes(g.Protected, cloudService, &cfg.TencentCloud, cfg.Server.Port)
 	deployhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), deploySvc)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)
 	databasehttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbService)
-	cronhttp.RegisterRoutes(g.Protected, g.WS, cronService, cmdExec)
+	cronhttp.RegisterRoutes(g.Protected, g.WS, cronService)
 	firewallhttp.RegisterRoutes(g.Protected, firewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)
 	notificationhttp.RegisterRoutes(g.Protected, notificationService)
-	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(cmdExec, db))
+	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(db))
 	if securitySvc != nil {
 		secHandler := websecurityhttp.NewSecurityHandler(securitySvc)
 		secHandler.RegisterRoutes(g.Protected.Group("/websites"))

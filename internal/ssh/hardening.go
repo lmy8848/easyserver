@@ -245,7 +245,7 @@ func (s *Service) GenerateKeyPair(ctx context.Context, name, keyType string) (st
 	if bits != "" {
 		args = append(strings.Split(bits, " "), args...)
 	}
-	if _, _, err := s.executor.RunCombined(ctx, "ssh-keygen", args...); err != nil {
+	if _, err := exec.CommandContext(ctx, "ssh-keygen", args...).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("ssh-keygen: %w", err)
 	}
 	pub, err := os.ReadFile(path + ".pub")
@@ -286,18 +286,18 @@ func (s *Service) Fail2banStatus(ctx context.Context) *Fail2banStatus {
 		return st // fail2ban 未安装时返回未安装状态
 	}
 	st.Installed = true
-	out, _, _ := s.executor.RunCombined(ctx, "systemctl", "is-active", "fail2ban")
-	if strings.TrimSpace(out) == "active" {
+	out, _ := exec.CommandContext(ctx, "systemctl", "is-active", "fail2ban").CombinedOutput()
+	if strings.TrimSpace(string(out)) == "active" {
 		st.Active = true
 	}
-	out, _, _ = s.executor.RunCombined(ctx, "systemctl", "is-enabled", "fail2ban")
-	if strings.TrimSpace(out) == "enabled" {
+	out, _ = exec.CommandContext(ctx, "systemctl", "is-enabled", "fail2ban").CombinedOutput()
+	if strings.TrimSpace(string(out)) == "enabled" {
 		st.Enabled = true
 	}
 	// List jails.
-	out, _, err := s.executor.RunCombined(ctx, "fail2ban-client", "status")
+	out, err := exec.CommandContext(ctx, "fail2ban-client", "status").CombinedOutput()
 	if err == nil {
-		for line := range strings.SplitSeq(out, "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			line = strings.TrimSpace(line)
 			if after, ok := strings.CutPrefix(line, "Jail list:"); ok {
 				jails := strings.SplitSeq(after, ",")
@@ -312,8 +312,8 @@ func (s *Service) Fail2banStatus(ctx context.Context) *Fail2banStatus {
 		}
 		// Per-jail failed/banned counts.
 		for i := range st.Jails {
-			out, _, _ := s.executor.RunCombined(ctx, "fail2ban-client", "status", st.Jails[i].Name)
-			for line := range strings.SplitSeq(out, "\n") {
+			out, _ := exec.CommandContext(ctx, "fail2ban-client", "status", st.Jails[i].Name).CombinedOutput()
+			for line := range strings.SplitSeq(string(out), "\n") {
 				line = strings.TrimSpace(line)
 				if strings.HasPrefix(line, "Currently failed:") {
 					_, _ = fmt.Sscanf(line, "Currently failed:%d", &st.Jails[i].Failed)
@@ -332,7 +332,7 @@ func (s *Service) InstallFail2ban(ctx context.Context) error {
 	if _, err := exec.LookPath("fail2ban-client"); err == nil {
 		return apperror.ErrBadRequest.WithMessage("fail2ban 已安装")
 	}
-	if _, _, err := s.executor.RunCombined(ctx, "apt-get", "install", "-y", "fail2ban"); err != nil {
+	if _, err := exec.CommandContext(ctx, "apt-get", "install", "-y", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("安装 fail2ban 失败: %w", err)
 	}
 	// Minimal sshd jail config.
@@ -347,7 +347,7 @@ bantime = 1h
 	if err := os.WriteFile("/etc/fail2ban/jail.d/sshd.local", []byte(jail), 0644); err != nil {
 		return err
 	}
-	if _, _, err := s.executor.RunCombined(ctx, "systemctl", "enable", "--now", "fail2ban"); err != nil {
+	if _, err := exec.CommandContext(ctx, "systemctl", "enable", "--now", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("启用 fail2ban 失败: %w", err)
 	}
 	return nil
@@ -358,7 +358,7 @@ func (s *Service) ReloadFail2ban(ctx context.Context) error {
 	if _, err := exec.LookPath("fail2ban-client"); err != nil {
 		return apperror.ErrBadRequest.WithMessage("fail2ban 未安装")
 	}
-	if _, _, err := s.executor.RunCombined(ctx, "systemctl", "reload", "fail2ban"); err != nil {
+	if _, err := exec.CommandContext(ctx, "systemctl", "reload", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("重载 fail2ban 失败: %w", err)
 	}
 	return nil
