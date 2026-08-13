@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,16 +23,14 @@ import (
 // CronHandler handles cron task API requests
 type CronHandler struct {
 	cronService *cron.Service
-	executor    executor.CommandExecutor
 	runner      *cron.ScriptRunner
 }
 
 // NewCronHandler creates a new CronHandler
-func NewCronHandler(cronService *cron.Service, exec executor.CommandExecutor) *CronHandler {
+func NewCronHandler(cronService *cron.Service) *CronHandler {
 	return &CronHandler{
 		cronService: cronService,
-		executor:    exec,
-		runner:      cron.NewScriptRunner(exec),
+		runner:      cron.NewScriptRunner(),
 	}
 }
 
@@ -83,7 +81,7 @@ func (h *CronHandler) CreateTask(c *gin.Context) {
 		c.Error(apperror.ErrBadRequest.WithMessage("调度表达式不能为空"))
 		return
 	}
-	if err := validateOnCalendar(h.executor, onCalendar); err != nil {
+	if err := validateOnCalendar(onCalendar); err != nil {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的调度表达式: " + err.Error()))
 		return
 	}
@@ -175,7 +173,7 @@ func (h *CronHandler) UpdateTask(c *gin.Context) {
 			c.Error(apperror.ErrBadRequest.WithMessage("调度表达式不能为空"))
 			return
 		}
-		if err := validateOnCalendar(h.executor, onCalendar); err != nil {
+		if err := validateOnCalendar(onCalendar); err != nil {
 			c.Error(apperror.ErrBadRequest.WithMessage("无效的调度表达式: " + err.Error()))
 			return
 		}
@@ -371,13 +369,13 @@ func (h *CronHandler) GetScriptLogs(c *gin.Context) {
 		"--output=json",
 		"-n", strconv.Itoa(limit),
 	}
-	stdout, _, exitCode, err := h.executor.Run(c.Request.Context(), "journalctl", args...)
-	if err != nil || exitCode != 0 {
-		c.Error(apperror.ErrInternal.WithMessage("读取历史日志失败: " + stdout))
+	stdout, err := exec.CommandContext(c.Request.Context(), "journalctl", args...).Output()
+	if err != nil {
+		c.Error(apperror.ErrInternal.WithMessage("读取历史日志失败: " + string(stdout)))
 		return
 	}
 
-	logs := parseScriptJournalLogs(stdout)
+	logs := parseScriptJournalLogs(string(stdout))
 	httpx.Success(c, logs)
 }
 
@@ -700,16 +698,16 @@ func validateWorkDir(dir string) error {
 }
 
 // validateOnCalendar 用 systemd-analyze calendar 校验 OnCalendar 表达式。
-func validateOnCalendar(exec executor.CommandExecutor, expr string) error {
-	_, _, exitCode, err := exec.Run(context.Background(), "systemd-analyze", "calendar", expr)
-	if err != nil || exitCode != 0 {
+func validateOnCalendar(expr string) error {
+	_, err := exec.CommandContext(context.Background(), "systemd-analyze", "calendar", expr).Output()
+	if err != nil {
 		return fmt.Errorf("systemd 无法解析 %q", expr)
 	}
 	return nil
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, cronService *cron.Service, exec executor.CommandExecutor) {
-	handler := NewCronHandler(cronService, exec)
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, cronService *cron.Service) {
+	handler := NewCronHandler(cronService)
 
 	protected.GET("/cron/tasks", handler.ListTasks)
 	protected.POST("/cron/tasks", handler.CreateTask)

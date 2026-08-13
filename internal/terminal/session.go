@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"time"
 
-	"easyserver/internal/infra/executor"
-
 	"github.com/creack/pty"
 )
 
@@ -40,10 +38,8 @@ func (m *Manager) CreateSession(id string) (*Session, error) {
 		shell = "/bin/bash"
 	}
 
-	cmd := m.executor.Command(context.TODO(), executor.StartOptions{Env: []string{"TERM=xterm-256color"}}, shell)
-	if cmd == nil {
-		return nil, errors.New("executor returned nil command")
-	}
+	cmd := exec.CommandContext(context.TODO(), shell)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

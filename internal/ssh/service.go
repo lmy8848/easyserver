@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
-
-	"easyserver/internal/infra/executor"
 )
 
 const sshdConfigPath = "/etc/ssh/sshd_config"
@@ -18,14 +17,12 @@ const sshdConfigPath = "/etc/ssh/sshd_config"
 // Service manages SSH server configuration.
 type Service struct {
 	configPath string
-	executor   executor.CommandExecutor
 }
 
 // NewService creates a new SSH service.
-func NewService(exec executor.CommandExecutor) *Service {
+func NewService() *Service {
 	return &Service{
 		configPath: sshdConfigPath,
-		executor:   exec,
 	}
 }
 
@@ -201,26 +198,23 @@ func (s *Service) SaveConfig(config *Config) error {
 
 // TestConfig tests the SSH configuration.
 func (s *Service) TestConfig(ctx context.Context) (string, error) {
-	output, exitCode, err := s.executor.RunCombined(ctx, "sshd", "-t")
+	output, err := exec.CommandContext(ctx, "sshd", "-t").CombinedOutput()
 	if err != nil {
-		return output, fmt.Errorf("config test failed: %w", err)
-	}
-	if exitCode != 0 {
-		return output, fmt.Errorf("config test failed (exit code %d)", exitCode)
+		return string(output), fmt.Errorf("config test failed: %w", err)
 	}
 	return "Configuration is valid", nil
 }
 
 // ReloadSSH reloads the SSH service.
 func (s *Service) ReloadSSH(ctx context.Context) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "systemctl", "reload", "sshd")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "reload", "sshd").CombinedOutput()
+	if err != nil {
 		// Try ssh service name
-		output2, exitCode2, err2 := s.executor.RunCombined(ctx, "systemctl", "reload", "ssh")
-		if err2 != nil || exitCode2 != 0 {
-			msg := output
+		output2, err2 := exec.CommandContext(ctx, "systemctl", "reload", "ssh").CombinedOutput()
+		if err2 != nil {
+			msg := string(output)
 			if msg == "" {
-				msg = output2
+				msg = string(output2)
 			}
 			// coalesceErr 可能返回 nil（executor 对非零退出码不返回 error）——
 			// nil 时拼 %w 会打出 %!w(<nil>)，单独处理。
@@ -240,9 +234,9 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 	seenPIDs := make(map[int]bool)
 
 	// Method 1: Use `who -u` for interactive sessions (with TTY)
-	whoOut, _, whoExit, whoErr := s.executor.Run(ctx, "who", "-u")
-	if whoErr == nil && whoExit == 0 {
-		scanner := bufio.NewScanner(strings.NewReader(whoOut))
+	whoOut, whoErr := exec.CommandContext(ctx, "who", "-u").Output()
+	if whoErr == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(whoOut)))
 		for scanner.Scan() {
 			line := scanner.Text()
 			session := parseWhoLine(line)
@@ -261,9 +255,9 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 	sshPortStr := fmt.Sprintf(":%d ", sshPort)
 	sshPortTab := fmt.Sprintf(":%d\t", sshPort)
 
-	ssOut, _, ssExit, ssErr := s.executor.Run(ctx, "ss", "-tnp")
-	if ssErr == nil && ssExit == 0 {
-		scanner := bufio.NewScanner(strings.NewReader(ssOut))
+	ssOut, ssErr := exec.CommandContext(ctx, "ss", "-tnp").Output()
+	if ssErr == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(ssOut)))
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !strings.Contains(line, sshPortStr) && !strings.Contains(line, sshPortTab) {
@@ -282,9 +276,9 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 	}
 
 	// Method 3: Use `ps` to find sshd processes with user sessions
-	psOut, _, psExit, psErr := s.executor.Run(ctx, "ps", "aux")
-	if psErr == nil && psExit == 0 {
-		scanner := bufio.NewScanner(strings.NewReader(psOut))
+	psOut, psErr := exec.CommandContext(ctx, "ps", "aux").Output()
+	if psErr == nil {
+		scanner := bufio.NewScanner(strings.NewReader(string(psOut)))
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !strings.Contains(line, "sshd:") || strings.Contains(line, "grep") {
@@ -307,12 +301,9 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 
 // KillSession kills an SSH session by PID.
 func (s *Service) KillSession(ctx context.Context, pid int) error {
-	output, exitCode, err := s.executor.RunCombined(ctx, "kill", strconv.Itoa(pid))
+	output, err := exec.CommandContext(ctx, "kill", strconv.Itoa(pid)).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("kill failed: %s: %w", output, err)
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("kill failed: %s (exit code %d)", output, exitCode)
 	}
 	log.Printf("ssh: killed session %d", pid)
 	return nil
@@ -321,14 +312,14 @@ func (s *Service) KillSession(ctx context.Context, pid int) error {
 // GetLoginHistory returns recent SSH login attempts.
 func (s *Service) GetLoginHistory(ctx context.Context, limit int) ([]LoginRecord, error) {
 	// Try journalctl first
-	stdout, _, exitCode, err := s.executor.Run(ctx, "journalctl", "-u", "sshd", "-u", "ssh", "--no-pager", "-n", strconv.Itoa(limit), "--output=short-iso")
-	if err != nil || exitCode != 0 {
+	stdout, err := exec.CommandContext(ctx, "journalctl", "-u", "sshd", "-u", "ssh", "--no-pager", "-n", strconv.Itoa(limit), "--output=short-iso").Output()
+	if err != nil {
 		// Fallback to /var/log/auth.log
 		return s.getLoginHistoryFromAuthLog(limit)
 	}
 
 	var records []LoginRecord
-	scanner := bufio.NewScanner(strings.NewReader(stdout))
+	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
 	for scanner.Scan() {
 		line := scanner.Text()
 		record := parseSSHLogLine(line)

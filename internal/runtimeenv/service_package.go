@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
 )
 
@@ -18,41 +18,34 @@ import (
 // Package state is sourced live from the underlying package manager (npm/pip/...);
 // there is no DB cache.
 type PackageService struct {
-	executor executor.CommandExecutor
 	provider mise.Provider
 }
 
-func NewPackageService(exec executor.CommandExecutor, provider mise.Provider) *PackageService {
-	return &PackageService{executor: exec, provider: provider}
+func NewPackageService(provider mise.Provider) *PackageService {
+	return &PackageService{provider: provider}
 }
 
-// runManagerCmd 运行包管理器命令并按"非零 exit = 失败"的通用约定处理结果。
-// 注意：底层 executor.RunCombined 把非零 exit 当作 err=nil + exitCode>0 返回
-// （为兼容 firewall 等依赖该语义的模块），因此 install/uninstall/update 等
-// "成功才算成功"的场景必须显式检查 exitCode。
-//
-// 针对 pnpm 还要显式注入 PNPM_HOME 与全局 bin 路径：`pnpm setup` 会把这两个
-// 写入 ~/.bashrc，但 server 进程（尤其 systemd 启动时）不 source bashrc，
-// 导致 `pnpm add -g` 校验 PATH 失败。这里把环境对齐到 SSH 登录后的状态。
+// runCombinedEnv 执行命令并把 env 注入进程环境，返回合并输出。
+// pnpm 需要 PNPM_HOME/PATH 注入（`pnpm setup` 写 ~/.bashrc，而 server 进程不
+// source 它），所以这两处不走 executor.RunCombined 而直接 exec.CommandContext。
+// 非零退出返回 *exec.ExitError，与 executor 语义一致。
+func runCombinedEnv(ctx context.Context, env []string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runManagerCmd 运行包管理器命令。非零退出与启动失败均以 err 形式返回
+// （os/exec 语义），install/uninstall/update 直接透传。
 func (s *PackageService) runManagerCmd(ctx context.Context, name string, args ...string) (string, error) {
-	var output string
-	var exitCode int
-	var err error
-
 	if name == "pnpm" {
-		opts := executor.CommandOptions{Env: pnpmEnv()}
-		output, exitCode, err = s.executor.RunWithOptions(ctx, opts, name, args...)
-	} else {
-		output, exitCode, err = s.executor.RunCombined(ctx, name, args...)
+		return runCombinedEnv(ctx, pnpmEnv(), name, args...)
 	}
-
-	if err != nil {
-		return output, err
-	}
-	if exitCode != 0 {
-		return output, fmt.Errorf("exit code %d", exitCode)
-	}
-	return output, nil
+	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return string(output), err
 }
 
 // pnpmEnv 返回 pnpm 全局安装所需的 PNPM_HOME 与 PATH 注入项。
@@ -111,7 +104,7 @@ func tailLines(s string, n int) string {
 // 换容器/nix 底层时此模块随之更换），此处直接调用 mise 二进制是具体实现的
 // 已知例外。
 func (s *PackageService) miseReshim(ctx context.Context) {
-	output, _, err := s.executor.RunCombined(ctx, mise.BinPath, "reshim")
+	output, err := exec.CommandContext(ctx, mise.BinPath, "reshim").CombinedOutput()
 	if err != nil {
 		log.Printf("package: mise reshim failed (continuing): err=%v, output=%s", err, output)
 	}
@@ -268,7 +261,7 @@ func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, manager, 
 
 // npm package search
 func (s *PackageService) searchNpmPackages(ctx context.Context, query string) ([]PackageInfo, error) {
-	output, _, _, err := s.executor.Run(ctx, "npm", "search", query, "--json")
+	output, err := exec.CommandContext(ctx, "npm", "search", query, "--json").Output()
 	if err != nil {
 		log.Printf("package: npm search error: %v", err)
 		return []PackageInfo{}, nil
@@ -279,7 +272,7 @@ func (s *PackageService) searchNpmPackages(ctx context.Context, query string) ([
 		Version     string `json:"version"`
 		Description string `json:"description"`
 	}
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal(output, &result); err != nil {
 		return nil, err
 	}
 
@@ -300,9 +293,9 @@ func (s *PackageService) searchNpmPackages(ctx context.Context, query string) ([
 func (s *PackageService) getNpmPackageVersions(ctx context.Context, packageName string) ([]string, error) {
 	// 失败时 npm 仍会将结构化错误 JSON 写到 stdout（exit code 非零），
 	// 因此忽略 err、统一按 stdout 内容分类处理。
-	output, _, _, _ := s.executor.Run(ctx, "npm", "view", packageName, "versions", "--json")
+	output, _ := exec.CommandContext(ctx, "npm", "view", packageName, "versions", "--json").Output()
 
-	trimmed := strings.TrimSpace(output)
+	trimmed := strings.TrimSpace(string(output))
 	if trimmed == "" {
 		return []string{}, nil
 	}
@@ -353,21 +346,21 @@ func (s *PackageService) searchPipPackages(ctx context.Context, query string) ([
 
 // pip package versions
 func (s *PackageService) getPipPackageVersions(ctx context.Context, packageName string) ([]string, error) {
-	output, _, _, err := s.executor.Run(ctx, "pip", "index", "versions", packageName)
+	output, err := exec.CommandContext(ctx, "pip", "index", "versions", packageName).Output()
 	if err != nil {
 		log.Printf("package: pip index error: %v", err)
 		return []string{}, nil
 	}
 
 	outputStr := output
-	start := strings.Index(outputStr, "(")
-	end := strings.Index(outputStr, ")")
+	start := strings.Index(string(outputStr), "(")
+	end := strings.Index(string(outputStr), ")")
 	if start == -1 || end == -1 {
 		return []string{}, nil
 	}
 
 	versionsStr := outputStr[start+1 : end]
-	versions := strings.Split(versionsStr, ", ")
+	versions := strings.Split(string(versionsStr), ", ")
 
 	if len(versions) > 20 {
 		versions = versions[:20]
@@ -387,7 +380,7 @@ func (s *PackageService) getPipPackageVersions(ctx context.Context, packageName 
 func (s *PackageService) scanNodePackages(ctx context.Context, runtimePath string) ([]Package, error) {
 	packages, _ := s.scanNpmPackages(ctx, runtimePath)
 
-	if _, err := s.executor.LookPath("pnpm"); err == nil {
+	if _, err := exec.LookPath("pnpm"); err == nil {
 		pnpmPkgs, _ := s.scanPnpmPackages(ctx)
 		packages = append(packages, pnpmPkgs...)
 	}
@@ -397,7 +390,7 @@ func (s *PackageService) scanNodePackages(ctx context.Context, runtimePath strin
 
 // npm package management
 func (s *PackageService) scanNpmPackages(ctx context.Context, runtimePath string) ([]Package, error) {
-	output, _, _, err := s.executor.Run(ctx, "npm", "list", "-g", "--json")
+	output, err := exec.CommandContext(ctx, "npm", "list", "-g", "--json").Output()
 	if err != nil {
 		log.Printf("package: npm list error: %v", err)
 		return []Package{}, nil
@@ -408,7 +401,7 @@ func (s *PackageService) scanNpmPackages(ctx context.Context, runtimePath string
 			Version string `json:"version"`
 		} `json:"dependencies"`
 	}
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal(output, &result); err != nil {
 		return nil, err
 	}
 
@@ -431,8 +424,7 @@ func (s *PackageService) scanNpmPackages(ctx context.Context, runtimePath string
 //	[{ "path": "...", "dependencies": { "<pkg>": { "version": "x.y.z" } } }]
 func (s *PackageService) scanPnpmPackages(ctx context.Context) ([]Package, error) {
 	// 注入 PNPM_HOME，确保 list 看到的全局目录与 install 时一致。
-	opts := executor.CommandOptions{Env: pnpmEnv()}
-	output, _, err := s.executor.RunWithOptions(ctx, opts, "pnpm", "list", "-g", "--json")
+	output, err := runCombinedEnv(ctx, pnpmEnv(), "pnpm", "list", "-g", "--json")
 	if err != nil {
 		log.Printf("package: pnpm list error: %v", err)
 		return []Package{}, nil
@@ -481,13 +473,13 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 	}
 
 	if manager == "pnpm" {
-		if _, lookErr := s.executor.LookPath(manager); lookErr != nil {
+		if _, lookErr := exec.LookPath(manager); lookErr != nil {
 			log.Printf("package: %s not found, attempting to enable via corepack", manager)
 			// corepack 在 mise 环境下偶尔会 exit 0 却不真正生成 shim（静默失败），
 			// 因此 enable 之后跑 mise reshim 让新 shim 出现，再用 LookPath 二次校验。
 			corepackOutput, corepackErr := s.runManagerCmd(ctx, "corepack", "enable", manager)
 			s.miseReshim(ctx)
-			if _, lookErr2 := s.executor.LookPath(manager); lookErr2 != nil {
+			if _, lookErr2 := exec.LookPath(manager); lookErr2 != nil {
 				log.Printf("package: corepack did not produce a working %s shim (corepack: err=%v, output=%q), falling back to npm install -g", manager, corepackErr, corepackOutput)
 				installOutput, installErr := s.runManagerCmd(ctx, "npm", "install", "-g", manager)
 				if installErr != nil {
@@ -497,7 +489,7 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 			}
 			// pnpm 需要先 `pnpm setup` 才能进行全局安装（PNPM_HOME / 全局 bin 目录初始化）。
 			// 失败不阻断流程——后续 pnpm 调用会显式注入 PNPM_HOME 兜底。
-			setupOutput, _, setupErr := s.executor.RunCombined(ctx, "pnpm", "setup")
+			setupOutput, setupErr := exec.CommandContext(ctx, "pnpm", "setup").CombinedOutput()
 			if setupErr != nil {
 				log.Printf("package: pnpm setup failed (continuing): err=%v, output=%s", setupErr, setupOutput)
 			}
@@ -569,7 +561,7 @@ func (s *PackageService) updateNpmPackage(ctx context.Context, req *PackageUpdat
 
 // pip package management
 func (s *PackageService) scanPipPackages(ctx context.Context, runtimePath string) ([]Package, error) {
-	output, _, _, err := s.executor.Run(ctx, "pip", "list", "--format=json")
+	output, err := exec.CommandContext(ctx, "pip", "list", "--format=json").Output()
 	if err != nil {
 		log.Printf("package: pip list error: %v", err)
 		return []Package{}, nil
@@ -579,7 +571,7 @@ func (s *PackageService) scanPipPackages(ctx context.Context, runtimePath string
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
+	if err := json.Unmarshal(output, &result); err != nil {
 		return nil, err
 	}
 

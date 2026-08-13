@@ -14,7 +14,6 @@ import (
 
 	"easyserver/internal/envconfig"
 	"easyserver/internal/infra"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
 	"easyserver/internal/infra/task"
 )
@@ -34,15 +33,13 @@ type RuntimeLookup interface {
 }
 
 type Service struct {
-	executor   executor.CommandExecutor
 	envConfigs EnvConfigProvider
 	provider   mise.Provider
-	taskMgr    *task.Manager // 后台 install/uninstall 执行器（key=runtime:<id> 互斥）
+	taskMgr    *task.Manager // 后台 install/uninstall 执行器（key=runtime:<lang@exact> 互斥）
 }
 
-func NewService(exec executor.CommandExecutor, envConfigs EnvConfigProvider, provider mise.Provider) *Service {
+func NewService(envConfigs EnvConfigProvider, provider mise.Provider) *Service {
 	return &Service{
-		executor:   exec,
 		envConfigs: envConfigs,
 		provider:   provider,
 		taskMgr:    task.NewManager(8),
@@ -213,7 +210,7 @@ func (w installWriter) Write(p []byte) (int, error) {
 func (s *Service) runStreaming(ctx context.Context, initialMsg string, log *task.TaskLog, name string, args ...string) (string, int, error) {
 	log.Append(initialMsg)
 
-	cmd := s.executor.Command(ctx, executor.StartOptions{}, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	// DEBIAN_FRONTEND=noninteractive 防止 ensureBuildDeps 里的 apt-get install
 	// 撞上 tzdata 这类会忽略 -y 的交互式 postinst 直接挂住。
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")

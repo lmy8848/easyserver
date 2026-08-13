@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
 )
 
@@ -70,15 +70,14 @@ type RuntimeLookup interface {
 
 // ServiceManager manages systemd services.
 type ServiceManager struct {
-	mu       sync.Mutex // 保护 managed CRUD 并发（创建/更新/删除互斥）
-	executor executor.CommandExecutor
+	mu       sync.Mutex    // 保护 managed CRUD 并发（创建/更新/删除互斥）
 	runtime  RuntimeLookup // 可选，nil 时跳过 runtime 补全
 	provider mise.Provider
 }
 
 // NewServiceManager creates a new ServiceManager.
-func NewServiceManager(exec executor.CommandExecutor, runtimeLookup RuntimeLookup, provider mise.Provider) *ServiceManager {
-	return &ServiceManager{executor: exec, runtime: runtimeLookup, provider: provider}
+func NewServiceManager(runtimeLookup RuntimeLookup, provider mise.Provider) *ServiceManager {
+	return &ServiceManager{runtime: runtimeLookup, provider: provider}
 }
 
 // List returns all systemd services with basic info (name, state, description).
@@ -86,13 +85,13 @@ func NewServiceManager(exec executor.CommandExecutor, runtimeLookup RuntimeLooku
 // 只调一次 list-units（~16ms），不查 PID/内存/enabled（list-unit-files 要 ~1.8s，
 // systemctl show 全部要更久），前端用 GetDetails 按需加载当前页的运行时详情。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full")
-	if err != nil || exitCode != 0 {
+	stdout, err := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full").Output()
+	if err != nil {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
 	var services []ServiceInfo
-	lines := strings.SplitSeq(stdout, "\n")
+	lines := strings.SplitSeq(string(stdout), "\n")
 
 	for line := range lines {
 		line = strings.TrimSpace(line)
@@ -173,15 +172,15 @@ func (m *ServiceManager) batchGetDetailedInfoChunk(ctx context.Context, services
 	}
 	args = append(args, "--property=Id,MainPID,MemoryCurrent,ActiveState,UnitFileState,Description,SubState")
 
-	stdout, _, _, _ := m.executor.Run(ctx, "systemctl", args...)
-	if stdout == "" {
+	stdout, _ := exec.CommandContext(ctx, "systemctl", args...).Output()
+	if len(stdout) == 0 {
 		return
 	}
 
 	currentName := ""
 	props := make(map[string]string)
 
-	lines := strings.SplitSeq(stdout, "\n")
+	lines := strings.SplitSeq(string(stdout), "\n")
 	for line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -253,9 +252,9 @@ func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, pr
 
 // Get returns info for a specific service.
 func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, error) {
-	stdout, _, exitCode, err := m.executor.Run(ctx, "systemctl", "show", name+".service",
-		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description,UnitFileState")
-	if err != nil || exitCode != 0 {
+	stdout, err := exec.CommandContext(ctx, "systemctl", "show", name+".service",
+		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description,UnitFileState").Output()
+	if err != nil {
 		return nil, fmt.Errorf("failed to get service info: %w", err)
 	}
 
@@ -263,7 +262,7 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 		Name: name,
 	}
 
-	lines := strings.SplitSeq(stdout, "\n")
+	lines := strings.SplitSeq(string(stdout), "\n")
 	for line := range lines {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
@@ -314,8 +313,8 @@ func (m *ServiceManager) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already running", name)
 	}
 
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "start", name+".service")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "start", name+".service").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to start service: %s", output)
 	}
 	log.Printf("service: started %s", name)
@@ -336,8 +335,8 @@ func (m *ServiceManager) Stop(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already stopped", name)
 	}
 
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "stop", name+".service")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "stop", name+".service").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to stop service: %s", output)
 	}
 	log.Printf("service: stopped %s", name)
@@ -350,8 +349,8 @@ func (m *ServiceManager) Restart(ctx context.Context, name string) error {
 		return err
 	}
 
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "restart", name+".service")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "restart", name+".service").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to restart service: %s", output)
 	}
 	log.Printf("service: restarted %s", name)
@@ -368,8 +367,8 @@ func (m *ServiceManager) Enable(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already enabled", name)
 	}
 
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "enable", name+".service")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "enable", name+".service").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to enable service: %s", output)
 	}
 	log.Printf("service: enabled %s", name)
@@ -386,8 +385,8 @@ func (m *ServiceManager) Disable(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already disabled", name)
 	}
 
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "disable", name+".service")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "disable", name+".service").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("failed to disable service: %s", output)
 	}
 	log.Printf("service: disabled %s", name)
@@ -410,13 +409,13 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 		args = append(args, "--since", since)
 	}
 
-	stdout, _, exitCode, err := m.executor.Run(ctx, "journalctl", args...)
-	if err != nil || exitCode != 0 {
+	stdout, err := exec.CommandContext(ctx, "journalctl", args...).Output()
+	if err != nil {
 		return nil, fmt.Errorf("failed to get logs: %w", err)
 	}
 
 	var logs []LogLine
-	lines := strings.SplitSeq(stdout, "\n")
+	lines := strings.SplitSeq(string(stdout), "\n")
 
 	for line := range lines {
 		line = strings.TrimSpace(line)
@@ -473,16 +472,16 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 
 // isEnabled checks if a service is enabled.
 func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
-	stdout, _, _, _ := m.executor.Run(ctx, "systemctl", "is-enabled", name+".service")
+	stdout, _ := exec.CommandContext(ctx, "systemctl", "is-enabled", name+".service").Output()
 	// systemctl is-enabled returns exit code 1 for disabled services,
 	// so we check the output string instead of relying on exit code.
-	return strings.TrimSpace(stdout) == "enabled"
+	return strings.TrimSpace(string(stdout)) == "enabled"
 }
 
 // serviceExists checks if a service unit exists on the system.
 func (m *ServiceManager) serviceExists(ctx context.Context, name string) bool {
-	_, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "cat", name+".service")
-	return err == nil && exitCode == 0
+	_, err := exec.CommandContext(ctx, "systemctl", "cat", name+".service").CombinedOutput()
+	return err == nil
 }
 
 // requireServiceExists returns an error if the service does not exist.
@@ -579,15 +578,15 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 			// enable 失败：回滚 unit 文件 + reload + reset-failed。
 			_ = removeUnitFile(spec.Name)
 			_ = m.daemonReload(ctx)
-			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix)
+			_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix).CombinedOutput()
 			return fmt.Errorf("enable 失败（已回滚）: %w", err)
 		}
 		if err := m.startManaged(ctx, spec.Name); err != nil {
 			// start 失败：disable + 回滚 unit 文件 + reload + reset-failed。
-			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "disable", managedUnitPrefix+spec.Name+managedUnitSuffix)
+			_, _ = exec.CommandContext(ctx, "systemctl", "disable", managedUnitPrefix+spec.Name+managedUnitSuffix).CombinedOutput()
 			_ = removeUnitFile(spec.Name)
 			_ = m.daemonReload(ctx)
-			_, _, _ = m.executor.RunCombined(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix)
+			_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix).CombinedOutput()
 			return fmt.Errorf("start 失败（已回滚）: %w", err)
 		}
 	}
@@ -633,7 +632,7 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 			}
 			if wasActive {
 				fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-				_, _, _ = m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
+				_, _ = exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
 			}
 		}
 	}
@@ -667,8 +666,8 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 	info, err := m.Get(ctx, managedUnitPrefix+spec.Name)
 	if err == nil && info.State == "active" {
 		fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-		output, exitCode, rerr := m.executor.RunCombined(ctx, "systemctl", "restart", fullName)
-		if rerr != nil || exitCode != 0 {
+		output, rerr := exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
+		if rerr != nil {
 			rollback()
 			return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %s", output)
 		}
@@ -693,12 +692,12 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 	fullName := managedUnitPrefix + name + managedUnitSuffix
 
 	// 先 disable（best-effort，可能本来就未 enable）
-	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "disable", fullName); err != nil {
+	if _, err := exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput(); err != nil {
 		log.Printf("systemd: disable %s during delete: %v", fullName, err)
 	}
 
 	// 停止：失败则返回错误，避免删 unit 后留孤儿进程。
-	if _, _, err := m.executor.RunCombined(ctx, "systemctl", "stop", fullName); err != nil {
+	if _, err := exec.CommandContext(ctx, "systemctl", "stop", fullName).CombinedOutput(); err != nil {
 		return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
 	}
 
@@ -736,26 +735,26 @@ func (m *ServiceManager) managedUnitExists(name string) bool {
 }
 
 func (m *ServiceManager) daemonReload(ctx context.Context) error {
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "daemon-reload")
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "daemon-reload").CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("daemon-reload 失败: %s", output)
 	}
 	return nil
 }
 
 func (m *ServiceManager) enableManaged(ctx context.Context, name string) error {
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "enable",
-		managedUnitPrefix+name+managedUnitSuffix)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "enable",
+		managedUnitPrefix+name+managedUnitSuffix).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("enable 失败: %s", output)
 	}
 	return nil
 }
 
 func (m *ServiceManager) disableManaged(ctx context.Context, name string) error {
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "disable",
-		managedUnitPrefix+name+managedUnitSuffix)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "disable",
+		managedUnitPrefix+name+managedUnitSuffix).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("disable 失败: %s", output)
 	}
 	return nil
@@ -768,8 +767,8 @@ func (m *ServiceManager) startManaged(ctx context.Context, name string) error {
 	if err == nil && info.State == "active" {
 		return nil
 	}
-	output, exitCode, err := m.executor.RunCombined(ctx, "systemctl", "start", fullName)
-	if err != nil || exitCode != 0 {
+	output, err := exec.CommandContext(ctx, "systemctl", "start", fullName).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("start 失败: %s", output)
 	}
 	return nil

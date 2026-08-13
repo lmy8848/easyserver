@@ -5,9 +5,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
-
-	"easyserver/internal/infra/executor"
 )
 
 type runtimeExecCall struct {
@@ -15,56 +12,25 @@ type runtimeExecCall struct {
 	args []string
 }
 
-type runtimeFakeExecutor struct {
-	calls []runtimeExecCall
-	out   string
-	code  int
+// fakeRunner 实现 runCmdFunc seam：记录调用参数、返回固定输出/退出码。
+// 流式路径（streamRun）不走此 seam，直接用真实命令（见 stream 测试）。
+type fakeRunner struct {
+	calls  []runtimeExecCall
+	out    string
+	stderr string
+	code   int
 }
 
-func (f *runtimeFakeExecutor) Run(ctx context.Context, name string, args ...string) (string, string, int, error) {
+func (f *fakeRunner) run(ctx context.Context, name string, args ...string) (string, string, int, error) {
 	f.calls = append(f.calls, runtimeExecCall{name: name, args: args})
-	return f.out, "", f.code, nil
+	return f.out, f.stderr, f.code, nil
 }
-func (f *runtimeFakeExecutor) RunWithTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) (string, string, int, error) {
-	return f.Run(ctx, name, args...)
-}
-func (f *runtimeFakeExecutor) RunCombined(ctx context.Context, name string, args ...string) (string, int, error) {
-	f.calls = append(f.calls, runtimeExecCall{name: name, args: args})
-	return f.out, f.code, nil
-}
-func (f *runtimeFakeExecutor) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, int, error) {
-	f.calls = append(f.calls, runtimeExecCall{name: name, args: args})
-	if onLine != nil {
-		for l := range strings.SplitSeq(f.out, "\n") {
-			if l = strings.TrimSpace(l); l != "" {
-				onLine(l)
-			}
-		}
-	}
-	return f.out, f.code, nil
-}
-func (f *runtimeFakeExecutor) RunWithOptions(ctx context.Context, opts executor.CommandOptions, name string, args ...string) (string, int, error) {
-	panic("unused")
-}
-func (f *runtimeFakeExecutor) Start(context.Context, executor.StartOptions, string, ...string) (executor.Process, error) {
-	panic("unused")
-}
-func (f *runtimeFakeExecutor) Command(context.Context, executor.StartOptions, string, ...string) *exec.Cmd {
-	panic("unused")
-}
-func (f *runtimeFakeExecutor) LookPath(string) (string, error) { return "", nil }
 
 func TestExecSeparatesStderrFromQueryOutput(t *testing.T) {
-	mock := executor.NewMockExecutor()
 	// mysql 客户端把警告打到 stderr —— 成功时不得混入查询结果（列表/SQL 输出
 	// 是解析目标，必须干净）。
-	// MockExecutor 按 `name+空格+args[0]` 匹配：exec 子命令与 pull 子命令分开设置。
-	mock.SetResponse("docker exec", executor.MockResponse{
-		Stdout:   "testdb\tutf8mb4\n",
-		Stderr:   "mysql: [Warning] Using a password on the command line interface can be insecure.",
-		ExitCode: 0,
-	})
-	runtime := NewCLIContainerRuntime(mock)
+	fake := &fakeRunner{out: "testdb\tutf8mb4\n", stderr: "mysql: [Warning] Using a password on the command line interface can be insecure."}
+	runtime := NewCLIContainerRuntime(fake.run)
 	out, err := runtime.Exec(context.Background(), "docker", "c1", "mysql", "-N", "-B", "-e", "SHOW DATABASES")
 	if err != nil {
 		t.Fatalf("exec: %v", err)
@@ -77,8 +43,8 @@ func TestExecSeparatesStderrFromQueryOutput(t *testing.T) {
 func TestExecHoistsEnvBeforeContainerName(t *testing.T) {
 	// withAdminCredentials 把 MYSQL_PWD 作为 `-e KEY=VAL` 传入；docker exec 的
 	// 选项必须位于容器名之前，否则 `-e` 会被当成容器内要执行的命令而失败。
-	fake := &runtimeFakeExecutor{}
-	runtime := NewCLIContainerRuntime(fake)
+	fake := &fakeRunner{}
+	runtime := NewCLIContainerRuntime(fake.run)
 	_, err := runtime.Exec(context.Background(), "docker", "c1",
 		"-e", "MYSQL_PWD=secret", "mysql", "-uroot", "-N", "-B", "-e", "SHOW DATABASES")
 	if err != nil {
@@ -98,14 +64,10 @@ func TestExecHoistsEnvBeforeContainerName(t *testing.T) {
 }
 
 func TestLifecycleCommandKeepsCombinedOutput(t *testing.T) {
-	mock := executor.NewMockExecutor()
 	// 生命周期命令（如拉镜像/启动）stderr 也可能承载进度/诊断，仍须合并 ——
 	// 安装日志依赖整条输出流。
-	mock.SetResponse("docker pull", executor.MockResponse{
-		Stdout:   "pulling image...",
-		Stderr:   "extracting layer 3/5",
-		ExitCode: 0})
-	runtime := NewCLIContainerRuntime(mock)
+	fake := &fakeRunner{out: "pulling image...", stderr: "extracting layer 3/5"}
+	runtime := NewCLIContainerRuntime(fake.run)
 	out, err := runtime.command(context.Background(), "docker", "pull", "mysql:8.0")
 	if err != nil {
 		t.Fatalf("command: %v", err)
@@ -116,8 +78,8 @@ func TestLifecycleCommandKeepsCombinedOutput(t *testing.T) {
 }
 
 func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
-	fake := &runtimeFakeExecutor{}
-	runtime := NewCLIContainerRuntime(fake)
+	fake := &fakeRunner{}
+	runtime := NewCLIContainerRuntime(fake.run)
 	err := runtime.Create(context.Background(), ContainerSpec{
 		ContainerEngine: "podman",
 		Name:            "easyserver-db-mysql-8",
@@ -165,11 +127,10 @@ func TestContainerRuntimeCreateUsesStableManagedArguments(t *testing.T) {
 }
 
 func TestRemoveToleratesAlreadyGone(t *testing.T) {
-	mock := executor.NewMockExecutor()
 	// 失败安装回滚后重装/卸载会再次删除容器 —— 目标资源已不存在时应视为成功，
 	// 而不是让重装流程报错。
-	mock.SetResponse("podman rm", executor.MockResponse{ExitCode: 1, Stderr: "Error: no such container \"easyserver-db-mysql-8.0\""})
-	rt := NewCLIContainerRuntime(mock)
+	fake := &fakeRunner{code: 1, stderr: `Error: no such container "easyserver-db-mysql-8.0"`}
+	rt := NewCLIContainerRuntime(fake.run)
 
 	if err := rt.Remove(context.Background(), "podman", "easyserver-db-mysql-8.0"); err != nil {
 		t.Fatalf("Remove of already-gone container should be a no-op: %v", err)
@@ -178,12 +139,11 @@ func TestRemoveToleratesAlreadyGone(t *testing.T) {
 
 func TestStreamRunFeedsHookLineByLine(t *testing.T) {
 	// 流式路径（拉镜像等长耗时命令）必须把 stdout+stderr 逐行实时喂给
-	// outputHook，而不是等命令结束一次性回放。用真实 OSExecutor + 无害的
-	// sh 命令验证双 pipe 合并。
+	// outputHook，而不是等命令结束一次性回放。用真实命令（sh）验证双 pipe 合并。
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
-	rt := NewCLIContainerRuntime(executor.NewOSExecutor())
+	rt := NewCLIContainerRuntime(nil) // 默认 runCmd（executor.Run）
 	var got []string
 	rt.SetOutputHook(func(line string) { got = append(got, line) })
 
@@ -204,8 +164,8 @@ func TestStreamRunFeedsHookLineByLine(t *testing.T) {
 func TestExistsTreatsNotFoundAsFalse(t *testing.T) {
 	// Exists 用 `inspect` 判存在：not-found（docker "No such object" / podman
 	// "no such container"）→ false、nil，而不是错误。
-	fake := &runtimeFakeExecutor{out: "Error: No such object: easyserver-db-mysql-8", code: 1}
-	rt := NewCLIContainerRuntime(fake)
+	fake := &fakeRunner{out: "Error: No such object: easyserver-db-mysql-8", code: 1}
+	rt := NewCLIContainerRuntime(fake.run)
 
 	exists, err := rt.Exists(context.Background(), "podman", "c1")
 	if err != nil {
@@ -217,8 +177,8 @@ func TestExistsTreatsNotFoundAsFalse(t *testing.T) {
 }
 
 func TestExistsReportsTrueOnHit(t *testing.T) {
-	fake := &runtimeFakeExecutor{out: "c1", code: 0}
-	rt := NewCLIContainerRuntime(fake)
+	fake := &fakeRunner{out: "c1"}
+	rt := NewCLIContainerRuntime(fake.run)
 	exists, err := rt.Exists(context.Background(), "docker", "c1")
 	if err != nil {
 		t.Fatalf("exists: %v", err)
@@ -231,9 +191,9 @@ func TestExistsReportsTrueOnHit(t *testing.T) {
 func TestStatusDoesNotPolluteOutputHook(t *testing.T) {
 	// 安装期间 waitForHealthy 每 500ms 轮询一次容器状态；Status 的
 	// `podman inspect` 输出（running|starting）绝不能经 outputHook 灌进安装日志，
-	// 否则会刷出整屏重复状态行。生命周期命令（start 等）仍须走 hook。
-	fake := &runtimeFakeExecutor{out: "running|starting"}
-	runtime := NewCLIContainerRuntime(fake)
+	// 否则会刷出整屏重复状态行（hook=false 分支）。
+	fake := &fakeRunner{out: "running|starting"}
+	runtime := NewCLIContainerRuntime(fake.run)
 	var hooked []string
 	runtime.SetOutputHook(func(line string) { hooked = append(hooked, line) })
 
@@ -242,11 +202,5 @@ func TestStatusDoesNotPolluteOutputHook(t *testing.T) {
 	}
 	if len(hooked) != 0 {
 		t.Fatalf("Status output leaked into output hook: %v", hooked)
-	}
-	if err := runtime.Start(context.Background(), "podman", "c1"); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if len(hooked) != 1 || hooked[0] != "running|starting" {
-		t.Fatalf("lifecycle command should still fire the hook, got %v", hooked)
 	}
 }

@@ -8,10 +8,10 @@ import (
 	"log"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"easyserver/internal/infra"
-	"easyserver/internal/infra/executor"
 )
 
 // RunningScript 表示一个正在运行的脚本实例。
@@ -33,6 +33,14 @@ type RunningScript struct {
 	catStdinW io.WriteCloser // systemd-cat stdin writer
 }
 
+// setpgidCmd 构造独立进程组的 *exec.Cmd（背景：脚本进程与 systemd-cat 都要
+// 能整体 Kill 而不波及面板进程）。仅在 runner 与 cron service 启动子进程处使用。
+func setpgidCmd(name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(context.Background(), name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
+}
+
 // Running 是运行中脚本的对外摘要，供 REST 查询前端显示标记。
 type Running struct {
 	ID        int64  `json:"id"`
@@ -42,16 +50,13 @@ type Running struct {
 // ScriptRunner 管理运行中的脚本进程。单实例：同一脚本同时只允许一个运行实例，
 // 再次 Start 复用已有实例。
 type ScriptRunner struct {
-	exec executor.CommandExecutor
-
 	mu      sync.RWMutex
 	running map[int64]*RunningScript
 }
 
 // NewScriptRunner 创建 ScriptRunner。
-func NewScriptRunner(exec executor.CommandExecutor) *ScriptRunner {
+func NewScriptRunner() *ScriptRunner {
 	return &ScriptRunner{
-		exec:    exec,
 		running: make(map[int64]*RunningScript),
 	}
 }
@@ -100,8 +105,7 @@ func (r *ScriptRunner) Start(script *Script) (*RunningScript, error) {
 	// systemd-cat 持久化管道：脚本输出落 journald（identifier=easyserver-script-<name>）。
 	var catCmd *exec.Cmd
 	var catStdinW io.WriteCloser
-	if cmd := r.exec.Command(context.Background(), executor.StartOptions{Setpgid: true},
-		"systemd-cat", "-t", "easyserver-script-"+script.Name); cmd != nil {
+	if cmd := setpgidCmd("systemd-cat", "-t", "easyserver-script-"+script.Name); cmd != nil {
 		if w, wErr := cmd.StdinPipe(); wErr == nil {
 			if err := cmd.Start(); err == nil {
 				catCmd = cmd
@@ -114,9 +118,9 @@ func (r *ScriptRunner) Start(script *Script) (*RunningScript, error) {
 		}
 	}
 
-	// 主执行进程：用 Command() 拿 *exec.Cmd，先取 stdout/stderr pipe 再 Start。
+	// 主执行进程：直接 exec.CommandContext 拿 *exec.Cmd，先取 stdout/stderr pipe 再 Start。
 	// 注意 pipe 必须在 Start 之前设置，否则报 "StdoutPipe after process started"。
-	cmd := r.exec.Command(context.Background(), executor.StartOptions{Setpgid: true}, script.Path)
+	cmd := setpgidCmd(script.Path)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		if catCmd != nil {

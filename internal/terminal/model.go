@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"easyserver/internal/infra/executor"
 )
 
 // Session represents a terminal session.
@@ -47,14 +45,12 @@ const MaxTerminalSessions = 10
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
-	executor executor.CommandExecutor
 }
 
 // NewManager creates a new terminal Manager and starts the idle timeout checker.
-func NewManager(ctx context.Context, wg *sync.WaitGroup, exec executor.CommandExecutor, idleTimeout time.Duration) *Manager {
+func NewManager(ctx context.Context, wg *sync.WaitGroup, idleTimeout time.Duration) *Manager {
 	m := &Manager{
 		sessions: make(map[string]*Session),
-		executor: exec,
 	}
 	wg.Go(func() {
 		m.idleTimeoutLoop(ctx, idleTimeout)

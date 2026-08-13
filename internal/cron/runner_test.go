@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"easyserver/internal/infra/executor"
 )
 
 // TestScriptRunnerSurvivesCallerLifecycle 回归测试：脚本进程必须脱离调用方（WS）生命周期。
@@ -36,7 +34,7 @@ func TestScriptRunnerSurvivesCallerLifecycle(t *testing.T) {
 	}
 
 	// 2) 修复后：ScriptRunner.Start 不绑定调用方 ctx，进程应存活。
-	runner := NewScriptRunner(executor.NewOSExecutor())
+	runner := NewScriptRunner()
 	script := &Script{ID: 1, Name: "survivor", Path: writeSurvivorScript(t)}
 	rs, err := runner.Start(script)
 	if err != nil {

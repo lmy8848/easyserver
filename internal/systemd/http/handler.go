@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/systemd"
 
 	"github.com/gin-gonic/gin"
@@ -29,15 +29,13 @@ func validateServiceName(name string) bool {
 
 type ServiceHandler struct {
 	serviceManager    *systemd.ServiceManager
-	executor          executor.CommandExecutor
 	jwtSecret         string
 	protectedServices []string // Services that cannot be stopped/disabled
 }
 
-func NewServiceHandler(serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
+func NewServiceHandler(serviceManager *systemd.ServiceManager, jwtSecret string, allowedOrigins []string, devMode bool) *ServiceHandler {
 	return &ServiceHandler{
 		serviceManager:    serviceManager,
-		executor:          exec,
 		jwtSecret:         jwtSecret,
 		protectedServices: []string{"easyserver"}, // Panel's own service
 	}
@@ -262,7 +260,7 @@ func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) {
 
 	// journalctl -f 跟随；进程独立于本请求（Background），避免客户端断开时被 request ctx 杀。
 	// 注意：须先 StdoutPipe 再 Start，否则报 "StdoutPipe after process started"。
-	cmd := h.executor.Command(context.Background(), executor.StartOptions{}, "journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
+	cmd := exec.CommandContext(context.Background(), "journalctl", "-u", name+".service", "-f", "--no-pager", "--output=json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		c.Error(apperror.ErrInternal.WithMessage("获取日志流失败"))
@@ -450,8 +448,8 @@ func requireManagedName(fullName string) (string, error) {
 }
 
 // RegisterRoutes registers service management routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
-	handler := NewServiceHandler(serviceManager, exec, jwtSecret, allowedOrigins, devMode)
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, jwtSecret string, allowedOrigins []string, devMode bool) {
+	handler := NewServiceHandler(serviceManager, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/services", handler.List)
 	protected.POST("/services", handler.Create)
 	protected.POST("/services/details", handler.GetDetails)

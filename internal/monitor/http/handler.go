@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -14,7 +15,6 @@ import (
 
 	"easyserver/internal/httpx"
 	"easyserver/internal/infra/apperror"
-	"easyserver/internal/infra/executor"
 	"easyserver/internal/monitor"
 
 	"github.com/gin-gonic/gin"
@@ -34,14 +34,12 @@ const (
 
 type MonitorHandler struct {
 	monitorService *monitor.MonitorService
-	executor       executor.CommandExecutor
 	jwtSecret      string
 }
 
-func NewMonitorHandler(monitorService *monitor.MonitorService, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
+func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) *MonitorHandler {
 	return &MonitorHandler{
 		monitorService: monitorService,
-		executor:       exec,
 		jwtSecret:      jwtSecret,
 	}
 }
@@ -155,8 +153,8 @@ func (h *MonitorHandler) HandleSSE(c *gin.Context) {
 }
 
 // RegisterRoutes registers monitor related routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *monitor.MonitorService, exec executor.CommandExecutor, jwtSecret string, allowedOrigins []string, devMode bool) {
-	handler := NewMonitorHandler(monitorService, exec, jwtSecret, allowedOrigins, devMode)
+func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) {
+	handler := NewMonitorHandler(monitorService, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/monitor/stats", handler.HandleStats)
 	protected.GET("/monitor/history", handler.HandleHistory)
 	protected.GET("/monitor", handler.HandleSSE)
@@ -470,9 +468,9 @@ func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
 		}
 	}()
 
-	out, _, err := h.executor.RunCombined(ctx, "ss", "-tlnp", fmt.Sprintf("sport = :%d", port))
-	if err == nil && strings.TrimSpace(out) != "" {
-		lines := strings.Split(strings.TrimSpace(out), "\n")
+	out, err := exec.CommandContext(ctx, "ss", "-tlnp", fmt.Sprintf("sport = :%d", port)).CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		if len(lines) > 1 {
 			for _, line := range lines[1:] {
 				if strings.Contains(line, fmt.Sprintf(":%d", port)) {
@@ -482,9 +480,9 @@ func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
 		}
 	}
 
-	out, _, err = h.executor.RunCombined(ctx, "netstat", "-tlnp")
+	out, err = exec.CommandContext(ctx, "netstat", "-tlnp").CombinedOutput()
 	if err == nil {
-		for line := range strings.SplitSeq(out, "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			if strings.Contains(line, fmt.Sprintf(":%d ", port)) || strings.Contains(line, fmt.Sprintf(":%d\t", port)) {
 				return strings.TrimSpace(line)
 			}
