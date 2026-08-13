@@ -3,22 +3,40 @@ package cron
 import (
 	"context"
 	"fmt"
+	"log"
+	"sync"
+	"time"
 
 	"easyserver/internal/infra/executor"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/notification"
 )
+
+// cronWatchInterval 是定时任务失败巡检间隔。
+const cronWatchInterval = 5 * time.Minute
 
 // Service 管理定时任务与脚本/文档：任务 CRUD/状态/日志委托给 TimerManager，脚本/文档走 SQLite。
 type Service struct {
 	repo Repository
 	tm   *TimerManager
+
+	mu        sync.Mutex
+	lastSeen  map[string]string // task name → LastResult，翻转检测基线
+	notifSink notification.Sink
 }
 
 // NewService creates a new cron Service.
 func NewService(repo Repository, exec executor.CommandExecutor, provider mise.Provider) *Service {
+	return NewServiceWithSink(repo, exec, provider, nil)
+}
+
+// NewServiceWithSink 在 NewService 基础上附加通知 sink（nil 时失败巡检不发送）。
+func NewServiceWithSink(repo Repository, exec executor.CommandExecutor, provider mise.Provider, sink notification.Sink) *Service {
 	return &Service{
-		repo: repo,
-		tm:   NewTimerManager(exec, provider, repo),
+		repo:      repo,
+		tm:        NewTimerManager(exec, provider, repo),
+		lastSeen:  make(map[string]string),
+		notifSink: sink,
 	}
 }
 
@@ -107,4 +125,103 @@ func (s *Service) DeleteScript(ctx context.Context, id int64) error {
 		return err
 	}
 	return s.repo.DeleteScriptFile(id)
+}
+
+// --- 失败巡检 ---
+
+// StartWatcher 启动定时任务失败巡检：每 cronWatchInterval 扫描一次全部任务的
+// LastResult，翻转（success → failed）才发站内通知。stopCh 关闭时退出。
+// 首次扫描只建基线不通知，存量失败不刷屏；持续失败不重复（无翻转不触发）。
+func (s *Service) StartWatcher(stopCh <-chan struct{}) {
+	go func() {
+		ticker := time.NewTicker(cronWatchInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				s.sweep()
+			}
+		}
+	}()
+}
+
+// sweep 执行一次巡检：列出全部任务，与上次结果比对，翻转才通知。
+func (s *Service) sweep() {
+	tasks, err := s.List(context.Background())
+	if err != nil {
+		log.Printf("cron: watcher list tasks: %v", err)
+		return
+	}
+	changed := s.reconcile(taskResults(tasks))
+	for _, f := range changed {
+		s.notifyTaskFailed(f)
+	}
+}
+
+// taskResults 抽取任务的 name → LastResult 映射。
+func taskResults(tasks []CronTask) map[string]string {
+	m := make(map[string]string, len(tasks))
+	for _, t := range tasks {
+		m[t.Name] = t.LastResult
+	}
+	return m
+}
+
+// taskFailedResult 判定 systemd 的 Result 属性是否代表执行失败。LastResult 是
+// systemctl show 的 Result 值原样（timer_manager.go），成功为 "success"；失败
+// 是 exit-code / signal / timeout / start-limit-hit 等，绝不等于字面 "failed"。
+func taskFailedResult(result string) bool {
+	switch result {
+	case "success", "":
+		return false
+	default:
+		return true
+	}
+}
+
+// reconcile 是纯状态机：拿当前结果与 lastSeen 基线比对，返回本次发生
+// 非失败 → 失败翻转的任务。**副作用只有更新基线**，通知由调用方发。
+//
+// 规则：
+//   - 首次见到（基线无此任务）→ 只建基线，不通知（存量失败不刷屏）
+//   - 基线为失败（持续失败）→ 不通知
+//   - 基线非失败、当前失败 → 翻转，通知（记录基线为失败）
+//   - 基线为失败、当前非失败（恢复）→ 更新基线，不通知
+func (s *Service) reconcile(curr map[string]string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var failed []string
+	for name, result := range curr {
+		prev, seen := s.lastSeen[name]
+		if !seen {
+			s.lastSeen[name] = result
+			continue
+		}
+		if result != prev {
+			// 状态变了：当前失败才算值得通知的事件
+			s.lastSeen[name] = result
+			if !taskFailedResult(prev) && taskFailedResult(result) {
+				failed = append(failed, name)
+			}
+		}
+	}
+	return failed
+}
+
+// notifyTaskFailed 向站内通知投递任务失败。sink 未接线或发送失败都只记日志。
+func (s *Service) notifyTaskFailed(name string) {
+	if s.notifSink == nil {
+		return
+	}
+	if _, err := s.notifSink.CreateIfNotExists(notification.CreateNotificationRequest{
+		Type:    "cron",
+		Title:   "定时任务失败：" + name,
+		Message: fmt.Sprintf("定时任务 %s 上次执行失败，请检查任务日志。", name),
+		Level:   "error",
+	}); err != nil {
+		log.Printf("cron: notify task failed %q: %v", name, err)
+	}
 }

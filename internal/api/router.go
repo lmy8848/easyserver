@@ -95,6 +95,11 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 			Enabled:   rule.Enabled,
 		})
 	}
+	// 未配置任何告警规则时 seed 默认规则（CPU/内存/磁盘），保证新安装默认有
+	// 磁盘等关键告警；用户可在设置页修改/删除。
+	if len(alertRules) == 0 {
+		alertRules = defaultAlertRules()
+	}
 	alertService.SetRules(alertRules)
 
 	auditRepo := audit.NewSQLiteRepository(db)
@@ -126,7 +131,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	// ── Domain services (no background goroutines) ──
 
 	cronRepo := cron.NewSQLiteRepository(db)
-	cronService := cron.NewService(cronRepo, cmdExec, miseProvider)
+	cronService := cron.NewServiceWithSink(cronRepo, cmdExec, miseProvider, notificationService)
 
 	serviceManager := systemd.NewServiceManager(cmdExec, cronRepo, miseProvider)
 
@@ -134,7 +139,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	containerService := container.NewService(cmdExec)
 
 	dbRepo := dbdomain.NewSQLiteRepository(db)
-	dbService := dbdomain.NewService(dbRepo, dbdomain.NewCLIContainerRuntime(cmdExec))
+	dbService := dbdomain.NewServiceWithSink(dbRepo, dbdomain.NewCLIContainerRuntime(cmdExec), notificationService)
 
 	deployRepo := deploy.NewSQLiteRepository(db)
 	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)
@@ -229,9 +234,14 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 		ServeWeb(e)
 	}
 
+	// ── Background watchers ──
+	watcherStop := make(chan struct{})
+	cronService.StartWatcher(watcherStop)
+
 	// ── Shutdown function ──
 	shutdown := func() {
 		auditSvc.Close()
+		close(watcherStop)
 		cancel()
 		wg.Wait()
 		middleware.StopRateLimiter()
@@ -240,6 +250,15 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	}
 
 	return e, shutdown
+}
+
+// defaultAlertRules 返回未配置告警规则时的 seed 默认规则。
+func defaultAlertRules() []alert.AlertRule {
+	return []alert.AlertRule{
+		{ID: 1, Name: "CPU 告警", Metric: "cpu_percent", Threshold: 90, Duration: 60, Enabled: true},
+		{ID: 2, Name: "内存告警", Metric: "mem_percent", Threshold: 85, Duration: 60, Enabled: true},
+		{ID: 3, Name: "磁盘告警", Metric: "disk_percent", Threshold: 90, Duration: 60, Enabled: true},
+	}
 }
 
 // routeGroups holds the pre-configured gin router groups.

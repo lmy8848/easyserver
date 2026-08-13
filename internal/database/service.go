@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"unicode"
 
 	"easyserver/internal/infra/task"
+	"easyserver/internal/notification"
 )
 
 const (
@@ -34,6 +36,7 @@ type Service struct {
 	runtimeFactory func() DatabaseRuntime // builds the runtime for background installs
 	driver         SQLRunner              // direct driver channel (MySQL/PostgreSQL)
 	redisOps       *redisRunner           // direct Redis channel (key browser ops)
+	notifSink      notification.Sink      // optional: failure notifications (nil = disabled)
 
 	restoreMu   sync.Mutex
 	restoreTask map[int64]*RestoreStatus // backupID → 恢复任务内存态（恢复不写备份行）
@@ -44,6 +47,12 @@ type Service struct {
 // DatabaseRuntime. Sweeps orphaned backup rows (running → failed) from a
 // previous crashed process.
 func NewService(repo Repository, runtime DatabaseRuntime) *Service {
+	return NewServiceWithSink(repo, runtime, nil)
+}
+
+// NewServiceWithSink 在 NewService 基础上附加通知 sink。sink 为 nil 时安装失败
+// 不发送站内通知（测试与未接线场景）。
+func NewServiceWithSink(repo Repository, runtime DatabaseRuntime, sink notification.Sink) *Service {
 	s := &Service{
 		repo:    repo,
 		runtime: runtime,
@@ -54,6 +63,7 @@ func NewService(repo Repository, runtime DatabaseRuntime) *Service {
 		driver:      newDriverSQLRunner(),
 		redisOps:    newRedisRunner(),
 		restoreTask: make(map[int64]*RestoreStatus),
+		notifSink:   sink,
 	}
 	s.SweepOrphanBackups(context.Background())
 	return s
@@ -212,7 +222,15 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		// (which is canceled once CreateInstance responds), so it must not inherit
 		// its cancellation — the per-task context from the task executor drives it,
 		// and CancelInstall cancels that.
-		return s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, password, spec, rt, log)
+		installErr := s.installInstance(ctx, id, dbType, req.Version, req.Image, engineName, containerName, password, spec, rt, log)
+		if installErr != nil && ctx.Err() == nil && !errors.Is(installErr, context.Canceled) {
+			// 非取消的真实失败才发站内通知；用户取消（ctx 已取消或错误本身是
+			// Canceled）是安静操作。业务上下文（版本/类型）在此闭包内，正是
+			// 调用方按需发送的理由。
+			title := fmt.Sprintf("%s %s 安装失败", dbType, req.Version)
+			s.notifyInstallFailed(title, fmt.Sprintf("安装 %s (%s) 失败: %v", req.Image, containerName, installErr))
+		}
+		return installErr
 	}); err != nil {
 		// Duplicate install (same container already installing) or concurrency
 		// limit: the row was written above but no task started — remove it so the
@@ -221,6 +239,22 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		return nil, err
 	}
 	return &CreateInstanceResult{InstallID: containerName, InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
+}
+
+// notifyInstallFailed 向站内通知投递安装失败。sink 未接线（nil）时静默跳过；
+// 发送失败只记日志，不阻断调用方（通知是旁路，失败不影响安装结果）。
+func (s *Service) notifyInstallFailed(title, message string) {
+	if s.notifSink == nil {
+		return
+	}
+	if _, err := s.notifSink.CreateIfNotExists(notification.CreateNotificationRequest{
+		Type:    "deploy",
+		Title:   title,
+		Message: message,
+		Level:   "error",
+	}); err != nil {
+		log.Printf("database: notify install failed %q: %v", title, err)
+	}
 }
 
 // installInstance runs the container creation pipeline and reports progress

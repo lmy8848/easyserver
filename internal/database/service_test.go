@@ -7,11 +7,14 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"easyserver/internal/notification"
 )
 
 // --- SanitizeSQLError tests ---
@@ -93,15 +96,18 @@ type fakeDBRuntime struct {
 	stopped     []string
 	restarted   []string
 	exists      bool // 预检 Exists 的返回值（默认 false）
+	// createErr / startErr 让安装管线在指定步骤失败，模拟真实故障。
+	createErr error
+	startErr  error
 }
 
 func (f *fakeDBRuntime) Create(_ context.Context, spec ContainerSpec) error {
 	f.createSpecs = append(f.createSpecs, spec)
-	return nil
+	return f.createErr
 }
 func (f *fakeDBRuntime) Start(_ context.Context, _, name string) error {
 	f.started = append(f.started, name)
-	return nil
+	return f.startErr
 }
 func (f *fakeDBRuntime) Stop(_ context.Context, _, name string) error {
 	f.stopped = append(f.stopped, name)
@@ -493,4 +499,68 @@ func findInstanceByStatus(repo *fakeRepo, status string) *DBInstance {
 		}
 	}
 	return nil
+}
+
+// fakeSink records notification.CreateIfNotExists calls.
+type fakeSink struct {
+	created []notification.CreateNotificationRequest
+}
+
+func (f *fakeSink) CreateIfNotExists(req notification.CreateNotificationRequest) (*notification.Notification, error) {
+	f.created = append(f.created, req)
+	return &notification.Notification{ID: int64(len(f.created)), Type: req.Type, Title: req.Title}, nil
+}
+
+func TestInstallFailureSendsNotification(t *testing.T) {
+	// 安装失败（非取消）→ 站内通知收到一条 deploy 类型、error 级别的安装失败。
+	withTempHostBase(t)
+	repo := newFakeRepo()
+	// fakeDBRuntime.Start 报错 → installInstance 在启动步骤失败（真实故障）。
+	rt := &fakeDBRuntime{startErr: errors.New("container failed to start")}
+	sink := &fakeSink{}
+	svc := NewServiceWithSink(repo, rt, sink)
+
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := svc.WaitForInstall(res.InstallID); err == nil {
+		t.Fatal("expected install to fail when container start fails")
+	}
+	if len(sink.created) != 1 {
+		t.Fatalf("expected exactly one failure notification, got %d: %+v", len(sink.created), sink.created)
+	}
+	n := sink.created[0]
+	if n.Type != "deploy" {
+		t.Errorf("notification type = %q, want deploy", n.Type)
+	}
+	if n.Level != "error" {
+		t.Errorf("notification level = %q, want error", n.Level)
+	}
+	if !strings.Contains(n.Title, "mysql") || !strings.Contains(n.Title, "8.0") {
+		t.Errorf("notification title = %q, want it to mention the db type and version", n.Title)
+	}
+}
+
+func TestInstallCancelDoesNotSendNotification(t *testing.T) {
+	// 用户取消 → 不发失败通知（安静操作）。取消后实例行被删除（无残留）。
+	withTempHostBase(t)
+	repo := newFakeRepo()
+	// fakeDBRuntime.Create 返回上下文取消错误：installInstance 的 canceled()
+	// 分支判定「用户取消」→ 删行、不发通知，任务终态 canceled。
+	rt := &fakeDBRuntime{createErr: context.Canceled}
+	sink := &fakeSink{}
+	svc := NewServiceWithSink(repo, rt, sink)
+
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{Version: "8.0", Port: 3306, Image: "mysql:8.0"})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := svc.WaitForInstall(res.InstallID); err == nil {
+		t.Fatal("expected cancel to be observable as an error from WaitForInstall")
+	}
+	// 取消路径走 canceled() 分支删行、不发通知——由 installInstance 语义保证。
+	if len(sink.created) != 0 {
+		t.Fatalf("cancel must not send notification, got %d: %+v", len(sink.created), sink.created)
+	}
 }

@@ -3,7 +3,7 @@ package notification
 // Notification represents a system notification
 type Notification struct {
 	ID        int64  `json:"id"`
-	Type      string `json:"type"` // alert/security/deploy/cron/update/system
+	Type      string `json:"type"` // alert/security/deploy/cron/system
 	Title     string `json:"title"`
 	Message   string `json:"message"`
 	Level     string `json:"level"` // info/warning/error
