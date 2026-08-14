@@ -80,6 +80,13 @@ func (e *AppError) WithMessage(msg string) *AppError {
 // 等价于 WithMessage(err.Error()).Wrap(err)：分类（Code/HTTPStatus）保留
 // 哨兵语义，用户可见消息取底层错误文本，原始错误经 Unwrap 留在链上
 // （errors.Is/As 仍可穿透）。
+//
+// 使用准则：**默认优先用 Wrap(err)**（前端只见哨兵文案，底层错误进日志）；
+// WrapMessage 仅当底层错误文本本身友好且对用户有信息价值时使用（如
+// "定时任务 X 不存在"——实体名+状态，无敏感信息）。底层错误含敏感信息
+// （绝对路径、SQL 全文、密钥、CLI 输出等）时，改用
+// WithMessage(友好文案).Wrap(err)——前端只见友好文案，详细错误经
+// SafeError() 仅进日志。
 func (e *AppError) WrapMessage(err error) *AppError {
 	ne := *e
 	ne.Message = err.Error()

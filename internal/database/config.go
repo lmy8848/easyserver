@@ -215,7 +215,7 @@ func (s *Service) applyMySQLConfig(ctx context.Context, v *DBInstance, params ma
 			literal = value
 		}
 		if _, err := s.driver.Exec(ctx, v, sys, "SET PERSIST "+builder.QuoteIdentifier(key)+" = "+literal); err != nil {
-			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("设置参数 %s: %w", key, err))
+			return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("设置参数 %s 失败", key)).Wrap(err)
 		}
 	}
 	return nil
@@ -226,7 +226,7 @@ func (s *Service) applyPostgresConfig(ctx context.Context, v *DBInstance, params
 	sys := systemDBName(v.DBType)
 	for key, value := range params {
 		if _, err := s.driver.Exec(ctx, v, sys, "ALTER SYSTEM SET "+builder.QuoteIdentifier(key)+" = '"+strings.ReplaceAll(value, "'", "''")+"'"); err != nil {
-			return false, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("设置参数 %s: %w", key, err))
+			return false, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("设置参数 %s 失败", key)).Wrap(err)
 		}
 	}
 	if _, err := s.driver.Exec(ctx, v, sys, "SELECT pg_reload_conf()"); err != nil {
@@ -257,12 +257,12 @@ func (s *Service) applyRedisConfig(ctx context.Context, v *DBInstance, params ma
 			continue // 启动期参数，运行时无法 CONFIG SET，重建容器时生效
 		}
 		if err := s.redisFor().ConfigSet(ctx, v, key, value); err != nil {
-			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("设置参数 %s: %w", key, err))
+			return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("设置参数 %s 失败", key)).Wrap(err)
 		}
 	}
 	if len(params) > 0 {
 		if err := s.redisFor().ConfigRewrite(ctx, v); err != nil {
-			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("写回配置文件: %w", err))
+			return apperror.ErrBadRequest.WithMessage("写回配置文件失败").Wrap(err)
 		}
 	}
 	return nil

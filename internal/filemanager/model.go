@@ -123,7 +123,8 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 			break
 		}
 		if !os.IsNotExist(err) {
-			return "", apperror.ErrForbidden.WrapMessage(fmt.Errorf("cannot resolve path: %w", err))
+			// 底层 os 错误可能含绝对路径，只进日志；前端只见友好文案。
+			return "", apperror.ErrForbidden.WithMessage("路径解析失败，拒绝访问").Wrap(err)
 		}
 
 		parent := filepath.Dir(checkPath)

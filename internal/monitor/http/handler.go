@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -47,7 +48,9 @@ func NewMonitorHandler(monitorService *monitor.MonitorService, jwtSecret string,
 func (h *MonitorHandler) HandleStats(c *gin.Context) {
 	snapshot, err := h.monitorService.GetCurrentStats(c.Request.Context())
 	if err != nil {
-		httpx.Success(c, nil)
+		// 采集失败如实上报，不伪装成功（前端据此显示降级提示）。
+		// 底层错误可能含系统路径（/proc 等），前端只见友好文案。
+		c.Error(apperror.ErrInternal.WithMessage("监控数据采集失败").Wrap(err))
 		return
 	}
 
@@ -463,8 +466,8 @@ func safeListen(addr string) (net.Listener, error) {
 func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
 	defer func() {
 		if r := recover(); r != nil {
-			// 静默吞掉解析过程中的 panic，避免端口探测接口崩溃
-			_ = r
+			// 解析过程中意外 panic 不扩散到整个接口，但必须留痕便于排查。
+			log.Printf("monitor: getPortProcess(%d) panic recovered: %v", port, r)
 		}
 	}()
 

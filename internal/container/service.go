@@ -286,7 +286,7 @@ func (s *Service) ListContainers(ctx context.Context, engine Engine, all bool) (
 
 	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s ps failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s ps failed: %s", engine, output))
 	}
 
 	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
@@ -320,7 +320,7 @@ func (s *Service) ListContainers(ctx context.Context, engine Engine, all bool) (
 func (s *Service) GetContainer(ctx context.Context, engine Engine, id string) (*Container, error) {
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "inspect", "--format", "{{json .}}", id).CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s inspect failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s inspect failed: %s", engine, output))
 	}
 
 	trimmed := strings.TrimSpace(string(output))
@@ -346,9 +346,9 @@ func (s *Service) containerAction(ctx context.Context, engine Engine, action, id
 	output, err := exec.CommandContext(ctx, engineBinary(engine), action, id).CombinedOutput()
 	if err != nil {
 		if len(output) != 0 {
-			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s %s failed: %s", engine, action, output))
+			return apperror.ErrInternal.Wrap(fmt.Errorf("%s %s failed: %s", engine, action, output))
 		}
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s %s failed: %w", engine, action, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s %s failed: %w", engine, action, err))
 	}
 	return nil
 }
@@ -406,7 +406,7 @@ func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string,
 
 	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s rm failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s rm failed: %w", engine, err))
 	}
 	return nil
 }
@@ -416,7 +416,7 @@ func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string
 	args := []string{"logs", "--tail", strconv.Itoa(tail), id}
 	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return "", apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s logs failed: %s", engine, output))
+		return "", apperror.ErrInternal.Wrap(fmt.Errorf("%s logs failed: %s", engine, output))
 	}
 	return string(output), nil
 }
@@ -439,7 +439,7 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "exec", id, "sh", "-c", cmd).CombinedOutput()
 	if err != nil {
-		return string(output), apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s exec failed: %s", engine, output))
+		return string(output), apperror.ErrInternal.Wrap(fmt.Errorf("%s exec failed: %s", engine, output))
 	}
 	return string(output), nil
 }
@@ -505,7 +505,7 @@ func (s *Service) CreateContainer(ctx context.Context, engine Engine, req Create
 
 	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return "", apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s create failed: %s", engine, output))
+		return "", apperror.ErrInternal.Wrap(fmt.Errorf("%s create failed: %s", engine, output))
 	}
 
 	return strings.TrimSpace(string(output)), nil
@@ -519,7 +519,7 @@ func (s *Service) ListImages(ctx context.Context, engine Engine) ([]Image, error
 
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "images", "--format", "json").CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s images failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s images failed: %s", engine, output))
 	}
 
 	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
@@ -555,7 +555,7 @@ func (s *Service) PullImage(ctx context.Context, engine Engine, image string) er
 	defer cancel()
 	_, err := exec.CommandContext(pullCtx, engineBinary(engine), "pull", image).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s pull failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s pull failed: %w", engine, err))
 	}
 	return nil
 }
@@ -570,7 +570,7 @@ func (s *Service) RemoveImage(ctx context.Context, engine Engine, id string, for
 
 	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s rmi failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s rmi failed: %w", engine, err))
 	}
 	return nil
 }
@@ -580,7 +580,7 @@ func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id strin
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "stats", id, "--no-stream", "--format",
 		`{"cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}","mem_percent":"{{.MemPerc}}","net_rx":"{{.NetIO}}","block_read":"{{.BlockIO}}","pids":"{{.PIDs}}"}`).CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s stats failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s stats failed: %s", engine, output))
 	}
 
 	var raw struct {
@@ -682,7 +682,7 @@ func parseBytes(s string) int64 {
 func (s *Service) GetContainerTop(ctx context.Context, engine Engine, id string) ([]ProcessInfo, error) {
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm").CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s top failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s top failed: %s", engine, output))
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -722,7 +722,7 @@ func (s *Service) CopyToContainer(ctx context.Context, engine Engine, id, srcPat
 	}
 	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s cp to container failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s cp to container failed: %w", engine, err))
 	}
 	return nil
 }
@@ -734,7 +734,7 @@ func (s *Service) CopyFromContainer(ctx context.Context, engine Engine, id, srcP
 	}
 	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s cp from container failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s cp from container failed: %w", engine, err))
 	}
 	return nil
 }
@@ -764,7 +764,7 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 
 	_, err := exec.CommandContext(ctx, engineBinary(engine), "rename", id, newName).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s rename failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s rename failed: %w", engine, err))
 	}
 	return nil
 }
@@ -790,7 +790,7 @@ func (s *Service) UpdateContainer(ctx context.Context, engine Engine, id string,
 
 	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s update failed: %s", engine, output))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s update failed: %s", engine, output))
 	}
 	return nil
 }
@@ -949,7 +949,7 @@ func (s *Service) installDocker(ctx context.Context) error {
 
 	_, err := exec.CommandContext(ctx, "which", "curl").CombinedOutput()
 	if err != nil {
-		return apperror.ErrInternal.WrapMessage(fmt.Errorf("curl 未安装，请先安装 curl: %w", err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("curl 未安装，请先安装 curl: %w", err))
 	}
 
 	log.Println("docker: downloading install script...")
@@ -1104,7 +1104,7 @@ func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 func (s *Service) GetInfo(ctx context.Context, engine Engine) (map[string]any, error) {
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "info", "--format", "{{json .}}").CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s info failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s info failed: %s", engine, output))
 	}
 
 	var info map[string]any
@@ -1316,7 +1316,7 @@ func (s *Service) RegistryLogin(ctx context.Context, engine Engine, server, user
 	cmd.Stdin = strings.NewReader(password + "\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s login failed: %s", engine, truncateOutput(string(out), 500)))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s login failed: %s", engine, truncateOutput(string(out), 500)))
 	}
 	return nil
 }
@@ -1325,7 +1325,7 @@ func (s *Service) RegistryLogin(ctx context.Context, engine Engine, server, user
 func (s *Service) RegistryLogout(ctx context.Context, engine Engine, server string) error {
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "logout", server).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s logout failed: %s", engine, truncateOutput(string(output), 500)))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s logout failed: %s", engine, truncateOutput(string(output), 500)))
 	}
 	return nil
 }
@@ -1527,7 +1527,7 @@ func (s *Service) findComposeFile(projectDir string) string {
 func (s *Service) ListVolumes(ctx context.Context, engine Engine) ([]Volume, error) {
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "volume", "ls", "--format", "json").CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s volume ls failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s volume ls failed: %s", engine, output))
 	}
 
 	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
@@ -1573,7 +1573,7 @@ func (s *Service) CreateVolume(ctx context.Context, engine Engine, name, driver 
 
 	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s volume create failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s volume create failed: %w", engine, err))
 	}
 	return nil
 }
@@ -1588,7 +1588,7 @@ func (s *Service) RemoveVolume(ctx context.Context, engine Engine, name string, 
 
 	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s volume rm failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s volume rm failed: %w", engine, err))
 	}
 	return nil
 }
@@ -1604,7 +1604,7 @@ type networkDetails struct {
 func (s *Service) ListNetworks(ctx context.Context, engine Engine) ([]Network, error) {
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "network", "ls", "--format", "json").CombinedOutput()
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s network ls failed: %s", engine, output))
+		return nil, apperror.ErrInternal.Wrap(fmt.Errorf("%s network ls failed: %s", engine, output))
 	}
 
 	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
@@ -1679,7 +1679,7 @@ func (s *Service) CreateNetwork(ctx context.Context, engine Engine, name, driver
 
 	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s network create failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s network create failed: %w", engine, err))
 	}
 	return nil
 }
@@ -1688,7 +1688,7 @@ func (s *Service) CreateNetwork(ctx context.Context, engine Engine, name, driver
 func (s *Service) RemoveNetwork(ctx context.Context, engine Engine, id string) error {
 	_, err := exec.CommandContext(ctx, engineBinary(engine), "network", "rm", id).CombinedOutput()
 	if err != nil {
-		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s network rm failed: %w", engine, err))
+		return apperror.ErrInternal.Wrap(fmt.Errorf("%s network rm failed: %w", engine, err))
 	}
 	return nil
 }

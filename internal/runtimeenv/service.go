@@ -267,7 +267,9 @@ func (s *Service) uninstallRuntime(ctx context.Context, name, version string, lo
 func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string, error) {
 	versions, err := s.provider.ListRemoteVersions(ctx, lang)
 	if err != nil {
-		return nil, apperror.ErrBadRequest.WrapMessage(err)
+		// 版本查询是用户主动操作：失败归类为请求问题。底层错误（mise 输出，
+		// 可能含系统信息）只进日志，前端只见友好文案。
+		return nil, apperror.ErrBadRequest.WithMessage("查询远程版本失败").Wrap(err)
 	}
 	return versions, nil
 }

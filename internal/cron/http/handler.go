@@ -437,7 +437,7 @@ func (h *CronHandler) CreateScript(c *gin.Context) {
 	}
 	for _, s := range existingScripts {
 		if s.Name == req.Name {
-			c.Error(apperror.ErrBadRequest.WithMessage("脚本名称已存在"))
+			c.Error(apperror.ErrConflict.WithMessage("脚本名称已存在"))
 			return
 		}
 	}
