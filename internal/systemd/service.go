@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/mise"
 )
 
@@ -487,7 +488,7 @@ func (m *ServiceManager) serviceExists(ctx context.Context, name string) bool {
 // requireServiceExists returns an error if the service does not exist.
 func (m *ServiceManager) requireServiceExists(ctx context.Context, name string) error {
 	if !m.serviceExists(ctx, name) {
-		return fmt.Errorf("service %s does not exist", name)
+		return errx.NotFound("service %s does not exist", name)
 	}
 	return nil
 }
@@ -558,7 +559,7 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 	defer m.mu.Unlock()
 
 	if m.managedUnitExists(spec.Name) {
-		return fmt.Errorf("托管服务 %s 已存在", spec.Name)
+		return errx.Conflict("托管服务 %s 已存在", spec.Name)
 	}
 
 	content, err := RenderUnit(spec, m.provider)
@@ -611,7 +612,7 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 	defer m.mu.Unlock()
 
 	if !m.managedUnitExists(spec.Name) {
-		return fmt.Errorf("托管服务 %s 不存在", spec.Name)
+		return errx.NotFound("托管服务 %s 不存在", spec.Name)
 	}
 
 	// 读取旧 unit 文件配置、运行状态与开机自启状态，便于任一后续步骤失败时平滑回滚
@@ -686,7 +687,7 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 	defer m.mu.Unlock()
 
 	if !m.managedUnitExists(name) {
-		return fmt.Errorf("托管服务 %s 不存在", name)
+		return errx.NotFound("托管服务 %s 不存在", name)
 	}
 
 	fullName := managedUnitPrefix + name + managedUnitSuffix
@@ -721,7 +722,7 @@ func (m *ServiceManager) fillRuntime(ctx context.Context, spec *ManagedUnitSpec)
 		return fmt.Errorf("runtime 查询未配置，无法绑定运行时 %s", spec.Runtime)
 	}
 	if !m.runtime.Installed(ctx, lang, exact) {
-		return fmt.Errorf("运行时 %s 未安装（需先到「运行环境管理」安装）", spec.Runtime)
+		return errx.NotFound("运行时 %s 未安装（需先到「运行环境管理」安装）", spec.Runtime)
 	}
 	return nil
 }

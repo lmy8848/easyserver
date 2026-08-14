@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/mise"
 )
 
@@ -48,11 +48,11 @@ func (s *MirrorService) List(ctx context.Context) ([]MirrorEntry, error) {
 // Upsert 写入/更新镜像源，保存即生效（直写文件）。
 func (s *MirrorService) Upsert(ctx context.Context, key, value string) error {
 	if !isValidEnvKey(key) {
-		return apperror.ErrBadRequest.WithMessage("无效的环境变量名：" + key)
+		return errx.BadRequest("无效的环境变量名：%s", key)
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return apperror.ErrBadRequest.WithMessage("镜像地址不能为空")
+		return errx.BadRequest("镜像地址不能为空")
 	}
 	return s.store.UpsertEnv(key, value)
 }
@@ -60,7 +60,7 @@ func (s *MirrorService) Upsert(ctx context.Context, key, value string) error {
 // Delete 删除镜像源，删除即从文件消失。
 func (s *MirrorService) Delete(ctx context.Context, key string) error {
 	if !isValidEnvKey(key) {
-		return apperror.ErrBadRequest.WithMessage("无效的环境变量名：" + key)
+		return errx.BadRequest("无效的环境变量名：%s", key)
 	}
 	return s.store.DeleteEnv(key)
 }

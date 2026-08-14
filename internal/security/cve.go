@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 // Service provides security-audit operations (CVE scanning, kernel status,
@@ -43,7 +43,7 @@ type installedPackage struct {
 func (s *Service) Scan(ctx context.Context) ([]Vulnerability, error) {
 	pkgs, err := s.listInstalled(ctx)
 	if err != nil {
-		return nil, apperror.ErrInternal.WithMessage("读取已装包失败: " + err.Error())
+		return nil, errx.Internal("读取已装包失败: %w", err)
 	}
 	var vulns []Vulnerability
 	// osv.dev querybatch accepts up to 1000 queries per request.
@@ -51,7 +51,7 @@ func (s *Service) Scan(ctx context.Context) ([]Vulnerability, error) {
 		end := min(i+500, len(pkgs))
 		results, err := s.queryOSVBatch(ctx, pkgs[i:end])
 		if err != nil {
-			return nil, apperror.ErrInternal.WithMessage("查询 osv.dev 失败: " + err.Error())
+			return nil, errx.Internal("查询 osv.dev 失败: %w", err)
 		}
 		for j, res := range results {
 			if len(res.Vulns) == 0 {
@@ -148,12 +148,12 @@ func (s *Service) queryOSVBatch(ctx context.Context, pkgs []installedPackage) ([
 // Upgrade runs apt-get install --only-upgrade for the given packages.
 func (s *Service) Upgrade(ctx context.Context, packages []string) (string, error) {
 	if len(packages) == 0 {
-		return "", apperror.ErrBadRequest.WithMessage("未指定升级的包")
+		return "", errx.BadRequest("未指定升级的包")
 	}
 	args := append([]string{"install", "--only-upgrade", "-y"}, packages...)
 	out, err := exec.CommandContext(ctx, "apt-get", args...).CombinedOutput()
 	if err != nil {
-		return string(out), apperror.ErrInternal.WithMessage("升级失败: " + err.Error())
+		return string(out), errx.Internal("升级失败: %w", err)
 	}
 	return string(out), nil
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/errx"
 )
 
 // SessionService manages login sessions in memory. Sessions do not survive
@@ -125,7 +126,7 @@ func (s *SessionService) UpdateActivity(ctx context.Context, token string) error
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[token]
 	if !ok {
-		return errors.New("session not found")
+		return errx.NotFound("session not found")
 	}
 	sess.LoginAt = time.Now()
 	return nil
@@ -247,7 +248,7 @@ func (s *SessionService) IsSessionValidByToken(ctx context.Context, token string
 	defer s.mu.RUnlock()
 	sess, ok := s.sessions[token]
 	if !ok {
-		return nil, errors.New("session not found")
+		return nil, errx.NotFound("session not found")
 	}
 	cp := *sess
 	return &cp, nil

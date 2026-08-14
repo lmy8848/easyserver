@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 // Service provides environment variable and global config management
@@ -30,7 +30,7 @@ func (s *Service) GetEnvConfig(ctx context.Context, id int64) (*EnvConfig, error
 // CreateEnvConfig creates a new environment configuration
 func (s *Service) CreateEnvConfig(ctx context.Context, c *EnvConfig) error {
 	if !isValidEnvName(c.Name) {
-		return apperror.ErrBadRequest.WithMessage("无效的环境变量名：" + c.Name)
+		return errx.BadRequest("无效的环境变量名：%s", c.Name)
 	}
 	return s.repo.CreateEnvConfig(ctx, c)
 }
@@ -38,7 +38,7 @@ func (s *Service) CreateEnvConfig(ctx context.Context, c *EnvConfig) error {
 // UpdateEnvConfig updates an environment configuration
 func (s *Service) UpdateEnvConfig(ctx context.Context, c *EnvConfig) error {
 	if !isValidEnvName(c.Name) {
-		return apperror.ErrBadRequest.WithMessage("无效的环境变量名：" + c.Name)
+		return errx.BadRequest("无效的环境变量名：%s", c.Name)
 	}
 	return s.repo.UpdateEnvConfig(ctx, c)
 }
@@ -55,7 +55,7 @@ func (s *Service) ListPathEntries(ctx context.Context) ([]PathEntry, error) {
 // CreatePathEntry creates a new PATH entry
 func (s *Service) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 	if !isValidPath(e.Path) {
-		return apperror.ErrBadRequest.WithMessage("无效的路径：" + e.Path)
+		return errx.BadRequest("无效的路径：%s", e.Path)
 	}
 	return s.repo.CreatePathEntry(ctx, e)
 }
@@ -63,7 +63,7 @@ func (s *Service) CreatePathEntry(ctx context.Context, e *PathEntry) error {
 // UpdatePathEntry updates an existing PATH entry
 func (s *Service) UpdatePathEntry(ctx context.Context, e *PathEntry) error {
 	if !isValidPath(e.Path) {
-		return apperror.ErrBadRequest.WithMessage("无效的路径：" + e.Path)
+		return errx.BadRequest("无效的路径：%s", e.Path)
 	}
 	return s.repo.UpdatePathEntry(ctx, e)
 }

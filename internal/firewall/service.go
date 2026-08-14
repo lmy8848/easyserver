@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"easyserver/internal/infra/errx"
 )
 
 // FirewallService manages local firewall rules
@@ -293,7 +295,7 @@ func (s *Service) UpdateRule(ctx context.Context, rule *FirewallRule) error {
 	// Get the old rule to remove it from the system if it's enabled
 	oldRule, err := s.GetRule(ctx, rule.ID)
 	if err != nil {
-		return fmt.Errorf("rule not found: %w", err)
+		return errx.NotFound("rule not found: %w", err)
 	}
 
 	// If the old rule was enabled, remove it from the system first
@@ -324,7 +326,7 @@ func (s *Service) UpdateRule(ctx context.Context, rule *FirewallRule) error {
 func (s *Service) DeleteRule(ctx context.Context, id int64) error {
 	rule, err := s.GetRule(ctx, id)
 	if err != nil {
-		return fmt.Errorf("rule not found: %w", err)
+		return errx.NotFound("rule not found: %w", err)
 	}
 
 	// Remove from system (collect error but continue with DB cleanup)
@@ -347,7 +349,7 @@ func (s *Service) DeleteRule(ctx context.Context, id int64) error {
 func (s *Service) EnableRule(ctx context.Context, id int64) error {
 	rule, err := s.GetRule(ctx, id)
 	if err != nil {
-		return fmt.Errorf("rule not found: %w", err)
+		return errx.NotFound("rule not found: %w", err)
 	}
 
 	if err := s.applyRule(ctx, rule); err != nil {
@@ -361,7 +363,7 @@ func (s *Service) EnableRule(ctx context.Context, id int64) error {
 func (s *Service) DisableRule(ctx context.Context, id int64) error {
 	rule, err := s.GetRule(ctx, id)
 	if err != nil {
-		return fmt.Errorf("rule not found: %w", err)
+		return errx.NotFound("rule not found: %w", err)
 	}
 
 	if err := s.removeRule(ctx, rule); err != nil {
@@ -388,7 +390,7 @@ func (s *Service) MoveRuleUp(ctx context.Context, id int64) error {
 		}
 	}
 	if idx < 0 {
-		return errors.New("rule not found")
+		return errx.NotFound("rule not found")
 	}
 	if idx == 0 {
 		return nil // Already at top
@@ -418,7 +420,7 @@ func (s *Service) MoveRuleDown(ctx context.Context, id int64) error {
 		}
 	}
 	if idx < 0 {
-		return errors.New("rule not found")
+		return errx.NotFound("rule not found")
 	}
 	if idx == len(rules)-1 {
 		return nil // Already at bottom

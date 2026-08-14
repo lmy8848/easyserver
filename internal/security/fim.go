@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 // FIMBaseline is one monitored file's baseline hash.
@@ -51,7 +51,7 @@ func defaultFIMPaths(configPath string) []string {
 // ScanBaseline hashes the default critical files and stores/updates the baseline.
 func (s *Service) ScanBaseline(ctx context.Context) error {
 	if s.db == nil {
-		return apperror.ErrInternal.WithMessage("db 不可用")
+		return errx.Unavailable("db 不可用")
 	}
 	for _, p := range s.fimPaths {
 		hash, size, mtime, err := hashFile(p)
@@ -63,7 +63,7 @@ func (s *Service) ScanBaseline(ctx context.Context) error {
 			 ON CONFLICT(path) DO UPDATE SET hash=excluded.hash, size=excluded.size, mtime=excluded.mtime, updated_at=excluded.updated_at`,
 			p, hash, size, mtime, time.Now().Format(time.RFC3339))
 		if err != nil {
-			return apperror.WrapError(err)
+			return err
 		}
 	}
 	return nil
@@ -73,11 +73,11 @@ func (s *Service) ScanBaseline(ctx context.Context) error {
 // any modifications/deletions. Returns the detected changes.
 func (s *Service) CheckChanges(ctx context.Context) ([]FIMChange, error) {
 	if s.db == nil {
-		return nil, apperror.ErrInternal.WithMessage("db 不可用")
+		return nil, errx.Unavailable("db 不可用")
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT path, hash FROM fim_baseline")
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	defer rows.Close()
 	var changes []FIMChange
@@ -103,7 +103,7 @@ func (s *Service) CheckChanges(ctx context.Context) ([]FIMChange, error) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	return changes, nil
 }
@@ -121,11 +121,11 @@ func (s *Service) recordChange(ctx context.Context, ch FIMChange) {
 // ListBaseline returns the current baseline.
 func (s *Service) ListBaseline(ctx context.Context) ([]FIMBaseline, error) {
 	if s.db == nil {
-		return nil, apperror.ErrInternal.WithMessage("db 不可用")
+		return nil, errx.Unavailable("db 不可用")
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT path, hash, size, mtime, updated_at FROM fim_baseline ORDER BY path")
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	defer rows.Close()
 	var bl []FIMBaseline
@@ -137,7 +137,7 @@ func (s *Service) ListBaseline(ctx context.Context) ([]FIMBaseline, error) {
 		bl = append(bl, b)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	return bl, nil
 }
@@ -145,14 +145,14 @@ func (s *Service) ListBaseline(ctx context.Context) ([]FIMBaseline, error) {
 // ListChanges returns recent detected changes.
 func (s *Service) ListChanges(ctx context.Context, limit int) ([]FIMChange, error) {
 	if s.db == nil {
-		return nil, apperror.ErrInternal.WithMessage("db 不可用")
+		return nil, errx.Unavailable("db 不可用")
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT path, change_type, old_hash, new_hash, detected_at FROM fim_changes ORDER BY detected_at DESC LIMIT ?", limit)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	defer rows.Close()
 	var ch []FIMChange
@@ -164,7 +164,7 @@ func (s *Service) ListChanges(ctx context.Context, limit int) ([]FIMChange, erro
 		ch = append(ch, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	return ch, nil
 }
@@ -172,10 +172,10 @@ func (s *Service) ListChanges(ctx context.Context, limit int) ([]FIMChange, erro
 // ResetBaseline clears the baseline and re-scans the default paths.
 func (s *Service) ResetBaseline(ctx context.Context) error {
 	if s.db == nil {
-		return apperror.ErrInternal.WithMessage("db 不可用")
+		return errx.Unavailable("db 不可用")
 	}
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM fim_baseline"); err != nil {
-		return apperror.WrapError(err)
+		return err
 	}
 	return s.ScanBaseline(ctx)
 }

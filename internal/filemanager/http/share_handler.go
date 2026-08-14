@@ -21,8 +21,8 @@ import (
 	"easyserver/internal/filemanager"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -92,31 +92,27 @@ func parseExpiresAt(s string) (string, error) {
 }
 
 // CreateShare creates a new file share link
-func (h *FileShareHandler) CreateShare(c *gin.Context) {
+func (h *FileShareHandler) CreateShare(c *gin.Context) (any, error) {
 	var req filemanager.CreateShareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	// Validate file path
 	validPath, err := h.fileManager.ValidatePath(req.FilePath)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("文件路径无效"))
-		return
+		return nil, errx.BadRequest("文件路径无效")
 	}
 
 	// Check file exists
 	info, err := os.Stat(validPath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文件不存在"))
-		return
+		return nil, errx.NotFound("文件不存在")
 	}
 
 	// Check file size limit (max 500MB)
 	if info.Size() > fileShareMaxSize {
-		c.Error(apperror.ErrBadRequest.WithMessage("文件超过500MB，不支持分享"))
-		return
+		return nil, errx.BadRequest("文件超过500MB，不支持分享")
 	}
 
 	middleware.AuditSummary(c, "生成文件外链 "+req.FilePath)
@@ -127,14 +123,12 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 	// Validate + normalize expires_at (relative or absolute). Empty =永久有效.
 	expiresAt, err := parseExpiresAt(req.ExpiresAt)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage(err.Error()))
-		return
+		return nil, errx.BadRequest("%w", err)
 	}
 
 	token, err := generateToken()
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, errx.Internal("生成令牌失败: %w", err)
 	}
 
 	share := &filemanager.FileShare{
@@ -151,13 +145,12 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) {
 
 	id, err := h.shareRepo.Create(c.Request.Context(), share)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	share.ID = id
 	// Don't expose password in response
 	share.Password = ""
-	httpx.Success(c, share)
+	return share, nil
 }
 
 // ShareListItem is an enriched share record with current file status.
@@ -170,14 +163,13 @@ type ShareListItem struct {
 }
 
 // ListShares lists all file shares for the current user
-func (h *FileShareHandler) ListShares(c *gin.Context) {
+func (h *FileShareHandler) ListShares(c *gin.Context) (any, error) {
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(int64)
 
 	shares, err := h.shareRepo.List(c.Request.Context(), uid)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 
 	items := make([]ShareListItem, 0, len(shares))
@@ -195,17 +187,16 @@ func (h *FileShareHandler) ListShares(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	httpx.Success(c, items)
+	return items, nil
 }
 
 // GetShare returns a single share owned by the current user, including its
 // password so the frontend can reconstruct a full shareable link. Owner check
 // is enforced; non-owners get 404 (no existence leak).
-func (h *FileShareHandler) GetShare(c *gin.Context) {
+func (h *FileShareHandler) GetShare(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的ID"))
-		return
+		return nil, errx.BadRequest("无效的ID")
 	}
 
 	userID, _ := c.Get("user_id")
@@ -213,30 +204,26 @@ func (h *FileShareHandler) GetShare(c *gin.Context) {
 
 	share, err := h.shareRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if share == nil || share.CreatedBy != uid {
-		c.Error(apperror.ErrNotFound.WithMessage("外链不存在"))
-		return
+		return nil, errx.NotFound("外链不存在")
 	}
-	httpx.Success(c, share)
+	return share, nil
 }
 
 // UpdateShare modifies a share's access-control fields (password / expiry /
 // download cap). File path and token are immutable. Owner-gated; expires_at
 // format and max_downloads are validated as guards.
-func (h *FileShareHandler) UpdateShare(c *gin.Context) {
+func (h *FileShareHandler) UpdateShare(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的ID"))
-		return
+		return nil, errx.BadRequest("无效的ID")
 	}
 
 	var req filemanager.UpdateShareRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	userID, _ := c.Get("user_id")
@@ -244,33 +231,28 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 
 	share, err := h.shareRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if share == nil || share.CreatedBy != uid {
-		c.Error(apperror.ErrNotFound.WithMessage("外链不存在"))
-		return
+		return nil, errx.NotFound("外链不存在")
 	}
 
 	// Guard: validate max_downloads if provided.
 	if req.MaxDownloads != nil && *req.MaxDownloads < 0 {
-		c.Error(apperror.ErrBadRequest.WithMessage("最大下载次数不能为负数"))
-		return
+		return nil, errx.BadRequest("最大下载次数不能为负数")
 	}
 
 	// Guard: validate + normalize expires_at (unless explicitly clearing).
 	if !req.ClearExpiry {
 		parsed, perr := parseExpiresAt(req.ExpiresAt)
 		if perr != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(perr.Error()))
-			return
+			return nil, errx.BadRequest("%w", perr)
 		}
 		req.ExpiresAt = parsed
 	}
 
 	if err := h.shareRepo.Update(c.Request.Context(), id, &req); err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新文件外链 #"+c.Param("id"))
@@ -278,40 +260,36 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) {
 	// Return refreshed record without leaking password to the list view.
 	updated, err := h.shareRepo.GetByID(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if updated != nil {
 		updated.Password = ""
 	}
-	httpx.Success(c, updated)
+	return updated, nil
 }
 
 // DeleteShare revokes a file share
-func (h *FileShareHandler) DeleteShare(c *gin.Context) {
+func (h *FileShareHandler) DeleteShare(c *gin.Context) (any, error) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的ID"))
-		return
+		return nil, errx.BadRequest("无效的ID")
 	}
 
 	middleware.AuditSummary(c, "撤销文件外链 #"+idStr)
 	if err := h.shareRepo.Delete(c.Request.Context(), id); err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // CleanupExpired removes expired file shares
-func (h *FileShareHandler) CleanupExpired(c *gin.Context) {
+func (h *FileShareHandler) CleanupExpired(c *gin.Context) (any, error) {
 	count, err := h.shareRepo.DeleteExpired(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"deleted": count})
+	return gin.H{"deleted": count}, nil
 }
 
 // ShareInfoResponse is the public metadata for a share link. It intentionally
@@ -332,21 +310,18 @@ type ShareInfoResponse struct {
 
 // ShareInfo returns public, non-sensitive metadata about a share so the
 // download page can render before requesting the file. No auth required.
-func (h *FileShareHandler) ShareInfo(c *gin.Context) {
+func (h *FileShareHandler) ShareInfo(c *gin.Context) (any, error) {
 	token := c.Param("token")
 	if token == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
-		return
+		return nil, errx.BadRequest("缺少分享令牌")
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if share == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接不存在或已失效"))
-		return
+		return nil, errx.NotFound("分享链接不存在或已失效")
 	}
 
 	resp := ShareInfoResponse{
@@ -375,7 +350,7 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) {
 		}
 	}
 
-	httpx.Success(c, resp)
+	return resp, nil
 }
 
 var (
@@ -398,39 +373,33 @@ type TicketRequest struct {
 // GetTicket verifies access and issues a stateless download ticket.
 // This is the ONLY place where download counts are incremented, preventing
 // double counting from browser retries or multi-threaded download managers.
-func (h *FileShareHandler) GetTicket(c *gin.Context) {
+func (h *FileShareHandler) GetTicket(c *gin.Context) (any, error) {
 	token := c.Param("token")
 	if token == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少分享令牌"))
-		return
+		return nil, errx.BadRequest("缺少分享令牌")
 	}
 
 	var req TicketRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		// 绑定失败（空 body 或非 JSON）直接返回 400；无密码分享时前端发送 {} 空对象即可
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if share == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接不存在或已失效"))
-		return
+		return nil, errx.NotFound("分享链接不存在或已失效")
 	}
 
 	// Check password
 	if share.Password != "" {
 		if req.Password == "" {
-			c.Error(apperror.ErrForbidden.WithMessage("需要输入密码"))
-			return
+			return nil, errx.Forbidden("需要输入密码")
 		}
 		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(share.Password)) != 1 {
-			c.Error(apperror.ErrForbidden.WithMessage("密码错误"))
-			return
+			return nil, errx.Forbidden("密码错误")
 		}
 	}
 
@@ -439,43 +408,35 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 		expires, err := time.Parse("2006-01-02 15:04:05", share.ExpiresAt)
 		if err == nil && time.Now().After(expires) {
 			if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
-				c.Error(apperror.ErrInternal.Wrap(delErr))
-				return
+				return nil, delErr
 			}
-			c.Error(apperror.ErrNotFound.WithMessage("分享链接已过期"))
-			return
+			return nil, errx.NotFound("分享链接已过期")
 		}
 	}
 
 	// Validate file exists
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
-		return
+		return nil, errx.NotFound("文件不存在或已移动")
 	}
 	_, err = os.Stat(validPath)
 	if err != nil {
 		if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
-			c.Error(apperror.ErrInternal.Wrap(delErr))
-			return
+			return nil, delErr
 		}
-		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
-		return
+		return nil, errx.NotFound("文件不可用")
 	}
 
 	// Atomically increment count
 	allowed, err := h.shareRepo.IncrementDownloadsIfUnderLimit(c.Request.Context(), share.ID)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if !allowed {
 		if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
-			c.Error(apperror.ErrInternal.Wrap(delErr))
-			return
+			return nil, delErr
 		}
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接下载次数已达上限"))
-		return
+		return nil, errx.NotFound("分享链接下载次数已达上限")
 	}
 
 	// Issue stateless ticket valid for 6 hours
@@ -485,7 +446,7 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) {
 	mac.Write([]byte(msg))
 	sig := hex.EncodeToString(mac.Sum(nil))
 
-	httpx.Success(c, gin.H{"ticket": fmt.Sprintf("%s.%s", msg, sig)})
+	return gin.H{"ticket": fmt.Sprintf("%s.%s", msg, sig)}, nil
 }
 
 // PublicDownload handles public file download via a stateless ticket.
@@ -517,52 +478,44 @@ func (h *FileShareHandler) validateTicket(share *filemanager.FileShare, ticket s
 	return nil
 }
 
-func (h *FileShareHandler) PublicList(c *gin.Context) {
+func (h *FileShareHandler) PublicList(c *gin.Context) (any, error) {
 	token := c.Param("token")
 	ticket := c.Query("ticket")
 	subpath := c.Query("subpath")
 	if token == "" || ticket == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少令牌或凭证"))
-		return
+		return nil, errx.BadRequest("缺少令牌或凭证")
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if share == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接已失效"))
-		return
+		return nil, errx.NotFound("分享链接已失效")
 	}
 
 	if err := h.validateTicket(share, ticket); err != nil {
-		c.Error(apperror.ErrForbidden.WithMessage(err.Error()))
-		return
+		return nil, errx.Forbidden("%w", err)
 	}
 
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
-		return
+		return nil, errx.NotFound("文件不存在或已移动")
 	}
 
 	info, err := os.Stat(validPath)
 	if err != nil || !info.IsDir() {
-		c.Error(apperror.ErrBadRequest.WithMessage("该分享不是一个文件夹"))
-		return
+		return nil, errx.BadRequest("该分享不是一个文件夹")
 	}
 
 	targetDir, err := h.fileManager.ResolveShareSubpath(validPath, subpath)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("非法路径"))
-		return
+		return nil, errx.BadRequest("非法路径")
 	}
 
 	entries, err := os.ReadDir(targetDir)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 
 	type Entry struct {
@@ -582,59 +535,51 @@ func (h *FileShareHandler) PublicList(c *gin.Context) {
 			IsDir: e.IsDir(),
 		})
 	}
-	httpx.Success(c, res)
+	return res, nil
 }
 
-func (h *FileShareHandler) PublicDownload(c *gin.Context) {
+func (h *FileShareHandler) PublicDownload(c *gin.Context) (any, error) {
 	token := c.Param("token")
 	ticket := c.Query("ticket")
 	subpath := c.Query("subpath")
 
 	if token == "" || ticket == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少令牌或凭证"))
-		return
+		return nil, errx.BadRequest("缺少令牌或凭证")
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	if share == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("分享链接已失效"))
-		return
+		return nil, errx.NotFound("分享链接已失效")
 	}
 
 	if err := h.validateTicket(share, ticket); err != nil {
-		c.Error(apperror.ErrForbidden.WithMessage(err.Error()))
-		return
+		return nil, errx.Forbidden("%w", err)
 	}
 
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文件不存在或已移动"))
-		return
+		return nil, errx.NotFound("文件不存在或已移动")
 	}
 	info, err := os.Stat(validPath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
-		return
+		return nil, errx.NotFound("文件不可用")
 	}
 
 	targetPath := validPath
 	if info.IsDir() && subpath != "" {
 		resolved, err := h.fileManager.ResolveShareSubpath(validPath, subpath)
 		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage("非法路径"))
-			return
+			return nil, errx.BadRequest("非法路径")
 		}
 		targetPath = resolved
 	}
 
 	targetInfo, err := os.Stat(targetPath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("文件不可用"))
-		return
+		return nil, errx.NotFound("文件不可用")
 	}
 
 	if targetInfo.IsDir() {
@@ -677,15 +622,14 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 			_, err = io.Copy(f, sf)
 			return err
 		})
-		return
+		return nil, nil
 	}
 
 	// Serve single file — O_NOFOLLOW guards the TOCTOU window between
 	// ResolveShareSubpath's EvalSymlinks and the actual read.
 	f, err := os.OpenFile(targetPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		c.Error(apperror.ErrInternal.Wrap(err))
-		return
+		return nil, err
 	}
 	defer f.Close()
 
@@ -701,18 +645,19 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) {
 	}
 
 	c.DataFromReader(200, targetInfo.Size(), contentType, f, extraHeaders)
+	return nil, nil
 }
 
 // RegisterRoutes registers file share management routes (protected)
 func RegisterShareRoutes(protected *gin.RouterGroup, shareRepo filemanager.ShareRepository, fileManager *filemanager.Manager, cfg *config.Config) {
 	handler := NewFileShareHandler(shareRepo, fileManager, cfg)
 
-	protected.POST("/shares", handler.CreateShare)
-	protected.GET("/shares", handler.ListShares)
-	protected.GET("/shares/:id", handler.GetShare)
-	protected.PUT("/shares/:id", handler.UpdateShare)
-	protected.DELETE("/shares/:id", handler.DeleteShare)
-	protected.POST("/shares/cleanup", handler.CleanupExpired)
+	protected.POST("/shares", httpx.H(handler.CreateShare))
+	protected.GET("/shares", httpx.H(handler.ListShares))
+	protected.GET("/shares/:id", httpx.H(handler.GetShare))
+	protected.PUT("/shares/:id", httpx.H(handler.UpdateShare))
+	protected.DELETE("/shares/:id", httpx.H(handler.DeleteShare))
+	protected.POST("/shares/cleanup", httpx.H(handler.CleanupExpired))
 }
 
 // RegisterPublicShareRoute registers the public share routes (no auth).
@@ -722,8 +667,8 @@ func RegisterPublicShareRoute(public *gin.RouterGroup, shareRepo filemanager.Sha
 	if rateLimit > 0 {
 		g.Use(middleware.RateLimitMiddleware("share", rateLimit, rateInterval))
 	}
-	g.GET("/:token/info", handler.ShareInfo)
-	g.POST("/:token/ticket", handler.GetTicket)
-	g.GET("/:token/download", handler.PublicDownload)
-	g.GET("/:token/list", handler.PublicList)
+	g.GET("/:token/info", httpx.H(handler.ShareInfo))
+	g.POST("/:token/ticket", httpx.H(handler.GetTicket))
+	g.GET("/:token/download", httpx.H(handler.PublicDownload))
+	g.GET("/:token/list", httpx.H(handler.PublicList))
 }

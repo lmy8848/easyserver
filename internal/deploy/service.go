@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"easyserver/internal/infra/errx"
 )
 
 // Service manages deploy operations
@@ -165,7 +167,7 @@ func (s *Service) CreateTask(ctx context.Context, task *Task) error {
 		return fmt.Errorf("failed to check server: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("server %d does not exist", task.ServerID)
+		return errx.NotFound("server %d does not exist", task.ServerID)
 	}
 
 	return s.repo.CreateTask(ctx, task)
@@ -373,13 +375,13 @@ func (s *Service) RollbackVersion(ctx context.Context, versionID int64) error {
 	// Get version info
 	ver, err := s.repo.GetVersion(ctx, versionID)
 	if err != nil {
-		return fmt.Errorf("version not found: %w", err)
+		return errx.NotFound("version not found: %w", err)
 	}
 
 	// Get server info
 	srv, err := s.GetServer(ctx, ver.ServerID)
 	if err != nil {
-		return fmt.Errorf("server not found: %w", err)
+		return errx.NotFound("server not found: %w", err)
 	}
 
 	// Get auth data

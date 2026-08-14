@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"easyserver/internal/infra/errx"
 )
 
 // --- Logical database CRUD (live, server-owned) ---
@@ -16,7 +18,7 @@ func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Databa
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, errx.NotFound("database instance not found")
 	}
 	return s.queryDatabases(ctx, instance)
 }
@@ -31,29 +33,37 @@ func (s *Service) queryDatabases(ctx context.Context, instance *DBInstance) ([]D
 		res, err := runner.Query(ctx, instance, systemDBName(instance.DBType),
 			"SELECT schema_name, default_character_set_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY schema_name")
 		if err != nil {
-			return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
+			return nil, fmt.Errorf("query mysql databases: %s", SanitizeSQLError(err.Error()))
 		}
-		var dbs []Database
+		var databases []Database
 		for _, row := range res.Rows {
-			dbs = append(dbs, Database{Name: str(row, 0), Charset: str(row, 1)})
+			if len(row) >= 2 {
+				databases = append(databases, Database{
+					Name:    str(row, 0),
+					Charset: str(row, 1),
+				})
+			}
 		}
-		return dbs, nil
+		return databases, nil
 	case DBTypePostgreSQL:
 		runner = s.runnerFor(instance)
 		res, err := runner.Query(ctx, instance, systemDBName(instance.DBType),
-			"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false ORDER BY datname")
+			"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database WHERE datistemplate = false AND datname != 'postgres' ORDER BY datname")
 		if err != nil {
-			return nil, fmt.Errorf("list databases failed: %s", SanitizeSQLError(err.Error()))
+			return nil, fmt.Errorf("query postgres databases: %s", SanitizeSQLError(err.Error()))
 		}
-		var dbs []Database
+		var databases []Database
 		for _, row := range res.Rows {
-			dbs = append(dbs, Database{Name: str(row, 0), Charset: str(row, 1)})
+			if len(row) >= 2 {
+				databases = append(databases, Database{
+					Name:    str(row, 0),
+					Charset: str(row, 1),
+				})
+			}
 		}
-		return dbs, nil
-	case DBTypeRedis:
-		return []Database{}, nil
+		return databases, nil
 	default:
-		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
+		return nil, fmt.Errorf("database query not supported for %s", instance.DBType)
 	}
 }
 
@@ -78,10 +88,10 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, errx.NotFound("database instance not found")
 	}
 	if instance.Status != "running" && instance.Status != "active" {
-		return nil, errors.New("database instance is not running")
+		return nil, errx.Conflict("database instance is not running")
 	}
 
 	// DDL statements cannot be parameter-bound; names/hosts are validated and
@@ -116,10 +126,10 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return errx.NotFound("database instance not found")
 	}
 	if instance.Status != "running" {
-		return errors.New("database instance is not running")
+		return errx.Conflict("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -148,7 +158,7 @@ func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, 
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, errx.NotFound("database instance not found")
 	}
 	return s.queryUsers(ctx, instance)
 }
@@ -204,10 +214,10 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, errx.NotFound("database instance not found")
 	}
 	if instance.Status != "running" {
-		return nil, errors.New("database instance is not running")
+		return nil, errx.Conflict("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -238,7 +248,7 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return errx.NotFound("database instance not found")
 	}
 
 	if isAdminUser(instance.DBType, username) {
@@ -269,10 +279,10 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return errx.NotFound("database instance not found")
 	}
 	if instance.Status != "running" {
-		return errors.New("database instance is not running")
+		return errx.Conflict("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -299,10 +309,10 @@ func (s *Service) ResetPassword(ctx context.Context, instanceID int64, username,
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return errx.NotFound("database instance not found")
 	}
 	if instance.Status != "running" {
-		return errors.New("database instance is not running")
+		return errx.Conflict("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -327,7 +337,7 @@ func (s *Service) getInstanceForSQL(ctx context.Context, instanceID int64, dbNam
 	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, errors.New("数据库实例不存在")
+		return nil, errx.NotFound("数据库实例不存在")
 	}
 	return instance, nil
 }

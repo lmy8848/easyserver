@@ -8,7 +8,7 @@ import (
 
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/runtimeenv"
 
 	"github.com/gin-gonic/gin"
@@ -21,22 +21,19 @@ func splitRuntimeBinding(s string) (lang, exact string) {
 }
 
 // getRuntimeByBinding 按 lang@exact 取已安装环境；不存在/非法 → 错误响应。
-func (h *RuntimeHandler) getRuntimeByBinding(c *gin.Context, binding string) (*runtimeenv.RuntimeEnvironment, bool) {
+func (h *RuntimeHandler) getRuntimeByBinding(c *gin.Context, binding string) (*runtimeenv.RuntimeEnvironment, error) {
 	lang, exact := splitRuntimeBinding(binding)
 	if lang == "" || exact == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的运行时绑定: " + binding))
-		return nil, false
+		return nil, errx.BadRequest("无效的运行时绑定: %s", binding)
 	}
 	env, err := h.runtimeService.GetByLangExact(c.Request.Context(), lang, exact)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return nil, false
+		return nil, err
 	}
 	if env == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("运行时环境不存在: " + binding))
-		return nil, false
+		return nil, errx.NotFound("运行时环境不存在: %s", binding)
 	}
-	return env, true
+	return env, nil
 }
 
 // ============================================================
@@ -52,102 +49,91 @@ func NewRuntimeHandler(runtimeService *runtimeenv.Service) *RuntimeHandler {
 }
 
 // List returns all installed runtime environments（installs/ 目录扫描，ADR-0009）
-func (h *RuntimeHandler) List(c *gin.Context) {
+func (h *RuntimeHandler) List(c *gin.Context) (any, error) {
 	environments, err := h.runtimeService.ListAll(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"environments": environments,
-	})
+	}, nil
 }
 
 // ListByName returns all versions of a specific runtime environment
-func (h *RuntimeHandler) ListByName(c *gin.Context) {
+func (h *RuntimeHandler) ListByName(c *gin.Context) (any, error) {
 	name := c.Param("name")
 	if name == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("运行时名称不能为空"))
-		return
+		return nil, errx.BadRequest("运行时名称不能为空")
 	}
 
 	// Validate runtime name
 	if !runtimeenv.IsSupported(name) {
-		c.Error(apperror.ErrBadRequest.WithMessage("不支持的运行时: " + name))
-		return
+		return nil, errx.BadRequest("不支持的运行时: %s", name)
 	}
 
 	environments, err := h.runtimeService.ListByName(c.Request.Context(), name)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"environments": environments,
-	})
+	}, nil
 }
 
 // Install installs a runtime environment
-func (h *RuntimeHandler) Install(c *gin.Context) {
+func (h *RuntimeHandler) Install(c *gin.Context) (any, error) {
 	var req runtimeenv.RuntimeInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
 	// Validate runtime name
 	if !runtimeenv.IsSupported(req.Name) {
-		c.Error(apperror.ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
-		return
+		return nil, errx.BadRequest("不支持的运行时: %s", req.Name)
 	}
 
-	middleware.AuditSummary(c, "安装运行环境 "+req.Name+" "+req.Version)
+	middleware.AuditSummary(c, "安装运行时 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.Install(c.Request.Context(), req.Name, req.Version); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
-		"message": "安装已启动",
-	})
+	return gin.H{
+		"message": "运行时安装已启动",
+	}, nil
 }
 
 // Uninstall uninstalls a runtime environment
-func (h *RuntimeHandler) Uninstall(c *gin.Context) {
+func (h *RuntimeHandler) Uninstall(c *gin.Context) (any, error) {
 	var req runtimeenv.RuntimeUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
 	// Validate runtime name
 	if !runtimeenv.IsSupported(req.Name) {
-		c.Error(apperror.ErrBadRequest.WithMessage("不支持的运行时: " + req.Name))
-		return
+		return nil, errx.BadRequest("不支持的运行时: %s", req.Name)
 	}
 
-	middleware.AuditSummary(c, "卸载运行环境 "+req.Name+" "+req.Version)
+	middleware.AuditSummary(c, "卸载运行时 "+req.Name+" "+req.Version)
 	if err := h.runtimeService.Uninstall(c.Request.Context(), req.Name, req.Version); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
-		"message": "卸载成功",
-	})
+	return gin.H{
+		"message": "运行时卸载成功",
+	}, nil
 }
 
 // GetLogs 流式返回安装/卸载日志（SSE）。先回放任务已缓冲的行（游标从 0 起），
 // 再跟随实时行，任务结束推送 {type:"done", error} 并关闭。任务不存在（成功即清，
 // 或面板重启后内存日志已失）时立即推送 done + 说明。绑定键 lang@exact 在路径
 // 参数里（ADR-0009）。
-func (h *RuntimeHandler) GetLogs(c *gin.Context) {
+func (h *RuntimeHandler) GetLogs(c *gin.Context) (any, error) {
 	lang, exact := splitRuntimeBinding(c.Param("binding"))
 	if lang == "" || exact == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的运行时绑定"))
-		return
+		return nil, errx.BadRequest("无效的运行时绑定")
 	}
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -167,7 +153,7 @@ func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 	tk, ok := h.runtimeService.InstallTask(lang, exact)
 	if !ok {
 		send(map[string]string{"type": "done", "error": "安装日志已丢失（服务可能已重启或安装已完成），无法查看"})
-		return
+		return nil, nil
 	}
 	log := tk.Log()
 
@@ -175,7 +161,7 @@ func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 	for {
 		select {
 		case <-c.Request.Context().Done():
-			return
+			return nil, nil
 		default:
 		}
 		lines, next := log.Tail(cursor)
@@ -197,51 +183,48 @@ func (h *RuntimeHandler) GetLogs(c *gin.Context) {
 				errMsg = tk.Err().Error()
 			}
 			send(map[string]string{"type": "done", "error": errMsg})
-			return
+			return nil, nil
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
 }
 
 // GetCleanupInfo 返回卸载确认所需的运行环境信息（卸载确认弹窗用）。
-func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) {
-	env, ok := h.getRuntimeByBinding(c, c.Param("binding"))
-	if !ok {
-		return
+func (h *RuntimeHandler) GetCleanupInfo(c *gin.Context) (any, error) {
+	env, err := h.getRuntimeByBinding(c, c.Param("binding"))
+	if err != nil {
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"runtime": env,
-	})
+	}, nil
 }
 
 // GetRemoteVersions gets available remote versions
-func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) {
+func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) (any, error) {
 	name := c.Param("name")
 	if name == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("运行时名称不能为空"))
-		return
+		return nil, errx.BadRequest("运行时名称不能为空")
 	}
 
 	if !runtimeenv.IsSupported(name) {
-		c.Error(apperror.ErrBadRequest.WithMessage("不支持的运行时: " + name))
-		return
+		return nil, errx.BadRequest("不支持的运行时: %s", name)
 	}
 
 	versions, err := h.runtimeService.GetRemoteVersions(c.Request.Context(), name)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{"versions": versions})
+	return gin.H{"versions": versions}, nil
 }
 
 // GetCatalog returns the catalog of supported runtimes
-func (h *RuntimeHandler) GetCatalog(c *gin.Context) {
-	httpx.Success(c, gin.H{
+func (h *RuntimeHandler) GetCatalog(c *gin.Context) (any, error) {
+	return gin.H{
 		"catalog": runtimeenv.GetCatalog(),
-	})
+	}, nil
 }
 
 // ============================================================
@@ -262,61 +245,54 @@ func NewPackageManagerHandler(packageService *runtimeenv.PackageService, runtime
 
 // getRuntimeFromBinding 按 lang@exact 取已安装环境并校验包管理支持。
 // 成功后返回 (lang, exact, path)。binding 为空时报错。
-func (h *PackageManagerHandler) getRuntimeFromBinding(c *gin.Context, binding string) (lang, exact, path string, ok bool) {
+func (h *PackageManagerHandler) getRuntimeFromBinding(c *gin.Context, binding string) (lang, exact, path string, err error) {
 	if binding == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("runtime 不能为空（格式 lang@exact）"))
-		return
+		return "", "", "", errx.BadRequest("runtime 不能为空（格式 lang@exact）")
 	}
 	lang, exact = splitRuntimeBinding(binding)
 	if lang == "" || exact == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 runtime: " + binding))
-		return
+		return "", "", "", errx.BadRequest("无效的 runtime: %s", binding)
 	}
-	env, err := h.runtimeService.GetByLangExact(c.Request.Context(), lang, exact)
-	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+	env, gerr := h.runtimeService.GetByLangExact(c.Request.Context(), lang, exact)
+	if gerr != nil {
+		return "", "", "", gerr
 	}
 	if env == nil {
-		c.Error(apperror.ErrNotFound.WithMessage("运行时不存在: " + binding))
-		return
+		return "", "", "", errx.NotFound("运行时不存在: %s", binding)
 	}
 	if !runtimeenv.SupportsGlobalPkgsFor(lang) {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("运行环境 %s 暂不支持面板全局包管理", lang)))
-		return
+		return "", "", "", errx.BadRequest("运行环境 %s 暂不支持面板全局包管理", lang)
 	}
-	return lang, exact, env.Path, true
+	return lang, exact, env.Path, nil
 }
 
 // ListPackages returns all packages for a runtime by scanning the system
 // package manager directly. There is no DB cache, so each call reflects the
 // current state of the runtime's package manager.
-func (h *PackageManagerHandler) ListPackages(c *gin.Context) {
-	lang, _, path, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+func (h *PackageManagerHandler) ListPackages(c *gin.Context) (any, error) {
+	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 	packages, err := h.packageService.ListPackages(c.Request.Context(), lang, path)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"packages": packages,
-	})
+	}, nil
 }
 
 // InstallPackage installs a package
-func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
+func (h *PackageManagerHandler) InstallPackage(c *gin.Context) (any, error) {
 	var req runtimeenv.PackageInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
-	lang, _, path, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 
 	summary := "安装包 " + req.Name
@@ -328,26 +304,24 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, summary)
 	if err := h.packageService.InstallPackage(c.Request.Context(), &req, lang, path); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message": "包安装已启动",
-	})
+	}, nil
 }
 
 // UninstallPackage uninstalls a package
-func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
+func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) (any, error) {
 	var req runtimeenv.PackageUninstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
-	lang, _, path, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 
 	summary := "卸载包 " + req.Name
@@ -356,26 +330,24 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, summary)
 	if err := h.packageService.UninstallPackage(c.Request.Context(), &req, lang, path); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message": "包卸载成功",
-	})
+	}, nil
 }
 
 // UpdatePackage updates a package
-func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
+func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) (any, error) {
 	var req runtimeenv.PackageUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
-	lang, _, path, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 
 	// Try to get old version before update
@@ -391,8 +363,7 @@ func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
 	}
 
 	if err := h.packageService.UpdatePackage(c.Request.Context(), &req, lang, path); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	// Try to get new version after update
@@ -418,74 +389,70 @@ func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) {
 	}
 	middleware.AuditSummary(c, summary)
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message": "包更新成功",
-	})
+	}, nil
 }
 
 // SearchPackages searches for available packages
-func (h *PackageManagerHandler) SearchPackages(c *gin.Context) {
-	lang, _, _, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+func (h *PackageManagerHandler) SearchPackages(c *gin.Context) (any, error) {
+	lang, _, _, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 	query := c.Query("q")
 
 	packages, err := h.packageService.SearchPackages(c.Request.Context(), lang, query)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"packages": packages,
-	})
+	}, nil
 }
 
 // GetPackageVersions returns available versions for a package
-func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) {
-	lang, _, _, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) (any, error) {
+	lang, _, _, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 	packageName := c.Query("name")
 	if packageName == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少包名参数"))
-		return
+		return nil, errx.BadRequest("缺少包名参数")
 	}
 
 	versions, err := h.packageService.GetPackageVersions(c.Request.Context(), lang, packageName)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"versions": versions,
-	})
+	}, nil
 }
 
 // GetRegistry gets the package manager registry
-func (h *PackageManagerHandler) GetRegistry(c *gin.Context) {
-	lang, _, path, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
-	if !ok {
-		return
+func (h *PackageManagerHandler) GetRegistry(c *gin.Context) (any, error) {
+	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	if err != nil {
+		return nil, err
 	}
 	manager := c.Query("manager")
 
 	registry, err := h.packageService.GetRegistry(c.Request.Context(), lang, path, manager)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"registry": registry,
-	})
+	}, nil
 }
 
 // SetRegistry sets the package manager registry
-func (h *PackageManagerHandler) SetRegistry(c *gin.Context) {
+func (h *PackageManagerHandler) SetRegistry(c *gin.Context) (any, error) {
 	var req struct {
 		Runtime  string `json:"runtime"` // lang@exact
 		Manager  string `json:"manager"`
@@ -493,24 +460,22 @@ func (h *PackageManagerHandler) SetRegistry(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
-	lang, _, path, ok := h.getRuntimeFromBinding(c, req.Runtime)
-	if !ok {
-		return
+	lang, _, path, err := h.getRuntimeFromBinding(c, req.Runtime)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "配置包管理器镜像源 "+req.Manager)
 	if err := h.packageService.SetRegistry(c.Request.Context(), lang, path, req.Manager, req.Registry); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message": "配置保存成功",
-	})
+	}, nil
 }
 
 // ============================================================
@@ -526,60 +491,54 @@ func NewMirrorHandler(mirrorService *runtimeenv.MirrorService) *MirrorHandler {
 }
 
 // List 返回 config.toml [env] 段全部条目。
-func (h *MirrorHandler) List(c *gin.Context) {
+func (h *MirrorHandler) List(c *gin.Context) (any, error) {
 	entries, err := h.mirrorService.List(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"mirrors": entries})
+	return gin.H{"mirrors": entries}, nil
 }
 
 // Create 新增/覆盖一个镜像源（保存即写入文件生效）。
-func (h *MirrorHandler) Create(c *gin.Context) {
+func (h *MirrorHandler) Create(c *gin.Context) (any, error) {
 	var req struct {
 		EnvKey   string `json:"env_key" binding:"required"`
 		EnvValue string `json:"env_value" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 	middleware.AuditSummary(c, "创建镜像源 "+req.EnvKey)
 	if err := h.mirrorService.Upsert(c.Request.Context(), req.EnvKey, req.EnvValue); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "已保存"})
+	return gin.H{"message": "已保存"}, nil
 }
 
 // Update 更新指定 env_key 的镜像地址。
-func (h *MirrorHandler) Update(c *gin.Context) {
+func (h *MirrorHandler) Update(c *gin.Context) (any, error) {
 	envKey := c.Param("env_key")
 	var req struct {
 		EnvValue string `json:"env_value" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 	middleware.AuditSummary(c, "更新镜像源 "+envKey)
 	if err := h.mirrorService.Upsert(c.Request.Context(), envKey, req.EnvValue); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "已保存"})
+	return gin.H{"message": "已保存"}, nil
 }
 
 // Delete 从文件删除指定 env_key 的镜像源。
-func (h *MirrorHandler) Delete(c *gin.Context) {
+func (h *MirrorHandler) Delete(c *gin.Context) (any, error) {
 	envKey := c.Param("env_key")
 	middleware.AuditSummary(c, "删除镜像源 "+envKey)
 	if err := h.mirrorService.Delete(c.Request.Context(), envKey); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "已删除"})
+	return gin.H{"message": "已删除"}, nil
 }
 
 // ============================================================
@@ -589,30 +548,30 @@ func (h *MirrorHandler) Delete(c *gin.Context) {
 func RegisterRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, packageService *runtimeenv.PackageService, mirrorService *runtimeenv.MirrorService) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
-	protected.GET("/runtime", runtimeHandler.List)
-	protected.GET("/runtime/:name", runtimeHandler.ListByName)
-	protected.GET("/runtime/:name/remote-versions", runtimeHandler.GetRemoteVersions)
-	protected.POST("/runtime/install", runtimeHandler.Install)
-	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
-	protected.GET("/runtime/logs/:binding", runtimeHandler.GetLogs)
-	protected.GET("/runtime/cleanup/:binding", runtimeHandler.GetCleanupInfo)
-	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
+	protected.GET("/runtime", httpx.H(runtimeHandler.List))
+	protected.GET("/runtime/:name", httpx.H(runtimeHandler.ListByName))
+	protected.GET("/runtime/:name/remote-versions", httpx.H(runtimeHandler.GetRemoteVersions))
+	protected.POST("/runtime/install", httpx.H(runtimeHandler.Install))
+	protected.POST("/runtime/uninstall", httpx.H(runtimeHandler.Uninstall))
+	protected.GET("/runtime/logs/:binding", httpx.H(runtimeHandler.GetLogs))
+	protected.GET("/runtime/cleanup/:binding", httpx.H(runtimeHandler.GetCleanupInfo))
+	protected.GET("/runtime/catalog", httpx.H(runtimeHandler.GetCatalog))
 
 	// Mirror source management（独立于环境变量 API，文件即权威）
 	mirrorHandler := NewMirrorHandler(mirrorService)
-	protected.GET("/runtime/mirrors", mirrorHandler.List)
-	protected.POST("/runtime/mirrors", mirrorHandler.Create)
-	protected.PUT("/runtime/mirrors/:env_key", mirrorHandler.Update)
-	protected.DELETE("/runtime/mirrors/:env_key", mirrorHandler.Delete)
+	protected.GET("/runtime/mirrors", httpx.H(mirrorHandler.List))
+	protected.POST("/runtime/mirrors", httpx.H(mirrorHandler.Create))
+	protected.PUT("/runtime/mirrors/:env_key", httpx.H(mirrorHandler.Update))
+	protected.DELETE("/runtime/mirrors/:env_key", httpx.H(mirrorHandler.Delete))
 
 	// Package management
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)
-	protected.GET("/packages", packageHandler.ListPackages)
-	protected.GET("/packages/search", packageHandler.SearchPackages)
-	protected.GET("/packages/versions", packageHandler.GetPackageVersions)
-	protected.POST("/packages/install", packageHandler.InstallPackage)
-	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
-	protected.POST("/packages/update", packageHandler.UpdatePackage)
-	protected.GET("/packages/registry", packageHandler.GetRegistry)
-	protected.POST("/packages/registry", packageHandler.SetRegistry)
+	protected.GET("/packages", httpx.H(packageHandler.ListPackages))
+	protected.GET("/packages/search", httpx.H(packageHandler.SearchPackages))
+	protected.GET("/packages/versions", httpx.H(packageHandler.GetPackageVersions))
+	protected.POST("/packages/install", httpx.H(packageHandler.InstallPackage))
+	protected.POST("/packages/uninstall", httpx.H(packageHandler.UninstallPackage))
+	protected.POST("/packages/update", httpx.H(packageHandler.UpdatePackage))
+	protected.GET("/packages/registry", httpx.H(packageHandler.GetRegistry))
+	protected.POST("/packages/registry", httpx.H(packageHandler.SetRegistry))
 }

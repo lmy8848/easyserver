@@ -2,9 +2,10 @@ package terminal
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
+
+	"easyserver/internal/infra/errx"
 )
 
 // Session represents a terminal session.
@@ -65,7 +66,7 @@ func (m *Manager) GetSession(id string) (*Session, error) {
 
 	session, exists := m.sessions[id]
 	if !exists {
-		return nil, fmt.Errorf("session %s not found", id)
+		return nil, errx.NotFound("session %s not found", id)
 	}
 
 	return session, nil
@@ -78,7 +79,7 @@ func (m *Manager) CloseSession(id string) error {
 
 	session, exists := m.sessions[id]
 	if !exists {
-		return fmt.Errorf("session %s not found", id)
+		return errx.NotFound("session %s not found", id)
 	}
 
 	session.Close()

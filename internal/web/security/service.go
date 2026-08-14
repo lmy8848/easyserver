@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"easyserver/internal/firewall"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 const (
@@ -33,13 +33,13 @@ func NewSecurityService(repo SecurityRepository, fw *firewall.Service) *Security
 func (s *SecurityService) GetConfig(ctx context.Context, websiteID int64) (*SecurityConfig, error) {
 	cfg, err := s.repo.GetConfig(ctx, websiteID)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	if cfg == nil {
 		// Auto-create default config on first access.
 		cfg, err = s.repo.CreateConfig(ctx, websiteID)
 		if err != nil {
-			return nil, apperror.WrapError(err)
+			return nil, err
 		}
 	}
 	return cfg, nil
@@ -52,7 +52,7 @@ func (s *SecurityService) UpdateConfig(ctx context.Context, websiteID int64, upd
 	}
 	updater(cfg)
 	if err := s.repo.UpdateConfig(ctx, cfg); err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	return cfg, nil
 }
@@ -63,7 +63,7 @@ func (s *SecurityService) UpdateConfig(ctx context.Context, websiteID int64, upd
 // It writes a deny directive to the nginx ban file and adds an iptables DROP rule.
 func (s *SecurityService) BanIP(ctx context.Context, websiteID *int64, ip, reason, source string, durationSecs int) error {
 	if ip == "" {
-		return apperror.ErrBadRequest.WithMessage("IP 不能为空")
+		return errx.BadRequest("IP 不能为空")
 	}
 
 	var expiresAt *time.Time
@@ -74,7 +74,7 @@ func (s *SecurityService) BanIP(ctx context.Context, websiteID *int64, ip, reaso
 
 	// Record in DB.
 	if _, err := s.repo.AddBannedIP(ctx, websiteID, ip, reason, source, expiresAt); err != nil {
-		return apperror.WrapError(err)
+		return err
 	}
 
 	// Network-layer ban via firewall (iptables DROP).
@@ -90,7 +90,7 @@ func (s *SecurityService) BanIP(ctx context.Context, websiteID *int64, ip, reaso
 			Remark:   fmt.Sprintf("网站安全封禁 %s: %s", ip, reason),
 		}
 		if err := s.firewall.CreateRule(ctx, rule); err != nil {
-			return apperror.WrapError(fmt.Errorf("防火墙规则创建失败: %w", err))
+			return fmt.Errorf("防火墙规则创建失败: %w", err)
 		}
 	}
 
@@ -103,15 +103,15 @@ func (s *SecurityService) UnbanIP(ctx context.Context, banID int64) error {
 	// Look up the ban first so we know which IP's firewall rule to remove.
 	ban, err := s.repo.GetBannedIP(ctx, banID)
 	if err != nil {
-		return apperror.WrapError(err)
+		return err
 	}
 	if ban == nil {
-		return apperror.ErrNotFound.WithMessage("封禁记录不存在")
+		return errx.NotFound("封禁记录不存在")
 	}
 	ip := ban.IP
 
 	if err := s.repo.RemoveBannedIP(ctx, banID); err != nil {
-		return apperror.WrapError(err)
+		return err
 	}
 
 	// Remove only the firewall rule(s) matching this IP + our remark prefix.
@@ -134,7 +134,7 @@ func (s *SecurityService) UnbanIP(ctx context.Context, banID int64) error {
 func (s *SecurityService) ListBannedIPs(ctx context.Context, websiteID int64) ([]BannedIP, error) {
 	bans, err := s.repo.ListBannedIPs(ctx, websiteID)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	// Filter out expired.
 	var active []BannedIP
@@ -151,7 +151,7 @@ func (s *SecurityService) ListBannedIPs(ctx context.Context, websiteID int64) ([
 func (s *SecurityService) CleanupExpired(ctx context.Context) error {
 	n, err := s.repo.RemoveExpiredBannedIPs(ctx)
 	if err != nil {
-		return apperror.WrapError(err)
+		return err
 	}
 	if n > 0 {
 		return s.refreshNginxBanFile(ctx)
@@ -166,7 +166,7 @@ func (s *SecurityService) CleanupExpired(ctx context.Context) error {
 func (s *SecurityService) refreshNginxBanFile(ctx context.Context) error {
 	bans, err := s.repo.ListAllBannedIPs(ctx)
 	if err != nil {
-		return apperror.WrapError(err)
+		return err
 	}
 
 	// Deduplicate IPs (a global ban and a per-website ban may share an IP).
@@ -189,19 +189,19 @@ func (s *SecurityService) refreshNginxBanFile(ctx context.Context) error {
 
 	dir := filepath.Dir(nginxBanFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return apperror.ErrInternal.WithMessage("创建 nginx 配置目录失败: " + err.Error())
+		return errx.Internal("创建 nginx 配置目录失败: %w", err)
 	}
 	content := strings.Join(lines, "\n")
 	if err := os.WriteFile(nginxBanFile, []byte(content), 0644); err != nil {
-		return apperror.ErrInternal.WithMessage("写入 nginx 封禁文件失败: " + err.Error())
+		return errx.Internal("写入 nginx 封禁文件失败: %w", err)
 	}
 
 	// Reload nginx (graceful, no downtime).
 	if _, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput(); err != nil {
-		return apperror.ErrInternal.WithMessage("nginx 配置测试失败，未重载")
+		return errx.Internal("nginx 配置测试失败，未重载")
 	}
 	if _, err := exec.CommandContext(ctx, "nginx", "-s", "reload").CombinedOutput(); err != nil {
-		return apperror.ErrInternal.WithMessage("nginx 重载失败")
+		return errx.Internal("nginx 重载失败")
 	}
 	return nil
 }

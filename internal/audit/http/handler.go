@@ -10,7 +10,6 @@ import (
 	"easyserver/internal/audit"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/apperror"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +43,7 @@ type AuditLogListResponse struct {
 }
 
 // List returns audit logs with pagination and filtering
-func (h *AuditHandler) List(c *gin.Context) {
+func (h *AuditHandler) List(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	// Parse query params
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -82,8 +81,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		}
 		total, logs, err := h.auditRepo.Query(c.Request.Context(), filter)
 		if err != nil {
-			c.Error(apperror.WrapError(err))
-			return
+			return nil, err
 		}
 		items := make([]AuditLogItem, 0, len(logs))
 		for _, log := range logs {
@@ -100,11 +98,10 @@ func (h *AuditHandler) List(c *gin.Context) {
 				CreatedAt: log.CreatedAt.Format("2006-01-02 15:04:05"),
 			})
 		}
-		httpx.Success(c, AuditLogListResponse{
+		return AuditLogListResponse{
 			Total: total,
 			Items: items,
-		})
-		return
+		}, nil
 	}
 
 	// Fallback to direct SQL
@@ -164,8 +161,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 	var total int64
 	countQuery := "SELECT COUNT(*) FROM audit_logs WHERE " + where
 	if err := h.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	// Get items
@@ -175,8 +171,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -192,28 +187,25 @@ func (h *AuditHandler) List(c *gin.Context) {
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, AuditLogListResponse{
+	return AuditLogListResponse{
 		Total: total,
 		Items: items,
-	})
+	}, nil
 }
 
 // GetActions returns distinct actions for filtering
-func (h *AuditHandler) GetActions(c *gin.Context) {
+func (h *AuditHandler) GetActions(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	logType := c.Query("type")
 	if h.auditRepo != nil {
 		actions, err := h.auditRepo.GetActions(c.Request.Context(), logType)
 		if err != nil {
-			c.Error(apperror.WrapError(err))
-			return
+			return nil, err
 		}
-		httpx.Success(c, actions)
-		return
+		return actions, nil
 	}
 
 	var rows *sql.Rows
@@ -224,8 +216,7 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 		rows, err = h.db.QueryContext(ctx, "SELECT DISTINCT action FROM audit_logs ORDER BY action")
 	}
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -237,15 +228,14 @@ func (h *AuditHandler) GetActions(c *gin.Context) {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, actions)
+	return actions, nil
 }
 
 // Stats returns audit log statistics
-func (h *AuditHandler) Stats(c *gin.Context) {
+func (h *AuditHandler) Stats(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
 	if days < 1 || days > 90 {
@@ -263,8 +253,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			LIMIT 10
 		`, since)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer userRows.Close()
 
@@ -280,8 +269,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 	if err := userRows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	// 按操作类型统计
@@ -294,8 +282,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			LIMIT 10
 		`, since)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer actionRows.Close()
 
@@ -311,8 +298,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 	if err := actionRows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	// 按天统计
@@ -324,8 +310,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			ORDER BY day ASC
 		`, since)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer dayRows.Close()
 
@@ -341,8 +326,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 	if err := dayRows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	// 按状态码统计（仅 request 日志含 status 字段）
@@ -360,8 +344,7 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 			GROUP BY status_group
 		`, since)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer statusRows.Close()
 
@@ -377,16 +360,15 @@ func (h *AuditHandler) Stats(c *gin.Context) {
 		}
 	}
 	if err := statusRows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"user_stats":   userStats,
 		"action_stats": actionStats,
 		"day_stats":    dayStats,
 		"status_stats": statusStats,
-	})
+	}, nil
 }
 
 // sanitizeCSVField prevents CSV formula injection by prefixing dangerous leading characters.
@@ -402,21 +384,21 @@ func sanitizeCSVField(field string) string {
 }
 
 // GetCleanPolicy returns the current clean policy
-func (h *AuditHandler) GetCleanPolicy(c *gin.Context) {
+func (h *AuditHandler) GetCleanPolicy(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	// Check if there's a scheduled clean task
 	var count int
 	_ = h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"retention_days": 90,
 		"total_records":  count,
 		"auto_clean":     true,
-	})
+	}, nil
 }
 
 // Export returns audit logs as CSV
-func (h *AuditHandler) Export(c *gin.Context) {
+func (h *AuditHandler) Export(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	username := c.Query("username")
 	action := c.Query("action")
@@ -462,8 +444,7 @@ func (h *AuditHandler) Export(c *gin.Context) {
 		          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT 10000`
 	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -497,13 +478,13 @@ func (h *AuditHandler) Export(c *gin.Context) {
 			createdAt)
 	}
 	if err := rows.Err(); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
+	return nil, nil
 }
 
 // Clean deletes audit logs older than specified days
-func (h *AuditHandler) Clean(c *gin.Context) {
+func (h *AuditHandler) Clean(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	days, _ := strconv.Atoi(c.DefaultQuery("days", "90"))
 	if days < 1 {
@@ -516,30 +497,27 @@ func (h *AuditHandler) Clean(c *gin.Context) {
 	if h.auditRepo != nil {
 		rows, err := h.auditRepo.Clean(c.Request.Context(), since)
 		if err != nil {
-			c.Error(apperror.WrapError(err))
-			return
+			return nil, err
 		}
-		httpx.Success(c, gin.H{"deleted": rows})
-		return
+		return gin.H{"deleted": rows}, nil
 	}
 
 	result, err := h.db.ExecContext(ctx, "DELETE FROM audit_logs WHERE created_at < ?", since)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	rows, _ := result.RowsAffected()
-	httpx.Success(c, gin.H{"deleted": rows})
+	return gin.H{"deleted": rows}, nil
 }
 
 // RegisterRoutes wires audit routes onto the gin router group.
 func RegisterRoutes(protected *gin.RouterGroup, db *sql.DB, auditRepo audit.Repository) {
 	handler := NewAuditHandlerWithRepo(db, auditRepo)
-	protected.GET("/audit-logs", handler.List)
-	protected.GET("/audit-logs/actions", handler.GetActions)
-	protected.GET("/audit-logs/stats", handler.Stats)
-	protected.GET("/audit-logs/clean-policy", handler.GetCleanPolicy)
-	protected.GET("/audit-logs/export", handler.Export)
-	protected.DELETE("/audit-logs/clean", handler.Clean)
+	protected.GET("/audit-logs", httpx.H(handler.List))
+	protected.GET("/audit-logs/actions", httpx.H(handler.GetActions))
+	protected.GET("/audit-logs/stats", httpx.H(handler.Stats))
+	protected.GET("/audit-logs/clean-policy", httpx.H(handler.GetCleanPolicy))
+	protected.GET("/audit-logs/export", httpx.H(handler.Export))
+	protected.DELETE("/audit-logs/clean", httpx.H(handler.Clean))
 }

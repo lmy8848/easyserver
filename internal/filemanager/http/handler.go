@@ -15,7 +15,7 @@ import (
 	"easyserver/internal/filemanager"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,31 +52,26 @@ func NewFileManagerHandler(fm *filemanager.Manager, maxUploadSize int64) *FileMa
 	}
 }
 
-// getUserInfo extracts user info from context
-
 // List returns files in a directory
-func (h *FileManagerHandler) List(c *gin.Context) {
+func (h *FileManagerHandler) List(c *gin.Context) (any, error) {
 	path := c.Query("path")
 
 	// Empty path means root - read basePath directly
 	if path == "" {
 		files, err := h.fileManager.ListRoot()
 		if err != nil {
-			c.Error(apperror.WrapError(err))
-			return
+			return nil, err
 		}
-		httpx.Success(c, gin.H{
+		return gin.H{
 			"path":    "/",
 			"parent":  "/",
 			"entries": files,
-		})
-		return
+		}, nil
 	}
 
 	files, err := h.fileManager.List(path)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	parent := "/"
@@ -84,35 +79,33 @@ func (h *FileManagerHandler) List(c *gin.Context) {
 		parent = filepath.Dir(path)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"path":    path,
 		"parent":  parent,
 		"entries": files,
-	})
+	}, nil
 }
 
 // Mkdir creates a directory
-func (h *FileManagerHandler) Mkdir(c *gin.Context) {
+func (h *FileManagerHandler) Mkdir(c *gin.Context) (any, error) {
 	var req struct {
 		Path string `json:"path" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "创建目录 "+req.Path)
 	if err := h.fileManager.Mkdir(req.Path); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Upload handles file upload
-func (h *FileManagerHandler) Upload(c *gin.Context) {
+func (h *FileManagerHandler) Upload(c *gin.Context) (any, error) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		// Debug: log what we received
@@ -122,8 +115,7 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 			log.Printf("DEBUG upload: MultipartForm.Value keys=%v", keysOfStringMap(c.Request.MultipartForm.Value))
 		}
 		log.Printf("DEBUG upload: PostForm keys=%v", c.Request.PostForm)
-		c.Error(apperror.ErrBadRequest.WithMessage("no file provided"))
-		return
+		return nil, errx.BadRequest("no file provided")
 	}
 	defer file.Close()
 
@@ -139,48 +131,42 @@ func (h *FileManagerHandler) Upload(c *gin.Context) {
 	// Use FileManager.Upload for secure file upload
 	size, err := h.fileManager.Upload(file, path, h.maxUploadSize)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("upload failed: %w", err)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"name": header.Filename,
 		"path": path,
 		"size": size,
-	})
+	}, nil
 }
 
 // Download handles file download
-func (h *FileManagerHandler) Download(c *gin.Context) {
+func (h *FileManagerHandler) Download(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("path is required"))
-		return
+		return nil, errx.BadRequest("path is required")
 	}
 
 	validPath, err := h.fileManager.ValidatePath(path)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid path: %w", err)
 	}
 
 	// Check if file exists
 	info, err := os.Stat(validPath)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("file not found"))
-		return
+		return nil, errx.NotFound("file not found")
 	}
 
 	if info.IsDir() {
-		c.Error(apperror.ErrBadRequest.WithMessage("cannot download a directory"))
-		return
+		return nil, errx.BadRequest("cannot download a directory")
 	}
 
 	// O_NOFOLLOW: TOCTOU defense between ValidatePath and serve.
 	f, err := os.OpenFile(validPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("open file failed: %w", err)
 	}
 	defer f.Close()
 
@@ -206,13 +192,14 @@ func (h *FileManagerHandler) Download(c *gin.Context) {
 		c.Header("Content-Security-Policy", "frame-ancestors 'self'")
 		c.Header("X-Frame-Options", "SAMEORIGIN")
 		http.ServeContent(c.Writer, c.Request, base, info.ModTime(), f)
-		return
+		return nil, nil
 	}
 
 	// Regular download: force attachment so the browser saves it to disk.
 	c.DataFromReader(200, info.Size(), "application/octet-stream", f, map[string]string{
 		"Content-Disposition": fmt.Sprintf("attachment; filename=%q", base),
 	})
+	return nil, nil
 }
 
 // inlineMIMEByExt maps media/image/PDF extensions to their MIME types so the
@@ -256,194 +243,176 @@ func inlineMIME(name string) (string, bool) {
 }
 
 // Rename renames a file
-func (h *FileManagerHandler) Rename(c *gin.Context) {
+func (h *FileManagerHandler) Rename(c *gin.Context) (any, error) {
 	var req struct {
 		OldPath string `json:"old_path" binding:"required"`
 		NewPath string `json:"new_path" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "重命名 "+req.OldPath+" 为 "+req.NewPath)
 	if err := h.fileManager.Rename(req.OldPath, req.NewPath); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Delete deletes a file or directory
-func (h *FileManagerHandler) Delete(c *gin.Context) {
+func (h *FileManagerHandler) Delete(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("path is required"))
-		return
+		return nil, errx.BadRequest("path is required")
 	}
 
 	recursive := c.Query("recursive") == "true"
 
 	middleware.AuditSummary(c, "删除文件 "+path)
 	if err := h.fileManager.Delete(path, recursive); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Move moves files
-func (h *FileManagerHandler) Move(c *gin.Context) {
+func (h *FileManagerHandler) Move(c *gin.Context) (any, error) {
 	var req struct {
 		Paths []string `json:"paths" binding:"required"`
 		Dest  string   `json:"dest" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "移动文件到 "+req.Dest)
 	if err := h.fileManager.Move(req.Paths, req.Dest); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Copy copies a file
-func (h *FileManagerHandler) Copy(c *gin.Context) {
+func (h *FileManagerHandler) Copy(c *gin.Context) (any, error) {
 	var req struct {
 		Source string `json:"source" binding:"required"`
 		Dest   string `json:"dest" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "复制文件 "+req.Source+" 到 "+req.Dest)
 	if err := h.fileManager.Copy(req.Source, req.Dest); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // GetContent returns file content
-func (h *FileManagerHandler) GetContent(c *gin.Context) {
+func (h *FileManagerHandler) GetContent(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("path is required"))
-		return
+		return nil, errx.BadRequest("path is required")
 	}
 
 	content, err := h.fileManager.ReadContent(path)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, content)
+	return content, nil
 }
 
 // SaveContent saves content to a file
-func (h *FileManagerHandler) SaveContent(c *gin.Context) {
+func (h *FileManagerHandler) SaveContent(c *gin.Context) (any, error) {
 	var req struct {
 		Path    string `json:"path" binding:"required"`
 		Content string `json:"content"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "保存文件内容 "+req.Path)
 	if err := h.fileManager.WriteContent(req.Path, req.Content); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Search searches for files by name
-func (h *FileManagerHandler) Search(c *gin.Context) {
+func (h *FileManagerHandler) Search(c *gin.Context) (any, error) {
 	rootPath := c.Query("path")
 	if rootPath == "" {
 		rootPath = "/"
 	}
 	pattern := c.Query("q")
 	if pattern == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("search query is required"))
-		return
+		return nil, errx.BadRequest("search query is required")
 	}
 
 	maxResults, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 
 	results, err := h.fileManager.Search(rootPath, pattern, maxResults)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, results)
+	return results, nil
 }
 
 // SearchContent searches for files containing text
-func (h *FileManagerHandler) SearchContent(c *gin.Context) {
+func (h *FileManagerHandler) SearchContent(c *gin.Context) (any, error) {
 	rootPath := c.Query("path")
 	if rootPath == "" {
 		rootPath = "/"
 	}
 	text := c.Query("q")
 	if text == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("search query is required"))
-		return
+		return nil, errx.BadRequest("search query is required")
 	}
 
 	maxResults, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
 	results, err := h.fileManager.SearchContent(rootPath, text, maxResults)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, results)
+	return results, nil
 }
 
 // Compress creates a zip archive
-func (h *FileManagerHandler) Compress(c *gin.Context) {
+func (h *FileManagerHandler) Compress(c *gin.Context) (any, error) {
 	var req struct {
 		Sources []string `json:"sources" binding:"required"`
 		Dest    string   `json:"dest" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "压缩文件到 "+req.Dest)
 	if err := h.fileManager.Compress(req.Sources, req.Dest); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Extract extracts an archive
-func (h *FileManagerHandler) Extract(c *gin.Context) {
+func (h *FileManagerHandler) Extract(c *gin.Context) (any, error) {
 	// Dest 允许为空：空串表示解压到根目录(basePath)，与 ValidatePath 的
 	// "empty path or '.' is treated as basePath" 语义一致。前端 toRelativePath
 	// 在根目录下返回空串，这里不能用 binding:"required"，否则根目录解压会被拒。
@@ -453,64 +422,57 @@ func (h *FileManagerHandler) Extract(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "解压文件 "+req.Source+" 到 "+req.Dest)
 	if err := h.fileManager.Extract(req.Source, req.Dest); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // ArchiveList lists entries in an archive file (for preview).
-func (h *FileManagerHandler) ArchiveList(c *gin.Context) {
+func (h *FileManagerHandler) ArchiveList(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少 path"))
-		return
+		return nil, errx.BadRequest("缺少 path")
 	}
 	entries, err := h.fileManager.ListArchiveEntries(path)
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"entries": entries})
+	return gin.H{"entries": entries}, nil
 }
 
 // Chmod changes file permissions
-func (h *FileManagerHandler) Chmod(c *gin.Context) {
+func (h *FileManagerHandler) Chmod(c *gin.Context) (any, error) {
 	var req struct {
 		Path string `json:"path" binding:"required"`
 		Mode string `json:"mode" binding:"required"` // e.g., "0755", "644"
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	// Parse mode string
 	mode, err := strconv.ParseUint(req.Mode, 8, 32)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("invalid mode format"))
-		return
+		return nil, errx.BadRequest("invalid mode format")
 	}
 
 	middleware.AuditSummary(c, "修改文件权限 "+req.Path+" "+req.Mode)
 	if err := h.fileManager.Chmod(req.Path, os.FileMode(mode)); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // Chown changes file ownership
-func (h *FileManagerHandler) Chown(c *gin.Context) {
+func (h *FileManagerHandler) Chown(c *gin.Context) (any, error) {
 	var req struct {
 		Path string `json:"path" binding:"required"`
 		UID  int    `json:"uid"`
@@ -518,86 +480,79 @@ func (h *FileManagerHandler) Chown(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "修改文件所有者 "+req.Path)
 	if err := h.fileManager.Chown(req.Path, req.UID, req.GID); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // GetDetails returns detailed file information
-func (h *FileManagerHandler) GetDetails(c *gin.Context) {
+func (h *FileManagerHandler) GetDetails(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("path is required"))
-		return
+		return nil, errx.BadRequest("path is required")
 	}
 
 	details, err := h.fileManager.GetFileDetails(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			c.Error(apperror.ErrNotFound.WithMessage("文件不存在"))
-			return
+			return nil, errx.NotFound("文件不存在")
 		}
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, details)
+	return details, nil
 }
 
 // GetMimeType returns the MIME type of a file
-func (h *FileManagerHandler) GetMimeType(c *gin.Context) {
+func (h *FileManagerHandler) GetMimeType(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("path is required"))
-		return
+		return nil, errx.BadRequest("path is required")
 	}
 
 	mimeType, err := h.fileManager.GetMimeType(path)
 	if err != nil {
-		c.Error(apperror.ErrForbidden.Wrap(err))
-		return
+		return nil, errx.Forbidden("%w", err)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"path":      path,
 		"mime_type": mimeType,
-	})
+	}, nil
 }
 
 // RegisterRoutes registers file management routes.
 // fileRoutesWithLargeBody is used only for the upload endpoint (larger body limit).
 func RegisterRoutes(protected *gin.RouterGroup, fileRoutesWithLargeBody *gin.RouterGroup, fileManager *filemanager.Manager, maxUploadSize int64) {
 	handler := NewFileManagerHandler(fileManager, maxUploadSize)
-	protected.GET("/files", handler.List)
-	protected.GET("/files/download", handler.Download)
-	protected.GET("/files/content", handler.GetContent)
-	protected.GET("/files/search", handler.Search)
-	protected.GET("/files/search-content", handler.SearchContent)
-	protected.GET("/files/details", handler.GetDetails)
-	protected.GET("/files/mime-type", handler.GetMimeType)
-	protected.POST("/files/mkdir", handler.Mkdir)
+	protected.GET("/files", httpx.H(handler.List))
+	protected.GET("/files/download", httpx.H(handler.Download))
+	protected.GET("/files/content", httpx.H(handler.GetContent))
+	protected.GET("/files/search", httpx.H(handler.Search))
+	protected.GET("/files/search-content", httpx.H(handler.SearchContent))
+	protected.GET("/files/details", httpx.H(handler.GetDetails))
+	protected.GET("/files/mime-type", httpx.H(handler.GetMimeType))
+	protected.POST("/files/mkdir", httpx.H(handler.Mkdir))
 	// Upload uses the large-body route group
 	if fileRoutesWithLargeBody != nil {
-		fileRoutesWithLargeBody.POST("/upload", handler.Upload)
+		fileRoutesWithLargeBody.POST("/upload", httpx.H(handler.Upload))
 	} else {
-		protected.POST("/files/upload", handler.Upload)
+		protected.POST("/files/upload", httpx.H(handler.Upload))
 	}
-	protected.PUT("/files/rename", handler.Rename)
-	protected.DELETE("/files", handler.Delete)
-	protected.POST("/files/move", handler.Move)
-	protected.POST("/files/copy", handler.Copy)
-	protected.PUT("/files/content", handler.SaveContent)
-	protected.POST("/files/compress", handler.Compress)
-	protected.POST("/files/extract", handler.Extract)
-	protected.GET("/files/archive-list", handler.ArchiveList)
-	protected.PUT("/files/chmod", handler.Chmod)
-	protected.PUT("/files/chown", handler.Chown)
+	protected.PUT("/files/rename", httpx.H(handler.Rename))
+	protected.DELETE("/files", httpx.H(handler.Delete))
+	protected.POST("/files/move", httpx.H(handler.Move))
+	protected.POST("/files/copy", httpx.H(handler.Copy))
+	protected.PUT("/files/content", httpx.H(handler.SaveContent))
+	protected.POST("/files/compress", httpx.H(handler.Compress))
+	protected.POST("/files/extract", httpx.H(handler.Extract))
+	protected.GET("/files/archive-list", httpx.H(handler.ArchiveList))
+	protected.PUT("/files/chmod", httpx.H(handler.Chmod))
+	protected.PUT("/files/chown", httpx.H(handler.Chown))
 }

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 // HardenOptions controls a one-shot SSH hardening pass.
@@ -31,18 +31,18 @@ type HardenOptions struct {
 func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, error) {
 	cfg, err := s.GetConfig()
 	if err != nil {
-		return nil, apperror.ErrInternal.WithMessage("读取 SSH 配置失败: " + err.Error())
+		return nil, errx.Internal("读取 SSH 配置失败: %w", err)
 	}
 
 	if opts.DisablePasswordAuth {
 		keys, _ := s.ListAuthorizedKeys()
 		if len(keys) == 0 {
-			return nil, apperror.ErrBadRequest.WithMessage("禁用密码登录前需先配置至少一个 SSH 公钥，否则将无法登录")
+			return nil, errx.BadRequest("禁用密码登录前需先配置至少一个 SSH 公钥，否则将无法登录")
 		}
 	}
 	if opts.Port != 0 && opts.Port != cfg.Port {
 		if !portAvailable(ctx, opts.Port) {
-			return nil, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %d 未空闲或不可用，请更换", opts.Port))
+			return nil, errx.BadRequest("端口 %d 未空闲或不可用，请更换", opts.Port)
 		}
 	}
 
@@ -65,17 +65,17 @@ func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, erro
 
 	// SaveConfig backs up to .bak automatically.
 	if err := s.SaveConfig(cfg); err != nil {
-		return nil, apperror.ErrInternal.WithMessage("保存配置失败: " + err.Error())
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
 	// Validate before reload; restore on failure.
 	if _, err := s.TestConfig(ctx); err != nil {
 		_ = s.restoreBackup()
 		_ = s.ReloadSSH(ctx)
-		return nil, apperror.ErrInternal.WithMessage("配置测试失败，已恢复原配置: " + err.Error())
+		return nil, errx.Internal("配置测试失败，已恢复原配置: %w", err)
 	}
 	if err := s.ReloadSSH(ctx); err != nil {
-		return nil, apperror.ErrInternal.WithMessage("重载 SSH 失败: " + err.Error())
+		return nil, errx.Internal("重载 SSH 失败: %w", err)
 	}
 	return cfg, nil
 }
@@ -154,10 +154,10 @@ func (s *Service) ListAuthorizedKeys() ([]AuthorizedKey, error) {
 func (s *Service) AddAuthorizedKey(pub string) error {
 	pub = strings.TrimSpace(pub)
 	if pub == "" {
-		return apperror.ErrBadRequest.WithMessage("公钥不能为空")
+		return errx.BadRequest("公钥不能为空")
 	}
 	if len(strings.Fields(pub)) < 2 {
-		return apperror.ErrBadRequest.WithMessage("公钥格式无效")
+		return errx.BadRequest("公钥格式无效")
 	}
 	p, err := authorizedKeysPath()
 	if err != nil {
@@ -207,7 +207,7 @@ func (s *Service) RemoveAuthorizedKey(comment string) error {
 		kept = append(kept, line)
 	}
 	if !removed {
-		return apperror.ErrNotFound.WithMessage("未找到匹配的公钥")
+		return errx.NotFound("未找到匹配的公钥")
 	}
 	return os.WriteFile(p, []byte(strings.Join(kept, "\n")+"\n"), 0600)
 }
@@ -232,7 +232,7 @@ func (s *Service) GenerateKeyPair(ctx context.Context, name, keyType string) (st
 	case "ecdsa":
 		bits = "-b 521"
 	default:
-		return "", apperror.ErrBadRequest.WithMessage("不支持的密钥类型")
+		return "", errx.BadRequest("不支持的密钥类型")
 	}
 	dir, err := os.MkdirTemp("", "es-key-*")
 	if err != nil {
@@ -330,7 +330,7 @@ func (s *Service) Fail2banStatus(ctx context.Context) *Fail2banStatus {
 // InstallFail2ban installs fail2ban and enables an sshd jail.
 func (s *Service) InstallFail2ban(ctx context.Context) error {
 	if _, err := exec.LookPath("fail2ban-client"); err == nil {
-		return apperror.ErrBadRequest.WithMessage("fail2ban 已安装")
+		return errx.Conflict("fail2ban 已安装")
 	}
 	if _, err := exec.CommandContext(ctx, "apt-get", "install", "-y", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("安装 fail2ban 失败: %w", err)
@@ -356,7 +356,7 @@ bantime = 1h
 // ReloadFail2ban reloads fail2ban config.
 func (s *Service) ReloadFail2ban(ctx context.Context) error {
 	if _, err := exec.LookPath("fail2ban-client"); err != nil {
-		return apperror.ErrBadRequest.WithMessage("fail2ban 未安装")
+		return errx.BadRequest("fail2ban 未安装")
 	}
 	if _, err := exec.CommandContext(ctx, "systemctl", "reload", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("重载 fail2ban 失败: %w", err)

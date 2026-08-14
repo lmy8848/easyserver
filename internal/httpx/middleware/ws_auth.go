@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -41,7 +41,7 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.Hand
 		}
 
 		if tokenString == "" {
-			c.Error(apperror.ErrUnauthorized.WithMessage("missing token"))
+			c.Error(errx.Unauthorized("missing token"))
 			c.Abort()
 			return
 		}
@@ -56,7 +56,7 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.Hand
 		})
 
 		if err != nil || !token.Valid {
-			c.Error(apperror.ErrUnauthorized.WithMessage("invalid or expired token"))
+			c.Error(ErrTokenExpired)
 			c.Abort()
 			return
 		}
@@ -65,12 +65,12 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.Hand
 		if sessionValidator != nil {
 			valid, err := sessionValidator(tokenString)
 			if err != nil {
-				c.Error(apperror.ErrInternal.WithMessage("session validation error"))
+				c.Error(errx.Internal("session validation error: %w", err))
 				c.Abort()
 				return
 			}
 			if !valid {
-				c.Error(apperror.ErrUnauthorized.WithMessage("session expired, please login again"))
+				c.Error(errx.Unauthorized("session expired, please login again"))
 				c.Abort()
 				return
 			}

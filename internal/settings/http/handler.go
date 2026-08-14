@@ -4,8 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
-	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -18,8 +16,8 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
-	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -71,7 +69,7 @@ func maskWebhookURL(rawURL string) string {
 }
 
 // GetSettings returns current settings (sensitive fields are masked)
-func (h *SettingsHandler) GetSettings(c *gin.Context) {
+func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 	cfg := h.store.Get()
 
 	// Mask database path: show only the filename
@@ -85,7 +83,7 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 	// Mask webhook URL: show only scheme + host
 	webhookURL := maskWebhookURL(cfg.Notify.WebhookURL)
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"server": gin.H{
 			"port":           cfg.Server.Port,
 			"host":           cfg.Server.Host,
@@ -145,18 +143,17 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) {
 			"file_preview": cfg.Features.FilePreview,
 			"fim":          cfg.Features.FIM,
 		},
-	})
+	}, nil
 }
 
 // UpdateFeaturesConfig updates optional feature toggles.
-func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
 	var req struct {
 		FilePreview *bool `json:"file_preview"`
 		FIM         *bool `json:"fim"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 	middleware.AuditSummary(c, "更新功能开关")
 	h.store.Update(func(cfg *config.Config) {
@@ -168,14 +165,13 @@ func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) {
 		}
 	})
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
-	httpx.Success(c, gin.H{"message": "功能开关已更新"})
+	return gin.H{"message": "功能开关已更新"}, nil
 }
 
 // UpdateCloudConfig updates Tencent Cloud configuration
-func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) (any, error) {
 	var req struct {
 		Enabled    *bool   `json:"enabled"`
 		SecretID   *string `json:"secret_id"`
@@ -184,8 +180,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 		InstanceID *string `json:"instance_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新云配置")
@@ -206,8 +201,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 	}
 
 	if req.Region != nil && !validRegions[*req.Region] {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的区域: " + *req.Region))
-		return
+		return nil, errx.BadRequest("无效的区域: %s", *req.Region)
 	}
 
 	h.store.Update(func(cfg *config.Config) {
@@ -230,15 +224,14 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{"message": "云配置已更新"})
+	return gin.H{"message": "云配置已更新"}, nil
 }
 
 // UpdateServerConfig updates server configuration
-func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 	var req struct {
 		Port               *int    `json:"port"`
 		Host               *string `json:"host"`
@@ -258,16 +251,14 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		} `json:"turnstile"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新服务器配置")
 
 	// ---- 校验（基于请求体，不依赖当前配置，提前统一做） ----
 	if req.Port != nil && (*req.Port < 1 || *req.Port > 65535) {
-		c.Error(apperror.ErrBadRequest.WithMessage("端口必须在 1 到 65535 之间"))
-		return
+		return nil, errx.BadRequest("端口必须在 1 到 65535 之间")
 	}
 	// Warn about privileged ports
 	if req.Port != nil && *req.Port < 1024 {
@@ -276,12 +267,10 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 	if req.Host != nil {
 		host := strings.TrimSpace(*req.Host)
 		if host == "" {
-			c.Error(apperror.ErrBadRequest.WithMessage("主机不能为空"))
-			return
+			return nil, errx.BadRequest("主机不能为空")
 		}
 		if len(host) > 253 {
-			c.Error(apperror.ErrBadRequest.WithMessage("主机名过长（最多 253 个字符）"))
-			return
+			return nil, errx.BadRequest("主机名过长（最多 253 个字符）")
 		}
 		// Warn about localhost-only binding
 		if host == "127.0.0.1" || host == "::1" {
@@ -289,23 +278,19 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		}
 	}
 	if req.MaxUploadSize != nil && (*req.MaxUploadSize < 0 || *req.MaxUploadSize > 4<<30) {
-		c.Error(apperror.ErrBadRequest.WithMessage("max_upload_size 必须在 0 到 4GB 之间"))
-		return
+		return nil, errx.BadRequest("max_upload_size 必须在 0 到 4GB 之间")
 	}
 	if req.AssetsRateLimit != nil && (*req.AssetsRateLimit < 100 || *req.AssetsRateLimit > 100000) {
-		c.Error(apperror.ErrBadRequest.WithMessage("assets_rate_limit 必须在 100 到 100000 之间"))
-		return
+		return nil, errx.BadRequest("assets_rate_limit 必须在 100 到 100000 之间")
 	}
 	var assetsRateInterval time.Duration
 	if req.AssetsRateInterval != nil {
 		d, err := time.ParseDuration(*req.AssetsRateInterval)
 		if err != nil {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的 assets_rate_interval: %v", err)))
-			return
+			return nil, errx.BadRequest("无效的 assets_rate_interval: %w", err)
 		}
 		if d < 1*time.Second || d > 1*time.Hour {
-			c.Error(apperror.ErrBadRequest.WithMessage("assets_rate_interval 必须在 1s 到 1h 之间"))
-			return
+			return nil, errx.BadRequest("assets_rate_interval 必须在 1s 到 1h 之间")
 		}
 		assetsRateInterval = d
 	}
@@ -366,8 +351,7 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
 	// Sync assets rate limiter at runtime
@@ -378,10 +362,10 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) {
 		}
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message":          "服务器配置已更新",
 		"requires_restart": requiresRestart,
-	})
+	}, nil
 }
 
 // tlsCertInfo holds parsed certificate metadata for API responses.
@@ -394,22 +378,20 @@ type tlsCertInfo struct {
 // UpdateTLSConfig updates TLS certificate configuration.
 // Accepts PEM-encoded cert/key content, validates the pair, writes to disk,
 // and updates the config file. Requires restart to take effect.
-func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) (any, error) {
 	var req struct {
 		Enabled     *bool   `json:"enabled"`
 		CertContent *string `json:"cert_content"`
 		KeyContent  *string `json:"key_content"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新 TLS 配置")
 
 	if req.Enabled == nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("缺少 enabled 字段"))
-		return
+		return nil, errx.BadRequest("缺少 enabled 字段")
 	}
 
 	// If disabling, just update the flag
@@ -418,22 +400,19 @@ func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) {
 			cfg.Server.TLS.Enabled = false
 		})
 		if err := h.saveConfig(); err != nil {
-			c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-			return
+			return nil, errx.Internal("保存配置失败: %w", err)
 		}
-		httpx.Success(c, gin.H{
+		return gin.H{
 			"message":          "TLS 已禁用",
 			"requires_restart": true,
 			"cert_info":        nil,
-		})
-		return
+		}, nil
 	}
 
 	// Enabling TLS — cert and key content are required
 	if req.CertContent == nil || req.KeyContent == nil ||
 		strings.TrimSpace(*req.CertContent) == "" || strings.TrimSpace(*req.KeyContent) == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("启用 TLS 需要提供证书和私钥内容"))
-		return
+		return nil, errx.BadRequest("启用 TLS 需要提供证书和私钥内容")
 	}
 
 	// Validate PEM format and that cert matches key
@@ -441,16 +420,14 @@ func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) {
 	keyPEM := []byte(strings.TrimSpace(*req.KeyContent))
 
 	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("证书与私钥不配对或格式无效: %v", err)))
-		return
+		return nil, errx.BadRequest("证书与私钥不配对或格式无效: %w", err)
 	}
 
 	// Determine cert storage directory (next to config file)
 	configDir := filepath.Dir(h.store.Get().Path)
 	certDir := filepath.Join(configDir, "certs")
 	if err := os.MkdirAll(certDir, 0700); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("创建证书目录失败: %v", err)))
-		return
+		return nil, errx.Internal("创建证书目录失败: %w", err)
 	}
 
 	certPath := filepath.Join(certDir, "server.crt")
@@ -459,24 +436,20 @@ func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) {
 	// Atomic write: write to temp file then rename
 	certTmp := certPath + ".tmp"
 	if err := os.WriteFile(certTmp, certPEM, 0644); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("写入证书文件失败: %v", err)))
-		return
+		return nil, errx.Internal("写入证书文件失败: %w", err)
 	}
 	if err := os.Rename(certTmp, certPath); err != nil {
 		os.Remove(certTmp)
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("更新证书文件失败: %v", err)))
-		return
+		return nil, errx.Internal("更新证书文件失败: %w", err)
 	}
 
 	keyTmp := keyPath + ".tmp"
 	if err := os.WriteFile(keyTmp, keyPEM, 0600); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("写入私钥文件失败: %v", err)))
-		return
+		return nil, errx.Internal("写入私钥文件失败: %w", err)
 	}
 	if err := os.Rename(keyTmp, keyPath); err != nil {
 		os.Remove(keyTmp)
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("更新私钥文件失败: %v", err)))
-		return
+		return nil, errx.Internal("更新私钥文件失败: %w", err)
 	}
 
 	// Update config
@@ -487,18 +460,17 @@ func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) {
 	})
 
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
 	// Parse cert info for response
 	certInfo := parseCertInfo(certPEM)
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message":          "TLS 证书已更新，需要重启面板生效",
 		"requires_restart": true,
 		"cert_info":        certInfo,
-	})
+	}, nil
 }
 
 // parseCertInfo extracts domain, issuer, and expiry from a PEM-encoded certificate.
@@ -535,7 +507,7 @@ func certInfoFromConfig(cfg *config.Config) *tlsCertInfo {
 }
 
 // UpdateAuthConfig updates authentication configuration
-func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 	var req struct {
 		SessionTimeout      *int  `json:"session_timeout"`
 		IdleTimeout         *int  `json:"idle_timeout"`
@@ -549,44 +521,35 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 		MobileDeviceBinding *bool `json:"mobile_device_binding"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新认证配置")
 
 	// ---- 校验（基于请求体） ----
 	if req.SessionTimeout != nil && *req.SessionTimeout < 300 {
-		c.Error(apperror.ErrBadRequest.WithMessage("session_timeout 至少为 300 秒（5分钟）"))
-		return
+		return nil, errx.BadRequest("session_timeout 至少为 300 秒（5分钟）")
 	}
 	if req.IdleTimeout != nil && *req.IdleTimeout < 60 {
-		c.Error(apperror.ErrBadRequest.WithMessage("idle_timeout 至少为 60 秒（1分钟）"))
-		return
+		return nil, errx.BadRequest("idle_timeout 至少为 60 秒（1分钟）")
 	}
 	if req.MaxLoginAttempts != nil && (*req.MaxLoginAttempts < 3 || *req.MaxLoginAttempts > 100) {
-		c.Error(apperror.ErrBadRequest.WithMessage("max_login_attempts 必须在 3 到 100 之间"))
-		return
+		return nil, errx.BadRequest("max_login_attempts 必须在 3 到 100 之间")
 	}
 	if req.LockoutDuration != nil && (*req.LockoutDuration < 60 || *req.LockoutDuration > 86400) {
-		c.Error(apperror.ErrBadRequest.WithMessage("lockout_duration 必须在 60 秒到 86400 秒之间"))
-		return
+		return nil, errx.BadRequest("lockout_duration 必须在 60 秒到 86400 秒之间")
 	}
 	if req.RateLimit != nil && *req.RateLimit < 10 {
-		c.Error(apperror.ErrBadRequest.WithMessage("rate_limit 至少为 10"))
-		return
+		return nil, errx.BadRequest("rate_limit 至少为 10")
 	}
 	if req.RateInterval != nil && *req.RateInterval < 1 {
-		c.Error(apperror.ErrBadRequest.WithMessage("rate_interval 至少为 1 秒"))
-		return
+		return nil, errx.BadRequest("rate_interval 至少为 1 秒")
 	}
 	if req.LoginRateLimit != nil && (*req.LoginRateLimit < 1 || *req.LoginRateLimit > 100) {
-		c.Error(apperror.ErrBadRequest.WithMessage("login_rate_limit 必须在 1 到 100 之间"))
-		return
+		return nil, errx.BadRequest("login_rate_limit 必须在 1 到 100 之间")
 	}
 	if req.LoginRateInterval != nil && (*req.LoginRateInterval < 1 || *req.LoginRateInterval > 3600) {
-		c.Error(apperror.ErrBadRequest.WithMessage("login_rate_interval 必须在 1 秒到 3600 秒之间"))
-		return
+		return nil, errx.BadRequest("login_rate_interval 必须在 1 秒到 3600 秒之间")
 	}
 
 	// ---- 应用修改 ----
@@ -640,34 +603,30 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{"message": "认证配置已更新"})
+	return gin.H{"message": "认证配置已更新"}, nil
 }
 
 // UpdateMonitorConfig updates monitor configuration
-func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) (any, error) {
 	var req struct {
 		HistoryRetention *int `json:"history_retention"`
 		CollectInterval  *int `json:"collect_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新监控配置")
 
 	// ---- 校验（基于请求体） ----
 	if req.HistoryRetention != nil && (*req.HistoryRetention < 24 || *req.HistoryRetention > 8760) {
-		c.Error(apperror.ErrBadRequest.WithMessage("history_retention 必须在 24 小时到 8760 小时（1年）之间"))
-		return
+		return nil, errx.BadRequest("history_retention 必须在 24 小时到 8760 小时（1年）之间")
 	}
 	if req.CollectInterval != nil && (*req.CollectInterval < 1 || *req.CollectInterval > 300) {
-		c.Error(apperror.ErrBadRequest.WithMessage("collect_interval 必须在 1 秒到 300 秒（5分钟）之间"))
-		return
+		return nil, errx.BadRequest("collect_interval 必须在 1 秒到 300 秒（5分钟）之间")
 	}
 
 	// ---- 应用修改 ----
@@ -692,21 +651,19 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{"message": "监控配置已更新"})
+	return gin.H{"message": "监控配置已更新"}, nil
 }
 
 // UpdateAuditConfig updates audit configuration
-func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) (any, error) {
 	var req struct {
 		Enabled *bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新审计配置")
@@ -719,48 +676,45 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{"message": "审计配置已更新"})
+	return gin.H{"message": "审计配置已更新"}, nil
 }
 
 // validateWebhookURL validates a webhook URL format
 func validateWebhookURL(rawURL string) error {
 	if rawURL == "" {
-		return errors.New("webhook URL cannot be empty")
+		return errx.BadRequest("webhook URL cannot be empty")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid webhook URL: %w", err)
+		return errx.BadRequest("invalid webhook URL: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("webhook URL must use http or https scheme")
+		return errx.BadRequest("webhook URL must use http or https scheme")
 	}
 	if u.Host == "" {
-		return errors.New("webhook URL must have a valid host")
+		return errx.BadRequest("webhook URL must have a valid host")
 	}
 	return nil
 }
 
 // UpdateNotifyConfig updates notification configuration
-func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
+func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) (any, error) {
 	var req struct {
 		Enabled    *bool   `json:"enabled"`
 		WebhookURL *string `json:"webhook_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新通知配置")
 
 	if req.WebhookURL != nil && strings.TrimSpace(*req.WebhookURL) != "" {
 		if err := validateWebhookURL(strings.TrimSpace(*req.WebhookURL)); err != nil {
-			c.Error(apperror.ErrBadRequest.Wrap(err))
-			return
+			return nil, err
 		}
 	}
 
@@ -775,43 +729,38 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) {
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("保存配置失败: %v", err)))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{"message": "通知配置已更新"})
+	return gin.H{"message": "通知配置已更新"}, nil
 }
 
 // TestWebhook sends a test notification to the configured webhook
-func (h *SettingsHandler) TestWebhook(c *gin.Context) {
+func (h *SettingsHandler) TestWebhook(c *gin.Context) (any, error) {
 	middleware.AuditSummary(c, "测试通知 Webhook")
 	cfg := h.store.Get()
 	if cfg.Notify.WebhookURL == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("请先配置 Webhook URL"))
-		return
+		return nil, errx.BadRequest("请先配置 Webhook URL")
 	}
 
 	if err := validateWebhookURL(cfg.Notify.WebhookURL); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, err
 	}
 
 	notifyService := notify.NewService(h.store)
 	if err := notifyService.TestWebhook(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("测试通知失败: %v", err)))
-		return
+		return nil, errx.Internal("测试通知失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{"message": "测试通知已发送"})
+	return gin.H{"message": "测试通知已发送"}, nil
 }
 
 // TestCloudConnection tests the Tencent Cloud connection
-func (h *SettingsHandler) TestCloudConnection(c *gin.Context) {
+func (h *SettingsHandler) TestCloudConnection(c *gin.Context) (any, error) {
 	middleware.AuditSummary(c, "测试云连接")
 	cfg := h.store.Get()
 	if cfg.TencentCloud.SecretID == "" || cfg.TencentCloud.SecretKey == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("请先配置 SecretID 和 SecretKey"))
-		return
+		return nil, errx.BadRequest("请先配置 SecretID 和 SecretKey")
 	}
 
 	cloudService, err := cloud.NewService(
@@ -821,21 +770,19 @@ func (h *SettingsHandler) TestCloudConnection(c *gin.Context) {
 		cfg.TencentCloud.InstanceID,
 	)
 	if err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("创建云客户端失败: %v", err)))
-		return
+		return nil, errx.Internal("创建云客户端失败: %w", err)
 	}
 
 	// Try to get instances to verify connection
 	instances, err := cloudService.GetInstances(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.ErrInternal.WithMessage(fmt.Sprintf("连接失败: %v", err)))
-		return
+		return nil, errx.Internal("连接失败: %w", err)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"message":        "连接成功",
 		"instance_count": len(instances),
-	})
+	}, nil
 }
 
 // saveConfig saves the current config back to its source file (cfg.Path).
@@ -844,49 +791,43 @@ func (h *SettingsHandler) saveConfig() error {
 }
 
 // GetAlertRules returns the current alert rules
-func (h *SettingsHandler) GetAlertRules(c *gin.Context) {
-	httpx.Success(c, gin.H{"rules": h.store.Get().Alerts.Rules})
+func (h *SettingsHandler) GetAlertRules(c *gin.Context) (any, error) {
+	return gin.H{"rules": h.store.Get().Alerts.Rules}, nil
 }
 
 // UpdateAlertRules updates the alert rules configuration
-func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
+func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) (any, error) {
 	var req struct {
 		Rules []config.AlertRuleConfig `json:"rules"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的请求: %w", err)
 	}
 
 	middleware.AuditSummary(c, "更新告警规则")
 
 	// Limit number of rules to prevent abuse
 	if len(req.Rules) > 50 {
-		c.Error(apperror.ErrBadRequest.WithMessage("告警规则过多（最多 50 条）"))
-		return
+		return nil, errx.BadRequest("告警规则过多（最多 50 条）")
 	}
 
 	// Validate rules
 	for _, rule := range req.Rules {
 		if rule.Name == "" {
-			c.Error(apperror.ErrBadRequest.WithMessage("规则名称不能为空"))
-			return
+			return nil, errx.BadRequest("规则名称不能为空")
 		}
 		validMetrics := map[string]bool{
 			"cpu_percent": true, "mem_percent": true, "disk_percent": true,
 			"load_1m": true, "load_5m": true, "load_15m": true,
 		}
 		if !validMetrics[rule.Metric] {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的指标: " + rule.Metric))
-			return
+			return nil, errx.BadRequest("无效的指标: %s", rule.Metric)
 		}
 		if rule.Threshold <= 0 || rule.Threshold > 100 {
-			c.Error(apperror.ErrBadRequest.WithMessage("阈值必须在 0 到 100 之间"))
-			return
+			return nil, errx.BadRequest("阈值必须在 0 到 100 之间")
 		}
 		if rule.Duration < 0 {
-			c.Error(apperror.ErrBadRequest.WithMessage("持续时间不能为负数"))
-			return
+			return nil, errx.BadRequest("持续时间不能为负数")
 		}
 	}
 
@@ -894,8 +835,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 		cfg.Alerts.Rules = req.Rules
 	})
 	if err := h.saveConfig(); err != nil {
-		c.Error(apperror.ErrInternal.WithMessage("保存配置失败: " + err.Error()))
-		return
+		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 
 	// Update AlertService at runtime
@@ -914,21 +854,21 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) {
 		h.alertService.SetRules(alertRules)
 	}
 
-	httpx.Success(c, gin.H{"message": "告警规则已更新", "rules": h.store.Get().Alerts.Rules})
+	return gin.H{"message": "告警规则已更新", "rules": h.store.Get().Alerts.Rules}, nil
 }
 
 // GetSystemInfo returns system information
-func (h *SettingsHandler) GetSystemInfo(c *gin.Context) {
-	httpx.Success(c, gin.H{
+func (h *SettingsHandler) GetSystemInfo(c *gin.Context) (any, error) {
+	return gin.H{
 		"version":  infra.DisplayVersion(),
 		"build_id": infra.BuildID,
-	})
+	}, nil
 }
 
 // RestartPanel restarts the backend service.
 // When force=true (e.g. port change), the listener is closed so the child
 // process creates a fresh one on the new address.
-func (h *SettingsHandler) RestartPanel(c *gin.Context) {
+func (h *SettingsHandler) RestartPanel(c *gin.Context) (any, error) {
 	middleware.AuditSummary(c, "重启面板")
 
 	var req struct {
@@ -947,25 +887,25 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) {
 			Force:      force,
 		})
 	})
-	httpx.Success(c, gin.H{"message": "面板正在重启..."})
+	return gin.H{"message": "面板正在重启..."}, nil
 }
 
 func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertService *alert.Service, monitorSvc MonitorUpdater, sig *infra.Signal) {
 	handler := NewSettingsHandler(store, alertService, sig)
 	handler.SetMonitorService(monitorSvc)
-	protected.GET("/settings", handler.GetSettings)
-	protected.GET("/settings/system", handler.GetSystemInfo)
-	protected.PUT("/settings/server", handler.UpdateServerConfig)
-	protected.PUT("/settings/tls", handler.UpdateTLSConfig)
-	protected.PUT("/settings/auth", handler.UpdateAuthConfig)
-	protected.PUT("/settings/monitor", handler.UpdateMonitorConfig)
-	protected.PUT("/settings/audit", handler.UpdateAuditConfig)
-	protected.PUT("/settings/notify", handler.UpdateNotifyConfig)
-	protected.PUT("/settings/features", handler.UpdateFeaturesConfig)
-	protected.POST("/settings/notify/test", handler.TestWebhook)
-	protected.GET("/alerts/rules", handler.GetAlertRules)
-	protected.PUT("/alerts/rules", handler.UpdateAlertRules)
-	protected.PUT("/settings/cloud", handler.UpdateCloudConfig)
-	protected.POST("/settings/cloud/test", handler.TestCloudConnection)
-	protected.POST("/settings/restart", handler.RestartPanel)
+	protected.GET("/settings", httpx.H(handler.GetSettings))
+	protected.GET("/settings/system", httpx.H(handler.GetSystemInfo))
+	protected.PUT("/settings/server", httpx.H(handler.UpdateServerConfig))
+	protected.PUT("/settings/tls", httpx.H(handler.UpdateTLSConfig))
+	protected.PUT("/settings/auth", httpx.H(handler.UpdateAuthConfig))
+	protected.PUT("/settings/monitor", httpx.H(handler.UpdateMonitorConfig))
+	protected.PUT("/settings/audit", httpx.H(handler.UpdateAuditConfig))
+	protected.PUT("/settings/notify", httpx.H(handler.UpdateNotifyConfig))
+	protected.PUT("/settings/features", httpx.H(handler.UpdateFeaturesConfig))
+	protected.POST("/settings/notify/test", httpx.H(handler.TestWebhook))
+	protected.GET("/alerts/rules", httpx.H(handler.GetAlertRules))
+	protected.PUT("/alerts/rules", httpx.H(handler.UpdateAlertRules))
+	protected.PUT("/settings/cloud", httpx.H(handler.UpdateCloudConfig))
+	protected.POST("/settings/cloud/test", httpx.H(handler.TestCloudConnection))
+	protected.POST("/settings/restart", httpx.H(handler.RestartPanel))
 }

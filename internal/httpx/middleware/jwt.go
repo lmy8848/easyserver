@@ -5,11 +5,17 @@ import (
 	"net/http"
 	"strings"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// CodeTokenExpired is the specific business error code for token expiration (40101)
+const CodeTokenExpired = 40101
+
+// ErrTokenExpired is the sentinel error returned when a JWT token is expired or invalid
+var ErrTokenExpired = errx.NewSentinel(errx.KindUnauthorized, CodeTokenExpired, "invalid or expired token")
 
 type JWTClaims struct {
 	UserID   int64  `json:"user_id"`
@@ -33,7 +39,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				c.Error(apperror.ErrUnauthorized.WithMessage("invalid authorization format"))
+				c.Error(errx.Unauthorized("invalid authorization format"))
 				c.Abort()
 				return
 			}
@@ -53,7 +59,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 		}
 
 		if tokenString == "" {
-			c.Error(apperror.ErrUnauthorized.WithMessage("missing authorization header"))
+			c.Error(errx.Unauthorized("missing authorization header"))
 			c.Abort()
 			return
 		}
@@ -66,7 +72,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 		})
 
 		if err != nil || !token.Valid {
-			c.Error(apperror.ErrTokenExpired.WithMessage("invalid or expired token"))
+			c.Error(ErrTokenExpired)
 			c.Abort()
 			return
 		}
@@ -75,12 +81,12 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 		if sessionValidator != nil {
 			valid, err := sessionValidator(tokenString)
 			if err != nil {
-				c.Error(apperror.ErrInternal.WithMessage("session validation error"))
+				c.Error(errx.Internal("session validation error: %w", err))
 				c.Abort()
 				return
 			}
 			if !valid {
-				c.Error(apperror.ErrUnauthorized.WithMessage("session expired, please login again"))
+				c.Error(errx.Unauthorized("session expired, please login again"))
 				c.Abort()
 				return
 			}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,11 +58,13 @@ func (wl *IPWhitelist) Update(allowed []string) {
 		if err != nil {
 			ip := net.ParseIP(cidr)
 			if ip != nil {
-				if ip.To4() != nil {
-					_, ipNet, _ = net.ParseCIDR(cidr + "/32")
-				} else {
-					_, ipNet, _ = net.ParseCIDR(cidr + "/128")
+				// Single IP, convert to /32 or /128
+				bits := 32
+				if ip.To4() == nil {
+					bits = 128
 				}
+				mask := net.CIDRMask(bits, bits)
+				ipNet = &net.IPNet{IP: ip, Mask: mask}
 			}
 		}
 		if ipNet != nil {
@@ -75,7 +77,7 @@ func (wl *IPWhitelist) Update(allowed []string) {
 func IPWhitelistMiddleware(whitelist *IPWhitelist) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !whitelist.IsAllowed(c.ClientIP()) {
-			c.Error(apperror.ErrForbidden.WithMessage("IP not allowed"))
+			c.Error(errx.Forbidden("IP not allowed"))
 			c.Abort()
 			return
 		}
@@ -126,7 +128,7 @@ func UserIPWhitelistMiddleware(getWhitelist UserIPWhitelistFunc) gin.HandlerFunc
 		}
 
 		if !allowed {
-			c.Error(apperror.ErrForbidden.WithMessage("your IP is not in the user whitelist"))
+			c.Error(errx.Forbidden("your IP is not in the user whitelist"))
 			c.Abort()
 			return
 		}
@@ -138,26 +140,27 @@ func UserIPWhitelistMiddleware(getWhitelist UserIPWhitelistFunc) gin.HandlerFunc
 // splitAndTrim splits a comma-separated string and trims whitespace
 func splitAndTrim(s string) []string {
 	parts := []string{}
-	for p := range strings.SplitSeq(s, ",") {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			parts = append(parts, p)
+	for part := range strings.SplitSeq(s, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
 		}
 	}
 	return parts
 }
 
-// matchIP checks if clientIP matches a whitelist entry (supports CIDR and exact IP)
-func matchIP(clientIP, entry string) bool {
+// matchIP checks if clientIP matches an allowed IP pattern (exact IP or CIDR)
+func matchIP(clientIP, pattern string) bool {
 	// Try CIDR match
-	if strings.Contains(entry, "/") {
-		_, ipNet, err := net.ParseCIDR(entry)
-		if err != nil {
-			return false
+	if strings.Contains(pattern, "/") {
+		_, ipNet, err := net.ParseCIDR(pattern)
+		if err == nil {
+			ip := net.ParseIP(clientIP)
+			return ip != nil && ipNet.Contains(ip)
 		}
-		ip := net.ParseIP(clientIP)
-		return ip != nil && ipNet.Contains(ip)
+		return false
 	}
+
 	// Exact IP match
-	return clientIP == entry
+	return clientIP == pattern
 }
