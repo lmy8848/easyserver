@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 var errSearchLimit = errors.New("search result limit reached")
@@ -386,7 +386,7 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 		}
 
 		if strings.Contains(file.Name, "..") {
-			return apperror.ErrForbidden.WithMessage("path traversal not allowed in archive: " + file.Name)
+			return errx.Forbidden("path traversal not allowed in archive: " + file.Name)
 		}
 
 		if file.Mode()&os.ModeSymlink != 0 {
@@ -484,7 +484,7 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 		}
 
 		if strings.Contains(header.Name, "..") {
-			return apperror.ErrForbidden.WithMessage("path traversal not allowed in archive: " + header.Name)
+			return errx.Forbidden("path traversal not allowed in archive: " + header.Name)
 		}
 
 		fileCount++

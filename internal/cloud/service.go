@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
@@ -146,7 +146,7 @@ func (s *Service) GetInstance(ctx context.Context, instanceID string) (*Instance
 	}
 
 	if len(response.Response.InstanceSet) == 0 {
-		return nil, apperror.ErrNotFound.WithMessage("实例不存在")
+		return nil, errx.NotFound("实例不存在")
 	}
 
 	inst := response.Response.InstanceSet[0]
@@ -284,12 +284,12 @@ func (s *Service) DeleteFirewallRule(ctx context.Context, instanceID string, rul
 
 	rules := describeResp.Response.FirewallRuleSet
 	if len(rules) == 0 {
-		return apperror.ErrNotFound.WithMessage(fmt.Sprintf("实例 %s 没有防火墙规则", instanceID))
+		return errx.NotFound("实例 %s 没有防火墙规则", instanceID)
 	}
 
 	idx, err := strconv.Atoi(ruleID)
 	if err != nil || idx < 0 || idx >= len(rules) {
-		return apperror.ErrBadRequest.WithMessage(fmt.Sprintf("无效的防火墙规则 ID %q：范围为 0-%d", ruleID, len(rules)-1))
+		return errx.BadRequest("无效的防火墙规则 ID %q：范围为 0-%d", ruleID, len(rules)-1)
 	}
 
 	targetRule := rules[idx]
@@ -375,7 +375,7 @@ func (s *Service) ApplySnapshot(ctx context.Context, snapshotID string) error {
 	}
 
 	if len(describeResp.Response.SnapshotSet) == 0 {
-		return apperror.ErrNotFound.WithMessage(fmt.Sprintf("快照 %s 不存在", snapshotID))
+		return errx.NotFound("快照 %s 不存在", snapshotID)
 	}
 
 	request := lighthouse.NewApplyInstanceSnapshotRequest()
@@ -419,7 +419,7 @@ var metricConfig = map[string]struct {
 func (s *Service) GetMonitorData(ctx context.Context, instanceID, metric string, start, end time.Time) (*MonitorData, error) {
 	mc, ok := metricConfig[metric]
 	if !ok {
-		return nil, apperror.ErrBadRequest.WithMessage(fmt.Sprintf("不支持的监控指标：%s（支持：CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT）", metric))
+		return nil, errx.BadRequest("不支持的监控指标：%s（支持：CPU_USAGE, MEMORY_USAGE, DISK_USAGE, NETWORK_IN_OUT）", metric)
 	}
 
 	cpf := profile.NewClientProfile()

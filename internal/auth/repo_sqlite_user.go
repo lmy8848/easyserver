@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 type sqliteUserRepo struct {
@@ -37,7 +37,7 @@ func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, apperror.ErrNotFound.WithMessage("user not found")
+			return nil, errx.NotFound("user not found")
 		}
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (r *sqliteUserRepo) GetByUsername(ctx context.Context, username string) (*U
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, apperror.ErrNotFound.WithMessage("user not found")
+			return nil, errx.NotFound("user not found")
 		}
 		return nil, err
 	}

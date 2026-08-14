@@ -16,7 +16,7 @@ import (
 	"crypto/x509"
 
 	"easyserver/internal/infra"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -58,8 +58,7 @@ func NewSSHClient(srv *Server, authData string) (*SSHClient, error) {
 	if err != nil {
 		// 底层错误含 known_hosts 绝对路径，不直接暴露给前端：
 		// 前端见友好文案，详细错误（含路径）只进日志（SafeError）。
-		return nil, apperror.ErrInternal.WithMessage("SSH 主机密钥校验不可用（known_hosts 缺失或不可读）").
-			Wrap(fmt.Errorf("ssh: host key verification unavailable — %s not found or unreadable: %w", knownHostsPath, err))
+		return nil, errx.Internal("SSH 主机密钥校验不可用（known_hosts 缺失或不可读）: %w", fmt.Errorf("ssh: host key verification unavailable — %s not found or unreadable: %w", knownHostsPath, err))
 	}
 
 	config := &ssh.ClientConfig{

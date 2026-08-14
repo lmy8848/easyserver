@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/errx"
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
@@ -405,7 +405,7 @@ func (s *AuthService) VerifyTOTP(secret, code string) bool {
 // EnableTOTP enables 2FA for a user after verifying the code.
 func (s *AuthService) EnableTOTP(ctx context.Context, userID int64, secret, code string) ([]string, error) {
 	if !s.VerifyTOTP(secret, code) {
-		return nil, apperror.ErrUnauthorized.WithMessage("invalid TOTP code")
+		return nil, errx.Unauthorized("invalid TOTP code")
 	}
 
 	backupCodes, err := s.GenerateBackupCodes()
@@ -442,7 +442,7 @@ func (s *AuthService) DisableTOTP(ctx context.Context, userID int64, password st
 	}
 
 	if !verifyPassword(password, passwordHash) {
-		return apperror.ErrUnauthorized.WithMessage("invalid password")
+		return errx.Unauthorized("invalid password")
 	}
 
 	return s.totpRepo.DisableTOTP(ctx, userID)
