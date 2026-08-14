@@ -149,26 +149,9 @@ var (
 // 错误分类函数
 // ============================================================
 
-// errorPattern maps error message patterns to AppError types
-type errorPattern struct {
-	matches []string  // substrings to match
-	target  *AppError // target error type
-}
-
-// errorRegistry is the ordered list of error patterns.
-// First match wins. Add new patterns here instead of modifying WrapError.
-//
-// 迁移状态：全部业务领域已迁移到产生端显式分类（filemanager / runtimeenv /
-// database / auth / container / firewall / cron / systemd / deploy / terminal /
-// settings），errorRegistry 仅剩 SQLite 驱动级约束错误（UNIQUE）。该条目
-// 无代码字面量产生点（驱动运行时生成），待 repo 层统一处理后可移除。
-var errorRegistry = []errorPattern{
-	// UNIQUE constraint violation (SQLite)
-	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
-}
-
-// WrapError automatically wraps an error into the appropriate AppError
-// based on error pattern matching. Add new patterns to errorRegistry.
+// WrapError 是错误分类的兜底入口：已显式分类的错误（AppError）原样放行，
+// 其余未知错误包装为 ErrInternal（500）。分类责任在产生端——各领域服务
+// 用 ErrXxx.WithMessage / ErrXxx.WrapMessage 显式指定，不再依赖文本嗅探。
 func WrapError(err error) error {
 	if err == nil {
 		return nil
@@ -177,31 +160,12 @@ func WrapError(err error) error {
 	if errors.As(err, &appErr) {
 		return err
 	}
-
-	msg := err.Error()
-	for _, p := range errorRegistry {
-		for _, pattern := range p.matches {
-			if contains(msg, pattern) {
-				return p.target.WithMessage(msg)
-			}
-		}
-	}
-
 	return ErrInternal.Wrap(err)
 }
 
 // ============================================================
 // 内部工具函数
 // ============================================================
-
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
 
 // sensitivePatterns are patterns that should be filtered from error logs
 var sensitivePatterns = []string{

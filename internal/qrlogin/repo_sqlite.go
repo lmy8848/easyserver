@@ -3,16 +3,18 @@ package qrlogin
 import (
 	"context"
 	"database/sql"
+
+	"easyserver/internal/infra/database"
 	"fmt"
 	"time"
 )
 
 type sqliteRepo struct {
-	db *sql.DB
+	db database.DB
 }
 
 func NewSQLiteRepository(db *sql.DB) Repository {
-	return &sqliteRepo{db: db}
+	return &sqliteRepo{db: database.Wrap(db)}
 }
 
 func (r *sqliteRepo) Create(ctx context.Context, s *QRLoginSession) (int64, error) {

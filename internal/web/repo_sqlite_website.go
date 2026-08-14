@@ -3,17 +3,19 @@ package web
 import (
 	"context"
 	"database/sql"
+
+	"easyserver/internal/infra/database"
 	"fmt"
 )
 
 // sqliteWebsiteRepo implements WebsiteRepository for SQLite.
 type sqliteWebsiteRepo struct {
-	db *sql.DB
+	db database.DB
 }
 
 // NewSQLiteWebsiteRepository creates a new SQLite-backed WebsiteRepository.
 func NewSQLiteWebsiteRepository(db *sql.DB) WebsiteRepository {
-	return &sqliteWebsiteRepo{db: db}
+	return &sqliteWebsiteRepo{db: database.Wrap(db)}
 }
 
 // List returns websites for a specific web server

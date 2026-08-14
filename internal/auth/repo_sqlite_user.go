@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"database/sql"
+
+	"easyserver/internal/infra/database"
 	"fmt"
 	"time"
 
@@ -10,11 +12,11 @@ import (
 )
 
 type sqliteUserRepo struct {
-	db *sql.DB
+	db database.DB
 }
 
 func NewSQLiteUserRepository(db *sql.DB) UserRepo {
-	return &sqliteUserRepo{db: db}
+	return &sqliteUserRepo{db: database.Wrap(db)}
 }
 
 func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {

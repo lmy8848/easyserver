@@ -3,17 +3,19 @@ package web
 import (
 	"context"
 	"database/sql"
+
+	"easyserver/internal/infra/database"
 	"fmt"
 )
 
 // sqliteServerRepo implements ServerRepository for SQLite.
 type sqliteServerRepo struct {
-	db *sql.DB
+	db database.DB
 }
 
 // NewSQLiteServerRepository creates a new SQLite-backed ServerRepository.
 func NewSQLiteServerRepository(db *sql.DB) ServerRepository {
-	return &sqliteServerRepo{db: db}
+	return &sqliteServerRepo{db: database.Wrap(db)}
 }
 
 // List returns all web servers ordered by id

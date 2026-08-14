@@ -20,18 +20,9 @@ func TestWrapError_NilInput(t *testing.T) {
 //   - invalid password / invalid TOTP code → auth 直接返回 ErrUnauthorized
 //   - docker 系列 → container 直接返回 ErrDockerNotInstalled / ErrBadRequest
 //   - not found / 已存在 / cannot be empty 等 → 各领域产生端显式分类
+//   - SQLite UNIQUE 约束 → infra/database writeDB 统一映射 ErrConflict
 // 这些错误若再裸传给 WrapError，会按未知错误走 500 —— 这正是迁移的预期
 // 行为（分类责任在产生端）。
-
-func TestWrapError_UniqueConstraint(t *testing.T) {
-	err := errors.New("UNIQUE constraint failed: users.email")
-	result := WrapError(err)
-
-	var appErr *AppError
-	require.ErrorAs(t, result, &appErr)
-	assert.Equal(t, http.StatusConflict, appErr.HTTPStatus)
-	assert.Equal(t, CodeConflict, appErr.Code)
-}
 
 func TestWrapError_UnknownError(t *testing.T) {
 	err := errors.New("some completely unknown error")
