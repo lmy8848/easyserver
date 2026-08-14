@@ -26,20 +26,10 @@ func TestWrapError_NotFound(t *testing.T) {
 	assert.Equal(t, err.Error(), appErr.Message)
 }
 
-func TestWrapError_DockerNotInstalled(t *testing.T) {
-	err := errors.New("docker is not installed")
-	result := WrapError(err)
-
-	var appErr *AppError
-	require.ErrorAs(t, result, &appErr)
-	assert.Equal(t, http.StatusInternalServerError, appErr.HTTPStatus)
-	assert.Equal(t, CodeDockerNotInstalled, appErr.Code)
-	assert.Contains(t, appErr.Message, "docker is not installed")
-}
-
 // 已迁移到产生端显式分类的场景（WrapError 不再嗅探）：
 //   - path traversal → filemanager 直接返回 ErrForbidden
 //   - invalid password / invalid TOTP code → auth 直接返回 ErrUnauthorized
+//   - docker 系列 → container 直接返回 ErrDockerNotInstalled / ErrBadRequest
 // 这些错误若再裸传给 WrapError，会按未知错误走 500 —— 这正是迁移的预期
 // 行为（分类责任在产生端）。
 
