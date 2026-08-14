@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"easyserver/internal/infra/apperror"
 )
 
 // totpRepository implements TOTPRepository for SQLite.
@@ -57,7 +59,7 @@ func (r *totpRepository) GetBackupCodes(ctx context.Context, userID int64) (stri
 	err := r.db.QueryRowContext(ctx, "SELECT totp_backup_codes FROM users WHERE id = ? AND totp_enabled = 1", userID).Scan(&codesJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", errors.New("user not found or 2FA not enabled")
+			return "", apperror.ErrUnauthorized.WithMessage("user not found or 2FA not enabled")
 		}
 		return "", fmt.Errorf("get backup codes: %w", err)
 	}
@@ -95,7 +97,7 @@ func (r *totpRepository) GetTOTPSecret(ctx context.Context, userID int64) (strin
 	err := r.db.QueryRowContext(ctx, "SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 1", userID).Scan(&secret)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", errors.New("user not found or 2FA not enabled")
+			return "", apperror.ErrUnauthorized.WithMessage("user not found or 2FA not enabled")
 		}
 		return "", fmt.Errorf("get TOTP secret: %w", err)
 	}

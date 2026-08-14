@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/mise"
 	"easyserver/internal/systemd"
 )
@@ -99,7 +100,7 @@ func (m *TimerManager) Create(ctx context.Context, spec *CronTask) error {
 	defer m.mu.Unlock()
 
 	if m.timerUnitExists(spec.Name) {
-		return fmt.Errorf("定时任务 %s 已存在", spec.Name)
+		return apperror.ErrConflict.WrapMessage(fmt.Errorf("定时任务 %s 已存在", spec.Name))
 	}
 
 	// 命令先落盘为脚本，unit 的 ExecStart 指其路径。
@@ -152,7 +153,7 @@ func (m *TimerManager) Update(ctx context.Context, spec *CronTask) error {
 	defer m.mu.Unlock()
 
 	if !m.timerUnitExists(spec.Name) {
-		return fmt.Errorf("定时任务 %s 不存在", spec.Name)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("定时任务 %s 不存在", spec.Name))
 	}
 
 	oldTimer, _ := systemd.ReadCronUnitFile(systemd.CronTimerFileName(spec.Name))
@@ -238,7 +239,7 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 	defer m.mu.Unlock()
 
 	if !m.timerUnitExists(name) {
-		return fmt.Errorf("定时任务 %s 不存在", name)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("定时任务 %s 不存在", name))
 	}
 
 	timerFull := systemd.CronTimerFileName(name)
@@ -264,7 +265,7 @@ func (m *TimerManager) Enable(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.timerUnitExists(name) {
-		return fmt.Errorf("定时任务 %s 不存在", name)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("定时任务 %s 不存在", name))
 	}
 	return m.enableTimer(ctx, name)
 }
@@ -274,7 +275,7 @@ func (m *TimerManager) Disable(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.timerUnitExists(name) {
-		return fmt.Errorf("定时任务 %s 不存在", name)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("定时任务 %s 不存在", name))
 	}
 	if err := m.disableTimer(ctx, name); err != nil {
 		return err
@@ -286,7 +287,7 @@ func (m *TimerManager) Disable(ctx context.Context, name string) error {
 // RunNow 立即手动执行任务：systemctl start <name>.service，与 timer 触发同路径。
 func (m *TimerManager) RunNow(ctx context.Context, name string) error {
 	if !m.timerUnitExists(name) {
-		return fmt.Errorf("定时任务 %s 不存在", name)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("定时任务 %s 不存在", name))
 	}
 	output, err := exec.CommandContext(ctx, "systemctl", "start", systemd.CronServiceFileName(name)).CombinedOutput()
 	if err != nil {
@@ -346,7 +347,7 @@ func (m *TimerManager) fillRuntime(ctx context.Context, spec *CronTask) error {
 		return fmt.Errorf("runtime 查询未配置，无法绑定运行时 %s", spec.Runtime)
 	}
 	if !m.runtime.Installed(ctx, lang, exact) {
-		return fmt.Errorf("运行时 %s 未安装（需先到「运行环境管理」安装）", spec.Runtime)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("运行时 %s 未安装（需先到「运行环境管理」安装）", spec.Runtime))
 	}
 	return nil
 }

@@ -729,7 +729,7 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) {
 // validateWebhookURL validates a webhook URL format
 func validateWebhookURL(rawURL string) error {
 	if rawURL == "" {
-		return errors.New("webhook URL cannot be empty")
+		return apperror.ErrBadRequest.WithMessage("webhook URL cannot be empty")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {

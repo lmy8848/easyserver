@@ -158,18 +158,11 @@ type errorPattern struct {
 // errorRegistry is the ordered list of error patterns.
 // First match wins. Add new patterns here instead of modifying WrapError.
 //
-// 迁移状态：产生端已显式分类的条目已移除（path traversal → filemanager、
-// 无效的表名/列名 → database/sql_builder、npm/pip → runtimeenv、DB 配置驱动
-// → database/config、invalid password/TOTP → auth、docker 系列 → container）。
-// 剩余条目是领域级/驱动级泛化错误（SQLite 约束、实体不存在/已存在等），待各
-// 领域迁移到产生端后逐条移除。
+// 迁移状态：全部业务领域已迁移到产生端显式分类（filemanager / runtimeenv /
+// database / auth / container / firewall / cron / systemd / deploy / terminal /
+// settings），errorRegistry 仅剩 SQLite 驱动级约束错误（UNIQUE）。该条目
+// 无代码字面量产生点（驱动运行时生成），待 repo 层统一处理后可移除。
 var errorRegistry = []errorPattern{
-	// Not found
-	{matches: []string{"not found", "未安装", "不存在", "does not exist", "No such container"}, target: ErrNotFound},
-	// Already exists / installed / running
-	{matches: []string{"already installed", "已安装", "已存在", "is already running", "is not running", "未运行"}, target: ErrConflict},
-	// Bad state / precondition
-	{matches: []string{"cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
 	// UNIQUE constraint violation (SQLite)
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
 }

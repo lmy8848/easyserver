@@ -335,7 +335,7 @@ func (s *Service) GetContainer(ctx context.Context, engine Engine, id string) (*
 	}
 
 	if len(rows) == 0 {
-		return nil, fmt.Errorf("container not found: %s", id)
+		return nil, apperror.ErrNotFound.WrapMessage(fmt.Errorf("container not found: %s", id))
 	}
 
 	c := rows[0].toContainer()
@@ -434,7 +434,7 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 		return "", fmt.Errorf("command exceeds maximum length (%d bytes)", maxCmdLen)
 	}
 	if strings.TrimSpace(cmd) == "" {
-		return "", errors.New("command cannot be empty")
+		return "", apperror.ErrBadRequest.WithMessage("command cannot be empty")
 	}
 
 	output, err := exec.CommandContext(ctx, engineBinary(engine), "exec", id, "sh", "-c", cmd).CombinedOutput()
@@ -745,10 +745,10 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 		return err
 	}
 	if strings.TrimSpace(id) == "" {
-		return errors.New("container ID cannot be empty")
+		return apperror.ErrBadRequest.WithMessage("container ID cannot be empty")
 	}
 	if strings.TrimSpace(newName) == "" {
-		return errors.New("new container name cannot be empty")
+		return apperror.ErrBadRequest.WithMessage("new container name cannot be empty")
 	}
 	if len(newName) > 128 {
 		return errors.New("container name too long (max 128 characters)")
@@ -949,7 +949,7 @@ func (s *Service) installDocker(ctx context.Context) error {
 
 	_, err := exec.CommandContext(ctx, "which", "curl").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("curl 未安装，请先安装 curl: %w", err)
+		return apperror.ErrInternal.WrapMessage(fmt.Errorf("curl 未安装，请先安装 curl: %w", err))
 	}
 
 	log.Println("docker: downloading install script...")

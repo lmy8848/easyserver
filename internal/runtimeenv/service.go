@@ -155,7 +155,7 @@ func (s *Service) Install(ctx context.Context, name, version string) error {
 
 	// 已安装判定走磁盘（目录 + 完成标记），而非 DB 行。
 	if Installed(ctx, name, exactVersion) {
-		return fmt.Errorf("%s %s is already installed", name, exactVersion)
+		return apperror.ErrConflict.WrapMessage(fmt.Errorf("%s %s is already installed", name, exactVersion))
 	}
 
 	// 安装脱离请求生命周期：task 执行器内部用 WithoutCancel 剥离取消，请求断开
@@ -228,7 +228,7 @@ func isValidVersion(version string) bool {
 func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 	// 存在性判定走磁盘（目录 + 完成标记）。
 	if !Installed(ctx, name, version) {
-		return fmt.Errorf("%s %s not found", name, version)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("%s %s not found", name, version))
 	}
 
 	// 正在安装/卸载同一版本 → 拒绝（task 互斥，但显式报错更友好）。

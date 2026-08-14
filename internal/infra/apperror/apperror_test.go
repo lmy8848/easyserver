@@ -15,21 +15,11 @@ func TestWrapError_NilInput(t *testing.T) {
 	assert.NoError(t, result)
 }
 
-func TestWrapError_NotFound(t *testing.T) {
-	err := errors.New("resource not found in database")
-	result := WrapError(err)
-
-	var appErr *AppError
-	require.ErrorAs(t, result, &appErr)
-	assert.Equal(t, http.StatusNotFound, appErr.HTTPStatus)
-	assert.Equal(t, CodeNotFound, appErr.Code)
-	assert.Equal(t, err.Error(), appErr.Message)
-}
-
 // 已迁移到产生端显式分类的场景（WrapError 不再嗅探）：
 //   - path traversal → filemanager 直接返回 ErrForbidden
 //   - invalid password / invalid TOTP code → auth 直接返回 ErrUnauthorized
 //   - docker 系列 → container 直接返回 ErrDockerNotInstalled / ErrBadRequest
+//   - not found / 已存在 / cannot be empty 等 → 各领域产生端显式分类
 // 这些错误若再裸传给 WrapError，会按未知错误走 500 —— 这正是迁移的预期
 // 行为（分类责任在产生端）。
 

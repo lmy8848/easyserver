@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/config"
 )
 
@@ -125,7 +126,7 @@ func (s *SessionService) UpdateActivity(ctx context.Context, token string) error
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[token]
 	if !ok {
-		return errors.New("session not found")
+		return apperror.ErrNotFound.WithMessage("session not found")
 	}
 	sess.LoginAt = time.Now()
 	return nil
@@ -247,7 +248,7 @@ func (s *SessionService) IsSessionValidByToken(ctx context.Context, token string
 	defer s.mu.RUnlock()
 	sess, ok := s.sessions[token]
 	if !ok {
-		return nil, errors.New("session not found")
+		return nil, apperror.ErrNotFound.WithMessage("session not found")
 	}
 	cp := *sess
 	return &cp, nil

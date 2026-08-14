@@ -16,6 +16,7 @@ import (
 	"crypto/x509"
 
 	"easyserver/internal/infra"
+	"easyserver/internal/infra/apperror"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -55,7 +56,7 @@ func NewSSHClient(srv *Server, authData string) (*SSHClient, error) {
 
 	hostKeyCallback, err := knownhosts.New(knownHostsPath)
 	if err != nil {
-		return nil, fmt.Errorf("ssh: host key verification unavailable — %s not found or unreadable: %w", knownHostsPath, err)
+		return nil, apperror.ErrInternal.WrapMessage(fmt.Errorf("ssh: host key verification unavailable — %s not found or unreadable: %w", knownHostsPath, err))
 	}
 
 	config := &ssh.ClientConfig{
