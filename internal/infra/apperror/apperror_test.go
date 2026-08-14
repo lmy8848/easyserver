@@ -161,3 +161,28 @@ func TestAppError_Is_NonAppErrorTarget(t *testing.T) {
 	err := ErrBadRequest.WithMessage("x")
 	require.NotErrorIs(t, err, errors.New("请求参数错误"))
 }
+
+// --- 预定义错误约束：Code 全局唯一，且与 HTTP 分类一致 ---
+
+func TestPredefinedErrors_UniqueCodes(t *testing.T) {
+	// 新增预定义哨兵时必须加入此列表：Code 是 errors.Is 的分类/身份标识，
+	// 重复会让两个不同错误互相匹配，破坏调用方判断。
+	sentinels := []*AppError{
+		ErrBadRequest, ErrUnauthorized, ErrTokenExpired, ErrForbidden,
+		ErrNotFound, ErrConflict, ErrRateLimit, ErrInternal,
+		ErrDockerNotInstalled, ErrServiceNotReady,
+	}
+
+	seen := make(map[int]string, len(sentinels))
+	for _, s := range sentinels {
+		if prev, ok := seen[s.Code]; ok {
+			t.Errorf("code %d duplicated: %q 与 %q 共用", s.Code, prev, s.Message)
+		}
+		seen[s.Code] = s.Message
+
+		// Code 与 HTTP 分类一致（40000 段 ↔ 400，40100 ↔ 401 ...）
+		if want := s.HTTPStatus * 100; s.Code < want || s.Code >= want+100 {
+			t.Errorf("code %d 与 HTTPStatus %d 分类不符（应在 %d~%d 段）", s.Code, s.HTTPStatus, want, want+99)
+		}
+	}
+}
