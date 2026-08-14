@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"easyserver/internal/infra/apperror"
 )
 
 // 结构化配置。面板是配置参数的唯一写入方：参数元数据定义在下方，Key 就是驱动
@@ -199,7 +201,7 @@ func (s *Service) applyMySQLConfig(ctx context.Context, v *DBInstance, params ma
 	}
 	major, _ := strconv.Atoi(strings.Split(str(res.Rows[0], 0), ".")[0])
 	if major < 8 {
-		return errors.New("MySQL 8.0+ 才支持在线持久化配置（SET PERSIST）")
+		return apperror.ErrBadRequest.WithMessage("MySQL 8.0+ 才支持在线持久化配置（SET PERSIST）")
 	}
 
 	builder := NewSQLBuilder(DBTypeMySQL)
@@ -213,7 +215,7 @@ func (s *Service) applyMySQLConfig(ctx context.Context, v *DBInstance, params ma
 			literal = value
 		}
 		if _, err := s.driver.Exec(ctx, v, sys, "SET PERSIST "+builder.QuoteIdentifier(key)+" = "+literal); err != nil {
-			return fmt.Errorf("设置参数 %s: %w", key, err)
+			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("设置参数 %s: %w", key, err))
 		}
 	}
 	return nil
@@ -224,7 +226,7 @@ func (s *Service) applyPostgresConfig(ctx context.Context, v *DBInstance, params
 	sys := systemDBName(v.DBType)
 	for key, value := range params {
 		if _, err := s.driver.Exec(ctx, v, sys, "ALTER SYSTEM SET "+builder.QuoteIdentifier(key)+" = '"+strings.ReplaceAll(value, "'", "''")+"'"); err != nil {
-			return false, fmt.Errorf("设置参数 %s: %w", key, err)
+			return false, apperror.ErrBadRequest.WrapMessage(fmt.Errorf("设置参数 %s: %w", key, err))
 		}
 	}
 	if _, err := s.driver.Exec(ctx, v, sys, "SELECT pg_reload_conf()"); err != nil {
@@ -255,12 +257,12 @@ func (s *Service) applyRedisConfig(ctx context.Context, v *DBInstance, params ma
 			continue // 启动期参数，运行时无法 CONFIG SET，重建容器时生效
 		}
 		if err := s.redisFor().ConfigSet(ctx, v, key, value); err != nil {
-			return fmt.Errorf("设置参数 %s: %w", key, err)
+			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("设置参数 %s: %w", key, err))
 		}
 	}
 	if len(params) > 0 {
 		if err := s.redisFor().ConfigRewrite(ctx, v); err != nil {
-			return fmt.Errorf("写回配置文件: %w", err)
+			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("写回配置文件: %w", err))
 		}
 	}
 	return nil

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/mise"
 )
 
@@ -264,7 +265,7 @@ func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, runtimePa
 			if registry == "" && strings.Contains(err.Error(), "exit code 1") {
 				return nil
 			}
-			return fmt.Errorf("pip config set failed: %s", describeCmdErr(err, output, "pip config set global.index-url"))
+			return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("pip config set failed: %s", describeCmdErr(err, output, "pip config set global.index-url")))
 		}
 		return nil
 	default:
@@ -496,7 +497,7 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 				log.Printf("package: corepack did not produce a working %s shim (corepack: err=%v, output=%q), falling back to npm install -g", manager, corepackErr, corepackOutput)
 				installOutput, installErr := s.runManagerCmd(ctx, "", "npm", "install", "-g", manager)
 				if installErr != nil {
-					return fmt.Errorf("failed to auto-install %s: %w (output: %s)", manager, installErr, installOutput)
+					return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("failed to auto-install %s: %w (output: %s)", manager, installErr, installOutput))
 				}
 				s.miseReshim(ctx)
 			}
@@ -517,7 +518,7 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 
 	output, err := s.runManagerCmd(ctx, runtimePath, manager, args...)
 	if err != nil {
-		return fmt.Errorf("%s install failed: %s", manager, describeCmdErr(err, output, manager+" install "+req.Name))
+		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("%s install failed: %s", manager, describeCmdErr(err, output, manager+" install "+req.Name)))
 	}
 
 	log.Printf("package: installed via %s %s", manager, strings.Join(args, " "))
@@ -611,7 +612,7 @@ func (s *PackageService) installPipPackage(ctx context.Context, req *PackageInst
 
 	output, err := s.runManagerCmd(ctx, runtimePath, "pip", args...)
 	if err != nil {
-		return fmt.Errorf("pip install failed: %s", describeCmdErr(err, output, "pip install "+req.Name))
+		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("pip install failed: %s", describeCmdErr(err, output, "pip install "+req.Name)))
 	}
 
 	log.Printf("package: installed %s via pip", req.Name)
@@ -621,7 +622,7 @@ func (s *PackageService) installPipPackage(ctx context.Context, req *PackageInst
 func (s *PackageService) uninstallPipPackage(ctx context.Context, req *PackageUninstallRequest, runtimePath string) error {
 	output, err := s.runManagerCmd(ctx, runtimePath, "pip", "uninstall", "-y", req.Name)
 	if err != nil {
-		return fmt.Errorf("pip uninstall failed: %s", describeCmdErr(err, output, "pip uninstall "+req.Name))
+		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("pip uninstall failed: %s", describeCmdErr(err, output, "pip uninstall "+req.Name)))
 	}
 
 	log.Printf("package: uninstalled %s via pip", req.Name)
@@ -631,7 +632,7 @@ func (s *PackageService) uninstallPipPackage(ctx context.Context, req *PackageUn
 func (s *PackageService) updatePipPackage(ctx context.Context, req *PackageUpdateRequest, runtimePath string) error {
 	output, err := s.runManagerCmd(ctx, runtimePath, "pip", "install", "--upgrade", req.Name)
 	if err != nil {
-		return fmt.Errorf("pip update failed: %s", describeCmdErr(err, output, "pip update "+req.Name))
+		return apperror.ErrBadRequest.WrapMessage(fmt.Errorf("pip update failed: %s", describeCmdErr(err, output, "pip update "+req.Name)))
 	}
 
 	log.Printf("package: updated %s via pip", req.Name)

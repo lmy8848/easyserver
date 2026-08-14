@@ -26,16 +26,6 @@ func TestWrapError_NotFound(t *testing.T) {
 	assert.Equal(t, err.Error(), appErr.Message)
 }
 
-func TestWrapError_PathTraversal(t *testing.T) {
-	err := errors.New("path traversal detected")
-	result := WrapError(err)
-
-	var appErr *AppError
-	require.ErrorAs(t, result, &appErr)
-	assert.Equal(t, http.StatusForbidden, appErr.HTTPStatus)
-	assert.Equal(t, CodeForbidden, appErr.Code)
-}
-
 func TestWrapError_DockerNotInstalled(t *testing.T) {
 	err := errors.New("docker is not installed")
 	result := WrapError(err)
@@ -47,15 +37,11 @@ func TestWrapError_DockerNotInstalled(t *testing.T) {
 	assert.Contains(t, appErr.Message, "docker is not installed")
 }
 
-func TestWrapError_InvalidPassword(t *testing.T) {
-	err := errors.New("invalid password")
-	result := WrapError(err)
-
-	var appErr *AppError
-	require.ErrorAs(t, result, &appErr)
-	assert.Equal(t, http.StatusUnauthorized, appErr.HTTPStatus)
-	assert.Equal(t, CodeUnauthorized, appErr.Code)
-}
+// 已迁移到产生端显式分类的场景（WrapError 不再嗅探）：
+//   - path traversal → filemanager 直接返回 ErrForbidden
+//   - invalid password / invalid TOTP code → auth 直接返回 ErrUnauthorized
+// 这些错误若再裸传给 WrapError，会按未知错误走 500 —— 这正是迁移的预期
+// 行为（分类责任在产生端）。
 
 func TestWrapError_UniqueConstraint(t *testing.T) {
 	err := errors.New("UNIQUE constraint failed: users.email")
@@ -103,6 +89,23 @@ func TestAppError_Wrap(t *testing.T) {
 	assert.Equal(t, inner, wrapped.Unwrap())
 	assert.Contains(t, wrapped.Error(), "内部服务器错误")
 	assert.Contains(t, wrapped.Error(), "disk full")
+}
+
+func TestAppError_WrapMessage(t *testing.T) {
+	inner := errors.New("UNIQUE constraint failed: users.email")
+	wrapped := ErrConflict.WrapMessage(inner)
+
+	// 分类保留哨兵语义
+	assert.Equal(t, http.StatusConflict, wrapped.HTTPStatus)
+	assert.Equal(t, CodeConflict, wrapped.Code)
+	// 用户可见消息 = 底层错误文本
+	assert.Equal(t, "UNIQUE constraint failed: users.email", wrapped.Message)
+	// 原始错误留在链上：Unwrap + errors.Is/As 穿透 + errors.Is 匹配哨兵
+	assert.Equal(t, inner, wrapped.Unwrap())
+	require.ErrorIs(t, wrapped, ErrConflict)
+	var target *AppError
+	require.ErrorAs(t, wrapped, &target)
+	assert.Equal(t, inner, target.Unwrap())
 }
 
 func TestAppError_ErrorString(t *testing.T) {

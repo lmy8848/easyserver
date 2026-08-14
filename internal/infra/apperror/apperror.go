@@ -72,6 +72,21 @@ func (e *AppError) WithMessage(msg string) *AppError {
 	return &ne
 }
 
+// WrapMessage 一步完成"分类 + 原始消息 + 错误链"：产生端显式指定错误分类
+// 的推荐方式——
+//
+//	return apperror.ErrConflict.WrapMessage(err)
+//
+// 等价于 WithMessage(err.Error()).Wrap(err)：分类（Code/HTTPStatus）保留
+// 哨兵语义，用户可见消息取底层错误文本，原始错误经 Unwrap 留在链上
+// （errors.Is/As 仍可穿透）。
+func (e *AppError) WrapMessage(err error) *AppError {
+	ne := *e
+	ne.Message = err.Error()
+	ne.Err = err
+	return &ne
+}
+
 // ============================================================
 // 错误码常量（按 HTTP 分类，兼作 errors.Is 的分类标识；同一分类的
 // 细分哨兵共享 Code）
@@ -142,33 +157,27 @@ type errorPattern struct {
 
 // errorRegistry is the ordered list of error patterns.
 // First match wins. Add new patterns here instead of modifying WrapError.
+//
+// 迁移状态：产生端已显式分类的条目已移除（path traversal → filemanager、
+// 无效的表名/列名 → database/sql_builder、npm/pip → runtimeenv、DB 配置驱动
+// → database/config、invalid password/TOTP → auth）。剩余条目是领域级/驱动级
+// 泛化错误（docker CLI 输出、SQLite 约束、实体不存在/已存在等），待各领域
+// 迁移到产生端后逐条移除。
 var errorRegistry = []errorPattern{
-	// Security: path traversal
-	{matches: []string{"path traversal", "absolute paths are not allowed", "cannot resolve path"}, target: ErrForbidden},
 	// Docker not available
 	{matches: []string{"docker info failed", "Cannot connect to the Docker daemon", "docker: command not found", "executable file not found", "docker is not installed", "not accessible"}, target: ErrDockerNotInstalled},
 	// Docker operation failures
 	{matches: []string{"docker pull failed", "docker update failed", "docker start failed", "docker stop failed", "docker restart failed", "docker pause failed", "docker unpause failed", "docker rm failed", "docker rmi failed", "docker exec failed"}, target: ErrBadRequest},
-	// Auth errors
-	{matches: []string{"invalid password", "invalid TOTP code", "invalid credentials"}, target: ErrUnauthorized},
 	// Not found
 	{matches: []string{"not found", "未安装", "不存在", "does not exist", "No such container"}, target: ErrNotFound},
 	// Already exists / installed / running
 	{matches: []string{"already installed", "已安装", "已存在", "is already running", "is not running", "未运行"}, target: ErrConflict},
 	// Bad state / precondition
 	{matches: []string{"cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
-	// DB 标识符/名称校验（builder 内嵌校验的报错，路由层不再前置检查）
-	{matches: []string{"无效的表名", "无效的列名"}, target: ErrBadRequest},
 	// UNIQUE constraint violation (SQLite)
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
 	// No data available
 	{matches: []string{"no versions available", "无可用版本"}, target: ErrBadRequest},
-	// Package manager: package or version not found in registry (npm / pnpm)
-	{matches: []string{"npm error code E404", "ERR_PNPM_FETCH_404", "ERR_PNPM_NO_MATCHING_VERSION", "is not in the npm registry", "No matching version found"}, target: ErrBadRequest},
-	// Package manager: pip 用户输入类错误（包名/版本不存在、wheel 构建失败、PEP 668 等）
-	{matches: []string{"No matching distribution found for", "Could not find a version that satisfies the requirement", "Could not build wheels for", "externally-managed-environment", "ERROR: Invalid requirement"}, target: ErrBadRequest},
-	// DB 配置驱动写入的参数/值非法（SET PERSIST 只读变量、PG 未知参数、Redis 非法值）
-	{matches: []string{"is a read only variable", "unrecognized configuration parameter", "CONFIG SET failed", "CONFIG REWRITE failed"}, target: ErrBadRequest},
 }
 
 // WrapError automatically wraps an error into the appropriate AppError

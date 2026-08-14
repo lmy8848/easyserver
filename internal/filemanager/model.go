@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"easyserver/internal/infra/apperror"
 )
 
 // FileEntry represents a file or directory entry.
@@ -121,7 +123,7 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 			break
 		}
 		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("cannot resolve path: %w", err)
+			return "", apperror.ErrForbidden.WrapMessage(fmt.Errorf("cannot resolve path: %w", err))
 		}
 
 		parent := filepath.Dir(checkPath)
@@ -134,7 +136,7 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 	}
 
 	if !isSubPath(absBase, resolvedPath) {
-		return "", errors.New("path traversal detected: path escapes base directory")
+		return "", apperror.ErrForbidden.WithMessage("path traversal detected: path escapes base directory")
 	}
 
 	return resolvedPath, nil
@@ -154,7 +156,7 @@ func (m *Manager) validateRealPath(realPath string) error {
 		return fmt.Errorf("resolve symlinks: %w", err)
 	}
 	if !isSubPath(m.basePath, resolved) {
-		return errors.New("path traversal detected: path escapes base directory")
+		return apperror.ErrForbidden.WithMessage("path traversal detected: path escapes base directory")
 	}
 	return nil
 }
@@ -186,10 +188,10 @@ func (m *Manager) ResolveShareSubpath(shareRoot, subpath string) (string, error)
 		return "", err
 	}
 	if !isSubPath(m.basePath, resolved) {
-		return "", errors.New("path traversal detected: path escapes base directory")
+		return "", apperror.ErrForbidden.WithMessage("path traversal detected: path escapes base directory")
 	}
 	if !isSubPath(shareRoot, resolved) {
-		return "", errors.New("path traversal detected: path escapes share root")
+		return "", apperror.ErrForbidden.WithMessage("path traversal detected: path escapes share root")
 	}
 	return target, nil
 }
