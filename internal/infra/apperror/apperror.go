@@ -14,11 +14,12 @@ import (
 // AppError is the unified application error type used across all packages.
 // Handlers return AppError (or wrap it), and middleware converts it to HTTP responses.
 //
-// 分类语义：Code 是唯一分类标识（每个预定义哨兵一个 Code），Is 按 Code
-// 比较——因此 WithMessage/Wrap 产生的副本与哨兵之间 errors.Is 成立。
+// 分类语义：Code 按 HTTP 分类（同分类细分哨兵共享 Code，如 ErrForbidden /
+// ErrPathViolation 都是 40300），Is 按 Code 比较——因此 WithMessage/Wrap
+// 产生的副本与哨兵之间 errors.Is 成立，分类粒度即 HTTP 分类。
 type AppError struct {
 	HTTPStatus int    // HTTP status code
-	Code       int    // Business error code（唯一，兼作哨兵身份）
+	Code       int    // Business error code（HTTP 分类标识，兼作哨兵身份）
 	Message    string // User-facing message
 	Err        error  // Original error for logging
 }
@@ -72,23 +73,23 @@ func (e *AppError) WithMessage(msg string) *AppError {
 }
 
 // ============================================================
-// 错误码常量（每个哨兵唯一，兼作 errors.Is 的分类标识）
+// 错误码常量（按 HTTP 分类，兼作 errors.Is 的分类标识；同一分类的
+// 细分哨兵共享 Code）
 // ============================================================
 
 const (
 	CodeSuccess       = 0
 	CodeBadRequest    = 40000
 	CodeUnauthorized  = 40100
-	CodeTokenExpired  = 40101
 	CodeForbidden     = 40300
-	CodePathViolation = 40301
 	CodeNotFound      = 40400
 	CodeConflict      = 40900
 	CodeRateLimit     = 42900
 	CodeInternalError = 50000
 )
 
-// 派生业务码：同一 HTTP 分类下的细分哨兵（400 段）。
+// 派生业务码：400 段细分哨兵（仍属 BadRequest 分类，Code 唯一以支持
+// 精确 errors.Is 判断，如"是否 Docker 未安装"）。
 const (
 	CodeDockerNotInstalled = 40001
 	CodeServiceNotReady    = 40002
@@ -104,11 +105,13 @@ var (
 
 	// 401 Unauthorized
 	ErrUnauthorized = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "未授权"}
-	ErrTokenExpired = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeTokenExpired, Message: "token 已过期"}
+	// token 无效：覆盖签名错误/格式错误/过期等一切校验失败（与 ErrUnauthorized
+	// 同分类，errors.Is(err, ErrUnauthorized) 成立）
+	ErrTokenExpired = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "token 无效"}
 
 	// 403 Forbidden
 	ErrForbidden     = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "禁止访问"}
-	ErrPathViolation = &AppError{HTTPStatus: http.StatusForbidden, Code: CodePathViolation, Message: "路径越权"}
+	ErrPathViolation = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "路径越权"}
 
 	// 404 Not Found
 	ErrNotFound = &AppError{HTTPStatus: http.StatusNotFound, Code: CodeNotFound, Message: "资源不存在"}

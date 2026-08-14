@@ -33,7 +33,7 @@ func TestWrapError_PathTraversal(t *testing.T) {
 	var appErr *AppError
 	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusForbidden, appErr.HTTPStatus)
-	assert.Equal(t, CodePathViolation, appErr.Code)
+	assert.Equal(t, CodeForbidden, appErr.Code)
 }
 
 func TestWrapError_DockerNotInstalled(t *testing.T) {
@@ -145,12 +145,18 @@ func TestAppError_Is_Chain(t *testing.T) {
 	require.ErrorIs(t, outer, ErrInternal)
 }
 
-func TestAppError_Is_UniqueCode(t *testing.T) {
-	// Code 唯一化后，同 HTTP 分类的细分哨兵互不匹配
+func TestAppError_Is_SameCategorySentinels(t *testing.T) {
+	// 同 HTTP 分类的细分哨兵共享 Code：相互 errors.Is 匹配（分类粒度 = HTTP 分类）
 	pathErr := ErrPathViolation.WithMessage("路径越权")
 	require.ErrorIs(t, pathErr, ErrPathViolation)
-	require.NotErrorIs(t, pathErr, ErrForbidden)
+	require.ErrorIs(t, pathErr, ErrForbidden) // 同为 403 分类
 
+	// token 无效归入 401 分类
+	tokenErr := ErrTokenExpired.WithMessage("invalid or expired token")
+	require.ErrorIs(t, tokenErr, ErrTokenExpired)
+	require.ErrorIs(t, tokenErr, ErrUnauthorized)
+
+	// 400 段细分哨兵保持独立 Code：与 ErrBadRequest 互不匹配
 	dockerErr := ErrDockerNotInstalled.WithMessage("Docker 未安装")
 	require.ErrorIs(t, dockerErr, ErrDockerNotInstalled)
 	require.NotErrorIs(t, dockerErr, ErrBadRequest)
