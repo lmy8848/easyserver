@@ -24,14 +24,14 @@ func splitRuntimeBinding(s string) (lang, exact string) {
 func (h *RuntimeHandler) getRuntimeByBinding(c *gin.Context, binding string) (*runtimeenv.RuntimeEnvironment, error) {
 	lang, exact := splitRuntimeBinding(binding)
 	if lang == "" || exact == "" {
-		return nil, errx.BadRequest("无效的运行时绑定: " + binding)
+		return nil, errx.BadRequest("无效的运行时绑定: %s", binding)
 	}
 	env, err := h.runtimeService.GetByLangExact(c.Request.Context(), lang, exact)
 	if err != nil {
 		return nil, err
 	}
 	if env == nil {
-		return nil, errx.NotFound("运行时环境不存在: " + binding)
+		return nil, errx.NotFound("运行时环境不存在: %s", binding)
 	}
 	return env, nil
 }
@@ -69,7 +69,7 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) (any, error) {
 
 	// Validate runtime name
 	if !runtimeenv.IsSupported(name) {
-		return nil, errx.BadRequest("不支持的运行时: " + name)
+		return nil, errx.BadRequest("不支持的运行时: %s", name)
 	}
 
 	environments, err := h.runtimeService.ListByName(c.Request.Context(), name)
@@ -91,7 +91,7 @@ func (h *RuntimeHandler) Install(c *gin.Context) (any, error) {
 
 	// Validate runtime name
 	if !runtimeenv.IsSupported(req.Name) {
-		return nil, errx.BadRequest("不支持的运行时: " + req.Name)
+		return nil, errx.BadRequest("不支持的运行时: %s", req.Name)
 	}
 
 	middleware.AuditSummary(c, "安装运行时 "+req.Name+" "+req.Version)
@@ -113,7 +113,7 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) (any, error) {
 
 	// Validate runtime name
 	if !runtimeenv.IsSupported(req.Name) {
-		return nil, errx.BadRequest("不支持的运行时: " + req.Name)
+		return nil, errx.BadRequest("不支持的运行时: %s", req.Name)
 	}
 
 	middleware.AuditSummary(c, "卸载运行时 "+req.Name+" "+req.Version)
@@ -209,7 +209,7 @@ func (h *RuntimeHandler) GetRemoteVersions(c *gin.Context) (any, error) {
 	}
 
 	if !runtimeenv.IsSupported(name) {
-		return nil, errx.BadRequest("不支持的运行时: " + name)
+		return nil, errx.BadRequest("不支持的运行时: %s", name)
 	}
 
 	versions, err := h.runtimeService.GetRemoteVersions(c.Request.Context(), name)
@@ -251,14 +251,14 @@ func (h *PackageManagerHandler) getRuntimeFromBinding(c *gin.Context, binding st
 	}
 	lang, exact = splitRuntimeBinding(binding)
 	if lang == "" || exact == "" {
-		return "", "", "", errx.BadRequest("无效的 runtime: " + binding)
+		return "", "", "", errx.BadRequest("无效的 runtime: %s", binding)
 	}
 	env, gerr := h.runtimeService.GetByLangExact(c.Request.Context(), lang, exact)
 	if gerr != nil {
 		return "", "", "", gerr
 	}
 	if env == nil {
-		return "", "", "", errx.NotFound("运行时不存在: " + binding)
+		return "", "", "", errx.NotFound("运行时不存在: %s", binding)
 	}
 	if !runtimeenv.SupportsGlobalPkgsFor(lang) {
 		return "", "", "", errx.BadRequest("运行环境 %s 暂不支持面板全局包管理", lang)

@@ -201,7 +201,7 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) (any, error) {
 	}
 
 	if req.Region != nil && !validRegions[*req.Region] {
-		return nil, errx.BadRequest("无效的区域: " + *req.Region)
+		return nil, errx.BadRequest("无效的区域: %s", *req.Region)
 	}
 
 	h.store.Update(func(cfg *config.Config) {
@@ -821,7 +821,7 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) (any, error) {
 			"load_1m": true, "load_5m": true, "load_15m": true,
 		}
 		if !validMetrics[rule.Metric] {
-			return nil, errx.BadRequest("无效的指标: " + rule.Metric)
+			return nil, errx.BadRequest("无效的指标: %s", rule.Metric)
 		}
 		if rule.Threshold <= 0 || rule.Threshold > 100 {
 			return nil, errx.BadRequest("阈值必须在 0 到 100 之间")

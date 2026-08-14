@@ -56,7 +56,7 @@ func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.Hand
 		})
 
 		if err != nil || !token.Valid {
-			c.Error(&errx.Error{Kind: errx.KindUnauthorized, Code: errx.CodeTokenExpired, Message: "invalid or expired token"})
+			c.Error(ErrTokenExpired)
 			c.Abort()
 			return
 		}

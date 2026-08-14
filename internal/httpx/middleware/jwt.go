@@ -11,6 +11,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// CodeTokenExpired is the specific business error code for token expiration (40101)
+const CodeTokenExpired = 40101
+
+// ErrTokenExpired is the sentinel error returned when a JWT token is expired or invalid
+var ErrTokenExpired = errx.NewSentinel(errx.KindUnauthorized, CodeTokenExpired, "invalid or expired token")
+
 type JWTClaims struct {
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
@@ -66,7 +72,7 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 		})
 
 		if err != nil || !token.Valid {
-			c.Error(&errx.Error{Kind: errx.KindUnauthorized, Code: errx.CodeTokenExpired, Message: "invalid or expired token"})
+			c.Error(ErrTokenExpired)
 			c.Abort()
 			return
 		}

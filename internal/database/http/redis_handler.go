@@ -136,14 +136,14 @@ func (h *RedisHandler) SetValue(c *gin.Context) (any, error) {
 		}
 	case "list", "set":
 		if len(req.Values) == 0 {
-			return nil, errx.BadRequest(typ + " 至少需要一个元素")
+			return nil, errx.BadRequest("%s 至少需要一个元素", typ)
 		}
 	case "zset":
 		if len(req.ZSetMembers) == 0 {
 			return nil, errx.BadRequest("zset 至少需要一个成员")
 		}
 	default:
-		return nil, errx.BadRequest("不支持的 Redis 类型: " + typ)
+		return nil, errx.BadRequest("不支持的 Redis 类型: %s", typ)
 	}
 	middleware.AuditSummary(c, "添加 Redis key "+req.Key)
 	// 集合类型添加 = 新建键：ttl 缺省或 -1 视为永久（0），>0 才补 EXPIRE。

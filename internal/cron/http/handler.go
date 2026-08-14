@@ -338,7 +338,7 @@ func (h *CronHandler) GetScriptLogs(c *gin.Context) (any, error) {
 	}
 	stdout, err := exec.CommandContext(c.Request.Context(), "journalctl", args...).Output()
 	if err != nil {
-		return nil, errx.Internal("读取历史日志失败: " + string(stdout))
+		return nil, errx.Internal("读取历史日志失败: %s", string(stdout))
 	}
 
 	logs := parseScriptJournalLogs(string(stdout))

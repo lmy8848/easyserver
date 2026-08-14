@@ -147,7 +147,7 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 		// Sanitize ws.Name to prevent shell injection - only allow alphanumeric, hyphens, dots
 		safeName := sanitizePackageName(ws.Name)
 		if safeName == "" {
-			return errx.BadRequest("无效的服务器名称：" + ws.Name)
+			return errx.BadRequest("无效的服务器名称：%s", ws.Name)
 		}
 		uninstallCmd = "apt-get remove -y " + safeName
 	}

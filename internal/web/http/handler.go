@@ -83,7 +83,7 @@ func (h *WebServerHandler) Create(c *gin.Context) (any, error) {
 	// Look up the predefined template — only predefined server types are allowed
 	predef := web.FindPredefinedWebServer(req.Name)
 	if predef == nil {
-		return nil, errx.BadRequest(fmt.Sprintf("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, web.GetPredefinedWebServerNames()))
+		return nil, errx.BadRequest("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, web.GetPredefinedWebServerNames())
 	}
 
 	// Build the WebServer from the trusted template, with optional display overrides
@@ -596,7 +596,7 @@ func (h *WebServerHandler) BrowseDirs(c *gin.Context) (any, error) {
 
 	// Security: must be under allowed roots
 	if !isAllowedPath(reqPath) {
-		return nil, errx.BadRequest("路径必须在以下目录下: " + strings.Join(allowedRoots, ", "))
+		return nil, errx.BadRequest("路径必须在以下目录下: %s", strings.Join(allowedRoots, ", "))
 	}
 
 	// Check directory exists

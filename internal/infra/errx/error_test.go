@@ -75,29 +75,17 @@ func TestNew_And_Wrap(t *testing.T) {
 		require.ErrorAs(t, err, &xErr)
 		assert.Equal(t, "资源不存在", xErr.Message)
 	})
-
-	t.Run("Wrap with cause", func(t *testing.T) {
-		cause := errors.New("disk full")
-		err := Wrap(KindInternal, cause)
-		var xErr *Error
-		require.ErrorAs(t, err, &xErr)
-		assert.Equal(t, KindInternal, xErr.Kind)
-		assert.Equal(t, "内部服务器错误", xErr.Message)
-		assert.Equal(t, cause, xErr.Cause)
-		assert.Equal(t, "内部服务器错误: disk full", xErr.Error())
-	})
-
-	t.Run("Wrap nil returns nil", func(t *testing.T) {
-		assert.NoError(t, Wrap(KindInternal, nil))
-	})
 }
 
-func TestTwoTierIs(t *testing.T) {
+func TestNewSentinel_And_TwoTierIs(t *testing.T) {
+	sampleSentinelA := NewSentinel(KindUnavailable, 50001, "服务未就绪")
+	sampleSentinelB := NewSentinel(KindUnavailable, 50002, "连接超时")
+
 	t.Run("Tier 1: Sentinel exact pointer match", func(t *testing.T) {
-		wrappedSentinel := fmt.Errorf("wrapped: %w", ErrDockerNotInstalled)
-		require.ErrorIs(t, wrappedSentinel, ErrDockerNotInstalled)
-		require.NotErrorIs(t, wrappedSentinel, ErrServiceNotReady)
-		require.NotErrorIs(t, ErrDockerNotInstalled, Internal("other internal"))
+		wrappedSentinel := fmt.Errorf("wrapped: %w", sampleSentinelA)
+		require.ErrorIs(t, wrappedSentinel, sampleSentinelA)
+		require.NotErrorIs(t, wrappedSentinel, sampleSentinelB)
+		require.NotErrorIs(t, sampleSentinelA, Internal("other internal"))
 	})
 
 	t.Run("Tier 2: Kind semantic match", func(t *testing.T) {
@@ -110,8 +98,8 @@ func TestTwoTierIs(t *testing.T) {
 		require.NotErrorIs(t, nf1, KindBadRequest)
 
 		// Sentinel also matches its underlying Kind
-		require.ErrorIs(t, ErrDockerNotInstalled, KindUnavailable)
-		require.ErrorIs(t, ErrServiceNotReady, KindUnavailable)
+		require.ErrorIs(t, sampleSentinelA, KindUnavailable)
+		require.ErrorIs(t, sampleSentinelB, KindUnavailable)
 
 		// Different error instances don't pointer-match each other
 		require.NotErrorIs(t, nf1, nf2)
@@ -150,7 +138,7 @@ func TestSafeError_Sanitization(t *testing.T) {
 		assert.NotContains(t, safe, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xyz")
 		assert.NotContains(t, safe, "Secret123")
 		assert.NotContains(t, safe, "key-456")
-		assert.Contains(t, safe, "[REDACTED]")
+		assert.Contains(t, safe, "******")
 		assert.Contains(t, safe, "认证失败")
 	})
 }

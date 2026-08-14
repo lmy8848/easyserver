@@ -124,7 +124,7 @@ func (s *WebsiteService) GetConfig(ctx context.Context, webServerID, id int64) (
 	confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 	data, err := os.ReadFile(confPath)
 	if err != nil {
-		return "", errx.NotFound("配置文件不存在: " + confPath)
+		return "", errx.NotFound("配置文件不存在: %s", confPath)
 	}
 	return string(data), nil
 }

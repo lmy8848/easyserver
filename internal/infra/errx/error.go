@@ -1,6 +1,7 @@
 package errx
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -24,12 +25,11 @@ const (
 	KindNotImplemented
 )
 
-// Standard business error codes (for API JSON wire-format compatibility)
+// Standard category business error codes (for API JSON wire-format default mapping)
 const (
 	CodeSuccess        = 0
 	CodeBadRequest     = 40000
 	CodeUnauthorized   = 40100
-	CodeTokenExpired   = 40101
 	CodeForbidden      = 40300
 	CodeNotFound       = 40400
 	CodeConflict       = 40900
@@ -103,7 +103,7 @@ func defaultMessage(k Kind) string {
 type Error struct {
 	Kind    Kind   // 语义分类
 	Message string // 用户可见文案
-	Code    int    // 业务码；0 = 用 mapKind 默认码，非 0 = 覆盖（业务细分）
+	Code    int    // 业务码；0 = 用 mapKind 默认码，非 0 = 领域自定义细分业务码
 	Cause   error  // 底层错误（日志用），可为 nil
 }
 
@@ -119,7 +119,7 @@ func (e *Error) Unwrap() error {
 }
 
 // Is 实现两档判断：
-// 1. 指针身份（哨兵精确匹配，如 ErrDockerNotInstalled）
+// 1. 指针身份（哨兵精确匹配，如各领域自定义哨兵）
 // 2. Kind 分类兜底（如 errors.Is(err, errx.KindNotFound)）
 func (e *Error) Is(target error) bool {
 	if t, ok := target.(*Error); ok {
@@ -142,17 +142,17 @@ func (e *Error) SafeError() string {
 }
 
 // ============================================================
-// 预定义细分哨兵（保持 50001/50002 等兼容）
-// ============================================================
-
-var (
-	ErrDockerNotInstalled = &Error{Kind: KindUnavailable, Code: 50001, Message: "Docker 未安装或未启动"}
-	ErrServiceNotReady    = &Error{Kind: KindUnavailable, Code: 50002, Message: "服务未就绪"}
-)
-
-// ============================================================
 // 工厂与便捷构造函数
 // ============================================================
+
+// NewSentinel 创建带有自定义业务码的领域哨兵错误（各领域定义专属错误使用）
+func NewSentinel(kind Kind, code int, message string) *Error {
+	return &Error{
+		Kind:    kind,
+		Code:    code,
+		Message: message,
+	}
+}
 
 // New 创建指定 Kind 的通用错误
 func New(kind Kind, msg string, cause ...error) error {
@@ -170,72 +170,111 @@ func New(kind Kind, msg string, cause ...error) error {
 	}
 }
 
-// Wrap 包装底层错误，Message 取 Kind 默认文案
-func Wrap(kind Kind, cause error) error {
-	if cause == nil {
-		return nil
+// BadRequest 创建参数错误 (KindBadRequest)
+func BadRequest(msg string, args ...any) error {
+	return formatError(KindBadRequest, msg, args...)
+}
+
+// Unauthorized 创建未授权错误 (KindUnauthorized)
+func Unauthorized(msg string, args ...any) error {
+	return formatError(KindUnauthorized, msg, args...)
+}
+
+// Forbidden 创建禁止访问错误 (KindForbidden)
+func Forbidden(msg string, args ...any) error {
+	return formatError(KindForbidden, msg, args...)
+}
+
+// NotFound 创建资源不存在错误 (KindNotFound)
+func NotFound(msg string, args ...any) error {
+	return formatError(KindNotFound, msg, args...)
+}
+
+// Conflict 创建资源冲突错误 (KindConflict)
+func Conflict(msg string, args ...any) error {
+	return formatError(KindConflict, msg, args...)
+}
+
+// RateLimit 创建限流错误 (KindRateLimit)
+func RateLimit(msg string, args ...any) error {
+	return formatError(KindRateLimit, msg, args...)
+}
+
+// Internal 创建内部错误 (KindInternal)
+func Internal(msg string, args ...any) error {
+	return formatError(KindInternal, msg, args...)
+}
+
+// Unavailable 创建服务不可用/未就绪错误 (KindUnavailable)
+func Unavailable(msg string, args ...any) error {
+	return formatError(KindUnavailable, msg, args...)
+}
+
+// Timeout 创建操作超时错误 (KindTimeout)
+func Timeout(msg string, args ...any) error {
+	return formatError(KindTimeout, msg, args...)
+}
+
+// NotImplemented 创建功能未实现错误 (KindNotImplemented)
+func NotImplemented(msg string, args ...any) error {
+	return formatError(KindNotImplemented, msg, args...)
+}
+
+// formatError 解析 msg 字符串和参数，使用 fmt.Errorf 支持 %w 与标准格式化
+func formatError(kind Kind, msg string, args ...any) error {
+	var cause error
+	for _, arg := range args {
+		if err, ok := arg.(error); ok {
+			cause = err
+		}
 	}
+
+	if len(args) == 0 {
+		return &Error{
+			Kind:    kind,
+			Message: msg,
+			Cause:   cause,
+		}
+	}
+
+	formattedErr := fmt.Errorf(msg, args...)
+	if cause == nil {
+		cause = errors.Unwrap(formattedErr)
+	}
+
 	return &Error{
 		Kind:    kind,
-		Message: defaultMessage(kind),
+		Message: formattedErr.Error(),
 		Cause:   cause,
 	}
 }
 
-func format(kind Kind, msg string, args ...any) error {
-	if len(args) > 0 {
-		msg = fmt.Sprintf(msg, args...)
-	}
-	return &Error{
-		Kind:    kind,
-		Message: msg,
-	}
-}
-
-func BadRequest(msg string, args ...any) error     { return format(KindBadRequest, msg, args...) }
-func Unauthorized(msg string, args ...any) error   { return format(KindUnauthorized, msg, args...) }
-func Forbidden(msg string, args ...any) error      { return format(KindForbidden, msg, args...) }
-func NotFound(msg string, args ...any) error       { return format(KindNotFound, msg, args...) }
-func Conflict(msg string, args ...any) error       { return format(KindConflict, msg, args...) }
-func RateLimit(msg string, args ...any) error      { return format(KindRateLimit, msg, args...) }
-func Internal(msg string, args ...any) error       { return format(KindInternal, msg, args...) }
-func Unavailable(msg string, args ...any) error    { return format(KindUnavailable, msg, args...) }
-func Timeout(msg string, args ...any) error        { return format(KindTimeout, msg, args...) }
-func NotImplemented(msg string, args ...any) error { return format(KindNotImplemented, msg, args...) }
-
 // ============================================================
-// 日志脱敏内部函数
+// 日志敏感信息脱敏
 // ============================================================
 
-var sensitivePatterns = []string{
-	"token",
-	"password",
-	"secret",
-	"credential",
-	"authorization",
-	"bearer",
-	"jwt",
-	"api_key",
-	"apikey",
-	"access_key",
+var sensitiveKeys = []string{
+	"token", "password", "secret", "authorization",
+	"jwt", "api_key", "apikey", "private_key", "passwd",
 }
 
+// sanitizeSensitiveInfo 脱敏日志字符串中的敏感信息
 func sanitizeSensitiveInfo(s string) string {
 	lower := strings.ToLower(s)
-	for _, pattern := range sensitivePatterns {
-		idx := strings.Index(lower, pattern)
-		if idx >= 0 {
-			start := idx + len(pattern)
-			if start < len(s) {
-				for start < len(s) && (s[start] == ':' || s[start] == '=' || s[start] == ' ') {
-					start++
+	for _, key := range sensitiveKeys {
+		if idx := strings.Index(lower, key); idx != -1 {
+			sepIdx := strings.IndexAny(s[idx:], "=:")
+			if sepIdx != -1 {
+				valStart := idx + sepIdx + 1
+				for valStart < len(s) && (s[valStart] == ' ' || s[valStart] == '"' || s[valStart] == '\'') {
+					valStart++
 				}
-				end := start
-				for end < len(s) && s[end] != ' ' && s[end] != ',' && s[end] != '\n' {
-					end++
+				valEnd := valStart
+				for valEnd < len(s) && s[valEnd] != ' ' && s[valEnd] != '&' && s[valEnd] != ',' && s[valEnd] != '"' && s[valEnd] != '\'' && s[valEnd] != '\n' {
+					valEnd++
 				}
-				if end > start {
-					s = s[:start] + "[REDACTED]" + s[end:]
+				if valEnd > valStart {
+					s = s[:valStart] + "******" + s[valEnd:]
 					lower = strings.ToLower(s)
 				}
 			}

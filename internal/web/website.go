@@ -495,7 +495,7 @@ func validateDomain(domain string) error {
 	// Only allow alphanumeric, hyphens, dots
 	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)
 	if !domainRegex.MatchString(domain) {
-		return errx.BadRequest("无效的域名：" + domain)
+		return errx.BadRequest("无效的域名：%s", domain)
 	}
 	if len(domain) > 253 {
 		return errx.BadRequest("域名过长：%d 字符", len(domain))

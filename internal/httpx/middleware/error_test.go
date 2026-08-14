@@ -51,13 +51,15 @@ func setupErrorTestRouter() *gin.Engine {
 func TestErrorHandler(t *testing.T) {
 	r := setupErrorTestRouter()
 
+	customSentinel := errx.NewSentinel(errx.KindUnavailable, 50001, "服务未安装或不可用")
+
 	// 1. errx channel
 	r.GET("/test-errx-notfound", func(c *gin.Context) {
 		c.Error(errx.NotFound("资源 %s 不存在", "user-1"))
 	})
 
 	r.GET("/test-errx-sentinel", func(c *gin.Context) {
-		c.Error(errx.ErrDockerNotInstalled)
+		c.Error(customSentinel)
 	})
 
 	r.GET("/test-errx-conflict", func(c *gin.Context) {
@@ -83,7 +85,7 @@ func TestErrorHandler(t *testing.T) {
 		assert.Nil(t, resp.Data)
 	})
 
-	t.Run("errx.ErrDockerNotInstalled (sentinel code override)", func(t *testing.T) {
+	t.Run("custom sentinel code override", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/test-errx-sentinel", nil)
 		r.ServeHTTP(w, req)
@@ -93,7 +95,7 @@ func TestErrorHandler(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.Equal(t, 50001, resp.Code)
-		assert.Equal(t, "Docker 未安装或未启动", resp.Message)
+		assert.Equal(t, "服务未安装或不可用", resp.Message)
 	})
 
 	t.Run("errx.Conflict", func(t *testing.T) {

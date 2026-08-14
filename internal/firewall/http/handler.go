@@ -395,7 +395,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) (any, error) {
 
 		// Check if port is protected (panel port or SSH)
 		if action != "ACCEPT" && h.isProtectedPort(c, req.Port) {
-			return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", req.Port))
+			return nil, errx.BadRequest("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", req.Port)
 		}
 	}
 
@@ -501,7 +501,7 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) (any, error) {
 
 	// Check if the updated rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", rule.Port))
+		return nil, errx.BadRequest("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", rule.Port)
 	}
 
 	if err := h.firewallService.UpdateRule(c.Request.Context(), rule); err != nil {
@@ -553,7 +553,7 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) (any, error) {
 
 	// Check if enabling this rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法启用 DROP/REJECT 规则", rule.Port))
+		return nil, errx.BadRequest("端口 %s 受保护（面板或 SSH），无法启用 DROP/REJECT 规则", rule.Port)
 	}
 
 	if err := h.firewallService.EnableRule(c.Request.Context(), id); err != nil {
@@ -743,7 +743,7 @@ func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) (any, error) {
 	// Removing an ACCEPT rule for a protected port could lock out the user
 	// if the default policy is DROP.
 	if strings.ToUpper(rule.Action) == "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法删除其 ACCEPT 规则", rule.Port))
+		return nil, errx.BadRequest("端口 %s 受保护（面板或 SSH），无法删除其 ACCEPT 规则", rule.Port)
 	}
 
 	if err := h.firewallService.RemoveSystemRule(c.Request.Context(), &rule); err != nil {
@@ -812,7 +812,7 @@ func (h *FirewallRuleHandler) ImportRules(c *gin.Context) (any, error) {
 
 	middleware.AuditSummary(c, "导入防火墙规则 "+strconv.Itoa(len(data.Rules))+" 条")
 	if data.Version != 1 {
-		return nil, errx.BadRequest(fmt.Sprintf("不支持的导出版本: %d，期望版本 1", data.Version))
+		return nil, errx.BadRequest("不支持的导出版本: %d，期望版本 1", data.Version)
 	}
 
 	if len(data.Rules) == 0 {
@@ -822,7 +822,7 @@ func (h *FirewallRuleHandler) ImportRules(c *gin.Context) (any, error) {
 	// Limit import size to prevent abuse
 	const maxImportRules = 500
 	if len(data.Rules) > maxImportRules {
-		return nil, errx.BadRequest(fmt.Sprintf("导入规则数量过多: %d（最大 %d）", len(data.Rules), maxImportRules))
+		return nil, errx.BadRequest("导入规则数量过多: %d（最大 %d）", len(data.Rules), maxImportRules)
 	}
 
 	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
@@ -986,12 +986,12 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) (any, error) {
 		}
 	}
 	if tpl == nil {
-		return nil, errx.BadRequest("未找到模板: " + req.Name)
+		return nil, errx.BadRequest("未找到模板: %s", req.Name)
 	}
 
 	// Check if the template would block a protected port
 	if tpl.Action != "ACCEPT" && tpl.Port != "" && h.isProtectedPort(c, tpl.Port) {
-		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", tpl.Port))
+		return nil, errx.BadRequest("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", tpl.Port)
 	}
 
 	rule := &firewall.FirewallRule{

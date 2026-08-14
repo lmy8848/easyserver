@@ -386,7 +386,7 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 		}
 
 		if strings.Contains(file.Name, "..") {
-			return errx.Forbidden("path traversal not allowed in archive: " + file.Name)
+			return errx.Forbidden("path traversal not allowed in archive: %s", file.Name)
 		}
 
 		if file.Mode()&os.ModeSymlink != 0 {
@@ -484,7 +484,7 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 		}
 
 		if strings.Contains(header.Name, "..") {
-			return errx.Forbidden("path traversal not allowed in archive: " + header.Name)
+			return errx.Forbidden("path traversal not allowed in archive: %s", header.Name)
 		}
 
 		fileCount++

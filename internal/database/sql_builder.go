@@ -358,7 +358,7 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 			return "", fmt.Errorf("不支持的列类型: %s", colType)
 		}
 		if !isValidTableName(col.Name) {
-			return "", errx.BadRequest("无效的列名: " + col.Name)
+			return "", errx.BadRequest("无效的列名: %s", col.Name)
 		}
 	}
 	if collation != "" && !isValidCollation(collation) {
