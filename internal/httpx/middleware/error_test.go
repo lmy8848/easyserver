@@ -21,17 +21,17 @@ func TestMapKind(t *testing.T) {
 		wantStatus int
 		wantCode   int
 	}{
-		{errx.KindBadRequest, http.StatusBadRequest, errx.CodeBadRequest},
-		{errx.KindUnauthorized, http.StatusUnauthorized, errx.CodeUnauthorized},
-		{errx.KindForbidden, http.StatusForbidden, errx.CodeForbidden},
-		{errx.KindNotFound, http.StatusNotFound, errx.CodeNotFound},
-		{errx.KindConflict, http.StatusConflict, errx.CodeConflict},
-		{errx.KindRateLimit, http.StatusTooManyRequests, errx.CodeRateLimit},
-		{errx.KindNotImplemented, http.StatusNotImplemented, errx.CodeNotImplemented},
-		{errx.KindUnavailable, http.StatusServiceUnavailable, errx.CodeUnavailable},
-		{errx.KindTimeout, http.StatusGatewayTimeout, errx.CodeTimeout},
-		{errx.KindInternal, http.StatusInternalServerError, errx.CodeInternalError},
-		{errx.Kind(99), http.StatusInternalServerError, errx.CodeInternalError},
+		{errx.KindBadRequest, http.StatusBadRequest, CodeBadRequest},
+		{errx.KindUnauthorized, http.StatusUnauthorized, CodeUnauthorized},
+		{errx.KindForbidden, http.StatusForbidden, CodeForbidden},
+		{errx.KindNotFound, http.StatusNotFound, CodeNotFound},
+		{errx.KindConflict, http.StatusConflict, CodeConflict},
+		{errx.KindRateLimit, http.StatusTooManyRequests, CodeRateLimit},
+		{errx.KindNotImplemented, http.StatusNotImplemented, CodeNotImplemented},
+		{errx.KindUnavailable, http.StatusServiceUnavailable, CodeUnavailable},
+		{errx.KindTimeout, http.StatusGatewayTimeout, CodeTimeout},
+		{errx.KindInternal, http.StatusInternalServerError, CodeInternalError},
+		{errx.Kind(99), http.StatusInternalServerError, CodeInternalError},
 	}
 
 	for _, tt := range tests {

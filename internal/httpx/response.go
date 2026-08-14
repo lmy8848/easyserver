@@ -3,10 +3,11 @@ package httpx
 import (
 	"net/http"
 
-	"easyserver/internal/infra/errx"
-
 	"github.com/gin-gonic/gin"
 )
+
+// CodeSuccess 是 API 成功响应的业务状态码
+const CodeSuccess = 0
 
 // ============================================================
 // 响应格式
@@ -32,7 +33,7 @@ type PaginatedData struct {
 // Success returns a success response
 func Success(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, Response{
-		Code:    errx.CodeSuccess,
+		Code:    CodeSuccess,
 		Message: "ok",
 		Data:    data,
 	})

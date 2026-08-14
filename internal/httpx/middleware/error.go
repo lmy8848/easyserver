@@ -16,31 +16,45 @@ type errorResponse struct {
 	Data    any    `json:"data"`
 }
 
-// mapKind maps an errx.Kind to standard HTTP status and business error code.
+// 默认 API JSON 响应业务错误码（传输层协议）
+const (
+	CodeBadRequest     = 40000
+	CodeUnauthorized   = 40100
+	CodeForbidden      = 40300
+	CodeNotFound       = 40400
+	CodeConflict       = 40900
+	CodeRateLimit      = 42900
+	CodeInternalError  = 50000
+	CodeNotImplemented = 50100
+	CodeUnavailable    = 50300
+	CodeTimeout        = 50400
+)
+
+// mapKind maps an errx.Kind to standard HTTP status and default wire-format business error code.
 func mapKind(k errx.Kind) (status int, code int) {
 	switch k {
 	case errx.KindBadRequest:
-		return http.StatusBadRequest, errx.CodeBadRequest
+		return http.StatusBadRequest, CodeBadRequest
 	case errx.KindUnauthorized:
-		return http.StatusUnauthorized, errx.CodeUnauthorized
+		return http.StatusUnauthorized, CodeUnauthorized
 	case errx.KindForbidden:
-		return http.StatusForbidden, errx.CodeForbidden
+		return http.StatusForbidden, CodeForbidden
 	case errx.KindNotFound:
-		return http.StatusNotFound, errx.CodeNotFound
+		return http.StatusNotFound, CodeNotFound
 	case errx.KindConflict:
-		return http.StatusConflict, errx.CodeConflict
+		return http.StatusConflict, CodeConflict
 	case errx.KindRateLimit:
-		return http.StatusTooManyRequests, errx.CodeRateLimit
+		return http.StatusTooManyRequests, CodeRateLimit
 	case errx.KindNotImplemented:
-		return http.StatusNotImplemented, errx.CodeNotImplemented
+		return http.StatusNotImplemented, CodeNotImplemented
 	case errx.KindUnavailable:
-		return http.StatusServiceUnavailable, errx.CodeUnavailable
+		return http.StatusServiceUnavailable, CodeUnavailable
 	case errx.KindTimeout:
-		return http.StatusGatewayTimeout, errx.CodeTimeout
+		return http.StatusGatewayTimeout, CodeTimeout
 	case errx.KindInternal:
 		fallthrough
 	default:
-		return http.StatusInternalServerError, errx.CodeInternalError
+		return http.StatusInternalServerError, CodeInternalError
 	}
 }
 
@@ -82,7 +96,7 @@ func handleError(c *gin.Context, err error) {
 
 	default:
 		status = http.StatusInternalServerError
-		code = errx.CodeInternalError
+		code = CodeInternalError
 		message = "internal server error"
 		safeLog = err.Error()
 	}
