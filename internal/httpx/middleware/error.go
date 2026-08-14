@@ -32,6 +32,12 @@ func mapKind(k errx.Kind) (status int, code int) {
 		return http.StatusConflict, apperror.CodeConflict
 	case errx.KindRateLimit:
 		return http.StatusTooManyRequests, apperror.CodeRateLimit
+	case errx.KindNotImplemented:
+		return http.StatusNotImplemented, 50100
+	case errx.KindUnavailable:
+		return http.StatusServiceUnavailable, 50300
+	case errx.KindTimeout:
+		return http.StatusGatewayTimeout, 50400
 	case errx.KindInternal:
 		fallthrough
 	default:

@@ -28,6 +28,9 @@ func TestMapKind(t *testing.T) {
 		{errx.KindNotFound, http.StatusNotFound, apperror.CodeNotFound},
 		{errx.KindConflict, http.StatusConflict, apperror.CodeConflict},
 		{errx.KindRateLimit, http.StatusTooManyRequests, apperror.CodeRateLimit},
+		{errx.KindNotImplemented, http.StatusNotImplemented, 50100},
+		{errx.KindUnavailable, http.StatusServiceUnavailable, 50300},
+		{errx.KindTimeout, http.StatusGatewayTimeout, 50400},
 		{errx.KindInternal, http.StatusInternalServerError, apperror.CodeInternalError},
 		{errx.Kind(99), http.StatusInternalServerError, apperror.CodeInternalError},
 	}
@@ -87,7 +90,7 @@ func TestErrorHandler_DualChannel(t *testing.T) {
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/test-errx-sentinel", nil)
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 		var resp errorResponse
 		err := json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)

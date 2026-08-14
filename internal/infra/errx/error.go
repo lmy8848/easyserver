@@ -19,6 +19,9 @@ const (
 	KindConflict
 	KindRateLimit
 	KindInternal
+	KindUnavailable
+	KindTimeout
+	KindNotImplemented
 )
 
 // Error 实现 error 接口，使得 errors.Is(err, errx.KindNotFound) 成立
@@ -38,6 +41,12 @@ func (k Kind) Error() string {
 		return "rate_limit"
 	case KindInternal:
 		return "internal"
+	case KindUnavailable:
+		return "unavailable"
+	case KindTimeout:
+		return "timeout"
+	case KindNotImplemented:
+		return "not_implemented"
 	default:
 		return "unknown"
 	}
@@ -58,6 +67,12 @@ func defaultMessage(k Kind) string {
 		return "资源冲突"
 	case KindRateLimit:
 		return "请求过于频繁"
+	case KindUnavailable:
+		return "服务不可用或未就绪"
+	case KindTimeout:
+		return "操作超时"
+	case KindNotImplemented:
+		return "功能暂未支持或未实现"
 	case KindInternal:
 		fallthrough
 	default:
@@ -115,8 +130,8 @@ func (e *Error) SafeError() string {
 // ============================================================
 
 var (
-	ErrDockerNotInstalled = &Error{Kind: KindInternal, Code: 50001, Message: "Docker 未安装或未启动"}
-	ErrServiceNotReady    = &Error{Kind: KindInternal, Code: 50002, Message: "服务未就绪"}
+	ErrDockerNotInstalled = &Error{Kind: KindUnavailable, Code: 50001, Message: "Docker 未安装或未启动"}
+	ErrServiceNotReady    = &Error{Kind: KindUnavailable, Code: 50002, Message: "服务未就绪"}
 )
 
 // ============================================================
@@ -161,13 +176,16 @@ func format(kind Kind, msg string, args ...any) error {
 	}
 }
 
-func BadRequest(msg string, args ...any) error   { return format(KindBadRequest, msg, args...) }
-func Unauthorized(msg string, args ...any) error { return format(KindUnauthorized, msg, args...) }
-func Forbidden(msg string, args ...any) error    { return format(KindForbidden, msg, args...) }
-func NotFound(msg string, args ...any) error     { return format(KindNotFound, msg, args...) }
-func Conflict(msg string, args ...any) error     { return format(KindConflict, msg, args...) }
-func RateLimit(msg string, args ...any) error    { return format(KindRateLimit, msg, args...) }
-func Internal(msg string, args ...any) error     { return format(KindInternal, msg, args...) }
+func BadRequest(msg string, args ...any) error     { return format(KindBadRequest, msg, args...) }
+func Unauthorized(msg string, args ...any) error   { return format(KindUnauthorized, msg, args...) }
+func Forbidden(msg string, args ...any) error      { return format(KindForbidden, msg, args...) }
+func NotFound(msg string, args ...any) error       { return format(KindNotFound, msg, args...) }
+func Conflict(msg string, args ...any) error       { return format(KindConflict, msg, args...) }
+func RateLimit(msg string, args ...any) error      { return format(KindRateLimit, msg, args...) }
+func Internal(msg string, args ...any) error       { return format(KindInternal, msg, args...) }
+func Unavailable(msg string, args ...any) error    { return format(KindUnavailable, msg, args...) }
+func Timeout(msg string, args ...any) error        { return format(KindTimeout, msg, args...) }
+func NotImplemented(msg string, args ...any) error { return format(KindNotImplemented, msg, args...) }
 
 // ============================================================
 // 日志脱敏内部函数

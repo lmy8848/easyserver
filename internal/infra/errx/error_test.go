@@ -18,6 +18,9 @@ func TestKind_ErrorString(t *testing.T) {
 	assert.Equal(t, "conflict", KindConflict.Error())
 	assert.Equal(t, "rate_limit", KindRateLimit.Error())
 	assert.Equal(t, "internal", KindInternal.Error())
+	assert.Equal(t, "unavailable", KindUnavailable.Error())
+	assert.Equal(t, "timeout", KindTimeout.Error())
+	assert.Equal(t, "not_implemented", KindNotImplemented.Error())
 	assert.Equal(t, "unknown", Kind(99).Error())
 }
 
@@ -37,6 +40,9 @@ func TestConvenienceConstructors(t *testing.T) {
 		{"Conflict plain", Conflict("name exists"), KindConflict, "name exists"},
 		{"RateLimit plain", RateLimit("too many requests"), KindRateLimit, "too many requests"},
 		{"Internal plain", Internal("database error"), KindInternal, "database error"},
+		{"Unavailable plain", Unavailable("service unavailable"), KindUnavailable, "service unavailable"},
+		{"Timeout plain", Timeout("operation timed out"), KindTimeout, "operation timed out"},
+		{"NotImplemented plain", NotImplemented("not implemented"), KindNotImplemented, "not implemented"},
 	}
 
 	for _, tt := range tests {
@@ -104,8 +110,8 @@ func TestTwoTierIs(t *testing.T) {
 		require.NotErrorIs(t, nf1, KindBadRequest)
 
 		// Sentinel also matches its underlying Kind
-		require.ErrorIs(t, ErrDockerNotInstalled, KindInternal)
-		require.ErrorIs(t, ErrServiceNotReady, KindInternal)
+		require.ErrorIs(t, ErrDockerNotInstalled, KindUnavailable)
+		require.ErrorIs(t, ErrServiceNotReady, KindUnavailable)
 
 		// Different error instances don't pointer-match each other
 		require.NotErrorIs(t, nf1, nf2)
