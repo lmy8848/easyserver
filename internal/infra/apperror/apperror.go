@@ -104,11 +104,11 @@ const (
 	CodeInternalError = 50000
 )
 
-// 派生业务码：400 段细分哨兵（仍属 BadRequest 分类，Code 唯一以支持
-// 精确 errors.Is 判断，如"是否 Docker 未安装"）。
+// 派生业务码：500 段细分哨兵（仍属 InternalError 分类区段，Code 唯一以支持
+// 精确 errors.Is 判断，如"是否 Docker 未安装"、"服务是否就绪"）。
 const (
-	CodeDockerNotInstalled = 40001
-	CodeServiceNotReady    = 40002
+	CodeDockerNotInstalled = 50001
+	CodeServiceNotReady    = 50002
 )
 
 // ============================================================
@@ -140,9 +140,9 @@ var (
 	// 500 Internal Server Error
 	ErrInternal = &AppError{HTTPStatus: http.StatusInternalServerError, Code: CodeInternalError, Message: "内部服务器错误"}
 
-	// Domain-specific errors
-	ErrDockerNotInstalled = &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeDockerNotInstalled, Message: "Docker 未安装或未启动"}
-	ErrServiceNotReady    = &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeServiceNotReady, Message: "服务未就绪"}
+	// Domain-specific errors（服务端环境/状态问题 → 500 分类）
+	ErrDockerNotInstalled = &AppError{HTTPStatus: http.StatusInternalServerError, Code: CodeDockerNotInstalled, Message: "Docker 未安装或未启动"}
+	ErrServiceNotReady    = &AppError{HTTPStatus: http.StatusInternalServerError, Code: CodeServiceNotReady, Message: "服务未就绪"}
 )
 
 // ============================================================

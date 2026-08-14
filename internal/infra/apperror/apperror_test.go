@@ -32,7 +32,7 @@ func TestWrapError_DockerNotInstalled(t *testing.T) {
 
 	var appErr *AppError
 	require.ErrorAs(t, result, &appErr)
-	assert.Equal(t, http.StatusBadRequest, appErr.HTTPStatus)
+	assert.Equal(t, http.StatusInternalServerError, appErr.HTTPStatus)
 	assert.Equal(t, CodeDockerNotInstalled, appErr.Code)
 	assert.Contains(t, appErr.Message, "docker is not installed")
 }
