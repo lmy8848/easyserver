@@ -2,6 +2,7 @@ package apperror
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestWrapError_PathTraversal(t *testing.T) {
 	var appErr *AppError
 	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusForbidden, appErr.HTTPStatus)
-	assert.Equal(t, CodeForbidden, appErr.Code)
+	assert.Equal(t, CodePathViolation, appErr.Code)
 }
 
 func TestWrapError_DockerNotInstalled(t *testing.T) {
@@ -42,7 +43,7 @@ func TestWrapError_DockerNotInstalled(t *testing.T) {
 	var appErr *AppError
 	require.ErrorAs(t, result, &appErr)
 	assert.Equal(t, http.StatusBadRequest, appErr.HTTPStatus)
-	assert.Equal(t, CodeBadRequest, appErr.Code)
+	assert.Equal(t, CodeDockerNotInstalled, appErr.Code)
 	assert.Contains(t, appErr.Message, "docker is not installed")
 }
 
@@ -112,4 +113,50 @@ func TestAppError_ErrorString(t *testing.T) {
 	// With underlying error
 	e2 := &AppError{Message: "outer", Err: errors.New("inner")}
 	assert.Equal(t, "outer: inner", e2.Error())
+}
+
+// --- Is 语义：WithMessage/Wrap 副本与哨兵的 errors.Is 匹配 ---
+
+func TestAppError_Is_WithMessageCopy(t *testing.T) {
+	// 副本与哨兵：Code 相同 → errors.Is 成立
+	err := ErrNotFound.WithMessage("用户不存在")
+	require.ErrorIs(t, err, ErrNotFound)
+	require.NotErrorIs(t, err, ErrBadRequest)
+
+	// 反向：哨兵与副本
+	require.ErrorIs(t, ErrNotFound, ErrNotFound.WithMessage("x"))
+}
+
+func TestAppError_Is_WrappedCopy(t *testing.T) {
+	err := ErrInternal.Wrap(errors.New("disk full"))
+	require.ErrorIs(t, err, ErrInternal)
+	require.NotErrorIs(t, err, ErrBadRequest)
+}
+
+func TestAppError_Is_Chain(t *testing.T) {
+	// 链式：AppError 包普通错误，errors.Is 穿透
+	inner := errors.New("disk full")
+	err := ErrInternal.Wrap(inner)
+	require.ErrorIs(t, err, ErrInternal)
+	require.NotErrorIs(t, inner, ErrInternal)
+
+	// fmt.Errorf %w 再包一层
+	outer := fmt.Errorf("outer: %w", err)
+	require.ErrorIs(t, outer, ErrInternal)
+}
+
+func TestAppError_Is_UniqueCode(t *testing.T) {
+	// Code 唯一化后，同 HTTP 分类的细分哨兵互不匹配
+	pathErr := ErrPathViolation.WithMessage("路径越权")
+	require.ErrorIs(t, pathErr, ErrPathViolation)
+	require.NotErrorIs(t, pathErr, ErrForbidden)
+
+	dockerErr := ErrDockerNotInstalled.WithMessage("Docker 未安装")
+	require.ErrorIs(t, dockerErr, ErrDockerNotInstalled)
+	require.NotErrorIs(t, dockerErr, ErrBadRequest)
+}
+
+func TestAppError_Is_NonAppErrorTarget(t *testing.T) {
+	err := ErrBadRequest.WithMessage("x")
+	require.NotErrorIs(t, err, errors.New("请求参数错误"))
 }

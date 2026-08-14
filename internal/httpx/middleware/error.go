@@ -43,9 +43,10 @@ func handleError(c *gin.Context, err error) {
 		// Log based on severity level
 		switch {
 		case appErr.HTTPStatus >= 500:
-			// Server errors: full details for debugging
-			log.Printf("ERROR [%s %s] user=%v(%v) ip=%s: %v",
-				method, path, username, userID, clientIP, appErr)
+			// Server errors: full details for debugging（SafeError 过滤底层
+			// 错误中的敏感值，如 token/password 字段）
+			log.Printf("ERROR [%s %s] user=%v(%v) ip=%s: %s",
+				method, path, username, userID, clientIP, appErr.SafeError())
 		case appErr.HTTPStatus == 401 || appErr.HTTPStatus == 403:
 			// Auth errors: security audit trail
 			log.Printf("WARN  [%s %s] ip=%s: %s",

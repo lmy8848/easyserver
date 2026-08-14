@@ -13,9 +13,12 @@ import (
 
 // AppError is the unified application error type used across all packages.
 // Handlers return AppError (or wrap it), and middleware converts it to HTTP responses.
+//
+// 分类语义：Code 是唯一分类标识（每个预定义哨兵一个 Code），Is 按 Code
+// 比较——因此 WithMessage/Wrap 产生的副本与哨兵之间 errors.Is 成立。
 type AppError struct {
 	HTTPStatus int    // HTTP status code
-	Code       int    // Business error code
+	Code       int    // Business error code（唯一，兼作哨兵身份）
 	Message    string // User-facing message
 	Err        error  // Original error for logging
 }
@@ -44,28 +47,32 @@ func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
+// Is 让 errors.Is 对 WithMessage/Wrap 副本成立：副本与哨兵 Code 相同即
+// 视为同一分类错误（如 errors.Is(err, ErrNotFound) 匹配所有 404 副本）。
+func (e *AppError) Is(target error) bool {
+	t, ok := target.(*AppError)
+	if !ok {
+		return false
+	}
+	return e.Code == t.Code
+}
+
 // Wrap creates a new AppError wrapping an underlying error
 func (e *AppError) Wrap(err error) *AppError {
-	return &AppError{
-		HTTPStatus: e.HTTPStatus,
-		Code:       e.Code,
-		Message:    e.Message,
-		Err:        err,
-	}
+	ne := *e
+	ne.Err = err
+	return &ne
 }
 
 // WithMessage creates a copy with a custom message
 func (e *AppError) WithMessage(msg string) *AppError {
-	return &AppError{
-		HTTPStatus: e.HTTPStatus,
-		Code:       e.Code,
-		Message:    msg,
-		Err:        e.Err,
-	}
+	ne := *e
+	ne.Message = msg
+	return &ne
 }
 
 // ============================================================
-// 错误码常量
+// 错误码常量（每个哨兵唯一，兼作 errors.Is 的分类标识）
 // ============================================================
 
 const (
@@ -74,14 +81,21 @@ const (
 	CodeUnauthorized  = 40100
 	CodeTokenExpired  = 40101
 	CodeForbidden     = 40300
+	CodePathViolation = 40301
 	CodeNotFound      = 40400
 	CodeConflict      = 40900
 	CodeRateLimit     = 42900
 	CodeInternalError = 50000
 )
 
+// 派生业务码：同一 HTTP 分类下的细分哨兵（400 段）。
+const (
+	CodeDockerNotInstalled = 40001
+	CodeServiceNotReady    = 40002
+)
+
 // ============================================================
-// 预定义错误
+// 预定义错误（哨兵）
 // ============================================================
 
 var (
@@ -94,7 +108,7 @@ var (
 
 	// 403 Forbidden
 	ErrForbidden     = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "禁止访问"}
-	ErrPathViolation = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "路径越权"}
+	ErrPathViolation = &AppError{HTTPStatus: http.StatusForbidden, Code: CodePathViolation, Message: "路径越权"}
 
 	// 404 Not Found
 	ErrNotFound = &AppError{HTTPStatus: http.StatusNotFound, Code: CodeNotFound, Message: "资源不存在"}
@@ -109,40 +123,13 @@ var (
 	ErrInternal = &AppError{HTTPStatus: http.StatusInternalServerError, Code: CodeInternalError, Message: "内部服务器错误"}
 
 	// Domain-specific errors
-	ErrDockerNotInstalled = &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeBadRequest, Message: "Docker 未安装或未启动"}
-	ErrServiceNotReady    = &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeBadRequest, Message: "服务未就绪"}
+	ErrDockerNotInstalled = &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeDockerNotInstalled, Message: "Docker 未安装或未启动"}
+	ErrServiceNotReady    = &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeServiceNotReady, Message: "服务未就绪"}
 )
 
 // ============================================================
 // 错误分类函数
 // ============================================================
-
-// IsPathError checks if the error is a path validation error
-func IsPathError(err error) bool {
-	var appErr *AppError
-	if errors.As(err, &appErr) {
-		return appErr == ErrPathViolation
-	}
-	msg := err.Error()
-	return contains(msg, "path traversal") ||
-		contains(msg, "absolute paths are not allowed") ||
-		contains(msg, "cannot resolve path")
-}
-
-// IsDockerNotInstalled checks if the error is about Docker not being available
-func IsDockerNotInstalled(err error) bool {
-	var appErr *AppError
-	if errors.As(err, &appErr) {
-		return appErr == ErrDockerNotInstalled
-	}
-	msg := err.Error()
-	return contains(msg, "docker info failed") ||
-		contains(msg, "Cannot connect to the Docker daemon") ||
-		contains(msg, "docker: command not found") ||
-		contains(msg, "executable file not found") ||
-		contains(msg, "docker is not installed") ||
-		contains(msg, "not accessible")
-}
 
 // errorPattern maps error message patterns to AppError types
 type errorPattern struct {
