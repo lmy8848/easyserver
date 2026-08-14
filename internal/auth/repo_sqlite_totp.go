@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"errors"
 	"fmt"
 
@@ -13,12 +12,12 @@ import (
 
 // totpRepository implements TOTPRepository for SQLite.
 type totpRepository struct {
-	db database.DB
+	db *sql.DB
 }
 
 // NewTOTPRepository creates a new TOTPRepo.
 func NewTOTPRepository(db *sql.DB) TOTPRepo {
-	return &totpRepository{db: database.Wrap(db)}
+	return &totpRepository{db: db}
 }
 
 // EnableTOTP enables 2FA for a user by storing the secret and hashed backup codes.

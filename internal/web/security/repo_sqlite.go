@@ -4,17 +4,16 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"fmt"
 	"time"
 )
 
 type sqliteSecurityRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 func NewSQLiteSecurityRepository(db *sql.DB) SecurityRepository {
-	return &sqliteSecurityRepo{db: database.Wrap(db)}
+	return &sqliteSecurityRepo{db: db}
 }
 
 // GetConfig returns the security config for a website (or error if not found).

@@ -4,19 +4,18 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"fmt"
 	"log"
 )
 
 // FirewallRepository implements Repository for SQLite
 type sqliteRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 // NewFirewallRepository creates a new FirewallRepository
 func NewSQLiteRepository(db *sql.DB) Repository {
-	return &sqliteRepo{db: database.Wrap(db)}
+	return &sqliteRepo{db: db}
 }
 
 // CountEnabledRules returns the count of enabled firewall rules

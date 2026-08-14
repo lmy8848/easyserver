@@ -3,18 +3,16 @@ package envconfig
 import (
 	"context"
 	"database/sql"
-
-	"easyserver/internal/infra/database"
 )
 
 // sqliteRepo implements Repository for SQLite
 type sqliteRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 // NewSQLiteRepository creates a new SQLite-backed Repository
 func NewSQLiteRepository(db *sql.DB) Repository {
-	return &sqliteRepo{db: database.Wrap(db)}
+	return &sqliteRepo{db: db}
 }
 
 func (r *sqliteRepo) ListEnvConfigs(ctx context.Context) ([]EnvConfig, error) {

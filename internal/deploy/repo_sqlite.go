@@ -4,19 +4,18 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"fmt"
 	"log"
 )
 
 // sqliteRepo implements Repository for SQLite
 type sqliteRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 // NewSQLiteRepository creates a new deploy Repository backed by SQLite
 func NewSQLiteRepository(db *sql.DB) Repository {
-	return &sqliteRepo{db: database.Wrap(db)}
+	return &sqliteRepo{db: db}
 }
 
 // --- Server CRUD ---

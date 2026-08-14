@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,12 +12,12 @@ import (
 
 // sqliteRepo implements Repository for SQLite.
 type sqliteRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 // NewSQLiteRepository creates a new SQLite-backed cron Repository.
 func NewSQLiteRepository(db *sql.DB) Repository {
-	return &sqliteRepo{db: database.Wrap(db)}
+	return &sqliteRepo{db: db}
 }
 
 func (r *sqliteRepo) ListScripts(ctx context.Context) ([]Script, error) {

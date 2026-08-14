@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"fmt"
 	"time"
 
@@ -12,11 +11,11 @@ import (
 )
 
 type sqliteUserRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 func NewSQLiteUserRepository(db *sql.DB) UserRepo {
-	return &sqliteUserRepo{db: database.Wrap(db)}
+	return &sqliteUserRepo{db: db}
 }
 
 func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {

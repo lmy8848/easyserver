@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"easyserver/internal/infra/database"
 	"fmt"
 	"log"
 	"time"
@@ -12,12 +11,12 @@ import (
 
 // sqliteRepo implements Repository for SQLite.
 type sqliteRepo struct {
-	db database.DB
+	db *sql.DB
 }
 
 // NewSQLiteRepository creates a new SQLite-backed audit Repository.
 func NewSQLiteRepository(db *sql.DB) Repository {
-	return &sqliteRepo{db: database.Wrap(db)}
+	return &sqliteRepo{db: db}
 }
 
 func (r *sqliteRepo) Log(ctx context.Context, entry *AuditLog) error {
