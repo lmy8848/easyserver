@@ -18,6 +18,8 @@ import (
 	"time"
 	"unicode"
 
+	"easyserver/internal/infra/apperror"
+
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/task"
 	"easyserver/internal/notification"
@@ -139,7 +141,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	dirKey := instanceDirKey(dbType, req.Version)
 	for _, inst := range instances {
 		if instanceDirKey(inst.DBType, inst.Version) == dirKey {
-			return nil, fmt.Errorf("version %s is already installed for %s", req.Version, dbType)
+			return nil, apperror.ErrConflict.WrapMessage(fmt.Errorf("version %s is already installed for %s", req.Version, dbType))
 		}
 	}
 
@@ -329,7 +331,7 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 // install leaves no row behind, unlike a failed one.
 func (s *Service) CancelInstall(installID string) error {
 	if !s.taskMgr.Cancel(installID) {
-		return errors.New("安装已结束或不存在")
+		return apperror.ErrNotFound.WithMessage("安装已结束或不存在")
 	}
 	return nil
 }
@@ -481,7 +483,7 @@ func (s *Service) WaitForInstall(installID string) error {
 func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge bool) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return errors.New("instance not found")
+		return apperror.ErrNotFound.WithMessage("instance not found")
 	}
 
 	if err := s.runtime.Remove(ctx, v.ContainerEngine, v.ContainerName); err != nil {
@@ -504,7 +506,7 @@ func (s *Service) UninstallInstance(ctx context.Context, instanceID int64, purge
 func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (string, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return "", errors.New("instance not found")
+		return "", apperror.ErrNotFound.WithMessage("instance not found")
 	}
 	if v.ContainerEngine == "" || v.ContainerName == "" {
 		return "", errors.New("database instance is not container-managed")
@@ -545,7 +547,7 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 func (s *Service) StartInstance(ctx context.Context, instanceID int64) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return errors.New("instance not found")
+		return apperror.ErrNotFound.WithMessage("instance not found")
 	}
 	if err := s.runtime.Start(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("start failed: %w", err)
@@ -559,7 +561,7 @@ func (s *Service) StartInstance(ctx context.Context, instanceID int64) error {
 func (s *Service) StopInstance(ctx context.Context, instanceID int64) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return errors.New("instance not found")
+		return apperror.ErrNotFound.WithMessage("instance not found")
 	}
 	if err := s.runtime.Stop(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("stop failed: %w", err)
@@ -570,7 +572,7 @@ func (s *Service) StopInstance(ctx context.Context, instanceID int64) error {
 func (s *Service) RestartInstance(ctx context.Context, instanceID int64) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return errors.New("instance not found")
+		return apperror.ErrNotFound.WithMessage("instance not found")
 	}
 	if err := s.runtime.Restart(ctx, v.ContainerEngine, v.ContainerName); err != nil {
 		return fmt.Errorf("restart failed: %w", err)
@@ -587,7 +589,7 @@ func (s *Service) RestartInstance(ctx context.Context, instanceID int64) error {
 func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, lines int) (string, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return "", errors.New("instance not found")
+		return "", apperror.ErrNotFound.WithMessage("instance not found")
 	}
 	if lines <= 0 {
 		lines = defaultLogLines
@@ -604,7 +606,7 @@ func (s *Service) GetInstanceServiceLogs(ctx context.Context, instanceID int64, 
 func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*InstanceConfigView, error) {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return nil, errors.New("instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("instance not found")
 	}
 	if err := s.ensureInstanceRunning(ctx, v, "读取配置"); err != nil {
 		return nil, err
@@ -627,7 +629,7 @@ func (s *Service) GetInstanceConfig(ctx context.Context, instanceID int64) (*Ins
 func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, params map[string]string) error {
 	v, err := s.GetInstance(ctx, instanceID)
 	if err != nil || v == nil {
-		return errors.New("instance not found")
+		return apperror.ErrNotFound.WithMessage("instance not found")
 	}
 
 	// 组装本次覆盖值，空值跳过（不清覆盖、不重置 —— 保存只应用改过的字段）。
@@ -666,7 +668,7 @@ func (s *Service) SaveInstanceConfig(ctx context.Context, instanceID int64, para
 func (s *Service) ensureInstanceRunning(ctx context.Context, v *DBInstance, action string) error {
 	info, err := s.runtime.Status(ctx, v.ContainerEngine, v.ContainerName)
 	if err != nil || info.State != "running" {
-		return fmt.Errorf("实例未运行，无法%s（请先启动实例）", action)
+		return apperror.ErrConflict.WrapMessage(fmt.Errorf("实例未运行，无法%s（请先启动实例）", action))
 	}
 	return nil
 }

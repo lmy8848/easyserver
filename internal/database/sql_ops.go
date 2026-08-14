@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"easyserver/internal/infra/apperror"
 )
 
 // --- Logical database CRUD (live, server-owned) ---
@@ -16,7 +18,7 @@ func (s *Service) ListDatabases(ctx context.Context, instanceID int64) ([]Databa
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	return s.queryDatabases(ctx, instance)
 }
@@ -78,10 +80,10 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	if instance.Status != "running" && instance.Status != "active" {
-		return nil, errors.New("database instance is not running")
+		return nil, apperror.ErrConflict.WithMessage("database instance is not running")
 	}
 
 	// DDL statements cannot be parameter-bound; names/hosts are validated and
@@ -116,10 +118,10 @@ func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName s
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	if instance.Status != "running" {
-		return errors.New("database instance is not running")
+		return apperror.ErrConflict.WithMessage("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -148,7 +150,7 @@ func (s *Service) ListDBUsers(ctx context.Context, instanceID int64) ([]DBUser, 
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	return s.queryUsers(ctx, instance)
 }
@@ -204,10 +206,10 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 		return nil, fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	if instance.Status != "running" {
-		return nil, errors.New("database instance is not running")
+		return nil, apperror.ErrConflict.WithMessage("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -238,7 +240,7 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 
 	if isAdminUser(instance.DBType, username) {
@@ -269,10 +271,10 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	if instance.Status != "running" {
-		return errors.New("database instance is not running")
+		return apperror.ErrConflict.WithMessage("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -299,10 +301,10 @@ func (s *Service) ResetPassword(ctx context.Context, instanceID int64, username,
 		return fmt.Errorf("get instance: %w", err)
 	}
 	if instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	if instance.Status != "running" {
-		return errors.New("database instance is not running")
+		return apperror.ErrConflict.WithMessage("database instance is not running")
 	}
 
 	builder := NewSQLBuilder(instance.DBType)
@@ -327,7 +329,7 @@ func (s *Service) getInstanceForSQL(ctx context.Context, instanceID int64, dbNam
 	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, errors.New("数据库实例不存在")
+		return nil, apperror.ErrNotFound.WithMessage("数据库实例不存在")
 	}
 	return instance, nil
 }

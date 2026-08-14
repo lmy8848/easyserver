@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/mise"
 	"easyserver/internal/infra/task"
 )
@@ -264,5 +265,9 @@ func (s *Service) uninstallRuntime(ctx context.Context, name, version string, lo
 
 // GetRemoteVersions dynamically fetches available versions via the provider.
 func (s *Service) GetRemoteVersions(ctx context.Context, lang string) ([]string, error) {
-	return s.provider.ListRemoteVersions(ctx, lang)
+	versions, err := s.provider.ListRemoteVersions(ctx, lang)
+	if err != nil {
+		return nil, apperror.ErrBadRequest.WrapMessage(err)
+	}
+	return versions, nil
 }

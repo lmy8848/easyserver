@@ -172,8 +172,6 @@ var errorRegistry = []errorPattern{
 	{matches: []string{"cannot change", "cannot be empty", "stop it first"}, target: ErrBadRequest},
 	// UNIQUE constraint violation (SQLite)
 	{matches: []string{"UNIQUE constraint failed", "constraint failed"}, target: ErrConflict},
-	// No data available
-	{matches: []string{"no versions available", "无可用版本"}, target: ErrBadRequest},
 }
 
 // WrapError automatically wraps an error into the appropriate AppError

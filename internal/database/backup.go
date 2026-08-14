@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/task"
 )
 
@@ -19,7 +20,7 @@ const esBackupsDir = "es_backups"
 func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, errors.New("database instance not found")
+		return nil, apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	// 备份直接落在实例宿主数据目录的 es_backups/ 子目录 —— 该目录是宿主挂载，
 	// 容器内 dump 写这里宿主直见，无需 CopyFrom 往返。chown 999 让容器内进程
@@ -107,7 +108,7 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	// 容器内写文件（-r），路径映射到宿主数据目录 es_backups/（宿主挂载 → 宿主直见），
 	// 不再走 docker cp 往返。
@@ -125,7 +126,7 @@ func (s *Service) backupMySQL(ctx context.Context, backup *DBBackup) error {
 func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	// 同上：pg_dump -Fc 是二进制，必须 -f 写容器文件 —— 但目标在宿主挂载的数据
 	// 目录内，写完宿主直见，无需 cp。
@@ -139,7 +140,7 @@ func (s *Service) backupPostgreSQL(ctx context.Context, backup *DBBackup) error 
 func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	// Trigger persistence over the direct connection. dump.rdb 由 redis 进程直接写在
 	// 宿主数据目录（/data 是宿主挂载），宿主侧拷贝到 es_backups/ 即可，不经过容器
@@ -185,7 +186,7 @@ func (s *Service) GetBackup(ctx context.Context, id int64) (*DBBackup, error) {
 func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
-		return fmt.Errorf("backup not found: %w", err)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("backup not found: %w", err))
 	}
 
 	// 备份任务运行中不能删（task 可能正在写该行）。
@@ -216,7 +217,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) error {
 	backup, err := s.repo.GetBackup(ctx, id)
 	if err != nil {
-		return fmt.Errorf("backup not found: %w", err)
+		return apperror.ErrNotFound.WrapMessage(fmt.Errorf("backup not found: %w", err))
 	}
 
 	if backup.Status != "success" {
@@ -224,7 +225,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 	}
 
 	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
-		return errors.New("备份文件不存在")
+		return apperror.ErrNotFound.WithMessage("备份文件不存在")
 	}
 
 	key := fmt.Sprintf("restore-%d", id)
@@ -277,7 +278,7 @@ func (s *Service) GetRestoreStatus(_ context.Context, id int64) (*RestoreStatus,
 func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.sql"
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
@@ -299,7 +300,7 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	target := "/tmp/easyserver-restore.dump"
 	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
@@ -316,7 +317,7 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
-		return errors.New("database instance not found")
+		return apperror.ErrNotFound.WithMessage("database instance not found")
 	}
 	// AOF 开启时 Redis 启动忽略 RDB（AOF 优先），恢复 RDB 会静默失效——直接拒绝。
 	if aof, err := s.redisFor().ConfigGet(ctx, instance, "appendonly"); err == nil && aof == "yes" {

@@ -568,7 +568,7 @@ func (b *SQLBuilder) BuildResetPassword(username, newPassword, host string) (str
 		return "", errors.New("invalid username")
 	}
 	if newPassword == "" {
-		return "", errors.New("password cannot be empty")
+		return "", apperror.ErrBadRequest.WithMessage("password cannot be empty")
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
