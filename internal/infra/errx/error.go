@@ -24,6 +24,22 @@ const (
 	KindNotImplemented
 )
 
+// Standard business error codes (for API JSON wire-format compatibility)
+const (
+	CodeSuccess        = 0
+	CodeBadRequest     = 40000
+	CodeUnauthorized   = 40100
+	CodeTokenExpired   = 40101
+	CodeForbidden      = 40300
+	CodeNotFound       = 40400
+	CodeConflict       = 40900
+	CodeRateLimit      = 42900
+	CodeInternalError  = 50000
+	CodeNotImplemented = 50100
+	CodeUnavailable    = 50300
+	CodeTimeout        = 50400
+)
+
 // Error 实现 error 接口，使得 errors.Is(err, errx.KindNotFound) 成立
 func (k Kind) Error() string {
 	switch k {

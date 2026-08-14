@@ -11,7 +11,7 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/terminal"
 
 	"github.com/gin-gonic/gin"
@@ -67,38 +67,32 @@ func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, aud
 }
 
 // HandleWebSocket handles terminal WebSocket connections
-func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
+func (h *TerminalHandler) HandleWebSocket(c *gin.Context) (any, error) {
 	// User info already set by WSAuthMiddleware
 	userIDIface, ok := c.Get("user_id")
 	if !ok {
-		c.Error(apperror.ErrUnauthorized.WithMessage("用户ID未找到"))
-		return
+		return nil, errx.Unauthorized("用户ID未找到")
 	}
 	userID, ok := userIDIface.(int64)
 	if !ok {
-		c.Error(apperror.ErrInternal.WithMessage("用户ID类型无效"))
-		return
+		return nil, errx.Internal("用户ID类型无效")
 	}
 	usernameIface, ok := c.Get("username")
 	if !ok {
-		c.Error(apperror.ErrUnauthorized.WithMessage("用户名未找到"))
-		return
+		return nil, errx.Unauthorized("用户名未找到")
 	}
 	username, ok := usernameIface.(string)
 	if !ok {
-		c.Error(apperror.ErrInternal.WithMessage("用户名类型无效"))
-		return
+		return nil, errx.Internal("用户名类型无效")
 	}
 
 	// Get and validate session ID from URL
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		c.Error(apperror.ErrBadRequest.WithMessage("会话ID不能为空"))
-		return
+		return nil, errx.BadRequest("会话ID不能为空")
 	}
 	if !sessionIDRegex.MatchString(sessionID) {
-		c.Error(apperror.ErrBadRequest.WithMessage("会话ID格式无效"))
-		return
+		return nil, errx.BadRequest("会话ID格式无效")
 	}
 
 	// Create or get session
@@ -107,8 +101,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		// Try to get existing session
 		session, err = h.terminalManager.GetSession(sessionID)
 		if err != nil {
-			c.Error(apperror.WrapError(err))
-			return
+			return nil, err
 		}
 	}
 
@@ -124,7 +117,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	if err != nil {
 		log.Printf("terminal: websocket upgrade error: %v", err)
 		_ = h.terminalManager.CloseSession(sessionID)
-		return
+		return nil, nil
 	}
 
 	// wsWrite is the channel for serialized WebSocket writes.
@@ -186,6 +179,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 			map[string]any{"summary": "终端会话已关闭", "duration": durationStr, "session_id": sessionID},
 			c.ClientIP(), c.Request.UserAgent())
 	}
+	return nil, nil
 }
 
 // writePump handles all writes to the WebSocket connection.
@@ -249,9 +243,9 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 
 // RegisterRoutes registers terminal routes
 func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditLog OperationLogger, allowedOrigins []string, devMode bool) {
-	protected.GET("/terminal/:id", func(c *gin.Context) {
-		httpx.Success(c, nil)
-	})
+	protected.GET("/terminal/:id", httpx.H(func(c *gin.Context) (any, error) {
+		return nil, nil
+	}))
 	handler := NewTerminalHandler(terminalManager, jwtSecret, auditLog, allowedOrigins, devMode)
-	wsGroup.GET("/terminal/:id", handler.HandleWebSocket)
+	wsGroup.GET("/terminal/:id", httpx.H(handler.HandleWebSocket))
 }

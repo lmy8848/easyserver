@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
@@ -22,17 +21,17 @@ func TestMapKind(t *testing.T) {
 		wantStatus int
 		wantCode   int
 	}{
-		{errx.KindBadRequest, http.StatusBadRequest, apperror.CodeBadRequest},
-		{errx.KindUnauthorized, http.StatusUnauthorized, apperror.CodeUnauthorized},
-		{errx.KindForbidden, http.StatusForbidden, apperror.CodeForbidden},
-		{errx.KindNotFound, http.StatusNotFound, apperror.CodeNotFound},
-		{errx.KindConflict, http.StatusConflict, apperror.CodeConflict},
-		{errx.KindRateLimit, http.StatusTooManyRequests, apperror.CodeRateLimit},
-		{errx.KindNotImplemented, http.StatusNotImplemented, 50100},
-		{errx.KindUnavailable, http.StatusServiceUnavailable, 50300},
-		{errx.KindTimeout, http.StatusGatewayTimeout, 50400},
-		{errx.KindInternal, http.StatusInternalServerError, apperror.CodeInternalError},
-		{errx.Kind(99), http.StatusInternalServerError, apperror.CodeInternalError},
+		{errx.KindBadRequest, http.StatusBadRequest, errx.CodeBadRequest},
+		{errx.KindUnauthorized, http.StatusUnauthorized, errx.CodeUnauthorized},
+		{errx.KindForbidden, http.StatusForbidden, errx.CodeForbidden},
+		{errx.KindNotFound, http.StatusNotFound, errx.CodeNotFound},
+		{errx.KindConflict, http.StatusConflict, errx.CodeConflict},
+		{errx.KindRateLimit, http.StatusTooManyRequests, errx.CodeRateLimit},
+		{errx.KindNotImplemented, http.StatusNotImplemented, errx.CodeNotImplemented},
+		{errx.KindUnavailable, http.StatusServiceUnavailable, errx.CodeUnavailable},
+		{errx.KindTimeout, http.StatusGatewayTimeout, errx.CodeTimeout},
+		{errx.KindInternal, http.StatusInternalServerError, errx.CodeInternalError},
+		{errx.Kind(99), http.StatusInternalServerError, errx.CodeInternalError},
 	}
 
 	for _, tt := range tests {
@@ -49,7 +48,7 @@ func setupErrorTestRouter() *gin.Engine {
 	return r
 }
 
-func TestErrorHandler_DualChannel(t *testing.T) {
+func TestErrorHandler(t *testing.T) {
 	r := setupErrorTestRouter()
 
 	// 1. errx channel
@@ -61,12 +60,11 @@ func TestErrorHandler_DualChannel(t *testing.T) {
 		c.Error(errx.ErrDockerNotInstalled)
 	})
 
-	// 2. apperror legacy channel
-	r.GET("/test-apperror-conflict", func(c *gin.Context) {
-		c.Error(apperror.ErrConflict.WithMessage("邮箱已存在"))
+	r.GET("/test-errx-conflict", func(c *gin.Context) {
+		c.Error(errx.Conflict("邮箱已存在"))
 	})
 
-	// 3. unknown generic error
+	// 2. unknown generic error
 	r.GET("/test-unknown-error", func(c *gin.Context) {
 		c.Error(errors.New("raw db connection broke"))
 	})
@@ -98,9 +96,9 @@ func TestErrorHandler_DualChannel(t *testing.T) {
 		assert.Equal(t, "Docker 未安装或未启动", resp.Message)
 	})
 
-	t.Run("apperror.ErrConflict (legacy fallback)", func(t *testing.T) {
+	t.Run("errx.Conflict", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/test-apperror-conflict", nil)
+		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/test-errx-conflict", nil)
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusConflict, w.Code)

@@ -2,140 +2,151 @@ package middleware
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
 
-type visitor struct {
-	count       int
-	windowStart time.Time
-}
-
-const maxVisitors = 10000
-
+// RateLimiter implements an in-memory token bucket / sliding window rate limiter
 type RateLimiter struct {
+	mu       sync.Mutex
 	visitors map[string]*visitor
-	mu       sync.RWMutex
-	rate     atomic.Int64
-	interval atomic.Int64
-	done     chan struct{}
+	rate     int           // requests allowed
+	interval time.Duration // per time interval
 }
 
+type visitor struct {
+	lastSeen time.Time
+	tokens   int
+}
+
+// Global registry of named rate limiters (so same named limiter is reused across requests)
+var (
+	rateLimiters sync.Map
+	cleanupOnce  sync.Once
+)
+
+// NewRateLimiter creates a new rate limiter
 func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		visitors: make(map[string]*visitor),
-		done:     make(chan struct{}),
+		rate:     rate,
+		interval: interval,
 	}
-	rl.rate.Store(int64(rate))
-	rl.interval.Store(int64(interval))
 
-	go rl.cleanup()
+	// Start background cleanup goroutine once
+	cleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			for range ticker.C {
+				rateLimiters.Range(func(key, value any) bool {
+					if limiter, ok := value.(*RateLimiter); ok {
+						limiter.cleanup(time.Minute * 5)
+					}
+					return true
+				})
+			}
+		}()
+	})
 
 	return rl
 }
 
-func (rl *RateLimiter) UpdateRate(rate int, interval time.Duration) {
-	rl.rate.Store(int64(rate))
-	rl.interval.Store(int64(interval))
+// GetRateLimiter returns a named rate limiter from the registry, or nil if not registered
+func GetRateLimiter(name string) *RateLimiter {
+	if val, ok := rateLimiters.Load(name); ok {
+		return val.(*RateLimiter)
+	}
+	return nil
 }
 
-func (rl *RateLimiter) Stop() {
-	close(rl.done)
-}
-
-func (rl *RateLimiter) cleanup() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			rl.mu.Lock()
-			interval := time.Duration(rl.interval.Load())
-			now := time.Now()
-			for ip, v := range rl.visitors {
-				if now.Sub(v.windowStart) > interval*2 {
-					delete(rl.visitors, ip)
-				}
-			}
-			rl.mu.Unlock()
-		case <-rl.done:
-			return
-		}
-	}
-}
-
-func (rl *RateLimiter) isAllowed(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	rate := int(rl.rate.Load())
-	interval := time.Duration(rl.interval.Load())
-	now := time.Now()
-
-	v, exists := rl.visitors[ip]
-	if !exists {
-		if len(rl.visitors) >= maxVisitors {
-			rl.evictOldest()
-		}
-		rl.visitors[ip] = &visitor{count: 1, windowStart: now}
-		return true
-	}
-
-	if now.Sub(v.windowStart) > interval {
-		v.count = 1
-		v.windowStart = now
-		return true
-	}
-
-	if v.count >= rate {
-		return false
-	}
-
-	v.count++
-	return true
-}
-
-func (rl *RateLimiter) evictOldest() {
-	type entry struct {
-		ip   string
-		time time.Time
-	}
-	var entries = make([]entry, 0, len(rl.visitors))
-	for ip, v := range rl.visitors {
-		entries = append(entries, entry{ip, v.windowStart})
-	}
-	for i := 0; i < len(entries); i++ {
-		for j := i + 1; j < len(entries); j++ {
-			if entries[j].time.Before(entries[i].time) {
-				entries[i], entries[j] = entries[j], entries[i]
-			}
-		}
-	}
-	toRemove := max(len(entries)/10, 1)
-	for i := range toRemove {
-		delete(rl.visitors, entries[i].ip)
-	}
-}
-
-var rateLimiters sync.Map
-
+// StopRateLimiter stops and clears all registered rate limiters
 func StopRateLimiter() {
-	rateLimiters.Range(func(_, v any) bool {
-		v.(*RateLimiter).Stop()
+	rateLimiters.Range(func(k, v any) bool {
+		rateLimiters.Delete(k)
 		return true
 	})
 }
 
-// GetRateLimiter returns a named rate limiter for runtime updates.
-func GetRateLimiter(name string) *RateLimiter {
-	if v, ok := rateLimiters.Load(name); ok {
-		return v.(*RateLimiter)
+// RegisterRateLimiter registers a named rate limiter
+func RegisterRateLimiter(name string, limiter *RateLimiter) {
+	rateLimiters.Store(name, limiter)
+}
+
+// isAllowed checks if a request from the given IP is allowed
+func (rl *RateLimiter) isAllowed(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	v, exists := rl.visitors[ip]
+
+	if !exists {
+		rl.visitors[ip] = &visitor{
+			lastSeen: now,
+			tokens:   rl.rate - 1,
+		}
+		return true
 	}
-	return nil
+
+	// Refill tokens based on elapsed time
+	elapsed := now.Sub(v.lastSeen)
+	if elapsed >= rl.interval {
+		v.tokens = rl.rate - 1
+		v.lastSeen = now
+		return true
+	}
+
+	// Calculate tokens to add proportionally
+	tokensToAdd := int(float64(elapsed) / float64(rl.interval) * float64(rl.rate))
+	if tokensToAdd > 0 {
+		v.tokens = min(v.tokens+tokensToAdd, rl.rate)
+		v.lastSeen = now
+	}
+
+	if v.tokens > 0 {
+		v.tokens--
+		return true
+	}
+
+	return false
+}
+
+// Reset clears the rate limiter history for an IP (e.g., after successful login)
+func (rl *RateLimiter) Reset(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	delete(rl.visitors, ip)
+}
+
+// ResetAll clears all rate limiter history
+func (rl *RateLimiter) ResetAll() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.visitors = make(map[string]*visitor)
+}
+
+// UpdateRate dynamically updates rate and interval for the limiter
+func (rl *RateLimiter) UpdateRate(rate int, interval time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.rate = rate
+	rl.interval = interval
+}
+
+// cleanup removes stale entries
+func (rl *RateLimiter) cleanup(maxAge time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	for ip, v := range rl.visitors {
+		if now.Sub(v.lastSeen) > maxAge {
+			delete(rl.visitors, ip)
+		}
+	}
 }
 
 // RateLimitMiddleware creates a named rate limiter and returns a Gin handler.
@@ -154,7 +165,7 @@ func RateLimitMiddleware(name string, rate int, interval time.Duration) gin.Hand
 		ip := c.ClientIP()
 
 		if !limiter.isAllowed(ip) {
-			c.Error(apperror.ErrRateLimit)
+			c.Error(errx.RateLimit("Too many requests"))
 			c.Abort()
 			return
 		}

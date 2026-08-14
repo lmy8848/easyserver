@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 
-	"easyserver/internal/infra/apperror"
 	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
@@ -21,27 +20,27 @@ type errorResponse struct {
 func mapKind(k errx.Kind) (status int, code int) {
 	switch k {
 	case errx.KindBadRequest:
-		return http.StatusBadRequest, apperror.CodeBadRequest
+		return http.StatusBadRequest, errx.CodeBadRequest
 	case errx.KindUnauthorized:
-		return http.StatusUnauthorized, apperror.CodeUnauthorized
+		return http.StatusUnauthorized, errx.CodeUnauthorized
 	case errx.KindForbidden:
-		return http.StatusForbidden, apperror.CodeForbidden
+		return http.StatusForbidden, errx.CodeForbidden
 	case errx.KindNotFound:
-		return http.StatusNotFound, apperror.CodeNotFound
+		return http.StatusNotFound, errx.CodeNotFound
 	case errx.KindConflict:
-		return http.StatusConflict, apperror.CodeConflict
+		return http.StatusConflict, errx.CodeConflict
 	case errx.KindRateLimit:
-		return http.StatusTooManyRequests, apperror.CodeRateLimit
+		return http.StatusTooManyRequests, errx.CodeRateLimit
 	case errx.KindNotImplemented:
-		return http.StatusNotImplemented, 50100
+		return http.StatusNotImplemented, errx.CodeNotImplemented
 	case errx.KindUnavailable:
-		return http.StatusServiceUnavailable, 50300
+		return http.StatusServiceUnavailable, errx.CodeUnavailable
 	case errx.KindTimeout:
-		return http.StatusGatewayTimeout, 50400
+		return http.StatusGatewayTimeout, errx.CodeTimeout
 	case errx.KindInternal:
 		fallthrough
 	default:
-		return http.StatusInternalServerError, apperror.CodeInternalError
+		return http.StatusInternalServerError, errx.CodeInternalError
 	}
 }
 
@@ -71,7 +70,6 @@ func handleError(c *gin.Context, err error) {
 	var message, safeLog string
 
 	var xErr *errx.Error
-	var appErr *apperror.AppError
 
 	switch {
 	case errors.As(err, &xErr):
@@ -82,15 +80,9 @@ func handleError(c *gin.Context, err error) {
 		message = xErr.Message
 		safeLog = xErr.SafeError()
 
-	case errors.As(err, &appErr):
-		status = appErr.HTTPStatus
-		code = appErr.Code
-		message = appErr.Message
-		safeLog = appErr.SafeError()
-
 	default:
 		status = http.StatusInternalServerError
-		code = apperror.CodeInternalError
+		code = errx.CodeInternalError
 		message = "internal server error"
 		safeLog = err.Error()
 	}

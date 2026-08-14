@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 )
 
 // SSLCertInfo is the parsed SSL certificate detail for a website.
@@ -75,10 +75,10 @@ type HealthResult struct {
 func (s *WebsiteService) GetSSL(ctx context.Context, webServerID, id int64) (*SSLCertInfo, error) {
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	if w == nil {
-		return nil, apperror.ErrNotFound.WithMessage("网站不存在")
+		return nil, errx.NotFound("网站不存在")
 	}
 	info := &SSLCertInfo{CertPath: w.SSLCertPath, KeyPath: w.SSLKeyPath}
 	if w.SSLCertPath == "" {
@@ -87,15 +87,15 @@ func (s *WebsiteService) GetSSL(ctx context.Context, webServerID, id int64) (*SS
 	info.Enabled = true
 	data, err := os.ReadFile(w.SSLCertPath)
 	if err != nil {
-		return nil, apperror.ErrInternal.WithMessage("读取证书失败: " + err.Error())
+		return nil, errx.Internal("读取证书失败: %w", err)
 	}
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return nil, apperror.ErrInternal.WithMessage("证书 PEM 格式无效")
+		return nil, errx.Internal("证书 PEM 格式无效")
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, apperror.ErrInternal.WithMessage("解析证书失败: " + err.Error())
+		return nil, errx.Internal("解析证书失败: %w", err)
 	}
 	info.Subject = cert.Subject.CommonName
 	info.Issuer = cert.Issuer.CommonName
@@ -112,19 +112,19 @@ func (s *WebsiteService) GetSSL(ctx context.Context, webServerID, id int64) (*SS
 func (s *WebsiteService) GetConfig(ctx context.Context, webServerID, id int64) (string, error) {
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
-		return "", apperror.WrapError(err)
+		return "", err
 	}
 	if w == nil {
-		return "", apperror.ErrNotFound.WithMessage("网站不存在")
+		return "", errx.NotFound("网站不存在")
 	}
 	ws, err := s.webServerRepo.Get(ctx, webServerID)
 	if err != nil || ws == nil {
-		return "", apperror.ErrNotFound.WithMessage("Web 服务器不存在")
+		return "", errx.NotFound("Web 服务器不存在")
 	}
 	confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
 	data, err := os.ReadFile(confPath)
 	if err != nil {
-		return "", apperror.ErrNotFound.WithMessage("配置文件不存在: " + confPath)
+		return "", errx.NotFound("配置文件不存在: " + confPath)
 	}
 	return string(data), nil
 }
@@ -133,7 +133,7 @@ func (s *WebsiteService) GetConfig(ctx context.Context, webServerID, id int64) (
 func (s *WebsiteService) GetParsedLogs(ctx context.Context, webServerID, id int64, logType string, lines int) ([]LogEntry, error) {
 	raw, err := s.GetLogs(ctx, webServerID, id, logType, lines)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	return parseNginxLogs(raw), nil
 }
@@ -142,7 +142,7 @@ func (s *WebsiteService) GetParsedLogs(ctx context.Context, webServerID, id int6
 func (s *WebsiteService) GetStats(ctx context.Context, webServerID, id int64) (*WebsiteStats, error) {
 	raw, err := s.GetLogs(ctx, webServerID, id, "access", 5000)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	return computeStats(raw), nil
 }
@@ -154,10 +154,10 @@ func (s *WebsiteService) GetStats(ctx context.Context, webServerID, id int64) (*
 func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64, port int) (*HealthResult, error) {
 	w, err := s.repo.Get(ctx, webServerID, id)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	if w == nil {
-		return nil, apperror.ErrNotFound.WithMessage("网站不存在")
+		return nil, errx.NotFound("网站不存在")
 	}
 	if port <= 0 {
 		port = w.Port
@@ -171,7 +171,7 @@ func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64,
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, apperror.WrapError(err)
+		return nil, err
 	}
 	resp, err := client.Do(req)
 	latency := time.Since(start).Milliseconds()

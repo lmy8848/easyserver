@@ -4,7 +4,7 @@ import (
 	"strconv"
 
 	"easyserver/internal/httpx"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/web/security"
 
 	"github.com/gin-gonic/gin"
@@ -22,35 +22,32 @@ func NewSecurityHandler(svc *security.SecurityService) *SecurityHandler {
 func (h *SecurityHandler) RegisterRoutes(g *gin.RouterGroup) {
 	security := g.Group("/:id/security")
 	{
-		security.GET("/config", h.GetConfig)
-		security.PUT("/config", h.UpdateConfig)
-		security.GET("/banned", h.ListBannedIPs)
-		security.POST("/ban", h.BanIP)
-		security.POST("/unban/:ban_id", h.UnbanIP)
+		security.GET("/config", httpx.H(h.GetConfig))
+		security.PUT("/config", httpx.H(h.UpdateConfig))
+		security.GET("/banned", httpx.H(h.ListBannedIPs))
+		security.POST("/ban", httpx.H(h.BanIP))
+		security.POST("/unban/:ban_id", httpx.H(h.UnbanIP))
 	}
 }
 
 // GetConfig returns the security config for a website.
-func (h *SecurityHandler) GetConfig(c *gin.Context) {
+func (h *SecurityHandler) GetConfig(c *gin.Context) (any, error) {
 	websiteID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的网站ID"))
-		return
+		return nil, errx.BadRequest("无效的网站ID")
 	}
 	cfg, err := h.svc.GetConfig(c.Request.Context(), websiteID)
 	if err != nil {
-		c.Error(err)
-		return
+		return nil, err
 	}
-	httpx.Success(c, cfg)
+	return cfg, nil
 }
 
 // UpdateConfig updates rate-limit and auto-ban settings.
-func (h *SecurityHandler) UpdateConfig(c *gin.Context) {
+func (h *SecurityHandler) UpdateConfig(c *gin.Context) (any, error) {
 	websiteID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的网站ID"))
-		return
+		return nil, errx.BadRequest("无效的网站ID")
 	}
 	var req struct {
 		RateLimitEnabled    bool `json:"rate_limit_enabled"`
@@ -63,8 +60,7 @@ func (h *SecurityHandler) UpdateConfig(c *gin.Context) {
 		AutoBanDuration     int  `json:"auto_ban_duration"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 	cfg, err := h.svc.UpdateConfig(c.Request.Context(), websiteID, func(cfg *security.SecurityConfig) {
 		cfg.RateLimitEnabled = req.RateLimitEnabled
@@ -77,33 +73,29 @@ func (h *SecurityHandler) UpdateConfig(c *gin.Context) {
 		cfg.AutoBanDuration = req.AutoBanDuration
 	})
 	if err != nil {
-		c.Error(err)
-		return
+		return nil, err
 	}
-	httpx.Success(c, cfg)
+	return cfg, nil
 }
 
 // ListBannedIPs returns active bans for a website.
-func (h *SecurityHandler) ListBannedIPs(c *gin.Context) {
+func (h *SecurityHandler) ListBannedIPs(c *gin.Context) (any, error) {
 	websiteID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的网站ID"))
-		return
+		return nil, errx.BadRequest("无效的网站ID")
 	}
 	bans, err := h.svc.ListBannedIPs(c.Request.Context(), websiteID)
 	if err != nil {
-		c.Error(err)
-		return
+		return nil, err
 	}
-	httpx.Success(c, bans)
+	return bans, nil
 }
 
 // BanIP manually bans an IP for a website.
-func (h *SecurityHandler) BanIP(c *gin.Context) {
+func (h *SecurityHandler) BanIP(c *gin.Context) (any, error) {
 	websiteID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的网站ID"))
-		return
+		return nil, errx.BadRequest("无效的网站ID")
 	}
 	var req struct {
 		IP       string `json:"ip" binding:"required"`
@@ -111,30 +103,26 @@ func (h *SecurityHandler) BanIP(c *gin.Context) {
 		Duration int    `json:"duration"` // seconds, 0 = permanent
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 	if req.Reason == "" {
 		req.Reason = "手动封禁"
 	}
 	wid := &websiteID
 	if err := h.svc.BanIP(c.Request.Context(), wid, req.IP, req.Reason, "manual", req.Duration); err != nil {
-		c.Error(err)
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "已封禁 " + req.IP})
+	return gin.H{"message": "已封禁 " + req.IP}, nil
 }
 
 // UnbanIP removes a ban by ID.
-func (h *SecurityHandler) UnbanIP(c *gin.Context) {
+func (h *SecurityHandler) UnbanIP(c *gin.Context) (any, error) {
 	banID, err := strconv.ParseInt(c.Param("ban_id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的封禁ID"))
-		return
+		return nil, errx.BadRequest("无效的封禁ID")
 	}
 	if err := h.svc.UnbanIP(c.Request.Context(), banID); err != nil {
-		c.Error(err)
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "已解封"})
+	return gin.H{"message": "已解封"}, nil
 }

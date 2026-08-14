@@ -3,7 +3,7 @@ package httpx
 import (
 	"net/http"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,7 +32,7 @@ type PaginatedData struct {
 // Success returns a success response
 func Success(c *gin.Context, data any) {
 	c.JSON(http.StatusOK, Response{
-		Code:    apperror.CodeSuccess,
+		Code:    errx.CodeSuccess,
 		Message: "ok",
 		Data:    data,
 	})

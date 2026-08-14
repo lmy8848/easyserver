@@ -13,7 +13,7 @@ import (
 	"easyserver/internal/firewall"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,77 +37,69 @@ func NewFirewallHandler(firewallService *firewall.Service, panelPort int) *Firew
 }
 
 // GetStatus returns the firewall status
-func (h *FirewallHandler) GetStatus(c *gin.Context) {
+func (h *FirewallHandler) GetStatus(c *gin.Context) (any, error) {
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, status)
+	return status, nil
 }
 
 // EnableFirewall enables the firewall
-func (h *FirewallHandler) EnableFirewall(c *gin.Context) {
+func (h *FirewallHandler) EnableFirewall(c *gin.Context) (any, error) {
 	middleware.AuditSummary(c, "启用防火墙")
 	if err := h.firewallService.EnableFirewall(c.Request.Context()); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "防火墙已启用"})
+	return gin.H{"message": "防火墙已启用"}, nil
 }
 
 // DisableFirewall disables the firewall
-func (h *FirewallHandler) DisableFirewall(c *gin.Context) {
+func (h *FirewallHandler) DisableFirewall(c *gin.Context) (any, error) {
 	// Require confirmation
 	var req struct {
 		Confirm bool `json:"confirm"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
-		c.Error(apperror.ErrBadRequest.WithMessage("请确认禁用防火墙，设置 {\"confirm\": true}"))
-		return
+		return nil, errx.BadRequest("请确认禁用防火墙，设置 {\"confirm\": true}")
 	}
 
 	middleware.AuditSummary(c, "禁用防火墙")
 	if err := h.firewallService.DisableFirewall(c.Request.Context()); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "防火墙已禁用"})
+	return gin.H{"message": "防火墙已禁用"}, nil
 }
 
 // SetDefaultPolicy sets the default policy for a chain (INPUT or OUTPUT)
-func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) {
+func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) (any, error) {
 	var req firewall.SetDefaultPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "设置防火墙默认策略 "+req.Chain+" "+req.Policy)
 	// Validate chain
 	chain := strings.ToUpper(req.Chain)
 	if chain != "INPUT" && chain != "OUTPUT" {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的链，必须是 INPUT 或 OUTPUT"))
-		return
+		return nil, errx.BadRequest("无效的链，必须是 INPUT 或 OUTPUT")
 	}
 
 	// Validate policy
 	policy := strings.ToUpper(req.Policy)
 	if policy != "ACCEPT" && policy != "DROP" {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的策略，必须是 ACCEPT 或 DROP"))
-		return
+		return nil, errx.BadRequest("无效的策略，必须是 ACCEPT 或 DROP")
 	}
 
 	if err := h.firewallService.SetDefaultPolicy(c.Request.Context(), chain, policy); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, gin.H{"message": fmt.Sprintf("%s 的默认策略已设置为 %s", chain, policy)})
+	return gin.H{"message": fmt.Sprintf("%s 的默认策略已设置为 %s", chain, policy)}, nil
 }
 
 // GetLogs returns firewall log entries from system log files
-func (h *FirewallHandler) GetLogs(c *gin.Context) {
+func (h *FirewallHandler) GetLogs(c *gin.Context) (any, error) {
 	linesParam := c.DefaultQuery("lines", "100")
 	lines, err := strconv.Atoi(linesParam)
 	if err != nil || lines < 1 {
@@ -135,8 +127,6 @@ func (h *FirewallHandler) GetLogs(c *gin.Context) {
 
 	// Sort by timestamp descending (newest first) and limit
 	if len(allEntries) > lines {
-		// Simple truncation - entries are already appended in file order
-		// For better sorting we'd need to parse timestamps, but keep it simple
 		allEntries = allEntries[len(allEntries)-lines:]
 	}
 
@@ -145,11 +135,8 @@ func (h *FirewallHandler) GetLogs(c *gin.Context) {
 		allEntries[i], allEntries[j] = allEntries[j], allEntries[i]
 	}
 
-	httpx.Success(c, allEntries)
+	return allEntries, nil
 }
-
-// iptables log pattern: kernel: [12345.678] IN=eth0 OUT= MAC=... SRC=1.2.3.4 DST=5.6.7.8 LEN=... PROTO=TCP SPT=12345 DPT=22 ...
-var iptablesLogRegex = regexp.MustCompile(`SRC=(\S+)\s+DST=(\S+)\s+.*?PROTO=(\S+)`)
 
 // ufw log pattern: [UFW BLOCK] IN=eth0 OUT= MAC=... SRC=1.2.3.4 DST=5.6.7.8 LEN=... PROTO=TCP SPT=12345 DPT=22 ...
 var ufwActionRegex = regexp.MustCompile(`\[UFW\s+(\w+)\]`)
@@ -183,7 +170,6 @@ func readFirewallLog(filePath string, maxLines int) ([]firewall.FirewallLogEntry
 
 	// Reorder ring buffer to chronological order
 	if len(lines) == maxLines {
-		// Rotate so that writeIdx points to the oldest entry
 		ordered := make([]string, len(lines))
 		for i := range lines {
 			ordered[i] = lines[(writeIdx+i)%len(lines)]
@@ -205,16 +191,13 @@ func readFirewallLog(filePath string, maxLines int) ([]firewall.FirewallLogEntry
 
 // isFirewallLogLine checks if a log line is related to firewall activity
 func isFirewallLogLine(line string) bool {
-	// Check for ufw log entries
 	if strings.Contains(line, "[UFW ") {
 		return true
 	}
-	// Check for iptables/nft log entries (common patterns)
 	lower := strings.ToLower(line)
 	if strings.Contains(lower, "iptables") || strings.Contains(lower, "nftables") {
 		return true
 	}
-	// Check for kernel firewall log entries with SRC/DST pattern
 	if strings.Contains(line, "SRC=") && strings.Contains(line, "DST=") && strings.Contains(line, "PROTO=") {
 		return true
 	}
@@ -227,14 +210,11 @@ func parseFirewallLogLine(line string) *firewall.FirewallLogEntry {
 		Raw: line,
 	}
 
-	// Parse timestamp (first field in most log formats)
 	parts := strings.SplitN(line, " ", 4)
 	if len(parts) >= 3 {
-		// Typical format: "Jun 23 19:00:00 hostname ..."
 		entry.Timestamp = strings.Join(parts[:3], " ")
 	}
 
-	// Parse action
 	if ufwActionRegex.MatchString(line) {
 		matches := ufwActionRegex.FindStringSubmatch(line)
 		if len(matches) > 1 {
@@ -250,93 +230,90 @@ func parseFirewallLogLine(line string) *firewall.FirewallLogEntry {
 		entry.Action = "LOG"
 	}
 
-	// Parse SRC, DST, PROTO
-	if iptablesLogRegex.MatchString(line) {
-		matches := iptablesLogRegex.FindStringSubmatch(line)
-		if len(matches) > 3 {
-			entry.SrcIP = matches[1]
-			entry.DstIP = matches[2]
-			entry.Protocol = strings.ToLower(matches[3])
-		}
+	if strings.Contains(line, "PROTO=TCP") {
+		entry.Protocol = "tcp"
+	} else if strings.Contains(line, "PROTO=UDP") {
+		entry.Protocol = "udp"
+	} else if strings.Contains(line, "PROTO=ICMP") {
+		entry.Protocol = "icmp"
 	}
 
-	// Parse ports
-	entry.DstPort = extractPort(line, "DPT=")
-	entry.SrcPort = extractPort(line, "SPT=")
+	dptRegex := regexp.MustCompile(`DPT=(\d+)`)
+	if matches := dptRegex.FindStringSubmatch(line); len(matches) > 1 {
+		entry.DstPort, _ = strconv.Atoi(matches[1])
+	}
 
-	// Parse interface
-	if _, after, ok := strings.Cut(line, "IN="); ok {
-		rest := after
-		if before, _, ok := strings.Cut(rest, " "); ok {
-			entry.Interface = before
-		}
+	sptRegex := regexp.MustCompile(`SPT=(\d+)`)
+	if matches := sptRegex.FindStringSubmatch(line); len(matches) > 1 {
+		entry.SrcPort, _ = strconv.Atoi(matches[1])
+	}
+
+	srcRegex := regexp.MustCompile(`SRC=(\S+)`)
+	if matches := srcRegex.FindStringSubmatch(line); len(matches) > 1 {
+		entry.SrcIP = matches[1]
+	}
+
+	dstRegex := regexp.MustCompile(`DST=(\S+)`)
+	if matches := dstRegex.FindStringSubmatch(line); len(matches) > 1 {
+		entry.DstIP = matches[1]
+	}
+
+	inRegex := regexp.MustCompile(`IN=(\S*)`)
+	if matches := inRegex.FindStringSubmatch(line); len(matches) > 1 && matches[1] != "" {
+		entry.Interface = matches[1]
 	}
 
 	return entry
 }
 
-// extractPort extracts a port number from a log line given a prefix like "DPT="
-func extractPort(line, prefix string) int {
-	_, after, ok := strings.Cut(line, prefix)
-	if !ok {
-		return 0
-	}
-	rest := after
-	before0, _, ok0 := strings.Cut(rest, " ")
-	var portStr string
-	if ok0 {
-		portStr = before0
-	} else {
-		portStr = rest
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return 0
-	}
-	return port
-}
+// Helper validation functions
 
-// isValidPort validates port format (single port or range)
 func isValidPort(port string) bool {
-	// Single port: 80
-	if p, err := strconv.Atoi(port); err == nil {
-		return p > 0 && p <= 65535
+	if port == "all" || port == "ALL" {
+		return true
 	}
-	// Port range: 8000-9000
-	parts := strings.Split(port, "-")
-	if len(parts) == 2 {
-		start, err1 := strconv.Atoi(parts[0])
-		end, err2 := strconv.Atoi(parts[1])
-		if err1 == nil && err2 == nil && start > 0 && end > start && start <= 65535 && end <= 65535 {
-			return true
+	if strings.Contains(port, "-") {
+		parts := strings.Split(port, "-")
+		if len(parts) != 2 {
+			return false
 		}
+		start, err := strconv.Atoi(parts[0])
+		if err != nil || start < 1 || start > 65535 {
+			return false
+		}
+		end, err := strconv.Atoi(parts[1])
+		if err != nil || end < 1 || end > 65535 || start >= end {
+			return false
+		}
+		return true
 	}
-	return false
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return false
+	}
+	return p >= 1 && p <= 65535
 }
 
-// isValidCIDR validates IP or CIDR format
-func isValidCIDR(s string) bool {
-	// Single IP: 192.168.1.1
-	if net.ParseIP(s) != nil {
+func isValidCIDR(cidr string) bool {
+	if cidr == "" || cidr == "0.0.0.0/0" || cidr == "::/0" {
 		return true
 	}
-	// CIDR: 192.168.1.0/24
-	if _, _, err := net.ParseCIDR(s); err == nil {
+	if ip := net.ParseIP(cidr); ip != nil {
 		return true
 	}
-	return false
+	_, _, err := net.ParseCIDR(cidr)
+	return err == nil
 }
 
 // ============================================================
-// FirewallRuleHandler — firewall rule CRUD operations
+// FirewallRuleHandler — firewall rules CRUD operations
 // ============================================================
 
-// FirewallRuleHandler handles firewall rule CRUD operations
+// FirewallRuleHandler handles firewall rules CRUD operations
 type FirewallRuleHandler struct {
 	firewallService *firewall.Service
 }
 
-// NewFirewallRuleHandler creates a new FirewallRuleHandler
 func NewFirewallRuleHandler(firewallService *firewall.Service) *FirewallRuleHandler {
 	return &FirewallRuleHandler{
 		firewallService: firewallService,
@@ -349,63 +326,55 @@ func (h *FirewallRuleHandler) isProtectedPort(c *gin.Context, port string) bool 
 }
 
 // ListRules returns all firewall rules
-func (h *FirewallRuleHandler) ListRules(c *gin.Context) {
+func (h *FirewallRuleHandler) ListRules(c *gin.Context) (any, error) {
 	rules, err := h.firewallService.ListRules(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, rules)
+	return rules, nil
 }
 
 // GetRule returns a firewall rule by ID
-func (h *FirewallRuleHandler) GetRule(c *gin.Context) {
+func (h *FirewallRuleHandler) GetRule(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
-	httpx.Success(c, rule)
+	return rule, nil
 }
 
 // CreateRule creates a new firewall rule
-func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
+func (h *FirewallRuleHandler) CreateRule(c *gin.Context) (any, error) {
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.ErrInternal.WithMessage("获取防火墙状态失败"))
-		return
+		return nil, errx.Internal("获取防火墙状态失败")
 	}
 	if !status.Enabled {
-		c.Error(apperror.ErrBadRequest.WithMessage("防火墙已禁用，请先启用防火墙"))
-		return
+		return nil, errx.BadRequest("防火墙已禁用，请先启用防火墙")
 	}
 
 	var req firewall.CreateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "创建防火墙规则 "+req.Port)
 	// Validate chain
 	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 	if !validChains[strings.ToUpper(req.Chain)] {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的链，必须是 INPUT、OUTPUT 或 FORWARD"))
-		return
+		return nil, errx.BadRequest("无效的链，必须是 INPUT、OUTPUT 或 FORWARD")
 	}
 
 	// Validate action
 	validActions := map[string]bool{"ACCEPT": true, "DROP": true, "REJECT": true}
 	action := strings.ToUpper(req.Action)
 	if !validActions[action] {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的动作，必须是 ACCEPT、DROP 或 REJECT"))
-		return
+		return nil, errx.BadRequest("无效的动作，必须是 ACCEPT、DROP 或 REJECT")
 	}
 
 	// Set defaults
@@ -415,29 +384,25 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	}
 	validProtocols := map[string]bool{"tcp": true, "udp": true, "all": true, "icmp": true}
 	if !validProtocols[strings.ToLower(protocol)] {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的协议，必须是 tcp、udp、all 或 icmp"))
-		return
+		return nil, errx.BadRequest("无效的协议，必须是 tcp、udp、all 或 icmp")
 	}
 
 	// Validate port format if provided
 	if req.Port != "" {
 		if !isValidPort(req.Port) {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的端口格式，使用单端口 (80) 或范围 (8000-9000)"))
-			return
+			return nil, errx.BadRequest("无效的端口格式，使用单端口 (80) 或范围 (8000-9000)")
 		}
 
 		// Check if port is protected (panel port or SSH)
 		if action != "ACCEPT" && h.isProtectedPort(c, req.Port) {
-			c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", req.Port)))
-			return
+			return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", req.Port))
 		}
 	}
 
 	// Validate source IP/CIDR if provided
 	if req.Source != "" && req.Source != "0.0.0.0/0" && req.Source != "::/0" {
 		if !isValidCIDR(req.Source) {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)"))
-			return
+			return nil, errx.BadRequest("无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)")
 		}
 	}
 
@@ -448,8 +413,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	}
 	validIPVersions := map[string]bool{"ipv4": true, "ipv6": true, "both": true}
 	if !validIPVersions[ipVersion] {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 ip_version，必须是 ipv4、ipv6 或 both"))
-		return
+		return nil, errx.BadRequest("无效的 ip_version，必须是 ipv4、ipv6 或 both")
 	}
 
 	rule := &firewall.FirewallRule{
@@ -464,30 +428,26 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) {
 	}
 
 	if err := h.firewallService.CreateRule(c.Request.Context(), rule); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, rule)
+	return rule, nil
 }
 
 // UpdateRule updates an existing firewall rule
-func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
+func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
 
 	var req firewall.UpdateFirewallRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	summary := "更新防火墙规则 (端口: " + rule.Port + ")"
@@ -498,46 +458,40 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 	if req.Chain != nil {
 		validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 		if !validChains[strings.ToUpper(*req.Chain)] {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的链"))
-			return
+			return nil, errx.BadRequest("无效的链")
 		}
 		rule.Chain = strings.ToUpper(*req.Chain)
 	}
 	if req.Protocol != nil {
 		validProtocols := map[string]bool{"tcp": true, "udp": true, "all": true, "icmp": true}
 		if !validProtocols[strings.ToLower(*req.Protocol)] {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的协议"))
-			return
+			return nil, errx.BadRequest("无效的协议")
 		}
 		rule.Protocol = strings.ToLower(*req.Protocol)
 	}
 	if req.Port != nil {
 		if *req.Port != "" && !isValidPort(*req.Port) {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的端口格式"))
-			return
+			return nil, errx.BadRequest("无效的端口格式")
 		}
 		rule.Port = *req.Port
 	}
 	if req.Action != nil {
 		validActions := map[string]bool{"ACCEPT": true, "DROP": true, "REJECT": true}
 		if !validActions[strings.ToUpper(*req.Action)] {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的动作"))
-			return
+			return nil, errx.BadRequest("无效的动作")
 		}
 		rule.Action = strings.ToUpper(*req.Action)
 	}
 	if req.Source != nil {
 		if *req.Source != "" && *req.Source != "0.0.0.0/0" && *req.Source != "::/0" && !isValidCIDR(*req.Source) {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)"))
-			return
+			return nil, errx.BadRequest("无效的源地址格式，使用 IP (192.168.1.1) 或 CIDR (192.168.1.0/24)")
 		}
 		rule.Source = *req.Source
 	}
 	if req.IPVersion != nil {
 		validIPVersions := map[string]bool{"ipv4": true, "ipv6": true, "both": true}
 		if !validIPVersions[*req.IPVersion] {
-			c.Error(apperror.ErrBadRequest.WithMessage("无效的 ip_version，必须是 ipv4、ipv6 或 both"))
-			return
+			return nil, errx.BadRequest("无效的 ip_version，必须是 ipv4、ipv6 或 both")
 		}
 		rule.IPVersion = *req.IPVersion
 	}
@@ -547,156 +501,133 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) {
 
 	// Check if the updated rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", rule.Port)))
-		return
+		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", rule.Port))
 	}
 
 	if err := h.firewallService.UpdateRule(c.Request.Context(), rule); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, rule)
+	return rule, nil
 }
 
 // DeleteRule deletes a firewall rule
-func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) {
+func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 	// Check existence
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
 	middleware.AuditSummary(c, "删除防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.DeleteRule(c.Request.Context(), id); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "规则已删除"})
+	return gin.H{"message": "规则已删除"}, nil
 }
 
 // EnableRule enables a firewall rule
-func (h *FirewallRuleHandler) EnableRule(c *gin.Context) {
+func (h *FirewallRuleHandler) EnableRule(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.ErrInternal.WithMessage("获取防火墙状态失败"))
-		return
+		return nil, errx.Internal("获取防火墙状态失败")
 	}
 	if !status.Enabled {
-		c.Error(apperror.ErrBadRequest.WithMessage("防火墙已禁用，请先启用防火墙"))
-		return
+		return nil, errx.BadRequest("防火墙已禁用，请先启用防火墙")
 	}
 
 	// Check existence
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
 	middleware.AuditSummary(c, "启用防火墙规则 (端口: "+rule.Port+")")
 
 	// Check if enabling this rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法启用 DROP/REJECT 规则", rule.Port)))
-		return
+		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法启用 DROP/REJECT 规则", rule.Port))
 	}
 
 	if err := h.firewallService.EnableRule(c.Request.Context(), id); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "规则已启用"})
+	return gin.H{"message": "规则已启用"}, nil
 }
 
 // DisableRule disables a firewall rule
-func (h *FirewallRuleHandler) DisableRule(c *gin.Context) {
+func (h *FirewallRuleHandler) DisableRule(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 	// Check existence
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
 	middleware.AuditSummary(c, "禁用防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.DisableRule(c.Request.Context(), id); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "规则已禁用"})
+	return gin.H{"message": "规则已禁用"}, nil
 }
 
 // MoveRuleUp moves a rule up in priority
-func (h *FirewallRuleHandler) MoveRuleUp(c *gin.Context) {
+func (h *FirewallRuleHandler) MoveRuleUp(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
 	middleware.AuditSummary(c, "上移防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.MoveRuleUp(c.Request.Context(), id); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "规则已上移"})
+	return gin.H{"message": "规则已上移"}, nil
 }
 
 // MoveRuleDown moves a rule down in priority
-func (h *FirewallRuleHandler) MoveRuleDown(c *gin.Context) {
+func (h *FirewallRuleHandler) MoveRuleDown(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的规则ID"))
-		return
+		return nil, errx.BadRequest("无效的规则ID")
 	}
 	rule, err := h.firewallService.GetRule(c.Request.Context(), id)
 	if err != nil {
-		c.Error(apperror.ErrNotFound.WithMessage("规则不存在"))
-		return
+		return nil, errx.NotFound("规则不存在")
 	}
 	middleware.AuditSummary(c, "下移防火墙规则 (端口: "+rule.Port+")")
 	if err := h.firewallService.MoveRuleDown(c.Request.Context(), id); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, gin.H{"message": "规则已下移"})
+	return gin.H{"message": "规则已下移"}, nil
 }
 
 // BulkEnableRules enables multiple firewall rules
-func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
+func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) (any, error) {
 	// Check if firewall is enabled
 	status, err := h.firewallService.GetStatus(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.ErrInternal.WithMessage("获取防火墙状态失败"))
-		return
+		return nil, errx.Internal("获取防火墙状态失败")
 	}
 	if !status.Enabled {
-		c.Error(apperror.ErrBadRequest.WithMessage("防火墙已禁用，请先启用防火墙"))
-		return
+		return nil, errx.BadRequest("防火墙已禁用，请先启用防火墙")
 	}
 
 	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "批量启用防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
@@ -722,19 +653,18 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) {
 		succeeded = append(succeeded, id)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"succeeded": len(succeeded),
 		"failed":    len(failed),
 		"errors":    errors,
-	})
+	}, nil
 }
 
 // BulkDisableRules disables multiple firewall rules
-func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
+func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) (any, error) {
 	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "批量禁用防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
@@ -754,19 +684,18 @@ func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) {
 		succeeded = append(succeeded, id)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"succeeded": len(succeeded),
 		"failed":    len(failed),
 		"errors":    errors,
-	})
+	}, nil
 }
 
 // BulkDeleteRules deletes multiple firewall rules
-func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) {
+func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) (any, error) {
 	var req firewall.BulkIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.Wrap(err))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "批量删除防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
@@ -786,29 +715,27 @@ func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) {
 		succeeded = append(succeeded, id)
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"succeeded": len(succeeded),
 		"failed":    len(failed),
 		"errors":    errors,
-	})
+	}, nil
 }
 
 // GetSystemRules returns rules from the system
-func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) {
+func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) (any, error) {
 	rules, err := h.firewallService.GetSystemRules(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, rules)
+	return rules, nil
 }
 
 // DeleteSystemRule deletes a rule directly from the system (not from database)
-func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
+func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) (any, error) {
 	var rule firewall.FirewallRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("invalid request: " + err.Error()))
-		return
+		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 
 	middleware.AuditSummary(c, "删除系统防火墙规则 "+rule.Port)
@@ -816,16 +743,14 @@ func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) {
 	// Removing an ACCEPT rule for a protected port could lock out the user
 	// if the default policy is DROP.
 	if strings.ToUpper(rule.Action) == "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法删除其 ACCEPT 规则", rule.Port)))
-		return
+		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法删除其 ACCEPT 规则", rule.Port))
 	}
 
 	if err := h.firewallService.RemoveSystemRule(c.Request.Context(), &rule); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
-	httpx.Success(c, nil)
+	return nil, nil
 }
 
 // FirewallExportData is the export file format
@@ -847,11 +772,10 @@ type FirewallExportedRule struct {
 }
 
 // ExportRules exports all firewall rules as a downloadable JSON file
-func (h *FirewallRuleHandler) ExportRules(c *gin.Context) {
+func (h *FirewallRuleHandler) ExportRules(c *gin.Context) (any, error) {
 	rules, err := h.firewallService.ListRules(c.Request.Context())
 	if err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
 
 	exportedRules := make([]FirewallExportedRule, 0, len(rules))
@@ -876,33 +800,29 @@ func (h *FirewallRuleHandler) ExportRules(c *gin.Context) {
 	filename := fmt.Sprintf("firewall-rules-%s.json", time.Now().Format("2006-01-02"))
 	c.Header("Content-Disposition", "attachment; filename="+filename)
 	c.Header("Content-Type", "application/json")
-	httpx.Success(c, data)
+	return data, nil
 }
 
 // ImportRules imports firewall rules from a JSON file
-func (h *FirewallRuleHandler) ImportRules(c *gin.Context) {
+func (h *FirewallRuleHandler) ImportRules(c *gin.Context) (any, error) {
 	var data FirewallExportData
 	if err := c.ShouldBindJSON(&data); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("无效的 JSON: " + err.Error()))
-		return
+		return nil, errx.BadRequest("无效的 JSON: %w", err)
 	}
 
 	middleware.AuditSummary(c, "导入防火墙规则 "+strconv.Itoa(len(data.Rules))+" 条")
 	if data.Version != 1 {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("不支持的导出版本: %d，期望版本 1", data.Version)))
-		return
+		return nil, errx.BadRequest(fmt.Sprintf("不支持的导出版本: %d，期望版本 1", data.Version))
 	}
 
 	if len(data.Rules) == 0 {
-		c.Error(apperror.ErrBadRequest.WithMessage("没有可导入的规则"))
-		return
+		return nil, errx.BadRequest("没有可导入的规则")
 	}
 
 	// Limit import size to prevent abuse
 	const maxImportRules = 500
 	if len(data.Rules) > maxImportRules {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("导入规则数量过多: %d（最大 %d）", len(data.Rules), maxImportRules)))
-		return
+		return nil, errx.BadRequest(fmt.Sprintf("导入规则数量过多: %d（最大 %d）", len(data.Rules), maxImportRules))
 	}
 
 	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
@@ -991,11 +911,11 @@ func (h *FirewallRuleHandler) ImportRules(c *gin.Context) {
 		succeeded++
 	}
 
-	httpx.Success(c, gin.H{
+	return gin.H{
 		"succeeded": succeeded,
 		"failed":    failed,
 		"errors":    errors,
-	})
+	}, nil
 }
 
 // ============================================================
@@ -1043,18 +963,17 @@ var firewallRuleTemplates = []FirewallRuleTemplate{
 }
 
 // GetTemplates returns the list of available rule templates
-func (h *FirewallTemplateHandler) GetTemplates(c *gin.Context) {
-	httpx.Success(c, firewallRuleTemplates)
+func (h *FirewallTemplateHandler) GetTemplates(c *gin.Context) (any, error) {
+	return firewallRuleTemplates, nil
 }
 
 // ApplyTemplate creates a firewall rule from a named template
-func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
+func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) (any, error) {
 	var req struct {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("请提供模板名称"))
-		return
+		return nil, errx.BadRequest("请提供模板名称")
 	}
 
 	middleware.AuditSummary(c, "应用防火墙模板 "+req.Name)
@@ -1067,14 +986,12 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 		}
 	}
 	if tpl == nil {
-		c.Error(apperror.ErrBadRequest.WithMessage("未找到模板: " + req.Name))
-		return
+		return nil, errx.BadRequest("未找到模板: " + req.Name)
 	}
 
 	// Check if the template would block a protected port
 	if tpl.Action != "ACCEPT" && tpl.Port != "" && h.isProtectedPort(c, tpl.Port) {
-		c.Error(apperror.ErrBadRequest.WithMessage(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", tpl.Port)))
-		return
+		return nil, errx.BadRequest(fmt.Sprintf("端口 %s 受保护（面板或 SSH），无法创建 DROP/REJECT 规则", tpl.Port))
 	}
 
 	rule := &firewall.FirewallRule{
@@ -1088,10 +1005,9 @@ func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) {
 	}
 
 	if err := h.firewallService.CreateRule(c.Request.Context(), rule); err != nil {
-		c.Error(apperror.WrapError(err))
-		return
+		return nil, err
 	}
-	httpx.Success(c, rule)
+	return rule, nil
 }
 
 // ============================================================
@@ -1108,33 +1024,33 @@ func RegisterRoutes(protected *gin.RouterGroup, firewallService *firewall.Servic
 	templateHandler := NewFirewallTemplateHandler(firewallService)
 
 	// Status and control
-	protected.GET("/firewall/status", handler.GetStatus)
-	protected.POST("/firewall/enable", handler.EnableFirewall)
-	protected.POST("/firewall/disable", handler.DisableFirewall)
-	protected.POST("/firewall/default-policy", handler.SetDefaultPolicy)
-	protected.GET("/firewall/logs", handler.GetLogs)
+	protected.GET("/firewall/status", httpx.H(handler.GetStatus))
+	protected.POST("/firewall/enable", httpx.H(handler.EnableFirewall))
+	protected.POST("/firewall/disable", httpx.H(handler.DisableFirewall))
+	protected.POST("/firewall/default-policy", httpx.H(handler.SetDefaultPolicy))
+	protected.GET("/firewall/logs", httpx.H(handler.GetLogs))
 
 	// Rules CRUD
-	protected.GET("/firewall/rules", ruleHandler.ListRules)
-	protected.POST("/firewall/rules", ruleHandler.CreateRule)
-	protected.GET("/firewall/rules/export", ruleHandler.ExportRules)
-	protected.POST("/firewall/rules/import", ruleHandler.ImportRules)
-	protected.POST("/firewall/rules/bulk-enable", ruleHandler.BulkEnableRules)
-	protected.POST("/firewall/rules/bulk-disable", ruleHandler.BulkDisableRules)
-	protected.POST("/firewall/rules/bulk-delete", ruleHandler.BulkDeleteRules)
-	protected.GET("/firewall/rules/:id", ruleHandler.GetRule)
-	protected.PUT("/firewall/rules/:id", ruleHandler.UpdateRule)
-	protected.DELETE("/firewall/rules/:id", ruleHandler.DeleteRule)
-	protected.POST("/firewall/rules/:id/enable", ruleHandler.EnableRule)
-	protected.POST("/firewall/rules/:id/disable", ruleHandler.DisableRule)
-	protected.POST("/firewall/rules/:id/move-up", ruleHandler.MoveRuleUp)
-	protected.POST("/firewall/rules/:id/move-down", ruleHandler.MoveRuleDown)
+	protected.GET("/firewall/rules", httpx.H(ruleHandler.ListRules))
+	protected.POST("/firewall/rules", httpx.H(ruleHandler.CreateRule))
+	protected.GET("/firewall/rules/export", httpx.H(ruleHandler.ExportRules))
+	protected.POST("/firewall/rules/import", httpx.H(ruleHandler.ImportRules))
+	protected.POST("/firewall/rules/bulk-enable", httpx.H(ruleHandler.BulkEnableRules))
+	protected.POST("/firewall/rules/bulk-disable", httpx.H(ruleHandler.BulkDisableRules))
+	protected.POST("/firewall/rules/bulk-delete", httpx.H(ruleHandler.BulkDeleteRules))
+	protected.GET("/firewall/rules/:id", httpx.H(ruleHandler.GetRule))
+	protected.PUT("/firewall/rules/:id", httpx.H(ruleHandler.UpdateRule))
+	protected.DELETE("/firewall/rules/:id", httpx.H(ruleHandler.DeleteRule))
+	protected.POST("/firewall/rules/:id/enable", httpx.H(ruleHandler.EnableRule))
+	protected.POST("/firewall/rules/:id/disable", httpx.H(ruleHandler.DisableRule))
+	protected.POST("/firewall/rules/:id/move-up", httpx.H(ruleHandler.MoveRuleUp))
+	protected.POST("/firewall/rules/:id/move-down", httpx.H(ruleHandler.MoveRuleDown))
 
 	// System rules
-	protected.GET("/firewall/system-rules", ruleHandler.GetSystemRules)
-	protected.POST("/firewall/system-rules/delete", ruleHandler.DeleteSystemRule)
+	protected.GET("/firewall/system-rules", httpx.H(ruleHandler.GetSystemRules))
+	protected.POST("/firewall/system-rules/delete", httpx.H(ruleHandler.DeleteSystemRule))
 
 	// Templates
-	protected.GET("/firewall/templates", templateHandler.GetTemplates)
-	protected.POST("/firewall/templates/apply", templateHandler.ApplyTemplate)
+	protected.GET("/firewall/templates", httpx.H(templateHandler.GetTemplates))
+	protected.POST("/firewall/templates/apply", httpx.H(templateHandler.ApplyTemplate))
 }
