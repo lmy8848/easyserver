@@ -14,9 +14,9 @@ import (
 // AppError is the unified application error type used across all packages.
 // Handlers return AppError (or wrap it), and middleware converts it to HTTP responses.
 //
-// 分类语义：Code 按 HTTP 分类（同分类细分哨兵共享 Code，如 ErrForbidden /
-// ErrPathViolation 都是 40300），Is 按 Code 比较——因此 WithMessage/Wrap
-// 产生的副本与哨兵之间 errors.Is 成立，分类粒度即 HTTP 分类。
+// 分类语义：Code 按 HTTP 分类（同分类细分哨兵共享 Code），Is 按 Code
+// 比较——因此 WithMessage/Wrap 产生的副本与哨兵之间 errors.Is 成立，
+// 分类粒度即 HTTP 分类。
 type AppError struct {
 	HTTPStatus int    // HTTP status code
 	Code       int    // Business error code（HTTP 分类标识，兼作哨兵身份）
@@ -81,6 +81,7 @@ const (
 	CodeSuccess       = 0
 	CodeBadRequest    = 40000
 	CodeUnauthorized  = 40100
+	CodeTokenExpired  = 40101
 	CodeForbidden     = 40300
 	CodeNotFound      = 40400
 	CodeConflict      = 40900
@@ -105,13 +106,12 @@ var (
 
 	// 401 Unauthorized
 	ErrUnauthorized = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "未授权"}
-	// token 无效：覆盖签名错误/格式错误/过期等一切校验失败（与 ErrUnauthorized
-	// 同分类，errors.Is(err, ErrUnauthorized) 成立）
-	ErrTokenExpired = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "token 无效"}
+	// token 无效：覆盖签名错误/格式错误/过期等一切校验失败，独立 Code
+	// （前端依据 40101 识别登录失效）
+	ErrTokenExpired = &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeTokenExpired, Message: "token 无效"}
 
 	// 403 Forbidden
-	ErrForbidden     = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "禁止访问"}
-	ErrPathViolation = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "路径越权"}
+	ErrForbidden = &AppError{HTTPStatus: http.StatusForbidden, Code: CodeForbidden, Message: "禁止访问"}
 
 	// 404 Not Found
 	ErrNotFound = &AppError{HTTPStatus: http.StatusNotFound, Code: CodeNotFound, Message: "资源不存在"}
@@ -144,7 +144,7 @@ type errorPattern struct {
 // First match wins. Add new patterns here instead of modifying WrapError.
 var errorRegistry = []errorPattern{
 	// Security: path traversal
-	{matches: []string{"path traversal", "absolute paths are not allowed", "cannot resolve path"}, target: ErrPathViolation},
+	{matches: []string{"path traversal", "absolute paths are not allowed", "cannot resolve path"}, target: ErrForbidden},
 	// Docker not available
 	{matches: []string{"docker info failed", "Cannot connect to the Docker daemon", "docker: command not found", "executable file not found", "docker is not installed", "not accessible"}, target: ErrDockerNotInstalled},
 	// Docker operation failures

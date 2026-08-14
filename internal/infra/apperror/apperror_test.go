@@ -145,16 +145,11 @@ func TestAppError_Is_Chain(t *testing.T) {
 	require.ErrorIs(t, outer, ErrInternal)
 }
 
-func TestAppError_Is_SameCategorySentinels(t *testing.T) {
-	// 同 HTTP 分类的细分哨兵共享 Code：相互 errors.Is 匹配（分类粒度 = HTTP 分类）
-	pathErr := ErrPathViolation.WithMessage("路径越权")
-	require.ErrorIs(t, pathErr, ErrPathViolation)
-	require.ErrorIs(t, pathErr, ErrForbidden) // 同为 403 分类
-
-	// token 无效归入 401 分类
+func TestAppError_Is_TokenInvalidCode(t *testing.T) {
+	// token 无效保持独立 Code（40101）：匹配自身哨兵，但不匹配 ErrUnauthorized
 	tokenErr := ErrTokenExpired.WithMessage("invalid or expired token")
 	require.ErrorIs(t, tokenErr, ErrTokenExpired)
-	require.ErrorIs(t, tokenErr, ErrUnauthorized)
+	require.NotErrorIs(t, tokenErr, ErrUnauthorized)
 
 	// 400 段细分哨兵保持独立 Code：与 ErrBadRequest 互不匹配
 	dockerErr := ErrDockerNotInstalled.WithMessage("Docker 未安装")

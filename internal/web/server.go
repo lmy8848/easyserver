@@ -306,7 +306,7 @@ func validateConfigPath(path string) error {
 			return nil
 		}
 	}
-	return apperror.ErrPathViolation.WithMessage(fmt.Sprintf("配置路径 %q 不在允许的目录中", path))
+	return apperror.ErrForbidden.WithMessage(fmt.Sprintf("配置路径 %q 不在允许的目录中", path))
 }
 
 // GetConfig reads the main config file content
