@@ -43,9 +43,6 @@ type Provider interface {
 	Unwrap(lang, exact, execLine string) string
 	// InstallPath 返回 (lang, exact) 的安装目录（供 UI 展示）。
 	InstallPath(lang, exact string) string
-	// WriteConfig 让实现按 env 持久化自身配置（如镜像源）。
-	// envs 的 key 均为底层标识。
-	WriteConfig(ctx context.Context, envs map[string]string) error
 }
 
 // NewProvider returns the mise-backed Provider.
@@ -76,7 +73,7 @@ func toolFor(lang string) (string, error) {
 func miseCmdEnv() []string {
 	return []string{
 		"MISE_DATA_DIR=" + DataDir,
-		"MISE_CONFIG_DIR=" + ConfigDir,
+		"MISE_CONFIG_DIR=" + DataDir,
 		"MISE_YES=1",
 	}
 }
@@ -86,7 +83,7 @@ func (miseProvider) ListRemoteVersions(ctx context.Context, lang string) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, BinPath, "ls-remote", tool)
+	cmd := exec.CommandContext(ctx, filepath.Join(DataDir, "mise"), "ls-remote", tool)
 	cmd.Env = append(os.Environ(), miseCmdEnv()...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -117,7 +114,7 @@ func (miseProvider) ResolveVersion(ctx context.Context, lang, version string) (s
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, BinPath, "latest", fmt.Sprintf("%s@%s", tool, version))
+	cmd := exec.CommandContext(ctx, filepath.Join(DataDir, "mise"), "latest", fmt.Sprintf("%s@%s", tool, version))
 	cmd.Env = append(os.Environ(), miseCmdEnv()...)
 	out, _ := cmd.Output()
 
@@ -140,27 +137,16 @@ func (miseProvider) runInstallLike(ctx context.Context, op string, lang, exact s
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, BinPath, op, "-y", fmt.Sprintf("%s@%s", tool, exact))
+	cmd := exec.CommandContext(ctx, filepath.Join(DataDir, "mise"), op, "-y", fmt.Sprintf("%s@%s", tool, exact))
 	cmd.Env = append(os.Environ(), miseCmdEnv()...)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
+	// Stdout/Stderr 直连 out：同一 writer → exec.Cmd 合并两路为单管道、单 goroutine
+	// copy（CombinedOutput 同款机制），实时写 out。避免 StdoutPipe+io.MultiReader
+	// 顺序读导致的 stderr（进度条）阻塞到命令结束才一起出现。
+	cmd.Stdout = out
+	cmd.Stderr = out
 
-	// 合并两路输出到 out（顺序读 stdout 后 stderr，mise 输出以 stdout 为主）。
-	// 实时写，调用方（runtimeenv）负责写 DB 与日志截断。
-	// 复制失败（out 写入失败）不影响进程退出状态，真实错误由下方 cmd.Wait 决定。
-	_, _ = io.Copy(out, io.MultiReader(stdout, stderr))
-
-	if err := cmd.Wait(); err != nil {
+	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return fmt.Errorf("%s failed with exit code %d", op, exitErr.ExitCode())
@@ -184,8 +170,8 @@ func (miseProvider) Command(lang, exact, cmd string) (Command, error) {
 		return Command{}, err
 	}
 	return Command{
-		Exec: []string{BinPath, "exec", tool + "@" + exact, "--", cmd},
-		Env:  []string{"MISE_DATA_DIR=" + DataDir, "MISE_CONFIG_DIR=" + ConfigDir},
+		Exec: []string{filepath.Join(DataDir, "mise"), "exec", tool + "@" + exact, "--", cmd},
+		Env:  []string{"MISE_DATA_DIR=" + DataDir, "MISE_CONFIG_DIR=" + DataDir},
 	}, nil
 }
 
@@ -193,7 +179,7 @@ func (miseProvider) Command(lang, exact, cmd string) (Command, error) {
 // `{bin} exec <tool>@<exact> -- <cmd>`：先匹配 bin 前缀（避免误剥非 runtime
 // 命令），再取包裹处第一个 "-- " 之后（用户 cmd 自身含 "--" 也不会误剥）。
 func (miseProvider) Unwrap(lang, exact, execLine string) string {
-	prefix := BinPath + " exec "
+	prefix := filepath.Join(DataDir, "mise") + " exec "
 	if !strings.HasPrefix(execLine, prefix) {
 		return execLine
 	}
@@ -229,34 +215,6 @@ func (miseProvider) InstallPath(lang, exact string) string {
 		return ""
 	}
 	return filepath.Join(DataDir, "installs", miseToolDirName(tool), exact)
-}
-
-func (miseProvider) WriteConfig(ctx context.Context, envs map[string]string) error {
-	content := BuildConfigContent(envs)
-
-	dir := filepath.Dir(ConfigPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	tmpFile, err := os.CreateTemp(dir, "config.toml.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmpFile.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmpFile.Write([]byte(content)); err != nil {
-		tmpFile.Close()
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, ConfigPath)
 }
 
 // isValidVersion validates a version string to prevent command injection.

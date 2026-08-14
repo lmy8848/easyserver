@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Empty, Checkbox } from 'antd';
+import { Form, message, Modal, Tag, Tabs, Card, Button, Empty, Checkbox, Spin } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ConsoleSqlOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance } from '../../types';
@@ -45,7 +45,8 @@ export default function DatabasePage() {
 
   // ===== Version state =====
   const [versions, setVersions] = useState<DBInstance[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
+  // 初始即加载中：挂载 effect 会立即 fetchInstances，避免首帧闪「尚未安装」。
+  const [versionsLoading, setVersionsLoading] = useState(true);
   const [installVersionVisible, setInstallVersionVisible] = useState(false);
   const [installVersionForm] = Form.useForm();
   // 安装成功后让头部 select 一次性跳转到新装版本（InstanceHeader 消费后清空）。
@@ -862,7 +863,13 @@ export default function DatabasePage() {
               </Button>
             </Empty>
           </Card>
-        ) : selectedVersion && (selectedVersion.status === 'installing' || selectedVersion.status === 'failed') ? (
+        ) : versions.length === 0 ? (
+          // 列表加载中（首次进入 / 切换类型后 versions 已清空）：显示 Spin
+          // 占位，避免空列表期间落进下面的数据 tab 分支闪一下空界面。
+          <Card>
+            <div style={{ textAlign: 'center', padding: '48px 0' }}><Spin size="large" /></div>
+          </Card>
+        ) : selectedVersion && (selectedVersion.status === 'installing' || selectedVersion.status === 'provisioning' || selectedVersion.status === 'failed') ? (
           // key=instance id: a reinstall reuses the same container name (so the
           // containerName prop is unchanged), but it is a brand-new install with a
           // fresh log stream — remounting on id change resets the SSE connection
@@ -873,6 +880,14 @@ export default function DatabasePage() {
             version={selectedVersion.version}
             onDone={() => fetchInstances(activeDbType)}
           />
+        ) : selectedVersion && selectedVersion.status !== 'running' ? (
+          // 实例未运行（stopped / unhealthy）：不渲染任何数据 tab，避免对
+          // 未运行的实例发起数据库/用户/配置/Redis key 等请求。启动后
+          // InstanceHeader 通知 enterVersion 自动重新加载数据。
+          <Card>
+            <Empty style={{ padding: '48px 0' }}
+              description={`${activeDBTypeInfo.display_name} 实例未运行，请先启动`} />
+          </Card>
         ) : tableExplorer ? (
           <TableExplorerView {...tableExplorer} />
         ) : (

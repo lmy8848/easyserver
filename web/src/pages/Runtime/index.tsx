@@ -1,17 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
-import { Card, Button, Space, Modal, Tag, Progress, message } from 'antd';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Card, Button, Space, Modal, Tag, message } from 'antd';
 import { PlusOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
-import PackageManager from './PackageManager';
-import PackageRegistryModal from './PackageRegistryModal';
+// import PackageManager from './PackageManager';
+// import PackageRegistryModal from './PackageRegistryModal';
 import MirrorPanel from './MirrorPanel';
 import type {
   RuntimeEnvironment,
   VersionInfo,
-  PackageInfo,
-  PackageSearchResult,
   LogsData,
   CleanupData,
   CatalogEntry,
@@ -22,14 +20,24 @@ export default function Runtime() {
   const [environments, setEnvironments] = useState<RuntimeEnvironment[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 刷新运行环境列表。SSE 日志 done 后调用（稳定回调，供 effect 依赖）。
+  const fetchEnvironments = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/runtime');
+      setEnvironments(res.data.data?.environments || []);
+    } catch (error) {
+      message.error('获取运行环境列表失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // --- Catalog (drives the install dialog's language dropdown; loaded once) ---
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
 
   // --- Mirror config modal ---
   const [mirrorVisible, setMirrorVisible] = useState(false);
-
-  // --- Polling ---
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // --- Install modal state ---
   const [installVisible, setInstallVisible] = useState(false);
@@ -41,7 +49,6 @@ export default function Runtime() {
   // --- Logs modal state ---
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsData, setLogsData] = useState<LogsData | null>(null);
-  const [logsLoading, setLogsLoading] = useState(false);
   // logStream 是 SSE 实时累积的日志内容（DB 的 logs 列不再存日志本体）。
   const [logStream, setLogStream] = useState('');
   const logsContainerRef = useRef<HTMLPreElement>(null);
@@ -57,11 +64,11 @@ export default function Runtime() {
     }
   }, [logStream]);
 
-  // SSE 日志流：打开弹窗且有绑定（lang@exact）时连接 /runtime/log/stream/:lang@exact，
+  // SSE 日志流：打开弹窗且有绑定（lang@exact）时连接 /runtime/logs/:lang@exact，
   // 先回放已缓冲行再收实时行。done 帧更新状态/错误并关闭；关闭弹窗或切换目标时断开。
   useEffect(() => {
     if (!logsVisible || !logsData?.name || !logsData?.version) return;
-    const es = new EventSource(`/api/runtime/log/stream/${logsData.name}@${logsData.version}`);
+    const es = new EventSource(`/api/runtime/logs/${logsData.name}@${logsData.version}`);
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -71,39 +78,31 @@ export default function Runtime() {
           es.close();
           // 终态成功时任务已成功即清、SSE 无日志可回放——done 带的"日志已丢失"
           // 说明对已完成操作是误导，别覆盖已成功的状态。
-          if (msg.error) {
-            setLogsData(prev => {
-              if (!prev) return prev;
+          setLogsData(prev => {
+            if (!prev) return prev;
+            if (msg.error) {
               if (prev.status === 'installed' || prev.status === 'uninstalled') return prev;
-              return {
-                ...prev,
-                error_message: msg.error,
-                status: prev.status === 'uninstalling' ? 'uninstall_failed' : 'failed',
-              };
-            });
-          } else {
-            setLogsData(prev => prev && ({
-              ...prev,
-              status: prev.status === 'uninstalling' ? 'uninstalled' : 'installed',
-              progress: 100,
-              progress_step: 'done',
-            }));
-          }
+              return { ...prev, status: prev.status === 'uninstalling' ? 'uninstall_failed' : 'failed' };
+            }
+            return { ...prev, status: prev.status === 'uninstalling' ? 'uninstalled' : 'installed' };
+          });
+          // 安装/卸载结束：刷新列表，让 installing → installed/failed 落地。
+          fetchEnvironments();
         }
       } catch { /* ignore malformed frames */ }
     };
     // 服务端关闭流或瞬断：关闭，让 done 状态接管 UI（EventSource 否则自动重连）。
     es.onerror = () => { es.close(); };
     return () => es.close();
-  }, [logsVisible, logsData?.name, logsData?.version]);
+  }, [logsVisible, logsData?.name, logsData?.version, fetchEnvironments]);
 
   // --- Cleanup modal state ---
   const [cleanupVisible, setCleanupVisible] = useState(false);
   const [cleanupData, setCleanupData] = useState<CleanupData | null>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
 
-  // --- Package manager state ---
-  const [packageVisible, setPackageVisible] = useState(false);
+  // --- Package manager state（暂注释，后端保留）---
+  /* const [packageVisible, setPackageVisible] = useState(false);
   const [selectedRuntimeForPackage, setSelectedRuntimeForPackage] = useState<RuntimeEnvironment | null>(null);
   const [packageData, setPackageData] = useState<PackageInfo[]>([]);
   const [packageLoading, setPackageLoading] = useState(false);
@@ -115,7 +114,7 @@ export default function Runtime() {
   const [updatingPackageName, setUpdatingPackageName] = useState<string | null>(null);
 
   // --- Registry modal state ---
-  const [registryVisible, setRegistryVisible] = useState(false);
+  const [registryVisible, setRegistryVisible] = useState(false); */
 
   // ==================== Lifecycle ====================
 
@@ -140,18 +139,6 @@ export default function Runtime() {
     message.error(e?.message || fallback);
   };
 
-  const fetchEnvironments = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/runtime');
-      setEnvironments(res.data.data?.environments || []);
-    } catch (error) {
-      message.error('获取运行环境列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchEnvironments();
     api.get('/runtime/catalog')
@@ -163,30 +150,7 @@ export default function Runtime() {
         // both look like the backend is fine. Surface the failure.
         message.error('加载运行环境目录失败，请刷新页面或检查后端服务');
       });
-  }, []);
-
-  const inProgressEnvs = environments.filter(e => e.status === 'installing' || e.status === 'uninstalling');
-
-  useEffect(() => {
-    if (inProgressEnvs.length === 0) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      return;
-    }
-
-    pollIntervalRef.current = setInterval(() => {
-      fetchEnvironments();
-    }, 2000);
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
-  }, [inProgressEnvs.length]);
+  }, [fetchEnvironments]);
 
   // ==================== Runtime list actions ====================
 
@@ -194,6 +158,7 @@ export default function Runtime() {
     try {
       await api.post('/runtime/uninstall', { name, version });
       message.success('删除成功');
+      openLogs(name, version);
       fetchEnvironments();
     } catch (error: unknown) {
       showApiError(error, '删除失败');
@@ -205,6 +170,7 @@ export default function Runtime() {
       await api.post('/runtime/uninstall', { name, version });
       await api.post('/runtime/install', { name, version });
       message.success('重新安装已开始...');
+      openLogs(name, version);
       fetchEnvironments();
     } catch (error: unknown) {
       showApiError(error, '重试失败');
@@ -221,6 +187,7 @@ export default function Runtime() {
       setInstallVisible(false);
       setSelectedRuntime('');
       setAvailableVersions([]);
+      openLogs(values.name, values.version);
       fetchEnvironments();
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '安装失败'));
@@ -264,24 +231,17 @@ export default function Runtime() {
 
   // ==================== Logs modal actions ====================
 
-  const handleViewLogs = async (binding: string) => {
-    setLogsLoading(true);
+  const openLogs = (name: string, version: string) => {
     setLogStream('');
-    try {
-      const res = await api.get(`/runtime/logs/${binding}`);
-      setLogsData(res.data.data);
-      setLogsVisible(true);
-    } catch (error: unknown) {
-      const bizCode = (error as { response?: { data?: { code?: number } } })?.response?.data?.code;
-      if (bizCode === 40400) {
-        fetchEnvironments();
-        message.info('该记录已被移除');
-      } else {
-        message.error((error instanceof Error ? error.message : '获取日志失败'));
-      }
-    } finally {
-      setLogsLoading(false);
-    }
+    setLogsData({ name, version, status: 'running', logs: '' });
+    setLogsVisible(true);
+  };
+
+  const handleViewLogs = (binding: string) => {
+    // 绑定键 lang@exact 即 URL 参数：直接构造日志目标，SSE 连接到 /runtime/logs/:binding
+    // 回放实时日志。无需再拉 JSON 快照（logs 字段在 ADR-0009 后恒空）。
+    const [name = '', version = ''] = binding.split('@');
+    openLogs(name, version);
   };
 
   // ==================== Cleanup modal actions ====================
@@ -305,6 +265,7 @@ export default function Runtime() {
       message.success('卸载成功');
       setCleanupVisible(false);
       setCleanupData(null);
+      openLogs(name, version);
       fetchEnvironments();
     } catch (error: unknown) {
       setCleanupVisible(false);
@@ -314,8 +275,7 @@ export default function Runtime() {
     }
   };
 
-  // ==================== Package manager actions ====================
-
+  /* ==================== Package manager actions（暂注释，后端保留）====================
   const handleOpenPackageManager = async (runtime: RuntimeEnvironment) => {
     setSelectedRuntimeForPackage(runtime);
     setPackageVisible(true);
@@ -426,7 +386,12 @@ export default function Runtime() {
 
     setPackageVersionsLoading(true);
     try {
-      const res = await api.get(`/packages/versions/${packageName}?runtime=${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}`);
+      const res = await api.get('/packages/versions', {
+        params: {
+          name: packageName,
+          runtime: `${selectedRuntimeForPackage.name}@${selectedRuntimeForPackage.version}`,
+        },
+      });
       setPackageVersions(res.data.data?.versions || []);
     } catch (error: unknown) {
       console.error('Get versions failed:', error);
@@ -440,6 +405,7 @@ export default function Runtime() {
     setPackageSearchResults([]);
     handleGetPackageVersions(packageName);
   };
+  */
 
   // ==================== Render ====================
 
@@ -465,13 +431,11 @@ export default function Runtime() {
         <RuntimeList
           environments={environments}
           loading={loading}
-          logsLoading={logsLoading}
           cleanupLoading={cleanupLoading}
           onDeleteRecord={handleDeleteRecord}
           onRetry={handleRetry}
           onViewLogs={handleViewLogs}
           onViewCleanup={handleViewCleanup}
-          onOpenPackageManager={handleOpenPackageManager}
         />
       </Card>
 
@@ -532,36 +496,8 @@ export default function Runtime() {
               <Space>
                 <span><strong>运行环境:</strong> {logsData.name}</span>
                 <span><strong>版本:</strong> {logsData.version}</span>
-                {(() => {
-                  const m: Record<string, { color: string; label: string }> = {
-                    installed: { color: 'green', label: '已安装' },
-                    installing: { color: 'blue', label: '安装中' },
-                    failed: { color: 'red', label: '安装失败' },
-                    uninstalling: { color: 'orange', label: '卸载中' },
-                    uninstalled: { color: 'default', label: '已卸载' },
-                    uninstall_failed: { color: 'red', label: '卸载失败' },
-                  };
-                  const { color, label } = m[logsData.status] ?? { color: 'default', label: logsData.status };
-                  return <Tag color={color}>{label}</Tag>;
-                })()}
               </Space>
             </div>
-            {logsData.progress > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <strong>进度:</strong>
-                <Progress
-                  percent={logsData.progress}
-                  status={
-                    logsData.status === 'failed' || logsData.status === 'uninstall_failed'
-                      ? 'exception'
-                      : logsData.status === 'installed' || logsData.status === 'uninstalled'
-                        ? 'success'
-                        : 'active'
-                  }
-                />
-                {logsData.progress_step && <span style={{ color: '#999' }}>{logsData.progress_step}</span>}
-              </div>
-            )}
             {logStream && (
               <div style={{ marginBottom: 16 }}>
                 <strong>日志:</strong>
@@ -579,12 +515,6 @@ export default function Runtime() {
                 >
                   {logStream}
                 </pre>
-              </div>
-            )}
-            {logsData.error_message && (
-              <div>
-                <strong style={{ color: '#ff4d4f' }}>错误信息:</strong>
-                <div style={{ color: '#ff4d4f', marginTop: 8 }}>{logsData.error_message}</div>
               </div>
             )}
           </div>
@@ -645,14 +575,13 @@ export default function Runtime() {
         )}
       </Modal>
 
-      {/* Package manager registry modal */}
+      {/* Package manager modal（暂注释，后端保留）
       <PackageRegistryModal
         visible={registryVisible}
         runtime={selectedRuntimeForPackage}
         onClose={() => setRegistryVisible(false)}
       />
 
-      {/* Package manager modal */}
       <PackageManager
         catalog={catalog}
         visible={packageVisible}
@@ -682,6 +611,7 @@ export default function Runtime() {
         onUpdatePackage={handleUpdatePackage}
         onUninstallPackage={handleUninstallPackage}
       />
+      */}
     </div>
   );
 }

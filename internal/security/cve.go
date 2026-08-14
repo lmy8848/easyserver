@@ -16,12 +16,14 @@ import (
 // Service provides security-audit operations (CVE scanning, kernel status,
 // file integrity monitoring).
 type Service struct {
-	db *sql.DB
+	db       *sql.DB
+	fimPaths []string
 }
 
-// NewService creates a security Service.
-func NewService(db *sql.DB) *Service {
-	return &Service{db: db}
+// NewService creates a security Service. configPath 是面板配置文件的实际路径
+// （--config），FIM 用它替换默认监视列表中的硬编码项。
+func NewService(db *sql.DB, configPath string) *Service {
+	return &Service{db: db, fimPaths: defaultFIMPaths(configPath)}
 }
 
 // Vulnerability is one installed package with known CVEs.

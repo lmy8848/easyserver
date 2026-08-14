@@ -1,23 +1,20 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Modal, Table, Switch, Input, Button, Space, Tag, message, Popconfirm, Form, Select } from 'antd';
+import { Modal, Table, Input, Button, Space, Tag, message, Popconfirm, Form, Select } from 'antd';
 import { SyncOutlined, PlusOutlined } from '@ant-design/icons';
 import api from '../../services/api';
 import type { CatalogEntry } from './types';
 
-// MirrorPanel now operates entirely on the /api/env-config endpoint.
-// Mirror sources are just env vars (MISE_NODE_MIRROR_URL etc.) stored in
-// env_configs. This panel filters env_configs by the catalog's mirror_envs
+// MirrorPanel operates on the dedicated /api/runtime/mirrors API.
+// Mirror sources are env keys in /opt/easyserver/mise/config.toml [env]
+// (file is the authority — no enabled/source state, write = take effect,
+// delete = gone). The panel filters file entries by the catalog's mirror_envs
 // keys and renders them grouped by language, offering the extra UX of
 // pre-seeded candidate URLs (from catalog.mirror_candidates, which excludes
 // mise's default source) on the add form.
 
-interface EnvConfigRow {
-  id: number;
-  name: string;
-  value: string;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
+interface MirrorRow {
+  env_key: string;
+  env_value: string;
 }
 
 interface MirrorPanelProps {
@@ -48,22 +45,22 @@ function useMirrorCatalog(catalog: CatalogEntry[]) {
 }
 
 export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelProps) {
-  const [configs, setConfigs] = useState<EnvConfigRow[]>([]);
+  const [mirrors, setMirrors] = useState<MirrorRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [editing, setEditing] = useState<Record<number, string>>({});
+  const [editing, setEditing] = useState<Record<string, string>>({});
   const [addVisible, setAddVisible] = useState(false);
   const [addForm] = Form.useForm();
   const [addSubmitting, setAddSubmitting] = useState(false);
 
   const { keyToLang, keyToDisplay, langToEntry, supportedKeys } = useMirrorCatalog(catalog);
 
-  const fetchConfigs = async () => {
+  const fetchMirrors = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/env-config');
-      const all: EnvConfigRow[] = res.data.data?.configs || [];
-      // Only show env vars whose name is a declared mirror env key.
-      setConfigs(all.filter(c => supportedKeys.has(c.name)));
+      const res = await api.get('/runtime/mirrors');
+      const all: MirrorRow[] = res.data.data?.mirrors || [];
+      // Only show env keys declared as mirror env keys by the catalog.
+      setMirrors(all.filter(m => supportedKeys.has(m.env_key)));
     } catch {
       message.error('获取镜像配置失败');
     } finally {
@@ -72,40 +69,30 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
   };
 
   useEffect(() => {
-    if (visible && catalog.length > 0) fetchConfigs();
+    if (visible && catalog.length > 0) fetchMirrors();
   }, [visible, catalog.length]);
 
-  const handleToggle = async (c: EnvConfigRow, enabled: boolean) => {
-    try {
-      await api.put(`/env-config/${c.id}`, { name: c.name, value: c.value, enabled });
-      message.success(enabled ? '已启用' : '已禁用');
-      fetchConfigs();
-    } catch (e: any) {
-      message.error(e?.message || '更新失败');
-    }
-  };
-
-  const handleSave = async (c: EnvConfigRow) => {
-    const next = editing[c.id];
-    if (next === undefined || next === c.value) {
-      setEditing(prev => { const cp = { ...prev }; delete cp[c.id]; return cp; });
+  const handleSave = async (m: MirrorRow) => {
+    const next = editing[m.env_key];
+    if (next === undefined || next === m.env_value) {
+      setEditing(prev => { const cp = { ...prev }; delete cp[m.env_key]; return cp; });
       return;
     }
     try {
-      await api.put(`/env-config/${c.id}`, { name: c.name, value: next, enabled: c.enabled });
-      message.success('已保存');
-      setEditing(prev => { const cp = { ...prev }; delete cp[c.id]; return cp; });
-      fetchConfigs();
+      await api.put(`/runtime/mirrors/${encodeURIComponent(m.env_key)}`, { env_value: next });
+      message.success('已保存，立即生效');
+      setEditing(prev => { const cp = { ...prev }; delete cp[m.env_key]; return cp; });
+      fetchMirrors();
     } catch (e: any) {
       message.error(e?.message || '保存失败');
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (envKey: string) => {
     try {
-      await api.delete(`/env-config/${id}`);
+      await api.delete(`/runtime/mirrors/${encodeURIComponent(envKey)}`);
       message.success('已删除');
-      fetchConfigs();
+      fetchMirrors();
     } catch (e: any) {
       message.error(e?.message || '删除失败');
     }
@@ -116,16 +103,15 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
       const values = await addForm.validateFields();
       setAddSubmitting(true);
       // Trim trailing slash for consistency with how mirror URLs are stored.
-      const value = (values.env_value as string).replace(/\/+$/, '');
-      await api.post('/env-config', {
-        name: values.env_key,
-        value,
-        enabled: values.enabled ?? true,
+      const envValue = (values.env_value as string).replace(/\/+$/, '');
+      await api.post('/runtime/mirrors', {
+        env_key: values.env_key,
+        env_value: envValue,
       });
-      message.success('已新增');
+      message.success('已新增，立即生效');
       setAddVisible(false);
       addForm.resetFields();
-      fetchConfigs();
+      fetchMirrors();
     } catch (e: any) {
       if (e?.errorFields) return; // form validation error, keep modal open
       message.error(e?.message || '新增失败');
@@ -160,7 +146,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
   const columns = [
     {
       title: '语言',
-      dataIndex: 'name',
+      dataIndex: 'env_key',
       width: 100,
       render: (name: string) => {
         const lang = keyToLang.get(name);
@@ -169,29 +155,29 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
     },
     {
       title: 'Env Key',
-      dataIndex: 'name',
+      dataIndex: 'env_key',
       width: 240,
       render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>,
     },
     {
       title: '镜像地址',
-      dataIndex: 'value',
-      render: (v: string, c: EnvConfigRow) => {
-        const isEditing = editing[c.id] !== undefined;
+      dataIndex: 'env_value',
+      render: (v: string, m: MirrorRow) => {
+        const isEditing = editing[m.env_key] !== undefined;
         return isEditing ? (
           <Space.Compact style={{ width: '100%' }}>
             <Input
-              value={editing[c.id]}
-              onChange={e => setEditing(prev => ({ ...prev, [c.id]: e.target.value }))}
-              onPressEnter={() => handleSave(c)}
+              value={editing[m.env_key]}
+              onChange={e => setEditing(prev => ({ ...prev, [m.env_key]: e.target.value }))}
+              onPressEnter={() => handleSave(m)}
             />
-            <Button type="primary" onClick={() => handleSave(c)}>保存</Button>
-            <Button onClick={() => setEditing(prev => { const cp = { ...prev }; delete cp[c.id]; return cp; })}>取消</Button>
+            <Button type="primary" onClick={() => handleSave(m)}>保存</Button>
+            <Button onClick={() => setEditing(prev => { const cp = { ...prev }; delete cp[m.env_key]; return cp; })}>取消</Button>
           </Space.Compact>
         ) : (
           <span
             style={{ cursor: 'pointer' }}
-            onClick={() => setEditing(prev => ({ ...prev, [c.id]: v }))}
+            onClick={() => setEditing(prev => ({ ...prev, [m.env_key]: v }))}
             title="点击编辑"
           >
             {v || <span style={{ color: '#999' }}>（点击设置）</span>}
@@ -200,18 +186,10 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
       },
     },
     {
-      title: '启用',
-      dataIndex: 'enabled',
-      width: 80,
-      render: (v: boolean, c: EnvConfigRow) => (
-        <Switch checked={v} onChange={checked => handleToggle(c, checked)} size="small" />
-      ),
-    },
-    {
       title: '操作',
       width: 80,
-      render: (_: unknown, c: EnvConfigRow) => (
-        <Popconfirm title="删除此镜像配置？" onConfirm={() => handleDelete(c.id)}>
+      render: (_: unknown, m: MirrorRow) => (
+        <Popconfirm title="删除此镜像配置？" onConfirm={() => handleDelete(m.env_key)}>
           <Button type="link" danger size="small">删除</Button>
         </Popconfirm>
       ),
@@ -232,7 +210,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
       title={
         <Space>
           <span>镜像源配置</span>
-          <Button icon={<SyncOutlined />} size="small" onClick={fetchConfigs} loading={loading}>
+          <Button icon={<SyncOutlined />} size="small" onClick={fetchMirrors} loading={loading}>
             刷新
           </Button>
           <Button
@@ -253,10 +231,10 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
       destroyOnHidden
     >
       <Table
-        rowKey="id"
+        rowKey="env_key"
         size="small"
         loading={loading}
-        dataSource={configs}
+        dataSource={mirrors}
         pagination={false}
         locale={{
           emptyText: catalog.length === 0
@@ -268,7 +246,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
         columns={columns}
       />
       <div style={{ marginTop: 12, color: '#999', fontSize: 12 }}>
-        提示：修改后在下次安装运行时版本时写入 <code>/etc/mise/config.toml</code> 生效。SSH 会话需重新登录后才能拾取。未配置时 mise 使用默认下载源。
+        修改后立即生效
       </div>
     </Modal>
 
@@ -282,7 +260,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
       confirmLoading={addSubmitting}
       destroyOnHidden
     >
-      <Form form={addForm} layout="vertical" initialValues={{ enabled: true }}>
+      <Form form={addForm} layout="vertical">
         <Form.Item
           name="lang"
           label="语言"
@@ -324,9 +302,6 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
             ))}
           </div>
         )}
-        <Form.Item name="enabled" valuePropName="checked">
-          <span />
-        </Form.Item>
       </Form>
     </Modal>
     </>

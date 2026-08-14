@@ -134,10 +134,9 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	envConfigService := envconfig.NewService(envConfigRepo)
 
 	// runtimeService 必须先建：cron/systemd 用它校验运行时绑定（ADR-0009 目录权威）。
-	runtimeService := runtimeenv.NewService(envConfigService, miseProvider)
-	if err := runtimeService.Init(ctx); err != nil {
-		log.Printf("ERROR: Failed to init runtime service: %v", err)
-	}
+	runtimeService := runtimeenv.NewService(miseProvider)
+	// 镜像源以 config.toml 文件为权威（文件即权威，独立于环境变量 API）。
+	mirrorService := runtimeenv.NewMirrorService(mise.NewEnvStore())
 	packageManagerService := runtimeenv.NewPackageService(miseProvider)
 
 	cronService := cron.NewServiceWithSink(cronRepo, miseProvider, runtimeService, notificationService)
@@ -210,7 +209,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	settingshttp.RegisterRoutes(g.Protected, cfg, configPath, alertService, monitorSvc, sig)
 	cloudhttp.RegisterRoutes(g.Protected, cloudService, &cfg.TencentCloud, cfg.Server.Port)
 	deployhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), deploySvc)
-	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService)
+	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)
 	databasehttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbService)
@@ -219,7 +218,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)
 	notificationhttp.RegisterRoutes(g.Protected, notificationService)
-	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(db))
+	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(db, configPath))
 	if securitySvc != nil {
 		secHandler := websecurityhttp.NewSecurityHandler(securitySvc)
 		secHandler.RegisterRoutes(g.Protected.Group("/websites"))

@@ -40,12 +40,25 @@ func runCombinedEnv(ctx context.Context, env []string, name string, args ...stri
 
 // runManagerCmd 运行包管理器命令。非零退出与启动失败均以 err 形式返回
 // （os/exec 语义），install/uninstall/update 直接透传。
-func (s *PackageService) runManagerCmd(ctx context.Context, name string, args ...string) (string, error) {
+// runtimePath 是安装版本目录（installs/<tool>/<version>）：npm/pip 用其 bin/ 下
+// 自带的可执行文件，而非系统 PATH 的同名工具；pnpm 走全局 PNPM_HOME；corepack
+// 等系统工具传空 runtimePath 走 PATH。
+func (s *PackageService) runManagerCmd(ctx context.Context, runtimePath, name string, args ...string) (string, error) {
 	if name == "pnpm" {
 		return runCombinedEnv(ctx, pnpmEnv(), name, args...)
 	}
+	if runtimePath != "" {
+		name = managerBin(runtimePath, name)
+	}
 	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	return string(output), err
+}
+
+// managerBin 返回安装版本内对应包管理器的可执行路径。
+// node → <install>/bin/npm，python → <install>/bin/pip。让全局包操作走该版本
+// 自带的包管理器，而非系统 PATH 的同名工具。
+func managerBin(runtimePath, tool string) string {
+	return filepath.Join(runtimePath, "bin", tool)
 }
 
 // pnpmEnv 返回 pnpm 全局安装所需的 PNPM_HOME 与 PATH 注入项。
@@ -104,7 +117,7 @@ func tailLines(s string, n int) string {
 // 换容器/nix 底层时此模块随之更换），此处直接调用 mise 二进制是具体实现的
 // 已知例外。
 func (s *PackageService) miseReshim(ctx context.Context) {
-	output, err := exec.CommandContext(ctx, mise.BinPath, "reshim").CombinedOutput()
+	output, err := exec.CommandContext(ctx, filepath.Join(mise.DataDir, "mise"), "reshim").CombinedOutput()
 	if err != nil {
 		log.Printf("package: mise reshim failed (continuing): err=%v, output=%s", err, output)
 	}
@@ -191,7 +204,7 @@ func (s *PackageService) GetPackageVersions(ctx context.Context, runtimeName, pa
 }
 
 // GetRegistry returns the current registry URL for a package manager
-func (s *PackageService) GetRegistry(ctx context.Context, runtimeName, manager string) (string, error) {
+func (s *PackageService) GetRegistry(ctx context.Context, runtimeName, runtimePath, manager string) (string, error) {
 	switch runtimeName {
 	case "node":
 		if manager == "" {
@@ -200,13 +213,13 @@ func (s *PackageService) GetRegistry(ctx context.Context, runtimeName, manager s
 		if manager != "npm" && manager != "pnpm" {
 			return "", fmt.Errorf("invalid package manager: %s", manager)
 		}
-		output, err := s.runManagerCmd(ctx, manager, "config", "get", "registry")
+		output, err := s.runManagerCmd(ctx, runtimePath, manager, "config", "get", "registry")
 		if err != nil {
 			return "", fmt.Errorf("%s config get registry failed: %w", manager, err)
 		}
 		return strings.TrimSpace(output), nil
 	case "python":
-		output, err := s.runManagerCmd(ctx, "pip", "config", "get", "global.index-url")
+		output, err := s.runManagerCmd(ctx, runtimePath, "pip", "config", "get", "global.index-url")
 		if err != nil {
 			// pip config get returns error if not set
 			return "", nil //nolint:nilerr // pip 未配置 index-url 时返回空串
@@ -218,7 +231,7 @@ func (s *PackageService) GetRegistry(ctx context.Context, runtimeName, manager s
 }
 
 // SetRegistry sets the registry URL for a package manager
-func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, manager, registry string) error {
+func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, runtimePath, manager, registry string) error {
 	switch runtimeName {
 	case "node":
 		if manager == "" {
@@ -230,9 +243,9 @@ func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, manager, 
 		var output string
 		var err error
 		if registry == "" {
-			output, err = s.runManagerCmd(ctx, manager, "config", "delete", "registry")
+			output, err = s.runManagerCmd(ctx, runtimePath, manager, "config", "delete", "registry")
 		} else {
-			output, err = s.runManagerCmd(ctx, manager, "config", "set", "registry", registry)
+			output, err = s.runManagerCmd(ctx, runtimePath, manager, "config", "set", "registry", registry)
 		}
 		if err != nil {
 			return fmt.Errorf("%s config set registry failed: %s", manager, describeCmdErr(err, output, manager+" config set registry"))
@@ -242,9 +255,9 @@ func (s *PackageService) SetRegistry(ctx context.Context, runtimeName, manager, 
 		var output string
 		var err error
 		if registry == "" {
-			output, err = s.runManagerCmd(ctx, "pip", "config", "unset", "global.index-url")
+			output, err = s.runManagerCmd(ctx, runtimePath, "pip", "config", "unset", "global.index-url")
 		} else {
-			output, err = s.runManagerCmd(ctx, "pip", "config", "set", "global.index-url", registry)
+			output, err = s.runManagerCmd(ctx, runtimePath, "pip", "config", "set", "global.index-url", registry)
 		}
 		if err != nil {
 			// Ignore unset errors if it was not set
@@ -390,7 +403,7 @@ func (s *PackageService) scanNodePackages(ctx context.Context, runtimePath strin
 
 // npm package management
 func (s *PackageService) scanNpmPackages(ctx context.Context, runtimePath string) ([]Package, error) {
-	output, err := exec.CommandContext(ctx, "npm", "list", "-g", "--json").Output()
+	output, err := exec.CommandContext(ctx, managerBin(runtimePath, "npm"), "list", "-g", "--json").Output()
 	if err != nil {
 		log.Printf("package: npm list error: %v", err)
 		return []Package{}, nil
@@ -477,11 +490,11 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 			log.Printf("package: %s not found, attempting to enable via corepack", manager)
 			// corepack 在 mise 环境下偶尔会 exit 0 却不真正生成 shim（静默失败），
 			// 因此 enable 之后跑 mise reshim 让新 shim 出现，再用 LookPath 二次校验。
-			corepackOutput, corepackErr := s.runManagerCmd(ctx, "corepack", "enable", manager)
+			corepackOutput, corepackErr := s.runManagerCmd(ctx, "", "corepack", "enable", manager)
 			s.miseReshim(ctx)
 			if _, lookErr2 := exec.LookPath(manager); lookErr2 != nil {
 				log.Printf("package: corepack did not produce a working %s shim (corepack: err=%v, output=%q), falling back to npm install -g", manager, corepackErr, corepackOutput)
-				installOutput, installErr := s.runManagerCmd(ctx, "npm", "install", "-g", manager)
+				installOutput, installErr := s.runManagerCmd(ctx, "", "npm", "install", "-g", manager)
 				if installErr != nil {
 					return fmt.Errorf("failed to auto-install %s: %w (output: %s)", manager, installErr, installOutput)
 				}
@@ -502,7 +515,7 @@ func (s *PackageService) installNpmPackage(ctx context.Context, req *PackageInst
 		args = append(args, req.Name)
 	}
 
-	output, err := s.runManagerCmd(ctx, manager, args...)
+	output, err := s.runManagerCmd(ctx, runtimePath, manager, args...)
 	if err != nil {
 		return fmt.Errorf("%s install failed: %s", manager, describeCmdErr(err, output, manager+" install "+req.Name))
 	}
@@ -529,7 +542,7 @@ func (s *PackageService) uninstallNpmPackage(ctx context.Context, req *PackageUn
 	}
 	args = append(args, req.Name)
 
-	output, err := s.runManagerCmd(ctx, manager, args...)
+	output, err := s.runManagerCmd(ctx, runtimePath, manager, args...)
 	if err != nil {
 		return fmt.Errorf("%s uninstall failed: %s", manager, describeCmdErr(err, output, manager+" uninstall "+req.Name))
 	}
@@ -550,7 +563,7 @@ func (s *PackageService) updateNpmPackage(ctx context.Context, req *PackageUpdat
 	// npm 与 pnpm 都用 `update -g <name>`
 	args := []string{"update", "-g", req.Name}
 
-	output, err := s.runManagerCmd(ctx, manager, args...)
+	output, err := s.runManagerCmd(ctx, runtimePath, manager, args...)
 	if err != nil {
 		return fmt.Errorf("%s update failed: %s", manager, describeCmdErr(err, output, manager+" update "+req.Name))
 	}
@@ -561,7 +574,7 @@ func (s *PackageService) updateNpmPackage(ctx context.Context, req *PackageUpdat
 
 // pip package management
 func (s *PackageService) scanPipPackages(ctx context.Context, runtimePath string) ([]Package, error) {
-	output, err := exec.CommandContext(ctx, "pip", "list", "--format=json").Output()
+	output, err := exec.CommandContext(ctx, managerBin(runtimePath, "pip"), "list", "--format=json").Output()
 	if err != nil {
 		log.Printf("package: pip list error: %v", err)
 		return []Package{}, nil
@@ -596,7 +609,7 @@ func (s *PackageService) installPipPackage(ctx context.Context, req *PackageInst
 		args = append(args, req.Name)
 	}
 
-	output, err := s.runManagerCmd(ctx, "pip", args...)
+	output, err := s.runManagerCmd(ctx, runtimePath, "pip", args...)
 	if err != nil {
 		return fmt.Errorf("pip install failed: %s", describeCmdErr(err, output, "pip install "+req.Name))
 	}
@@ -606,7 +619,7 @@ func (s *PackageService) installPipPackage(ctx context.Context, req *PackageInst
 }
 
 func (s *PackageService) uninstallPipPackage(ctx context.Context, req *PackageUninstallRequest, runtimePath string) error {
-	output, err := s.runManagerCmd(ctx, "pip", "uninstall", "-y", req.Name)
+	output, err := s.runManagerCmd(ctx, runtimePath, "pip", "uninstall", "-y", req.Name)
 	if err != nil {
 		return fmt.Errorf("pip uninstall failed: %s", describeCmdErr(err, output, "pip uninstall "+req.Name))
 	}
@@ -616,7 +629,7 @@ func (s *PackageService) uninstallPipPackage(ctx context.Context, req *PackageUn
 }
 
 func (s *PackageService) updatePipPackage(ctx context.Context, req *PackageUpdateRequest, runtimePath string) error {
-	output, err := s.runManagerCmd(ctx, "pip", "install", "--upgrade", req.Name)
+	output, err := s.runManagerCmd(ctx, runtimePath, "pip", "install", "--upgrade", req.Name)
 	if err != nil {
 		return fmt.Errorf("pip update failed: %s", describeCmdErr(err, output, "pip update "+req.Name))
 	}

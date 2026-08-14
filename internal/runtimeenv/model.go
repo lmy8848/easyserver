@@ -1,18 +1,12 @@
 package runtimeenv
 
-import "time"
-
 // RuntimeEnvironment represents a runtime environment (Java, Node.js, PHP, Python, Go).
 // 权威来源是 installs/ 目录扫描（ADR-0009）；lang@exact 是绑定键，无数字 id。
 type RuntimeEnvironment struct {
-	Name         string    `json:"name"`          // java, node, php, python, go
-	Version      string    `json:"version"`       // 17, 18.17.0, 8.2, 3.11, 1.21
-	Path         string    `json:"path"`          // Installation path
-	Status       string    `json:"status"`        // installed（扫描恒为已安装）
-	Progress     int       `json:"progress"`      // 100
-	ProgressStep string    `json:"progress_step"` // done
-	ErrorMessage string    `json:"error_message"` // 恒空（失败无痕，ADR-0009）
-	InstalledAt  time.Time `json:"installed_at"`  // 目录 mtime
+	Name    string `json:"name"`    // java, node, php, python, go
+	Version string `json:"version"` // 17, 18.17.0, 8.2, 3.11, 1.21
+	Path    string `json:"path"`    // Installation path
+	Status  string `json:"status"`  // installed（扫描恒为已安装）
 }
 
 // RuntimeInstallRequest represents a request to install a runtime environment

@@ -10,6 +10,8 @@
 
 - **服务器 (Server)** — 运行 EasyServer 的那一台 Linux 主机。EasyServer 是单机单管理员设计，不存在多节点集群。
 - **单管理员 (Single Admin)** — 整个面板只允许一个管理员账户登录。CLI 工具 `cmd/cli/main.go` 可在紧急时重置密码。
+- **Panel Root（面板根）** — 面板私有工作根目录，**固定常量**（`internal/infra/config` 的 `DataRoot`，值为 `/opt/easyserver`，不支持配置修改），所有领域子目录（`mise/`、`scripts/`、`db/`）由代码从它派生拼接。改动它 = 全新安装语义（存量内容不迁移）。面板配置文件的位置独立于它（由 `--config` 指定）。
+  _Avoid_: 在代码/文档中散落硬编码 `/opt/easyserver` 字面量，一律经 `config.DataRoot` 派生。
 
 ### 网站托管
 
@@ -29,7 +31,7 @@
 ### 定时任务
 
 - **Cron Task** — 一条定时任务定义，承载为 systemd 的一对 `.timer`（OnCalendar 触发）+ `.service`（mise exec 执行）。状态读 `systemctl`，日志走 journald，重试/超时由 systemd 原生处理。任务用 UI 调度表单（预设频率）描述，后端转为 OnCalendar 表达式。
-- **Cron Script** — 可被 Cron Task 引用的可复用脚本（sh/bash/python）。内容落盘 `/opt/easyserver/scripts/`，DB `scripts` 表仅存元数据（名称/语言/描述）。
+- **Cron Script** — 可被 Cron Task 引用的可复用脚本（sh/bash/python）。内容落盘面板根（Panel Root）的 `scripts/` 子目录，DB `scripts` 表仅存元数据（名称/语言/描述）。
 _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 
 ### 防火墙
@@ -43,7 +45,7 @@ _Avoid_: Cron Log（已弃用，日志由 journald 承载）
 - **Runtime Binding（运行时绑定）** — 用 `lang@exact`（如 `node@20.11.0`）唯一确定一个已安装版本，cron/进程守护通过它绑定执行环境。持久化形态是 systemd unit 文件的 `RuntimeLang`/`RuntimeExact` 注释；面板前端 Select 的值即此字符串（见 ADR-0009）。
 - **Global Default** — 通过 `/etc/mise/config.toml` 写入的系统级默认版本，仅服务 SSH 登录用户与未受面板控制的脚本；面板自身的执行流不依赖。
 - **Execution Shim** — 面板主动发起的执行（Process、Cron）强制包裹为 `mise exec <lang>@<exact> -- <cmd>`，彻底隔离 PATH。托管 systemd unit（进程守护、定时任务）的 ExecStart 由面板生成时即带有此包裹。
-- **Mirror Profile** — 存于 DB 的镜像 env 表（淘宝 / 华为 / 清华为默认 seed），生效后写入 `/etc/mise/config.toml` 的 `[env]` 段供 mise 读取，UI 可编辑。
+- **Mirror Source（镜像源）** — 面板根（Panel Root）下 `mise/config.toml` `[env]` 段的条目，文件即权威：无 DB 副本、无启用/禁用状态，UI 编辑保存即写入文件生效。与通用环境变量（`env_configs` 表）相互独立。
 
 ### 容器
 

@@ -7,12 +7,22 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/mise"
 	"easyserver/internal/notification"
 )
 
 // cronWatchInterval 是定时任务失败巡检间隔。
 const cronWatchInterval = 5 * time.Minute
+
+// 脚本/任务命令的落盘目录，由面板根（config.DataRoot）派生。集中定义，
+// 避免路径常量散落各文件。
+const (
+	// scriptsDir 是脚本落盘目录（脚本内容存储，DB 仅存元数据）。
+	scriptsDir = config.DataRoot + "/scripts"
+	// taskCommandDir 是任务命令落盘目录，与脚本库分离（见 timer_manager.go）。
+	taskCommandDir = scriptsDir + "/tasks"
+)
 
 // Service 管理定时任务与脚本/文档：任务 CRUD/状态/日志委托给 TimerManager，脚本/文档走 SQLite。
 type Service struct {

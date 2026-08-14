@@ -139,29 +139,11 @@ func (h *RuntimeHandler) Uninstall(c *gin.Context) {
 	})
 }
 
-// GetLogs returns the installation logs for a runtime environment.
-// lang@exact 路径参数（ADR-0009 绑定键即字符串）。
+// GetLogs 流式返回安装/卸载日志（SSE）。先回放任务已缓冲的行（游标从 0 起），
+// 再跟随实时行，任务结束推送 {type:"done", error} 并关闭。任务不存在（成功即清，
+// 或面板重启后内存日志已失）时立即推送 done + 说明。绑定键 lang@exact 在路径
+// 参数里（ADR-0009）。
 func (h *RuntimeHandler) GetLogs(c *gin.Context) {
-	env, ok := h.getRuntimeByBinding(c, c.Param("binding"))
-	if !ok {
-		return
-	}
-
-	httpx.Success(c, gin.H{
-		"name":          env.Name,
-		"version":       env.Version,
-		"status":        env.Status,
-		"progress":      env.Progress,
-		"progress_step": env.ProgressStep,
-		"logs":          "",
-		"error_message": env.ErrorMessage,
-	})
-}
-
-// InstallLogStream 流式返回安装/卸载日志（SSE）。先回放任务已缓冲的行（游标从
-// 0 起），再跟随实时行，任务结束推送 {type:"done", error} 并关闭。任务不存在
-// （成功即清，或面板重启后内存日志已失）时立即推送 done + 说明。
-func (h *RuntimeHandler) InstallLogStream(c *gin.Context) {
 	lang, exact := splitRuntimeBinding(c.Param("binding"))
 	if lang == "" || exact == "" {
 		c.Error(apperror.ErrBadRequest.WithMessage("无效的运行时绑定"))
@@ -466,7 +448,11 @@ func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	packageName := strings.TrimPrefix(c.Param("name"), "/")
+	packageName := c.Query("name")
+	if packageName == "" {
+		c.Error(apperror.ErrBadRequest.WithMessage("缺少包名参数"))
+		return
+	}
 
 	versions, err := h.packageService.GetPackageVersions(c.Request.Context(), lang, packageName)
 	if err != nil {
@@ -481,13 +467,13 @@ func (h *PackageManagerHandler) GetPackageVersions(c *gin.Context) {
 
 // GetRegistry gets the package manager registry
 func (h *PackageManagerHandler) GetRegistry(c *gin.Context) {
-	lang, _, _, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
+	lang, _, path, ok := h.getRuntimeFromBinding(c, c.Query("runtime"))
 	if !ok {
 		return
 	}
 	manager := c.Query("manager")
 
-	registry, err := h.packageService.GetRegistry(c.Request.Context(), lang, manager)
+	registry, err := h.packageService.GetRegistry(c.Request.Context(), lang, path, manager)
 	if err != nil {
 		c.Error(apperror.WrapError(err))
 		return
@@ -511,13 +497,13 @@ func (h *PackageManagerHandler) SetRegistry(c *gin.Context) {
 		return
 	}
 
-	lang, _, _, ok := h.getRuntimeFromBinding(c, req.Runtime)
+	lang, _, path, ok := h.getRuntimeFromBinding(c, req.Runtime)
 	if !ok {
 		return
 	}
 
 	middleware.AuditSummary(c, "配置包管理器镜像源 "+req.Manager)
-	if err := h.packageService.SetRegistry(c.Request.Context(), lang, req.Manager, req.Registry); err != nil {
+	if err := h.packageService.SetRegistry(c.Request.Context(), lang, path, req.Manager, req.Registry); err != nil {
 		c.Error(apperror.WrapError(err))
 		return
 	}
@@ -528,10 +514,79 @@ func (h *PackageManagerHandler) SetRegistry(c *gin.Context) {
 }
 
 // ============================================================
+// MirrorHandler — 镜像源管理（config.toml [env] 文件即权威）
+// ============================================================
+
+type MirrorHandler struct {
+	mirrorService *runtimeenv.MirrorService
+}
+
+func NewMirrorHandler(mirrorService *runtimeenv.MirrorService) *MirrorHandler {
+	return &MirrorHandler{mirrorService: mirrorService}
+}
+
+// List 返回 config.toml [env] 段全部条目。
+func (h *MirrorHandler) List(c *gin.Context) {
+	entries, err := h.mirrorService.List(c.Request.Context())
+	if err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"mirrors": entries})
+}
+
+// Create 新增/覆盖一个镜像源（保存即写入文件生效）。
+func (h *MirrorHandler) Create(c *gin.Context) {
+	var req struct {
+		EnvKey   string `json:"env_key" binding:"required"`
+		EnvValue string `json:"env_value" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+	middleware.AuditSummary(c, "创建镜像源 "+req.EnvKey)
+	if err := h.mirrorService.Upsert(c.Request.Context(), req.EnvKey, req.EnvValue); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "已保存"})
+}
+
+// Update 更新指定 env_key 的镜像地址。
+func (h *MirrorHandler) Update(c *gin.Context) {
+	envKey := c.Param("env_key")
+	var req struct {
+		EnvValue string `json:"env_value" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperror.ErrBadRequest.WithMessage("无效的请求: " + err.Error()))
+		return
+	}
+	middleware.AuditSummary(c, "更新镜像源 "+envKey)
+	if err := h.mirrorService.Upsert(c.Request.Context(), envKey, req.EnvValue); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "已保存"})
+}
+
+// Delete 从文件删除指定 env_key 的镜像源。
+func (h *MirrorHandler) Delete(c *gin.Context) {
+	envKey := c.Param("env_key")
+	middleware.AuditSummary(c, "删除镜像源 "+envKey)
+	if err := h.mirrorService.Delete(c.Request.Context(), envKey); err != nil {
+		c.Error(apperror.WrapError(err))
+		return
+	}
+	httpx.Success(c, gin.H{"message": "已删除"})
+}
+
+// ============================================================
 // Route registration
 // ============================================================
 
-func RegisterRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, packageService *runtimeenv.PackageService) {
+func RegisterRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Service, packageService *runtimeenv.PackageService, mirrorService *runtimeenv.MirrorService) {
 	// Runtime environment management
 	runtimeHandler := NewRuntimeHandler(runtimeService)
 	protected.GET("/runtime", runtimeHandler.List)
@@ -540,15 +595,21 @@ func RegisterRoutes(protected *gin.RouterGroup, runtimeService *runtimeenv.Servi
 	protected.POST("/runtime/install", runtimeHandler.Install)
 	protected.POST("/runtime/uninstall", runtimeHandler.Uninstall)
 	protected.GET("/runtime/logs/:binding", runtimeHandler.GetLogs)
-	protected.GET("/runtime/log/stream/:binding", runtimeHandler.InstallLogStream)
 	protected.GET("/runtime/cleanup/:binding", runtimeHandler.GetCleanupInfo)
 	protected.GET("/runtime/catalog", runtimeHandler.GetCatalog)
+
+	// Mirror source management（独立于环境变量 API，文件即权威）
+	mirrorHandler := NewMirrorHandler(mirrorService)
+	protected.GET("/runtime/mirrors", mirrorHandler.List)
+	protected.POST("/runtime/mirrors", mirrorHandler.Create)
+	protected.PUT("/runtime/mirrors/:env_key", mirrorHandler.Update)
+	protected.DELETE("/runtime/mirrors/:env_key", mirrorHandler.Delete)
 
 	// Package management
 	packageHandler := NewPackageManagerHandler(packageService, runtimeService)
 	protected.GET("/packages", packageHandler.ListPackages)
 	protected.GET("/packages/search", packageHandler.SearchPackages)
-	protected.GET("/packages/versions/*name", packageHandler.GetPackageVersions)
+	protected.GET("/packages/versions", packageHandler.GetPackageVersions)
 	protected.POST("/packages/install", packageHandler.InstallPackage)
 	protected.POST("/packages/uninstall", packageHandler.UninstallPackage)
 	protected.POST("/packages/update", packageHandler.UpdatePackage)

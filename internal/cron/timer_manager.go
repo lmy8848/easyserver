@@ -541,8 +541,6 @@ func parseEnvMap(envStr string) map[string]string {
 // 所有命令统一写成可执行脚本落盘，ExecStart 指向脚本路径（保持单行），
 // 从而支持多行命令且规避 systemd unit 换行注入。脚本目录与脚本库分离。
 
-const taskCommandDir = "/opt/easyserver/scripts/tasks"
-
 func taskCommandPath(name string) string {
 	return filepath.Join(taskCommandDir, name)
 }

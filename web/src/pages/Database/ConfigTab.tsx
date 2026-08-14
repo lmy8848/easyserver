@@ -207,7 +207,7 @@ export default function ConfigTab({
             // 点了立即关；保存异步继续，进度看触发按钮 busy loading，结果走 message。
             onConfirm={() => { void onSaveConfig(); }}
           >
-            <Button type="primary" loading={busy === 'save-config'} disabled={version?.status !== 'running'}>保存配置</Button>
+            <Button type="primary" loading={busy === 'save-config'} disabled={!version}>保存配置</Button>
           </Popconfirm>
           <Button icon={<ReloadOutlined />} loading={dbConfigLoading} onClick={onFetchConfig}>刷新</Button>
         </Space>

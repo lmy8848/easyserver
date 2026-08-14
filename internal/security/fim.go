@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"easyserver/internal/infra/apperror"
@@ -29,12 +30,22 @@ type FIMChange struct {
 	DetectedAt string `json:"detected_at"`
 }
 
-// defaultFIMPaths are the critical files monitored by default.
-var defaultFIMPaths = []string{
-	"/etc/ssh/sshd_config",
-	"/etc/nginx/nginx.conf",
-	"/opt/easyserver/config.yaml",
-	"/root/.ssh/authorized_keys",
+// defaultFIMPaths 返回默认监视的关键文件列表。
+// 面板配置文件路径不硬编码：取实际 configPath（--config 决定），
+// 与面板真实运行位置保持一致；相对路径归一化为绝对路径。
+func defaultFIMPaths(configPath string) []string {
+	paths := []string{
+		"/etc/ssh/sshd_config",
+		"/etc/nginx/nginx.conf",
+		"/root/.ssh/authorized_keys",
+	}
+	if configPath != "" {
+		if abs, err := filepath.Abs(configPath); err == nil {
+			configPath = abs
+		}
+		paths = append(paths, configPath)
+	}
+	return paths
 }
 
 // ScanBaseline hashes the default critical files and stores/updates the baseline.
@@ -42,7 +53,7 @@ func (s *Service) ScanBaseline(ctx context.Context) error {
 	if s.db == nil {
 		return apperror.ErrInternal.WithMessage("db 不可用")
 	}
-	for _, p := range defaultFIMPaths {
+	for _, p := range s.fimPaths {
 		hash, size, mtime, err := hashFile(p)
 		if err != nil {
 			continue // file does not exist, skip

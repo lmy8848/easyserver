@@ -14,7 +14,9 @@ export default function SqlConsoleTab({
   sqlLoading,
   onExecuteSQL,
 }: SqlConsoleTabProps) {
-  if (!version || version.status !== 'running') {
+  // 页面层已保证仅在实例 running 时渲染本组件；version 可能为 null 的
+  // 一帧（列表已到、实例尚未选中的空档）仍需兜底。
+  if (!version) {
     return <Empty description="数据库实例未运行" />;
   }
 

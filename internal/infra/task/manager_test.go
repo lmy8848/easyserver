@@ -328,3 +328,63 @@ func mustGet(t *testing.T, m *Manager, key string) *Task {
 	}
 	return tk
 }
+
+// TestTaskLogWrite 验证 TaskLog 实现 io.Writer：按换行切行、无换行的尾部也立即
+// 入列（实时性——mise 进度条用 \r 无 \n，不能等任务结束才 flush）、返回字节数。
+func TestTaskLogWrite(t *testing.T) {
+	// 单次 Write 多行。
+	l := &TaskLog{}
+	if n, err := l.Write([]byte("a\nb\nc\n")); err != nil || n != 6 {
+		t.Fatalf("Write = (%d, %v), want (6, nil)", n, err)
+	}
+	if lines, _ := l.Tail(0); len(lines) != 3 || lines[0] != "a" || lines[1] != "b" || lines[2] != "c" {
+		t.Fatalf("tail = %q, want [a b c]", lines)
+	}
+
+	// 无换行的尾部立即入列（不 pending），保证实时：
+	// "a\nb" 切出 "a"，尾部 "b" 也入列；再写 "c\nd\n" 得 [a b c d]。
+	l2 := &TaskLog{}
+	_, _ = l2.Write([]byte("a\nb"))
+	if lines, _ := l2.Tail(0); len(lines) != 2 || lines[0] != "a" || lines[1] != "b" {
+		t.Fatalf("after partial write tail = %q, want [a b]", lines)
+	}
+	_, _ = l2.Write([]byte("c\nd\n"))
+	if lines, _ := l2.Tail(0); len(lines) != 4 || lines[3] != "d" {
+		t.Fatalf("after sequential write tail = %q, want [a b c d]", lines)
+	}
+
+	// Append 与 Write 混合：各自独立成行。
+	l3 := &TaskLog{}
+	_, _ = l3.Write([]byte("x\ny"))
+	l3.Append("z")
+	if lines, _ := l3.Tail(0); len(lines) != 3 || lines[0] != "x" || lines[1] != "y" || lines[2] != "z" {
+		t.Fatalf("mixed tail = %q, want [x y z]", lines)
+	}
+}
+
+// TestTasksSnapshot 验证 Tasks() 返回 key→status 快照，含 running 与 failed 任务。
+func TestTasksSnapshot(t *testing.T) {
+	m := NewManager(8)
+	_, err := m.Start(context.Background(), "k1", Options{}, blockOnCancel)
+	if err != nil {
+		t.Fatalf("start k1: %v", err)
+	}
+	// 失败任务保留在 byKey（直至同 key 重提覆盖）。
+	if _, err := m.Start(context.Background(), "k2", Options{MaxRetries: 0}, func(ctx context.Context) error {
+		return errors.New("boom")
+	}); err != nil {
+		t.Fatalf("start k2: %v", err)
+	}
+	// 等 k2 进入 failed 终态。
+	snap := m.Tasks()
+	for snap["k2"] != StatusFailed {
+		snap = m.Tasks()
+	}
+	if got := snap["k1"]; got != StatusRunning {
+		t.Fatalf("k1 status = %v, want %v", got, StatusRunning)
+	}
+	if got := snap["k2"]; got != StatusFailed {
+		t.Fatalf("k2 status = %v, want %v", got, StatusFailed)
+	}
+	m.Cancel("k1")
+}

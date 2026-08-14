@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/task"
 	"easyserver/internal/notification"
 )
@@ -744,7 +745,7 @@ func sanitizeName(value string) string {
 // hostDBBaseDir 是数据库实例数据/配置目录的宿主根。每个实例占
 // <base>/<dbtype>-<version>/{data,config}，目录与实例一一对应（同类型+版本只允许
 // 一个实例）。变量而非常量：测试改指向临时目录，避免单元测试真实操作 /opt。
-var hostDBBaseDir = "/opt/easyserver/db"
+var hostDBBaseDir = config.DataRoot + "/db"
 
 // containerUID 是官方 mysql/postgres/redis 镜像内数据进程的 uid（均为 999）。
 // 宿主目录必须 chown 给它，容器内进程才能写数据目录与 CONFIG REWRITE 写回配置。

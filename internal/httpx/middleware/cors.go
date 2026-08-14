@@ -16,14 +16,13 @@ func CORSMiddleware(allowedOrigins []string, devMode bool) gin.HandlerFunc {
 		origin := c.Request.Header.Get("Origin")
 
 		// Check if origin is allowed
-		allowed := false
+		var allowed bool
 		if devMode || hasWildcard {
 			// 在开发模式下，或者配置了通配符，允许任意域名的跨域请求
 			allowed = true
 		} else {
-			if slices.Contains(allowedOrigins, origin) {
-				allowed = true
-			}
+			// 与 CSRF 共用 trustedOrigin 规则：本机回环源默认信任，其余源需显式配置。
+			allowed = trustedOrigin(origin, "", allowedOrigins)
 		}
 
 		if allowed && origin != "" {

@@ -85,7 +85,7 @@ export default function DatabasesTab({
             style={{ width: 200 }}
             allowClear
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateDB} disabled={version?.status !== 'running'}>创建数据库</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateDB} disabled={!version}>创建数据库</Button>
           <Button icon={<ReloadOutlined />} loading={dbsLoading} onClick={onFetchDatabases}>刷新</Button>
         </Space>
       </div>

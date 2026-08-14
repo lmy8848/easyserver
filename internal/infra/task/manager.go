@@ -42,13 +42,46 @@ type TaskLog struct {
 
 const maxLogLines = 5000
 
-// Append 追加一行日志。环形缓冲：超过上限时丢弃最旧的 1/4。
+// Write 实现 io.Writer：把字节流按换行切分为日志行追加。无换行的尾部也立即
+// 入列（如 mise 进度条用 \r 覆盖、无 \n），保证日志实时出现，而非等任务结束
+// 才一次性 flush。代价是跨 Write 拆分的极长行会被切成两半，可接受。
+func (l *TaskLog) Write(p []byte) (int, error) {
+	if l == nil {
+		return len(p), nil
+	}
+	n := len(p)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.writeLocked(p)
+	return n, nil
+}
+
+// Append 追加完整一行（立即入列）。
 func (l *TaskLog) Append(line string) {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.appendLocked(line)
+}
+
+// writeLocked 假定已持锁：把字节流按换行切分入列，无换行尾部也入列（实时）。
+func (l *TaskLog) writeLocked(p []byte) {
+	start := 0
+	for i := range p {
+		if p[i] == '\n' {
+			l.appendLocked(string(p[start:i]))
+			start = i + 1
+		}
+	}
+	if start < len(p) {
+		l.appendLocked(string(p[start:]))
+	}
+}
+
+// appendLocked 假定已持锁，追加一行（环形缓冲超上限丢最旧 1/4）。
+func (l *TaskLog) appendLocked(line string) {
 	if len(l.lines) >= maxLogLines {
 		l.lines = append(l.lines[:0], l.lines[len(l.lines)-maxLogLines*3/4:]...)
 	}
@@ -331,4 +364,19 @@ func (m *Manager) Get(key string) (*Task, bool) {
 	defer m.mu.Unlock()
 	tk, ok := m.byKey[key]
 	return tk, ok
+}
+
+// Tasks 返回已注册任务的快照（key → status）。供调用方把"进行中/失败"的任务
+// 合并进各自的列表视图（如运行环境列表显示安装中）。succeeded 已清不在内；
+// failed/canceled 保留（同 key 下次 Start 前一直在）。
+func (m *Manager) Tasks() map[string]Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]Status, len(m.byKey))
+	for k, tk := range m.byKey {
+		tk.mu.Lock()
+		out[k] = tk.status
+		tk.mu.Unlock()
+	}
+	return out
 }

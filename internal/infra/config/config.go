@@ -8,6 +8,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DataRoot 是面板私有工作根目录（Panel Root，固定常量，不支持配置修改）。
+// 各领域子目录（mise / scripts / db）由代码从它派生拼接，禁止在代码中
+// 散落硬编码 /opt/easyserver 字面量。
+//
+// 设计意图：整个面板的私有数据自包含在一个目录下，卸载面板 = 删除该目录，
+// 零系统残留。改动该常量 = 全新安装语义（存量内容不迁移）。
+const DataRoot = "/opt/easyserver"
+
 type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	Auth         AuthConfig         `yaml:"auth"`

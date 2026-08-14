@@ -1,25 +1,19 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
 // CSRFOriginVerify 校验写请求的 Origin 是否可信。浏览器发起跨站请求时强制带
-// Origin 且无法伪造，故「带 Origin 必须白名单、不带 Origin 放行」能卡住跨站请求，
+// Origin 且无法伪造，故「带 Origin 必须可信、不带 Origin 放行」能卡住跨站请求，
 // 又不误伤 curl / 移动端原生 App（它们不发 Origin，无 CSRF 风险）。
-// 信任源 = 请求自身 origin（同源部署）+ allowedOrigins（反代跨源时并入）。
+// 信任判定统一走 trustedOrigin（自身 origin + 本机回环源 + allowedOrigins）。
 func csrfOriginVerify(allowedOrigins []string, devMode bool) gin.HandlerFunc {
-	trusted := map[string]bool{}
-	for _, o := range allowedOrigins {
-		o = strings.TrimSuffix(strings.TrimSpace(o), "/")
-		if o != "" && o != "*" {
-			trusted[o] = true
-		}
-	}
-
 	return func(c *gin.Context) {
 		// 只拦会改状态的写操作（GET/HEAD/OPTIONS 放行，SSE/预览不受影响）。
 		switch c.Request.Method {
@@ -48,7 +42,7 @@ func csrfOriginVerify(allowedOrigins []string, devMode bool) gin.HandlerFunc {
 		}
 		selfOrigin := scheme + "://" + c.Request.Host
 
-		if origin == selfOrigin || trusted[origin] {
+		if trustedOrigin(origin, selfOrigin, allowedOrigins) {
 			c.Next()
 			return
 		}
@@ -58,6 +52,55 @@ func csrfOriginVerify(allowedOrigins []string, devMode bool) gin.HandlerFunc {
 			"message": "CSRF validation failed: untrusted Origin",
 		})
 	}
+}
+
+// isLoopbackOrigin 报告 Origin 是否来自本机回环地址（127.0.0.0/8、::1 或 localhost）。
+//
+// 浏览器只能在页面自身源为回环地址时携带这类 Origin，跨站页面无法伪造，
+// 因此默认信任回环源没有 CSRF 风险，也免去为本地开发（vite dev server 等）
+// 反复配置 allowed_origins 白名单的麻烦。
+func isLoopbackOrigin(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// trustedOrigin 统一判定 Origin 是否可信，CSRF 与 CORS 共用同一套规则：
+//   - 与 selfOrigin 相同（同源部署；selfOrigin 为空时不启用该比较）；
+//   - 本机回环源（127.0.0.0/8、::1、localhost，见 isLoopbackOrigin）；
+//   - 显式配置在 allowedOrigins 白名单内（通配符 "*" 不视为可信）。
+//
+// origin 与白名单项均做去空格/去尾斜杠归一化后比较。
+func trustedOrigin(origin, selfOrigin string, allowedOrigins []string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return false
+	}
+	origin = strings.TrimSuffix(origin, "/")
+	if selfOrigin != "" && origin == selfOrigin {
+		return true
+	}
+	if isLoopbackOrigin(origin) {
+		return true
+	}
+	for _, o := range allowedOrigins {
+		o = strings.TrimSuffix(strings.TrimSpace(o), "/")
+		if o != "" && o != "*" && o == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // SecurityMiddleware adds security headers with a pre-generated CSP nonce.

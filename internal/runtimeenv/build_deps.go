@@ -5,6 +5,7 @@ import (
 	"fmt"
 	stdlog "log"
 	"os"
+	"os/exec"
 	"strings"
 
 	"easyserver/internal/infra/task"
@@ -34,7 +35,7 @@ func hasAptGet() bool {
 }
 
 // ensureBuildDeps 在调用 mise install 前确保系统级编译依赖到位。
-// 整个过程输出由 runStreaming/installWriter 写进任务日志（内存流），前端
+// 整个过程输出由 runStreaming 写进任务日志（内存流），前端
 // SSE 实时可见。
 //
 // 行为：
@@ -54,23 +55,27 @@ func (s *Service) ensureBuildDeps(ctx context.Context, lang string, log *task.Ta
 
 	// apt-get update：包索引过期时 install 会报 "Unable to locate package"。
 	// -qq 静默普通进度。失败不中断——常见原因是个别镜像超时，后续 install
-	// 仍可用本地缓存的索引完成。
-	if _, exitCode, err := s.runStreaming(ctx,
-		"更新 apt 软件包索引 (apt-get update)", log,
-		"/usr/bin/apt-get", "update", "-qq"); err != nil || exitCode != 0 {
-		log.Append(fmt.Sprintf("⚠ apt-get update 失败 (exit %d, err=%v)，继续尝试 install", exitCode, err))
+	// 仍可用本地缓存的索引完成。Stdout/Stderr 直连 TaskLog 实时流（exec.Cmd
+	// 合并两路，CombinedOutput 同款机制）。
+	updateCmd := exec.CommandContext(ctx, "/usr/bin/apt-get", "update", "-qq")
+	updateCmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+	updateCmd.Stdout = log
+	updateCmd.Stderr = updateCmd.Stdout
+	if err := updateCmd.Run(); err != nil {
+		log.Append(fmt.Sprintf("⚠ apt-get update 失败 (%v)，继续尝试 install", err))
 	}
 
 	// -y 跳过确认；-q 减噪。已装的包会被 apt 当成"已是最新"快速跳过，
-	// 因此对老服务器和新服务器是同一份代码。
+	// 因此对老服务器和新服务器是同一份代码。DEBIAN_FRONTEND=noninteractive
+	// 防止撞上 tzdata 这类会忽略 -y 的交互式 postinst 直接挂住。
 	args := append([]string{"install", "-y", "-q"}, pkgs...)
-	output, exitCode, err := s.runStreaming(ctx,
-		fmt.Sprintf("安装 %s 编译依赖 (%d 个包: %s)", lang, len(pkgs), strings.Join(pkgs, " ")), log,
-		"/usr/bin/apt-get", args...)
-	if err != nil || exitCode != 0 {
-		stdlog.Printf("runtime: apt-get install %s failed (exit %d): %v", lang, exitCode, err)
-		return fmt.Errorf("apt-get install %s 失败 (exit %d): %s",
-			lang, exitCode, tailLines(output, 8))
+	installCmd := exec.CommandContext(ctx, "/usr/bin/apt-get", args...)
+	installCmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+	installCmd.Stdout = log
+	installCmd.Stderr = installCmd.Stdout
+	if err := installCmd.Run(); err != nil {
+		stdlog.Printf("runtime: apt-get install %s failed: %v", lang, err)
+		return fmt.Errorf("apt-get install %s 失败: %w", lang, err)
 	}
 	return nil
 }

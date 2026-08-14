@@ -90,18 +90,11 @@ func scanVersions(root, toolDir, lang string) ([]RuntimeEnvironment, error) {
 		if _, err := os.Stat(filepath.Join(dir, version, okMarker)); err != nil {
 			continue // 无标记：手动安装或崩溃残留
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
 		envs = append(envs, RuntimeEnvironment{
-			Name:         lang,
-			Version:      version,
-			Path:         filepath.Join(dir, version),
-			Status:       "installed",
-			Progress:     100,
-			ProgressStep: "done",
-			InstalledAt:  info.ModTime(),
+			Name:    lang,
+			Version: version,
+			Path:    filepath.Join(dir, version),
+			Status:  "installed",
 		})
 	}
 	return envs, nil

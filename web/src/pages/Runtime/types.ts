@@ -3,10 +3,6 @@ export interface RuntimeEnvironment {
   version: string;       // exact: 20.11.0
   path: string;
   status: string;        // 恒 'installed'（目录扫描权威，ADR-0009）
-  progress: number;      // 恒 100
-  progress_step: string; // 恒 'done'
-  error_message: string; // 恒空
-  installed_at: string;
 }
 
 export interface VersionInfo {
@@ -25,10 +21,7 @@ export interface LogsData {
   name: string;          // lang
   version: string;       // exact
   status: string;
-  progress: number;
-  progress_step: string;
   logs: string;
-  error_message: string;
 }
 
 export interface CleanupData {

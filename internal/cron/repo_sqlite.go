@@ -138,6 +138,3 @@ func scriptFilePath(id int64) string {
 
 // ScriptPath 导出脚本落盘路径，供 handler 判断任务是否引用某脚本。
 func ScriptPath(id int64) string { return scriptFilePath(id) }
-
-// scriptsDir 是脚本落盘目录（脚本内容存储）。
-const scriptsDir = "/opt/easyserver/scripts"

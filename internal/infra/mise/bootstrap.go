@@ -3,6 +3,7 @@ package mise
 import (
 	"context"
 	"crypto/sha256"
+	"easyserver/internal/infra/config"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,12 +24,14 @@ const (
 	fallbackMiseSha256  = "d80fa6b4be4d926e7a09fadab1ba777c9ce52f9c22de6d8f6e3cce8d66d281d8"
 )
 
+const DataDir = config.DataRoot + "/mise"
+
 // BootstrapMise ensures mise is installed and configured correctly
 func BootstrapMise() error {
-	// 下载前确保二进制所在目录存在（DataDir 根）。downloadMise 的临时文件
-	// 放这里做同文件系统 rename，目录缺失会导致 CreateTemp 报
-	// "no such file or directory"。
-	if err := os.MkdirAll(filepath.Dir(BinPath), 0755); err != nil {
+	// 下载前确保二进制所在目录存在（DataDir 根，二进制即 <DataDir>/mise）。
+	// downloadMise 的临时文件放这里做同文件系统 rename，目录缺失会导致
+	// CreateTemp 报 "no such file or directory"。
+	if err := os.MkdirAll(DataDir, 0755); err != nil {
 		return err
 	}
 
@@ -50,7 +53,7 @@ func BootstrapMise() error {
 }
 
 func checkMiseVersion() error {
-	cmd := exec.CommandContext(context.Background(), BinPath, "--version")
+	cmd := exec.CommandContext(context.Background(), filepath.Join(DataDir, "mise"), "--version")
 	out, err := cmd.Output()
 	if err != nil {
 		return err
@@ -73,7 +76,7 @@ func checkMiseVersion() error {
 		}
 	}
 	log.Printf("mise: existing binary at %s reports %q (expected %s or %s); using it as-is",
-		BinPath, verStr, target, fallback)
+		filepath.Join(DataDir, "mise"), verStr, target, fallback)
 	return nil
 }
 
@@ -91,7 +94,7 @@ func downloadMise(version, expectedSha256 string) error {
 		// atomic rename below stays within one filesystem. Defaulting to
 		// /tmp blows up with "invalid cross-device link" on hosts where
 		// /tmp is tmpfs and /opt is on the root fs.
-		tmpFile, err := os.CreateTemp(filepath.Dir(BinPath), "mise-download-*.tmp")
+		tmpFile, err := os.CreateTemp(DataDir, "mise-download-*.tmp")
 		if err != nil {
 			return err
 		}
@@ -105,7 +108,7 @@ func downloadMise(version, expectedSha256 string) error {
 			if err := os.Chmod(tmpPath, 0755); err != nil {
 				return err
 			}
-			return os.Rename(tmpPath, BinPath)
+			return os.Rename(tmpPath, filepath.Join(DataDir, "mise"))
 		}
 		log.Printf("Download failed from %s: %v", dlUrl, err)
 		lastErr = err
@@ -150,12 +153,9 @@ func downloadFile(filepath string, url string, expectedSha256 string) error {
 }
 
 func setupMiseEnv() error {
-	// 数据目录与 config 目录（同根，全自包含在 /opt/easyserver/mise）。
-	// BinPath 直接放 DataDir 根下，故 DataDir 即二进制所在目录。
+	// 数据目录与 config 目录同根（<DataDir>，全自包含在面板根 mise/ 子目录）。
+	// 二进制 <DataDir>/mise 直接放根下，无需额外 bin/ 子目录。
 	if err := os.MkdirAll(DataDir, 0755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(ConfigDir, 0755); err != nil {
 		return err
 	}
 
@@ -173,7 +173,7 @@ func setupMiseEnv() error {
 		os.Setenv("MISE_DATA_DIR", DataDir)
 	}
 	if os.Getenv("MISE_CONFIG_DIR") == "" {
-		os.Setenv("MISE_CONFIG_DIR", ConfigDir)
+		os.Setenv("MISE_CONFIG_DIR", DataDir)
 	}
 
 	return nil

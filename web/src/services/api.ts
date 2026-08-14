@@ -51,6 +51,28 @@ api.interceptors.response.use(
         import('antd').then(({ message }) => message.warning(msg));
       }
 
+      // 后端错误响应统一为 { code, message, data }：把真实错误信息覆盖到
+      // error.message 上，替代 axios 默认的 "Request failed with status code
+      // NNN" 文案 —— 各 catch 块里的 error.message 直接显示后端消息，无需
+      // 逐个调用点取 error.response.data.message。网络错误（无 response）
+      // 不受影响，保持 "Network Error"/timeout 等原始信息。
+      const serverMsg = data?.message;
+      if (typeof serverMsg === 'string' && serverMsg) {
+        error.message = serverMsg;
+      }
+
+      // blob 响应（下载/导出）出错时 body 仍是 JSON：读取后提取 message，
+      // 否则这些调用点只能看到 "Request failed with status code NNN"。
+      if (data instanceof Blob) {
+        return data.text().then((text) => {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed?.message) error.message = parsed.message;
+          } catch { /* 非 JSON（如代理返回的 HTML 错误页）保持原样 */ }
+          return Promise.reject(error);
+        });
+      }
+
       // Pass through original error so catch blocks can inspect error.response?.status
       return Promise.reject(error);
     }

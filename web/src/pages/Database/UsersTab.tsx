@@ -72,7 +72,7 @@ export default function UsersTab({
             style={{ width: 200 }}
             allowClear
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateUser} disabled={version?.status !== 'running'}>创建用户</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={onOpenCreateUser} disabled={!version}>创建用户</Button>
           <Button icon={<ReloadOutlined />} loading={usersLoading} onClick={onFetchUsers}>刷新</Button>
         </Space>
       </div>
