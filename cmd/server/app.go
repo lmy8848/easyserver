@@ -23,23 +23,22 @@ import (
 // App is the process shell: owns the HTTP server, TCP listener, restart signal,
 // and shutdown coordination. All application composition lives in internal/api.
 type App struct {
-	srv        *http.Server
-	ln         net.Listener
-	sig        *infra.Signal
-	cfg        *config.Config
-	configPath string
-	devMode    bool
-	shutdown   func()
+	srv      *http.Server
+	ln       net.Listener
+	sig      *infra.Signal
+	store    *config.Store
+	devMode  bool
+	shutdown func()
 }
 
-// NewApp constructs the process shell. Application services are created later
-// by api.Setup during Run.
-func NewApp(cfg *config.Config, configPath string, devMode bool) *App {
+// NewApp constructs the process shell. store 在 main 装配（config.Load →
+// config.NewStore），App 与 api.Setup 只认 store，不再持有 cfg 对象。
+func NewApp(store *config.Store, devMode bool) *App {
+	cfg := store.Get()
 	a := &App{
-		cfg:        cfg,
-		configPath: configPath,
-		devMode:    devMode,
-		sig:        infra.NewSignal(),
+		store:   store,
+		devMode: devMode,
+		sig:     infra.NewSignal(),
 		srv: &http.Server{
 			Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 			ReadTimeout:  30 * time.Second,
@@ -59,7 +58,7 @@ func (a *App) Run() {
 		log.Printf("ERROR: Failed to bootstrap mise runtime manager: %v", err)
 	}
 
-	handler, shutdown := api.Setup(a.cfg, a.configPath, a.sig)
+	handler, shutdown := api.Setup(a.store, a.sig)
 	a.shutdown = shutdown
 	a.srv.Handler = handler
 
@@ -99,8 +98,9 @@ func (a *App) Run() {
 }
 
 func (a *App) serve() error {
-	if a.cfg.Server.TLS.Enabled {
-		return a.srv.ServeTLS(a.ln, a.cfg.Server.TLS.CertFile, a.cfg.Server.TLS.KeyFile)
+	tlsCfg := a.store.Get().Server.TLS
+	if tlsCfg.Enabled {
+		return a.srv.ServeTLS(a.ln, tlsCfg.CertFile, tlsCfg.KeyFile)
 	}
 	return a.srv.Serve(a.ln)
 }

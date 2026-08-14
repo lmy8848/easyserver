@@ -12,6 +12,7 @@ import (
 
 	"easyserver/internal/auth"
 	"easyserver/internal/infra"
+	"easyserver/internal/infra/config"
 )
 
 // LoginEvent is an alias for auth.LoginEvent.
@@ -30,22 +31,28 @@ type AlertEvent struct {
 
 // Service handles sending notifications (webhook, etc.)
 type Service struct {
-	webhookURL string
-	enabled    bool
+	store      *config.Store
 	httpClient *http.Client
 }
 
-// NewService creates a new notify Service.
-func NewService(webhookURL string, enabled bool) *Service {
+// NewService creates a new notify Service. Webhook 配置（URL/开关）运行时
+// 实时读 store：settings 修改后立即生效。
+func NewService(store *config.Store) *Service {
 	return &Service{
-		webhookURL: webhookURL,
-		enabled:    enabled,
+		store:      store,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
+// webhookConfig 返回当前生效的 webhook 配置（URL + 开关）。
+func (s *Service) webhookConfig() (url string, enabled bool) {
+	cfg := s.store.Get()
+	return cfg.Notify.WebhookURL, cfg.Notify.Enabled
+}
+
 // TestWebhook sends a test notification synchronously and returns any error.
 func (s *Service) TestWebhook() error {
+	url, _ := s.webhookConfig()
 	event := LoginEvent{
 		Username:  "test",
 		IP:        "127.0.0.1",
@@ -62,7 +69,7 @@ func (s *Service) TestWebhook() error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.webhookURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -82,7 +89,8 @@ func (s *Service) TestWebhook() error {
 
 // NotifyLogin sends a login notification via webhook.
 func (s *Service) NotifyLogin(event LoginEvent) {
-	if !s.enabled || s.webhookURL == "" {
+	url, enabled := s.webhookConfig()
+	if !enabled || url == "" {
 		return
 	}
 
@@ -95,7 +103,8 @@ func (s *Service) NotifyLogin(event LoginEvent) {
 
 // NotifyAlert sends an alert notification via webhook.
 func (s *Service) NotifyAlert(event AlertEvent) {
-	if !s.enabled || s.webhookURL == "" {
+	url, enabled := s.webhookConfig()
+	if !enabled || url == "" {
 		return
 	}
 
@@ -107,6 +116,7 @@ func (s *Service) NotifyAlert(event AlertEvent) {
 }
 
 func (s *Service) sendWebhook(event LoginEvent) error {
+	url, _ := s.webhookConfig()
 	msg := s.formatMessage(event)
 	payload := s.buildPayload(msg)
 
@@ -115,7 +125,7 @@ func (s *Service) sendWebhook(event LoginEvent) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.webhookURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -154,8 +164,9 @@ func (s *Service) formatMessage(event LoginEvent) string {
 }
 
 func (s *Service) buildPayload(msg string) map[string]any {
+	url, _ := s.webhookConfig()
 	switch {
-	case strings.Contains(s.webhookURL, "dingtalk.com"):
+	case strings.Contains(url, "dingtalk.com"):
 		return map[string]any{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
@@ -163,14 +174,14 @@ func (s *Service) buildPayload(msg string) map[string]any {
 				"text":  msg,
 			},
 		}
-	case strings.Contains(s.webhookURL, "feishu.cn"):
+	case strings.Contains(url, "feishu.cn"):
 		return map[string]any{
 			"msg_type": "text",
 			"content": map[string]string{
 				"text": msg,
 			},
 		}
-	case strings.Contains(s.webhookURL, "qyapi.weixin.qq.com"):
+	case strings.Contains(url, "qyapi.weixin.qq.com"):
 		return map[string]any{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
@@ -206,7 +217,8 @@ func (s *Service) sendAlertWebhook(event AlertEvent) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, s.webhookURL, bytes.NewBuffer(jsonData))
+	url, _ := s.webhookConfig()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

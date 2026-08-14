@@ -35,6 +35,10 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	app := NewApp(cfg, *configPath, *devMode)
+	// 装配配置仓库：此后 App / api.Setup / 各服务只认 store（实时读最新快照），
+	// cfg 对象不再往下传。
+	store := config.NewStore(cfg)
+
+	app := NewApp(store, *devMode)
 	app.Run()
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"easyserver/internal/auth"
+	"easyserver/internal/infra/config"
 )
 
 type auditEntry struct {
@@ -106,26 +107,32 @@ func (w *auditWriter) close() {
 
 // Service provides audit logging.
 type Service struct {
-	auditRepo     Repository
-	writer        *auditWriter
-	retentionDays int
+	auditRepo Repository
+	writer    *auditWriter
+	store     *config.Store
 }
 
-// NewService creates a new audit Service.
-func NewService(ctx context.Context, wg *sync.WaitGroup, auditRepo Repository, retentionDays int) *Service {
-	if retentionDays <= 0 {
-		retentionDays = 90
-	}
-
+// NewService creates a new audit Service. 保留天数运行时实时读 store
+// （settings 修改后下次清理即生效）。
+func NewService(ctx context.Context, wg *sync.WaitGroup, auditRepo Repository, store *config.Store) *Service {
 	s := &Service{
-		auditRepo:     auditRepo,
-		writer:        newAuditWriter(ctx, auditRepo),
-		retentionDays: retentionDays,
+		auditRepo: auditRepo,
+		writer:    newAuditWriter(ctx, auditRepo),
+		store:     store,
 	}
 	wg.Go(func() {
 		s.cleanupLoop(ctx)
 	})
 	return s
+}
+
+// retentionDays 返回当前生效的保留天数（兜底 90 天）。
+func (s *Service) retentionDays() int {
+	d := s.store.Get().Audit.RetentionDays
+	if d <= 0 {
+		return 90
+	}
+	return d
 }
 
 func (s *Service) Close() {
@@ -148,14 +155,15 @@ func (s *Service) cleanupLoop(ctx context.Context) {
 }
 
 func (s *Service) cleanupOldRecords(ctx context.Context) {
-	since := time.Now().AddDate(0, 0, -s.retentionDays)
+	days := s.retentionDays()
+	since := time.Now().AddDate(0, 0, -days)
 	rows, err := s.auditRepo.Clean(ctx, since)
 	if err != nil {
 		log.Printf("audit: cleanup error: %v", err)
 		return
 	}
 	if rows > 0 {
-		log.Printf("audit: cleaned up %d old records (older than %d days)", rows, s.retentionDays)
+		log.Printf("audit: cleaned up %d old records (older than %d days)", rows, days)
 	}
 }
 

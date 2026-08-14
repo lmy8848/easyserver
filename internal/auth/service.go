@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"easyserver/internal/infra/config"
+
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
@@ -37,22 +39,22 @@ const (
 )
 
 type AuthService struct {
-	userRepo        UserRepo
-	loginLogger     LoginEventLogger
-	totpRepo        TOTPRepo
-	maxAttempts     int
-	lockoutDuration time.Duration
-	notifier        LoginNotifier
+	store       *config.Store
+	userRepo    UserRepo
+	loginLogger LoginEventLogger
+	totpRepo    TOTPRepo
+	notifier    LoginNotifier
 }
 
-func NewAuthService(ctx context.Context, wg *sync.WaitGroup, maxAttempts int, lockoutDuration time.Duration, userRepo UserRepo, loginLogger LoginEventLogger, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
+// NewAuthService 构造认证服务。登录限制参数（最大尝试次数/锁定时长）运行时
+// 实时读 store：settings 修改后立即生效，无需重启。
+func NewAuthService(ctx context.Context, wg *sync.WaitGroup, store *config.Store, userRepo UserRepo, loginLogger LoginEventLogger, totpRepo TOTPRepo, notifier LoginNotifier) *AuthService {
 	s := &AuthService{
-		maxAttempts:     maxAttempts,
-		lockoutDuration: lockoutDuration,
-		userRepo:        userRepo,
-		loginLogger:     loginLogger,
-		totpRepo:        totpRepo,
-		notifier:        notifier,
+		store:       store,
+		userRepo:    userRepo,
+		loginLogger: loginLogger,
+		totpRepo:    totpRepo,
+		notifier:    notifier,
 	}
 	return s
 }
@@ -133,7 +135,8 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Us
 	}
 
 	if !verifyPassword(password, user.PasswordHash) {
-		if err := s.userRepo.IncrementLoginAttemptsWithLock(ctx, user.ID, s.maxAttempts, int(s.lockoutDuration.Seconds())); err != nil {
+		cur := s.store.Get()
+		if err := s.userRepo.IncrementLoginAttemptsWithLock(ctx, user.ID, cur.Auth.MaxLoginAttempts, int(cur.Auth.LockoutDuration.Seconds())); err != nil {
 			log.Printf("auth: failed to update login attempts: %v", err)
 		}
 		return nil, errors.New("用户名或密码错误")

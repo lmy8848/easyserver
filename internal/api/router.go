@@ -60,10 +60,14 @@ import (
 
 // Setup constructs the entire application service graph, registers all HTTP
 // routes, and returns the handler plus a shutdown function. It is the single
-// composition root for the HTTP layer.
-func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handler, func()) {
+// composition root for the HTTP layer. store 是配置唯一权威：需要实时配置的
+// 服务持有 store 每次读最新快照；启动参数类服务取一次 cfg := store.Get()。
+func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
+
+	// 启动快照：一次性初始化参数（数据库路径、base_path、密钥等）从此取。
+	cfg := store.Get()
 
 	// ── Infrastructure ──
 
@@ -76,7 +80,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 
 	// ── Shared services (depended upon by others) ──
 
-	notifyService := notify.NewService(cfg.Notify.WebhookURL, cfg.Notify.Enabled)
+	notifyService := notify.NewService(store)
 
 	notificationRepo := notification.NewSQLiteRepository(db)
 	notificationService := notification.NewService(notificationRepo)
@@ -101,26 +105,26 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	alertService.SetRules(alertRules)
 
 	auditRepo := audit.NewSQLiteRepository(db)
-	auditSvc := audit.NewService(ctx, &wg, auditRepo, cfg.Audit.RetentionDays)
+	auditSvc := audit.NewService(ctx, &wg, auditRepo, store)
 
 	// ── Auth ──
 
 	userRepo := auth.NewSQLiteUserRepository(db)
 	totpRepo := auth.NewTOTPRepository(db)
 
-	authSvc := auth.NewAuthService(ctx, &wg, cfg.Auth.MaxLoginAttempts, cfg.Auth.LockoutDuration, userRepo, auditSvc, totpRepo, notifyService)
+	authSvc := auth.NewAuthService(ctx, &wg, store, userRepo, auditSvc, totpRepo, notifyService)
 	if err := authSvc.InitDefaultAdmin(ctx); err != nil {
 		log.Fatalf("init default admin: %v", err)
 	}
 
-	sessionSvc := auth.NewSessionService(ctx, &wg, cfg.Auth.IdleTimeout, cfg.Auth.SessionCleanupInterval)
+	sessionSvc := auth.NewSessionService(ctx, &wg, store)
 
-	qrLoginService := qrlogin.NewService(qrlogin.NewSQLiteRepository(db), cfg.Auth.JWTSecret, cfg.Auth.SessionTimeout, sessionSvc)
+	qrLoginService := qrlogin.NewService(qrlogin.NewSQLiteRepository(db), store, sessionSvc)
 
 	// ── Monitor ──
 
 	monitorRepo := monitor.NewSQLiteRepository(db)
-	monitorSvc := monitor.NewMonitorService(ctx, &wg, monitorRepo, cfg.Monitor.CollectInterval, cfg.Monitor.HistoryRetention, alertService, auditSvc)
+	monitorSvc := monitor.NewMonitorService(ctx, &wg, monitorRepo, store, alertService, auditSvc)
 
 	// ── Terminal ──
 
@@ -206,7 +210,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	terminalhttp.RegisterRoutes(g.Protected, g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo)
-	settingshttp.RegisterRoutes(g.Protected, cfg, configPath, alertService, monitorSvc, sig)
+	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig)
 	cloudhttp.RegisterRoutes(g.Protected, cloudService, &cfg.TencentCloud, cfg.Server.Port)
 	deployhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), deploySvc)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
@@ -218,7 +222,7 @@ func Setup(cfg *config.Config, configPath string, sig *infra.Signal) (http.Handl
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)
 	notificationhttp.RegisterRoutes(g.Protected, notificationService)
-	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(db, configPath))
+	securityhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), security.NewService(db, cfg.Path))
 	if securitySvc != nil {
 		secHandler := websecurityhttp.NewSecurityHandler(securitySvc)
 		secHandler.RegisterRoutes(g.Protected.Group("/websites"))

@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"easyserver/internal/infra/config"
 )
 
 const (
@@ -109,7 +111,9 @@ type MonitorService struct {
 	passwdMu    sync.RWMutex
 }
 
-func NewMonitorService(ctx context.Context, wg *sync.WaitGroup, monitorRepo Repository, interval, retention time.Duration, alertSvc Evaluator, auditSvc SystemEventLogger) *MonitorService {
+// NewMonitorService 构造监控服务：初始采集间隔/保留时长取 store 当前值，
+// 运行中经 SetInterval / SetRetention 热更新（settings 保存后调用）。
+func NewMonitorService(ctx context.Context, wg *sync.WaitGroup, monitorRepo Repository, store *config.Store, alertSvc Evaluator, auditSvc SystemEventLogger) *MonitorService {
 	s := &MonitorService{
 		monitorRepo:      monitorRepo,
 		hub:              NewMonitorHub(),
@@ -120,8 +124,9 @@ func NewMonitorService(ctx context.Context, wg *sync.WaitGroup, monitorRepo Repo
 		alertService:     alertSvc,
 		auditService:     auditSvc,
 	}
-	s.interval.Store(int64(interval))
-	s.retention.Store(int64(retention))
+	cfg := store.Get()
+	s.interval.Store(int64(cfg.Monitor.CollectInterval))
+	s.retention.Store(int64(cfg.Monitor.HistoryRetention))
 
 	wg.Go(func() {
 		s.run(ctx)

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"easyserver/internal/infra/config"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -44,7 +46,10 @@ func setupAuditTestDB(t *testing.T) *sql.DB {
 
 func newTestAuditService(db *sql.DB) *Service {
 	repo := NewSQLiteRepository(db)
-	svc := NewService(context.Background(), &sync.WaitGroup{}, repo, 90)
+	store := config.NewStore(&config.Config{
+		Audit: config.AuditConfig{RetentionDays: 90},
+	})
+	svc := NewService(context.Background(), &sync.WaitGroup{}, repo, store)
 	return svc
 }
 

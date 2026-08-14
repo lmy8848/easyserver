@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"easyserver/internal/auth"
+	"easyserver/internal/infra/config"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -24,16 +25,15 @@ const pendingTTL = 2 * time.Minute
 // Service implements the scan-to-login state machine. It depends on the auth
 // package for JWT issuance and session creation; QR login deliberately creates
 // a coexisting session (no RemoveUserSessions) so the authorizing mobile stays
-// logged in.
+// logged in. JWT 密钥与会话时长实时读 store（settings 修改后立即生效）。
 type Service struct {
 	repo           Repository
-	jwtSecret      string
-	sessionTimeout time.Duration
+	store          *config.Store
 	sessionService *auth.SessionService
 }
 
-func NewService(repo Repository, jwtSecret string, sessionTimeout time.Duration, sessionService *auth.SessionService) *Service {
-	return &Service{repo: repo, jwtSecret: jwtSecret, sessionTimeout: sessionTimeout, sessionService: sessionService}
+func NewService(repo Repository, store *config.Store, sessionService *auth.SessionService) *Service {
+	return &Service{repo: repo, store: store, sessionService: sessionService}
 }
 
 // CreateSession generates a new pending QR session and returns the QR token +
@@ -137,14 +137,15 @@ func (s *Service) Confirm(ctx context.Context, qrToken string, userID int64, use
 		return ErrExpired
 	}
 
-	webToken, err := auth.GenerateToken(s.jwtSecret, userID, username, role, s.sessionTimeout)
+	cur := s.store.Get()
+	webToken, err := auth.GenerateToken(cur.Auth.JWTSecret, userID, username, role, cur.Auth.SessionTimeout)
 	if err != nil {
 		return fmt.Errorf("generate web token: %w", err)
 	}
 
 	// Coexist: create the web session WITHOUT removing the mobile's session.
 	if s.sessionService != nil {
-		expiresAt := time.Now().Add(s.sessionTimeout)
+		expiresAt := time.Now().Add(cur.Auth.SessionTimeout)
 		if err := s.sessionService.CreateSession(ctx, webToken, userID, username, role, ip, userAgent, "web", "", "", expiresAt); err != nil {
 			return fmt.Errorf("create web session: %w", err)
 		}

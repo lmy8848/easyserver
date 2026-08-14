@@ -7,28 +7,33 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"easyserver/internal/infra/config"
 )
 
 // SessionService manages login sessions in memory. Sessions do not survive
 // process restarts — users must re-login after a restart, which is acceptable
 // (and arguably safer) for a server admin panel.
 type SessionService struct {
-	mu          sync.RWMutex
-	sessions    map[string]*Session // raw JWT token → session
-	idleTimeout time.Duration
+	mu       sync.RWMutex
+	sessions map[string]*Session // raw JWT token → session
+	store    *config.Store
 	// mobileMu serializes mobile-session create/replace per process so the
 	// single-device binding check + create is atomic (prevents two mobile
 	// logins racing past an empty check). Single-admin panel -> one mutex.
 	mobileMu sync.Mutex
 }
 
-func NewSessionService(ctx context.Context, wg *sync.WaitGroup, idleTimeout, cleanupInterval time.Duration) *SessionService {
+// NewSessionService 构造会话服务。idle_timeout 每次清理实时读 store
+// （settings 修改后立即生效）；清理循环周期在构造时取初值（ticker 周期
+// 无法中途变更）。
+func NewSessionService(ctx context.Context, wg *sync.WaitGroup, store *config.Store) *SessionService {
 	s := &SessionService{
-		sessions:    make(map[string]*Session),
-		idleTimeout: idleTimeout,
+		sessions: make(map[string]*Session),
+		store:    store,
 	}
 	wg.Go(func() {
-		s.cleanupLoop(ctx, cleanupInterval)
+		s.cleanupLoop(ctx, store.Get().Auth.SessionCleanupInterval)
 	})
 	return s
 }
@@ -216,7 +221,7 @@ func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool
 	if sess.ExpiresAt.Before(now) {
 		return false, nil
 	}
-	if s.idleTimeout > 0 && sess.LoginAt.Before(now.Add(-s.idleTimeout)) {
+	if idle := s.store.Get().Auth.IdleTimeout; idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
 		return false, nil
 	}
 	return true, nil

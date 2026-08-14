@@ -16,7 +16,12 @@ import (
 // 零系统残留。改动该常量 = 全新安装语义（存量内容不迁移）。
 const DataRoot = "/opt/easyserver"
 
+// Path 记录配置文件在磁盘上的实际路径（--config 决定），Load 时填充。
+// 不参与 YAML/JSON 序列化：它是来源元数据，不是配置项。需要路径的地方
+// （写回 config.Save、推导配置目录、热重启传参、FIM 默认监视项）统一从
+// 它取，避免把 configPath 作为独立参数在调用链里层层传递。
 type Config struct {
+	Path         string             `yaml:"-" json:"-"`
 	Server       ServerConfig       `yaml:"server"`
 	Auth         AuthConfig         `yaml:"auth"`
 	Monitor      MonitorConfig      `yaml:"monitor"`
@@ -160,6 +165,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
+		Path: path,
 		Server: ServerConfig{
 			Port:               8080,
 			Host:               "0.0.0.0",
@@ -292,11 +298,11 @@ func (c *Config) applyEnvOverrides() {
 	}
 }
 
-// Save writes the configuration to a YAML file
-func Save(cfg *Config, path string) error {
+// Save writes the configuration back to its source file (cfg.Path, set by Load).
+func Save(cfg *Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	return os.WriteFile(cfg.Path, data, 0600)
 }

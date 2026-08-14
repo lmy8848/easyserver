@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"easyserver/internal/infra/config"
+
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -139,10 +141,15 @@ func createTestUser(t *testing.T, db *sql.DB, username, password string, locked 
 }
 
 func newTestAuthService(db *sql.DB) *AuthService {
+	store := config.NewStore(&config.Config{
+		Auth: config.AuthConfig{
+			MaxLoginAttempts: 5,
+			LockoutDuration:  5 * time.Minute,
+		},
+	})
 	return &AuthService{
-		userRepo:        NewSQLiteUserRepository(db),
-		maxAttempts:     5,
-		lockoutDuration: 5 * time.Minute,
+		userRepo: NewSQLiteUserRepository(db),
+		store:    store,
 	}
 }
 

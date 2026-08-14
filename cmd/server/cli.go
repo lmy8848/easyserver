@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
@@ -54,8 +53,9 @@ func runCLI(subcommand, configPath string) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 
-	auditSvc := audit.NewService(ctx, &wg, auditRepo, 30)
-	authSvc := auth.NewAuthService(ctx, &wg, 5, 15*time.Minute, userRepo, auditSvc, totpRepo, nil)
+	store := config.NewStore(cfg)
+	auditSvc := audit.NewService(ctx, &wg, auditRepo, store)
+	authSvc := auth.NewAuthService(ctx, &wg, store, userRepo, auditSvc, totpRepo, nil)
 
 	switch subcommand {
 	case "reset-password":
