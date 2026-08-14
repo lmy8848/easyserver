@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"easyserver/internal/infra/apperror"
+	"easyserver/internal/infra/errx"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -196,7 +196,7 @@ func (r *redisRunner) AddValue(ctx context.Context, inst *DBInstance, db int, ke
 		return err
 	}
 	if n > 0 {
-		return apperror.ErrConflict.WrapMessage(fmt.Errorf("键 %s 已存在", key))
+		return errx.Conflict("键 %s 已存在", key)
 	}
 	switch typ {
 	case "hash":
@@ -340,7 +340,7 @@ func (s *Service) getRedisInstance(ctx context.Context, instanceID int64, db int
 	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
-		return nil, apperror.ErrNotFound.WithMessage("database instance not found")
+		return nil, errx.NotFound("database instance not found")
 	}
 	return instance, nil
 }
@@ -380,7 +380,7 @@ func (s *Service) GetRedisValue(ctx context.Context, instanceID int64, db int, k
 		return nil, err
 	}
 	if key == "" {
-		return nil, apperror.ErrBadRequest.WithMessage("key cannot be empty")
+		return nil, errx.BadRequest("key cannot be empty")
 	}
 	return s.redisFor().GetValue(ctx, instance, db, key)
 }
@@ -394,7 +394,7 @@ func (s *Service) SetRedisValue(ctx context.Context, instanceID int64, db int, k
 		return err
 	}
 	if key == "" {
-		return apperror.ErrBadRequest.WithMessage("key cannot be empty")
+		return errx.BadRequest("key cannot be empty")
 	}
 	return s.redisFor().SetValue(ctx, instance, db, key, value, ttl)
 }
@@ -409,7 +409,7 @@ func (s *Service) AddRedisKey(ctx context.Context, instanceID int64, db int, typ
 		return err
 	}
 	if key == "" {
-		return apperror.ErrBadRequest.WithMessage("key cannot be empty")
+		return errx.BadRequest("key cannot be empty")
 	}
 	return s.redisFor().AddValue(ctx, instance, db, key, typ, time.Duration(ttl)*time.Second, fields, values, members)
 }
@@ -434,7 +434,7 @@ func (s *Service) ExpireRedisKey(ctx context.Context, instanceID int64, db int, 
 		return err
 	}
 	if key == "" {
-		return apperror.ErrBadRequest.WithMessage("key cannot be empty")
+		return errx.BadRequest("key cannot be empty")
 	}
 	return s.redisFor().Expire(ctx, instance, db, key, time.Duration(ttl)*time.Second)
 }
@@ -446,7 +446,7 @@ func (s *Service) PersistRedisKey(ctx context.Context, instanceID int64, db int,
 		return err
 	}
 	if key == "" {
-		return apperror.ErrBadRequest.WithMessage("key cannot be empty")
+		return errx.BadRequest("key cannot be empty")
 	}
 	return s.redisFor().Persist(ctx, instance, db, key)
 }
