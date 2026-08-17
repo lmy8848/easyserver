@@ -780,13 +780,11 @@ export default function FileManager() {
             setSortOrder(order);
           }}
           onClick={handleClick}
-          onEdit={openFile}
           onRename={showRename}
           onCopyMove={showCopyMove}
           onDelete={handleDelete}
           onChmod={showChmod}
           onDetails={showDetails}
-          onPreview={showPreview}
           onDownload={handleDownload}
           onExtract={handleExtract}
           onShare={handleShare}

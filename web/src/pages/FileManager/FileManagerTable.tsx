@@ -2,9 +2,9 @@ import {
   Table, Button, Space, Dropdown,
 } from 'antd';
 import {
-  FolderOutlined, FileOutlined, EditOutlined, DeleteOutlined,
+  FolderOutlined, FileOutlined, DeleteOutlined,
   DownloadOutlined, CopyOutlined, FormOutlined, ScissorOutlined,
-  ExpandOutlined, LockOutlined, FileImageOutlined, FileTextOutlined,
+  ExpandOutlined, LockOutlined, FileTextOutlined,
   LinkOutlined,
 } from '@ant-design/icons';
 import type { FileEntry } from '../../types';
@@ -16,13 +16,11 @@ interface FileManagerTableProps {
   selectedKeys: string[];
   canManageFiles: boolean;
   onClick: (file: FileEntry) => void;
-  onEdit: (path: string) => void;
   onRename: (path: string, name: string) => void;
   onCopyMove: (mode: 'copy' | 'move', path: string) => void;
   onDelete: (path: string, isDir: boolean) => void;
   onChmod: (path: string) => void;
   onDetails: (path: string) => void;
-  onPreview: (path: string) => void;
   onDownload: (path: string) => void;
   onExtract: (path: string) => void;
   onShare: (path: string) => void;
@@ -38,13 +36,11 @@ export default function FileManagerTable({
   selectedKeys,
   canManageFiles,
   onClick,
-  onEdit,
   onRename,
   onCopyMove,
   onDelete,
   onChmod,
   onDetails,
-  onPreview,
   onDownload,
   onExtract,
   onShare,
@@ -55,12 +51,6 @@ export default function FileManagerTable({
 }: FileManagerTableProps) {
   const getActionMenu = (record: FileEntry) => ({
     items: [
-      ...(!record.is_dir ? [{
-        key: 'preview',
-        icon: <FileImageOutlined />,
-        label: '预览',
-        onClick: () => onPreview(record.path),
-      }] : []),
       ...(!record.is_dir ? [{
         key: 'download',
         icon: <DownloadOutlined />,
@@ -81,12 +71,6 @@ export default function FileManagerTable({
       },
       ...(canManageFiles ? [
         { type: 'divider' as const },
-        ...(!record.is_dir ? [{
-          key: 'edit',
-          icon: <EditOutlined />,
-          label: '编辑',
-          onClick: () => onEdit(record.path),
-        }] : []),
         {
           key: 'rename',
           icon: <FormOutlined />,

@@ -1,15 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState } from 'react';
 import {
-  Modal, Input, Table, Button, Space, Tag, Row, Col, Image, Card,
+  Modal, Input, Table, Button, Space, Tag, Row, Col, Image,
 } from 'antd';
 import {
   FolderOutlined, FileOutlined, SearchOutlined,
 } from '@ant-design/icons';
-import CodeMirror from '@uiw/react-codemirror';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
-import { loadLanguageExtension, customEditorTheme } from './cmConfig';
 
 // ==================== Mkdir Modal ====================
 interface MkdirModalProps {
@@ -256,22 +251,6 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
 
   // 视频原始分辨率，加载 metadata 后用于按比例调整弹窗大小
   const [videoMeta, setVideoMeta] = useState<{ w: number; h: number } | null>(null);
-  const [langExts, setLangExts] = useState<Extension[]>([]);
-
-  useEffect(() => {
-    if (type !== 'text') return;
-    let active = true;
-    loadLanguageExtension(path).then((exts) => {
-      if (active) setLangExts(exts);
-    });
-    return () => { active = false; };
-  }, [path, type]);
-
-  const extensions = useMemo(() => [
-    ...langExts,
-    EditorView.lineWrapping,
-    customEditorTheme,
-  ], [langExts]);
 
   // 图片用 antd Image 内置预览层（全屏放大/缩放/旋转），不套外层 Modal。
   if (type === 'image') {
@@ -333,21 +312,6 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
           src={downloadUrl}
           style={{ width: '100%', height: '70vh', border: 'none' }}
         />
-      )}
-      {type === 'text' && (
-        <Card size="small" styles={{ body: { padding: 0 } }} style={{ overflow: 'hidden' }}>
-          <div style={{ height: '70vh' }}>
-            <CodeMirror
-              value={content}
-              height="70vh"
-              theme={oneDark}
-              extensions={extensions}
-              readOnly
-              editable={false}
-              style={{ fontSize: '13px', height: '100%' }}
-            />
-          </div>
-        </Card>
       )}
       {type === 'archive' && (
         <Table
