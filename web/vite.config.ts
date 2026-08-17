@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiHost = env['VITE_API_HOST'] || 'localhost'
+  const apiHost = env['VITE_API_HOST'] || '127.0.0.1'
   const apiPort = env['VITE_API_PORT'] || '8080'
   const apiTarget = `http://${apiHost}:${apiPort}`
   const wsTarget = `ws://${apiHost}:${apiPort}`
