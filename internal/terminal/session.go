@@ -38,8 +38,13 @@ func (m *Manager) CreateSession(id string) (*Session, error) {
 		shell = "/bin/bash"
 	}
 
-	cmd := exec.CommandContext(context.TODO(), shell)
+	cmd := exec.CommandContext(context.TODO(), shell, "-l")
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+		cmd.Dir = homeDir
+	} else if home := os.Getenv("HOME"); home != "" {
+		cmd.Dir = home
+	}
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {

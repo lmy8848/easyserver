@@ -31,4 +31,15 @@ body {
 
 
 /* Terminal styles */
-.xterm { padding: 8px; }
+.xterm {
+  padding: 4px 8px;
+  height: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+.xterm .xterm-screen,
+.xterm .xterm-viewport {
+  max-width: 100%;
+  background-color: #1e1e1e !important;
+}

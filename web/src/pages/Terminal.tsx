@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Card, Tabs, Button, Space, Tooltip, Badge } from 'antd';
+import { Card, Tabs, Button, Space, Tooltip, Badge, Input, type InputRef } from 'antd';
 import {
   PlusOutlined, CloseOutlined,
   ZoomInOutlined, ZoomOutOutlined,
   FullscreenOutlined, FullscreenExitOutlined,
+  ExpandOutlined, CompressOutlined,
   ReloadOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -30,25 +30,32 @@ interface TerminalTab {
 }
 
 const MIN_FONT_SIZE = 10;
-const MAX_FONT_SIZE = 24;
-const DEFAULT_FONT_SIZE = 14;
+const MAX_FONT_SIZE = 28;
+const DEFAULT_FONT_SIZE = 16;
 
-const StatusIcon = ({ status }: { status: ConnStatus }) => {
+const StatusBadge = ({ status }: { status: ConnStatus }) => {
   switch (status) {
     case 'connected':
-      return <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 12 }} />;
+      return <Badge status="success" />;
     case 'connecting':
     case 'reconnecting':
-      return <LoadingOutlined style={{ color: '#faad14', fontSize: 12 }} spin />;
+      return <Badge status="processing" />;
     case 'disconnected':
-      return <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 12 }} />;
+      return <Badge status="error" />;
   }
 };
 
 export default function TerminalPage() {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeKey, setActiveKey] = useState<string>('');
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [isWebFullscreen, setIsWebFullscreen] = useState(false);
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+  const inputRef = useRef<InputRef>(null);
+  const lastClickRef = useRef<{ key: string; time: number }>({ key: '', time: 0 });
+  const renameStartTimeRef = useRef(0);
+  const cardContainerRef = useRef<HTMLDivElement>(null);
   const tabCounter = useRef(0);
   const tabsRef = useRef<TerminalTab[]>([]);
   const mountGenRef = useRef(0);
@@ -69,46 +76,74 @@ export default function TerminalPage() {
     });
   }, []);
 
+  // 通用 resize 发送（带写锁防并发）
+  const sendResize = useCallback((tab: TerminalTab) => {
+    if (tab.writeLock || tab.ws?.readyState !== WebSocket.OPEN) return;
+    const dims = tab.fitAddon.proposeDimensions();
+    if (dims) {
+      tab.writeLock = true;
+      try {
+        tab.ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+      } catch (e) {
+        console.debug('WebSocket send error:', e);
+      }
+      tab.writeLock = false;
+    }
+  }, []);
+
   // 连接 WebSocket
   const connectWsRef = useRef<(tab: TerminalTab, isReconnect?: boolean) => void>(() => {});
 
   const connectWs = useCallback((tab: TerminalTab, isReconnect = false) => {
+    if (tab.disposed) return;
+
+    // 清理可能已存在的重连定时器
+    if (tab.reconnectTimer) {
+      clearTimeout(tab.reconnectTimer);
+      tab.reconnectTimer = null;
+    }
+
+    // 关闭旧连接前注销全部事件，防止旧连接 close 事件误触发重连定时器
     if (tab.ws) {
-      try { tab.ws.close(); } catch (e) { console.debug('WebSocket close error:', e); }
+      const oldWs = tab.ws;
+      oldWs.onopen = null;
+      oldWs.onmessage = null;
+      oldWs.onerror = null;
+      oldWs.onclose = null;
+      try { oldWs.close(); } catch (e) { console.debug('WebSocket close error:', e); }
+      tab.ws = null;
     }
 
     updateTabStatus(tab.key, isReconnect ? 'reconnecting' : 'connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${tab.key.replace('terminal-', '')}`;
-    // 同源 WS 握手自动携带 HttpOnly cookie，无需手动传 token
+    const wsUrl = `${protocol}//${window.location.host}/ws/terminal`;
     const ws = new WebSocket(wsUrl);
     tab.ws = ws;
 
     ws.onopen = () => {
+      if (tab.ws !== ws || tab.disposed) return;
       tab.reconnectCount = 0;
       updateTabStatus(tab.key, 'connected');
       // 延迟发送 resize
       setTimeout(() => {
-        const dims = tab.fitAddon.proposeDimensions();
-        if (dims && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
+        if (!tab.disposed && tab.ws === ws && ws.readyState === WebSocket.OPEN) {
+          tab.fitAddon.fit();
+          sendResize(tab);
         }
       }, 200);
     };
 
     ws.onmessage = (event) => {
+      if (tab.ws !== ws || tab.disposed) return;
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output') {
           tab.terminal.write(msg.data);
         } else if (msg.type === 'exit') {
           tab.terminal.write('\r\n\x1b[31m[Process exited]\x1b[0m\r\n');
-        } else if (msg.type !== 'pong') {
-          // 非预期消息，忽略
         }
       } catch {
-        // 如果不是 JSON，直接作为终端输出写入
         if (typeof event.data === 'string') {
           tab.terminal.write(event.data);
         }
@@ -120,14 +155,15 @@ export default function TerminalPage() {
     };
 
     ws.onclose = () => {
-      if (tab.disposed) return;
+      if (tab.ws !== ws || tab.disposed) return;
+      tab.ws = null;
       tab.reconnectCount++;
       if (tab.reconnectCount <= 3) {
         updateTabStatus(tab.key, 'reconnecting');
       } else {
         updateTabStatus(tab.key, 'disconnected');
       }
-      if (tab.reconnectCount <= 10) {
+      if (tab.reconnectCount <= 5) {
         if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
         tab.reconnectTimer = window.setTimeout(() => {
           if (!tab.disposed && tabsRef.current.includes(tab)) {
@@ -136,7 +172,7 @@ export default function TerminalPage() {
         }, 3000);
       }
     };
-  }, [updateTabStatus]);
+  }, [updateTabStatus, sendResize]);
 
   useEffect(() => {
     connectWsRef.current = connectWs;
@@ -227,10 +263,20 @@ export default function TerminalPage() {
       const tab = prev.find(t => t.key === key);
       if (tab) {
         tab.disposed = true;
-        if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+        if (tab.reconnectTimer) {
+          clearTimeout(tab.reconnectTimer);
+          tab.reconnectTimer = null;
+        }
         tab.onDataDisposable?.dispose();
         tab.terminal.dispose();
-        if (tab.ws) tab.ws.close();
+        if (tab.ws) {
+          tab.ws.onopen = null;
+          tab.ws.onmessage = null;
+          tab.ws.onerror = null;
+          tab.ws.onclose = null;
+          try { tab.ws.close(); } catch (e) { console.debug('WebSocket close error:', e); }
+          tab.ws = null;
+        }
       }
       const newTabs = prev.filter(t => t.key !== key);
       if (activeKey === key && newTabs.length > 0) {
@@ -240,19 +286,80 @@ export default function TerminalPage() {
     });
   }, [activeKey]);
 
+  const handleStartRename = useCallback((tab: TerminalTab) => {
+    renameStartTimeRef.current = Date.now();
+    setEditingKey(tab.key);
+    setEditingTitle(tab.label);
+  }, []);
+
+  const handleSaveRename = useCallback((key: string, force = false) => {
+    if (!force && Date.now() - renameStartTimeRef.current < 300) {
+      return;
+    }
+    const trimmed = editingTitle.trim();
+    if (trimmed) {
+      setTabs(prev => prev.map(t => {
+        if (t.key === key) {
+          t.label = trimmed;
+          return { ...t };
+        }
+        return t;
+      }));
+    }
+    setEditingKey(null);
+  }, [editingTitle]);
+
+  const handleCancelRename = useCallback(() => {
+    setEditingKey(null);
+  }, []);
+
+  const handleTabClick = useCallback((tab: TerminalTab) => {
+    const now = Date.now();
+    if (lastClickRef.current.key === tab.key && now - lastClickRef.current.time < 350) {
+      handleStartRename(tab);
+      lastClickRef.current = { key: '', time: 0 };
+    } else {
+      lastClickRef.current = { key: tab.key, time: now };
+    }
+  }, [handleStartRename]);
+
+  useEffect(() => {
+    if (!editingKey) return undefined;
+    const timer = setTimeout(() => {
+      inputRef.current?.focus({ cursor: 'all' });
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [editingKey]);
+
   const changeFontSize = useCallback((delta: number) => {
-    setTabs(prev => {
-      const tab = prev.find(t => t.key === activeKey);
-      if (tab) {
-        const newSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, tab.fontSize + delta));
-        tab.fontSize = newSize;
-        tab.terminal.options.fontSize = newSize;
-        tab.fitAddon.fit();
-        return [...prev];
+    const tab = tabsRef.current.find(t => t.key === activeKey);
+    if (!tab) return;
+    const oldSize = tab.fontSize;
+    const newSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, oldSize + delta));
+    if (newSize === oldSize) return;
+
+    // 若放大字号，先按比例预收缩行列数，避免在 fontSize 生效与 RAF fit 之间的 1 帧渲染中宽度瞬间撑满/溢出右侧
+    if (newSize > oldSize && tab.terminal.cols > 0) {
+      const approxCols = Math.max(2, Math.floor(tab.terminal.cols * (oldSize / newSize)));
+      const approxRows = Math.max(1, Math.floor(tab.terminal.rows * (oldSize / newSize)));
+      try {
+        tab.terminal.resize(approxCols, approxRows);
+      } catch (e) {
+        console.debug('Pre-resize error:', e);
       }
-      return prev;
+    }
+
+    tab.fontSize = newSize;
+    tab.terminal.options.fontSize = newSize;
+    setTabs(prev => [...prev]);
+
+    // xterm 在 DOM 测量新字号后进行精确 fit 并同步给后端 PTY
+    requestAnimationFrame(() => {
+      if (tab.disposed) return;
+      tab.fitAddon.fit();
+      sendResize(tab);
     });
-  }, [activeKey]);
+  }, [activeKey, sendResize]);
 
   const reconnect = useCallback(() => {
     const tab = tabsRef.current.find(t => t.key === activeKey);
@@ -267,12 +374,48 @@ export default function TerminalPage() {
     }
   }, [activeKey, connectWs]);
 
-  const toggleFullscreen = useCallback(() => {
-    setIsFullscreen(prev => !prev);
+  const toggleWebFullscreen = useCallback(() => {
+    setIsWebFullscreen(prev => !prev);
     setTimeout(() => {
-      tabsRef.current.forEach(tab => tab.fitAddon.fit());
+      tabsRef.current.forEach(tab => {
+        tab.fitAddon.fit();
+        sendResize(tab);
+      });
     }, 100);
+  }, [sendResize]);
+
+  const toggleNativeFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      cardContainerRef.current?.requestFullscreen().catch(err => {
+        console.debug('Failed to enter fullscreen:', err);
+      });
+    } else {
+      document.exitFullscreen().catch(err => {
+        console.debug('Failed to exit fullscreen:', err);
+      });
+    }
   }, []);
+
+  // 监听浏览器原生全屏状态变化（如按 Esc 键退出全屏）
+  useEffect(() => {
+    const handleNativeFullscreenChange = () => {
+      const isFull = !!document.fullscreenElement;
+      setIsNativeFullscreen(isFull);
+      setTimeout(() => {
+        tabsRef.current.forEach(tab => {
+          tab.fitAddon.fit();
+          sendResize(tab);
+        });
+      }, 100);
+    };
+
+    document.addEventListener('fullscreenchange', handleNativeFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleNativeFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleNativeFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleNativeFullscreenChange);
+    };
+  }, [sendResize]);
 
   // 首次挂载
   useEffect(() => {
@@ -286,10 +429,20 @@ export default function TerminalPage() {
       animFrameIdsRef.current = [];
       tabsRef.current.forEach(tab => {
         tab.disposed = true;
-        if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+        if (tab.reconnectTimer) {
+          clearTimeout(tab.reconnectTimer);
+          tab.reconnectTimer = null;
+        }
         tab.onDataDisposable?.dispose();
         tab.terminal.dispose();
-        if (tab.ws) tab.ws.close();
+        if (tab.ws) {
+          tab.ws.onopen = null;
+          tab.ws.onmessage = null;
+          tab.ws.onerror = null;
+          tab.ws.onclose = null;
+          try { tab.ws.close(); } catch (e) { console.debug('WebSocket close error:', e); }
+          tab.ws = null;
+        }
       });
       tabsRef.current = [];
       // 必须同步清空 React state，否则 React StrictMode 双挂载会让旧标签残留
@@ -298,21 +451,6 @@ export default function TerminalPage() {
       tabCounter.current = 0;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 通用 resize 发送（带写锁防并发）
-  const sendResize = useCallback((tab: TerminalTab) => {
-    if (tab.writeLock || tab.ws?.readyState !== WebSocket.OPEN) return;
-    const dims = tab.fitAddon.proposeDimensions();
-    if (dims) {
-      tab.writeLock = true;
-      try {
-        tab.ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }));
-      } catch (e) {
-        console.debug('WebSocket send error:', e);
-      }
-      tab.writeLock = false;
-    }
   }, []);
 
   // 窗口 resize
@@ -371,120 +509,210 @@ export default function TerminalPage() {
 
   const currentTab = tabs.find(t => t.key === activeKey);
 
-  const tabItems = tabs.map(tab => ({
-    key: tab.key,
-    label: (
-      <Space size={4}>
-        <StatusIcon status={tab.status} />
-        {tab.label}
-        <CloseOutlined
-          style={{ fontSize: 10 }}
-          onClick={(e: React.MouseEvent) => {
-            e.stopPropagation();
-            closeTab(tab.key);
+  const tabItems = tabs.map(tab => {
+    const isEditing = editingKey === tab.key;
+    return {
+      key: tab.key,
+      label: (
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            height: 24,
+            maxHeight: 24,
+            gap: 6,
           }}
-        />
-      </Space>
-    ),
-    children: null, // 不使用 Tabs 的 children
-  }));
+          onMouseDown={(e) => {
+            if (isEditing) e.stopPropagation();
+          }}
+          onClick={(e) => {
+            if (isEditing) e.stopPropagation();
+          }}
+        >
+          <StatusBadge status={tab.status} />
+          {isEditing ? (
+            <Input
+              ref={inputRef}
+              autoFocus
+              size="small"
+              value={editingTitle}
+              maxLength={30}
+              style={{
+                width: 110,
+                height: 22,
+                maxHeight: 22,
+                lineHeight: '20px',
+                padding: '0 4px',
+                fontSize: 13,
+                margin: 0,
+                verticalAlign: 'middle',
+              }}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => setEditingTitle(e.target.value)}
+              onBlur={() => handleSaveRename(tab.key)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveRename(tab.key, true);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  handleCancelRename();
+                }
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span
+              title="双击自定义标题"
+              onClick={() => handleTabClick(tab)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                handleStartRename(tab);
+              }}
+              style={{
+                cursor: 'pointer',
+                userSelect: 'none',
+                height: 22,
+                lineHeight: '22px',
+                display: 'inline-block',
+              }}
+            >
+              {tab.label}
+            </span>
+          )}
+          <CloseOutlined
+            style={{ fontSize: 10, color: '#999', marginLeft: 2 }}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              if (editingKey === tab.key) setEditingKey(null);
+              closeTab(tab.key);
+            }}
+          />
+        </div>
+      ),
+      children: null, // 不使用 Tabs 的 children
+    };
+  });
+
+  const isAnyFullscreen = isWebFullscreen || isNativeFullscreen;
 
   return (
-    <Card
-      title="Web 终端"
-      style={isFullscreen ? { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, borderRadius: 0 } : { display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)' }}
-      styles={{ body: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' } }}
-      extra={
-        <Space>
-          {currentTab && (
-            <Tooltip title={
-              currentTab.status === 'connected' ? '已连接' :
-              currentTab.status === 'connecting' ? '连接中...' :
-              currentTab.status === 'reconnecting' ? '重连中...' :
-              '已断开'
-            }>
-              <Badge
-                status={
-                  currentTab.status === 'connected' ? 'success' :
-                  currentTab.status === 'connecting' || currentTab.status === 'reconnecting' ? 'processing' :
-                  'error'
-                }
-                text={
-                  <span style={{ fontSize: 12 }}>
-                    {currentTab.status === 'connected' ? '已连接' :
-                     currentTab.status === 'connecting' ? '连接中' :
-                     currentTab.status === 'reconnecting' ? '重连中' :
-                     '已断开'}
-                  </span>
-                }
-              />
-            </Tooltip>
-          )}
-          <Tooltip title="缩小字体">
-            <Button
-              icon={<ZoomOutOutlined />}
-              onClick={() => changeFontSize(-1)}
-              disabled={!currentTab || currentTab.fontSize <= MIN_FONT_SIZE}
-            />
-          </Tooltip>
-          <span style={{ fontSize: 12, color: '#666', minWidth: 30, textAlign: 'center' }}>
-            {currentTab?.fontSize || DEFAULT_FONT_SIZE}
-          </span>
-          <Tooltip title="放大字体">
-            <Button
-              icon={<ZoomInOutlined />}
-              onClick={() => changeFontSize(1)}
-              disabled={!currentTab || currentTab.fontSize >= MAX_FONT_SIZE}
-            />
-          </Tooltip>
-          <Tooltip title="重新连接">
-            <Button icon={<ReloadOutlined />} onClick={reconnect} />
-          </Tooltip>
-          <Tooltip title={isFullscreen ? '退出全屏' : '全屏'}>
-            <Button
-              icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-              onClick={toggleFullscreen}
-            />
-          </Tooltip>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => createTerminal(++mountGenRef.current)}
-          >
-            新建终端
-          </Button>
-        </Space>
-      }
+    <div
+      ref={cardContainerRef}
+      style={isAnyFullscreen ? {
+        position: isWebFullscreen && !isNativeFullscreen ? 'fixed' : 'relative',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: isWebFullscreen ? 1000 : undefined,
+        height: '100vh',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#ffffff',
+      } : { display: 'flex', flexDirection: 'column', height: '100%' }}
     >
-      {tabs.length > 0 ? (
-        <>
-          <Tabs
-            activeKey={activeKey}
-            onChange={(key) => setActiveKey(key)}
-            items={tabItems}
-            hideAdd
-          />
-          {/* 终端容器，用 CSS 控制显示 */}
-          {tabs.map(tab => (
-            <div
-              key={tab.key}
-              id={tab.key}
-              style={{
-                flex: 1,
-                minHeight: 0,
-                background: '#1e1e1e',
-                borderRadius: 4,
-                padding: 8,
-                display: tab.key === activeKey ? 'block' : 'none',
-              }}
+      <Card
+        style={isAnyFullscreen
+          ? { display: 'flex', flexDirection: 'column', height: '100vh', width: '100%', borderRadius: 0, border: 'none' }
+          : { display: 'flex', flexDirection: 'column', height: 'calc(100vh - 96px)' }
+        }
+        styles={{
+          body: {
+            padding: '6px 12px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden',
+          },
+        }}
+      >
+        {tabs.length > 0 ? (
+          <>
+            <Tabs
+              activeKey={activeKey}
+              onChange={(key) => setActiveKey(key)}
+              items={tabItems}
+              hideAdd
+              tabBarStyle={{ marginBottom: 8 }}
+              tabBarExtraContent={
+                <Space size={8}>
+                  <Tooltip title="缩小字体">
+                    <Button
+                      icon={<ZoomOutOutlined />}
+                      onClick={() => changeFontSize(-1)}
+                      disabled={!currentTab || currentTab.fontSize <= MIN_FONT_SIZE}
+                    />
+                  </Tooltip>
+                  <span style={{ fontSize: 16, color: '#666', minWidth: 24, textAlign: 'center' }}>
+                    {currentTab?.fontSize || DEFAULT_FONT_SIZE}
+                  </span>
+                  <Tooltip title="放大字体">
+                    <Button
+                      icon={<ZoomInOutlined />}
+                      onClick={() => changeFontSize(1)}
+                      disabled={!currentTab || currentTab.fontSize >= MAX_FONT_SIZE}
+                    />
+                  </Tooltip>
+                  <Tooltip title="重新连接">
+                    <Button icon={<ReloadOutlined />} onClick={reconnect} />
+                  </Tooltip>
+                  <Tooltip title={isWebFullscreen ? '退出网页全屏' : '网页全屏'}>
+                    <Button
+                      icon={isWebFullscreen ? <CompressOutlined /> : <ExpandOutlined />}
+                      onClick={toggleWebFullscreen}
+                    />
+                  </Tooltip>
+                  <Tooltip title={isNativeFullscreen ? '退出屏幕全屏' : '屏幕全屏'}>
+                    <Button
+                      icon={isNativeFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                      onClick={toggleNativeFullscreen}
+                    />
+                  </Tooltip>
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => createTerminal(++mountGenRef.current)}
+                  >
+                    新建终端
+                  </Button>
+                </Space>
+              }
             />
-          ))}
-        </>
-      ) : (
-        <div style={{ textAlign: 'center', padding: 100, color: '#999' }}>
-          点击"新建终端"开始
-        </div>
-      )}
-    </Card>
+            {/* 终端容器，用 CSS 控制显示 */}
+            {tabs.map(tab => (
+              <div
+                key={tab.key}
+                id={tab.key}
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                  width: '100%',
+                  overflow: 'hidden',
+                  background: '#1e1e1e',
+                  borderRadius: 6,
+                  display: tab.key === activeKey ? 'block' : 'none',
+                }}
+              />
+            ))}
+          </>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#999', gap: 16 }}>
+            <div>暂无活动终端</div>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => createTerminal(++mountGenRef.current)}
+            >
+              新建终端
+            </Button>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }

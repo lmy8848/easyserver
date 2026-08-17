@@ -2,9 +2,10 @@ package http
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
-	"regexp"
 	"sync"
 	"time"
 
@@ -29,9 +30,6 @@ const (
 	// TermWSReadLimit is the maximum message size for WebSocket reads
 	TermWSReadLimit = 4096
 )
-
-// sessionIDRegex validates terminal session IDs to prevent injection
-var sessionIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // formatDuration formats a duration into a human-readable string
 func formatDuration(d time.Duration) string {
@@ -86,23 +84,15 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) (any, error) {
 		return nil, errx.Internal("用户名类型无效")
 	}
 
-	// Get and validate session ID from URL
-	sessionID := c.Param("id")
-	if sessionID == "" {
-		return nil, errx.BadRequest("会话ID不能为空")
-	}
-	if !sessionIDRegex.MatchString(sessionID) {
-		return nil, errx.BadRequest("会话ID格式无效")
-	}
+	// Generate unique session ID
+	var randBytes [8]byte
+	_, _ = rand.Read(randBytes[:])
+	sessionID := fmt.Sprintf("term-%d-%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes[:]))
 
-	// Create or get session
+	// Create session
 	session, err := h.terminalManager.CreateSession(sessionID)
 	if err != nil {
-		// Try to get existing session
-		session, err = h.terminalManager.GetSession(sessionID)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	// Log terminal session start
@@ -241,11 +231,8 @@ func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session
 	}
 }
 
-// RegisterRoutes registers terminal routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditLog OperationLogger, allowedOrigins []string, devMode bool) {
-	protected.GET("/terminal/:id", httpx.H(func(c *gin.Context) (any, error) {
-		return nil, nil
-	}))
+// RegisterRoutes registers terminal WebSocket routes
+func RegisterRoutes(wsGroup *gin.RouterGroup, terminalManager *terminal.Manager, jwtSecret string, auditLog OperationLogger, allowedOrigins []string, devMode bool) {
 	handler := NewTerminalHandler(terminalManager, jwtSecret, auditLog, allowedOrigins, devMode)
-	wsGroup.GET("/terminal/:id", httpx.H(handler.HandleWebSocket))
+	wsGroup.GET("/terminal", httpx.H(handler.HandleWebSocket))
 }
