@@ -35,7 +35,6 @@ const (
 	ResourceFile         ResourceCategory = "文件"
 	ResourceWebsite      ResourceCategory = "网站"
 	ResourceWebServer    ResourceCategory = "Web服务"
-	ResourceDeploy       ResourceCategory = "发布"
 	ResourceSetting      ResourceCategory = "面板设置"
 	ResourceEnvVar       ResourceCategory = "环境变量"
 	ResourceNotification ResourceCategory = "通知"
@@ -101,7 +100,6 @@ var categoryPrefixes = []struct {
 	{"/api/files", ResourceFile},
 	{"/api/websites", ResourceWebsite},
 	{"/api/web-servers", ResourceWebServer},
-	{"/api/deploy", ResourceDeploy},
 	{"/api/settings", ResourceSetting},
 	{"/api/env-config", ResourceEnvVar},
 	{"/api/notifications", ResourceNotification},

@@ -19,7 +19,6 @@ const (
 	ResourceFile         = middleware.ResourceFile
 	ResourceWebsite      = middleware.ResourceWebsite
 	ResourceWebServer    = middleware.ResourceWebServer
-	ResourceDeploy       = middleware.ResourceDeploy
 	ResourceSetting      = middleware.ResourceSetting
 	ResourceEnvVar       = middleware.ResourceEnvVar
 	ResourceNotification = middleware.ResourceNotification

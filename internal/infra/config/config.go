@@ -32,7 +32,6 @@ type Config struct {
 	Audit        AuditConfig        `toml:"audit"`
 	FileManager  FileManagerConfig  `toml:"filemanager"`
 	TencentCloud TencentCloudConfig `toml:"tencentcloud"`
-	Deploy       DeployConfig       `toml:"deploy"`
 	Notify       NotifyConfig       `toml:"notify"`
 	Logs         LogsConfig         `toml:"logs"`
 	Features     FeaturesConfig     `toml:"features"`
@@ -129,10 +128,6 @@ type TencentCloudConfig struct {
 	SecretKey  string `toml:"secret_key"`
 	Region     string `toml:"region"`
 	InstanceID string `toml:"instance_id"`
-}
-
-type DeployConfig struct {
-	EncryptionKey string `toml:"encryption_key"`
 }
 
 // LogsConfig 控制全局运行日志：文件落盘（应用根目录）、分级、源码定位、轮转。
@@ -272,10 +267,6 @@ func (c *Config) mergeDefaults() bool {
 		c.Auth.JWTSecret = generateRandomSecret(32)
 		generated = true
 	}
-	if c.Deploy.EncryptionKey == "" {
-		c.Deploy.EncryptionKey = generateRandomSecret(32)
-		generated = true
-	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
 	}
@@ -381,11 +372,6 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_INSTANCE_ID"); v != "" {
 		c.TencentCloud.InstanceID = v
-	}
-
-	// Deploy
-	if v := os.Getenv("EASYSERVER_ENCRYPTION_KEY"); v != "" {
-		c.Deploy.EncryptionKey = v
 	}
 }
 
