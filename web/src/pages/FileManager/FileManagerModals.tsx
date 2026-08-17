@@ -1,21 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Modal, Input, Table, Button, Space, Tag, Row, Col, Image, Card,
 } from 'antd';
 import {
   FolderOutlined, FileOutlined, SearchOutlined,
 } from '@ant-design/icons';
-import Editor, { loader } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
-
-// Use local monaco-editor bundle (no CDN)
-loader.config({ monaco });
-
-// Monaco workers: return a no-op worker stub so Monaco doesn't crash.
-// Monaco runs language services in main thread (fine for preview).
-(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
-  getWorker: () => new Worker('data:text/javascript;base64,', { name: 'monaco-dummy' }),
-};
+import CodeMirror from '@uiw/react-codemirror';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { EditorView } from '@codemirror/view';
+import type { Extension } from '@codemirror/state';
+import { loadLanguageExtension } from './cmLanguage';
+import { customEditorTheme } from './cmTheme';
 
 // ==================== Mkdir Modal ====================
 interface MkdirModalProps {
@@ -244,46 +239,6 @@ export function DetailsModal({ visible, data, onClose }: DetailsModalProps) {
   );
 }
 
-// ==================== Preview Modal ====================
-
-// detectLanguage maps file extensions to Monaco language IDs for syntax highlighting.
-function detectLanguage(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() || '';
-  const map: Record<string, string> = {
-    js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
-    ts: 'typescript', tsx: 'typescript',
-    json: 'json',
-    html: 'html', htm: 'html', xml: 'xml', svg: 'xml',
-    css: 'css', scss: 'scss', less: 'less',
-    py: 'python',
-    go: 'go',
-    java: 'java',
-    c: 'c', h: 'c',
-    cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
-    rs: 'rust',
-    rb: 'ruby',
-    php: 'php',
-    sh: 'shell', bash: 'shell', zsh: 'shell',
-    yml: 'yaml', yaml: 'yaml',
-    toml: 'ini', ini: 'ini', conf: 'ini', cfg: 'ini',
-    sql: 'sql',
-    md: 'markdown', markdown: 'markdown',
-    dart: 'dart',
-    dockerfile: 'dockerfile',
-    txt: 'plaintext',
-    log: 'plaintext',
-    env: 'plaintext',
-    csv: 'plaintext',
-    bat: 'bat',
-    ps1: 'powershell',
-  };
-  // Special: Dockerfile has no extension
-  const basename = path.split('/').pop()?.toLowerCase() || '';
-  if (basename === 'dockerfile' || basename === 'dockerfile.dev') return 'dockerfile';
-  if (basename === 'makefile' || basename === 'gnumakefile') return 'makefile';
-  return map[ext] || 'plaintext';
-}
-
 interface PreviewModalProps {
   visible: boolean;
   path: string;
@@ -302,6 +257,22 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
 
   // 视频原始分辨率，加载 metadata 后用于按比例调整弹窗大小
   const [videoMeta, setVideoMeta] = useState<{ w: number; h: number } | null>(null);
+  const [langExts, setLangExts] = useState<Extension[]>([]);
+
+  useEffect(() => {
+    if (type !== 'text') return;
+    let active = true;
+    loadLanguageExtension(path).then((exts) => {
+      if (active) setLangExts(exts);
+    });
+    return () => { active = false; };
+  }, [path, type]);
+
+  const extensions = useMemo(() => [
+    ...langExts,
+    EditorView.lineWrapping,
+    customEditorTheme,
+  ], [langExts]);
 
   // 图片用 antd Image 内置预览层（全屏放大/缩放/旋转），不套外层 Modal。
   if (type === 'image') {
@@ -367,21 +338,14 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
       {type === 'text' && (
         <Card size="small" styles={{ body: { padding: 0 } }} style={{ overflow: 'hidden' }}>
           <div style={{ height: '70vh' }}>
-            <Editor
+            <CodeMirror
               value={content}
-              language={detectLanguage(path)}
-              theme="vs-dark"
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                fontSize: 13,
-                fontFamily: 'Consolas, Monaco, "Courier New", monospace',
-                lineNumbers: 'on',
-                wordWrap: 'on',
-                scrollBeyondLastLine: false,
-                renderWhitespace: 'selection',
-                automaticLayout: true,
-              }}
+              height="70vh"
+              theme={oneDark}
+              extensions={extensions}
+              readOnly
+              editable={false}
+              style={{ fontSize: '13px', height: '100%' }}
             />
           </div>
         </Card>

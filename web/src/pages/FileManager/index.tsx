@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Modal, message, Input, Form, InputNumber, Progress, Spin, Button, Space } from 'antd';
 import { fileApi, fileShareApi } from '../../services/api';
 import type { FileEntry } from '../../types';
 import { isValidPath } from './types';
 import FileManagerHeader from './FileManagerHeader';
 import FileManagerTable from './FileManagerTable';
-import FileManagerEditor from './FileManagerEditor';
+
+const FileManagerEditor = lazy(() => import('./FileManagerEditor'));
 import {
   MkdirModal, RenameModal, CopyMoveModal, SearchModal,
   ChmodModal, DetailsModal, PreviewModal,
@@ -793,14 +794,18 @@ export default function FileManager() {
         />
       </FileManagerHeader>
 
-      <FileManagerEditor
-        visible={editVisible}
-        path={editPath}
-        content={editContent}
-        onClose={() => setEditVisible(false)}
-        onSave={handleSave}
-        onContentChange={setEditContent}
-      />
+      {editVisible && (
+        <Suspense fallback={null}>
+          <FileManagerEditor
+            visible={editVisible}
+            path={editPath}
+            content={editContent}
+            onClose={() => setEditVisible(false)}
+            onSave={handleSave}
+            onContentChange={setEditContent}
+          />
+        </Suspense>
+      )}
 
       <Modal
         title="生成文件外链"
