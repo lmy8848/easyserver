@@ -43,3 +43,90 @@ body {
   max-width: 100%;
   background-color: #1e1e1e !important;
 }
+
+/* CodeMirror 6 Search Panel Layout */
+.cm-search,
+.cm-panel.cm-search {
+  display: grid !important;
+  grid-template-columns: 240px auto auto auto auto auto auto 1fr !important;
+  grid-template-rows: auto auto !important;
+  row-gap: 8px !important;
+  column-gap: 6px !important;
+  align-items: center !important;
+  position: relative !important;
+  padding: 10px 48px 10px 14px !important;
+}
+
+.cm-search br,
+.cm-panel.cm-search br {
+  display: none !important;
+}
+
+.cm-search input[name="search"],
+.cm-panel.cm-search input[name="search"] {
+  grid-row: 1 !important;
+  grid-column: 1 !important;
+  width: 240px !important;
+}
+
+.cm-search button[name="next"],
+.cm-panel.cm-search button[name="next"] {
+  grid-row: 1 !important;
+  grid-column: 2 !important;
+}
+
+.cm-search button[name="prev"],
+.cm-panel.cm-search button[name="prev"] {
+  grid-row: 1 !important;
+  grid-column: 3 !important;
+}
+
+.cm-search button[name="select"],
+.cm-panel.cm-search button[name="select"] {
+  grid-row: 1 !important;
+  grid-column: 4 !important;
+}
+
+.cm-search label:nth-of-type(1),
+.cm-panel.cm-search label:nth-of-type(1) {
+  grid-row: 1 !important;
+  grid-column: 5 !important;
+}
+
+.cm-search label:nth-of-type(2),
+.cm-panel.cm-search label:nth-of-type(2) {
+  grid-row: 1 !important;
+  grid-column: 6 !important;
+}
+
+.cm-search label:nth-of-type(3),
+.cm-panel.cm-search label:nth-of-type(3) {
+  grid-row: 1 !important;
+  grid-column: 7 !important;
+}
+
+.cm-search input[name="replace"],
+.cm-panel.cm-search input[name="replace"] {
+  grid-row: 2 !important;
+  grid-column: 1 !important;
+  width: 240px !important;
+}
+
+.cm-search button[name="replace"],
+.cm-panel.cm-search button[name="replace"] {
+  grid-row: 2 !important;
+  grid-column: 2 !important;
+}
+
+.cm-search button[name="replaceAll"],
+.cm-panel.cm-search button[name="replaceAll"] {
+  grid-row: 2 !important;
+  grid-column: 3 !important;
+}
+
+.cm-search button[name="close"],
+.cm-panel.cm-search button[name="close"] {
+  position: absolute !important;
+  right: 12px !important;
+  top: 10px !important;
+}

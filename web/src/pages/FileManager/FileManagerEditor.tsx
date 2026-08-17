@@ -13,8 +13,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { loadLanguageExtension } from './cmLanguage';
-import { customEditorTheme } from './cmTheme';
+import { loadLanguageExtension, customEditorTheme } from './cmConfig';
 
 const FONT_SIZE_STORAGE_KEY = 'easyserver_editor_font_size';
 const MIN_FONT_SIZE = 10;

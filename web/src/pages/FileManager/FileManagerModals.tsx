@@ -9,8 +9,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import { loadLanguageExtension } from './cmLanguage';
-import { customEditorTheme } from './cmTheme';
+import { loadLanguageExtension, customEditorTheme } from './cmConfig';
 
 // ==================== Mkdir Modal ====================
 interface MkdirModalProps {
