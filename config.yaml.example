@@ -22,8 +22,10 @@ auth:
   idle_timeout: 30m
   max_login_attempts: 5
   lockout_duration: 15m
-  rate_limit: 100        # Max requests per interval
+  rate_limit: 1000       # Max requests per interval
   rate_interval: 1m      # Rate limit interval
+  login_rate_limit: 60   # Login & QR polling rate limit per interval
+  login_rate_interval: 1m
   ip_whitelist: []       # Empty = allow all; e.g., ["192.168.1.0/24", "10.0.0.1"]
   session_cleanup_interval: 5m  # 过期会话清理间隔
 

@@ -59,7 +59,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           lockout_duration: 900,
           rate_limit: 1000,
           rate_interval: 60,
-          login_rate_limit: 10,
+          login_rate_limit: 60,
           login_rate_interval: 60,
           allow_multi_session: false,
           mobile_device_binding: true,

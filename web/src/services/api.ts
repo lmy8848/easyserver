@@ -103,7 +103,7 @@ export const authApi = {
 
   // TOTP setup (protected)
   setupTOTP: () =>
-    api.post<ApiResponse<{ secret: string; otpauth_url: string; qr_code_base64: string }>>('/auth/totp/setup'),
+    api.post<ApiResponse<{ secret: string; otpauth_url: string }>>('/auth/totp/setup'),
 
   enableTOTP: (code: string) =>
     api.post<ApiResponse<{ backup_codes: string[] }>>('/auth/totp/enable', { code }),
@@ -130,7 +130,7 @@ export const authApi = {
 
   // Scan-to-login (QR). Web creates+p polls; mobile (authenticated) confirms.
   createQRSession: () =>
-    api.post<ApiResponse<{ qr_token: string; qr_code_base64: string; expires_at: string }>>('/auth/qr/session'),
+    api.post<ApiResponse<{ qr_token: string; expires_at: string }>>('/auth/qr/session'),
 
   getQRStatus: (qrToken: string) =>
     api.post<ApiResponse<{ status: string; expires_at: string; token?: string; user?: User; must_change_pass?: boolean }>>('/auth/qr/status', { qr_token: qrToken }),

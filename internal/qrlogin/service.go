@@ -3,7 +3,6 @@ package qrlogin
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,8 +10,6 @@ import (
 
 	"easyserver/internal/auth"
 	"easyserver/internal/infra/config"
-
-	"github.com/skip2/go-qrcode"
 )
 
 // qrTokenBytes is the entropy for a QR session token (32 bytes => 64 hex chars).
@@ -36,8 +33,8 @@ func NewService(repo Repository, store *config.Store, sessionService *auth.Sessi
 	return &Service{repo: repo, store: store, sessionService: sessionService}
 }
 
-// CreateSession generates a new pending QR session and returns the QR token +
-// base64-encoded PNG (content "esqr:<token>") for the web to render.
+// CreateSession generates a new pending QR session and returns the QR token
+// for the web to render as a QR code.
 func (s *Service) CreateSession(ctx context.Context) (*CreateResult, error) {
 	// Opportunistic cleanup of stale pending/cancelled rows.
 	if _, err := s.repo.DeleteExpired(ctx); err != nil {
@@ -62,15 +59,9 @@ func (s *Service) CreateSession(ctx context.Context) (*CreateResult, error) {
 		return nil, err
 	}
 
-	png, err := qrcode.Encode("esqr:"+qrToken, qrcode.Medium, 256)
-	if err != nil {
-		return nil, fmt.Errorf("encode qr: %w", err)
-	}
-
 	return &CreateResult{
-		QRToken:      qrToken,
-		QRCodeBase64: "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
-		ExpiresAt:    sess.ExpiresAt,
+		QRToken:   qrToken,
+		ExpiresAt: sess.ExpiresAt,
 	}, nil
 }
 

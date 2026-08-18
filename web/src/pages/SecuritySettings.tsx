@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Button, Switch, Modal, Input, message, Typography, Space, List, Alert, Table, Popconfirm, Tag } from 'antd';
+import { Card, Button, Switch, Modal, Input, message, Typography, Space, List, Alert, Table, Popconfirm, Tag, QRCode } from 'antd';
 import { SafetyOutlined, KeyOutlined, CopyOutlined, DownloadOutlined, LockOutlined, DesktopOutlined, DeleteOutlined, LogoutOutlined, ReloadOutlined } from '@ant-design/icons';
 import { authApi } from '../services/api';
 import { copyToClipboard } from '../utils/clipboard';
@@ -28,7 +28,6 @@ export default function SecuritySettings() {
   const [setupData, setSetupData] = useState<{
     secret: string;
     otpauth_url: string;
-    qr_code_base64: string;
   } | null>(null);
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [showSetupModal, setShowSetupModal] = useState(false);
@@ -220,11 +219,11 @@ export default function SecuritySettings() {
             <Paragraph>
               使用验证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码：
             </Paragraph>
-            <div style={{ margin: '24px 0' }}>
-              <img
-                src={setupData.qr_code_base64}
-                alt="TOTP QR Code"
-                style={{ maxWidth: 256, maxHeight: 256 }}
+            <div style={{ margin: '24px 0', display: 'flex', justifyContent: 'center' }}>
+              <QRCode
+                value={setupData.otpauth_url}
+                size={200}
+                bordered={false}
               />
             </div>
             <Paragraph type="secondary">

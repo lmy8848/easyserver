@@ -179,7 +179,7 @@ func Load(path string) (*Config, error) {
 			LockoutDuration:        15 * time.Minute,
 			RateLimit:              1000,
 			RateInterval:           time.Minute,
-			LoginRateLimit:         10,
+			LoginRateLimit:         60,
 			LoginRateInterval:      time.Minute,
 			SessionCleanupInterval: 5 * time.Minute,
 			MobileDeviceBinding:    true,
@@ -227,7 +227,7 @@ func (c *Config) mergeDefaults() {
 		c.Auth.RateInterval = time.Minute
 	}
 	if c.Auth.LoginRateLimit == 0 {
-		c.Auth.LoginRateLimit = 10
+		c.Auth.LoginRateLimit = 60
 	}
 	if c.Auth.LoginRateInterval == 0 {
 		c.Auth.LoginRateInterval = time.Minute

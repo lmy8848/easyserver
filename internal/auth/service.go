@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,7 +21,6 @@ import (
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
-	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -364,12 +362,11 @@ func (s *AuthService) IsAccountExpired(ctx context.Context, userID int64) (bool,
 
 // TOTPSetupResult contains the TOTP setup information.
 type TOTPSetupResult struct {
-	Secret       string `json:"secret"`
-	OtpauthURL   string `json:"otpauth_url"`
-	QRCodeBase64 string `json:"qr_code_base64"`
+	Secret     string `json:"secret"`
+	OtpauthURL string `json:"otpauth_url"`
 }
 
-// GenerateTOTP generates a new TOTP secret and QR code for setup.
+// GenerateTOTP generates a new TOTP secret for setup.
 func (s *AuthService) GenerateTOTP(userID int64, username string) (*TOTPSetupResult, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      totpIssuer,
@@ -383,17 +380,9 @@ func (s *AuthService) GenerateTOTP(userID int64, username string) (*TOTPSetupRes
 		return nil, fmt.Errorf("generate TOTP key: %w", err)
 	}
 
-	qrCode, err := qrcode.Encode(key.URL(), qrcode.Medium, 256)
-	if err != nil {
-		return nil, fmt.Errorf("generate QR code: %w", err)
-	}
-
-	qrCodeBase64 := "data:image/png;base64," + base64Encode(qrCode)
-
 	return &TOTPSetupResult{
-		Secret:       key.Secret(),
-		OtpauthURL:   key.URL(),
-		QRCodeBase64: qrCodeBase64,
+		Secret:     key.Secret(),
+		OtpauthURL: key.URL(),
 	}, nil
 }
 
@@ -503,10 +492,6 @@ func (s *AuthService) StorePendingSecret(ctx context.Context, userID int64, secr
 }
 
 // Helper functions
-
-func base64Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
-}
 
 func generateRandomCode(length int) (string, error) {
 	const digits = "0123456789"

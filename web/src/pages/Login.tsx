@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Form, Input, Button, message, Typography, Space, Segmented } from 'antd';
-import { UserOutlined, LockOutlined, SafetyOutlined, KeyOutlined, CloudServerOutlined, ReloadOutlined, QrcodeOutlined } from '@ant-design/icons';
+import { Form, Input, Button, message, Typography, Space, Segmented, QRCode } from 'antd';
+import { UserOutlined, LockOutlined, SafetyOutlined, KeyOutlined, CloudServerOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { authApi } from '../services/api';
@@ -34,10 +34,6 @@ const LOGIN_ANIM_CSS = `
   from { opacity: 0; transform: translateX(16px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-@keyframes esQrBreath {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50%      { transform: scale(1.02); opacity: 0.92; }
-}
 .es-login-step { animation: esLoginStepIn 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
 .es-login-orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.55; pointer-events: none; }
 /* 深色玻璃卡片下的输入框占位符 / 自动填充配色 */
@@ -62,7 +58,6 @@ const LOGIN_ANIM_CSS = `
 
 interface QRData {
   qr_token: string;
-  qr_code_base64: string;
   expires_at: string;
 }
 
@@ -189,13 +184,12 @@ export default function Login() {
   // 生成新的扫码登录二维码
   const startQrLogin = async () => {
     setQrLoading(true);
-    setQrStatus('pending');
     try {
       const res = await authApi.createQRSession();
       setQrData(res.data.data);
+      setQrStatus('pending');
     } catch {
       message.error('生成二维码失败');
-      setQrData(null);
     } finally {
       setQrLoading(false);
     }
@@ -209,6 +203,7 @@ export default function Login() {
     } else if (qrData) {
       authApi.cancelQRLogin(qrData.qr_token).catch(() => undefined);
       setQrData(null);
+      setQrStatus('pending');
     }
   };
 
@@ -224,7 +219,6 @@ export default function Login() {
         handleLoginSuccess({ user: d.user as User, must_change_pass: d.must_change_pass });
       } else if (d.status === 'expired' || d.status === 'cancelled') {
         setQrStatus('expired');
-        setQrData(null);
       }
     } catch {
       /* 网络抖动忽略，继续轮询 */
@@ -232,11 +226,11 @@ export default function Login() {
   }, [qrData, handleLoginSuccess]);
 
   useEffect(() => {
-    if (loginMode !== 'qr' || !qrData) return;
+    if (loginMode !== 'qr' || !qrData || qrStatus === 'expired') return;
     pollQRStatus();
-    const id = setInterval(pollQRStatus, 2000);
+    const id = setInterval(pollQRStatus, 3000);
     return () => clearInterval(id);
-  }, [loginMode, qrData, pollQRStatus]);
+  }, [loginMode, qrData, qrStatus, pollQRStatus]);
 
   const inputStyle: React.CSSProperties = {
     height: 46,
@@ -303,29 +297,17 @@ export default function Login() {
         background: 'rgba(255,255,255,0.95)', marginBottom: 16,
         boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
       }}>
-        {qrLoading || !qrData ? (
-          <div style={{ width: 200, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
-            生成中...
-          </div>
-        ) : qrStatus === 'expired' ? (
-          <div style={{ width: 200, height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-            <QrcodeOutlined style={{ fontSize: 56, color: '#bbb' }} />
-            <span style={{ color: '#999', fontSize: 13 }}>二维码已过期</span>
-          </div>
-        ) : (
-          <img src={qrData.qr_code_base64} alt="登录二维码"
-            style={{ width: 200, height: 200, display: 'block', animation: 'esQrBreath 3s ease-in-out infinite' }} />
-        )}
+        <QRCode
+          value={qrData ? `esqr:${qrData.qr_token}` : '-'}
+          size={200}
+          bordered={false}
+          status={qrStatus === 'expired' ? 'expired' : qrLoading || !qrData ? 'loading' : 'active'}
+          onRefresh={startQrLogin}
+        />
       </div>
-      <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14, marginBottom: 8 }}>
-        {qrStatus === 'expired' ? '二维码已失效' : '请使用手机 App 扫码登录'}
+      <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>
+        请使用手机 App 扫码登录
       </div>
-      {qrStatus === 'expired' && (
-        <Button icon={<ReloadOutlined />} onClick={startQrLogin} loading={qrLoading}
-          style={{ background: 'rgba(255,255,255,0.1)', borderColor: 'rgba(255,255,255,0.2)', color: '#fff' }}>
-          刷新二维码
-        </Button>
-      )}
     </div>
   );
 

@@ -33,12 +33,10 @@ type QRLoginSession struct {
 	ConfirmedAt *time.Time `json:"confirmed_at,omitempty"`
 }
 
-// CreateResult is returned when a web client requests a new QR session. The
-// QRCodeBase64 encodes "esqr:<qr_token>" and is rendered as an <img>.
+// CreateResult is returned when a web client requests a new QR session.
 type CreateResult struct {
-	QRToken      string    `json:"qr_token"`
-	QRCodeBase64 string    `json:"qr_code_base64"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	QRToken   string    `json:"qr_token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // StatusResult is returned to the polling web client. On the first confirmed
