@@ -8,6 +8,7 @@ import {
 import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
 import api from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
+import { useTab } from '../../hooks/useTab';
 import type { DockerStatus } from './types';
 import { withEngine } from './types';
 import ContainerTab from './ContainerTab';
@@ -41,6 +42,7 @@ function engineScore(e: string, s: DockerStatus | null): number {
 }
 
 export default function Container() {
+  const [activeTab, setActiveTab] = useTab('containers');
   const [engine, setEngine] = useState('docker');
   const [statuses, setStatuses] = useState<Record<string, DockerStatus | null>>({ docker: null, podman: null });
   const [checking, setChecking] = useState(true);
@@ -171,7 +173,7 @@ export default function Container() {
       </div>
 
       {ready ? (
-        <Tabs items={resourceTabs} />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={resourceTabs} />
       ) : !status?.installed ? (
         <Result
           status="info"

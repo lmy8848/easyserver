@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, Tabs, Tag, Button, Space, Spin, Alert, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { cloudApi } from '../../services/api';
+import { useTab } from '../../hooks/useTab';
 import type { CloudInstance, CloudFirewallRule, Snapshot } from '../../types';
 import CloudInstances from './CloudInstances';
 import CloudFirewall from './CloudFirewall';
@@ -10,6 +11,7 @@ import CloudMonitor from './CloudMonitor';
 import CloudTraffic from './CloudTraffic';
 
 export default function Cloud() {
+  const [activeTab, setActiveTab] = useTab('instances');
   const [instances, setInstances] = useState<CloudInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +121,8 @@ export default function Cloud() {
       >
         <Spin spinning={loading}>
           <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
             items={[
               {
                 key: 'instances',

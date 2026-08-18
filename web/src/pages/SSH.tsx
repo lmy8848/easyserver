@@ -8,6 +8,7 @@ import {
   ReloadOutlined, SaveOutlined, DeleteOutlined, SafetyOutlined,
 } from '@ant-design/icons';
 import api from '../services/api';
+import { useTab } from '../hooks/useTab';
 import SSHHardeningTab from './SSHHardeningTab';
 
 interface SSHSession {
@@ -34,7 +35,7 @@ export default function SSH() {
   const [logins, setLogins] = useState<SSHLoginRecord[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [loginsLoading, setLoginsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('config');
+  const [activeTab, setActiveTab] = useTab('config');
 
   const loadConfig = useCallback(async () => {
     try {

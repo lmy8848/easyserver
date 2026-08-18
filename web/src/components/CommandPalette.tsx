@@ -33,6 +33,7 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     { id: 'nav-audit', label: '审计日志', hint: '/audit', group: '导航', action: () => onSelect('/audit') },
     { id: 'nav-settings', label: '面板设置', hint: '/settings', group: '导航', action: () => onSelect('/settings') },
     { id: 'nav-security', label: '安全设置', hint: '/settings?tab=auth', group: '导航', action: () => onSelect('/settings?tab=auth') },
+    { id: 'nav-2fa', label: '两步验证 (2FA)', hint: '/settings?tab=auth#2fa', group: '导航', action: () => onSelect('/settings?tab=auth#2fa') },
     // Quick actions
     { id: 'act-restart', label: '重启 EasyServer', group: '操作', action: () => { onClose(); } },
     { id: 'act-update', label: '检查更新', group: '操作', action: () => onSelect('/settings?tab=server') },

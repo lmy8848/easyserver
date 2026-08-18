@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Input, message, Popconfirm, Tabs, Switch } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import api from '../services/api';
+import { useTab } from '../hooks/useTab';
 
 interface EnvConfig {
   id: number;
@@ -30,7 +31,7 @@ export default function EnvConfig() {
   const [editingPath, setEditingPath] = useState<PathEntry | null>(null);
   const [envForm] = Form.useForm();
   const [pathForm] = Form.useForm();
-  const [activeTab, setActiveTab] = useState('env');
+  const [activeTab, setActiveTab] = useTab('env');
 
 
 

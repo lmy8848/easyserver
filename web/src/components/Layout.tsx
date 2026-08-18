@@ -434,7 +434,7 @@ export default function Layout() {
                     <Icon name="key" size={16} />
                     <span>修改密码</span>
                   </div>
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings?tab=auth'); }}>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings?tab=auth#2fa'); }}>
                     <Icon name="shield" size={16} />
                     <span>两步验证</span>
                   </div>

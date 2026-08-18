@@ -9,6 +9,7 @@ import {
   ApiOutlined,
 } from '@ant-design/icons';
 import api from '../services/api';
+import { useTab } from '../hooks/useTab';
 
 interface DeployServer {
   id: number;
@@ -46,6 +47,7 @@ interface DeployVersion {
 }
 
 export default function Deploy() {
+  const [activeTab, setActiveTab] = useTab('servers');
   const [servers, setServers] = useState<DeployServer[]>([]);
   const [tasks, setTasks] = useState<DeployTask[]>([]);
   const [versions, setVersions] = useState<DeployVersion[]>([]);
@@ -349,7 +351,7 @@ export default function Deploy() {
 
   return (
     <Card title="部署同步">
-      <Tabs items={tabItems} />
+      <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
 
       {/* Server Modal */}
       <Modal

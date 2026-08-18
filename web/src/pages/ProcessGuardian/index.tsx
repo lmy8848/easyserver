@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import type { Service, ManagedServiceSpec } from '../../types';
 import { serviceApi } from '../../services/api';
+import { useTab } from '../../hooks/useTab';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 import { formatBytes, formatUptime } from '../../utils/format';
 
@@ -153,13 +154,13 @@ function buildServiceColumns(props: ColumnProps) {
 }
 
 export default function ProcessGuardian() {
-  const [activeTab, setActiveTab] = useState<'managed' | 'system'>('managed');
+  const [activeTab, setActiveTab] = useTab<'managed' | 'system'>('managed');
 
   return (
     <>
       <Tabs
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'managed' | 'system')}
+        onChange={setActiveTab}
         items={[
           {
             key: 'managed',

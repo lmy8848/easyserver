@@ -4,6 +4,7 @@ import ReactECharts from 'echarts-for-react';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { SystemProcess, MonitorSnapshot } from '../../types';
 import { systemProcessApi, systemApi, monitorApi } from '../../services/api';
+import { useTab } from '../../hooks/useTab';
 import { formatBytes } from '../../utils/format';
 import dayjs from 'dayjs';
 
@@ -432,9 +433,12 @@ function HistoryTab() {
 // ============================================================
 
 export default function SystemMonitor() {
+  const [activeTab, setActiveTab] = useTab('history');
+
   return (
     <Tabs
-      defaultActiveKey="history"
+      activeKey={activeTab}
+      onChange={setActiveTab}
       items={[
         { key: 'history', label: '监控数据', children: <HistoryTab /> },
         { key: 'processes', label: '系统进程', children: <ProcessTab /> },

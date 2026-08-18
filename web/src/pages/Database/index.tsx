@@ -4,6 +4,7 @@ import { DatabaseOutlined, UserOutlined, CodeOutlined, ConsoleSqlOutlined, PlusO
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
+import { useTab } from '../../hooks/useTab';
 import { StatusTag } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
 import InstallLogPanel from './InstallLogPanel';
@@ -32,7 +33,7 @@ export default function DatabasePage() {
   // ===== Navigation state =====
   // The database type is a static front-end Tab (MySQL/PostgreSQL/Redis); the instance
   // list, instance detail and database explorer render below it.
-  const [activeDbType, setActiveDbType] = useState('mysql');
+  const [activeDbType, setActiveDbType] = useTab('mysql', 'tab');
   const [selectedVersion, setSelectedVersion] = useState<DBInstance | null>(null);
   const [selectedDatabase, setSelectedDatabase] = useState<Database | null>(null);
   const [operating, setOperating] = useState('');
@@ -113,7 +114,7 @@ export default function DatabasePage() {
   // ===== Fetch functions =====
   // activeDbType only ever holds one of DB_TYPE_TABS' db_type keys (initial value
   // and Tabs items are both hard-coded), so find() always matches.
-  const activeDBTypeInfo = DB_TYPE_TABS.find(e => e.db_type === activeDbType)!;
+  const activeDBTypeInfo = DB_TYPE_TABS.find(e => e.db_type === activeDbType) || DB_TYPE_TABS[0]!;
 
   const fetchInstances = async (dbtype: string) => {
     setVersionsLoading(true);
@@ -122,7 +123,20 @@ export default function DatabasePage() {
   };
 
   // ===== Effects =====
-  useEffect(() => { fetchInstances('mysql'); }, []);
+  useEffect(() => {
+    setSelectedVersion(null);
+    setSelectedDatabase(null);
+    setVersions([]);
+    setDatabases([]);
+    setDBUsers([]);
+    setDBConfig(null);
+    setSelectedTable('');
+    setTableData(null);
+    setSqlResult(null);
+    setBackups([]);
+    setDetailTab('databases');
+    fetchInstances(activeDbType);
+  }, [activeDbType]);
 
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
@@ -231,19 +245,8 @@ export default function DatabasePage() {
   useEffect(() => () => { restoreEsRef.current?.close(); }, []);
 
   // ===== Navigation handlers =====
-  // Switching database type Tab clears all instance-scoped state and reloads.
-  // versions is reset to [] (not just left stale) so the header Select empties
-  // at once instead of briefly showing the previous type's instance.
   const changeDBType = (dbtype: string) => {
     setActiveDbType(dbtype);
-    setSelectedVersion(null);
-    setSelectedDatabase(null);
-    setVersions([]);
-    setDatabases([]); setDBUsers([]);
-    setDBConfig(null);
-    setSelectedTable(''); setTableData(null); setSqlResult(null); setBackups([]);
-    setDetailTab('databases');
-    fetchInstances(dbtype);
   };
 
   // Selecting a version (via the header Select / auto-select) sets it as the

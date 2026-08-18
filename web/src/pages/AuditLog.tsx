@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { auditApi, sshApi, type SSHLoginRecord } from '../services/api';
+import { useTab } from '../hooks/useTab';
 import { getHttpStatusColor } from '../utils/status';
 import dayjs from 'dayjs';
 
@@ -69,7 +70,7 @@ export default function AuditLog() {
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<AuditStats | null>(null);
   const [statsDays, setStatsDays] = useState(7);
-  const [activeTab, setActiveTab] = useState<string>('operation');
+  const [activeTab, setActiveTab] = useTab('operation');
 
   // SSH 登录日志
   const [sshLogins, setSSHLogins] = useState<SSHLoginRecord[]>([]);

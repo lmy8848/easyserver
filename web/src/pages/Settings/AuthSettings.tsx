@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Card, Form, Button, message, InputNumber, Switch, Select, Row, Col,
   Modal, Input, Typography, Space, Alert, Table, Popconfirm, Tag, QRCode,
@@ -35,6 +36,7 @@ export interface AuthSettingsProps {
 }
 
 export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps) {
+  const location = useLocation();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
@@ -81,6 +83,17 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
     checkTOTPStatus();
     fetchSessions();
   }, []);
+
+  useEffect(() => {
+    if (location.hash !== '#2fa') return;
+    const timer = setTimeout(() => {
+      const el = document.getElementById('2fa');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [location.hash]);
 
   useEffect(() => {
     if (settings?.auth) {
@@ -383,7 +396,14 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
       </Card>
 
       {/* 2FA Card */}
-      <Card style={{ marginTop: 16 }}>
+      <Card
+        id="2fa"
+        style={{
+          marginTop: 16,
+          transition: 'border-color 0.3s, box-shadow 0.3s',
+          ...(location.hash === '#2fa' ? { borderColor: '#6366f1', boxShadow: '0 0 0 2px rgba(99, 102, 241, 0.2)' } : {}),
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <SafetyOutlined style={{ fontSize: 24, color: totpEnabled ? '#52c41a' : '#d9d9d9' }} />
