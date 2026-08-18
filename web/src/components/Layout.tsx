@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { notificationApi, settingsApi } from '../services/api';
+import { notificationApi, settingsApi, authApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
-import { message, Button, Badge, Dropdown, Tooltip } from 'antd';
+import { message, Button, Badge, Dropdown, Tooltip, Modal, Form, Input } from 'antd';
 import { SunMoon, Sun, Moon } from 'lucide-react';
 import { useSSE } from '../hooks/useSSE';
 import { useThemeStore, type ThemeMode } from '../store/useThemeStore';
@@ -144,6 +144,9 @@ export default function Layout() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const [showChangePassModal, setShowChangePassModal] = useState(false);
+  const [changePassLoading, setChangePassLoading] = useState(false);
+  const [changePassForm] = Form.useForm();
   const { user, logout } = useAuthStore();
   const { mode: themeMode, setMode: setThemeMode } = useThemeStore();
 
@@ -220,6 +223,26 @@ export default function Layout() {
     logout();
     navigate('/login');
   }, [logout, navigate]);
+
+  const handleChangePassword = async (values: { old_password: string; new_password: string; confirm_password: string }) => {
+    if (values.new_password !== values.confirm_password) {
+      message.error('两次输入的密码不一致');
+      return;
+    }
+    setChangePassLoading(true);
+    try {
+      await authApi.changePassword(values.old_password, values.new_password);
+      message.success('密码修改成功，请重新登录');
+      setShowChangePassModal(false);
+      changePassForm.resetFields();
+      localStorage.removeItem('must_change_pass');
+      handleLogout();
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '密码修改失败');
+    } finally {
+      setChangePassLoading(false);
+    }
+  };
 
   const handleCmdSelect = useCallback((path: string) => {
     setCmdOpen(false);
@@ -407,21 +430,13 @@ export default function Layout() {
                     </div>
                   </div>
                   <div className="user-dropdown-divider" />
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings'); }}>
-                    <Icon name="user" size={16} />
-                    <span>个人信息</span>
-                  </div>
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/change-password'); }}>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); setShowChangePassModal(true); }}>
                     <Icon name="key" size={16} />
                     <span>修改密码</span>
                   </div>
                   <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings?tab=auth'); }}>
                     <Icon name="shield" size={16} />
                     <span>两步验证</span>
-                  </div>
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/audit'); }}>
-                    <Icon name="file-text" size={16} />
-                    <span>审计日志</span>
                   </div>
                   <div className="user-dropdown-divider" />
                   <div className="user-dropdown-item danger" onClick={() => { setShowUserMenu(false); handleLogout(); }}>
@@ -435,6 +450,80 @@ export default function Layout() {
         </header>
         <main className="content"><Outlet /></main>
       </div>
+
+      {/* 修改密码弹窗 */}
+      <Modal
+        title="修改密码"
+        open={showChangePassModal}
+        onCancel={() => {
+          if (!changePassLoading) {
+            setShowChangePassModal(false);
+            changePassForm.resetFields();
+          }
+        }}
+        footer={null}
+        destroyOnClose
+        centered
+        width={420}
+      >
+        <Form
+          form={changePassForm}
+          layout="vertical"
+          onFinish={handleChangePassword}
+          autoComplete="off"
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="old_password"
+            label="当前密码"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          >
+            <Input.Password placeholder="请输入当前密码" />
+          </Form.Item>
+
+          <Form.Item
+            name="new_password"
+            label="新密码"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 8, message: '密码至少8个字符' },
+            ]}
+            extra="密码需包含大写字母、小写字母和数字，至少8位"
+          >
+            <Input.Password placeholder="请输入新密码" />
+          </Form.Item>
+
+          <Form.Item
+            name="confirm_password"
+            label="确认新密码"
+            dependencies={['new_password']}
+            rules={[
+              { required: true, message: '请确认新密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('new_password') === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('两次输入的密码不一致'));
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="请再次输入新密码" />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <Button onClick={() => { setShowChangePassModal(false); changePassForm.resetFields(); }} disabled={changePassLoading}>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit" loading={changePassLoading}>
+                确认修改
+              </Button>
+            </div>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onSelect={handleCmdSelect} />
     </div>
