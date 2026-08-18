@@ -19,6 +19,7 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/infra/logger"
 	"easyserver/internal/notify"
 
 	"github.com/gin-gonic/gin"
@@ -132,6 +133,13 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 		},
 		"features": gin.H{
 			"fim": cfg.Features.FIM,
+		},
+		"logs": gin.H{
+			"level":       cfg.Logs.Level,
+			"path":        logger.LogPath(),
+			"format":      cfg.Logs.Format,
+			"max_size_mb": cfg.Logs.MaxSizeMB,
+			"max_files":   cfg.Logs.MaxFiles,
 		},
 	}, nil
 }
@@ -810,6 +818,60 @@ func (h *SettingsHandler) TestCloudConnection(c *gin.Context) (any, error) {
 	}, nil
 }
 
+// UpdateLogsConfig updates the global log configuration (level/format/rotation).
+// 等级通过 logger.SetLevel 运行时立即生效，其余字段持久化到 config.toml，重启后生效。
+func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
+	var req struct {
+		Level     *string `json:"level"`
+		Format    *string `json:"format"`
+		MaxSizeMB *int    `json:"max_size_mb"`
+		MaxFiles  *int    `json:"max_files"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return nil, errx.BadRequest("无效的请求: %w", err)
+	}
+
+	middleware.AuditSummary(c, "更新日志配置")
+
+	if req.Level != nil {
+		if err := logger.SetLevel(*req.Level); err != nil {
+			return nil, errx.BadRequest("%v", err)
+		}
+	}
+	if req.Format != nil {
+		if *req.Format != "text" && *req.Format != "json" {
+			return nil, errx.BadRequest("无效的日志格式 %q，可选 text|json", *req.Format)
+		}
+	}
+	if req.MaxSizeMB != nil && (*req.MaxSizeMB < 1 || *req.MaxSizeMB > 1024) {
+		return nil, errx.BadRequest("max_size_mb 必须在 1 到 1024 之间")
+	}
+	if req.MaxFiles != nil && (*req.MaxFiles < 1 || *req.MaxFiles > 10) {
+		return nil, errx.BadRequest("max_files 必须在 1 到 10 之间")
+	}
+
+	h.store.Update(func(cfg *config.Config) {
+		if req.Level != nil {
+			cfg.Logs.Level = *req.Level
+		}
+		if req.Format != nil {
+			cfg.Logs.Format = *req.Format
+		}
+		if req.MaxSizeMB != nil {
+			cfg.Logs.MaxSizeMB = *req.MaxSizeMB
+		}
+		if req.MaxFiles != nil {
+			cfg.Logs.MaxFiles = *req.MaxFiles
+		}
+	})
+
+	if err := h.saveConfig(); err != nil {
+		return nil, errx.Internal("保存配置失败: %w", err)
+	}
+
+	return gin.H{"message": "日志配置已更新", "level": logger.GetLevel()}, nil
+}
+
 // saveConfig saves the current config back to its source file (cfg.Path).
 func (h *SettingsHandler) saveConfig() error {
 	return config.Save(h.store.Get())
@@ -937,6 +999,7 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertServic
 	protected.PUT("/settings/audit", httpx.H(handler.UpdateAuditConfig))
 	protected.PUT("/settings/notify", httpx.H(handler.UpdateNotifyConfig))
 	protected.PUT("/settings/features", httpx.H(handler.UpdateFeaturesConfig))
+	protected.PUT("/settings/logs", httpx.H(handler.UpdateLogsConfig))
 	protected.POST("/settings/notify/test", httpx.H(handler.TestWebhook))
 	protected.GET("/alerts/rules", httpx.H(handler.GetAlertRules))
 	protected.PUT("/alerts/rules", httpx.H(handler.UpdateAlertRules))

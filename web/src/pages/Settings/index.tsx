@@ -18,6 +18,7 @@ import NotifySettings from './NotifySettings';
 import CloudSettings from './CloudSettings';
 import FeatureSettings from './FeatureSettings';
 import AlertRulesForm from './AlertRulesForm';
+import LogSettings from './LogSettings';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useTab('server');
@@ -145,6 +146,16 @@ export default function SettingsPage() {
             label: '功能开关',
             children: (
               <FeatureSettings
+                settings={settings}
+                onRefresh={fetchSettings}
+              />
+            ),
+          },
+          {
+            key: 'logs',
+            label: '运行日志',
+            children: (
+              <LogSettings
                 settings={settings}
                 onRefresh={fetchSettings}
               />

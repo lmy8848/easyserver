@@ -70,5 +70,12 @@ instance_id = ""
 enabled = false
 webhook_url = "" # 钉钉/飞书/企微 Webhook URL
 
+[logs]
+level = "info"        # 日志等级: debug|info|warn|error（可在面板设置中运行时修改并持久化）
+# path = ""          # 日志文件路径；留空 = 应用根目录 easyserver.log（由 DataRoot 派生）
+format = "text"       # 输出格式: text|json
+max_size_mb = 10      # 单文件轮转阈值 (MB)
+max_files = 3         # 保留轮转文件数 (.1 .2 …)
+
 [alerts]
 rules = []

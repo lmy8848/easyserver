@@ -34,6 +34,7 @@ type Config struct {
 	TencentCloud TencentCloudConfig `toml:"tencentcloud"`
 	Deploy       DeployConfig       `toml:"deploy"`
 	Notify       NotifyConfig       `toml:"notify"`
+	Logs         LogsConfig         `toml:"logs"`
 	Features     FeaturesConfig     `toml:"features"`
 }
 
@@ -132,6 +133,16 @@ type TencentCloudConfig struct {
 
 type DeployConfig struct {
 	EncryptionKey string `toml:"encryption_key"`
+}
+
+// LogsConfig 控制全局运行日志：文件落盘（应用根目录）、分级、源码定位、轮转。
+// 等级可在面板设置中运行时修改并持久化（SetLevel 即时生效，重启读本配置生效）。
+type LogsConfig struct {
+	Level     string `toml:"level"`       // debug|info|warn|error，默认 info
+	Path      string `toml:"path"`        // 日志文件路径；空 = DataRoot/easyserver.log
+	Format    string `toml:"format"`      // text|json，默认 text
+	MaxSizeMB int    `toml:"max_size_mb"` // 单文件轮转阈值(MB)，默认 10
+	MaxFiles  int    `toml:"max_files"`   // 保留轮转文件数(.1 .2…)，默认 3
 }
 
 // Duration is a wrapper around time.Duration that supports TOML string parsing (e.g. "24h", "30m", "3s").
@@ -312,6 +323,18 @@ func (c *Config) mergeDefaults() bool {
 	}
 	if c.Audit.RetentionDays == 0 {
 		c.Audit.RetentionDays = 90
+	}
+	if c.Logs.Level == "" {
+		c.Logs.Level = "info"
+	}
+	if c.Logs.Format == "" {
+		c.Logs.Format = "text"
+	}
+	if c.Logs.MaxSizeMB == 0 {
+		c.Logs.MaxSizeMB = 10
+	}
+	if c.Logs.MaxFiles == 0 {
+		c.Logs.MaxFiles = 3
 	}
 	return generated
 }

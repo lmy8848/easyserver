@@ -893,6 +893,9 @@ export const settingsApi = {
   updateFeatures: (data: { fim?: boolean }) =>
     api.put<ApiResponse>('/settings/features', data),
 
+  updateLogs: (data: { level?: string; format?: string; max_size_mb?: number; max_files?: number }) =>
+    api.put<ApiResponse>('/settings/logs', data),
+
   testWebhook: () =>
     api.post<ApiResponse>('/settings/notify/test'),
 

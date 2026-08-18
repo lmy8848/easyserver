@@ -56,6 +56,13 @@ export interface Settings {
   features: {
     fim: boolean;
   };
+  logs: {
+    level: string;
+    path: string;
+    format: string;
+    max_size_mb: number;
+    max_files: number;
+  };
 }
 
 export interface SystemInfo {

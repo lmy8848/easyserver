@@ -533,4 +533,5 @@ export interface AppSettings {
   notify: { enabled: boolean; webhook_url: string };
   tencentcloud: { enabled: boolean; region: string; instance_id: string; has_secret: boolean };
   features: { fim: boolean };
+  logs: { level: string; path: string; format: string; max_size_mb: number; max_files: number };
 }
