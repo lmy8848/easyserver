@@ -163,7 +163,7 @@ func fireHooks(r slog.Record) {
 			defer func() {
 				if v := recover(); v != nil {
 					// 直写 stderr，绕开日志主链路，避免经桥接再次触发 hooks 造成递归。
-					io.WriteString(os.Stderr, fmt.Sprintf("logger: hook panic ignored: %v\n", v))
+					_, _ = io.WriteString(os.Stderr, fmt.Sprintf("logger: hook panic ignored: %v\n", v))
 				}
 			}()
 			h(ctx, r)

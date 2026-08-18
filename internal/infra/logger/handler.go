@@ -66,8 +66,8 @@ func replaceSourceAttr(_ []string, a slog.Attr) slog.Attr {
 
 // trimFunc 去掉模块前缀段（easyserver/…），保留 包.方法 可读片段。
 func trimFunc(fn string) string {
-	if i := strings.Index(fn, "/"); i >= 0 {
-		return fn[i+1:]
+	if _, after, ok := strings.Cut(fn, "/"); ok {
+		return after
 	}
 	return fn
 }

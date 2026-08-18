@@ -35,7 +35,7 @@ func TestParseLevel(t *testing.T) {
 }
 
 func TestLevelFiltering(t *testing.T) {
-	defer SetLevel("info")
+	defer func() { _ = SetLevel("info") }()
 	var buf bytes.Buffer
 	h := makeHandler(&buf, false, "text")
 	l := slog.New(h)
@@ -57,7 +57,7 @@ func TestLevelFiltering(t *testing.T) {
 }
 
 func TestSourceLocation(t *testing.T) {
-	defer SetLevel("info")
+	defer func() { _ = SetLevel("info") }()
 	var buf bytes.Buffer
 	h := makeHandler(&buf, true, "text")
 	slog.New(h).Error("boom")
@@ -68,7 +68,7 @@ func TestSourceLocation(t *testing.T) {
 }
 
 func TestJSONFormat(t *testing.T) {
-	defer SetLevel("info")
+	defer func() { _ = SetLevel("info") }()
 	var buf bytes.Buffer
 	h := makeHandler(&buf, true, "json")
 	slog.New(h).Info("jsonok")
@@ -87,7 +87,7 @@ func TestRotation(t *testing.T) {
 	defer ft.Close()
 
 	payload := []byte("0123456789abcdefghij") // 20 bytes
-	for i := 0; i < 30; i++ {                 // 600 bytes → 触发多次轮转
+	for range 30 {                            // 600 bytes → 触发多次轮转
 		if _, err := ft.Write(payload); err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestRotationRespectsMaxFiles(t *testing.T) {
 	}
 	defer ft.Close()
 	payload := make([]byte, 100)
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		_, _ = ft.Write(payload)
 	}
 	if _, err := os.Stat(path + ".3"); err == nil {
@@ -122,7 +122,7 @@ func TestRotationRespectsMaxFiles(t *testing.T) {
 }
 
 func TestHookFireAndRemove(t *testing.T) {
-	defer SetLevel("info")
+	defer func() { _ = SetLevel("info") }()
 	var mu sync.Mutex
 	var msgs []string
 	remove := AddHook(func(_ context.Context, r slog.Record) {
@@ -155,7 +155,7 @@ func TestHookFireAndRemove(t *testing.T) {
 }
 
 func TestSetLevelInvalidKeepsCurrent(t *testing.T) {
-	defer SetLevel("info")
+	defer func() { _ = SetLevel("info") }()
 	_ = SetLevel("warn")
 	if err := SetLevel("bogus"); err == nil {
 		t.Fatal("bogus level should error")
