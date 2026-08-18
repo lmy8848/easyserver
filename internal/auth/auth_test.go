@@ -101,8 +101,6 @@ func setupTestDB(t *testing.T) *sql.DB {
 			last_login_ip TEXT DEFAULT '',
 			login_attempts INTEGER DEFAULT 0,
 			locked_until DATETIME,
-			expires_at DATETIME,
-			ip_whitelist TEXT DEFAULT '',
 			totp_secret TEXT DEFAULT '',
 			totp_enabled INTEGER DEFAULT 0,
 			totp_backup_codes TEXT DEFAULT '',

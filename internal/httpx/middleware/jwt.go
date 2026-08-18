@@ -20,7 +20,6 @@ var ErrTokenExpired = errx.NewSentinel(errx.KindUnauthorized, CodeTokenExpired, 
 type JWTClaims struct {
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
-	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -94,7 +93,6 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
-		c.Set("role", claims.Role)
 		c.Set("token", tokenString)
 		c.Next()
 	}

@@ -12,10 +12,9 @@ func TestGenerateToken(t *testing.T) {
 	secret := "test-secret-key-at-least-32-bytes-long"
 	userID := int64(1)
 	username := "testuser"
-	role := "admin"
 	timeout := 24 * time.Hour
 
-	token, err := GenerateToken(secret, userID, username, role, timeout)
+	token, err := GenerateToken(secret, userID, username, timeout)
 	require.NoError(t, err)
 	assert.NotEmpty(t, token)
 }
@@ -25,13 +24,12 @@ func TestGenerateToken_DifferentSecrets(t *testing.T) {
 	secret2 := "different-secret-key-at-least-32-bytes-"
 	userID := int64(1)
 	username := "testuser"
-	role := "admin"
 	timeout := 24 * time.Hour
 
-	token1, err := GenerateToken(secret1, userID, username, role, timeout)
+	token1, err := GenerateToken(secret1, userID, username, timeout)
 	require.NoError(t, err)
 
-	token2, err := GenerateToken(secret2, userID, username, role, timeout)
+	token2, err := GenerateToken(secret2, userID, username, timeout)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, token1, token2)

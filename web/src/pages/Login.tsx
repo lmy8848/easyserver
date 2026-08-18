@@ -223,19 +223,17 @@ export default function Login() {
 
   /**
    * Shared login success handler.
-   * Web 登录态走 HttpOnly Cookie（后端 Set-Cookie），此处只存 user 供显示。
-   * must_change_pass is stored on the user object from the server.
+   * Web 登录态走 HttpOnly Cookie（后端 Set-Cookie）。user 由登录接口返回
+   * （后端登录时已查出用户信息），QR 扫码登录除外——后端确认时拿不到
+   * web 端信息，由前端自行从 /auth/me 获取后再走这里。
    */
-  const handleLoginSuccess = useCallback((data: { user: { id: number; username: string; role: string }; must_change_pass?: boolean }) => {
-    useAuthStore.setState({
-      user: { ...data.user, must_change_pass: data.must_change_pass },
-      isAuthenticated: true,
-    });
-    localStorage.setItem('user', JSON.stringify(data.user));
+  const handleLoginSuccess = useCallback((user: User) => {
+    useAuthStore.setState({ user, isAuthenticated: true });
+    localStorage.setItem('user', JSON.stringify(user));
 
     message.success('登录成功');
 
-    if (data.must_change_pass) {
+    if (user.must_change_pass) {
       navigate('/change-password', { replace: true });
     } else {
       navigate('/');
@@ -258,7 +256,7 @@ export default function Login() {
         setStep('totp');
         message.info('请输入验证码');
       } else {
-        handleLoginSuccess(data);
+        handleLoginSuccess(data.user);
       }
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '登录失败'));
@@ -275,7 +273,7 @@ export default function Login() {
     setLoading(true);
     try {
       const response = await authApi.verifyTOTP(tempToken, values.code, turnstileToken);
-      handleLoginSuccess(response.data.data);
+      handleLoginSuccess(response.data.data.user);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '验证码错误'));
     } finally {
@@ -291,7 +289,7 @@ export default function Login() {
     setLoading(true);
     try {
       const response = await authApi.verifyBackupCode(tempToken, values.backup_code, turnstileToken);
-      handleLoginSuccess(response.data.data);
+      handleLoginSuccess(response.data.data.user);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '备份码错误'));
     } finally {
@@ -332,9 +330,9 @@ export default function Login() {
       const res = await authApi.getQRStatus(qrData.qr_token);
       const d = res.data.data;
       if (!d) return;
-      if (d.status === 'confirmed' && d.user) {
-        // QR 登录的 web token 已由后端 Set-Cookie，响应不再含 token。
-        handleLoginSuccess({ user: d.user as User, must_change_pass: d.must_change_pass });
+      if (d.status === 'confirmed') {
+        // QR 登录的 web token 已由后端 Set-Cookie；用户快照随状态返回。
+        handleLoginSuccess(d.user!);
       } else if (d.status === 'expired' || d.status === 'cancelled') {
         setQrStatus('expired');
       }

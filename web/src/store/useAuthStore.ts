@@ -17,7 +17,6 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 
-  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   loadUser: () => Promise<void>;
   updateUser: (user: User) => void;
@@ -41,30 +40,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   // 启动即进入"判断中"：先请求 /auth/me 确认 cookie 登录态，期间不误跳登录页。
   isLoading: true,
-
-  login: async (username: string, password: string) => {
-    set({ isLoading: true });
-    try {
-      // Web 登录后端通过 Set-Cookie 落地登录态，响应体无 token。
-      const res = await authApi.login(username, password);
-      const { user, must_change_pass } = res.data.data;
-
-      if (!isValidUser(user)) {
-        throw new Error('Invalid user data received');
-      }
-
-      localStorage.setItem('user', JSON.stringify({ ...user, must_change_pass }));
-
-      set({
-        user: { ...user, must_change_pass },
-        isAuthenticated: true,
-        isLoading: false,
-      });
-    } catch (error) {
-      set({ isLoading: false });
-      throw error;
-    }
-  },
 
   logout: () => {
     // 通知后端清 cookie + 黑名单（fire-and-forget，页面照常回登录页）

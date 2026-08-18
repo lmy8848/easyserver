@@ -36,8 +36,6 @@ type User struct {
 	LastLoginIP     string       `json:"last_login_ip" db:"last_login_ip"`
 	LoginAttempts   int          `json:"-" db:"login_attempts"`
 	LockedUntil     sql.NullTime `json:"-" db:"locked_until"`
-	ExpiresAt       sql.NullTime `json:"expires_at" db:"expires_at"`
-	IPWhitelist     string       `json:"ip_whitelist" db:"ip_whitelist"`
 	TotpSecret      string       `json:"-" db:"totp_secret"`
 	TotpEnabled     bool         `json:"totp_enabled" db:"totp_enabled"`
 	TotpBackupCodes string       `json:"-" db:"totp_backup_codes"`
@@ -47,13 +45,9 @@ type User struct {
 
 type Session struct {
 	UserID     int64     `json:"user_id"`
-	Username   string    `json:"username"`
-	Role       string    `json:"role"`
 	IP         string    `json:"ip"`
 	UserAgent  string    `json:"user_agent"`
 	ClientType string    `json:"client_type"`
-	DeviceID   string    `json:"device_id,omitempty"`
-	DeviceInfo string    `json:"device_info,omitempty"`
 	LoginAt    time.Time `json:"login_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	Token      string    `json:"token,omitempty"`
@@ -82,17 +76,13 @@ type LoginNotifier interface {
 	NotifyLogin(event LoginEvent)
 }
 
-// QRLoginSession is a one-time scan-to-login session.
+// QRLoginSession is a one-time scan-to-login session (in-memory).
 type QRLoginSession struct {
-	ID          int64      `json:"id"`
-	QRToken     string     `json:"qr_token"`
-	Status      string     `json:"status"`
-	UserID      int64      `json:"user_id"`
-	WebToken    string     `json:"-"` // never serialize the issued web token
-	UserJSON    string     `json:"-"` // {user, must_change_pass} for web pickup
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   time.Time  `json:"expires_at"`
-	ConfirmedAt *time.Time `json:"confirmed_at,omitempty"`
+	QRToken   string    `json:"qr_token"`
+	Status    string    `json:"status"`
+	WebToken  string    `json:"-"` // never serialize the issued web token
+	User      *User     `json:"-"` // 确认时的用户快照，web 领取时随状态返回
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // CreateResult is returned when a web client requests a new QR session.
@@ -102,24 +92,16 @@ type CreateResult struct {
 }
 
 // StatusResult is returned to the polling web client. On the first confirmed
-// poll the web_token + user are returned and the session is consumed (deleted).
+// poll the web_token is set (and consumed to a cookie server-side) along with
+// the confirming user's snapshot, so the client doesn't need a follow-up call.
 type StatusResult struct {
-	Status         string    `json:"status"`
-	ExpiresAt      time.Time `json:"expires_at"`
-	Token          string    `json:"token,omitempty"`
-	User           any       `json:"user,omitempty"`
-	MustChangePass bool      `json:"must_change_pass,omitempty"`
+	Status    string    `json:"status"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Token     string    `json:"token,omitempty"`
+	User      *User     `json:"user,omitempty"`
 }
 
 // ConfirmRequest is the body the mobile app sends after scanning the QR.
 type QRLoginConfirmRequest struct {
 	QRToken string `json:"qr_token" binding:"required"`
-}
-
-// LoginPayload is the {user, must_change_pass} blob stored at confirm time and
-// handed to the web client on pickup. It mirrors the password-login response
-// shape (minus the token, which is carried separately as WebToken).
-type LoginPayload struct {
-	User           any  `json:"user"`
-	MustChangePass bool `json:"must_change_pass"`
 }

@@ -19,17 +19,17 @@ func NewSQLiteUserRepository(db *sql.DB) UserRepo {
 func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 	user := &User{}
 	var mustChangePass, totpEnabled int
-	var lastLogin, lockedUntil, expiresAt sql.NullTime
+	var lastLogin, lockedUntil sql.NullTime
 
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, username, password_hash, role, must_change_pass, last_login, last_login_ip,
-		        login_attempts, locked_until, expires_at, ip_whitelist,
+		        login_attempts, locked_until,
 		        totp_secret, totp_enabled, totp_backup_codes, created_at, updated_at
 		 FROM users WHERE id = ?`, id,
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.Role,
 		&mustChangePass, &lastLogin, &user.LastLoginIP,
-		&user.LoginAttempts, &lockedUntil, &expiresAt, &user.IPWhitelist,
+		&user.LoginAttempts, &lockedUntil,
 		&user.TotpSecret, &totpEnabled, &user.TotpBackupCodes,
 		&user.CreatedAt, &user.UpdatedAt,
 	)
@@ -44,7 +44,6 @@ func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 	user.TotpEnabled = totpEnabled != 0
 	user.LastLogin = lastLogin
 	user.LockedUntil = lockedUntil
-	user.ExpiresAt = expiresAt
 
 	return user, nil
 }
@@ -52,17 +51,17 @@ func (r *sqliteUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 func (r *sqliteUserRepo) GetByUsername(ctx context.Context, username string) (*User, error) {
 	user := &User{}
 	var mustChangePass, totpEnabled int
-	var lastLogin, lockedUntil, expiresAt sql.NullTime
+	var lastLogin, lockedUntil sql.NullTime
 
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, username, password_hash, role, must_change_pass, last_login, last_login_ip,
-		        login_attempts, locked_until, expires_at, ip_whitelist,
+		        login_attempts, locked_until,
 		        totp_secret, totp_enabled, totp_backup_codes, created_at, updated_at
 		 FROM users WHERE username = ?`, username,
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.Role,
 		&mustChangePass, &lastLogin, &user.LastLoginIP,
-		&user.LoginAttempts, &lockedUntil, &expiresAt, &user.IPWhitelist,
+		&user.LoginAttempts, &lockedUntil,
 		&user.TotpSecret, &totpEnabled, &user.TotpBackupCodes,
 		&user.CreatedAt, &user.UpdatedAt,
 	)
@@ -77,16 +76,15 @@ func (r *sqliteUserRepo) GetByUsername(ctx context.Context, username string) (*U
 	user.TotpEnabled = totpEnabled != 0
 	user.LastLogin = lastLogin
 	user.LockedUntil = lockedUntil
-	user.ExpiresAt = expiresAt
 
 	return user, nil
 }
 
 func (r *sqliteUserRepo) Create(ctx context.Context, user *User) error {
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (username, password_hash, role, must_change_pass, ip_whitelist)
-		 VALUES (?, ?, ?, ?, ?)`,
-		user.Username, user.PasswordHash, user.Role, user.MustChangePass, user.IPWhitelist,
+		`INSERT INTO users (username, password_hash, role, must_change_pass)
+		 VALUES (?, ?, ?, ?)`,
+		user.Username, user.PasswordHash, user.Role, user.MustChangePass,
 	)
 	if err != nil {
 		return err
@@ -110,7 +108,7 @@ func (r *sqliteUserRepo) List(ctx context.Context, offset, limit int) ([]User, i
 
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, username, password_hash, role, must_change_pass, last_login, last_login_ip,
-		        login_attempts, locked_until, expires_at, ip_whitelist,
+		        login_attempts, locked_until,
 		        totp_secret, totp_enabled, totp_backup_codes, created_at, updated_at
 		 FROM users ORDER BY id DESC LIMIT ? OFFSET ?`,
 		limit, offset,
@@ -124,12 +122,12 @@ func (r *sqliteUserRepo) List(ctx context.Context, offset, limit int) ([]User, i
 	for rows.Next() {
 		var user User
 		var mustChangePass, totpEnabled int
-		var lastLogin, lockedUntil, expiresAt sql.NullTime
+		var lastLogin, lockedUntil sql.NullTime
 
 		if err := rows.Scan(
 			&user.ID, &user.Username, &user.PasswordHash, &user.Role,
 			&mustChangePass, &lastLogin, &user.LastLoginIP,
-			&user.LoginAttempts, &lockedUntil, &expiresAt, &user.IPWhitelist,
+			&user.LoginAttempts, &lockedUntil,
 			&user.TotpSecret, &totpEnabled, &user.TotpBackupCodes,
 			&user.CreatedAt, &user.UpdatedAt,
 		); err != nil {
@@ -140,7 +138,6 @@ func (r *sqliteUserRepo) List(ctx context.Context, offset, limit int) ([]User, i
 		user.TotpEnabled = totpEnabled != 0
 		user.LastLogin = lastLogin
 		user.LockedUntil = lockedUntil
-		user.ExpiresAt = expiresAt
 
 		users = append(users, user)
 	}
