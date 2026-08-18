@@ -11,7 +11,6 @@ type UserRepo interface {
 	List(ctx context.Context, offset, limit int) ([]User, int64, error)
 	UpdatePassword(ctx context.Context, id int64, passwordHash string) error
 	UpdateUsername(ctx context.Context, id int64, username string) error
-	SetMustChangePass(ctx context.Context, id int64, mustChange bool) error
 	IncrementLoginAttempts(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) (bool, error)
 	ResetLoginState(ctx context.Context, id int64, ip string) error
 }
@@ -30,4 +29,19 @@ type TOTPRepo interface {
 	GetPasswordHash(ctx context.Context, userID int64) (string, error)
 	GetBackupCodes(ctx context.Context, userID int64) (string, error)
 	UpdateBackupCodes(ctx context.Context, userID int64, codesJSON string) error
+}
+
+// QRLoginRepository defines data access for QR login sessions.
+type QRLoginRepository interface {
+	Create(ctx context.Context, s *QRLoginSession) (int64, error)
+	GetByToken(ctx context.Context, qrToken string) (*QRLoginSession, error)
+	// MarkConfirmed stores the issued web token + user payload and transitions to confirmed.
+	MarkConfirmed(ctx context.Context, qrToken string, userID int64, webToken string, userJSON string) error
+	// Consume atomically claims a confirmed session via a conditional UPDATE
+	// (confirmed -> consumed). It returns the session only if THIS caller won the
+	// race; ok is false when another poll already claimed it, it was cancelled,
+	// or it is still pending.
+	Consume(ctx context.Context, qrToken string) (*QRLoginSession, bool, error)
+	Delete(ctx context.Context, qrToken string) error
+	DeleteExpired(ctx context.Context) (int64, error)
 }

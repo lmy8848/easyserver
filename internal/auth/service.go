@@ -268,10 +268,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, userID int64, newPasswo
 		return err
 	}
 
-	if err := s.userRepo.UpdatePassword(ctx, userID, newHash); err != nil {
-		return err
-	}
-	return s.userRepo.SetMustChangePass(ctx, userID, true)
+	return s.userRepo.UpdatePassword(ctx, userID, newHash)
 }
 
 func (s *AuthService) ValidatePassword(password string) error {

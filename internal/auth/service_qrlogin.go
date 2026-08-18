@@ -1,4 +1,4 @@
-package qrlogin
+package auth
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"easyserver/internal/auth"
 	"easyserver/internal/infra/config"
 )
 
@@ -19,23 +18,22 @@ const qrTokenBytes = 32
 // must scan+confirm within this window).
 const pendingTTL = 2 * time.Minute
 
-// Service implements the scan-to-login state machine. It depends on the auth
-// package for JWT issuance and session creation; QR login deliberately creates
-// a coexisting session (no RemoveUserSessions) so the authorizing mobile stays
-// logged in. JWT 密钥与会话时长实时读 store（settings 修改后立即生效）。
-type Service struct {
-	repo           Repository
+// QRLoginService implements the scan-to-login state machine. It issues the web
+// JWT and creates a coexisting session (no RemoveUserSessions) so the
+// authorizing mobile stays logged in. JWT 密钥与会话时长实时读 store。
+type QRLoginService struct {
+	repo           QRLoginRepository
 	store          *config.Store
-	sessionService *auth.SessionService
+	sessionService *SessionService
 }
 
-func NewService(repo Repository, store *config.Store, sessionService *auth.SessionService) *Service {
-	return &Service{repo: repo, store: store, sessionService: sessionService}
+func NewQRLoginService(repo QRLoginRepository, store *config.Store, sessionService *SessionService) *QRLoginService {
+	return &QRLoginService{repo: repo, store: store, sessionService: sessionService}
 }
 
 // CreateSession generates a new pending QR session and returns the QR token
 // for the web to render as a QR code.
-func (s *Service) CreateSession(ctx context.Context) (*CreateResult, error) {
+func (s *QRLoginService) CreateSession(ctx context.Context) (*CreateResult, error) {
 	// Opportunistic cleanup of stale pending/cancelled rows.
 	if _, err := s.repo.DeleteExpired(ctx); err != nil {
 		// non-fatal; a failed cleanup shouldn't block login
@@ -51,7 +49,7 @@ func (s *Service) CreateSession(ctx context.Context) (*CreateResult, error) {
 	now := time.Now()
 	sess := &QRLoginSession{
 		QRToken:   qrToken,
-		Status:    StatusPending,
+		Status:    QRStatusPending,
 		CreatedAt: now,
 		ExpiresAt: now.Add(pendingTTL),
 	}
@@ -69,7 +67,7 @@ func (s *Service) CreateSession(ctx context.Context) (*CreateResult, error) {
 // session is claimed atomically (conditional UPDATE) so the issued token can
 // only be picked up by one poll; later polls see "expired". Invalid/expired
 // tokens report "expired" without leaking existence.
-func (s *Service) GetStatus(ctx context.Context, qrToken string) (*StatusResult, error) {
+func (s *QRLoginService) GetStatus(ctx context.Context, qrToken string) (*StatusResult, error) {
 	// 原子领取：仅一个 poll 能抢到 confirmed 行。
 	sess, ok, err := s.repo.Consume(ctx, qrToken)
 	if err != nil {
@@ -96,12 +94,12 @@ func (s *Service) GetStatus(ctx context.Context, qrToken string) (*StatusResult,
 	if err != nil {
 		return nil, err
 	}
-	if cur == nil || cur.Status == StatusConsumed {
+	if cur == nil || cur.Status == QRStatusConsumed {
 		// 已被消费或行已清理。
 		return &StatusResult{Status: "expired"}, nil
 	}
 	switch cur.Status {
-	case StatusCancelled:
+	case QRStatusCancelled:
 		return &StatusResult{Status: "cancelled", ExpiresAt: cur.ExpiresAt}, nil
 	default: // pending
 		if time.Now().After(cur.ExpiresAt) {
@@ -115,21 +113,21 @@ func (s *Service) GetStatus(ctx context.Context, qrToken string) (*StatusResult,
 // the QR session is pending+unexpired, issues a web JWT, creates a coexisting
 // session, and stores the token+user payload for the web to pick up. userJSON
 // is the pre-serialized {user, must_change_pass} payload.
-func (s *Service) Confirm(ctx context.Context, qrToken string, userID int64, username, role, ip, userAgent, userJSON string) error {
+func (s *QRLoginService) Confirm(ctx context.Context, qrToken string, userID int64, username, role, ip, userAgent, userJSON string) error {
 	sess, err := s.repo.GetByToken(ctx, qrToken)
 	if err != nil {
 		return err
 	}
-	if sess == nil || sess.Status != StatusPending {
-		return ErrNotPending
+	if sess == nil || sess.Status != QRStatusPending {
+		return ErrQRNotPending
 	}
 	if time.Now().After(sess.ExpiresAt) {
 		_ = s.repo.Delete(ctx, qrToken)
-		return ErrExpired
+		return ErrQRExpired
 	}
 
 	cur := s.store.Get()
-	webToken, err := auth.GenerateToken(cur.Auth.JWTSecret, userID, username, role, cur.Auth.SessionTimeout.Duration())
+	webToken, err := GenerateToken(cur.Auth.JWTSecret, userID, username, role, cur.Auth.SessionTimeout.Duration())
 	if err != nil {
 		return fmt.Errorf("generate web token: %w", err)
 	}
@@ -149,11 +147,11 @@ func (s *Service) Confirm(ctx context.Context, qrToken string, userID int64, use
 }
 
 // Cancel removes a pending session (user dismissed the QR).
-func (s *Service) Cancel(ctx context.Context, qrToken string) error {
+func (s *QRLoginService) Cancel(ctx context.Context, qrToken string) error {
 	return s.repo.Delete(ctx, qrToken)
 }
 
 // CleanupExpired removes stale rows; called periodically by the caller.
-func (s *Service) CleanupExpired(ctx context.Context) (int64, error) {
+func (s *QRLoginService) CleanupExpired(ctx context.Context) (int64, error) {
 	return s.repo.DeleteExpired(ctx)
 }

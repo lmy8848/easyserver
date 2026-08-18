@@ -167,15 +167,6 @@ func (r *sqliteUserRepo) UpdateUsername(ctx context.Context, id int64, username 
 	return err
 }
 
-func (r *sqliteUserRepo) SetMustChangePass(ctx context.Context, id int64, mustChange bool) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE users SET must_change_pass = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		mustChange, id,
-	)
-	return err
-}
-
-// maxAttempts<=0 时仅计数，不触发锁定。返回本次是否触发了锁定。
 func (r *sqliteUserRepo) IncrementLoginAttempts(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) (bool, error) {
 	res, err := r.db.ExecContext(ctx, `UPDATE users SET
 		login_attempts = login_attempts + 1,

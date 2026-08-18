@@ -14,7 +14,6 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/errx"
-	"easyserver/internal/qrlogin"
 
 	"github.com/gin-gonic/gin"
 )
@@ -720,12 +719,12 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) (any, error) {
 }
 
 type QRLoginHandler struct {
-	qrService   *qrlogin.Service
+	qrService   *auth.QRLoginService
 	authService *auth.AuthService
 	cfg         *config.Config
 }
 
-func NewQRLoginHandler(qrService *qrlogin.Service, authService *auth.AuthService, cfg *config.Config) *QRLoginHandler {
+func NewQRLoginHandler(qrService *auth.QRLoginService, authService *auth.AuthService, cfg *config.Config) *QRLoginHandler {
 	return &QRLoginHandler{qrService: qrService, authService: authService, cfg: cfg}
 }
 
@@ -744,7 +743,7 @@ func (h *QRLoginHandler) CreateQRSession(c *gin.Context) (any, error) {
 // Uses POST + body so the qr_token (a secret that redeems a web JWT) never
 // lands in URL/access logs/Referer the way a query string would.
 func (h *QRLoginHandler) GetQRStatus(c *gin.Context) (any, error) {
-	var req qrlogin.ConfirmRequest
+	var req auth.QRLoginConfirmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
 	}
@@ -757,7 +756,7 @@ func (h *QRLoginHandler) GetQRStatus(c *gin.Context) (any, error) {
 		return nil, errx.Internal("%w", err)
 	}
 	// 确认后：web token 改走 HttpOnly cookie，不再回传 JS（防 XSS 窃取）。
-	if res.Status == qrlogin.StatusConfirmed && res.Token != "" {
+	if res.Status == auth.QRStatusConfirmed && res.Token != "" {
 		setAuthCookie(c, res.Token, h.cfg.Auth.SessionTimeout.Duration())
 		res.Token = ""
 	}
@@ -769,7 +768,7 @@ func (h *QRLoginHandler) GetQRStatus(c *gin.Context) (any, error) {
 // the same admin user. Creates a coexisting session (mobile stays logged in).
 func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 	var req struct {
-		qrlogin.ConfirmRequest
+		auth.QRLoginConfirmRequest
 		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -801,7 +800,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 	userAgent := c.Request.UserAgent()
 	if err := h.qrService.Confirm(c.Request.Context(), req.QRToken, user.ID, user.Username, string(user.Role), ip, userAgent, string(payload)); err != nil {
 		switch {
-		case errors.Is(err, qrlogin.ErrNotPending), errors.Is(err, qrlogin.ErrExpired):
+		case errors.Is(err, auth.ErrQRNotPending), errors.Is(err, auth.ErrQRExpired):
 			return nil, errx.BadRequest("%s", err.Error())
 		default:
 			return nil, errx.Internal("%w", err)
@@ -814,7 +813,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 
 // CancelQRLogin dismisses a pending QR session.
 func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) (any, error) {
-	var req qrlogin.ConfirmRequest
+	var req auth.QRLoginConfirmRequest
 	_ = c.ShouldBindJSON(&req)
 	if req.QRToken == "" {
 		return nil, errx.BadRequest("缺少 qr_token")
@@ -825,7 +824,7 @@ func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) (any, error) {
 
 // registerQRLoginRoutes wires the scan-to-login endpoints onto the auth groups.
 // publicAuth is the rate-limited public group; authProtected requires a JWT.
-func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *qrlogin.Service, authService *auth.AuthService, cfg *config.Config) {
+func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *auth.QRLoginService, authService *auth.AuthService, cfg *config.Config) {
 	h := NewQRLoginHandler(qrService, authService, cfg)
 	publicAuth.POST("/qr/session", httpx.H(h.CreateQRSession))
 	publicAuth.POST("/qr/status", httpx.H(h.GetQRStatus))
@@ -839,7 +838,7 @@ func RegisterRoutes(
 	authService *auth.AuthService,
 	auditLog AuthAuditLogger,
 	sessionService *auth.SessionService,
-	qrService *qrlogin.Service,
+	qrService *auth.QRLoginService,
 	jwtSecret string,
 	sessionValidator func(string) (bool, error),
 	sessionTimeout time.Duration,

@@ -38,7 +38,6 @@ import (
 	"easyserver/internal/notification"
 	notificationhttp "easyserver/internal/notification/http"
 	"easyserver/internal/notify"
-	"easyserver/internal/qrlogin"
 	"easyserver/internal/runtimeenv"
 	runtimeenvhttp "easyserver/internal/runtimeenv/http"
 	"easyserver/internal/security"
@@ -119,7 +118,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	sessionSvc := auth.NewSessionService(ctx, &wg, store)
 
-	qrLoginService := qrlogin.NewService(qrlogin.NewSQLiteRepository(db), store, sessionSvc)
+	qrLoginService := auth.NewQRLoginService(auth.NewQRLoginRepository(db), store, sessionSvc)
 
 	// ── Monitor ──
 
