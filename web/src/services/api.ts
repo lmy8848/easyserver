@@ -83,7 +83,7 @@ api.interceptors.response.use(
 // Auth API
 export const authApi = {
   login: (username: string, password: string, turnstileToken?: string) =>
-    api.post<ApiResponse<{ token?: string; user: User; must_change_pass: boolean; requires_totp?: boolean; temp_token?: string }>>('/auth/login', { username, password, turnstile_token: turnstileToken, client_type: 'web' }),
+    api.post<ApiResponse<{ token?: string; user: User; requires_totp?: boolean; temp_token?: string }>>('/auth/login', { username, password, turnstile_token: turnstileToken, client_type: 'web' }),
 
   logout: () =>
     api.post<ApiResponse>('/auth/logout'),
@@ -99,10 +99,10 @@ export const authApi = {
 
   // TOTP verification (login step 2)
   verifyTOTP: (tempToken: string, code: string, turnstileToken?: string) =>
-    api.post<ApiResponse<{ token?: string; user: User; must_change_pass: boolean }>>('/auth/verify-totp', { temp_token: tempToken, code, turnstile_token: turnstileToken, client_type: 'web' }),
+    api.post<ApiResponse<{ token?: string; user: User }>>('/auth/verify-totp', { temp_token: tempToken, code, turnstile_token: turnstileToken, client_type: 'web' }),
 
   verifyBackupCode: (tempToken: string, backupCode: string, turnstileToken?: string) =>
-    api.post<ApiResponse<{ token?: string; user: User; must_change_pass: boolean }>>('/auth/verify-backup', { temp_token: tempToken, backup_code: backupCode, turnstile_token: turnstileToken, client_type: 'web' }),
+    api.post<ApiResponse<{ token?: string; user: User }>>('/auth/verify-backup', { temp_token: tempToken, backup_code: backupCode, turnstile_token: turnstileToken, client_type: 'web' }),
 
   // TOTP setup (protected)
   setupTOTP: () =>
@@ -119,7 +119,7 @@ export const authApi = {
 
   // Session management
   getSessions: () =>
-    api.get<ApiResponse<Array<{ user_id: number; username: string; role: string; ip: string; user_agent: string; client_type: string; device_id?: string; device_info?: string; is_current: boolean; login_at: string; expires_at: string; token?: string }>>>('/auth/sessions'),
+    api.get<ApiResponse<Array<{ user_id: number; ip: string; user_agent: string; client_type: string; is_current: boolean; login_at: string; expires_at: string; token?: string }>>>('/auth/sessions'),
 
   kickSession: (token: string) =>
     api.post<ApiResponse>('/auth/sessions/kick', { token }),
@@ -136,7 +136,7 @@ export const authApi = {
     api.post<ApiResponse<{ qr_token: string; expires_at: string }>>('/auth/qr/session'),
 
   getQRStatus: (qrToken: string) =>
-    api.post<ApiResponse<{ status: string; expires_at: string; token?: string; user?: User; must_change_pass?: boolean }>>('/auth/qr/status', { qr_token: qrToken }),
+    api.post<ApiResponse<{ status: string; expires_at: string; token?: string; user?: User }>>('/auth/qr/status', { qr_token: qrToken }),
 
   confirmQRLogin: (qrToken: string) =>
     api.post<ApiResponse<{ ok: boolean }>>('/auth/qr/confirm', { qr_token: qrToken }),

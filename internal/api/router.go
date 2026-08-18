@@ -118,7 +118,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	sessionSvc := auth.NewSessionService(ctx, &wg, store)
 
-	qrLoginService := auth.NewQRLoginService(auth.NewQRLoginRepository(db), store, sessionSvc)
+	qrLoginService := auth.NewQRLoginService(store, sessionSvc)
 
 	// ── Monitor ──
 

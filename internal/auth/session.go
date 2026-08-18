@@ -49,18 +49,14 @@ func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration
 	}
 }
 
-func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, username, role, ip, userAgent, clientType, deviceID, deviceInfo string, expiresAt time.Time) error {
+func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, ip, userAgent, clientType string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[token] = &Session{
 		UserID:     userID,
-		Username:   username,
-		Role:       role,
 		IP:         ip,
 		UserAgent:  userAgent,
 		ClientType: clientType,
-		DeviceID:   deviceID,
-		DeviceInfo: deviceInfo,
 		LoginAt:    time.Now(),
 		ExpiresAt:  expiresAt,
 		Token:      token,

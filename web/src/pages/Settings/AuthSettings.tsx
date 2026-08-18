@@ -19,13 +19,9 @@ const { Text, Paragraph } = Typography;
 
 interface Session {
   user_id: number;
-  username: string;
-  role: string;
   ip: string;
   user_agent: string;
   client_type: string;
-  device_id?: string;
-  device_info?: string;
   is_current: boolean;
   login_at: string;
   expires_at: string;
@@ -715,7 +711,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
             { title: '类型', dataIndex: 'client_type', key: 'client_type', width: 80,
               render: (t: string) => t === 'mobile' ? <Tag color="blue">移动</Tag> : <Tag>Web</Tag> },
             { title: '设备', key: 'device', ellipsis: true,
-              render: (_: unknown, r: Session) => r.client_type === 'mobile' ? (r.device_info || '移动设备') : r.user_agent },
+              render: (_: unknown, r: Session) => r.user_agent || '-' },
             { title: '登录时间', dataIndex: 'login_at', key: 'login_at', width: 180,
               render: (t: string) => t ? formatDateTime(t) : '-' },
             { title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 180,

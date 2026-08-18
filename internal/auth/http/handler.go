@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -105,8 +104,6 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 		Password       string `json:"password" binding:"required"`
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
-		DeviceID       string `json:"device_id"`
-		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
@@ -146,7 +143,7 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 	}
 
 	// If TOTP is not enabled, proceed with normal login
-	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, h.sessionTimeout)
 	if err != nil {
 		return nil, errx.Internal("生成令牌失败")
 	}
@@ -167,13 +164,9 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 		expiresAt := time.Now().Add(h.sessionTimeout)
 		sess := &auth.Session{
 			UserID:     user.ID,
-			Username:   user.Username,
-			Role:       string(user.Role),
 			IP:         ip,
 			UserAgent:  userAgent,
 			ClientType: clientType,
-			DeviceID:   req.DeviceID,
-			DeviceInfo: req.DeviceInfo,
 			ExpiresAt:  expiresAt,
 			Token:      token,
 		}
@@ -194,16 +187,9 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 	// 纵深防御为主——伪造 client_type 拿到的也只是登录者自己凭据的 token）；
 	// mobile 含（App 需 header token）。
 	if isWebClient(req.ClientType) {
-		return gin.H{
-			"user":             user,
-			"must_change_pass": user.MustChangePass,
-		}, nil
+		return gin.H{"user": user}, nil
 	}
-	return gin.H{
-		"token":            token,
-		"user":             user,
-		"must_change_pass": user.MustChangePass,
-	}, nil
+	return gin.H{"token": token, "user": user}, nil
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) (any, error) {
@@ -280,7 +266,7 @@ func (h *AuthHandler) ChangeUsername(c *gin.Context) (any, error) {
 	}
 
 	// 重新生成附带新 username 的 JWT Token 并重置 Cookie / Session
-	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, h.sessionTimeout)
 	if err != nil {
 		log.Printf("auth: failed to generate token after username change for user %d: %v", userID, err)
 	} else {
@@ -291,8 +277,6 @@ func (h *AuthHandler) ChangeUsername(c *gin.Context) (any, error) {
 			userAgent := c.Request.UserAgent()
 			sess := &auth.Session{
 				UserID:     user.ID,
-				Username:   user.Username,
-				Role:       string(user.Role),
 				IP:         ip,
 				UserAgent:  userAgent,
 				ClientType: "web",
@@ -338,8 +322,6 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 		TOTPVerifyRequest
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
-		DeviceID       string `json:"device_id"`
-		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
@@ -373,7 +355,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 	}
 
 	// Generate full token
-	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, h.sessionTimeout)
 	if err != nil {
 		return nil, errx.Internal("生成令牌失败")
 	}
@@ -394,13 +376,9 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 		expiresAt := time.Now().Add(h.sessionTimeout)
 		sess := &auth.Session{
 			UserID:     user.ID,
-			Username:   user.Username,
-			Role:       string(user.Role),
 			IP:         ip,
 			UserAgent:  userAgent,
 			ClientType: clientType,
-			DeviceID:   req.DeviceID,
-			DeviceInfo: req.DeviceInfo,
 			ExpiresAt:  expiresAt,
 			Token:      token,
 		}
@@ -416,16 +394,9 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 
 	setAuthCookie(c, token, h.sessionTimeout)
 	if isWebClient(req.ClientType) {
-		return gin.H{
-			"user":             user,
-			"must_change_pass": user.MustChangePass,
-		}, nil
+		return gin.H{"user": user}, nil
 	}
-	return gin.H{
-		"token":            token,
-		"user":             user,
-		"must_change_pass": user.MustChangePass,
-	}, nil
+	return gin.H{"token": token, "user": user}, nil
 }
 
 // VerifyBackupCode handles backup code verification during login (step 2)
@@ -434,8 +405,6 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 		BackupCodeVerifyRequest
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
-		DeviceID       string `json:"device_id"`
-		DeviceInfo     string `json:"device_info"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
@@ -468,7 +437,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 	}
 
 	// Generate full token
-	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, h.sessionTimeout)
 	if err != nil {
 		return nil, errx.Internal("生成令牌失败")
 	}
@@ -489,13 +458,9 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 		expiresAt := time.Now().Add(h.sessionTimeout)
 		sess := &auth.Session{
 			UserID:     user.ID,
-			Username:   user.Username,
-			Role:       string(user.Role),
 			IP:         ip,
 			UserAgent:  userAgent,
 			ClientType: clientType,
-			DeviceID:   req.DeviceID,
-			DeviceInfo: req.DeviceInfo,
 			ExpiresAt:  expiresAt,
 			Token:      token,
 		}
@@ -511,16 +476,9 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 
 	setAuthCookie(c, token, h.sessionTimeout)
 	if isWebClient(req.ClientType) {
-		return gin.H{
-			"user":             user,
-			"must_change_pass": user.MustChangePass,
-		}, nil
+		return gin.H{"user": user}, nil
 	}
-	return gin.H{
-		"token":            token,
-		"user":             user,
-		"must_change_pass": user.MustChangePass,
-	}, nil
+	return gin.H{"token": token, "user": user}, nil
 }
 
 // SetupTOTP generates TOTP setup information (QR code, secret)
@@ -617,7 +575,7 @@ func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Sessio
 	if h.sessionService == nil {
 		return nil
 	}
-	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.Username, sess.Role, sess.IP, sess.UserAgent, sess.ClientType, sess.DeviceID, sess.DeviceInfo, sess.ExpiresAt); err != nil {
+	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.IP, sess.UserAgent, sess.ClientType, sess.ExpiresAt); err != nil {
 		log.Printf("auth: create session for user %d: %v", sess.UserID, err)
 		return errx.Internal("创建会话失败")
 	}
@@ -784,21 +742,17 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 		return nil, errx.Unauthorized("未登录")
 	}
 
-	// Fetch the user to build the web login payload (mirrors password login).
+	// The mobile's identity is taken from its JWT (validated by middleware);
+	// the same admin user will be logged in on the web. Web 端领取后自行拉
+	// /auth/me 拿用户信息，无需回传。
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
 		return nil, errx.Internal("获取用户信息失败")
 	}
 
-	// {user, must_change_pass} payload handed to the web client on pickup.
-	payload, _ := json.Marshal(struct {
-		User           any  `json:"user"`
-		MustChangePass bool `json:"must_change_pass"`
-	}{User: user, MustChangePass: user.MustChangePass})
-
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
-	if err := h.qrService.Confirm(c.Request.Context(), req.QRToken, user.ID, user.Username, string(user.Role), ip, userAgent, string(payload)); err != nil {
+	if err := h.qrService.Confirm(c.Request.Context(), req.QRToken, user, ip, userAgent); err != nil {
 		switch {
 		case errors.Is(err, auth.ErrQRNotPending), errors.Is(err, auth.ErrQRExpired):
 			return nil, errx.BadRequest("%s", err.Error())

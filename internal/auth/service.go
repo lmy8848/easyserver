@@ -212,7 +212,8 @@ func (s *AuthService) ChangeUsername(ctx context.Context, userID int64, newUsern
 	}
 
 	for _, ch := range newUsername {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+		isValid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-'
+		if !isValid {
 			return errors.New("用户名只能包含字母、数字、下划线或短横线")
 		}
 	}

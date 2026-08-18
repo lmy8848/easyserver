@@ -13,11 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func generateTestToken(secret string, userID int64, username, role string, timeout time.Duration) (string, error) {
+func generateTestToken(secret string, userID int64, username string, timeout time.Duration) (string, error) {
 	claims := &JWTClaims{
 		UserID:   userID,
 		Username: username,
-		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(timeout)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -31,10 +30,9 @@ func TestJWTMiddleware_ValidToken(t *testing.T) {
 	secret := "test-secret-key-at-least-32-bytes-long"
 	userID := int64(1)
 	username := "testuser"
-	role := "admin"
 	timeout := 24 * time.Hour
 
-	token, err := generateTestToken(secret, userID, username, role, timeout)
+	token, err := generateTestToken(secret, userID, username, timeout)
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -107,13 +105,11 @@ func TestJWTMiddleware_ExpiredToken(t *testing.T) {
 	secret := "test-secret-key-at-least-32-bytes-long"
 	userID := int64(1)
 	username := "testuser"
-	role := "admin"
 
 	// Create a token that expired 1 hour ago
 	claims := &JWTClaims{
 		UserID:   userID,
 		Username: username,
-		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
@@ -144,11 +140,10 @@ func TestJWTMiddleware_WrongSecret(t *testing.T) {
 	wrongSecret := "wrong-secret-key-at-least-32-bytes-"
 	userID := int64(1)
 	username := "testuser"
-	role := "admin"
 	timeout := 24 * time.Hour
 
 	// Generate token with one secret
-	token, err := generateTestToken(secret, userID, username, role, timeout)
+	token, err := generateTestToken(secret, userID, username, timeout)
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -172,10 +167,9 @@ func TestJWTMiddleware_InvalidSession(t *testing.T) {
 	secret := "test-secret-key-at-least-32-bytes-long"
 	userID := int64(1)
 	username := "testuser"
-	role := "admin"
 	timeout := 24 * time.Hour
 
-	token, err := generateTestToken(secret, userID, username, role, timeout)
+	token, err := generateTestToken(secret, userID, username, timeout)
 	require.NoError(t, err)
 
 	// Session validator that always rejects
