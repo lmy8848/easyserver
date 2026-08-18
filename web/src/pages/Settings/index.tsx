@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Card, Spin, Tabs, Alert,
 } from 'antd';
@@ -19,6 +20,8 @@ import FeatureSettings from './FeatureSettings';
 import AlertRulesForm from './AlertRulesForm';
 
 export default function SettingsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'server';
   const [settings, setSettings] = useState<Settings | null>(null);
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +61,8 @@ export default function SettingsPage() {
   return (
     <div>
       <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setSearchParams({ tab: key })}
         items={[
           {
             key: 'server',

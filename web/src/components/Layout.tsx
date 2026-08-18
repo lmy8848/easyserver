@@ -47,7 +47,6 @@ const MENU_GROUPS = [
       { key: '/cloud', icon: 'cloud', label: '腾讯云' },
       { key: '/audit', icon: 'file-text', label: '审计日志' },
       { key: '/settings', icon: 'tool', label: '面板设置' },
-      { key: '/security', icon: 'lock', label: '安全设置' },
       { key: '/vulnerabilities', icon: 'alert', label: '漏洞扫描' },
       { key: '/fim', icon: 'check', label: '文件完整性' },
     ],
@@ -378,7 +377,7 @@ export default function Layout() {
                     <Icon name="key" size={16} />
                     <span>修改密码</span>
                   </div>
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/security'); }}>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings?tab=auth'); }}>
                     <Icon name="shield" size={16} />
                     <span>两步验证</span>
                   </div>

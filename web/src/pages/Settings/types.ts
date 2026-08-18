@@ -8,12 +8,13 @@ export interface Settings {
   server: {
     port: number;
     host: string;
-    tls: { enabled: boolean; cert_info: TLSCertInfo | null };
+    tls: { enabled: boolean; cert_file: string; key_file: string; cert_info: TLSCertInfo | null };
     domain: string;
     force_domain: boolean;
     max_upload_size: number;
     assets_rate_limit: number;
     assets_rate_interval: string;
+    allowed_origins: string[];
     turnstile: {
       site_key: string;
       secret_key: string;
@@ -32,6 +33,8 @@ export interface Settings {
     login_rate_limit: number;
     login_rate_interval: number;
     allow_multi_session: boolean;
+    ip_whitelist: string[];
+    session_cleanup_interval: number;
   };
   monitor: {
     history_retention: number;

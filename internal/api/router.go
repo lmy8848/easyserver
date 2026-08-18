@@ -288,12 +288,15 @@ func newEngine(cfg *config.Config) *gin.Engine {
 
 	cspNonce := InitCSPNonce()
 
+	ipWhitelist := middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)
+	middleware.RegisterIPWhitelist(ipWhitelist)
+
 	e.Use(gin.Logger(), gin.Recovery(),
 		middleware.ErrorHandler(),
 		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.ForceDomain),
 		middleware.SecurityMiddleware(cspNonce, cfg.Server.AllowedOrigins, cfg.Server.DevMode),
 		middleware.CORSMiddleware(cfg.Server.AllowedOrigins, cfg.Server.DevMode),
-		middleware.IPWhitelistMiddleware(middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)),
+		middleware.IPWhitelistMiddleware(ipWhitelist),
 	)
 
 	e.GET("/health", func(c *gin.Context) {

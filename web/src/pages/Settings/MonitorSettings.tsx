@@ -15,14 +15,13 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
   useEffect(() => {
     if (settings?.monitor) {
       // Backend returns history_retention in hours (e.g., 168 = 7 days)
-      const hours = Number(settings.monitor.history_retention) || 168;
-      const days = Math.max(1, Math.round(hours / 24));
-      // Backend returns collect_interval in seconds (e.g., 3)
-      const secs = Number(settings.monitor.collect_interval) || 3;
+      const days = settings.monitor.history_retention != null
+        ? Math.round(settings.monitor.history_retention / 24)
+        : undefined;
 
       form.setFieldsValue({
         history_retention: days,
-        collect_interval: secs,
+        collect_interval: settings.monitor.collect_interval,
       });
     }
   }, [settings, form]);
@@ -31,13 +30,10 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
     try {
       const values = await form.validateFields();
       setSaving(true);
-      const days = Number(values.history_retention) || 7;
-      const secs = Number(values.collect_interval) || 3;
-
       // Backend API receives history_retention in hours (days * 24), collect_interval in seconds
       await settingsApi.updateMonitor({
-        history_retention: days * 24,
-        collect_interval: secs,
+        history_retention: values.history_retention != null ? values.history_retention * 24 : undefined,
+        collect_interval: values.collect_interval,
       });
       message.success('监控配置已保存');
       onRefresh();
@@ -55,10 +51,6 @@ export default function MonitorSettings({ settings, onRefresh }: MonitorSettings
       <Form
         form={form}
         layout="vertical"
-        initialValues={{
-          history_retention: 7,
-          collect_interval: 3,
-        }}
       >
         <Form.Item
           name="history_retention"

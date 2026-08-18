@@ -23,7 +23,7 @@ export default function CloudSettings({ settings, onRefresh }: CloudSettingsProp
     if (settings?.tencentcloud) {
       form.setFieldsValue({
         enabled: settings.tencentcloud.enabled,
-        region: settings.tencentcloud.region || 'ap-guangzhou',
+        region: settings.tencentcloud.region,
         instance_id: settings.tencentcloud.instance_id,
       });
     }
@@ -96,10 +96,6 @@ export default function CloudSettings({ settings, onRefresh }: CloudSettingsProp
         <Form
           form={form}
           layout="vertical"
-          initialValues={{
-            enabled: false,
-            region: 'ap-guangzhou',
-          }}
         >
           <Form.Item
             name="enabled"

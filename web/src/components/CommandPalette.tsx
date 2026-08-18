@@ -32,10 +32,10 @@ export default function CommandPalette({ open, onClose, onSelect }: CommandPalet
     { id: 'nav-cron', label: '计划任务', hint: '/cron', group: '导航', action: () => onSelect('/cron') },
     { id: 'nav-audit', label: '审计日志', hint: '/audit', group: '导航', action: () => onSelect('/audit') },
     { id: 'nav-settings', label: '面板设置', hint: '/settings', group: '导航', action: () => onSelect('/settings') },
-    { id: 'nav-security', label: '安全设置', hint: '/security', group: '导航', action: () => onSelect('/security') },
+    { id: 'nav-security', label: '安全设置', hint: '/settings?tab=auth', group: '导航', action: () => onSelect('/settings?tab=auth') },
     // Quick actions
     { id: 'act-restart', label: '重启 EasyServer', group: '操作', action: () => { onClose(); } },
-    { id: 'act-update', label: '检查更新', group: '操作', action: () => { onClose(); } },
+    { id: 'act-update', label: '检查更新', group: '操作', action: () => onSelect('/settings?tab=server') },
     { id: 'act-logs', label: '查看系统日志', group: '操作', action: () => onSelect('/audit') },
   ];
 

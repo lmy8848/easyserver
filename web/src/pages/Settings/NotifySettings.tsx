@@ -58,10 +58,6 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
       <Form
         form={form}
         layout="vertical"
-        initialValues={{
-          enabled: false,
-          webhook_url: '',
-        }}
       >
         <Form.Item
           name="enabled"

@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -81,10 +82,13 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 			"host": cfg.Server.Host,
 			"tls": gin.H{
 				"enabled":   cfg.Server.TLS.Enabled,
+				"cert_file": cfg.Server.TLS.CertFile,
+				"key_file":  cfg.Server.TLS.KeyFile,
 				"cert_info": certInfoFromConfig(cfg),
 			},
 			"domain":               cfg.Server.Domain,
 			"force_domain":         cfg.Server.ForceDomain,
+			"allowed_origins":      cfg.Server.AllowedOrigins,
 			"assets_rate_limit":    cfg.Server.AssetsRateLimit,
 			"assets_rate_interval": cfg.Server.AssetsRateInterval.String(),
 			"max_upload_size":      cfg.Server.MaxUploadSize,
@@ -97,15 +101,17 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 			},
 		},
 		"auth": gin.H{
-			"session_timeout":     int(cfg.Auth.SessionTimeout.Seconds()),
-			"idle_timeout":        int(cfg.Auth.IdleTimeout.Seconds()),
-			"max_login_attempts":  cfg.Auth.MaxLoginAttempts,
-			"lockout_duration":    int(cfg.Auth.LockoutDuration.Seconds()),
-			"rate_limit":          cfg.Auth.RateLimit,
-			"rate_interval":       int(cfg.Auth.RateInterval.Seconds()),
-			"login_rate_limit":    cfg.Auth.LoginRateLimit,
-			"login_rate_interval": int(cfg.Auth.LoginRateInterval.Seconds()),
-			"allow_multi_session": cfg.Auth.AllowMultiSession,
+			"session_timeout":          int(cfg.Auth.SessionTimeout.Seconds()),
+			"idle_timeout":             int(cfg.Auth.IdleTimeout.Seconds()),
+			"max_login_attempts":       cfg.Auth.MaxLoginAttempts,
+			"lockout_duration":         int(cfg.Auth.LockoutDuration.Seconds()),
+			"rate_limit":               cfg.Auth.RateLimit,
+			"rate_interval":            int(cfg.Auth.RateInterval.Seconds()),
+			"login_rate_limit":         cfg.Auth.LoginRateLimit,
+			"login_rate_interval":      int(cfg.Auth.LoginRateInterval.Seconds()),
+			"allow_multi_session":      cfg.Auth.AllowMultiSession,
+			"ip_whitelist":             cfg.Auth.IPWhitelist,
+			"session_cleanup_interval": int(cfg.Auth.SessionCleanupInterval.Seconds()),
 		},
 		"monitor": gin.H{
 			"history_retention": int(cfg.Monitor.HistoryRetention.Hours()),
@@ -213,13 +219,14 @@ func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) (any, error) {
 // UpdateServerConfig updates server configuration
 func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 	var req struct {
-		Port               *int    `json:"port"`
-		Host               *string `json:"host"`
-		Domain             *string `json:"domain"`
-		ForceDomain        *bool   `json:"force_domain"`
-		MaxUploadSize      *int64  `json:"max_upload_size"`
-		AssetsRateLimit    *int    `json:"assets_rate_limit"`
-		AssetsRateInterval *string `json:"assets_rate_interval"`
+		Port               *int      `json:"port"`
+		Host               *string   `json:"host"`
+		Domain             *string   `json:"domain"`
+		ForceDomain        *bool     `json:"force_domain"`
+		AllowedOrigins     *[]string `json:"allowed_origins"`
+		MaxUploadSize      *int64    `json:"max_upload_size"`
+		AssetsRateLimit    *int      `json:"assets_rate_limit"`
+		AssetsRateInterval *string   `json:"assets_rate_interval"`
 		Turnstile          *struct {
 			SiteKey           *string `json:"site_key"`
 			SecretKey         *string `json:"secret_key"`
@@ -286,6 +293,15 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 		}
 		if req.ForceDomain != nil {
 			cfg.Server.ForceDomain = *req.ForceDomain
+		}
+		if req.AllowedOrigins != nil {
+			cleaned := make([]string, 0, len(*req.AllowedOrigins))
+			for _, o := range *req.AllowedOrigins {
+				if o = strings.TrimSpace(o); o != "" {
+					cleaned = append(cleaned, o)
+				}
+			}
+			cfg.Server.AllowedOrigins = cleaned
 		}
 		if req.MaxUploadSize != nil {
 			cfg.Server.MaxUploadSize = *req.MaxUploadSize
@@ -478,15 +494,17 @@ func certInfoFromConfig(cfg *config.Config) *tlsCertInfo {
 // UpdateAuthConfig updates authentication configuration
 func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 	var req struct {
-		SessionTimeout    *int  `json:"session_timeout"`
-		IdleTimeout       *int  `json:"idle_timeout"`
-		MaxLoginAttempts  *int  `json:"max_login_attempts"`
-		LockoutDuration   *int  `json:"lockout_duration"`
-		RateLimit         *int  `json:"rate_limit"`
-		RateInterval      *int  `json:"rate_interval"`
-		LoginRateLimit    *int  `json:"login_rate_limit"`
-		LoginRateInterval *int  `json:"login_rate_interval"`
-		AllowMultiSession *bool `json:"allow_multi_session"`
+		SessionTimeout         *int      `json:"session_timeout"`
+		IdleTimeout            *int      `json:"idle_timeout"`
+		MaxLoginAttempts       *int      `json:"max_login_attempts"`
+		LockoutDuration        *int      `json:"lockout_duration"`
+		RateLimit              *int      `json:"rate_limit"`
+		RateInterval           *int      `json:"rate_interval"`
+		LoginRateLimit         *int      `json:"login_rate_limit"`
+		LoginRateInterval      *int      `json:"login_rate_interval"`
+		AllowMultiSession      *bool     `json:"allow_multi_session"`
+		IPWhitelist            *[]string `json:"ip_whitelist"`
+		SessionCleanupInterval *int      `json:"session_cleanup_interval"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
@@ -519,6 +537,17 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 	if req.LoginRateInterval != nil && (*req.LoginRateInterval < 1 || *req.LoginRateInterval > 3600) {
 		return nil, errx.BadRequest("login_rate_interval 必须在 1 秒到 3600 秒之间")
 	}
+	if req.SessionCleanupInterval != nil && (*req.SessionCleanupInterval < 60 || *req.SessionCleanupInterval > 86400) {
+		return nil, errx.BadRequest("session_cleanup_interval 必须在 60 秒到 86400 秒之间")
+	}
+	if req.IPWhitelist != nil {
+		for _, entry := range *req.IPWhitelist {
+			entry = strings.TrimSpace(entry)
+			if entry == "" || !validIPOrCIDR(entry) {
+				return nil, errx.BadRequest("无效的 IP 白名单项: %s", entry)
+			}
+		}
+	}
 
 	// ---- 应用修改 ----
 	h.store.Update(func(cfg *config.Config) {
@@ -549,7 +578,26 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 		if req.AllowMultiSession != nil {
 			cfg.Auth.AllowMultiSession = *req.AllowMultiSession
 		}
+		if req.IPWhitelist != nil {
+			cleaned := make([]string, 0, len(*req.IPWhitelist))
+			for _, e := range *req.IPWhitelist {
+				if e = strings.TrimSpace(e); e != "" {
+					cleaned = append(cleaned, e)
+				}
+			}
+			cfg.Auth.IPWhitelist = cleaned
+		}
+		if req.SessionCleanupInterval != nil {
+			cfg.Auth.SessionCleanupInterval = config.Duration(time.Duration(*req.SessionCleanupInterval) * time.Second)
+		}
 	})
+
+	// 运行中热更新全局 IP 白名单（无需重启）
+	if req.IPWhitelist != nil {
+		if wl := middleware.GetIPWhitelist(); wl != nil {
+			wl.Update(h.store.Get().Auth.IPWhitelist)
+		}
+	}
 
 	// Sync API rate limiter at runtime
 	if req.RateLimit != nil || req.RateInterval != nil {
@@ -648,6 +696,15 @@ func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) (any, error) {
 	}
 
 	return gin.H{"message": "审计配置已更新"}, nil
+}
+
+// validIPOrCIDR 校验单个 IP 白名单项是合法 IP 或 CIDR。
+func validIPOrCIDR(s string) bool {
+	if strings.Contains(s, "/") {
+		_, _, err := net.ParseCIDR(s)
+		return err == nil
+	}
+	return net.ParseIP(s) != nil
 }
 
 // validateWebhookURL validates a webhook URL format
@@ -833,6 +890,15 @@ func (h *SettingsHandler) GetSystemInfo(c *gin.Context) (any, error) {
 	}, nil
 }
 
+// CheckUpdate checks GitHub for the latest release.
+func (h *SettingsHandler) CheckUpdate(c *gin.Context) (any, error) {
+	info, err := infra.CheckUpdate(c.Request.Context())
+	if err != nil {
+		return nil, errx.Internal("%w", err)
+	}
+	return info, nil
+}
+
 // RestartPanel restarts the backend service.
 // When force=true (e.g. port change), the listener is closed so the child
 // process creates a fresh one on the new address.
@@ -863,6 +929,7 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertServic
 	handler.SetMonitorService(monitorSvc)
 	protected.GET("/settings", httpx.H(handler.GetSettings))
 	protected.GET("/settings/system", httpx.H(handler.GetSystemInfo))
+	protected.GET("/settings/check-update", httpx.H(handler.CheckUpdate))
 	protected.PUT("/settings/server", httpx.H(handler.UpdateServerConfig))
 	protected.PUT("/settings/tls", httpx.H(handler.UpdateTLSConfig))
 	protected.PUT("/settings/auth", httpx.H(handler.UpdateAuthConfig))

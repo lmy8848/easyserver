@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"easyserver/internal/infra/errx"
 
@@ -14,6 +15,20 @@ type IPWhitelist struct {
 	mu      sync.RWMutex
 	allowed []*net.IPNet
 	enabled bool
+}
+
+// 全局 IP 白名单实例（与 ratelimit 的注册表同款模式），供运行中热更新。
+// router 构建时注册，settings handler 更新时读取。
+var globalIPWhitelist atomic.Pointer[IPWhitelist]
+
+// GetIPWhitelist 返回全局白名单实例，未注册时返回 nil。
+func GetIPWhitelist() *IPWhitelist {
+	return globalIPWhitelist.Load()
+}
+
+// RegisterIPWhitelist 注册全局白名单实例（进程内只调用一次）。
+func RegisterIPWhitelist(wl *IPWhitelist) {
+	globalIPWhitelist.Store(wl)
 }
 
 func NewIPWhitelist(allowedIPs []string) *IPWhitelist {

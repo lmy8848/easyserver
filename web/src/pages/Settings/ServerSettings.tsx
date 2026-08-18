@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Descriptions, Tag, Alert, Form, Input, Switch, Button, Space, message,
-  InputNumber, Modal, Divider, Typography, Upload,
+  InputNumber, Modal, Divider, Typography, Upload, Select, Row, Col,
 } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { UploadOutlined, SyncOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { settingsApi } from '../../services/api';
 import type { Settings, SystemInfo, TLSCertInfo } from './types';
@@ -22,6 +22,38 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
   const [saving, setSaving] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [requiresRestart, setRequiresRestart] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    current_version: string;
+    latest_version: string;
+    release_title: string;
+    has_update: boolean;
+    release_url: string;
+    release_notes: string;
+    published_at: string;
+  } | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const res = await settingsApi.checkUpdate();
+      const data = res.data?.data;
+      if (data) {
+        setUpdateInfo(data);
+        if (data.has_update) {
+          setShowUpdateModal(true);
+        } else {
+          message.success(`当前已是最新版本 (${data.current_version})`);
+        }
+      }
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '检查更新失败，请稍后重试');
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
   // Track original port/host to detect changes that need a force restart.
   // Use refs so closures always read the latest value.
   const originalPortRef = useRef<number | undefined>(undefined);
@@ -34,14 +66,17 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         port: settings.server.port,
         domain: settings.server.domain,
         force_domain: settings.server.force_domain,
-        max_upload_size: settings.server.max_upload_size ? Math.round(settings.server.max_upload_size / 1024 / 1024) : 512,
+        max_upload_size: settings.server.max_upload_size != null
+          ? Math.round(settings.server.max_upload_size / 1024 / 1024)
+          : undefined,
         assets_rate_limit: settings.server.assets_rate_limit,
         assets_rate_interval: settings.server.assets_rate_interval,
-        turnstile_site_key: settings.server.turnstile.site_key,
-        turnstile_secret_key: settings.server.turnstile.secret_key,
-        turnstile_enable_login: settings.server.turnstile.enable_login,
-        turnstile_enable_qr_login: settings.server.turnstile.enable_qr_login,
-        turnstile_enable_public_share: settings.server.turnstile.enable_public_share,
+        allowed_origins: settings.server.allowed_origins ?? [],
+        turnstile_site_key: settings.server.turnstile?.site_key,
+        turnstile_secret_key: settings.server.turnstile?.secret_key,
+        turnstile_enable_login: settings.server.turnstile?.enable_login,
+        turnstile_enable_qr_login: settings.server.turnstile?.enable_qr_login,
+        turnstile_enable_public_share: settings.server.turnstile?.enable_public_share,
       });
       // Only set on first load (don't overwrite when settings refresh after save)
       if (originalPortRef.current === undefined) {
@@ -79,6 +114,7 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         max_upload_size: values.max_upload_size != null ? values.max_upload_size * 1024 * 1024 : undefined,
         assets_rate_limit: values.assets_rate_limit,
         assets_rate_interval: values.assets_rate_interval,
+        allowed_origins: (values.allowed_origins ?? []).map((o: string) => o.trim()).filter(Boolean),
         turnstile: {
           site_key: values.turnstile_site_key || '',
           secret_key: values.turnstile_secret_key || '',
@@ -140,121 +176,159 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         <Form
           form={form}
           layout="vertical"
-          initialValues={{
-            host: '0.0.0.0',
-            port: 8080,
-            assets_rate_limit: 5000,
-            assets_rate_interval: '1m',
-          }}
         >
-          <Form.Item
-            name="host"
-            label="监听地址"
-            extra="服务器监听的 IP 地址，0.0.0.0 表示所有地址"
-          >
-            <Input placeholder="0.0.0.0" />
-          </Form.Item>
+          <Row gutter={[24, 0]}>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="host"
+                label="监听地址"
+                extra="服务器监听的 IP 地址，0.0.0.0 表示所有地址"
+              >
+                <Input placeholder="0.0.0.0" />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="port"
-            label="监听端口"
-            extra="服务器监听的端口号"
-          >
-            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="port"
+                label="监听端口"
+                extra="服务器监听的端口号"
+              >
+                <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="domain"
-            label="面板域名"
-            extra="设置后可通过域名访问面板，留空则不限制"
-          >
-            <Input placeholder="例：panel.example.com" />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="domain"
+                label="面板域名"
+                extra="设置后可通过域名访问面板，留空则不限制"
+              >
+                <Input placeholder="例：panel.example.com" />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="force_domain"
-            label="强制域名访问"
-            valuePropName="checked"
-            extra="开启后，在配置了面板域名时，所有通过 IP 或其他非匹配主机名的访问将自动 301 重定向至该域名"
-          >
-            <Switch />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="force_domain"
+                label="强制域名访问"
+                valuePropName="checked"
+                extra="开启后，所有通过 IP 或其他非匹配主机名的访问将自动 301 重定向至该域名"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="max_upload_size"
-            label="最大上传大小 (MB)"
-            extra="单个文件最大上传大小（MB），保存后需重启生效"
-          >
-            <InputNumber min={1} max={4096} style={{ width: '100%' }} />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="max_upload_size"
+                label="最大上传大小 (MB)"
+                extra="单个文件最大上传大小（MB），0 表示不限制/使用默认（512MB），保存后需重启生效"
+              >
+                <InputNumber min={0} max={4096} style={{ width: '100%' }} placeholder="0" />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="assets_rate_limit"
-            label="静态资源速率限制"
-            extra="每个时间窗口内静态资源（JS、CSS 等）允许的最大请求数"
-          >
-            <InputNumber min={100} max={100000} style={{ width: '100%' }} />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="assets_rate_limit"
+                label="静态资源速率限制"
+                extra="每个时间窗口内静态资源（JS、CSS 等）允许的最大请求数"
+              >
+                <InputNumber min={100} max={100000} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="assets_rate_interval"
-            label="静态资源限流时间窗口"
-            extra="静态资源速率限制的时间窗口，如 1m、5m"
-          >
-            <Input placeholder="1m" />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="assets_rate_interval"
+                label="静态资源限流时间窗口"
+                extra="静态资源速率限制的时间窗口，如 1m、5m"
+              >
+                <Input placeholder="1m" />
+              </Form.Item>
+            </Col>
+
+            <Col span={24}>
+              <Form.Item
+                name="allowed_origins"
+                label="允许的跨域来源 (CORS)"
+                extra="允许跨域访问面板的 Origin 列表，每行一个（如 http://localhost:5173）。默认已含本机来源，一般无需修改。"
+              >
+                <Select
+                  mode="tags"
+                  open={false}
+                  suffixIcon={null}
+                  placeholder="每行一个 Origin，回车添加"
+                  tokenSeparators={[',', '，']}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Divider />
           <Typography.Title level={5} style={{ margin: 0 }}>Cloudflare Turnstile</Typography.Title>
           <Paragraph style={{ color: '#8c8c8c', fontSize: 12, marginBottom: 8 }}>
-            配置 Cloudflare Turnstile 人机验证,在登录/扫码/外链下载前要求用户完成验证。
+            配置 Cloudflare Turnstile 人机验证，在登录/扫码/外链下载前要求用户完成验证。
             需在 <a href="https://dash.cloudflare.com/" target="_blank" rel="noreferrer">Cloudflare Dashboard</a> 创建 Turnstile 站点。
           </Paragraph>
 
-          <Form.Item
-            name="turnstile_site_key"
-            label="Site Key"
-            extra="Turnstile 站点密钥(公开)"
-          >
-            <Input placeholder="0x4AAAAAA..." />
-          </Form.Item>
+          <Row gutter={[24, 0]}>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="turnstile_site_key"
+                label="Site Key"
+                extra="Turnstile 站点密钥(公开)"
+              >
+                <Input placeholder="0x4AAAAAA..." />
+              </Form.Item>
+            </Col>
 
-          <Form.Item
-            name="turnstile_secret_key"
-            label="Secret Key"
-            extra="Turnstile 密钥(敏感,请妥善保管)"
-          >
-            <Input.Password placeholder="0x4AAAAAA..." autoComplete="off" />
-          </Form.Item>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="turnstile_secret_key"
+                label="Secret Key"
+                extra="Turnstile 密钥(敏感,请妥善保管)"
+              >
+                <Input.Password placeholder="0x4AAAAAA..." autoComplete="off" />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item
-            name="turnstile_enable_login"
-            label="登录验证"
-            extra="密码登录和 TOTP/备份码验证时要求 Turnstile"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
+          <Row gutter={[24, 0]}>
+            <Col xs={24} sm={8}>
+              <Form.Item
+                name="turnstile_enable_login"
+                label="登录验证"
+                extra="密码登录和 TOTP/备份码验证时要求 Turnstile"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item
+                name="turnstile_enable_qr_login"
+                label="扫码登录验证"
+                extra="手机端扫码确认登录时要求 Turnstile"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item
+                name="turnstile_enable_public_share"
+                label="外链下载验证"
+                extra="公开文件外链下载时要求 Turnstile"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
 
-          <Form.Item
-            name="turnstile_enable_qr_login"
-            label="扫码登录验证"
-            extra="手机端扫码确认登录时要求 Turnstile"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item
-            name="turnstile_enable_public_share"
-            label="外链下载验证"
-            extra="公开文件外链下载时要求 Turnstile"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item>
+          <Form.Item style={{ marginTop: 16 }}>
             <Space>
               <Button
                 type="primary"
@@ -291,29 +365,101 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         />
       )}
 
-      <Card title="系统信息" style={{ marginTop: 16 }}>
-        <Descriptions bordered column={{ xs: 1, sm: 2 }}>
-          <Descriptions.Item label="系统版本">{systemInfo?.version || '-'}</Descriptions.Item>
-          <Descriptions.Item label="TLS/HTTPS">
-            {settings?.server.tls.enabled
-              ? <Tag color="success">已启用</Tag>
-              : <Tag color="default">未启用</Tag>}
+      <TLSCard
+        tls={settings?.server.tls ?? { enabled: false, cert_file: '', key_file: '', cert_info: null }}
+        onSaved={onRefresh}
+        onRestart={handleRestart}
+      />
+
+      <Card
+        title="版本信息"
+        style={{ marginTop: 16 }}
+        extra={
+          <Button
+            icon={<SyncOutlined spin={checkingUpdate} />}
+            loading={checkingUpdate}
+            onClick={handleCheckUpdate}
+          >
+            检查更新
+          </Button>
+        }
+      >
+        <Descriptions bordered column={1}>
+          <Descriptions.Item label="系统版本">
+            <Space>
+              <span>{systemInfo?.version || '-'}</span>
+              {updateInfo?.has_update && (
+                <Tag color="processing" style={{ cursor: 'pointer' }} onClick={() => setShowUpdateModal(true)}>
+                  有新版本 {updateInfo.latest_version} 可用
+                </Tag>
+              )}
+            </Space>
           </Descriptions.Item>
         </Descriptions>
       </Card>
 
-      <TLSCard
-        tls={settings?.server.tls ?? { enabled: false, cert_info: null }}
-        onSaved={onRefresh}
-        onRestart={handleRestart}
-      />
+      <Modal
+        title={
+          <Space>
+            <CloudDownloadOutlined style={{ color: '#1890ff' }} />
+            <span>发现新版本 {updateInfo?.latest_version}</span>
+          </Space>
+        }
+        open={showUpdateModal}
+        onCancel={() => setShowUpdateModal(false)}
+        footer={[
+          <Button key="close" onClick={() => setShowUpdateModal(false)}>
+            关闭
+          </Button>,
+          <Button
+            key="github"
+            type="primary"
+            href={updateInfo?.release_url}
+            target="_blank"
+            rel="noreferrer"
+          >
+            前往 GitHub 查看并下载
+          </Button>,
+        ]}
+        width={560}
+      >
+        {updateInfo && (
+          <div style={{ marginTop: 12 }}>
+            <Descriptions bordered size="small" column={1} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="当前版本">{updateInfo.current_version}</Descriptions.Item>
+              <Descriptions.Item label="最新版本">{updateInfo.latest_version}</Descriptions.Item>
+              {updateInfo.published_at && (
+                <Descriptions.Item label="发布时间">
+                  {dayjs(updateInfo.published_at).format('YYYY-MM-DD HH:mm:ss')}
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+
+            {updateInfo.release_title && (
+              <Paragraph strong style={{ fontSize: 14, marginBottom: 8 }}>
+                {updateInfo.release_title}
+              </Paragraph>
+            )}
+
+            {updateInfo.release_notes ? (
+              <Card size="small" style={{ maxHeight: 240, overflowY: 'auto', background: '#fafafa' }}>
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 13 }}>
+                  {updateInfo.release_notes}
+                </pre>
+              </Card>
+            ) : (
+              <Text type="secondary">暂无更新日志说明</Text>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
 
 // TLS certificate management card
 interface TLSCardProps {
-  tls: { enabled: boolean; cert_info: TLSCertInfo | null };
+  tls: { enabled: boolean; cert_file: string; key_file: string; cert_info: TLSCertInfo | null };
   onSaved: () => void;
   onRestart: () => void;
 }
@@ -410,6 +556,8 @@ function TLSCard({ tls, onSaved, onRestart }: TLSCardProps) {
         <Descriptions bordered column={{ xs: 1, sm: 2 }} size="small" style={{ marginBottom: 16 }}>
           <Descriptions.Item label="域名">{tls.cert_info.domain}</Descriptions.Item>
           <Descriptions.Item label="颁发者">{tls.cert_info.issuer}</Descriptions.Item>
+          <Descriptions.Item label="证书文件">{tls.cert_file || '-'}</Descriptions.Item>
+          <Descriptions.Item label="私钥文件">{tls.key_file || '-'}</Descriptions.Item>
           <Descriptions.Item label="过期时间" span={2}>
             {dayjs(tls.cert_info.expires_at).format('YYYY-MM-DD HH:mm:ss')}
             {isExpired && <Text type="danger"> （已过期，请尽快更新）</Text>}

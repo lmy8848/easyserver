@@ -42,9 +42,6 @@ export default function AuditSettings({ settings, onRefresh }: AuditSettingsProp
       <Form
         form={form}
         layout="vertical"
-        initialValues={{
-          retention_days: 90,
-        }}
       >
         <Form.Item
           name="retention_days"
