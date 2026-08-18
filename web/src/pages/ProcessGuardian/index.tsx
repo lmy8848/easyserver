@@ -14,6 +14,7 @@ import {
 import type { Service, ManagedServiceSpec } from '../../types';
 import { serviceApi } from '../../services/api';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
+import { formatBytes, formatUptime } from '../../utils/format';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -36,24 +37,6 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   deactivating: { color: 'warning', label: '停止中' },
   reloading: { color: 'processing', label: '重载中' },
 };
-
-// formatBytes 把字节数格式化为人类可读（如 1.5 MB）。
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
-// formatUptime 把秒数格式化为人类可读（如 2d 3h 10m）。
-function formatUptime(sec: number): string {
-  const d = Math.floor(sec / 86400);
-  const h = Math.floor((sec % 86400) / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 // ============================================================
 // 共用表格列构造：面板托管和系统服务复用，差异通过参数控制

@@ -103,13 +103,6 @@ function ProcessTab() {
     return () => clearInterval(timer);
   }, [fetchProcesses]);
 
-  const formatMemory = (mb: number): string => {
-    if (mb >= 1024) return `${(mb / 1024).toFixed(1)}GB`;
-    return `${mb.toFixed(1)}MB`;
-  };
-
-
-
   const [rowSize, setRowSize] = useState<'large' | 'medium' | 'small'>('small');
 
   return (
@@ -143,7 +136,7 @@ function ProcessTab() {
         { title: '用户', dataIndex: 'user', width: 80 },
         { title: '状态', dataIndex: 'state', width: 70, render: (s: string) => { const c = STATE_MAP[s] || STATE_MAP['T']; return <Tag color={c?.color}>{c?.label}</Tag>; } },
         { title: 'CPU%', dataIndex: 'cpu_percent', width: 80, render: (v: number) => <Text type={v > 50 ? 'danger' : undefined}>{v.toFixed(1)}%</Text> },
-        { title: '内存', dataIndex: 'memory_mb', width: 80, render: (v: number) => formatMemory(v) },
+        { title: '内存', dataIndex: 'memory_mb', width: 80, render: (v: number) => formatBytes(v * 1024 * 1024) },
         { title: '线程', dataIndex: 'threads', width: 60 },
         { title: '启动时间', dataIndex: 'start_time', width: 100 },
         { title: '命令', dataIndex: 'command', ellipsis: true, render: (c: string) => <Tooltip title={c}><Text code>{c}</Text></Tooltip> },

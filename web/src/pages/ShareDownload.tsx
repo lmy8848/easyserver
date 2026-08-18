@@ -2,13 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Input, Button, message, Spin, List, Typography, Space, Breadcrumb } from 'antd';
 import {
-  FileOutlined, FileImageOutlined, FilePdfOutlined, FileZipOutlined,
-  FileTextOutlined, VideoCameraOutlined, AudioOutlined, DownloadOutlined,
-  LockOutlined, CloudServerOutlined, WarningOutlined, FolderOutlined, EyeOutlined, HomeOutlined
+  DownloadOutlined, LockOutlined, CloudServerOutlined, WarningOutlined, EyeOutlined, HomeOutlined, FileZipOutlined
 } from '@ant-design/icons';
 import { publicShareApi, authApi } from '../services/api';
 import type { ShareInfo, ShareFileEntry } from '../types';
 import Turnstile from '../components/Turnstile';
+import { getFileIcon } from '../utils/fileType';
+import { formatBytes } from '../utils/format';
 
 const PAGE_CSS = `
 @keyframes esShareGradient {
@@ -34,32 +34,6 @@ const PAGE_CSS = `
 .es-share-card .ant-breadcrumb-separator { color: rgba(255,255,255,0.4); }
 .es-share-card .ant-empty-description { color: rgba(255,255,255,0.45); }
 `;
-
-function formatSize(bytes: number) {
-  if (bytes === undefined || bytes === null || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function iconForFile(name: string, isDir?: boolean) {
-  if (isDir) return <FolderOutlined style={{ color: '#faad14' }} />;
-  const ext = name.split('.').pop()?.toLowerCase() || '';
-  const color = '#1890ff';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'].includes(ext))
-    return <FileImageOutlined style={{ color }} />;
-  if (ext === 'pdf') return <FilePdfOutlined style={{ color: '#ff4d4f' }} />;
-  if (['zip', 'gz', 'tar', 'bz2', 'xz', '7z', 'rar'].includes(ext))
-    return <FileZipOutlined style={{ color: '#faad14' }} />;
-  if (['mp4', 'webm', 'avi', 'mov', 'mkv'].includes(ext))
-    return <VideoCameraOutlined style={{ color: '#722ed1' }} />;
-  if (['mp3', 'wav', 'flac', 'ogg', 'aac'].includes(ext))
-    return <AudioOutlined style={{ color: '#13c2c2' }} />;
-  if (['txt', 'md', 'json', 'yaml', 'yml', 'go', 'py', 'js', 'ts', 'sh', 'html', 'css'].includes(ext))
-    return <FileTextOutlined style={{ color: '#52c41a' }} />;
-  return <FileOutlined style={{ color }} />;
-}
 
 export default function ShareDownload() {
   const { token = '' } = useParams<{ token: string }>();
@@ -252,13 +226,13 @@ export default function ShareDownload() {
               background: 'rgba(255,255,255,0.04)', borderRadius: 14,
               border: '1px solid rgba(255,255,255,0.08)', marginBottom: 20,
             }}>
-              <div style={{ fontSize: 40, lineHeight: 1 }}>{iconForFile(info.file_name, info.is_dir)}</div>
+              <div style={{ fontSize: 40, lineHeight: 1 }}>{getFileIcon(info.file_name, info.is_dir)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ color: '#fff', fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {info.file_name}
                 </div>
                 <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 4 }}>
-                  {info.is_dir ? '文件夹' : formatSize(info.file_size)}
+                  {info.is_dir ? '文件夹' : formatBytes(info.file_size)}
                   {info.downloads_left >= 0 && <span style={{ marginLeft: 12 }}>剩余 {info.downloads_left} 次</span>}
                   {info.needs_password && !ticket && <span style={{ marginLeft: 12, color: '#faad14' }}><LockOutlined /> 需密码</span>}
                 </div>
@@ -331,13 +305,13 @@ export default function ShareDownload() {
                     renderItem={(item) => (
                       <List.Item className="es-share-list-item" style={{ borderBottom: 'none', padding: '12px 16px', display: 'flex', alignItems: 'center' }}>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <span style={{ fontSize: 20 }}>{iconForFile(item.name, item.is_dir)}</span>
+                          <span style={{ fontSize: 20 }}>{getFileIcon(item.name, item.is_dir)}</span>
                           <Typography.Text style={{ color: 'rgba(255,255,255,0.92)', flex: 1 }} ellipsis={{ tooltip: item.name }}>
                             {item.name}
                           </Typography.Text>
                         </div>
                         <div style={{ marginLeft: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
-                          {!item.is_dir && <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>{formatSize(item.size)}</span>}
+                          {!item.is_dir && <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>{formatBytes(item.size)}</span>}
                           {item.is_dir ? (
                             <Space size={4}>
                               <Button type="text" style={{ color: '#52c41a' }} icon={<FileZipOutlined />} onClick={() => handleAccess('download_all', currentSubpath ? `${currentSubpath}/${item.name}` : item.name)}>

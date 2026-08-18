@@ -88,4 +88,4 @@ export function withEngine(url: string, engine: string): string {
 
 // Re-export from shared utils (backward compatible)
 export { formatBytes } from '../../utils/format';
-export { getServiceStatusColor as getStatusColor } from '../../utils/status';
+export { getStatusColorName as getStatusColor } from '../../utils/status';

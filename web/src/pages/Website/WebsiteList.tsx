@@ -17,7 +17,8 @@ import DetailDrawer from './DetailDrawer';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';
 import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './types';
-import { ServiceStatusTag } from '../../utils/status';
+import { StatusTag } from '../../utils/status';
+import { formatBytes } from '../../utils/format';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
 
 function renderServerIcon(name: string, size = 32) {
@@ -56,7 +57,7 @@ const projectLabel: Record<string, string> = {
 };
 
 function statusTag(status: string) {
-  return <ServiceStatusTag status={status} />;
+  return <StatusTag status={status} />;
 }
 
 export default function WebsiteList({
@@ -471,7 +472,7 @@ export default function WebsiteList({
                 <Space size="large">
                   {selectedServer.version && <span>版本: <strong>{selectedServer.version}</strong></span>}
                   {selectedServer.pid > 0 && <span>PID: <strong>{selectedServer.pid}</strong></span>}
-                  {selectedServer.memory_bytes > 0 && <span>内存: <strong>{(selectedServer.memory_bytes / 1024 / 1024).toFixed(1)} MB</strong></span>}
+                  {selectedServer.memory_bytes > 0 && <span>内存: <strong>{formatBytes(selectedServer.memory_bytes)}</strong></span>}
                   {selectedServer.uptime && <span>运行时间: <strong>{selectedServer.uptime}</strong></span>}
                   <span>默认端口: <strong>{selectedServer.default_port}</strong></span>
                   <span>配置目录: <Tag>{selectedServer.config_path}</Tag></span>

@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { DBInstance, RedisKey } from '../../types';
+import { formatBytes } from '../../utils/format';
 
 interface RedisKeysTabProps {
   instance: DBInstance;
@@ -30,13 +31,6 @@ function fmtTTL(ttl: number): string {
   if (m) parts.push(`${m}分钟`);
   if (s || parts.length === 0) parts.push(`${s}秒`);
   return parts.join('');
-}
-
-function fmtSize(n: number): string {
-  if (!n) return '0 B';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 const TYPE_COLOR: Record<string, string> = {
@@ -208,7 +202,7 @@ export default function RedisKeysTab({ instance }: RedisKeysTabProps) {
       render: (t: string) => <Tag color={TYPE_COLOR[t] || 'default'}>{TYPE_LABEL[t] || t}</Tag>,
     },
     { title: '过期时间', dataIndex: 'ttl', key: 'ttl', width: 130, render: fmtTTL },
-    { title: '大小', dataIndex: 'size', key: 'size', width: 90, render: fmtSize },
+    { title: '大小', dataIndex: 'size', key: 'size', width: 90, render: (s: number) => formatBytes(s) },
     {
       title: '操作', key: 'action', width: 200,
       render: (_: unknown, k: RedisKey) => (

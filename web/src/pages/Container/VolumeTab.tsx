@@ -9,7 +9,7 @@ import api from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Volume } from './types';
 import { withEngine } from './types';
-import { formatCreatedAt } from '../../utils/format';
+import { formatDateTime } from '../../utils/format';
 
 export default function VolumeTab({ engine }: { engine: string }) {
   const [volumes, setVolumes] = useState<Volume[]>([]);
@@ -68,7 +68,7 @@ export default function VolumeTab({ engine }: { engine: string }) {
     { title: '名称', dataIndex: 'name', key: 'name' },
     { title: '驱动', dataIndex: 'driver', key: 'driver' },
     { title: '挂载点', dataIndex: 'mountpoint', key: 'mountpoint', ellipsis: true },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v: string) => formatCreatedAt(v) },
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v: string) => formatDateTime(v) },
     {
       title: '操作',
       key: 'action',

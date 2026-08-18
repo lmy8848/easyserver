@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Form, message, Modal, Tag, Tabs, Card, Button, Empty, Checkbox, Spin } from 'antd';
+import { Form, message, Modal, Tabs, Card, Button, Empty, Checkbox, Spin } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ConsoleSqlOutlined, PlusOutlined } from '@ant-design/icons';
 import { dbServerApi } from '../../services/api';
 import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
-import { getServiceStatusColor } from '../../utils/status';
+import { StatusTag } from '../../utils/status';
 import InstanceHeader from './InstanceHeader';
 import InstallLogPanel from './InstallLogPanel';
 import DatabasesTab, { TableExplorerView } from './DatabasesTab';
@@ -776,18 +776,6 @@ export default function DatabasePage() {
     finally { setBusy(''); }
   };
 
-  // ===== Status helpers (shared) =====
-  const statusTag = (status: string) => {
-    const labels: Record<string, string> = {
-      running: '运行中', stopped: '已停止', installing: '安装中', failed: '安装失败',
-      partial: '部分运行', not_installed: '未安装',
-    };
-    const colors: Record<string, string> = {
-      running: 'success', installing: 'processing', failed: 'error', stopped: 'default',
-    };
-    return <Tag color={colors[status] || getServiceStatusColor(status)}>{labels[status] || status}</Tag>;
-  };
-
   // ===== Render =====
   // The database type is a persistent top-level Tab. InstanceHeader is the header card
   // (version picker + lifecycle actions + instance-level modals). When a version
@@ -846,7 +834,7 @@ export default function DatabasePage() {
           onInstallVersion={handleInstallVersion}
           portCheck={portCheck}
           onCheckPort={checkPort}
-          statusTag={statusTag}
+          statusTag={(s: string) => <StatusTag status={s} />}
           pendingSelectVersion={pendingSelectVersion}
           onPendingSelectConsumed={() => setPendingSelectVersion(null)}
         />

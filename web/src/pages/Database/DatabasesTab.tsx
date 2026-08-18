@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { renderCell } from './cellRender';
+import { formatBytes } from '../../utils/format';
 import type { DatabasesTabProps, Database as DBType, TableExplorerProps, TableColumnInfo } from './types';
 
 // 数据库 tab — 库列表；选中一个库后在同一 tab 内联表浏览器（原 TableExplorer，
@@ -137,7 +138,7 @@ export default function DatabasesTab({
           columns={[
             { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
             { title: '大小', dataIndex: 'file_size', key: 'file_size', width: 100,
-              render: (size: number) => size ? `${(size / 1024).toFixed(1)} KB` : '-' },
+              render: (size: number) => size ? formatBytes(size) : '-' },
             { title: '状态', dataIndex: 'status', key: 'status', width: 100,
               render: (status: string) => (
                 <Tag color={status === 'success' ? 'success' : status === 'failed' ? 'error' : 'processing'}>

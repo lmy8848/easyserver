@@ -4,6 +4,7 @@ import { LinkOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, CopyOutline
 import { fileShareApi } from '../../services/api';
 import type { FileShare } from '../../types';
 import { copyToClipboard } from '../../utils/clipboard';
+import { formatBytes, formatDateTime } from '../../utils/format';
 
 export default function FileShares() {
   const [shares, setShares] = useState<FileShare[]>([]);
@@ -167,17 +168,9 @@ export default function FileShares() {
     const expired = new Date(expiresAt) < new Date();
     return (
       <Tag color={expired ? 'error' : 'processing'}>
-        {expired ? '已过期' : new Date(expiresAt).toLocaleString()}
+        {expired ? '已过期' : formatDateTime(expiresAt)}
       </Tag>
     );
-  };
-
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const columns = [
@@ -194,7 +187,7 @@ export default function FileShares() {
     },
     {
       title: '大小', key: 'file_size', width: 100,
-      render: (_: unknown, record: FileShare) => record.is_dir ? '-' : formatSize(record.current_size !== undefined ? record.current_size : record.file_size),
+      render: (_: unknown, record: FileShare) => record.is_dir ? '-' : formatBytes(record.current_size !== undefined ? record.current_size : record.file_size),
     },
     {
       title: '下载次数', key: 'downloads', width: 90,
@@ -214,7 +207,7 @@ export default function FileShares() {
     },
     {
       title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 150,
-      render: (t: string) => new Date(t).toLocaleString(),
+      render: (t: string) => formatDateTime(t),
     },
     {
       title: '操作', key: 'action', width: 280,

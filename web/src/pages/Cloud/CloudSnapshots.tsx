@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Table, Button, Space, Tag, Modal, Form, Input, message } from 'antd';
 import { ReloadOutlined, CameraOutlined } from '@ant-design/icons';
 import { cloudApi } from '../../services/api';
+import { formatDateTime } from '../../utils/format';
 import type { Snapshot } from '../../types';
 
 interface Props {
@@ -58,7 +59,7 @@ export default function CloudSnapshots({ snapshots, selectedInstance, onRefresh 
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (time: string) => new Date(time).toLocaleString(),
+      render: (time: string) => formatDateTime(time),
     },
     {
       title: '操作',

@@ -3,8 +3,10 @@ import {
   Modal, Input, Table, Button, Space, Tag, Row, Col, Image,
 } from 'antd';
 import {
-  FolderOutlined, FileOutlined, SearchOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
+import { formatBytes, formatDateTime } from '../../utils/format';
+import { getFileIcon } from '../../utils/fileType';
 
 // ==================== Mkdir Modal ====================
 interface MkdirModalProps {
@@ -142,13 +144,13 @@ export function SearchModal({
             title: '名称', dataIndex: 'name',
             render: (name: string, record: any) => (
               <Space style={{ cursor: 'pointer' }} onClick={() => onItemClick(record)}>
-                {record.is_dir ? <FolderOutlined style={{ color: '#faad14' }} /> : <FileOutlined style={{ color: '#1890ff' }} />}
+                {getFileIcon(record.name, record.is_dir)}
                 {name}
               </Space>
             ),
           },
           { title: '路径', dataIndex: 'path', ellipsis: true },
-          { title: '大小', dataIndex: 'size', width: 100, render: (s: number) => `${(s / 1024).toFixed(1)} KB` },
+          { title: '大小', dataIndex: 'size', width: 100, render: (s: number) => formatBytes(s) },
           { title: '匹配', dataIndex: 'match', width: 80, render: (m: string) => <Tag color="blue">{m}</Tag> },
         ]}
       />
@@ -219,13 +221,13 @@ export function DetailsModal({ visible, data, onClose }: DetailsModalProps) {
             <Col span={8}><strong>类型：</strong></Col>
             <Col span={16}>{data.is_dir ? '文件夹' : '文件'}</Col>
             <Col span={8}><strong>大小：</strong></Col>
-            <Col span={16}>{(data.size_bytes / 1024).toFixed(1)} KB</Col>
+            <Col span={16}>{formatBytes(data.size_bytes)}</Col>
             <Col span={8}><strong>权限：</strong></Col>
             <Col span={16}>{data.mode} ({data.mode_octal})</Col>
             <Col span={8}><strong>属主：</strong></Col>
             <Col span={16}>UID: {data.uid}, GID: {data.gid}</Col>
             <Col span={8}><strong>修改时间：</strong></Col>
-            <Col span={16}>{new Date(data.modified_at).toLocaleString()}</Col>
+            <Col span={16}>{formatDateTime(data.modified_at)}</Col>
           </Row>
         </div>
       )}
@@ -325,7 +327,7 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
             { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true,
               render: (name: string, r: { is_dir: boolean }) => r.is_dir ? `📁 ${name}` : name },
             { title: '大小', dataIndex: 'size', key: 'size', width: 100,
-              render: (s: number, r: { is_dir: boolean }) => r.is_dir ? '-' : formatSize(s) },
+              render: (s: number, r: { is_dir: boolean }) => r.is_dir ? '-' : formatBytes(s) },
             { title: '类型', dataIndex: 'is_dir', key: 'is_dir', width: 80,
               render: (d: boolean) => d ? <Tag>目录</Tag> : <Tag color="blue">文件</Tag> },
           ]}
@@ -333,11 +335,4 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
       )}
     </Modal>
   );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
-  return `${(bytes / 1073741824).toFixed(1)} GB`;
 }

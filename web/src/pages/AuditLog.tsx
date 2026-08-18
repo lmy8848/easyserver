@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { auditApi, sshApi, type SSHLoginRecord } from '../services/api';
+import { getHttpStatusColor } from '../utils/status';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
@@ -241,13 +242,7 @@ export default function AuditLog() {
     return record.resource;
   };
 
-  const getStatusColor = (status: string) => {
-    const code = parseInt(status);
-    if (code >= 200 && code < 300) return 'success';
-    if (code >= 400 && code < 500) return 'warning';
-    if (code >= 500) return 'error';
-    return 'default';
-  };
+  const getStatusColor = (status: string) => getHttpStatusColor(status);
 
   // 统计图表配置 (memoized to prevent unnecessary re-renders)
   const userChartOption = useMemo(() => ({

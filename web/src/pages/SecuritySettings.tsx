@@ -3,6 +3,7 @@ import { Card, Button, Switch, Modal, Input, message, Typography, Space, List, A
 import { SafetyOutlined, KeyOutlined, CopyOutlined, DownloadOutlined, LockOutlined, DesktopOutlined, DeleteOutlined, LogoutOutlined, ReloadOutlined } from '@ant-design/icons';
 import { authApi } from '../services/api';
 import { copyToClipboard } from '../utils/clipboard';
+import { formatDateTime } from '../utils/format';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -367,9 +368,9 @@ export default function SecuritySettings() {
             { title: '设备', key: 'device', ellipsis: true,
               render: (_: unknown, r: Session) => r.client_type === 'mobile' ? (r.device_info || '移动设备') : r.user_agent },
             { title: '登录时间', dataIndex: 'login_at', key: 'login_at', width: 180,
-              render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+              render: (t: string) => t ? formatDateTime(t) : '-' },
             { title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 180,
-              render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+              render: (t: string) => t ? formatDateTime(t) : '-' },
             { title: '操作', key: 'action', width: 100,
               render: (_: unknown, record: Session) => (
                 record.token && !record.is_current ? (

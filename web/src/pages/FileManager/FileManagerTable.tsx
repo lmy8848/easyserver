@@ -2,13 +2,14 @@ import {
   Table, Button, Space, Dropdown,
 } from 'antd';
 import {
-  FolderOutlined, FileOutlined, DeleteOutlined,
+  DeleteOutlined,
   DownloadOutlined, CopyOutlined, FormOutlined, ScissorOutlined,
   ExpandOutlined, LockOutlined, FileTextOutlined,
   LinkOutlined,
 } from '@ant-design/icons';
 import type { FileEntry } from '../../types';
-import { formatFileSize } from './types';
+import { formatBytes, formatDateTime } from '../../utils/format';
+import { getFileIcon } from '../../utils/fileType';
 
 interface FileManagerTableProps {
   files: FileEntry[];
@@ -120,11 +121,7 @@ export default function FileManagerTable({
       sortOrder: (sortField === 'name' && sortOrder ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as 'ascend' | 'descend' | undefined,
       render: (_: unknown, record: FileEntry) => (
         <Space style={{ cursor: 'pointer' }} onClick={() => onClick(record)}>
-          {record.is_dir ? (
-            <FolderOutlined style={{ color: '#faad14' }} />
-          ) : (
-            <FileOutlined style={{ color: '#1890ff' }} />
-          )}
+          {getFileIcon(record.name, record.is_dir)}
           <span style={{ color: record.is_dir ? '#1890ff' : undefined }}>
             {record.name}
           </span>
@@ -141,7 +138,7 @@ export default function FileManagerTable({
       sortOrder: (sortField === 'size' && sortOrder ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as 'ascend' | 'descend' | undefined,
       render: (size: number, record: FileEntry) => {
         if (record.is_dir) return '-';
-        return formatFileSize(size);
+        return formatBytes(size);
       },
     },
     {
@@ -157,7 +154,7 @@ export default function FileManagerTable({
       width: 180,
       sorter: true,
       sortOrder: (sortField === 'modified' && sortOrder ? (sortOrder === 'asc' ? 'ascend' : 'descend') : undefined) as 'ascend' | 'descend' | undefined,
-      render: (time: string) => new Date(time).toLocaleString(),
+      render: (time: string) => formatDateTime(time),
     },
     {
       title: '操作',

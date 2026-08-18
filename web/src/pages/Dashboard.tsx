@@ -10,7 +10,7 @@ import {
 import ReactECharts from 'echarts-for-react';
 import { monitorApi } from '../services/api';
 import type { MonitorSnapshot, HistoryPoint } from '../types';
-import { formatBytes, formatUptime } from '../utils/format';
+import { formatBytes, formatUptime, formatDateTime } from '../utils/format';
 import { getPercentColor } from '../utils/status';
 import { useSSE } from '../hooks/useSSE';
 
@@ -394,7 +394,7 @@ export default function Dashboard() {
               <Descriptions.Item label="CPU 核数">{sys?.cpu_cores || '-'} 核</Descriptions.Item>
               <Descriptions.Item label="运行时间">{formatUptime(sys?.uptime_seconds || 0)}</Descriptions.Item>
               <Descriptions.Item label="最后更新" span={2}>
-                {stats?.timestamp ? new Date(stats.timestamp).toLocaleString() : '-'}
+                {stats?.timestamp ? formatDateTime(stats.timestamp) : '-'}
               </Descriptions.Item>
             </Descriptions>
           </Card>

@@ -12,30 +12,7 @@ import {
   ChmodModal, DetailsModal, PreviewModal,
 } from './FileManagerModals';
 import { copyToClipboard } from '../../utils/clipboard';
-
-// Previewable file extensions. Clicking a media/image/PDF/archive file opens
-// the preview modal instead of the text editor, which would try to read the
-// whole binary file into memory and hit the content-size limit for large files.
-const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'];
-const AUDIO_EXTS = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];
-const VIDEO_EXTS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'];
-const TEXT_EXTS = ['txt', 'md', 'json', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf', 'log', 'sh', 'py', 'go', 'js', 'ts', 'html', 'css', 'sql', 'env', 'csv', 'bat', 'ps1'];
-
-function fileExt(name: string): string {
-  return name.split('.').pop()?.toLowerCase() || '';
-}
-
-function isArchivePath(path: string): boolean {
-  const p = path.toLowerCase();
-  return p.endsWith('.zip') || p.endsWith('.tar') || p.endsWith('.tar.gz') || p.endsWith('.tgz') || p.endsWith('.gz');
-}
-
-// Media/binary files open in the preview modal on click; text files open in the editor.
-function isMediaOrBinary(path: string): boolean {
-  const ext = fileExt(path);
-  return IMAGE_EXTS.includes(ext) || AUDIO_EXTS.includes(ext) || VIDEO_EXTS.includes(ext)
-    || ext === 'pdf' || isArchivePath(path);
-}
+import { getPreviewType, type PreviewType } from '../../utils/fileType';
 
 export default function FileManager() {
   const [basePath, setBasePath] = useState<string>('');
@@ -217,9 +194,9 @@ export default function FileManager() {
       setCurrentPath(file.path);
       return;
     }
-    // Media/binary files open in the preview modal; text files open in the editor.
-    if (isMediaOrBinary(file.path)) {
-      showPreview(file.path);
+    const previewType = getPreviewType(file.path);
+    if (previewType) {
+      showPreview(file.path, previewType);
       return;
     }
     openFile(file.path);
@@ -446,23 +423,14 @@ export default function FileManager() {
     }
   };
 
-  const showPreview = async (path: string) => {
-    const ext = fileExt(path);
-    const isArchive = isArchivePath(path);
+  const showPreview = async (path: string, previewType?: PreviewType) => {
+    const type = previewType || getPreviewType(path);
+    if (!type) {
+      openFile(path);
+      return;
+    }
 
-    if (IMAGE_EXTS.includes(ext)) {
-      setPreviewType('image');
-      setPreviewPath(path);
-    } else if (AUDIO_EXTS.includes(ext)) {
-      setPreviewType('audio');
-      setPreviewPath(path);
-    } else if (VIDEO_EXTS.includes(ext)) {
-      setPreviewType('video');
-      setPreviewPath(path);
-    } else if (ext === 'pdf') {
-      setPreviewType('pdf');
-      setPreviewPath(path);
-    } else if (isArchive) {
+    if (type === 'archive') {
       try {
         const res = await fileApi.archiveList(path);
         setPreviewType('archive');
@@ -472,19 +440,9 @@ export default function FileManager() {
         message.error('无法读取压缩文件');
         return;
       }
-    } else if (TEXT_EXTS.includes(ext)) {
-      try {
-        const res = await fileApi.getContent(path);
-        setPreviewType('text');
-        setPreviewContent(res.data.data?.content || '');
-        setPreviewPath(path);
-      } catch {
-        message.error('无法预览');
-        return;
-      }
     } else {
-      message.info('不支持预览此文件类型');
-      return;
+      setPreviewType(type);
+      setPreviewPath(path);
     }
     setPreviewVisible(true);
   };

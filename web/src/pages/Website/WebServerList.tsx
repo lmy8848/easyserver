@@ -5,7 +5,7 @@ import {
 } from '@ant-design/icons';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
 import type { WebServer } from '../../types';
-import { getServiceStatusColor, ServiceStatusTag } from '../../utils/status';
+import { getStatusColor, StatusTag } from '../../utils/status';
 
 interface WebServerListProps {
   servers: WebServer[];
@@ -45,15 +45,11 @@ function renderServerIcon(name: string, size = 36) {
 }
 
 function statusTag(status: string) {
-  return <ServiceStatusTag status={status} />;
+  return <StatusTag status={status} />;
 }
 
 function statusColor(status: string) {
-  const colorName = getServiceStatusColor(status);
-  const colorMap: Record<string, string> = {
-    success: '#52c41a', error: '#ff4d4f', warning: '#faad14', default: '#999',
-  };
-  return colorMap[colorName] || '#999';
+  return getStatusColor(status);
 }
 
 export default function WebServerList({
