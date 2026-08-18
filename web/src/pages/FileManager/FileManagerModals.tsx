@@ -257,14 +257,12 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
   // 图片用 antd Image 内置预览层（全屏放大/缩放/旋转），不套外层 Modal。
   if (type === 'image') {
     return (
-      <Image
-        src={downloadUrl}
-        alt="preview"
-        style={{ display: 'none' }}
+      <Image.PreviewGroup
         preview={{
           open: visible,
           onOpenChange: (v) => { if (!v) onClose(); },
         }}
+        items={path ? [downloadUrl] : []}
       />
     );
   }

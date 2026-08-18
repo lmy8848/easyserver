@@ -585,7 +585,7 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) (any, error) {
 	if targetInfo.IsDir() {
 		// Zip and stream the directory
 		c.Header("Content-Type", "application/zip")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(targetPath)+".zip"))
+		c.Header("Content-Disposition", httpx.FormatContentDisposition("attachment", filepath.Base(targetPath)+".zip"))
 		c.Writer.WriteHeader(200)
 
 		zw := archive_zip.NewWriter(c.Writer)
@@ -638,10 +638,10 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) (any, error) {
 		contentType = "application/octet-stream"
 	}
 	extraHeaders := map[string]string{
-		"Content-Disposition": fmt.Sprintf("inline; filename=%q", filepath.Base(targetPath)),
+		"Content-Disposition": httpx.FormatContentDisposition("inline", filepath.Base(targetPath)),
 	}
 	if contentType == "application/octet-stream" {
-		extraHeaders["Content-Disposition"] = fmt.Sprintf("attachment; filename=%q", filepath.Base(targetPath))
+		extraHeaders["Content-Disposition"] = httpx.FormatContentDisposition("attachment", filepath.Base(targetPath))
 	}
 
 	c.DataFromReader(200, targetInfo.Size(), contentType, f, extraHeaders)

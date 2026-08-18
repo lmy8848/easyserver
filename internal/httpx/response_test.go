@@ -100,3 +100,39 @@ func TestH_ErrorAndAbort(t *testing.T) {
 		assert.Equal(t, "raw bytes stream", w.Body.String())
 	})
 }
+
+func TestFormatContentDisposition(t *testing.T) {
+	tests := []struct {
+		disposition string
+		filename    string
+		want        string
+	}{
+		{
+			disposition: "inline",
+			filename:    "test.png",
+			want:        `inline; filename="test.png"; filename*=UTF-8''test.png`,
+		},
+		{
+			disposition: "inline",
+			filename:    "微信图片_20241230144544_9.png",
+			want:        `inline; filename="_____20241230144544_9.png"; filename*=UTF-8''%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20241230144544_9.png`,
+		},
+		{
+			disposition: "attachment",
+			filename:    "my photo (1).jpg",
+			want:        `attachment; filename="my photo (1).jpg"; filename*=UTF-8''my%20photo%20%281%29.jpg`,
+		},
+		{
+			disposition: "inline",
+			filename:    "中文",
+			want:        `inline; filename="__"; filename*=UTF-8''%E4%B8%AD%E6%96%87`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			got := FormatContentDisposition(tt.disposition, tt.filename)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

@@ -1,7 +1,11 @@
 package httpx
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -68,4 +72,37 @@ func H(fn func(c *gin.Context) (any, error)) gin.HandlerFunc {
 		}
 		Success(c, data)
 	}
+}
+
+// ============================================================
+// Content-Disposition 工具
+// ============================================================
+
+// FormatContentDisposition constructs an RFC 6266 & RFC 5987 compliant Content-Disposition header.
+// It provides an ASCII fallback in filename="..." and the full UTF-8 filename in filename*=UTF-8”...
+// This avoids sending raw non-ASCII bytes in HTTP headers which breaks in HTTP proxies and modern browsers.
+func FormatContentDisposition(disposition, filename string) string {
+	ascii := toASCIIFilename(filename)
+	encoded := url.PathEscape(filename)
+	return fmt.Sprintf(`%s; filename=%q; filename*=UTF-8''%s`, disposition, ascii, encoded)
+}
+
+func toASCIIFilename(filename string) string {
+	var b strings.Builder
+	for _, r := range filename {
+		if r >= 0x20 && r <= 0x7E && r != '"' && r != '\\' && r != ';' {
+			b.WriteRune(r)
+		} else if r > 0x7E {
+			b.WriteRune('_')
+		}
+	}
+	res := b.String()
+	ext := filepath.Ext(filename)
+	if res == "" || res == ext {
+		if ext != "" {
+			return "file" + ext
+		}
+		return "file"
+	}
+	return res
 }

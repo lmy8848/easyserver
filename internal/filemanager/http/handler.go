@@ -1,7 +1,6 @@
 package http
 
 import (
-	"fmt"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -183,7 +182,7 @@ func (h *FileManagerHandler) Download(c *gin.Context) (any, error) {
 	// (e.g. .m4a) on Linux.
 	if mt, ok := inlineMIME(base); ok {
 		c.Header("Content-Type", mt)
-		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", base))
+		c.Header("Content-Disposition", httpx.FormatContentDisposition("inline", base))
 		// PDF 预览通过 <iframe> 嵌入此接口返回的内容；SecurityMiddleware 默认的
 		// frame-ancestors 'none' / X-Frame-Options: DENY 会阻止同源页面嵌入，
 		// 这里放宽为同源可嵌入。<img>/<video>/<audio> 不受 frame 头约束，
@@ -197,7 +196,7 @@ func (h *FileManagerHandler) Download(c *gin.Context) (any, error) {
 
 	// Regular download: force attachment so the browser saves it to disk.
 	c.DataFromReader(200, info.Size(), "application/octet-stream", f, map[string]string{
-		"Content-Disposition": fmt.Sprintf("attachment; filename=%q", base),
+		"Content-Disposition": httpx.FormatContentDisposition("attachment", base),
 	})
 	return nil, nil
 }
@@ -230,6 +229,7 @@ var inlineMIMEByExt = map[string]string{
 	".svg":  "image/svg+xml",
 	".bmp":  "image/bmp",
 	".ico":  "image/x-icon",
+	".avif": "image/avif",
 	// document
 	".pdf": "application/pdf",
 }
