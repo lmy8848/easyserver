@@ -36,6 +36,23 @@ export default function SSH() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [loginsLoading, setLoginsLoading] = useState(true);
   const [activeTab, setActiveTab] = useTab('config');
+  // sshd 可用性：null=检测中，false=不可用（页面占位，不渲染操作）
+  const [sshAvailable, setSSHAvailable] = useState<boolean | null>(null);
+  const [unavailableReason, setUnavailableReason] = useState('');
+  const [sshRunning, setSSHRunning] = useState(false);
+
+  // 挂载先检测 ssh 是否可用，避免不可用时各 tab 操作逐个报错
+  const checkStatus = async () => {
+    try {
+      const res = await api.get('/ssh/status');
+      const data = res.data?.data;
+      setSSHAvailable(data?.available ?? false);
+      setUnavailableReason(data?.reason || '');
+      setSSHRunning(data?.running ?? false);
+    } catch {
+      setSSHAvailable(true); // 检测接口本身失败不阻塞，由各操作错误提示兜底
+    }
+  };
 
   const loadConfig = useCallback(async () => {
     try {
@@ -44,8 +61,8 @@ export default function SSH() {
       if (config) {
         configForm.setFieldsValue(config);
       }
-    } catch {
-      message.error('加载 SSH 配置失败');
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || '加载 SSH 配置失败');
     } finally {
       setLoading(false);
     }
@@ -73,10 +90,14 @@ export default function SSH() {
     }
   };
 
-  // Load SSH config on mount
+  // 检测 ssh 可用性，可用才加载配置
   useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+    checkStatus();
+  }, []);
+
+  useEffect(() => {
+    if (sshAvailable) loadConfig();
+  }, [sshAvailable, loadConfig]);
 
   // Auto-load data when switching tabs
   useEffect(() => {
@@ -180,9 +201,19 @@ export default function SSH() {
 
   return (
     <div>
-      <h2>SSH 管理</h2>
-      <Tabs
-        activeKey={activeTab}
+      <h2>
+        SSH 管理
+        {sshAvailable === true && (
+          <Tag color={sshRunning ? 'success' : 'warning'} style={{ marginLeft: 8 }}>
+            {sshRunning ? '运行中' : '已停止'}
+          </Tag>
+        )}
+      </h2>
+      {sshAvailable === null ? (
+        <Spin />
+      ) : sshAvailable ? (
+        <Tabs
+          activeKey={activeTab}
         onChange={setActiveTab}
         items={[
           {
@@ -202,16 +233,8 @@ export default function SSH() {
                   <Form
                     form={configForm}
                     layout="vertical"
-                    initialValues={{
-                      port: 22,
-                      permit_root_login: 'yes',
-                      password_auth: 'yes',
-                      pubkey_auth: 'yes',
-                      max_auth_tries: 6,
-                      login_grace_time: 120,
-                      client_alive_interval: 0,
-                      client_alive_count_max: 3,
-                    }}
+                    // 不填 initialValues：配置值来自后端 sshd -T 的真实生效配置，
+                    // 加载失败时表单留空并显示错误，而非误导性的自定默认值。
                   >
                     <Form.Item name="port" label="监听端口">
                       <InputNumber min={1} max={65535} style={{ width: '100%' }} />
@@ -321,7 +344,15 @@ export default function SSH() {
             children: <SSHHardeningTab />,
           },
         ]}
-      />
+        />
+      ) : (
+        <Alert
+          type="error"
+          showIcon
+          message="SSH 服务不可用"
+          description={unavailableReason || '未检测到 sshd'}
+        />
+      )}
     </div>
   );
 }

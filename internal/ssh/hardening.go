@@ -29,7 +29,7 @@ type HardenOptions struct {
 //   - DisablePasswordAuth requires at least one authorized key (avoid lockout).
 //   - changing Port requires the new port to be free (avoid lockout).
 func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, error) {
-	cfg, err := s.GetConfig()
+	cfg, err := s.GetConfig(ctx)
 	if err != nil {
 		return nil, errx.Internal("读取 SSH 配置失败: %w", err)
 	}
@@ -80,9 +80,9 @@ func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, erro
 	return cfg, nil
 }
 
-// restoreBackup copies the .bak backup back over sshd_config.
+// restoreBackup copies the .bak backup back over the drop-in file.
 func (s *Service) restoreBackup() error {
-	return copyFile(s.configPath+".bak", s.configPath)
+	return copyFile(sshdDropInPath+".bak", sshdDropInPath)
 }
 
 // portAvailable reports whether a TCP port is free to listen on.

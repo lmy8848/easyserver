@@ -24,11 +24,16 @@ func NewSSHHandler(sshService *ssh.Service) *SSHHandler {
 
 // GetConfig returns the current SSH configuration
 func (h *SSHHandler) GetConfig(c *gin.Context) (any, error) {
-	config, err := h.sshService.GetConfig()
+	config, err := h.sshService.GetConfig(c.Request.Context())
 	if err != nil {
-		return nil, err
+		return nil, errx.Internal("读取 SSH 配置失败: %w", err)
 	}
 	return config, nil
+}
+
+// CheckStatus reports whether the SSH server is usable.
+func (h *SSHHandler) CheckStatus(c *gin.Context) (any, error) {
+	return h.sshService.CheckStatus(c.Request.Context())
 }
 
 // SaveConfig saves the SSH configuration
@@ -268,6 +273,7 @@ func RegisterRoutes(protected *gin.RouterGroup, sshService *ssh.Service) {
 	handler := NewSSHHandler(sshService)
 
 	// SSH Config
+	protected.GET("/ssh/status", httpx.H(handler.CheckStatus))
 	protected.GET("/ssh/config", httpx.H(handler.GetConfig))
 	protected.PUT("/ssh/config", httpx.H(handler.SaveConfig))
 	protected.POST("/ssh/config/test", httpx.H(handler.TestConfig))

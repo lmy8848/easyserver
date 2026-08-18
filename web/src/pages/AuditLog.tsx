@@ -9,7 +9,7 @@ import {
   DownloadOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { auditApi, sshApi, type SSHLoginRecord } from '../services/api';
+import { auditApi } from '../services/api';
 import { useTab } from '../hooks/useTab';
 import { getHttpStatusColor } from '../utils/status';
 import dayjs from 'dayjs';
@@ -71,10 +71,6 @@ export default function AuditLog() {
   const [stats, setStats] = useState<AuditStats | null>(null);
   const [statsDays, setStatsDays] = useState(7);
   const [activeTab, setActiveTab] = useTab('operation');
-
-  // SSH 登录日志
-  const [sshLogins, setSSHLogins] = useState<SSHLoginRecord[]>([]);
-  const [sshLoading, setSSHLoading] = useState(false);
 
   // 筛选条件
   const [page, setPage] = useState(1);
@@ -146,18 +142,6 @@ export default function AuditLog() {
     }
   }, [statsDays]);
 
-  const fetchSSHLogins = async () => {
-    setSSHLoading(true);
-    try {
-      const res = await sshApi.getLogins(200);
-      setSSHLogins(res.data?.data?.records || []);
-    } catch (error) {
-      console.error('Failed to fetch SSH logins:', error);
-    } finally {
-      setSSHLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchStats(); // 初始加载统计数据，显示异常告警角标
   }, [fetchStats]);
@@ -169,9 +153,6 @@ export default function AuditLog() {
   useEffect(() => {
     if (activeTab === 'stats') {
       fetchStats();
-    }
-    if (activeTab === 'ssh') {
-      fetchSSHLogins();
     }
   }, [activeTab, statsDays, fetchStats]);
 
@@ -442,7 +423,6 @@ export default function AuditLog() {
                 { label: '操作日志', value: 'operation' },
                 { label: '请求日志', value: 'request' },
                 { label: '统计分析', value: 'stats' },
-                { label: 'SSH 登录', value: 'ssh' },
               ]}
               value={activeTab}
               onChange={(v) => {
@@ -535,44 +515,6 @@ export default function AuditLog() {
                 <Card><ReactECharts option={statusChartOption} style={{ height: 300 }} /></Card>
               </Col>
             </Row>
-          </>
-        )}
-
-
-
-        {activeTab === 'ssh' && (
-          <>
-            <Space style={{ marginBottom: 16 }}>
-              <Text>系统 SSH 登录历史</Text>
-              <Button icon={<ReloadOutlined />} onClick={fetchSSHLogins} loading={sshLoading}>刷新</Button>
-            </Space>
-            <Table
-              dataSource={sshLogins}
-              rowKey={(r) => `${r.user}-${r.ip}-${r.time}-${r.port}-${r.method}`}
-              loading={sshLoading}
-              size="small"
-              pagination={{ pageSize: 50 }}
-              columns={[
-                { title: '用户名', dataIndex: 'user', width: 100 },
-                { title: 'IP 地址', dataIndex: 'ip', width: 150 },
-                { title: '端口', dataIndex: 'port', width: 80 },
-                { title: '登录时间', dataIndex: 'time', width: 200 },
-                { title: '终端', dataIndex: 'tty', width: 100 },
-                { title: '认证方式', dataIndex: 'method', width: 100 },
-                {
-                  title: '状态', dataIndex: 'status', width: 100,
-                  render: (v: string) => {
-                    const colorMap: Record<string, string> = {
-                      success: 'blue', failed: 'red',
-                    };
-                    const labelMap: Record<string, string> = {
-                      success: '成功', failed: '失败',
-                    };
-                    return <Tag color={colorMap[v] || 'default'}>{labelMap[v] || v}</Tag>;
-                  },
-                },
-              ]}
-            />
           </>
         )}
       </Card>

@@ -12,42 +12,79 @@ import (
 	"strings"
 )
 
-const sshdConfigPath = "/etc/ssh/sshd_config"
+const (
+	sshdConfigPath = "/etc/ssh/sshd_config"
+	// sshdDropInPath 是 EasyServer 托管的 drop-in 配置文件。文件名必须以 .conf
+	// 结尾才会被主配置中的 `Include /etc/ssh/sshd_config.d/*.conf` 加载
+	// （Debian/Ubuntu 默认有这一行），这样保存配置不再改写主配置文件。
+	// `99-` 前缀保证按字典序最后处理（sshd 关键字"先到先得"），覆盖其他
+	// drop-in（如 50-cloud-init.conf）的同名指令。
+	sshdDropInDir  = "/etc/ssh/sshd_config.d"
+	sshdDropInPath = sshdDropInDir + "/99-easyserver.conf"
+)
 
 // Service manages SSH server configuration.
-type Service struct {
-	configPath string
-}
+type Service struct{}
 
 // NewService creates a new SSH service.
 func NewService() *Service {
-	return &Service{
-		configPath: sshdConfigPath,
-	}
+	return &Service{}
 }
 
-// GetConfig parses and returns the current SSH configuration.
-func (s *Service) GetConfig() (*Config, error) {
-	config := &Config{
-		Port:                   22,
-		PermitRootLogin:        "yes",
-		PasswordAuthentication: "yes",
-		PubkeyAuthentication:   "yes",
-		MaxAuthTries:           6,
-		LoginGraceTime:         120,
-		ClientAliveInterval:    0,
-		ClientAliveCountMax:    3,
+// sshdBinary returns the sshd path, falling back to the standard location when
+// it's not on PATH (普通用户/受限环境的 PATH 通常不含 /usr/sbin)。
+func sshdBinary() string {
+	if p, err := exec.LookPath("sshd"); err == nil {
+		return p
 	}
+	return "/usr/sbin/sshd"
+}
 
-	file, err := os.Open(s.configPath)
+// CheckStatus reports whether the SSH server is usable (sshd binary present),
+// and whether the sshd service is currently running.
+// 前端据此决定是否渲染 SSH 管理操作，避免不可用时每个操作逐个报错。
+func (s *Service) CheckStatus(ctx context.Context) (map[string]any, error) {
+	if _, err := os.Stat(sshdBinary()); err != nil {
+		//nolint:nilerr // 不可用是正常业务结果（前端展示占位），不是错误。
+		return map[string]any{
+			"available": false,
+			"reason":    "未检测到 sshd（OpenSSH Server）：可能未安装，或系统使用其他 SSH 实现（如 dropbear）",
+		}, nil
+	}
+	// 服务状态：先试 sshd 再试 ssh（Debian 的服务名是 ssh）。
+	running := false
+	for _, unit := range []string{"sshd", "ssh"} {
+		out, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).Output()
+		if err == nil && strings.TrimSpace(string(out)) == "active" {
+			running = true
+			break
+		}
+	}
+	return map[string]any{
+		"available": true,
+		"reason":    "",
+		"running":   running,
+	}, nil
+}
+
+// GetConfig returns the effective SSH configuration parsed from `sshd -T`
+// (Include 展开、"先到先得"合并后的最终生效配置)。失败即报错
+func (s *Service) GetConfig(ctx context.Context) (*Config, error) {
+	out, err := exec.CommandContext(ctx, sshdBinary(), "-T").CombinedOutput()
 	if err != nil {
-		return config, nil // Return defaults if file doesn't exist
+		return nil, fmt.Errorf("sshd -T 失败: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	defer file.Close()
+	// sshd -T 输出完整生效配置（含默认值），解析即最终值，无需预置默认。
+	config := &Config{}
+	s.applyLines(config, strings.Split(string(out), "\n"))
+	return config, nil
+}
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+// applyLines parses sshd config directives (`sshd -T` output, keys are matched
+// case-insensitively) into config.
+func (s *Service) applyLines(config *Config, lines []string) {
+	for _, text := range lines {
+		line := strings.TrimSpace(text)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -94,111 +131,82 @@ func (s *Service) GetConfig() (*Config, error) {
 			config.DenyUsers = value
 		}
 	}
-
-	return config, nil
 }
 
-// SaveConfig saves the SSH configuration.
+// hasSSHDIncludeDir reports whether the main config includes the sshd_config.d
+// directory (Debian/Ubuntu 默认第一行 `Include /etc/ssh/sshd_config.d/*.conf`)。
+// 未 Include 时 drop-in 不会生效——保存直接报错，由用户手动补上 Include，
+// 面板不猜测、不静默写主配置。
+func hasSSHDIncludeDir() bool {
+	for _, line := range readLines(sshdConfigPath) {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if after, ok := strings.CutPrefix(trimmed, "Include"); ok {
+			if strings.Contains(after, "sshd_config.d") && strings.Contains(after, ".conf") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SaveConfig saves the SSH configuration to the EasyServer drop-in
+// （/etc/ssh/sshd_config.d/99-easyserver.conf），不动主配置文件。
 func (s *Service) SaveConfig(config *Config) error {
-	// Backup original file
-	backupPath := s.configPath + ".bak"
-	if err := copyFile(s.configPath, backupPath); err != nil {
+	if !hasSSHDIncludeDir() {
+		return fmt.Errorf("主配置未 Include %s，drop-in 不会生效；请在 /etc/ssh/sshd_config 中加入 `Include %s/*.conf` 后重试", sshdDropInDir, sshdDropInDir)
+	}
+	if err := os.MkdirAll(sshdDropInDir, 0755); err != nil {
+		return fmt.Errorf("create drop-in dir: %w", err)
+	}
+	return s.saveDropIn(sshdDropInPath, config)
+}
+
+// saveDropIn writes the managed settings as a standalone drop-in file
+// (atomic tmp+rename). 整文件重写——文件完全由 EasyServer 生成，无需保留结构。
+func (s *Service) saveDropIn(path string, config *Config) error {
+	// Backup previous drop-in so Harden 测试失败时可回滚。
+	if err := copyFile(path, path+".bak"); err != nil {
 		log.Printf("ssh: backup failed: %v", err)
 	}
 
-	// Read original file to preserve comments and structure
-	originalLines := readLines(s.configPath)
-
-	// Build new config lines
-	var newLines []string
-	updated := make(map[string]bool)
-
-	for _, line := range originalLines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			newLines = append(newLines, line)
-			continue
-		}
-
-		parts := strings.SplitN(trimmed, " ", 2)
-		if len(parts) != 2 {
-			newLines = append(newLines, line)
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		switch key {
-		case "Port":
-			newLines = append(newLines, fmt.Sprintf("Port %d", config.Port))
-			updated["Port"] = true
-		case "PermitRootLogin":
-			newLines = append(newLines, "PermitRootLogin "+config.PermitRootLogin)
-			updated["PermitRootLogin"] = true
-		case "PasswordAuthentication":
-			newLines = append(newLines, "PasswordAuthentication "+config.PasswordAuthentication)
-			updated["PasswordAuthentication"] = true
-		case "PubkeyAuthentication":
-			newLines = append(newLines, "PubkeyAuthentication "+config.PubkeyAuthentication)
-			updated["PubkeyAuthentication"] = true
-		case "MaxAuthTries":
-			newLines = append(newLines, fmt.Sprintf("MaxAuthTries %d", config.MaxAuthTries))
-			updated["MaxAuthTries"] = true
-		case "LoginGraceTime":
-			newLines = append(newLines, fmt.Sprintf("LoginGraceTime %d", config.LoginGraceTime))
-			updated["LoginGraceTime"] = true
-		case "ClientAliveInterval":
-			newLines = append(newLines, fmt.Sprintf("ClientAliveInterval %d", config.ClientAliveInterval))
-			updated["ClientAliveInterval"] = true
-		case "ClientAliveCountMax":
-			newLines = append(newLines, fmt.Sprintf("ClientAliveCountMax %d", config.ClientAliveCountMax))
-			updated["ClientAliveCountMax"] = true
-		case "AllowUsers":
-			if config.AllowUsers != "" {
-				newLines = append(newLines, "AllowUsers "+config.AllowUsers)
-			}
-			updated["AllowUsers"] = true
-		case "DenyUsers":
-			if config.DenyUsers != "" {
-				newLines = append(newLines, "DenyUsers "+config.DenyUsers)
-			}
-			updated["DenyUsers"] = true
-		default:
-			newLines = append(newLines, line)
-		}
+	lines := []string{
+		"# EasyServer 托管的 SSH 配置。请勿手动编辑——此文件会被整文件覆盖。",
+		"",
+		fmt.Sprintf("Port %d", config.Port),
+		"PermitRootLogin " + config.PermitRootLogin,
+		"PasswordAuthentication " + config.PasswordAuthentication,
+		"PubkeyAuthentication " + config.PubkeyAuthentication,
+		fmt.Sprintf("MaxAuthTries %d", config.MaxAuthTries),
+		fmt.Sprintf("LoginGraceTime %d", config.LoginGraceTime),
+		fmt.Sprintf("ClientAliveInterval %d", config.ClientAliveInterval),
+		fmt.Sprintf("ClientAliveCountMax %d", config.ClientAliveCountMax),
+	}
+	// ponytail: sshd 无"清除指令"语法，AllowUsers/DenyUsers 置空时只能不写行；
+	// 若主配置或其他 drop-in 已有该指令，清空后仍需手动改主配置。
+	if config.AllowUsers != "" {
+		lines = append(lines, "AllowUsers "+config.AllowUsers)
+	}
+	if config.DenyUsers != "" {
+		lines = append(lines, "DenyUsers "+config.DenyUsers)
 	}
 
-	// Append new settings that weren't in the original file
-	if !updated["Port"] {
-		newLines = append(newLines, fmt.Sprintf("Port %d", config.Port))
-	}
-	if !updated["PermitRootLogin"] {
-		newLines = append(newLines, "PermitRootLogin "+config.PermitRootLogin)
-	}
-	if !updated["PasswordAuthentication"] {
-		newLines = append(newLines, "PasswordAuthentication "+config.PasswordAuthentication)
-	}
-	if !updated["PubkeyAuthentication"] {
-		newLines = append(newLines, "PubkeyAuthentication "+config.PubkeyAuthentication)
-	}
-
-	// Write to temp file first
-	tmpPath := s.configPath + ".tmp"
-	if err := writeLines(tmpPath, newLines); err != nil {
+	tmpPath := path + ".tmp"
+	if err := writeLines(tmpPath, lines); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-
-	// Replace original file
-	if err := os.Rename(tmpPath, s.configPath); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("replace config: %w", err)
 	}
-
-	log.Printf("ssh: config saved to %s", s.configPath)
+	log.Printf("ssh: config saved to %s", path)
 	return nil
 }
 
 // TestConfig tests the SSH configuration.
 func (s *Service) TestConfig(ctx context.Context) (string, error) {
-	output, err := exec.CommandContext(ctx, "sshd", "-t").CombinedOutput()
+	output, err := exec.CommandContext(ctx, sshdBinary(), "-t").CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("config test failed: %w", err)
 	}
@@ -249,7 +257,7 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 
 	// Method 2: Use `ss` to detect all SSH connections (including non-interactive)
 	sshPort := 22
-	if cfg, err := s.GetConfig(); err == nil && cfg.Port > 0 {
+	if cfg, err := s.GetConfig(ctx); err == nil && cfg.Port > 0 {
 		sshPort = cfg.Port
 	}
 	sshPortStr := fmt.Sprintf(":%d ", sshPort)
