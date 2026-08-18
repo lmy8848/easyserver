@@ -3,9 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
-
 	"fmt"
-	"time"
 
 	"easyserver/internal/infra/errx"
 )
@@ -103,20 +101,6 @@ func (r *sqliteUserRepo) Create(ctx context.Context, user *User) error {
 	return nil
 }
 
-func (r *sqliteUserRepo) Update(ctx context.Context, user *User) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET username = ?, role = ?, ip_whitelist = ?, updated_at = CURRENT_TIMESTAMP
-		 WHERE id = ?`,
-		user.Username, user.Role, user.IPWhitelist, user.ID,
-	)
-	return err
-}
-
-func (r *sqliteUserRepo) Delete(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
-	return err
-}
-
 func (r *sqliteUserRepo) List(ctx context.Context, offset, limit int) ([]User, int64, error) {
 	var total int64
 	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&total)
@@ -167,18 +151,18 @@ func (r *sqliteUserRepo) List(ctx context.Context, offset, limit int) ([]User, i
 	return users, total, nil
 }
 
-func (r *sqliteUserRepo) UpdateLoginAttempts(ctx context.Context, id int64, attempts int, lockedUntil *time.Time) error {
-	_, err := r.db.ExecContext(ctx,
-		"UPDATE users SET login_attempts = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		attempts, lockedUntil, id,
-	)
-	return err
-}
-
 func (r *sqliteUserRepo) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {
 	_, err := r.db.ExecContext(ctx,
 		"UPDATE users SET password_hash = ?, must_change_pass = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
 		passwordHash, id,
+	)
+	return err
+}
+
+func (r *sqliteUserRepo) UpdateUsername(ctx context.Context, id int64, username string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE users SET username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		username, id,
 	)
 	return err
 }
@@ -191,20 +175,23 @@ func (r *sqliteUserRepo) SetMustChangePass(ctx context.Context, id int64, mustCh
 	return err
 }
 
-func (r *sqliteUserRepo) IncrementLoginAttempts(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE users SET login_attempts = login_attempts + 1 WHERE id = ?", id)
-	return err
-}
-
-func (r *sqliteUserRepo) IncrementLoginAttemptsWithLock(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET
+// maxAttempts<=0 时仅计数，不触发锁定。返回本次是否触发了锁定。
+func (r *sqliteUserRepo) IncrementLoginAttempts(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) (bool, error) {
+	res, err := r.db.ExecContext(ctx, `UPDATE users SET
 		login_attempts = login_attempts + 1,
 		locked_until = CASE
-			WHEN login_attempts + 1 >= ? THEN datetime('now', ?)
+			WHEN ? > 0 AND login_attempts + 1 >= ? THEN datetime('now', ?)
 			ELSE locked_until
 		END
-		WHERE id = ?`, maxAttempts, fmt.Sprintf("+%d seconds", lockoutSeconds), id)
-	return err
+		WHERE id = ?`, maxAttempts, maxAttempts, fmt.Sprintf("+%d seconds", lockoutSeconds), id)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0 && maxAttempts > 0, nil
 }
 
 func (r *sqliteUserRepo) ResetLoginState(ctx context.Context, id int64, ip string) error {
@@ -212,35 +199,4 @@ func (r *sqliteUserRepo) ResetLoginState(ctx context.Context, id int64, ip strin
 		"UPDATE users SET login_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP, last_login_ip = ? WHERE id = ?",
 		ip, id)
 	return err
-}
-
-func (r *sqliteUserRepo) UpdateLastLoginIP(ctx context.Context, id int64, ip string) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE users SET last_login_ip = ? WHERE id = ?", ip, id)
-	return err
-}
-
-func (r *sqliteUserRepo) SetAccountExpiry(ctx context.Context, id int64, expiresAt *time.Time) error {
-	if expiresAt == nil {
-		_, err := r.db.ExecContext(ctx, "UPDATE users SET expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
-		return err
-	}
-	_, err := r.db.ExecContext(ctx, "UPDATE users SET expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", expiresAt, id)
-	return err
-}
-
-func (r *sqliteUserRepo) GetAccountExpiry(ctx context.Context, id int64) (sql.NullTime, error) {
-	var expiresAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, "SELECT expires_at FROM users WHERE id = ?", id).Scan(&expiresAt)
-	return expiresAt, err
-}
-
-func (r *sqliteUserRepo) SetIPWhitelist(ctx context.Context, id int64, whitelist string) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE users SET ip_whitelist = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", whitelist, id)
-	return err
-}
-
-func (r *sqliteUserRepo) GetIPWhitelist(ctx context.Context, id int64) (string, error) {
-	var whitelist string
-	err := r.db.QueryRowContext(ctx, "SELECT COALESCE(ip_whitelist, '') FROM users WHERE id = ?", id).Scan(&whitelist)
-	return whitelist, err
 }

@@ -91,6 +91,9 @@ export const authApi = {
   getProfile: () =>
     api.get<ApiResponse<User>>('/auth/me'),
 
+  changeUsername: (newUsername: string, password: string) =>
+    api.put<ApiResponse<{ user: User; token?: string }>>('/auth/username', { new_username: newUsername, password }),
+
   changePassword: (oldPassword: string, newPassword: string) =>
     api.post<ApiResponse>('/auth/change-password', { old_password: oldPassword, new_password: newPassword }),
 

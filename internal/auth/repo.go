@@ -2,28 +2,18 @@ package auth
 
 import (
 	"context"
-	"database/sql"
-	"time"
 )
 
 type UserRepo interface {
 	GetByID(ctx context.Context, id int64) (*User, error)
 	GetByUsername(ctx context.Context, username string) (*User, error)
 	Create(ctx context.Context, user *User) error
-	Update(ctx context.Context, user *User) error
-	Delete(ctx context.Context, id int64) error
 	List(ctx context.Context, offset, limit int) ([]User, int64, error)
-	UpdateLoginAttempts(ctx context.Context, id int64, attempts int, lockedUntil *time.Time) error
 	UpdatePassword(ctx context.Context, id int64, passwordHash string) error
+	UpdateUsername(ctx context.Context, id int64, username string) error
 	SetMustChangePass(ctx context.Context, id int64, mustChange bool) error
-	IncrementLoginAttempts(ctx context.Context, id int64) error
-	IncrementLoginAttemptsWithLock(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) error
+	IncrementLoginAttempts(ctx context.Context, id int64, maxAttempts int, lockoutSeconds int) (bool, error)
 	ResetLoginState(ctx context.Context, id int64, ip string) error
-	UpdateLastLoginIP(ctx context.Context, id int64, ip string) error
-	SetAccountExpiry(ctx context.Context, id int64, expiresAt *time.Time) error
-	GetAccountExpiry(ctx context.Context, id int64) (sql.NullTime, error)
-	SetIPWhitelist(ctx context.Context, id int64, whitelist string) error
-	GetIPWhitelist(ctx context.Context, id int64) (string, error)
 }
 
 // TOTPer is the subset of TOTPRepository that AuthService needs.
@@ -40,6 +30,4 @@ type TOTPRepo interface {
 	GetPasswordHash(ctx context.Context, userID int64) (string, error)
 	GetBackupCodes(ctx context.Context, userID int64) (string, error)
 	UpdateBackupCodes(ctx context.Context, userID int64, codesJSON string) error
-	GetPendingSecret(ctx context.Context, userID int64) (string, error)
-	StorePendingSecret(ctx context.Context, userID int64, secret string) error
 }

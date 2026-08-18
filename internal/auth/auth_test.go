@@ -277,6 +277,18 @@ func TestChangePassword_WrongOldPassword(t *testing.T) {
 	}
 }
 
+func TestChangePassword_SamePassword(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	svc := newTestAuthService(db)
+	userID := createTestUser(t, db, "admin", "Admin123", false)
+
+	err := svc.ChangePassword(context.Background(), userID, "Admin123", "Admin123")
+	if err == nil {
+		t.Fatal("expected error when new password equals old password")
+	}
+}
+
 func TestChangePassword_AccountLocked(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -312,5 +324,76 @@ func TestChangePassword_UserNotFound(t *testing.T) {
 	err := svc.ChangePassword(context.Background(), 99999, "Admin123", "NewPass456")
 	if err == nil {
 		t.Fatal("expected error for non-existent user")
+	}
+}
+
+// --- TestChangeUsername ---
+
+func TestChangeUsername_Success(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	svc := newTestAuthService(db)
+	userID := createTestUser(t, db, "olduser", "Admin123", false)
+
+	err := svc.ChangeUsername(context.Background(), userID, "newuser", "Admin123")
+	if err != nil {
+		t.Fatalf("ChangeUsername failed: %v", err)
+	}
+
+	// Verify old username no longer logs in
+	_, err = svc.Login(context.Background(), "olduser", "Admin123")
+	if err == nil {
+		t.Error("old username should not log in")
+	}
+
+	// Verify new username logs in
+	user, err := svc.Login(context.Background(), "newuser", "Admin123")
+	if err != nil {
+		t.Fatalf("Login with new username failed: %v", err)
+	}
+	if user.Username != "newuser" {
+		t.Errorf("Username = %q, want %q", user.Username, "newuser")
+	}
+}
+
+func TestChangeUsername_WrongPassword(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	svc := newTestAuthService(db)
+	userID := createTestUser(t, db, "myuser", "Admin123", false)
+
+	err := svc.ChangeUsername(context.Background(), userID, "newuser", "WrongPass")
+	if err == nil {
+		t.Fatal("expected error for wrong password")
+	}
+}
+
+func TestChangeUsername_Duplicate(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	svc := newTestAuthService(db)
+	userID := createTestUser(t, db, "user1", "Admin123", false)
+	createTestUser(t, db, "user2", "Admin123", false)
+
+	err := svc.ChangeUsername(context.Background(), userID, "user2", "Admin123")
+	if err == nil {
+		t.Fatal("expected error for duplicate username")
+	}
+}
+
+func TestChangeUsername_InvalidFormat(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	svc := newTestAuthService(db)
+	userID := createTestUser(t, db, "validuser", "Admin123", false)
+
+	// too short
+	if err := svc.ChangeUsername(context.Background(), userID, "ab", "Admin123"); err == nil {
+		t.Error("expected error for short username")
+	}
+
+	// illegal characters
+	if err := svc.ChangeUsername(context.Background(), userID, "bad user name!", "Admin123"); err == nil {
+		t.Error("expected error for username with invalid characters")
 	}
 }

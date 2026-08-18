@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log"
 	"math/big"
-	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -43,6 +42,8 @@ type AuthService struct {
 	loginLogger LoginEventLogger
 	totpRepo    TOTPRepo
 	notifier    LoginNotifier
+	// ponytail: TOTP 设置期的待启用密钥放进程内存，重启即弃（本就不应跨重启保留）。
+	pendingSecrets sync.Map // userID(int64) -> secret(string)
 }
 
 // NewAuthService 构造认证服务。登录限制参数（最大尝试次数/锁定时长）运行时
@@ -121,70 +122,49 @@ func generateRandomPassword(length int) string {
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (*User, error) {
-	user, err := s.userRepo.GetByUsername(ctx, username)
-	if err != nil {
-		return nil, errors.New("用户名或密码错误")
-	}
-
-	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
-		if err := s.userRepo.IncrementLoginAttempts(ctx, user.ID); err != nil {
-			log.Printf("auth: failed to increment login attempts: %v", err)
-		}
-		return nil, errors.New("账号已被锁定")
-	}
-
-	if !verifyPassword(password, user.PasswordHash) {
-		cur := s.store.Get()
-		if err := s.userRepo.IncrementLoginAttemptsWithLock(ctx, user.ID, cur.Auth.MaxLoginAttempts, int(cur.Auth.LockoutDuration.Seconds())); err != nil {
-			log.Printf("auth: failed to update login attempts: %v", err)
-		}
-		return nil, errors.New("用户名或密码错误")
-	}
-
-	if err := s.userRepo.ResetLoginState(ctx, user.ID, ""); err != nil {
-		log.Printf("auth: failed to reset login state: %v", err)
-	}
-
-	return user, nil
+	return s.LoginWithInfo(ctx, username, password, "", "")
 }
 
 func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip, userAgent string) (*User, error) {
 	now := time.Now().Format(time.RFC3339)
 
-	user, err := s.Login(ctx, username, password)
+	user, err := s.userRepo.GetByUsername(ctx, username)
 	if err != nil {
-		evt := LoginEvent{Action: "LOGIN_FAILED", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: err.Error(), Time: now}
-		s.loginLogger.LogLoginEvent(ctx, evt)
+		evt := LoginEvent{Action: "LOGIN_FAILED", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: "用户名或密码错误", Time: now}
+		if s.loginLogger != nil {
+			s.loginLogger.LogLoginEvent(ctx, evt)
+		}
 		if s.notifier != nil {
 			s.notifier.NotifyLogin(evt)
 		}
-		return nil, err
+		return nil, errors.New("用户名或密码错误")
 	}
 
-	allowed, err := s.CheckIPWhitelist(ctx, user.ID, ip)
-	if err != nil {
-		return nil, err
+	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
+		return nil, errors.New("账号已被锁定")
 	}
-	if !allowed {
-		evt := LoginEvent{Action: "LOGIN_BLOCKED_IP", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: "IP not in whitelist", Time: now}
-		s.loginLogger.LogLoginEvent(ctx, evt)
+
+	if !verifyPassword(password, user.PasswordHash) {
+		cur := s.store.Get()
+		justLocked, err := s.userRepo.IncrementLoginAttempts(ctx, user.ID, cur.Auth.MaxLoginAttempts, int(cur.Auth.LockoutDuration.Seconds()))
+		if err != nil {
+			log.Printf("auth: failed to update login attempts: %v", err)
+		}
+		evt := LoginEvent{Action: "LOGIN_FAILED", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: "用户名或密码错误", Time: now}
+		if justLocked {
+			evt.Reason = "账号已被锁定"
+		}
+		if s.loginLogger != nil {
+			s.loginLogger.LogLoginEvent(ctx, evt)
+		}
 		if s.notifier != nil {
 			s.notifier.NotifyLogin(evt)
 		}
-		return nil, errors.New("login not allowed from this IP")
+		return nil, errors.New("用户名或密码错误")
 	}
 
-	expired, err := s.IsAccountExpired(ctx, user.ID)
-	if err != nil {
-		return nil, err
-	}
-	if expired {
-		s.loginLogger.LogLoginEvent(ctx, LoginEvent{Action: "LOGIN_BLOCKED_EXPIRED", Username: username, IP: ip, UserAgent: userAgent, Success: false, Reason: "account expired", Time: now})
-		return nil, errors.New("account has expired")
-	}
-
-	if err := s.userRepo.UpdateLastLoginIP(ctx, user.ID, ip); err != nil {
-		log.Printf("auth: failed to update last login ip: %v", err)
+	if err := s.userRepo.ResetLoginState(ctx, user.ID, ip); err != nil {
+		log.Printf("auth: failed to reset login state: %v", err)
 	}
 
 	evt := LoginEvent{Action: "LOGIN_SUCCESS", Username: username, IP: ip, UserAgent: userAgent, Success: true, Time: now}
@@ -209,6 +189,10 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 		return errors.New("invalid old password")
 	}
 
+	if oldPassword == newPassword {
+		return errors.New("新密码不能与旧密码相同")
+	}
+
 	if err := s.ValidatePassword(newPassword); err != nil {
 		return err
 	}
@@ -219,6 +203,43 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 	}
 
 	return s.userRepo.UpdatePassword(ctx, userID, newHash)
+}
+
+func (s *AuthService) ChangeUsername(ctx context.Context, userID int64, newUsername, password string) error {
+	newUsername = strings.TrimSpace(newUsername)
+	if len(newUsername) < 3 || len(newUsername) > 32 {
+		return errors.New("用户名长度必须在 3 到 32 个字符之间")
+	}
+
+	for _, ch := range newUsername {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+			return errors.New("用户名只能包含字母、数字、下划线或短横线")
+		}
+	}
+
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
+		return errors.New("账户已锁定")
+	}
+
+	if !verifyPassword(password, user.PasswordHash) {
+		return errors.New("当前密码不正确")
+	}
+
+	if user.Username == newUsername {
+		return errors.New("新用户名不能与当前用户名相同")
+	}
+
+	existing, err := s.userRepo.GetByUsername(ctx, newUsername)
+	if err == nil && existing != nil && existing.ID != userID {
+		return errors.New("该用户名已存在")
+	}
+
+	return s.userRepo.UpdateUsername(ctx, userID, newUsername)
 }
 
 func (s *AuthService) GetUserByID(ctx context.Context, id int64) (*User, error) {
@@ -289,75 +310,12 @@ func (s *AuthService) ValidatePassword(password string) error {
 	return nil
 }
 
-func (s *AuthService) SetAccountExpiry(ctx context.Context, userID int64, expiresAt *time.Time) error {
-	return s.userRepo.SetAccountExpiry(ctx, userID, expiresAt)
-}
-
-func (s *AuthService) SetIPWhitelist(ctx context.Context, userID int64, whitelist string) error {
-	return s.userRepo.SetIPWhitelist(ctx, userID, whitelist)
-}
-
 func (s *AuthService) IsTOTPEnabled(ctx context.Context, userID int64) (bool, error) {
 	return s.totpRepo.IsTOTPEnabled(ctx, userID)
 }
 
 func (s *AuthService) GetTOTPSecret(ctx context.Context, userID int64) (string, error) {
 	return s.totpRepo.GetTOTPSecret(ctx, userID)
-}
-
-func (s *AuthService) GetIPWhitelist(ctx context.Context, userID int64) (string, error) {
-	return s.userRepo.GetIPWhitelist(ctx, userID)
-}
-
-func (s *AuthService) CheckIPWhitelist(ctx context.Context, userID int64, ip string) (bool, error) {
-	whitelist, err := s.GetIPWhitelist(ctx, userID)
-	if err != nil {
-		return false, err
-	}
-
-	if whitelist == "" {
-		return true, nil
-	}
-
-	clientIP := net.ParseIP(ip)
-	if clientIP == nil {
-		return false, nil
-	}
-
-	for allowedIP := range strings.SplitSeq(whitelist, ",") {
-		allowedIP = strings.TrimSpace(allowedIP)
-		if allowedIP == "*" {
-			return true, nil
-		}
-		if strings.Contains(allowedIP, "/") {
-			_, cidr, err := net.ParseCIDR(allowedIP)
-			if err != nil {
-				continue
-			}
-			if cidr.Contains(clientIP) {
-				return true, nil
-			}
-		} else {
-			if allowedIP == ip {
-				return true, nil
-			}
-		}
-	}
-
-	return false, nil
-}
-
-func (s *AuthService) IsAccountExpired(ctx context.Context, userID int64) (bool, error) {
-	expiresAt, err := s.userRepo.GetAccountExpiry(ctx, userID)
-	if err != nil {
-		return false, err
-	}
-
-	if !expiresAt.Valid {
-		return false, nil
-	}
-
-	return expiresAt.Time.Before(time.Now()), nil
 }
 
 // TOTPSetupResult contains the TOTP setup information.
@@ -483,12 +441,17 @@ func (s *AuthService) VerifyBackupCode(ctx context.Context, userID int64, code s
 
 // GetPendingSecret gets the pending TOTP secret for a user (during setup).
 func (s *AuthService) GetPendingSecret(ctx context.Context, userID int64) (string, error) {
-	return s.totpRepo.GetPendingSecret(ctx, userID)
+	v, ok := s.pendingSecrets.Load(userID)
+	if !ok {
+		return "", errors.New("no pending TOTP secret found")
+	}
+	return v.(string), nil
 }
 
 // StorePendingSecret stores a TOTP secret temporarily during setup.
 func (s *AuthService) StorePendingSecret(ctx context.Context, userID int64, secret string) error {
-	return s.totpRepo.StorePendingSecret(ctx, userID, secret)
+	s.pendingSecrets.Store(userID, secret)
+	return nil
 }
 
 // Helper functions

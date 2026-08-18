@@ -63,6 +63,11 @@ type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required,min=8"`
 }
 
+type ChangeUsernameRequest struct {
+	NewUsername string `json:"new_username" binding:"required,min=3,max=32"`
+	Password    string `json:"password" binding:"required"`
+}
+
 // setAuthCookie 把登录态 JWT 写入 HttpOnly cookie。无条件对所有登录设置：
 // 移动端原生 App 忽略 cookie（用响应体 token），无副作用。
 func setAuthCookie(c *gin.Context, token string, maxAge time.Duration) {
@@ -256,6 +261,54 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) (any, error) {
 
 	middleware.AuditSummary(c, "修改密码")
 	return nil, nil
+}
+
+func (h *AuthHandler) ChangeUsername(c *gin.Context) (any, error) {
+	userID := c.GetInt64("user_id")
+
+	var req ChangeUsernameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return nil, errx.BadRequest("invalid request: %w", err)
+	}
+
+	if err := h.authService.ChangeUsername(c.Request.Context(), userID, req.NewUsername, req.Password); err != nil {
+		return nil, errx.BadRequest("%s", err.Error())
+	}
+
+	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
+	if err != nil {
+		return nil, errx.Internal("获取用户信息失败")
+	}
+
+	// 重新生成附带新 username 的 JWT Token 并重置 Cookie / Session
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, string(user.Role), h.sessionTimeout)
+	if err != nil {
+		log.Printf("auth: failed to generate token after username change for user %d: %v", userID, err)
+	} else {
+		setAuthCookie(c, token, h.sessionTimeout)
+		if h.sessionService != nil {
+			_ = h.sessionService.RemoveUserSessions(c.Request.Context(), userID)
+			ip := c.ClientIP()
+			userAgent := c.Request.UserAgent()
+			sess := &auth.Session{
+				UserID:     user.ID,
+				Username:   user.Username,
+				Role:       string(user.Role),
+				IP:         ip,
+				UserAgent:  userAgent,
+				ClientType: "web",
+				ExpiresAt:  time.Now().Add(h.sessionTimeout),
+				Token:      token,
+			}
+			_ = h.createSessionWithBinding(c, sess)
+		}
+	}
+
+	middleware.AuditSummary(c, "修改用户名: "+req.NewUsername)
+	return gin.H{
+		"user":  user,
+		"token": token,
+	}, nil
 }
 
 // TOTP verification request
@@ -822,6 +875,7 @@ func RegisterRoutes(
 	{
 		authProtected.POST("/logout", httpx.H(authHandler.Logout))
 		authProtected.GET("/me", httpx.H(authHandler.GetProfile))
+		authProtected.PUT("/username", httpx.H(authHandler.ChangeUsername))
 		authProtected.POST("/change-password", httpx.H(authHandler.ChangePassword))
 		authProtected.POST("/totp/setup", httpx.H(authHandler.SetupTOTP))
 		authProtected.POST("/totp/enable", httpx.H(authHandler.EnableTOTP))

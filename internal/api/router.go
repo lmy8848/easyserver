@@ -326,9 +326,6 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 	protected := api.Group("")
 	protected.Use(
 		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator),
-		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
-			return authSvc.GetIPWhitelist(context.Background(), userID)
-		}),
 		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout.Duration()),
 		middleware.AuditMiddleware(auditSvc),
 	)
@@ -341,9 +338,6 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 	fileRoutes.Use(
 		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval.Duration()),
 		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator),
-		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
-			return authSvc.GetIPWhitelist(context.Background(), userID)
-		}),
 		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout.Duration()),
 		middleware.AuditMiddleware(auditSvc),
 	)

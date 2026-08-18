@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"errors"
 	"fmt"
 
 	"easyserver/internal/infra/errx"
@@ -103,29 +102,4 @@ func (r *totpRepository) GetTOTPSecret(ctx context.Context, userID int64) (strin
 		return "", fmt.Errorf("get TOTP secret: %w", err)
 	}
 	return secret, nil
-}
-
-// GetPendingSecret returns a pending TOTP secret for a user during setup.
-func (r *totpRepository) GetPendingSecret(ctx context.Context, userID int64) (string, error) {
-	var secret string
-	err := r.db.QueryRowContext(ctx, "SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 0 AND totp_secret != ''", userID).Scan(&secret)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", errors.New("no pending TOTP secret found")
-		}
-		return "", fmt.Errorf("get pending secret: %w", err)
-	}
-	return secret, nil
-}
-
-// StorePendingSecret stores a TOTP secret temporarily during setup.
-func (r *totpRepository) StorePendingSecret(ctx context.Context, userID int64, secret string) error {
-	_, err := r.db.ExecContext(ctx, `
-		UPDATE users SET totp_secret = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`, secret, userID)
-	if err != nil {
-		return fmt.Errorf("store pending secret: %w", err)
-	}
-	return nil
 }

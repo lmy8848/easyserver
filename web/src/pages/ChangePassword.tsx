@@ -15,6 +15,10 @@ export default function ChangePassword() {
   const [form] = Form.useForm();
 
   const onFinish = async (values: { old_password: string; new_password: string; confirm_password: string }) => {
+    if (values.old_password === values.new_password) {
+      message.error('新密码不能与当前密码相同');
+      return;
+    }
     if (values.new_password !== values.confirm_password) {
       message.error('两次输入的密码不一致');
       return;
@@ -67,9 +71,18 @@ export default function ChangePassword() {
 
           <Form.Item
             name="new_password"
+            dependencies={['old_password']}
             rules={[
               { required: true, message: '请输入新密码' },
               { min: 8, message: '密码至少8个字符' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (value && getFieldValue('old_password') === value) {
+                    return Promise.reject(new Error('新密码不能与当前密码相同'));
+                  }
+                  return Promise.resolve();
+                },
+              }),
             ]}
             extra="密码需包含大写字母、小写字母和数字，至少8位"
           >
