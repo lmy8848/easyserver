@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"log"
 	"sort"
 	"sync"
@@ -19,10 +18,6 @@ type SessionService struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session // raw JWT token → session
 	store    *config.Store
-	// mobileMu serializes mobile-session create/replace per process so the
-	// single-device binding check + create is atomic (prevents two mobile
-	// logins racing past an empty check). Single-admin panel -> one mutex.
-	mobileMu sync.Mutex
 }
 
 // NewSessionService 构造会话服务。idle_timeout 每次清理实时读 store
@@ -34,7 +29,7 @@ func NewSessionService(ctx context.Context, wg *sync.WaitGroup, store *config.St
 		store:    store,
 	}
 	wg.Go(func() {
-		s.cleanupLoop(ctx, store.Get().Auth.SessionCleanupInterval)
+		s.cleanupLoop(ctx, store.Get().Auth.SessionCleanupInterval.Duration())
 	})
 	return s
 }
@@ -69,54 +64,6 @@ func (s *SessionService) CreateSession(ctx context.Context, token string, userID
 		LoginAt:    time.Now(),
 		ExpiresAt:  expiresAt,
 		Token:      token,
-	}
-	return nil
-}
-
-// ErrMobileDeviceBound is returned by CreateMobileSessionBound when an active
-// mobile session exists on a different device_id; the caller rejects the login.
-var ErrMobileDeviceBound = errors.New("mobile device bound by another session")
-
-// CreateMobileSessionBound creates a mobile session enforcing single-device
-// binding, atomically (process-locked). If an active mobile session exists on
-// the same device_id, the new session is created FIRST and the old one removed
-// after (so a create failure does NOT lock the user out). On a different
-// device_id it returns ErrMobileDeviceBound and creates nothing.
-//
-// device_id is a client-reported soft identifier, not a security boundary; the
-// real control is "one active mobile session + panel-revocable"
-func (s *SessionService) CreateMobileSessionBound(ctx context.Context, session *Session) error {
-	s.mobileMu.Lock()
-	defer s.mobileMu.Unlock()
-
-	existing := s.activeMobileSessionLocked(session.UserID)
-	if existing != nil {
-		if session.DeviceID != "" && existing.DeviceID == session.DeviceID {
-			// Same device: create new first, then remove the old.
-			s.mu.Lock()
-			s.sessions[session.Token] = session
-			delete(s.sessions, existing.Token)
-			s.mu.Unlock()
-			return nil
-		}
-		return ErrMobileDeviceBound
-	}
-	s.mu.Lock()
-	s.sessions[session.Token] = session
-	s.mu.Unlock()
-	return nil
-}
-
-// activeMobileSessionLocked returns the user's active mobile session, or nil.
-// Caller must hold mobileMu.
-func (s *SessionService) activeMobileSessionLocked(userID int64) *Session {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	now := time.Now()
-	for _, sess := range s.sessions {
-		if sess.UserID == userID && sess.ClientType == "mobile" && sess.ExpiresAt.After(now) {
-			return sess
-		}
 	}
 	return nil
 }
@@ -222,7 +169,7 @@ func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool
 	if sess.ExpiresAt.Before(now) {
 		return false, nil
 	}
-	if idle := s.store.Get().Auth.IdleTimeout; idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
+	if idle := s.store.Get().Auth.IdleTimeout.Duration(); idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
 		return false, nil
 	}
 	return true, nil

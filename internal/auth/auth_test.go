@@ -144,7 +144,7 @@ func newTestAuthService(db *sql.DB) *AuthService {
 	store := config.NewStore(&config.Config{
 		Auth: config.AuthConfig{
 			MaxLoginAttempts: 5,
-			LockoutDuration:  5 * time.Minute,
+			LockoutDuration:  config.Duration(5 * time.Minute),
 		},
 	})
 	return &AuthService{

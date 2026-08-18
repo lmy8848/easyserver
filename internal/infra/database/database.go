@@ -8,18 +8,24 @@ import (
 	"os"
 	"path/filepath"
 
+	"easyserver/internal/infra/config"
+
 	_ "modernc.org/sqlite"
 )
 
-func Init(dbPath string) (*sql.DB, error) {
-	dir := filepath.Dir(dbPath)
+// DBPath 是面板 SQLite 数据库的落盘路径，由面板根（config.DataRoot）派生。
+const DBPath = config.DataRoot + "/data/easyserver.db"
+
+// Init 初始化并返回 SQLite 数据库连接池，数据库落盘于 DBPath。
+func Init() (*sql.DB, error) {
+	dir := filepath.Dir(DBPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
 	// Build DSN using url.Parse for safe parameter encoding
 	dsn := &url.URL{
-		Path: dbPath,
+		Path: DBPath,
 	}
 	params := dsn.Query()
 	params.Set("_journal_mode", "WAL")

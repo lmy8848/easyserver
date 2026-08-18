@@ -23,7 +23,7 @@
 ```bash
 # 上传到服务器
 scp easyserver-linux user@server:/opt/easyserver/easyserver
-scp config.yaml user@server:/opt/easyserver/
+scp config.toml user@server:/opt/easyserver/
 ```
 
 ### 2.2 配置
@@ -39,14 +39,14 @@ cd /opt/easyserver
 chmod +x easyserver
 
 # 编辑配置
-vi config.yaml
+vi config.toml
 ```
 
 **必须修改的配置：**
 
-```yaml
-auth:
-  jwt_secret: "your-random-secret-here"  # 修改为随机字符串！
+```toml
+[auth]
+jwt_secret = "your-random-secret-here"  # 修改为随机字符串！
 ```
 
 生成随机密钥：
@@ -59,7 +59,7 @@ openssl rand -base64 32
 
 ```bash
 # 测试运行
-./easyserver -config config.yaml
+./easyserver -config config.toml
 
 # 访问测试
 curl http://server-ip:8080/health
@@ -89,7 +89,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/easyserver
-ExecStart=/opt/easyserver/easyserver -config /opt/easyserver/config.yaml
+ExecStart=/opt/easyserver/easyserver -config /opt/easyserver/config.toml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
@@ -139,10 +139,9 @@ sudo journalctl -u easyserver -f
 ```
 /opt/easyserver/
 ├── easyserver          # 主程序
-├── config.yaml         # 配置文件
+├── config.toml         # 配置文件
 └── data/               # 数据目录 (自动创建)
-    ├── easyserver.db   # SQLite 数据库
-    └── audit.log       # 审计日志
+    └── easyserver.db   # SQLite 数据库 (包含系统数据与审计日志)
 ```
 
 ---
@@ -151,44 +150,39 @@ sudo journalctl -u easyserver -f
 
 ### 5.1 完整配置示例
 
-```yaml
-server:
-  port: 8080                    # 监听端口
-  host: 0.0.0.0                 # 监听地址
-  serve_frontend: true          # 提供前端页面
-  tls:
-    enabled: false              # 是否启用 HTTPS
-    cert_file: "/path/to/cert.pem"
-    key_file: "/path/to/key.pem"
+```toml
+[server]
+port = 8080                    # 监听端口
+host = "0.0.0.0"                 # 监听地址
 
-auth:
-  jwt_secret: "your-random-secret"  # JWT 密钥 (必须修改!)
-  session_timeout: 24h              # 会话超时
-  idle_timeout: 30m                 # 空闲超时
-  max_login_attempts: 5             # 最大登录尝试次数
-  lockout_duration: 15m             # 锁定时长
-  rate_limit: 100                   # 速率限制
-  rate_interval: 1m                 # 速率限制间隔
-  ip_whitelist: []                  # IP 白名单 (空=允许所有)
-  session_cleanup_interval: 5m      # 过期会话清理间隔
+[server.tls]
+enabled = false              # 是否启用 HTTPS
+cert_file = "/path/to/cert.pem"
+key_file = "/path/to/key.pem"
 
-monitor:
-  history_retention: 24h        # 历史数据保留时长
-  collect_interval: 1s          # 采集间隔
+[auth]
+jwt_secret = "your-random-secret"  # JWT 密钥 (必须修改!)
+session_timeout = "24h"              # 会话超时
+idle_timeout = "30m"                 # 空闲超时
+max_login_attempts = 5             # 最大登录尝试次数
+lockout_duration = "15m"             # 锁定时长
+rate_limit = 100                   # 速率限制
+rate_interval = "1m"                 # 速率限制间隔
+ip_whitelist = []                  # IP 白名单 (空=允许所有)
+session_cleanup_interval = "5m"      # 过期会话清理间隔
 
-database:
-  path: "/opt/easyserver/data/easyserver.db"
+[monitor]
+history_retention = "24h"        # 历史数据保留时长
+collect_interval = "1s"          # 采集间隔
 
-audit:
-  enabled: true
-  log_path: "/opt/easyserver/data/audit.log"
-  retention_days: 90            # 审计日志保留天数
+[audit]
+retention_days = 90            # 审计日志保留天数
 
-deploy:
-  encryption_key: "change-me-to-a-random-32-byte-key"
+[deploy]
+encryption_key = "change-me-to-a-random-32-byte-key"
 
-filemanager:
-  base_path: "/opt/easyserver/data"  # 文件管理根目录（限制访问范围）
+[filemanager]
+base_path = "/opt/easyserver/data"  # 文件管理根目录（限制访问范围）
 ```
 
 ### 5.2 环境变量覆盖
@@ -375,7 +369,7 @@ sudo journalctl -u easyserver -f
 sudo journalctl -u easyserver -n 100
 
 # 编辑配置
-sudo vi /opt/easyserver/config.yaml
+sudo vi /opt/easyserver/config.toml
 
 # 重启服务使配置生效
 sudo systemctl restart easyserver
@@ -392,7 +386,7 @@ sudo systemctl restart easyserver
 sudo tar -czf easyserver-backup-$(date +%Y%m%d).tar.gz /opt/easyserver/data/
 
 # 备份配置
-sudo cp /opt/easyserver/config.yaml /opt/easyserver/config.yaml.bak
+sudo cp /opt/easyserver/config.toml /opt/easyserver/config.toml.bak
 ```
 
 ### 11.2 恢复
@@ -419,7 +413,7 @@ sudo systemctl start easyserver
 sudo journalctl -u easyserver -n 50 --no-pager
 
 # 检查配置文件语法
-./easyserver -config config.yaml
+./easyserver -config config.toml
 
 # 检查端口占用
 sudo netstat -tlnp | grep 8080
@@ -476,13 +470,10 @@ sudo sysctl -p
 
 ### 13.2 应用优化
 
-```yaml
-# config.yaml
-monitor:
-  collect_interval: 5s  # 降低采集频率
-
-database:
-  path: "/opt/easyserver/data/easyserver.db"
+```toml
+# config.toml
+[monitor]
+collect_interval = "5s"  # 降低采集频率
 ```
 
 ---

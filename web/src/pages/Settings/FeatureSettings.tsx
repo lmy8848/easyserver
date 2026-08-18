@@ -15,7 +15,6 @@ export default function FeatureSettings({ settings, onRefresh }: FeatureSettings
   useEffect(() => {
     if (settings?.features) {
       form.setFieldsValue({
-        file_preview: settings.features.file_preview,
         fim: settings.features.fim,
       });
     }
@@ -39,9 +38,6 @@ export default function FeatureSettings({ settings, onRefresh }: FeatureSettings
   return (
     <Card title="功能开关">
       <Form form={form} layout="vertical">
-        <Form.Item name="file_preview" label="文件预览增强" valuePropName="checked" extra="支持图片/音频/视频/PDF/文本/压缩文件预览。关闭后文件管理不显示预览按钮。">
-          <Switch />
-        </Form.Item>
         <Form.Item name="fim" label="文件完整性监控" valuePropName="checked" extra="关键文件 sha256 基线与变更检测。关闭后侧边栏隐藏「文件完整性」菜单。">
           <Switch />
         </Form.Item>

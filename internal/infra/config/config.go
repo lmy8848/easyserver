@@ -1,11 +1,14 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // DataRoot 是面板私有工作根目录（Panel Root，固定常量，不支持配置修改）。
@@ -17,145 +20,202 @@ import (
 const DataRoot = "/opt/easyserver"
 
 // Path 记录配置文件在磁盘上的实际路径（--config 决定），Load 时填充。
-// 不参与 YAML/JSON 序列化：它是来源元数据，不是配置项。需要路径的地方
+// 不参与 TOML/JSON 序列化：它是来源元数据，不是配置项。需要路径的地方
 // （写回 config.Save、推导配置目录、热重启传参、FIM 默认监视项）统一从
 // 它取，避免把 configPath 作为独立参数在调用链里层层传递。
 type Config struct {
-	Path         string             `yaml:"-" json:"-"`
-	Server       ServerConfig       `yaml:"server"`
-	Auth         AuthConfig         `yaml:"auth"`
-	Monitor      MonitorConfig      `yaml:"monitor"`
-	Alerts       AlertConfig        `yaml:"alerts"`
-	Database     DatabaseConfig     `yaml:"database"`
-	Audit        AuditConfig        `yaml:"audit"`
-	FileManager  FileManagerConfig  `yaml:"filemanager"`
-	TencentCloud TencentCloudConfig `yaml:"tencentcloud"`
-	Deploy       DeployConfig       `yaml:"deploy"`
-	Notify       NotifyConfig       `yaml:"notify"`
-	Features     FeaturesConfig     `yaml:"features"`
+	Path         string             `toml:"-" json:"-"`
+	Server       ServerConfig       `toml:"server"`
+	Auth         AuthConfig         `toml:"auth"`
+	Monitor      MonitorConfig      `toml:"monitor"`
+	Alerts       AlertConfig        `toml:"alerts"`
+	Audit        AuditConfig        `toml:"audit"`
+	FileManager  FileManagerConfig  `toml:"filemanager"`
+	TencentCloud TencentCloudConfig `toml:"tencentcloud"`
+	Deploy       DeployConfig       `toml:"deploy"`
+	Notify       NotifyConfig       `toml:"notify"`
+	Features     FeaturesConfig     `toml:"features"`
 }
 
 // FeaturesConfig holds optional feature toggles. Disabled by default to save
 // resources; admin enables per-feature from the panel settings.
 type FeaturesConfig struct {
-	FilePreview bool `yaml:"file_preview"` // file preview (image/audio/video/pdf/text/archive)
-	FIM         bool `yaml:"fim"`          // file integrity monitoring
+	FIM bool `toml:"fim"` // file integrity monitoring
 }
 
 type NotifyConfig struct {
-	WebhookURL string `yaml:"webhook_url"` // 钉钉/飞书/企微 Webhook URL
-	Enabled    bool   `yaml:"enabled"`
+	WebhookURL string `toml:"webhook_url"` // 钉钉/飞书/企微 Webhook URL
+	Enabled    bool   `toml:"enabled"`
 }
 
 type ServerConfig struct {
-	Port           int      `yaml:"port"`
-	Host           string   `yaml:"host"`
-	ServeFrontend  bool     `yaml:"serve_frontend"`
-	AllowedOrigins []string `yaml:"allowed_origins"`
-	DevMode        bool     `yaml:"dev_mode"`
-	Domain         string   `yaml:"domain"`
+	Port           int      `toml:"port"`
+	Host           string   `toml:"host"`
+	AllowedOrigins []string `toml:"allowed_origins"`
+	DevMode        bool     `toml:"dev_mode"`
+	Domain         string   `toml:"domain"`
+	ForceDomain    bool     `toml:"force_domain"`
 	// TrustedProxies is the list of trusted reverse-proxy CIDRs whose
 	// X-Forwarded-For is honored by c.ClientIP(). Default ["127.0.0.1"] (same-
 	// host nginx). Set to the CDN ranges (e.g. Cloudflare) when fronted by one.
 	// Empty/nil disables XFF trust entirely (ClientIP uses RemoteAddr).
-	TrustedProxies     []string        `yaml:"trusted_proxies"`
-	RedirectMode       string          `yaml:"redirect_mode"` // "off" | "ip_only" | "non_matching"
-	WwwHandling        string          `yaml:"www_handling"`  // "off" | "force_www" | "remove_www"
-	TLS                TLSConfig       `yaml:"tls"`
-	Turnstile          TurnstileConfig `yaml:"turnstile"`
-	AssetsRateLimit    int             `yaml:"assets_rate_limit"`
-	AssetsRateInterval time.Duration   `yaml:"assets_rate_interval"`
-	MaxUploadSize      int64           `yaml:"max_upload_size"` // bytes, 0 = use default (512MB)
+	TrustedProxies     []string        `toml:"trusted_proxies"`
+	TLS                TLSConfig       `toml:"tls"`
+	Turnstile          TurnstileConfig `toml:"turnstile"`
+	AssetsRateLimit    int             `toml:"assets_rate_limit"`
+	AssetsRateInterval Duration        `toml:"assets_rate_interval"`
+	MaxUploadSize      int64           `toml:"max_upload_size"` // bytes, 0 = use default (512MB)
 }
 
-// TurnstileConfig holds Cloudflare Turnstile settings. Turnstile is a
-// CAPTCHA alternative that runs a challenge before sensitive actions (login,
-// QR confirm, public share download) to fend off bots. When EnableLogin is
-// true the frontend renders the Turnstile widget and posts the resulting token
-// alongside the login request; the server verifies it with Cloudflare before
-// authenticating the user.
+// TurnstileConfig holds Cloudflare Turnstile settings.
 type TurnstileConfig struct {
-	SiteKey           string `yaml:"site_key"`
-	SecretKey         string `yaml:"secret_key"`
-	EnableLogin       bool   `yaml:"enable_login"`
-	EnableQRLogin     bool   `yaml:"enable_qr_login"`
-	EnablePublicShare bool   `yaml:"enable_public_share"`
+	SiteKey           string `toml:"site_key"`
+	SecretKey         string `toml:"secret_key"`
+	EnableLogin       bool   `toml:"enable_login"`
+	EnableQRLogin     bool   `toml:"enable_qr_login"`
+	EnablePublicShare bool   `toml:"enable_public_share"`
 }
 
 type TLSConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
+	Enabled  bool   `toml:"enabled"`
+	CertFile string `toml:"cert_file"`
+	KeyFile  string `toml:"key_file"`
 }
 
 type AuthConfig struct {
-	JWTSecret              string        `yaml:"jwt_secret"`
-	SessionTimeout         time.Duration `yaml:"session_timeout"`
-	IdleTimeout            time.Duration `yaml:"idle_timeout"`
-	MaxLoginAttempts       int           `yaml:"max_login_attempts"`
-	LockoutDuration        time.Duration `yaml:"lockout_duration"`
-	RateLimit              int           `yaml:"rate_limit"`
-	RateInterval           time.Duration `yaml:"rate_interval"`
-	LoginRateLimit         int           `yaml:"login_rate_limit"`
-	LoginRateInterval      time.Duration `yaml:"login_rate_interval"`
-	IPWhitelist            []string      `yaml:"ip_whitelist"`
-	SessionCleanupInterval time.Duration `yaml:"session_cleanup_interval"`
-	// AllowMultiSession, when true, lets a user stay logged in on multiple
-	// devices at once: a new password/TOTP/backup-code login no longer evicts
-	// the user's existing sessions. Default false (single session) preserves the
-	// original "new login kicks old sessions" behavior. Scan-to-login always
-	// coexists regardless of this flag. Toggleable from the panel auth settings.
-	AllowMultiSession bool `yaml:"allow_multi_session"`
-	// MobileDeviceBinding, when true, restricts mobile logins (client_type
-	// "mobile") to a single trusted device per user: a login from a different
-	// device_id is rejected until the trusted session is revoked from the panel;
-	// the same device may re-login (refresh). Default true. Only meaningful when
-	// AllowMultiSession is on (otherwise global single-session already evicts
-	// everything on each login). Web sessions are unaffected.
-	MobileDeviceBinding bool `yaml:"mobile_device_binding"`
+	JWTSecret              string   `toml:"jwt_secret"`
+	SessionTimeout         Duration `toml:"session_timeout"`
+	IdleTimeout            Duration `toml:"idle_timeout"`
+	MaxLoginAttempts       int      `toml:"max_login_attempts"`
+	LockoutDuration        Duration `toml:"lockout_duration"`
+	RateLimit              int      `toml:"rate_limit"`
+	RateInterval           Duration `toml:"rate_interval"`
+	LoginRateLimit         int      `toml:"login_rate_limit"`
+	LoginRateInterval      Duration `toml:"login_rate_interval"`
+	IPWhitelist            []string `toml:"ip_whitelist"`
+	SessionCleanupInterval Duration `toml:"session_cleanup_interval"`
+	AllowMultiSession      bool     `toml:"allow_multi_session"`
 }
 
 type MonitorConfig struct {
-	HistoryRetention time.Duration `yaml:"history_retention"`
-	CollectInterval  time.Duration `yaml:"collect_interval"`
+	HistoryRetention Duration `toml:"history_retention"`
+	CollectInterval  Duration `toml:"collect_interval"`
 }
 
 type AlertConfig struct {
-	Rules []AlertRuleConfig `yaml:"rules"`
+	Rules []AlertRuleConfig `toml:"rules"`
 }
 
 type AlertRuleConfig struct {
-	Name      string  `yaml:"name" json:"name"`
-	Metric    string  `yaml:"metric" json:"metric"`
-	Threshold float64 `yaml:"threshold" json:"threshold"`
-	Duration  int     `yaml:"duration" json:"duration"`
-	Enabled   bool    `yaml:"enabled" json:"enabled"`
-}
-
-type DatabaseConfig struct {
-	Path string `yaml:"path"`
+	Name      string  `toml:"name" json:"name"`
+	Metric    string  `toml:"metric" json:"metric"`
+	Threshold float64 `toml:"threshold" json:"threshold"`
+	Duration  int     `toml:"duration" json:"duration"`
+	Enabled   bool    `toml:"enabled" json:"enabled"`
 }
 
 type AuditConfig struct {
-	Enabled       bool   `yaml:"enabled"`
-	LogPath       string `yaml:"log_path"`
-	RetentionDays int    `yaml:"retention_days"`
+	RetentionDays int `toml:"retention_days"`
 }
 
 type FileManagerConfig struct {
-	BasePath string `yaml:"base_path"`
+	BasePath string `toml:"base_path"`
 }
 
 type TencentCloudConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	SecretID   string `yaml:"secret_id"`
-	SecretKey  string `yaml:"secret_key"`
-	Region     string `yaml:"region"`
-	InstanceID string `yaml:"instance_id"`
+	Enabled    bool   `toml:"enabled"`
+	SecretID   string `toml:"secret_id"`
+	SecretKey  string `toml:"secret_key"`
+	Region     string `toml:"region"`
+	InstanceID string `toml:"instance_id"`
 }
 
 type DeployConfig struct {
-	EncryptionKey string `yaml:"encryption_key"`
+	EncryptionKey string `toml:"encryption_key"`
+}
+
+// Duration is a wrapper around time.Duration that supports TOML string parsing (e.g. "24h", "30m", "3s").
+type Duration time.Duration
+
+func (d Duration) Duration() time.Duration {
+	return time.Duration(d)
+}
+
+func (d Duration) String() string {
+	return time.Duration(d).String()
+}
+
+func (d Duration) Seconds() float64 {
+	return time.Duration(d).Seconds()
+}
+
+func (d Duration) Hours() float64 {
+	return time.Duration(d).Hours()
+}
+
+func (d Duration) Minutes() float64 {
+	return time.Duration(d).Minutes()
+}
+
+func (d *Duration) UnmarshalText(text []byte) error {
+	s := string(text)
+	if s == "" {
+		*d = 0
+		return nil
+	}
+	dur, err := time.ParseDuration(s)
+	if err != nil {
+		return err
+	}
+	*d = Duration(dur)
+	return nil
+}
+
+func (d Duration) MarshalText() ([]byte, error) {
+	return []byte(marshalDuration(time.Duration(d))), nil
+}
+
+// marshalDuration formats a duration dropping zero sub-units, e.g.:
+//   - 24h0m0s  → "24h"
+//   - 1h30m0s  → "1h30m"
+//   - 15m0s    → "15m"
+//   - 3s       → "3s"
+func marshalDuration(d time.Duration) string {
+	if d == 0 {
+		return "0s"
+	}
+	neg := d < 0
+	if neg {
+		d = -d
+	}
+
+	h := d / time.Hour
+	d %= time.Hour
+	m := d / time.Minute
+	d %= time.Minute
+	s := d / time.Second
+	sub := d % time.Second
+
+	var result string
+	if sub != 0 {
+		// sub-second component: fall back to stdlib
+		result = (h*time.Hour + m*time.Minute + s*time.Second + sub).String()
+	} else {
+		if h > 0 {
+			result += fmt.Sprintf("%dh", h)
+		}
+		if m > 0 {
+			result += fmt.Sprintf("%dm", m)
+		}
+		if s > 0 {
+			result += fmt.Sprintf("%ds", s)
+		}
+	}
+
+	if neg {
+		return "-" + result
+	}
+	return result
 }
 
 func Load(path string) (*Config, error) {
@@ -164,83 +224,96 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
-	cfg := &Config{
-		Path: path,
-		Server: ServerConfig{
-			Port:               8080,
-			Host:               "0.0.0.0",
-			AssetsRateLimit:    5000,
-			AssetsRateInterval: time.Minute,
-		},
-		Auth: AuthConfig{
-			SessionTimeout:         24 * time.Hour,
-			IdleTimeout:            24 * time.Hour,
-			MaxLoginAttempts:       5,
-			LockoutDuration:        15 * time.Minute,
-			RateLimit:              1000,
-			RateInterval:           time.Minute,
-			LoginRateLimit:         60,
-			LoginRateInterval:      time.Minute,
-			SessionCleanupInterval: 5 * time.Minute,
-			MobileDeviceBinding:    true,
-		},
-		Monitor: MonitorConfig{
-			HistoryRetention: 168 * time.Hour,
-			CollectInterval:  3 * time.Second,
-		},
-		Database: DatabaseConfig{
-			Path: "./data/easyserver.db",
-		},
-		Audit: AuditConfig{
-			Enabled:       true,
-			LogPath:       "./data/audit.log",
-			RetentionDays: 90,
-		},
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	cfg := &Config{Path: path}
+	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
 
-	// Merge defaults for fields not present in YAML (yaml.Unmarshal zeros them)
-	cfg.mergeDefaults()
+	// Merge defaults for fields not present in TOML (toml.Unmarshal zeros them)
+	generated := cfg.mergeDefaults()
 
 	// Override with environment variables
 	cfg.applyEnvOverrides()
 
+	// If crypto secrets were auto-generated on first run, persist them back to file so they survive restarts
+	if generated && path != "" {
+		_ = Save(cfg)
+	}
+
 	return cfg, nil
 }
 
-// mergeDefaults restores default values for int/duration fields that were
-// zeroed by yaml.Unmarshal when the YAML key is absent.
-func (c *Config) mergeDefaults() {
+// generateRandomSecret generates a cryptographically secure hex-encoded random string.
+func generateRandomSecret(numBytes int) string {
+	b := make([]byte, numBytes)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand read failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+// mergeDefaults restores default values for fields that were
+// zeroed by toml.Unmarshal when the TOML key is absent. Returns true if any
+// sensitive secret was auto-generated.
+func (c *Config) mergeDefaults() bool {
+	generated := false
+	if c.Auth.JWTSecret == "" {
+		c.Auth.JWTSecret = generateRandomSecret(32)
+		generated = true
+	}
+	if c.Deploy.EncryptionKey == "" {
+		c.Deploy.EncryptionKey = generateRandomSecret(32)
+		generated = true
+	}
+	if c.Server.Port == 0 {
+		c.Server.Port = 8080
+	}
+	if c.Server.Host == "" {
+		c.Server.Host = "0.0.0.0"
+	}
 	if c.Server.AssetsRateLimit == 0 {
 		c.Server.AssetsRateLimit = 5000
 	}
 	if c.Server.AssetsRateInterval == 0 {
-		c.Server.AssetsRateInterval = time.Minute
+		c.Server.AssetsRateInterval = Duration(time.Minute)
+	}
+	if c.Auth.SessionTimeout == 0 {
+		c.Auth.SessionTimeout = Duration(24 * time.Hour)
+	}
+	if c.Auth.IdleTimeout == 0 {
+		c.Auth.IdleTimeout = Duration(24 * time.Hour)
+	}
+	if c.Auth.MaxLoginAttempts == 0 {
+		c.Auth.MaxLoginAttempts = 5
+	}
+	if c.Auth.LockoutDuration == 0 {
+		c.Auth.LockoutDuration = Duration(15 * time.Minute)
 	}
 	if c.Auth.RateLimit == 0 {
 		c.Auth.RateLimit = 1000
 	}
 	if c.Auth.RateInterval == 0 {
-		c.Auth.RateInterval = time.Minute
+		c.Auth.RateInterval = Duration(time.Minute)
 	}
 	if c.Auth.LoginRateLimit == 0 {
 		c.Auth.LoginRateLimit = 60
 	}
 	if c.Auth.LoginRateInterval == 0 {
-		c.Auth.LoginRateInterval = time.Minute
+		c.Auth.LoginRateInterval = Duration(time.Minute)
 	}
 	if c.Auth.SessionCleanupInterval == 0 {
-		c.Auth.SessionCleanupInterval = 5 * time.Minute
+		c.Auth.SessionCleanupInterval = Duration(5 * time.Minute)
 	}
 	if c.Monitor.CollectInterval == 0 {
-		c.Monitor.CollectInterval = 3 * time.Second
+		c.Monitor.CollectInterval = Duration(3 * time.Second)
 	}
 	if c.Monitor.HistoryRetention == 0 {
-		c.Monitor.HistoryRetention = 7 * 24 * time.Hour
+		c.Monitor.HistoryRetention = Duration(7 * 24 * time.Hour)
 	}
+	if c.Audit.RetentionDays == 0 {
+		c.Audit.RetentionDays = 90
+	}
+	return generated
 }
 
 func (c *Config) applyEnvOverrides() {
@@ -270,11 +343,6 @@ func (c *Config) applyEnvOverrides() {
 		c.Server.TLS.KeyFile = v
 	}
 
-	// Database
-	if v := os.Getenv("EASYSERVER_DB_PATH"); v != "" {
-		c.Database.Path = v
-	}
-
 	// Tencent Cloud
 	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_ENABLED"); v == "true" {
 		c.TencentCloud.Enabled = true
@@ -300,7 +368,7 @@ func (c *Config) applyEnvOverrides() {
 
 // Save writes the configuration back to its source file (cfg.Path, set by Load).
 func Save(cfg *Config) error {
-	data, err := yaml.Marshal(cfg)
+	data, err := toml.Marshal(cfg)
 	if err != nil {
 		return err
 	}

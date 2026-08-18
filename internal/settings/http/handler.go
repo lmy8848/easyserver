@@ -72,29 +72,19 @@ func maskWebhookURL(rawURL string) string {
 func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 	cfg := h.store.Get()
 
-	// Mask database path: show only the filename
-	dbPath := cfg.Database.Path
-	if idx := strings.LastIndex(dbPath, "/"); idx >= 0 && idx < len(dbPath)-1 {
-		dbPath = "/***/" + dbPath[idx+1:]
-	} else if dbPath != "" {
-		dbPath = "***"
-	}
-
 	// Mask webhook URL: show only scheme + host
 	webhookURL := maskWebhookURL(cfg.Notify.WebhookURL)
 
 	return gin.H{
 		"server": gin.H{
-			"port":           cfg.Server.Port,
-			"host":           cfg.Server.Host,
-			"serve_frontend": cfg.Server.ServeFrontend,
+			"port": cfg.Server.Port,
+			"host": cfg.Server.Host,
 			"tls": gin.H{
 				"enabled":   cfg.Server.TLS.Enabled,
 				"cert_info": certInfoFromConfig(cfg),
 			},
 			"domain":               cfg.Server.Domain,
-			"redirect_mode":        cfg.Server.RedirectMode,
-			"www_handling":         cfg.Server.WwwHandling,
+			"force_domain":         cfg.Server.ForceDomain,
 			"assets_rate_limit":    cfg.Server.AssetsRateLimit,
 			"assets_rate_interval": cfg.Server.AssetsRateInterval.String(),
 			"max_upload_size":      cfg.Server.MaxUploadSize,
@@ -107,27 +97,22 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 			},
 		},
 		"auth": gin.H{
-			"session_timeout":       int(cfg.Auth.SessionTimeout.Seconds()),
-			"idle_timeout":          int(cfg.Auth.IdleTimeout.Seconds()),
-			"max_login_attempts":    cfg.Auth.MaxLoginAttempts,
-			"lockout_duration":      int(cfg.Auth.LockoutDuration.Seconds()),
-			"rate_limit":            cfg.Auth.RateLimit,
-			"rate_interval":         int(cfg.Auth.RateInterval.Seconds()),
-			"login_rate_limit":      cfg.Auth.LoginRateLimit,
-			"login_rate_interval":   int(cfg.Auth.LoginRateInterval.Seconds()),
-			"allow_multi_session":   cfg.Auth.AllowMultiSession,
-			"mobile_device_binding": cfg.Auth.MobileDeviceBinding,
+			"session_timeout":     int(cfg.Auth.SessionTimeout.Seconds()),
+			"idle_timeout":        int(cfg.Auth.IdleTimeout.Seconds()),
+			"max_login_attempts":  cfg.Auth.MaxLoginAttempts,
+			"lockout_duration":    int(cfg.Auth.LockoutDuration.Seconds()),
+			"rate_limit":          cfg.Auth.RateLimit,
+			"rate_interval":       int(cfg.Auth.RateInterval.Seconds()),
+			"login_rate_limit":    cfg.Auth.LoginRateLimit,
+			"login_rate_interval": int(cfg.Auth.LoginRateInterval.Seconds()),
+			"allow_multi_session": cfg.Auth.AllowMultiSession,
 		},
 		"monitor": gin.H{
 			"history_retention": int(cfg.Monitor.HistoryRetention.Hours()),
 			"collect_interval":  int(cfg.Monitor.CollectInterval.Seconds()),
 		},
-		"database": gin.H{
-			"path": dbPath,
-		},
 		"audit": gin.H{
-			"enabled":  cfg.Audit.Enabled,
-			"log_path": cfg.Audit.LogPath,
+			"retention_days": cfg.Audit.RetentionDays,
 		},
 		"notify": gin.H{
 			"enabled":     cfg.Notify.Enabled,
@@ -140,8 +125,7 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 			"has_secret":  cfg.TencentCloud.SecretID != "" && cfg.TencentCloud.SecretKey != "",
 		},
 		"features": gin.H{
-			"file_preview": cfg.Features.FilePreview,
-			"fim":          cfg.Features.FIM,
+			"fim": cfg.Features.FIM,
 		},
 	}, nil
 }
@@ -149,17 +133,13 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 // UpdateFeaturesConfig updates optional feature toggles.
 func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
 	var req struct {
-		FilePreview *bool `json:"file_preview"`
-		FIM         *bool `json:"fim"`
+		FIM *bool `json:"fim"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
 	}
 	middleware.AuditSummary(c, "更新功能开关")
 	h.store.Update(func(cfg *config.Config) {
-		if req.FilePreview != nil {
-			cfg.Features.FilePreview = *req.FilePreview
-		}
 		if req.FIM != nil {
 			cfg.Features.FIM = *req.FIM
 		}
@@ -235,10 +215,8 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 	var req struct {
 		Port               *int    `json:"port"`
 		Host               *string `json:"host"`
-		ServeFrontend      *bool   `json:"serve_frontend"`
 		Domain             *string `json:"domain"`
-		RedirectMode       *string `json:"redirect_mode"`
-		WwwHandling        *string `json:"www_handling"`
+		ForceDomain        *bool   `json:"force_domain"`
 		MaxUploadSize      *int64  `json:"max_upload_size"`
 		AssetsRateLimit    *int    `json:"assets_rate_limit"`
 		AssetsRateInterval *string `json:"assets_rate_interval"`
@@ -295,9 +273,6 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 		assetsRateInterval = d
 	}
 
-	if req.ServeFrontend != nil && !*req.ServeFrontend {
-		log.Printf("WARNING: Frontend serving disabled, panel UI will not be accessible via browser")
-	}
 	// ---- 应用修改（副本上原子替换，读方看到完整一致的新配置） ----
 	h.store.Update(func(cfg *config.Config) {
 		if req.Port != nil {
@@ -306,17 +281,11 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 		if req.Host != nil {
 			cfg.Server.Host = strings.TrimSpace(*req.Host)
 		}
-		if req.ServeFrontend != nil {
-			cfg.Server.ServeFrontend = *req.ServeFrontend
-		}
 		if req.Domain != nil {
 			cfg.Server.Domain = strings.TrimSpace(*req.Domain)
 		}
-		if req.RedirectMode != nil {
-			cfg.Server.RedirectMode = *req.RedirectMode
-		}
-		if req.WwwHandling != nil {
-			cfg.Server.WwwHandling = *req.WwwHandling
+		if req.ForceDomain != nil {
+			cfg.Server.ForceDomain = *req.ForceDomain
 		}
 		if req.MaxUploadSize != nil {
 			cfg.Server.MaxUploadSize = *req.MaxUploadSize
@@ -325,7 +294,7 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 			cfg.Server.AssetsRateLimit = *req.AssetsRateLimit
 		}
 		if req.AssetsRateInterval != nil {
-			cfg.Server.AssetsRateInterval = assetsRateInterval
+			cfg.Server.AssetsRateInterval = config.Duration(assetsRateInterval)
 		}
 		if req.Turnstile != nil {
 			if req.Turnstile.SiteKey != nil {
@@ -346,8 +315,8 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 		}
 	})
 
-	// 重启类字段（端口/监听地址/前端托管）变化时提示重启
-	requiresRestart := req.Port != nil || req.Host != nil || req.ServeFrontend != nil
+	// 重启类字段（端口/监听地址）变化时提示重启
+	requiresRestart := req.Port != nil || req.Host != nil
 
 	// Save to config file
 	if err := h.saveConfig(); err != nil {
@@ -358,7 +327,7 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 	if req.AssetsRateLimit != nil || req.AssetsRateInterval != nil {
 		if rl := middleware.GetRateLimiter("assets"); rl != nil {
 			cur := h.store.Get()
-			rl.UpdateRate(cur.Server.AssetsRateLimit, cur.Server.AssetsRateInterval)
+			rl.UpdateRate(cur.Server.AssetsRateLimit, cur.Server.AssetsRateInterval.Duration())
 		}
 	}
 
@@ -509,16 +478,15 @@ func certInfoFromConfig(cfg *config.Config) *tlsCertInfo {
 // UpdateAuthConfig updates authentication configuration
 func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 	var req struct {
-		SessionTimeout      *int  `json:"session_timeout"`
-		IdleTimeout         *int  `json:"idle_timeout"`
-		MaxLoginAttempts    *int  `json:"max_login_attempts"`
-		LockoutDuration     *int  `json:"lockout_duration"`
-		RateLimit           *int  `json:"rate_limit"`
-		RateInterval        *int  `json:"rate_interval"`
-		LoginRateLimit      *int  `json:"login_rate_limit"`
-		LoginRateInterval   *int  `json:"login_rate_interval"`
-		AllowMultiSession   *bool `json:"allow_multi_session"`
-		MobileDeviceBinding *bool `json:"mobile_device_binding"`
+		SessionTimeout    *int  `json:"session_timeout"`
+		IdleTimeout       *int  `json:"idle_timeout"`
+		MaxLoginAttempts  *int  `json:"max_login_attempts"`
+		LockoutDuration   *int  `json:"lockout_duration"`
+		RateLimit         *int  `json:"rate_limit"`
+		RateInterval      *int  `json:"rate_interval"`
+		LoginRateLimit    *int  `json:"login_rate_limit"`
+		LoginRateInterval *int  `json:"login_rate_interval"`
+		AllowMultiSession *bool `json:"allow_multi_session"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
@@ -555,34 +523,31 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 	// ---- 应用修改 ----
 	h.store.Update(func(cfg *config.Config) {
 		if req.SessionTimeout != nil {
-			cfg.Auth.SessionTimeout = time.Duration(*req.SessionTimeout) * time.Second
+			cfg.Auth.SessionTimeout = config.Duration(time.Duration(*req.SessionTimeout) * time.Second)
 		}
 		if req.IdleTimeout != nil {
-			cfg.Auth.IdleTimeout = time.Duration(*req.IdleTimeout) * time.Second
+			cfg.Auth.IdleTimeout = config.Duration(time.Duration(*req.IdleTimeout) * time.Second)
 		}
 		if req.MaxLoginAttempts != nil {
 			cfg.Auth.MaxLoginAttempts = *req.MaxLoginAttempts
 		}
 		if req.LockoutDuration != nil {
-			cfg.Auth.LockoutDuration = time.Duration(*req.LockoutDuration) * time.Second
+			cfg.Auth.LockoutDuration = config.Duration(time.Duration(*req.LockoutDuration) * time.Second)
 		}
 		if req.RateLimit != nil {
 			cfg.Auth.RateLimit = *req.RateLimit
 		}
 		if req.RateInterval != nil {
-			cfg.Auth.RateInterval = time.Duration(*req.RateInterval) * time.Second
+			cfg.Auth.RateInterval = config.Duration(time.Duration(*req.RateInterval) * time.Second)
 		}
 		if req.LoginRateLimit != nil {
 			cfg.Auth.LoginRateLimit = *req.LoginRateLimit
 		}
 		if req.LoginRateInterval != nil {
-			cfg.Auth.LoginRateInterval = time.Duration(*req.LoginRateInterval) * time.Second
+			cfg.Auth.LoginRateInterval = config.Duration(time.Duration(*req.LoginRateInterval) * time.Second)
 		}
 		if req.AllowMultiSession != nil {
 			cfg.Auth.AllowMultiSession = *req.AllowMultiSession
-		}
-		if req.MobileDeviceBinding != nil {
-			cfg.Auth.MobileDeviceBinding = *req.MobileDeviceBinding
 		}
 	})
 
@@ -590,14 +555,14 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 	if req.RateLimit != nil || req.RateInterval != nil {
 		if rl := middleware.GetRateLimiter("api"); rl != nil {
 			cur := h.store.Get()
-			rl.UpdateRate(cur.Auth.RateLimit, cur.Auth.RateInterval)
+			rl.UpdateRate(cur.Auth.RateLimit, cur.Auth.RateInterval.Duration())
 		}
 	}
 	// Sync login rate limiter at runtime
 	if req.LoginRateLimit != nil || req.LoginRateInterval != nil {
 		if rl := middleware.GetRateLimiter("login"); rl != nil {
 			cur := h.store.Get()
-			rl.UpdateRate(cur.Auth.LoginRateLimit, cur.Auth.LoginRateInterval)
+			rl.UpdateRate(cur.Auth.LoginRateLimit, cur.Auth.LoginRateInterval.Duration())
 		}
 	}
 
@@ -634,11 +599,11 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) (any, error) {
 	h.store.Update(func(cfg *config.Config) {
 		if req.HistoryRetention != nil {
 			retention = time.Duration(*req.HistoryRetention) * time.Hour
-			cfg.Monitor.HistoryRetention = retention
+			cfg.Monitor.HistoryRetention = config.Duration(retention)
 		}
 		if req.CollectInterval != nil {
 			interval = time.Duration(*req.CollectInterval) * time.Second
-			cfg.Monitor.CollectInterval = interval
+			cfg.Monitor.CollectInterval = config.Duration(interval)
 		}
 	})
 	// 运行时热更新监控节律（monitor 服务内部原子更新，无需重启）
@@ -660,17 +625,20 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) (any, error) {
 // UpdateAuditConfig updates audit configuration
 func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) (any, error) {
 	var req struct {
-		Enabled *bool `json:"enabled"`
+		RetentionDays *int `json:"retention_days"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
+	}
+	if req.RetentionDays != nil && (*req.RetentionDays < 1 || *req.RetentionDays > 3650) {
+		return nil, errx.BadRequest("保留天数必须在 1 到 3650 天之间")
 	}
 
 	middleware.AuditSummary(c, "更新审计配置")
 
 	h.store.Update(func(cfg *config.Config) {
-		if req.Enabled != nil {
-			cfg.Audit.Enabled = *req.Enabled
+		if req.RetentionDays != nil {
+			cfg.Audit.RetentionDays = *req.RetentionDays
 		}
 	})
 

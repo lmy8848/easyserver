@@ -8,11 +8,9 @@ export interface Settings {
   server: {
     port: number;
     host: string;
-    serve_frontend: boolean;
     tls: { enabled: boolean; cert_info: TLSCertInfo | null };
     domain: string;
-    redirect_mode: string;
-    www_handling: string;
+    force_domain: boolean;
     max_upload_size: number;
     assets_rate_limit: number;
     assets_rate_interval: string;
@@ -34,18 +32,13 @@ export interface Settings {
     login_rate_limit: number;
     login_rate_interval: number;
     allow_multi_session: boolean;
-    mobile_device_binding: boolean;
   };
   monitor: {
     history_retention: number;
     collect_interval: number;
   };
-  database: {
-    path: string;
-  };
   audit: {
-    enabled: boolean;
-    log_path: string;
+    retention_days: number;
   };
   notify: {
     enabled: boolean;
@@ -58,7 +51,6 @@ export interface Settings {
     has_secret: boolean;
   };
   features: {
-    file_preview: boolean;
     fim: boolean;
   };
 }

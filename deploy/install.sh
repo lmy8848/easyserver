@@ -98,54 +98,50 @@ generate_config() {
     JWT_SECRET=$(openssl rand -base64 32)
     ENCRYPTION_KEY=$(openssl rand -base64 32)
 
-    cat > /opt/easyserver/config.yaml << EOF
-server:
-  port: 8080
-  host: 0.0.0.0
-  serve_frontend: true
-  dev_mode: false
-  allowed_origins:
-    - "http://localhost:5173"
-  tls:
-    enabled: false
-    cert_file: ""
-    key_file: ""
+    cat > /opt/easyserver/config.toml << EOF
+[server]
+port = 8080
+host = "0.0.0.0"
+dev_mode = false
+allowed_origins = [
+  "http://localhost:5173"
+]
 
-auth:
-  jwt_secret: "${JWT_SECRET}"
-  session_timeout: 24h
-  idle_timeout: 30m
-  max_login_attempts: 5
-  lockout_duration: 15m
-  rate_limit: 100
-  rate_interval: 1m
-  ip_whitelist: []
-  session_cleanup_interval: 5m
+[server.tls]
+enabled = false
+cert_file = ""
+key_file = ""
 
-monitor:
-  history_retention: 24h
-  collect_interval: 1s
+[auth]
+jwt_secret = "${JWT_SECRET}"
+session_timeout = "24h"
+idle_timeout = "30m"
+max_login_attempts = 5
+lockout_duration = "15m"
+rate_limit = 100
+rate_interval = "1m"
+ip_whitelist = []
+session_cleanup_interval = "5m"
 
-database:
-  path: "/opt/easyserver/data/easyserver.db"
+[monitor]
+history_retention = "24h"
+collect_interval = "1s"
 
-audit:
-  enabled: true
-  log_path: "/opt/easyserver/data/audit.log"
-  retention_days: 90
+[audit]
+retention_days = 90
 
-deploy:
-  encryption_key: "${ENCRYPTION_KEY}"
+[deploy]
+encryption_key = "${ENCRYPTION_KEY}"
 
-filemanager:
-  base_path: "/opt/easyserver/data"
+[filemanager]
+base_path = "/opt/easyserver/data"
 
-notify:
-  enabled: false
-  webhook_url: ""
+[notify]
+enabled = false
+webhook_url = ""
 
-alerts:
-  rules: []
+[alerts]
+rules = []
 EOF
 
     info "配置文件生成完成"
@@ -173,7 +169,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/easyserver
-ExecStart=/opt/easyserver/easyserver -config /opt/easyserver/config.yaml
+ExecStart=/opt/easyserver/easyserver -config /opt/easyserver/config.toml
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=5
@@ -197,25 +193,13 @@ EOF
 
 # 启动服务
 start_service() {
-    info "启动 EasyServer..."
-
-    systemctl start easyserver
+    info "启动服务..."
     systemctl enable easyserver
-
-    # 等待服务启动
-    sleep 2
-
-    # 检查服务状态
-    if systemctl is-active --quiet easyserver; then
-        info "EasyServer 启动成功"
-    else
-        error "EasyServer 启动失败"
-        systemctl status easyserver
-        exit 1
-    fi
+    systemctl start easyserver
+    info "服务启动完成"
 }
 
-# 显示安装信息
+# 显示安装成功信息
 show_info() {
     echo ""
     echo "========================================"
@@ -228,7 +212,7 @@ show_info() {
     echo "  用户名: admin"
     echo "  密码: admin"
     echo ""
-    echo "配置文件: /opt/easyserver/config.yaml"
+    echo "配置文件: /opt/easyserver/config.toml"
     echo "数据目录: /opt/easyserver/data/"
     echo ""
     echo "常用命令:"

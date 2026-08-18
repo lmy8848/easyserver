@@ -41,21 +41,17 @@ wget https://github.com/lmy8848/easyserver/releases/latest/download/easyserver-l
 chmod +x easyserver-linux-amd64
 
 # 生成配置
-cat > config.yaml << 'EOF'
-server:
-  port: 8080
-  host: 0.0.0.0
-  serve_frontend: true
-auth:
-  jwt_secret: "your-random-secret-32-bytes!!"
-database:
-  path: "./data/easyserver.db"
-filemanager:
-  base_path: "/opt/easyserver/data"
+cat > config.toml << 'EOF'
+[server]
+port = 8080
+host = "0.0.0.0"
+
+[filemanager]
+base_path = "/opt/easyserver/data"
 EOF
 
 # 启动
-./easyserver-linux-amd64 -config config.yaml
+./easyserver-linux-amd64 -config config.toml
 ```
 
 ---
@@ -99,7 +95,7 @@ make dev
 
 # 或手动
 go build -tags dev -o easyserver ./cmd/server
-./easyserver -config config.yaml -dev
+./easyserver -config config.toml -dev
 
 # 前端（热更新）
 cd web

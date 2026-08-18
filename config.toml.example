@@ -1,0 +1,60 @@
+# EasyServer Configuration
+# Copy this file to config.toml and modify as needed
+
+[server]
+port = 8080
+host = "0.0.0.0"
+dev_mode = false       # 开发模式，允许 localhost Origin（生产环境设为 false）
+allowed_origins = [
+  "http://localhost:5173",
+  # "https://yourdomain.com",
+]
+
+[server.tls]
+enabled = false
+cert_file = ""
+key_file = ""
+
+[auth]
+# jwt_secret: 留空时系统将在首次启动时自动生成高强度随机密钥并持久化保存
+# 也可通过环境变量 EASYSERVER_JWT_SECRET 指定
+# jwt_secret = ""
+session_timeout = "24h"
+idle_timeout = "30m"
+max_login_attempts = 5
+lockout_duration = "15m"
+rate_limit = 1000      # Max requests per interval
+rate_interval = "1m"   # Rate limit interval
+login_rate_limit = 60  # Login & QR polling rate limit per interval
+login_rate_interval = "1m"
+ip_whitelist = []      # Empty = allow all; e.g., ["192.168.1.0/24", "10.0.0.1"]
+session_cleanup_interval = "5m" # 过期会话清理间隔
+
+[monitor]
+history_retention = "168h"
+collect_interval = "3s"
+
+[audit]
+retention_days = 90
+
+[deploy]
+# encryption_key: 留空时系统将在首次启动时自动生成 32 字节高强度随机密钥
+# 也可通过环境变量 EASYSERVER_ENCRYPTION_KEY 指定
+# encryption_key = ""
+
+[filemanager]
+base_path = "/opt/easyserver/data" # Restrict file access to this path
+
+[tencentcloud]
+enabled = false
+secret_id = ""
+secret_key = ""
+region = "ap-guangzhou"
+instance_id = ""
+
+[notify]
+enabled = false
+webhook_url = "" # 钉钉/飞书/企微 Webhook URL
+
+[alerts]
+rules = []

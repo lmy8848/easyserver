@@ -17,7 +17,7 @@ import (
 func Validate(cfg *Config, devMode bool) error {
 	// JWT secret - empty always rejected
 	if cfg.Auth.JWTSecret == "" {
-		return errors.New("JWT secret is empty. Set a strong secret via EASYSERVER_JWT_SECRET env var (32+ chars) or auth.jwt_secret in config.yaml")
+		return errors.New("JWT secret is empty. Set a strong secret via EASYSERVER_JWT_SECRET env var (32+ chars) or auth.jwt_secret in config.toml")
 	}
 	if err := rejectOrWarn(devMode, len(cfg.Auth.JWTSecret) < 32,
 		"JWT secret must be at least 32 bytes. Use: EASYSERVER_JWT_SECRET=$(openssl rand -base64 32)"); err != nil {
@@ -53,7 +53,7 @@ func Validate(cfg *Config, devMode bool) error {
 		"auth.rate_limit must be between 10 and 100000"); err != nil {
 		return err
 	}
-	if err := rejectOrWarn(devMode, cfg.Auth.RateInterval < time.Second || cfg.Auth.RateInterval > time.Hour,
+	if err := rejectOrWarn(devMode, cfg.Auth.RateInterval.Duration() < time.Second || cfg.Auth.RateInterval.Duration() > time.Hour,
 		"auth.rate_interval must be between 1s and 1h"); err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func Validate(cfg *Config, devMode bool) error {
 		"auth.login_rate_limit must be between 1 and 100"); err != nil {
 		return err
 	}
-	if err := rejectOrWarn(devMode, cfg.Auth.LoginRateInterval < time.Second || cfg.Auth.LoginRateInterval > time.Hour,
+	if err := rejectOrWarn(devMode, cfg.Auth.LoginRateInterval.Duration() < time.Second || cfg.Auth.LoginRateInterval.Duration() > time.Hour,
 		"auth.login_rate_interval must be between 1s and 1h"); err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func Validate(cfg *Config, devMode bool) error {
 		"server.assets_rate_limit must be between 100 and 100000"); err != nil {
 		return err
 	}
-	if err := rejectOrWarn(devMode, cfg.Server.AssetsRateInterval < time.Second || cfg.Server.AssetsRateInterval > time.Hour,
+	if err := rejectOrWarn(devMode, cfg.Server.AssetsRateInterval.Duration() < time.Second || cfg.Server.AssetsRateInterval.Duration() > time.Hour,
 		"server.assets_rate_interval must be between 1s and 1h"); err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func Validate(cfg *Config, devMode bool) error {
 	// Deploy encryption key
 	if cfg.Deploy.EncryptionKey == "" {
 		if err := rejectOrWarn(devMode, true,
-			"deploy.encryption_key is required. Set via EASYSERVER_ENCRYPTION_KEY env var (32+ chars) or deploy.encryption_key in config.yaml."); err != nil {
+			"deploy.encryption_key is required. Set via EASYSERVER_ENCRYPTION_KEY env var (32+ chars) or deploy.encryption_key in config.toml."); err != nil {
 			return err
 		}
 	}

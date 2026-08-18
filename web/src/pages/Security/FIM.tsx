@@ -57,7 +57,7 @@ export default function FIM() {
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Card title="文件完整性监控" extra={<Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>}>
-        <Alert message="监控关键文件（sshd_config / nginx.conf / config.yaml / authorized_keys）的 sha256 基线，检测修改/删除。" type="info" showIcon style={{ marginBottom: 16 }} />
+        <Alert message="监控关键文件（sshd_config / nginx.conf / config.toml / authorized_keys）的 sha256 基线，检测修改/删除。" type="info" showIcon style={{ marginBottom: 16 }} />
         <Space>
           <Button type="primary" icon={<ScanOutlined />} onClick={scan} loading={busy}>建立基线</Button>
           <Button icon={<CheckCircleOutlined />} onClick={check} loading={busy}>检测变更</Button>

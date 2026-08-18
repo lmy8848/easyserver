@@ -71,7 +71,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	// ── Infrastructure ──
 
-	db, err := database.Init(cfg.Database.Path)
+	db, err := database.Init()
 	if err != nil {
 		log.Fatalf("init database: %v", err)
 	}
@@ -128,7 +128,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	// ── Terminal ──
 
-	terminalManager := terminal.NewManager(ctx, &wg, cfg.Auth.IdleTimeout)
+	terminalManager := terminal.NewManager(ctx, &wg, cfg.Auth.IdleTimeout.Duration())
 
 	// ── Domain services (no background goroutines) ──
 
@@ -204,7 +204,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	g := newGroups(e, cfg, authSvc, sessionSvc, auditSvc)
 
 	// Domain route registration
-	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout, cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval, cfg)
+	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout.Duration(), cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval.Duration(), cfg)
 	monitorhttp.RegisterRoutes(g.Protected, g.WS, monitorSvc, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
@@ -228,13 +228,11 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		secHandler.RegisterRoutes(g.Protected.Group("/websites"))
 	}
 	filemanagerhttp.RegisterShareRoutes(g.Protected, fileShareRepo, fileManager, cfg)
-	filemanagerhttp.RegisterPublicShareRoute(g.API, fileShareRepo, fileManager, cfg.Auth.RateLimit, cfg.Auth.RateInterval, cfg)
+	filemanagerhttp.RegisterPublicShareRoute(g.API, fileShareRepo, fileManager, cfg.Auth.RateLimit, cfg.Auth.RateInterval.Duration(), cfg)
 
-	// Static frontend
-	if cfg.Server.ServeFrontend {
-		e.Use(middleware.RateLimitMiddleware("assets", cfg.Server.AssetsRateLimit, cfg.Server.AssetsRateInterval))
-		ServeWeb(e)
-	}
+	// Static frontend (in dev mode, ServeWeb is a no-op via embed_dev.go)
+	e.Use(middleware.RateLimitMiddleware("assets", cfg.Server.AssetsRateLimit, cfg.Server.AssetsRateInterval.Duration()))
+	ServeWeb(e)
 
 	// ── Background watchers ──
 	watcherStop := make(chan struct{})
@@ -292,7 +290,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 
 	e.Use(gin.Logger(), gin.Recovery(),
 		middleware.ErrorHandler(),
-		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.RedirectMode, cfg.Server.WwwHandling),
+		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.ForceDomain),
 		middleware.SecurityMiddleware(cspNonce, cfg.Server.AllowedOrigins, cfg.Server.DevMode),
 		middleware.CORSMiddleware(cfg.Server.AllowedOrigins, cfg.Server.DevMode),
 		middleware.IPWhitelistMiddleware(middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)),
@@ -319,7 +317,7 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 	api := e.Group("/api")
 	api.Use(
 		middleware.MaxBodySizeMiddleware(maxUploadSize),
-		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval),
+		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval.Duration()),
 	)
 
 	protected := api.Group("")
@@ -328,7 +326,7 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
 			return authSvc.GetIPWhitelist(context.Background(), userID)
 		}),
-		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout),
+		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout.Duration()),
 		middleware.AuditMiddleware(auditSvc),
 	)
 
@@ -338,12 +336,12 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 		middleware.WriteTimeout(10*time.Minute),
 	)
 	fileRoutes.Use(
-		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval),
+		middleware.RateLimitMiddleware("api", cfg.Auth.RateLimit, cfg.Auth.RateInterval.Duration()),
 		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator),
 		middleware.UserIPWhitelistMiddleware(func(userID int64) (string, error) {
 			return authSvc.GetIPWhitelist(context.Background(), userID)
 		}),
-		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout),
+		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout.Duration()),
 		middleware.AuditMiddleware(auditSvc),
 	)
 

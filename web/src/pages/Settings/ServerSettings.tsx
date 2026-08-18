@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Card, Descriptions, Tag, Alert, Form, Input, Select, Switch, Button, Space, message,
+  Card, Descriptions, Tag, Alert, Form, Input, Switch, Button, Space, message,
   InputNumber, Modal, Divider, Typography, Upload,
 } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
@@ -32,10 +32,8 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
       form.setFieldsValue({
         host: settings.server.host,
         port: settings.server.port,
-        serve_frontend: settings.server.serve_frontend,
         domain: settings.server.domain,
-        redirect_mode: settings.server.redirect_mode || 'off',
-        www_handling: settings.server.www_handling || 'off',
+        force_domain: settings.server.force_domain,
         max_upload_size: settings.server.max_upload_size ? Math.round(settings.server.max_upload_size / 1024 / 1024) : 512,
         assets_rate_limit: settings.server.assets_rate_limit,
         assets_rate_interval: settings.server.assets_rate_interval,
@@ -53,7 +51,7 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
         originalHostRef.current = settings.server.host;
       }
     }
-  }, [settings, form]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [settings, form]);  
 
   // Ref to always read latest form values inside closures (avoids stale closure)
   const formRef = useRef(form);
@@ -76,10 +74,8 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
       const payload: Record<string, unknown> = {
         host: values.host,
         port: values.port,
-        serve_frontend: values.serve_frontend,
         domain: values.domain,
-        redirect_mode: values.redirect_mode,
-        www_handling: values.www_handling,
+        force_domain: values.force_domain,
         max_upload_size: values.max_upload_size != null ? values.max_upload_size * 1024 * 1024 : undefined,
         assets_rate_limit: values.assets_rate_limit,
         assets_rate_interval: values.assets_rate_interval,
@@ -147,7 +143,6 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
           initialValues={{
             host: '0.0.0.0',
             port: 8080,
-            serve_frontend: false,
             assets_rate_limit: 5000,
             assets_rate_interval: '1m',
           }}
@@ -169,15 +164,6 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
           </Form.Item>
 
           <Form.Item
-            name="serve_frontend"
-            label="提供前端"
-            extra="是否由后端直接提供前端静态文件服务"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item
             name="domain"
             label="面板域名"
             extra="设置后可通过域名访问面板，留空则不限制"
@@ -186,31 +172,12 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
           </Form.Item>
 
           <Form.Item
-            name="redirect_mode"
-            label="域名跳转模式"
-            extra="选择哪些访问地址会自动跳转到面板域名"
+            name="force_domain"
+            label="强制域名访问"
+            valuePropName="checked"
+            extra="开启后，在配置了面板域名时，所有通过 IP 或其他非匹配主机名的访问将自动 301 重定向至该域名"
           >
-            <Select
-              options={[
-                { label: '关闭', value: 'off' },
-                { label: '仅 IP 访问时跳转', value: 'ip_only' },
-                { label: '所有不匹配地址跳转', value: 'non_matching' },
-              ]}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="www_handling"
-            label="www 处理"
-            extra="是否统一 www 前缀"
-          >
-            <Select
-              options={[
-                { label: '不处理', value: 'off' },
-                { label: '强制添加 www', value: 'force_www' },
-                { label: '强制去除 www', value: 'remove_www' },
-              ]}
-            />
+            <Switch />
           </Form.Item>
 
           <Form.Item

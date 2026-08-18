@@ -138,7 +138,7 @@ export default function Layout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [features, setFeatures] = useState({ fim: false, file_preview: false });
+  const [features, setFeatures] = useState({ fim: false });
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -150,7 +150,7 @@ export default function Layout() {
   // Fetch features
   useEffect(() => {
     let mounted = true;
-    settingsApi.get().then((res: { data?: { data?: { features?: { fim: boolean; file_preview: boolean } } } }) => {
+    settingsApi.get().then((res: { data?: { data?: { features?: { fim: boolean } } } }) => {
       if (mounted && res.data?.data?.features) setFeatures(res.data.data.features);
     }).catch(() => {});
     return () => { mounted = false; };

@@ -560,40 +560,9 @@ func (h *AuthHandler) GetTOTPStatus(c *gin.Context) (any, error) {
 	}, nil
 }
 
-// createSessionWithBinding creates a session, enforcing the mobile single-device
-// binding when enabled. For mobile logins with binding on: requires device_id
-// (M2), delegates to CreateMobileSessionBound (atomic check+replace, H1/M3); on
-// rejection it audits + emits a login-blocked notification (M1) and returns 403.
-// Other logins go through CreateSession with the error checked (H2). device_id
-// is a client-reported soft identifier, not a security boundary (M5).
+// createSessionWithBinding creates a session for the authenticated user.
 func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Session) error {
 	if h.sessionService == nil {
-		return nil
-	}
-	if sess.ClientType == "mobile" && h.cfg.Auth.MobileDeviceBinding {
-		if sess.DeviceID == "" {
-			return errx.BadRequest("移动端登录缺少设备标识 device_id")
-		}
-		if err := h.sessionService.CreateMobileSessionBound(c.Request.Context(), sess); err != nil {
-			if errors.Is(err, auth.ErrMobileDeviceBound) {
-				if h.auditLog != nil {
-					h.auditLog.LogSecurityEvent(c.Request.Context(), sess.Username, "移动端登录被拒(已有其他设备登录)")
-				}
-				if h.authService != nil {
-					h.authService.NotifyLogin(auth.LoginEvent{
-						Username:  sess.Username,
-						IP:        sess.IP,
-						UserAgent: sess.UserAgent,
-						Time:      time.Now().Format(time.RFC3339),
-						Success:   false,
-						Reason:    "移动端绑定:已有其他设备登录",
-					})
-				}
-				return errx.Forbidden("已有其他移动设备登录，请先在面板「会话管理」中解绑该设备后再试")
-			}
-			log.Printf("auth: create mobile session for user %d: %v", sess.UserID, err)
-			return errx.Internal("创建会话失败")
-		}
 		return nil
 	}
 	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.Username, sess.Role, sess.IP, sess.UserAgent, sess.ClientType, sess.DeviceID, sess.DeviceInfo, sess.ExpiresAt); err != nil {
@@ -736,7 +705,7 @@ func (h *QRLoginHandler) GetQRStatus(c *gin.Context) (any, error) {
 	}
 	// 确认后：web token 改走 HttpOnly cookie，不再回传 JS（防 XSS 窃取）。
 	if res.Status == qrlogin.StatusConfirmed && res.Token != "" {
-		setAuthCookie(c, res.Token, h.cfg.Auth.SessionTimeout)
+		setAuthCookie(c, res.Token, h.cfg.Auth.SessionTimeout.Duration())
 		res.Token = ""
 	}
 	return res, nil

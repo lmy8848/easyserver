@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to config file")
+	configPath := flag.String("config", "config.toml", "path to config file")
 	devMode := flag.Bool("dev", false, "run in development mode (no embed, API only)")
 	var showVersion bool
 	flag.BoolVar(&showVersion, "v", false, "print version and exit")

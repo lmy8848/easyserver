@@ -26,7 +26,6 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
         login_rate_limit: settings.auth.login_rate_limit,
         login_rate_interval: Number(settings.auth.login_rate_interval) || 60,
         allow_multi_session: settings.auth.allow_multi_session,
-        mobile_device_binding: settings.auth.mobile_device_binding,
       });
     }
   }, [settings, form]);
@@ -62,7 +61,6 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           login_rate_limit: 60,
           login_rate_interval: 60,
           allow_multi_session: false,
-          mobile_device_binding: true,
         }}
       >
         <Form.Item
@@ -144,29 +142,6 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
           extra="开启后新登录不会踢出其他设备会话（移动端与 Web 可同时在线）；关闭后新登录会使其他设备下线。扫码登录始终共存，不受此开关影响。"
         >
           <Switch />
-        </Form.Item>
-
-        <Form.Item
-          shouldUpdate={(prev, cur) => prev.allow_multi_session !== cur.allow_multi_session}
-          noStyle
-        >
-          {({ getFieldValue }) => {
-            const multi = getFieldValue('allow_multi_session') as boolean;
-            return (
-              <Form.Item
-                name="mobile_device_binding"
-                label="移动端单设备绑定"
-                valuePropName="checked"
-                extra={
-                  multi
-                    ? '多端在线开启时生效：限制同类型移动设备（APP / 小程序）仅绑定一台常用设备，换设备登录将被拒绝，直至管理者手动解绑。Web 登录不受影响。'
-                    : '全局单会话模式下本开关不生效（任何新登录均会替换原有会话）。'
-                }
-              >
-                <Switch disabled={!multi} />
-              </Form.Item>
-            );
-          }}
         </Form.Item>
 
         <Form.Item>

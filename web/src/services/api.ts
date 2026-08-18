@@ -849,19 +849,19 @@ export const settingsApi = {
   getSystem: () =>
     api.get<ApiResponse<{ version: string; build_id?: string }>>('/settings/system'),
 
-  updateServer: (data: { port?: number; host?: string; serve_frontend?: boolean; domain?: string; redirect_mode?: string; www_handling?: string; max_upload_size?: number; assets_rate_limit?: number; assets_rate_interval?: string; turnstile?: { site_key?: string; secret_key?: string; enable_login?: boolean; enable_qr_login?: boolean; enable_public_share?: boolean } }) =>
+  updateServer: (data: { port?: number; host?: string; domain?: string; force_domain?: boolean; max_upload_size?: number; assets_rate_limit?: number; assets_rate_interval?: string; turnstile?: { site_key?: string; secret_key?: string; enable_login?: boolean; enable_qr_login?: boolean; enable_public_share?: boolean } }) =>
     api.put<ApiResponse<{ requires_restart: boolean }>>('/settings/server', data),
 
   updateTLS: (data: { enabled: boolean; cert_content?: string; key_content?: string }) =>
     api.put<ApiResponse<{ requires_restart: boolean; cert_info: { domain: string; issuer: string; expires_at: string } | null }>>('/settings/tls', data),
 
-  updateAuth: (data: { session_timeout?: number; idle_timeout?: number; max_login_attempts?: number; lockout_duration?: number; rate_limit?: number; rate_interval?: number; login_rate_limit?: number; login_rate_interval?: number; allow_multi_session?: boolean; mobile_device_binding?: boolean }) =>
+  updateAuth: (data: { session_timeout?: number; idle_timeout?: number; max_login_attempts?: number; lockout_duration?: number; rate_limit?: number; rate_interval?: number; login_rate_limit?: number; login_rate_interval?: number; allow_multi_session?: boolean }) =>
     api.put<ApiResponse>('/settings/auth', data),
 
   updateMonitor: (data: { history_retention?: number; collect_interval?: number }) =>
     api.put<ApiResponse>('/settings/monitor', data),
 
-  updateAudit: (data: { enabled?: boolean }) =>
+  updateAudit: (data: { retention_days?: number }) =>
     api.put<ApiResponse>('/settings/audit', data),
 
   updateCloud: (data: { enabled?: boolean; secret_id?: string; secret_key?: string; region?: string; instance_id?: string }) =>
@@ -876,7 +876,7 @@ export const settingsApi = {
   updateNotify: (data: { enabled?: boolean; webhook_url?: string }) =>
     api.put<ApiResponse>('/settings/notify', data),
 
-  updateFeatures: (data: { file_preview?: boolean; fim?: boolean }) =>
+  updateFeatures: (data: { fim?: boolean }) =>
     api.put<ApiResponse>('/settings/features', data),
 
   testWebhook: () =>

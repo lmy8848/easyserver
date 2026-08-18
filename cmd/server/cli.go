@@ -38,7 +38,7 @@ func runCLI(subcommand, configPath string) {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-	db, err := database.Init(cfg.Database.Path)
+	db, err := database.Init()
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}

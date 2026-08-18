@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Card, Descriptions, Form, Switch, Button, message,
+  Card, Form, InputNumber, Button, message,
 } from 'antd';
 import { settingsApi } from '../../services/api';
 import type { Settings } from './types';
@@ -17,7 +17,7 @@ export default function AuditSettings({ settings, onRefresh }: AuditSettingsProp
   useEffect(() => {
     if (settings?.audit) {
       form.setFieldsValue({
-        enabled: settings.audit.enabled,
+        retention_days: settings.audit.retention_days,
       });
     }
   }, [settings, form]);
@@ -30,9 +30,8 @@ export default function AuditSettings({ settings, onRefresh }: AuditSettingsProp
       message.success('审计配置已保存');
       onRefresh();
     } catch (error: unknown) {
-      if ((error instanceof Error ? error.message : String(error))) {
-        message.error((error instanceof Error ? error.message : String(error)));
-      }
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message || (error as Error)?.message;
+      if (msg) message.error(msg);
     } finally {
       setSaving(false);
     }
@@ -44,16 +43,19 @@ export default function AuditSettings({ settings, onRefresh }: AuditSettingsProp
         form={form}
         layout="vertical"
         initialValues={{
-          enabled: true,
+          retention_days: 90,
         }}
       >
         <Form.Item
-          name="enabled"
-          label="启用审计功能"
-          extra="记录所有用户操作到审计日志"
-          valuePropName="checked"
+          name="retention_days"
+          label="日志保留天数"
+          extra="审计日志全量记录于 SQLite 数据库中。超过保留天数的历史日志将由后台定时任务自动清理。"
+          rules={[
+            { required: true, message: '请输入保留天数' },
+            { type: 'number', min: 1, max: 3650, message: '保留天数需在 1 到 3650 之间' },
+          ]}
         >
-          <Switch />
+          <InputNumber min={1} max={3650} addonAfter="天" style={{ width: 160 }} />
         </Form.Item>
 
         <Form.Item>
@@ -66,10 +68,6 @@ export default function AuditSettings({ settings, onRefresh }: AuditSettingsProp
           </Button>
         </Form.Item>
       </Form>
-
-      <Descriptions bordered column={1} style={{ marginTop: 16 }}>
-        <Descriptions.Item label="日志路径">{settings?.audit.log_path}</Descriptions.Item>
-      </Descriptions>
     </Card>
   );
 }

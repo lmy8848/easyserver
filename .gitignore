@@ -30,6 +30,7 @@ data/
 
 # Config with secrets
 config.yaml
+config.toml
 .env
 .env.local
 *.pem

@@ -55,21 +55,22 @@ jobs:
 
       - name: Smoke test (amd64)
         run: |
-          cat > /tmp/easyserver-test.yaml << 'EOF'
-          server:
-            port: 18080
-            host: "127.0.0.1"
-            serve_frontend: false
-          auth:
-            jwt_secret: "ci-smoke-test-jwt-secret-at-least-32-bytes-long!!"
-          deploy:
-            encryption_key: "ci-smoke-test-encryption-key-32-bytes!!"
-          filemanager:
-            base_path: "/tmp/easyserver-data"
-          data_dir: /tmp/easyserver-data
+          cat > /tmp/easyserver-test.toml << 'EOF'
+          [server]
+          port = 18080
+          host = "127.0.0.1"
+
+          [auth]
+          jwt_secret = "ci-smoke-test-jwt-secret-at-least-32-bytes-long!!"
+
+          [deploy]
+          encryption_key = "ci-smoke-test-encryption-key-32-bytes!!"
+
+          [filemanager]
+          base_path = "/tmp/easyserver-data"
           EOF
           chmod +x easyserver-linux-amd64
-          MISE_DATA_DIR=/tmp/mise-data ./easyserver-linux-amd64 -config /tmp/easyserver-test.yaml &
+          MISE_DATA_DIR=/tmp/mise-data ./easyserver-linux-amd64 -config /tmp/easyserver-test.toml &
           PID=$!
           # 轮询等待监听，最多 15s
           for i in $(seq 1 15); do
