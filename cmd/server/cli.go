@@ -6,16 +6,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 
 	"easyserver/internal/audit"
 	"easyserver/internal/auth"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
-
-	"golang.org/x/term"
 )
 
 // runCLI handles emergency CLI subcommands (reset-password, unlock, reset-totp, show-admin, help).
@@ -81,15 +79,19 @@ func printUsage() {
 	fmt.Println("  help             Show this help message")
 }
 
-func readPassword(prompt string) (string, error) {
+func readPassword(ctx context.Context, prompt string) (string, error) {
 	fmt.Print(prompt)
-	if term.IsTerminal(syscall.Stdin) {
-		bytePassword, err := term.ReadPassword(syscall.Stdin)
-		fmt.Println()
-		if err != nil {
-			return "", err
-		}
-		return string(bytePassword), nil
+	if stat, err := os.Stdin.Stat(); err == nil && (stat.Mode()&os.ModeCharDevice) != 0 {
+		cmdOff := exec.CommandContext(ctx, "stty", "-echo")
+		cmdOff.Stdin = os.Stdin
+		_ = cmdOff.Run()
+
+		defer func() {
+			cmdOn := exec.CommandContext(ctx, "stty", "echo")
+			cmdOn.Stdin = os.Stdin
+			_ = cmdOn.Run()
+			fmt.Println()
+		}()
 	}
 	reader := bufio.NewReader(os.Stdin)
 	password, err := reader.ReadString('\n')
@@ -127,7 +129,7 @@ func notifyRestart() {
 
 func resetPasswordCmd(ctx context.Context, authSvc *auth.AuthService, auditSvc *audit.Service) {
 	user := getTargetUser(ctx, authSvc)
-	password, err := readPassword("New password: ")
+	password, err := readPassword(ctx, "New password: ")
 	if err != nil {
 		log.Fatalf("read password: %v", err)
 	}

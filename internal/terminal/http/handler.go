@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -15,17 +16,15 @@ import (
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/terminal"
 
+	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	gorillaWs "github.com/gorilla/websocket"
 )
 
 // Terminal WebSocket constants
 const (
 	// TermWSWriteDeadline is the deadline for writing a message to the WebSocket
 	TermWSWriteDeadline = 10 * time.Second
-	// TermWSReadDeadline is the deadline for reading a message from the WebSocket
-	TermWSReadDeadline = 60 * time.Second
-	// TermWSPingInterval is the interval for sending ping messages
+	// TermWSPingInterval is the interval for sending ping keepalives
 	TermWSPingInterval = 30 * time.Second
 	// TermWSReadLimit is the maximum message size for WebSocket reads
 	TermWSReadLimit = 4096
@@ -52,7 +51,7 @@ type TerminalHandler struct {
 	terminalManager *terminal.Manager
 	auditLog        OperationLogger
 	jwtSecret       string
-	upgrader        gorillaWs.Upgrader
+	acceptOpts      *websocket.AcceptOptions
 }
 
 func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, auditLog OperationLogger, allowedOrigins []string, devMode bool) *TerminalHandler {
@@ -60,7 +59,7 @@ func NewTerminalHandler(terminalManager *terminal.Manager, jwtSecret string, aud
 		terminalManager: terminalManager,
 		auditLog:        auditLog,
 		jwtSecret:       jwtSecret,
-		upgrader:        httpx.CreateUpgrader(),
+		acceptOpts:      httpx.AcceptWebSocketOptions(),
 	}
 }
 
@@ -102,63 +101,92 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) (any, error) {
 			string(middleware.ResourceTerminal), map[string]any{"summary": "终端会话已打开", "session_id": sessionID}, c.ClientIP(), c.Request.UserAgent())
 	}
 
-	// Upgrade to WebSocket
-	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
+	// Accept WebSocket connection
+	conn, err := websocket.Accept(c.Writer, c.Request, h.acceptOpts)
 	if err != nil {
-		log.Printf("terminal: websocket upgrade error: %v", err)
+		log.Printf("terminal: websocket accept error: %v", err)
 		_ = h.terminalManager.CloseSession(sessionID)
 		return nil, nil
 	}
+	defer func() { _ = conn.CloseNow() }()
 
-	// wsWrite is the channel for serialized WebSocket writes.
-	// writePump reads from it; the forwarding goroutine and readPump write to it.
-	wsWrite := make(chan []byte, 256)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
 
-	// Start writePump goroutine to serialize all WebSocket writes
-	var writePumpWg sync.WaitGroup
-	writePumpWg.Add(1)
-	infra.Go(func() {
-		defer writePumpWg.Done()
-		h.writePump(conn, wsWrite)
-	})
-
-	// Start forwarding goroutine: session.Send (PTY output) -> wsWrite.
-	// Exits when session.done is closed (session.Close) rather than when
-	// session.Send is closed, because readLoop never closes Send.
+	// Forward PTY output to WebSocket
 	var fwdWg sync.WaitGroup
 	fwdWg.Add(1)
 	infra.Go(func() {
 		defer fwdWg.Done()
+		defer cancel()
 		for {
 			select {
 			case msg, ok := <-session.Send:
 				if !ok {
 					return
 				}
-				select {
-				case wsWrite <- msg:
-				default:
+				writeCtx, writeCancel := context.WithTimeout(ctx, TermWSWriteDeadline)
+				err := conn.Write(writeCtx, websocket.MessageText, msg)
+				writeCancel()
+				if err != nil {
+					return
 				}
 			case <-session.Done():
+				return
+			case <-ctx.Done():
 				return
 			}
 		}
 	})
 
-	// readPump: reads from WebSocket, writes input to PTY
-	h.readPump(c, conn, session, wsWrite, userID, username, sessionID)
+	// Periodic ping keepalive
+	var pingWg sync.WaitGroup
+	pingWg.Add(1)
+	infra.Go(func() {
+		defer pingWg.Done()
+		ticker := time.NewTicker(TermWSPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pingCtx, pingCancel := context.WithTimeout(ctx, TermWSWriteDeadline)
+				err := conn.Ping(pingCtx)
+				pingCancel()
+				if err != nil {
+					cancel()
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
 
-	// Cleanup sequence:
-	// 1. Close session -> closes session.Send -> forwarding goroutine exits
-	// 2. Wait for forwarding goroutine
-	// 3. Close wsWrite -> writePump exits
-	// 4. Wait for writePump
-	// 5. Close WebSocket
+	// Read loop: reads from WebSocket, writes input to PTY
+	conn.SetReadLimit(TermWSReadLimit)
+	for {
+		_, msg, err := conn.Read(ctx)
+		if err != nil {
+			if websocket.CloseStatus(err) != websocket.StatusNormalClosure &&
+				websocket.CloseStatus(err) != websocket.StatusGoingAway &&
+				!errors.Is(err, context.Canceled) {
+				log.Printf("terminal: websocket read error: %v", err)
+			}
+			break
+		}
+
+		// Handle terminal input
+		if err := session.HandleInput(msg); err != nil {
+			log.Printf("terminal: handle input error: %v", err)
+		}
+	}
+
+	// Cleanup sequence
+	cancel()
 	_ = h.terminalManager.CloseSession(sessionID)
 	fwdWg.Wait()
-	close(wsWrite)
-	writePumpWg.Wait()
-	conn.Close()
+	pingWg.Wait()
+	_ = conn.Close(websocket.StatusNormalClosure, "terminal session closed")
 
 	// Log terminal session close with duration
 	if h.auditLog != nil {
@@ -170,65 +198,6 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) (any, error) {
 			c.ClientIP(), c.Request.UserAgent())
 	}
 	return nil, nil
-}
-
-// writePump handles all writes to the WebSocket connection.
-// It reads from wsWrite (PTY output and pong responses) and sends periodic pings.
-// All writes go through a mutex to comply with gorilla/websocket's concurrency requirements.
-func (h *TerminalHandler) writePump(conn *gorillaWs.Conn, wsWrite <-chan []byte) {
-	ticker := time.NewTicker(TermWSPingInterval)
-	defer ticker.Stop()
-
-	writeMsg := func(msgType int, data []byte) bool {
-		_ = conn.SetWriteDeadline(time.Now().Add(TermWSWriteDeadline))
-		if err := conn.WriteMessage(msgType, data); err != nil {
-			return false
-		}
-		return true
-	}
-
-	for {
-		select {
-		case msg, ok := <-wsWrite:
-			if !ok {
-				writeMsg(gorillaWs.CloseMessage, []byte{})
-				return
-			}
-			if !writeMsg(gorillaWs.TextMessage, msg) {
-				return
-			}
-		case <-ticker.C:
-			if !writeMsg(gorillaWs.PingMessage, nil) {
-				return
-			}
-		}
-	}
-}
-
-// readPump reads messages from the WebSocket connection and handles them.
-// It writes ping/pong responses through wsWrite to ensure serialized WebSocket writes.
-func (h *TerminalHandler) readPump(c *gin.Context, conn *gorillaWs.Conn, session *terminal.Session, wsWrite chan<- []byte, userID int64, username string, sessionID string) {
-	// Set up read deadline and pong handler
-	conn.SetReadLimit(TermWSReadLimit)
-	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(TermWSReadDeadline))
-		return nil
-	})
-
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			if gorillaWs.IsUnexpectedCloseError(err, gorillaWs.CloseGoingAway, gorillaWs.CloseNormalClosure) {
-				log.Printf("terminal: websocket read error: %v", err)
-			}
-			break
-		}
-
-		// Handle terminal input
-		if err := session.HandleInput(msg); err != nil {
-			log.Printf("terminal: handle input error: %v", err)
-		}
-	}
 }
 
 // RegisterRoutes registers terminal WebSocket routes
