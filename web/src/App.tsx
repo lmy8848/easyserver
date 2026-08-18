@@ -8,6 +8,7 @@ import ChangePassword from './pages/ChangePassword';
 import NotFound from './pages/NotFound';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useAuthStore } from './store/useAuthStore';
+import { useThemeStore } from './store/useThemeStore';
 
 // Lazy load pages for code splitting
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -92,22 +93,31 @@ function StaticContextInjector() {
 function App() {
   // 启动即判定 cookie 登录态（HttpOnly，JS 读不到，只能靠 /auth/me）。
   const loadUser = useAuthStore((s) => s.loadUser);
+  const { isDark } = useThemeStore();
   useEffect(() => { loadUser(); }, [loadUser]);
 
   return (
     <ConfigProvider 
       locale={zhCN} 
       theme={{ 
-        algorithm: theme.defaultAlgorithm,
-        token: {
+        algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: { 
           colorPrimary: '#6366f1',
           borderRadius: 6,
-          colorBgLayout: '#f0f2f5',
-          colorBorderSecondary: '#e5e7eb',
+          ...(isDark ? {
+            colorBgBase: '#141414',
+            colorBgContainer: '#1f1f1f',
+            colorBgLayout: '#141414',
+            colorBorder: '#303030',
+            colorBorderSecondary: '#262626',
+          } : {
+            colorBgLayout: '#f0f2f5',
+            colorBorderSecondary: '#e5e7eb',
+          }),
         },
         components: {
           Table: {
-            headerBg: '#f9fafb',
+            headerBg: isDark ? '#1f1f1f' : '#f9fafb',
           }
         }
       }}

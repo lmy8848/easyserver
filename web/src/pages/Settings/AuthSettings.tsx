@@ -4,7 +4,7 @@ import {
   Modal, Input, Typography, Space, Alert, Table, Popconfirm, Tag, QRCode,
 } from 'antd';
 import {
-  SafetyOutlined, KeyOutlined, CopyOutlined, DownloadOutlined,
+  SafetyOutlined, CopyOutlined, DownloadOutlined,
   LockOutlined, DesktopOutlined, DeleteOutlined, LogoutOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { settingsApi, authApi } from '../../services/api';
@@ -465,24 +465,20 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
 
         {setupStep === 'verify' && (
           <div style={{ textAlign: 'center' }}>
-            <Paragraph>
+            <Paragraph style={{ marginBottom: 20 }}>
               输入验证器应用中显示的 6 位验证码：
             </Paragraph>
-            <Input
-              prefix={<KeyOutlined />}
-              placeholder="6位验证码"
-              maxLength={6}
-              value={verifyCode}
-              onChange={(e) => setVerifyCode(e.target.value)}
-              style={{
-                textAlign: 'center',
-                fontSize: 24,
-                letterSpacing: 8,
-                marginBottom: 24,
-              }}
-            />
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+              <Input.OTP
+                size="large"
+                length={6}
+                value={verifyCode}
+                onChange={(text) => setVerifyCode(text)}
+              />
+            </div>
             <Button
               type="primary"
+              size="large"
               onClick={handleVerifyCode}
               loading={totpLoading}
               block

@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Form, Input, Button, message, Typography, Space, Segmented, QRCode } from 'antd';
+import { Form, Input, Button, message, Typography, Space, Segmented, QRCode, Dropdown, Tooltip } from 'antd';
 import { UserOutlined, LockOutlined, SafetyOutlined, KeyOutlined, CloudServerOutlined } from '@ant-design/icons';
+import { SunMoon, Sun, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
+import { useThemeStore, type ThemeMode } from '../store/useThemeStore';
 import { authApi } from '../services/api';
 import type { User } from '../types';
 import Turnstile from '../components/Turnstile';
 
 const { Title, Text } = Typography;
 
-// 登录页动画 keyframes。通过 <style> 注入,避免引入额外依赖。
+// 登录页动画 keyframes 与深浅色主题样式
 const LOGIN_ANIM_CSS = `
 @keyframes esLoginGradient {
   0%   { background-position: 0% 50%; }
@@ -26,34 +28,148 @@ const LOGIN_ANIM_CSS = `
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-@keyframes esLoginPulse {
+@keyframes esLoginPulseDark {
   0%, 100% { box-shadow: 0 8px 32px rgba(24,144,255,0.15); }
   50%      { box-shadow: 0 12px 40px rgba(24,144,255,0.30); }
+}
+@keyframes esLoginPulseLight {
+  0%, 100% { box-shadow: 0 20px 60px rgba(99,102,241,0.12), 0 8px 24px rgba(0,0,0,0.06); }
+  50%      { box-shadow: 0 24px 70px rgba(99,102,241,0.22), 0 12px 30px rgba(0,0,0,0.08); }
 }
 @keyframes esLoginStepIn {
   from { opacity: 0; transform: translateX(16px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 .es-login-step { animation: esLoginStepIn 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
-.es-login-orb { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.55; pointer-events: none; }
-/* 深色玻璃卡片下的输入框占位符 / 自动填充配色 */
-.es-login-card input::placeholder { color: rgba(255,255,255,0.35); }
-.es-login-card input:-webkit-autofill,
-.es-login-card input:-webkit-autofill:hover,
-.es-login-card input:-webkit-autofill:focus {
+.es-login-orb { position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; }
+
+/* === DARK THEME === */
+.es-login-wrapper.is-dark {
+  background: linear-gradient(125deg, #0f1729 0%, #1a1f3a 35%, #2a1a4a 70%, #1a1230 100%);
+  background-size: 300% 300%;
+}
+.es-login-wrapper.is-dark .es-login-card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  animation: esLoginPulseDark 6s ease-in-out infinite, esLoginFadeUp 0.6s cubic-bezier(0.22,1,0.36,1);
+}
+.es-login-wrapper.is-dark input::placeholder { color: rgba(255,255,255,0.35); }
+.es-login-wrapper.is-dark input:-webkit-autofill,
+.es-login-wrapper.is-dark input:-webkit-autofill:hover,
+.es-login-wrapper.is-dark input:-webkit-autofill:focus {
   -webkit-text-fill-color: #fff;
   -webkit-box-shadow: 0 0 0 1000px rgba(255,255,255,0.08) inset;
   transition: background-color 5000s ease-in-out 0s;
 }
-.es-login-card .ant-input-affix-wrapper { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
-.es-login-card .ant-input-affix-wrapper > input.ant-input { background: transparent; color: #fff; }
-.es-login-card .ant-form-item-explain-error { color: #ff7875; }
-/* Segmented 适配深色玻璃 */
-.es-login-card .ant-segmented { background: rgba(255,255,255,0.08); padding: 3px; border-radius: 10px; }
-.es-login-card .ant-segmented .ant-segmented-item { color: rgba(255,255,255,0.55); }
-.es-login-card .ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover { color: #fff; }
-.es-login-card .ant-segmented .ant-segmented-item-selected { color: #1f1f1f; }
-.es-login-card .ant-segmented .ant-segmented-thumb { background: rgba(255,255,255,0.14); }
+.es-login-wrapper.is-dark .ant-input-affix-wrapper {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.15);
+  transition: all 0.2s ease-in-out;
+}
+.es-login-wrapper.is-dark .ant-input-affix-wrapper > input.ant-input {
+  background: transparent;
+  color: #fff;
+}
+.es-login-wrapper.is-dark .ant-input-affix-wrapper:hover {
+  border-color: #40a9ff;
+}
+.es-login-wrapper.is-dark .ant-input-affix-wrapper-focused,
+.es-login-wrapper.is-dark .ant-input-affix-wrapper:focus-within {
+  border-color: #1890ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+}
+.es-login-wrapper.is-dark .ant-input-affix-wrapper-focused .ant-input-prefix,
+.es-login-wrapper.is-dark .ant-input-affix-wrapper:focus-within .ant-input-prefix {
+  color: #1890ff !important;
+}
+.es-login-wrapper.is-dark .ant-form-item-explain-error { color: #ff7875; }
+.es-login-wrapper.is-dark .ant-segmented { background: rgba(255,255,255,0.08); padding: 3px;}
+.es-login-wrapper.is-dark .ant-segmented .ant-segmented-item { color: rgba(255,255,255,0.55); }
+.es-login-wrapper.is-dark .ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover { color: #fff; }
+.es-login-wrapper.is-dark .ant-segmented .ant-segmented-item-selected { color: #fff; font-weight: 600; }
+.es-login-wrapper.is-dark .ant-segmented .ant-segmented-thumb { background: rgba(255,255,255,0.18); }
+.es-login-wrapper.is-dark .ant-otp { gap: 8px; justify-content: center; }
+.es-login-wrapper.is-dark .ant-otp input {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.15);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 10px;
+  transition: all 0.2s ease-in-out;
+}
+.es-login-wrapper.is-dark .ant-otp input:hover { border-color: #40a9ff; }
+.es-login-wrapper.is-dark .ant-otp input:focus,
+.es-login-wrapper.is-dark .ant-otp input:focus-visible {
+  border-color: #1890ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+  outline: none;
+}
+
+/* === LIGHT THEME === */
+.es-login-wrapper.is-light {
+  background: linear-gradient(125deg, #f0f4ff 0%, #e2e8f8 35%, #ede9fe 70%, #f5f3ff 100%);
+  background-size: 300% 300%;
+}
+.es-login-wrapper.is-light .es-login-card {
+  background: rgba(255,255,255,0.78);
+  border: 1px solid rgba(255,255,255,0.9);
+  animation: esLoginPulseLight 6s ease-in-out infinite, esLoginFadeUp 0.6s cubic-bezier(0.22,1,0.36,1);
+}
+.es-login-wrapper.is-light input::placeholder { color: #94a3b8; }
+.es-login-wrapper.is-light input:-webkit-autofill,
+.es-login-wrapper.is-light input:-webkit-autofill:hover,
+.es-login-wrapper.is-light input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1e293b;
+  -webkit-box-shadow: 0 0 0 1000px #f8fafc inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+.es-login-wrapper.is-light .ant-input-affix-wrapper {
+  background: rgba(255,255,255,0.9);
+  border-color: #e2e8f0;
+  transition: all 0.2s ease-in-out;
+}
+.es-login-wrapper.is-light .ant-input-affix-wrapper > input.ant-input {
+  background: transparent;
+  color: #1e293b;
+}
+.es-login-wrapper.is-light .ant-input-affix-wrapper:hover {
+  border-color: #6366f1;
+}
+.es-login-wrapper.is-light .ant-input-affix-wrapper-focused,
+.es-login-wrapper.is-light .ant-input-affix-wrapper:focus-within {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+}
+.es-login-wrapper.is-light .ant-input-affix-wrapper-focused .ant-input-prefix,
+.es-login-wrapper.is-light .ant-input-affix-wrapper:focus-within .ant-input-prefix {
+  color: #6366f1 !important;
+}
+.es-login-wrapper.is-light .ant-form-item-explain-error { color: #ef4444; }
+.es-login-wrapper.is-light .ant-segmented { background: rgba(241,245,249,0.95); padding: 3px;}
+.es-login-wrapper.is-light .ant-segmented .ant-segmented-item { color: #64748b; }
+.es-login-wrapper.is-light .ant-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover { color: #1e293b; }
+.es-login-wrapper.is-light .ant-segmented .ant-segmented-item-selected { color: #1e293b; font-weight: 600; }
+.es-login-wrapper.is-light .ant-segmented .ant-segmented-thumb { background: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+.es-login-wrapper.is-light .ant-otp { gap: 8px; justify-content: center; }
+.es-login-wrapper.is-light .ant-otp input {
+  background: rgba(255,255,255,0.9);
+  border-color: #e2e8f0;
+  color: #1e293b;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 10px;
+  transition: all 0.2s ease-in-out;
+}
+.es-login-wrapper.is-light .ant-otp input:hover { border-color: #6366f1; }
+.es-login-wrapper.is-light .ant-otp input:focus,
+.es-login-wrapper.is-light .ant-otp input:focus-visible {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+  outline: none;
+}
 `;
 
 interface QRData {
@@ -69,6 +185,8 @@ interface TurnstileConfig {
 }
 
 export default function Login() {
+  const { mode: themeMode, isDark, setMode: setThemeMode } = useThemeStore();
+  const [totpForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'login' | 'totp' | 'backup'>('login');
   const [tempToken, setTempToken] = useState<string>('');
@@ -232,16 +350,8 @@ export default function Login() {
     return () => clearInterval(id);
   }, [loginMode, qrData, qrStatus, pollQRStatus]);
 
-  const inputStyle: React.CSSProperties = {
-    height: 46,
-    borderRadius: 10,
-    background: 'rgba(255,255,255,0.08)',
-    borderColor: 'rgba(255,255,255,0.15)',
-    color: '#fff',
-  };
-
   const primaryBtnStyle: React.CSSProperties = {
-    height: 46, borderRadius: 10, fontWeight: 600, fontSize: 15, border: 'none',
+    borderRadius: 8, fontWeight: 600, fontSize: 16, border: 'none',
     background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
     boxShadow: '0 6px 20px rgba(24,144,255,0.35)',
   };
@@ -256,19 +366,19 @@ export default function Login() {
       }}>
         <CloudServerOutlined style={{ fontSize: 34, color: '#fff' }} />
       </div>
-      <Title level={2} style={{ margin: 0, color: '#fff', letterSpacing: 1 }}>EasyServer</Title>
-      <p style={{ color: 'rgba(255,255,255,0.55)', marginTop: 6, fontSize: 13, letterSpacing: 2 }}>LINUX 服务器管理面板</p>
+      <Title level={2} style={{ margin: 0, color: isDark ? '#fff' : '#1e293b', letterSpacing: 1 }}>EasyServer</Title>
+      <p style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#64748b', marginTop: 6, fontSize: 13, letterSpacing: 2 }}>LINUX 服务器管理面板</p>
     </div>
   );
 
   const renderPasswordForm = () => (
-    <Form name="login" onFinish={onFinish} autoComplete="off" size="large">
+    <Form name="login" onFinish={onFinish} autoComplete="off">
       <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-        <Input prefix={<UserOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="用户名" style={inputStyle} />
+        <Input size="large" prefix={<UserOutlined style={{ color: isDark ? 'rgba(255,255,255,0.45)' : '#94a3b8' }} />} placeholder="用户名" />
       </Form.Item>
 
       <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
-        <Input.Password prefix={<LockOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="密码" style={inputStyle} />
+        <Input.Password size="large" prefix={<LockOutlined style={{ color: isDark ? 'rgba(255,255,255,0.45)' : '#94a3b8' }} />} placeholder="密码" />
       </Form.Item>
 
       {turnstileCfg?.enable_login && turnstileCfg.site_key && (
@@ -283,7 +393,7 @@ export default function Login() {
       )}
 
       <Form.Item style={{ marginBottom: 0 }}>
-        <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
+        <Button type="primary" size="large" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
           登录
         </Button>
       </Form.Item>
@@ -293,19 +403,26 @@ export default function Login() {
   const renderQRForm = () => (
     <div style={{ textAlign: 'center' }}>
       <div style={{
-        display: 'inline-block', padding: 12, borderRadius: 16,
-        background: 'rgba(255,255,255,0.95)', marginBottom: 16,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+        display: 'inline-block',
+        padding: 12,
+        borderRadius: 12,
+        background: isDark ? 'rgba(255, 255, 255, 0.06)' : '#ffffff',
+        border: isDark ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid #e2e8f0',
+        boxShadow: isDark ? '0 2px 8px rgba(0, 0, 0, 0.15)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+        marginBottom: 16,
+        backdropFilter: 'blur(12px)',
       }}>
         <QRCode
           value={qrData ? `esqr:${qrData.qr_token}` : '-'}
           size={200}
           bordered={false}
+          color={isDark ? '#ffffff' : '#1e293b'}
+          bgColor="transparent"
           status={qrStatus === 'expired' ? 'expired' : qrLoading || !qrData ? 'loading' : 'active'}
           onRefresh={startQrLogin}
         />
       </div>
-      <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 14 }}>
+      <div style={{ color: isDark ? 'rgba(255,255,255,0.65)' : '#64748b', fontSize: 14 }}>
         请使用手机 App 扫码登录
       </div>
     </div>
@@ -322,14 +439,29 @@ export default function Login() {
         }}>
           <SafetyOutlined style={{ fontSize: 32, color: '#fff' }} />
         </div>
-        <Title level={3} style={{ margin: 0, color: '#fff' }}>双因素验证</Title>
-        <Text style={{ color: 'rgba(255,255,255,0.55)' }}>请输入验证器应用中的验证码</Text>
+        <Title level={3} style={{ margin: 0, color: isDark ? '#fff' : '#1e293b' }}>双因素验证</Title>
+        <Text style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#64748b' }}>请输入验证器应用中的验证码</Text>
       </div>
 
-      <Form name="totp" onFinish={onTOTPFinish} autoComplete="off" size="large">
-        <Form.Item name="code" rules={[{ required: true, message: '请输入验证码' }, { len: 6, message: '验证码为6位数字' }]}>
-          <Input prefix={<KeyOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="6位验证码"
-            maxLength={6} style={{ ...inputStyle, textAlign: 'center', fontSize: 26, letterSpacing: 12 }} />
+      <Form form={totpForm} name="totp" onFinish={onTOTPFinish} autoComplete="off">
+        <Form.Item
+          name="code"
+          rules={[
+            { required: true, message: '请输入验证码' },
+            { len: 6, message: '验证码为6位数字' },
+          ]}
+          style={{ textAlign: 'center' }}
+        >
+          <Input.OTP
+            size="large"
+            length={6}
+            autoFocus
+            onChange={(val) => {
+              if (val.length === 6 && !loading) {
+                totpForm.submit();
+              }
+            }}
+          />
         </Form.Item>
 
         {turnstileCfg?.enable_login && turnstileCfg.site_key && (
@@ -344,15 +476,15 @@ export default function Login() {
         )}
 
         <Form.Item style={{ marginBottom: 0 }}>
-          <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
+          <Button type="primary" size="large" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
             验证
           </Button>
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 0, textAlign: 'center', marginTop: 8 }}>
           <Space>
-            <Button type="link" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={() => setStep('backup')}>使用备份码</Button>
-            <Button type="link" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={() => { setStep('login'); setTempToken(''); }}>返回登录</Button>
+            <Button type="link" style={{ color: isDark ? 'rgba(255,255,255,0.65)' : '#6366f1' }} onClick={() => setStep('backup')}>使用备份码</Button>
+            <Button type="link" style={{ color: isDark ? 'rgba(255,255,255,0.65)' : '#6366f1' }} onClick={() => { setStep('login'); setTempToken(''); }}>返回登录</Button>
           </Space>
         </Form.Item>
       </Form>
@@ -370,13 +502,13 @@ export default function Login() {
         }}>
           <KeyOutlined style={{ fontSize: 32, color: '#fff' }} />
         </div>
-        <Title level={3} style={{ margin: 0, color: '#fff' }}>备份码验证</Title>
-        <Text style={{ color: 'rgba(255,255,255,0.55)' }}>请输入您的备份码</Text>
+        <Title level={3} style={{ margin: 0, color: isDark ? '#fff' : '#1e293b' }}>备份码验证</Title>
+        <Text style={{ color: isDark ? 'rgba(255,255,255,0.55)' : '#64748b' }}>请输入您的备份码</Text>
       </div>
 
-      <Form name="backup" onFinish={onBackupCodeFinish} autoComplete="off" size="large">
+      <Form name="backup" onFinish={onBackupCodeFinish} autoComplete="off">
         <Form.Item name="backup_code" rules={[{ required: true, message: '请输入备份码' }]}>
-          <Input prefix={<KeyOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />} placeholder="备份码" style={inputStyle} />
+          <Input size="large" prefix={<KeyOutlined style={{ color: isDark ? 'rgba(255,255,255,0.45)' : '#94a3b8' }} />} placeholder="备份码" />
         </Form.Item>
 
         {turnstileCfg?.enable_login && turnstileCfg.site_key && (
@@ -391,15 +523,15 @@ export default function Login() {
         )}
 
         <Form.Item style={{ marginBottom: 0 }}>
-          <Button type="primary" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
+          <Button type="primary" size="large" htmlType="submit" loading={loading} block style={primaryBtnStyle}>
             验证
           </Button>
         </Form.Item>
 
         <Form.Item style={{ marginBottom: 0, textAlign: 'center', marginTop: 8 }}>
           <Space>
-            <Button type="link" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={() => setStep('totp')}>使用验证码</Button>
-            <Button type="link" style={{ color: 'rgba(255,255,255,0.65)' }} onClick={() => { setStep('login'); setTempToken(''); }}>返回登录</Button>
+            <Button type="link" style={{ color: isDark ? 'rgba(255,255,255,0.65)' : '#6366f1' }} onClick={() => setStep('totp')}>使用验证码</Button>
+            <Button type="link" style={{ color: isDark ? 'rgba(255,255,255,0.65)' : '#6366f1' }} onClick={() => { setStep('login'); setTempToken(''); }}>返回登录</Button>
           </Space>
         </Form.Item>
       </Form>
@@ -407,23 +539,74 @@ export default function Login() {
   );
 
   return (
-    <div style={{
-      position: 'relative',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      overflow: 'hidden',
-      background: 'linear-gradient(125deg, #0f1729 0%, #1a1f3a 35%, #2a1a4a 70%, #1a1230 100%)',
-      backgroundSize: '300% 300%',
-      animation: 'esLoginGradient 18s ease infinite',
-    }}>
+    <div
+      className={`es-login-wrapper ${isDark ? 'is-dark' : 'is-light'}`}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        overflow: 'hidden',
+        animation: 'esLoginGradient 18s ease infinite',
+      }}
+    >
       <style>{LOGIN_ANIM_CSS}</style>
 
+      {/* 顶部右侧主题切换 */}
+      <div style={{ position: 'fixed', top: 20, right: 24, zIndex: 100 }}>
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: 'auto',
+                icon: <SunMoon size={16} />,
+                label: '跟随系统',
+              },
+              {
+                key: 'light',
+                icon: <Sun size={16} />,
+                label: '浅色模式',
+              },
+              {
+                key: 'dark',
+                icon: <Moon size={16} />,
+                label: '暗色模式',
+              },
+            ],
+            selectedKeys: [themeMode],
+            onClick: ({ key }) => setThemeMode(key as ThemeMode),
+          }}
+          trigger={['click']}
+          placement="bottomRight"
+        >
+          <Tooltip title={`主题：${themeMode === 'auto' ? '跟随系统' : themeMode === 'dark' ? '暗色模式' : '浅色模式'}`}>
+            <Button
+              type="text"
+              style={{
+                color: isDark ? '#fff' : '#1e293b',
+                background: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.8)',
+                border: isDark ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(226, 232, 240, 0.9)',
+                boxShadow: isDark ? 'none' : '0 4px 12px rgba(0,0,0,0.06)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                borderRadius: 10,
+                width: 38,
+                height: 38,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              icon={themeMode === 'auto' ? <SunMoon size={18} /> : themeMode === 'dark' ? <Moon size={18} /> : <Sun size={18} />}
+            />
+          </Tooltip>
+        </Dropdown>
+      </div>
+
       {/* 浮动光斑装饰 */}
-      <div className="es-login-orb" style={{ width: 420, height: 420, top: '-120px', left: '-80px', background: '#1890ff', animation: 'esLoginFloat 20s ease-in-out infinite' }} />
-      <div className="es-login-orb" style={{ width: 360, height: 360, bottom: '-100px', right: '-60px', background: '#722ed1', animation: 'esLoginFloat 24s ease-in-out infinite reverse' }} />
-      <div className="es-login-orb" style={{ width: 260, height: 260, top: '40%', right: '20%', background: '#13c2c2', opacity: 0.3, animation: 'esLoginFloat 28s ease-in-out infinite' }} />
+      <div className="es-login-orb" style={{ width: 420, height: 420, top: '-120px', left: '-80px', background: isDark ? '#1890ff' : '#6366f1', opacity: isDark ? 0.55 : 0.25, animation: 'esLoginFloat 20s ease-in-out infinite' }} />
+      <div className="es-login-orb" style={{ width: 360, height: 360, bottom: '-100px', right: '-60px', background: isDark ? '#722ed1' : '#a855f7', opacity: isDark ? 0.55 : 0.25, animation: 'esLoginFloat 24s ease-in-out infinite reverse' }} />
+      <div className="es-login-orb" style={{ width: 260, height: 260, top: '40%', right: '20%', background: isDark ? '#13c2c2' : '#38bdf8', opacity: isDark ? 0.3 : 0.2, animation: 'esLoginFloat 28s ease-in-out infinite' }} />
 
       {/* 玻璃拟态卡片 */}
       <div className="es-login-card" style={{
@@ -433,18 +616,15 @@ export default function Login() {
         maxWidth: '92vw',
         padding: '40px 36px 32px',
         borderRadius: 20,
-        background: 'rgba(255,255,255,0.06)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
-        border: '1px solid rgba(255,255,255,0.12)',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
-        animation: 'esLoginPulse 6s ease-in-out infinite, esLoginFadeUp 0.6s cubic-bezier(0.22,1,0.36,1)',
       }}>
         {step === 'login' && (
           <>
             <div style={{ animation: 'esLoginFadeUp 0.5s cubic-bezier(0.22,1,0.36,1)' }}>
               {renderBrand()}
               <Segmented
+                size="large"
                 value={loginMode}
                 onChange={(v) => switchMode(v as 'password' | 'qr')}
                 options={[
@@ -461,7 +641,7 @@ export default function Login() {
         {step === 'totp' && renderTOTPForm()}
         {step === 'backup' && renderBackupCodeForm()}
 
-        <div style={{ textAlign: 'center', marginTop: 24, color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+        <div style={{ textAlign: 'center', marginTop: 24, color: isDark ? 'rgba(255,255,255,0.3)' : '#94a3b8', fontSize: 12 }}>
           EasyServer © {new Date().getFullYear()}
         </div>
       </div>

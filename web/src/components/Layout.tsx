@@ -5,8 +5,10 @@ import { notificationApi, settingsApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
-import { message, Button, Badge } from 'antd';
+import { message, Button, Badge, Dropdown, Tooltip } from 'antd';
+import { SunMoon, Sun, Moon } from 'lucide-react';
 import { useSSE } from '../hooks/useSSE';
+import { useThemeStore, type ThemeMode } from '../store/useThemeStore';
 import './Layout.css';
 
 const MENU_GROUPS = [
@@ -143,6 +145,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const { mode: themeMode, setMode: setThemeMode } = useThemeStore();
 
   // 登录态判定由 App 顶层负责（loadUser），这里不再重复请求。
 
@@ -350,6 +353,41 @@ export default function Layout() {
                 </div>
               )}
             </div>
+
+            {/* Theme Mode Dropdown */}
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'auto',
+                    icon: <SunMoon size={16} />,
+                    label: '跟随系统',
+                  },
+                  {
+                    key: 'light',
+                    icon: <Sun size={16} />,
+                    label: '浅色模式',
+                  },
+                  {
+                    key: 'dark',
+                    icon: <Moon size={16} />,
+                    label: '暗色模式',
+                  },
+                ],
+                selectedKeys: [themeMode],
+                onClick: ({ key }) => setThemeMode(key as ThemeMode),
+              }}
+              trigger={['click']}
+              placement="bottomRight"
+            >
+              <Tooltip title={`主题：${themeMode === 'auto' ? '跟随系统' : themeMode === 'dark' ? '暗色模式' : '浅色模式'}`}>
+                <Button
+                  type="text"
+                  className="header-btn"
+                  icon={themeMode === 'auto' ? <SunMoon size={18} /> : themeMode === 'dark' ? <Moon size={18} /> : <Sun size={18} />}
+                />
+              </Tooltip>
+            </Dropdown>
 
             <div className="header-divider" />
 
