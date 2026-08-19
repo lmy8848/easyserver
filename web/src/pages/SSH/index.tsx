@@ -7,8 +7,8 @@ import {
   SettingOutlined, TeamOutlined, HistoryOutlined,
   ReloadOutlined, SaveOutlined, DeleteOutlined, SafetyOutlined,
 } from '@ant-design/icons';
-import { sshApi } from '../services/ssh';
-import { useTab } from '../hooks/useTab';
+import { sshApi } from '../../services/ssh';
+import { useTab } from '../../hooks/useTab';
 import SSHHardeningTab from './SSHHardeningTab';
 
 interface SSHSession {
@@ -214,136 +214,136 @@ export default function SSH() {
       ) : sshAvailable ? (
         <Tabs
           activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
-          {
-            key: 'config',
-            label: <span><SettingOutlined /> 配置</span>,
-            children: (
-              <Card title="SSH 服务器配置">
-                <Alert
-                  title="修改配置后需要点击「保存」并「重载服务」才能生效"
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                />
-                {loading ? (
-                  <Spin />
-                ) : (
-                  <Form
-                    form={configForm}
-                    layout="vertical"
-                    // 不填 initialValues：配置值来自后端 sshd -T 的真实生效配置，
-                    // 加载失败时表单留空并显示错误，而非误导性的自定默认值。
-                  >
-                    <Form.Item name="port" label="监听端口">
-                      <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="permit_root_login" label="Root 登录">
-                      <Select>
-                        <Select.Option value="yes">允许</Select.Option>
-                        <Select.Option value="no">禁止</Select.Option>
-                        <Select.Option value="prohibit-password">仅密钥</Select.Option>
-                      </Select>
-                    </Form.Item>
-                    <Form.Item name="password_auth" label="密码认证">
-                      <Select>
-                        <Select.Option value="yes">允许</Select.Option>
-                        <Select.Option value="no">禁止</Select.Option>
-                      </Select>
-                    </Form.Item>
-                    <Form.Item name="pubkey_auth" label="密钥认证">
-                      <Select>
-                        <Select.Option value="yes">允许</Select.Option>
-                        <Select.Option value="no">禁止</Select.Option>
-                      </Select>
-                    </Form.Item>
-                    <Form.Item name="max_auth_tries" label="最大尝试次数">
-                      <InputNumber min={1} max={10} style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="login_grace_time" label="登录超时（秒）">
-                      <InputNumber min={30} max={600} style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="client_alive_interval" label="心跳间隔（秒）">
-                      <InputNumber min={0} max={3600} style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="client_alive_count_max" label="心跳次数">
-                      <InputNumber min={1} max={10} style={{ width: '100%' }} />
-                    </Form.Item>
-                    <Form.Item name="allow_users" label="允许用户" extra="留空表示不限制">
-                      <Input placeholder="user1 user2" />
-                    </Form.Item>
-                    <Form.Item name="deny_users" label="拒绝用户">
-                      <Input placeholder="user1 user2" />
-                    </Form.Item>
-                    <Form.Item>
-                      <Space>
-                        <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
-                          保存配置
-                        </Button>
-                        <Button onClick={handleTest}>
-                          测试配置
-                        </Button>
-                        <Button icon={<ReloadOutlined />} onClick={handleReload}>
-                          重载服务
-                        </Button>
-                      </Space>
-                    </Form.Item>
-                  </Form>
-                )}
-              </Card>
-            ),
-          },
-          {
-            key: 'sessions',
-            label: <span><TeamOutlined /> 在线会话</span>,
-            children: (
-              <Card
-                title="在线 SSH 会话"
-                extra={
-                  <Button icon={<ReloadOutlined />} onClick={() => { setSessionsLoading(true); loadSessions(); }} loading={sessionsLoading}>
-                    刷新
-                  </Button>
-                }
-              >
-                <Table
-                  columns={sessionColumns}
-                  dataSource={sessions}
-                  rowKey="pid"
-                  loading={sessionsLoading}
-                  locale={{ emptyText: '暂无在线会话' }}
-                />
-              </Card>
-            ),
-          },
-          {
-            key: 'history',
-            label: <span><HistoryOutlined /> 登录历史</span>,
-            children: (
-              <Card
-                title="SSH 登录历史"
-                extra={
-                  <Button icon={<ReloadOutlined />} onClick={() => { setLoginsLoading(true); loadLogins(); }} loading={loginsLoading}>
-                    刷新
-                  </Button>
-                }
-              >
-                <Table
-                  columns={loginColumns}
-                  dataSource={logins}
-                  rowKey={(r) => `${r.user}-${r.time}-${r.ip}-${r.port}`}
-                  loading={loginsLoading}
-                  locale={{ emptyText: '暂无登录记录' }}
-                />
-              </Card>
-            ),
-          },
-          {
-            key: 'hardening',
-            label: <span><SafetyOutlined /> 加固向导</span>,
-            children: <SSHHardeningTab />,
-          },
-        ]}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'config',
+              label: <span><SettingOutlined /> 配置</span>,
+              children: (
+                <Card title="SSH 服务器配置">
+                  <Alert
+                    title="修改配置后需要点击「保存」并「重载服务」才能生效"
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                  />
+                  {loading ? (
+                    <Spin />
+                  ) : (
+                    <Form
+                      form={configForm}
+                      layout="vertical"
+                      // 不填 initialValues：配置值来自后端 sshd -T 的真实生效配置，
+                      // 加载失败时表单留空并显示错误，而非误导性的自定默认值。
+                    >
+                      <Form.Item name="port" label="监听端口">
+                        <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name="permit_root_login" label="Root 登录">
+                        <Select>
+                          <Select.Option value="yes">允许</Select.Option>
+                          <Select.Option value="no">禁止</Select.Option>
+                          <Select.Option value="prohibit-password">仅密钥</Select.Option>
+                        </Select>
+                      </Form.Item>
+                      <Form.Item name="password_auth" label="密码认证">
+                        <Select>
+                          <Select.Option value="yes">允许</Select.Option>
+                          <Select.Option value="no">禁止</Select.Option>
+                        </Select>
+                      </Form.Item>
+                      <Form.Item name="pubkey_auth" label="密钥认证">
+                        <Select>
+                          <Select.Option value="yes">允许</Select.Option>
+                          <Select.Option value="no">禁止</Select.Option>
+                        </Select>
+                      </Form.Item>
+                      <Form.Item name="max_auth_tries" label="最大尝试次数">
+                        <InputNumber min={1} max={10} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name="login_grace_time" label="登录超时（秒）">
+                        <InputNumber min={30} max={600} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name="client_alive_interval" label="心跳间隔（秒）">
+                        <InputNumber min={0} max={3600} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name="client_alive_count_max" label="心跳次数">
+                        <InputNumber min={1} max={10} style={{ width: '100%' }} />
+                      </Form.Item>
+                      <Form.Item name="allow_users" label="允许用户" extra="留空表示不限制">
+                        <Input placeholder="user1 user2" />
+                      </Form.Item>
+                      <Form.Item name="deny_users" label="拒绝用户">
+                        <Input placeholder="user1 user2" />
+                      </Form.Item>
+                      <Form.Item>
+                        <Space>
+                          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
+                            保存配置
+                          </Button>
+                          <Button onClick={handleTest}>
+                            测试配置
+                          </Button>
+                          <Button icon={<ReloadOutlined />} onClick={handleReload}>
+                            重载服务
+                          </Button>
+                        </Space>
+                      </Form.Item>
+                    </Form>
+                  )}
+                </Card>
+              ),
+            },
+            {
+              key: 'sessions',
+              label: <span><TeamOutlined /> 在线会话</span>,
+              children: (
+                <Card
+                  title="在线 SSH 会话"
+                  extra={
+                    <Button icon={<ReloadOutlined />} onClick={() => { setSessionsLoading(true); loadSessions(); }} loading={sessionsLoading}>
+                      刷新
+                    </Button>
+                  }
+                >
+                  <Table
+                    columns={sessionColumns}
+                    dataSource={sessions}
+                    rowKey="pid"
+                    loading={sessionsLoading}
+                    locale={{ emptyText: '暂无在线会话' }}
+                  />
+                </Card>
+              ),
+            },
+            {
+              key: 'history',
+              label: <span><HistoryOutlined /> 登录历史</span>,
+              children: (
+                <Card
+                  title="SSH 登录历史"
+                  extra={
+                    <Button icon={<ReloadOutlined />} onClick={() => { setLoginsLoading(true); loadLogins(); }} loading={loginsLoading}>
+                      刷新
+                    </Button>
+                  }
+                >
+                  <Table
+                    columns={loginColumns}
+                    dataSource={logins}
+                    rowKey={(r) => `${r.user}-${r.time}-${r.ip}-${r.port}`}
+                    loading={loginsLoading}
+                    locale={{ emptyText: '暂无登录记录' }}
+                  />
+                </Card>
+              ),
+            },
+            {
+              key: 'hardening',
+              label: <span><SafetyOutlined /> 加固向导</span>,
+              children: <SSHHardeningTab />,
+            },
+          ]}
         />
       ) : (
         <Alert

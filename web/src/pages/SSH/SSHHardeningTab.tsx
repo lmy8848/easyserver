@@ -6,7 +6,7 @@ import {
 import {
   ReloadOutlined, PlusOutlined, DeleteOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import { sshApi } from '../services/ssh';
+import { sshApi } from '../../services/ssh';
 
 interface AuthorizedKey { comment: string; type: string; key: string; }
 interface Jail { name: string; failed: number; banned: number; }

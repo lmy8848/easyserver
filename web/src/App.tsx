@@ -23,7 +23,6 @@ const Database = lazy(() => import('./pages/Database'));
 const Cron = lazy(() => import('./pages/Cron'));
 const Script = lazy(() => import('./pages/Script'));
 const Firewall = lazy(() => import('./pages/Firewall'));
-const SecuritySettings = lazy(() => import('./pages/SecuritySettings'));
 const Vulnerabilities = lazy(() => import('./pages/Security/Vulnerabilities'));
 const FIM = lazy(() => import('./pages/Security/FIM'));
 const SSH = lazy(() => import('./pages/SSH'));
@@ -142,7 +141,7 @@ function App() {
                 <Route path="files" element={<FileManager />} />
                 <Route path="audit" element={<AuditLog />} />
                 <Route path="settings" element={<Settings />} />
-                <Route path="security" element={<SecuritySettings />} />
+                <Route path="security" element={<Navigate to="/settings?tab=auth" replace />} />
                 <Route path="vulnerabilities" element={<Vulnerabilities />} />
                 <Route path="fim" element={<FIM />} />
                 <Route path="runtime" element={<Runtime />} />
