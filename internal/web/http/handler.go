@@ -735,7 +735,10 @@ func isAllowedPath(p string) bool {
 
 // hasProjectFiles checks if a directory contains project indicator files
 func hasProjectFiles(dir string) bool {
-	cleanDir := filepath.Clean(dir)
+	safeDir, ok := sanitizeAllowedPath(dir)
+	if !ok {
+		return false
+	}
 	indicators := []string{
 		"package.json", "index.js", "app.js", "server.js", // Node.js
 		"index.php", "composer.json", // PHP
@@ -746,8 +749,8 @@ func hasProjectFiles(dir string) bool {
 		"index.html", "index.htm", // Static
 	}
 	for _, f := range indicators {
-		target := filepath.Join(cleanDir, f)
-		rel, err := filepath.Rel(cleanDir, target)
+		target := filepath.Join(safeDir, filepath.Base(f))
+		rel, err := filepath.Rel(safeDir, target)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
@@ -760,7 +763,10 @@ func hasProjectFiles(dir string) bool {
 
 // detectProjectType detects the project type in a directory
 func detectProjectType(dir string) string {
-	cleanDir := filepath.Clean(dir)
+	safeDir, ok := sanitizeAllowedPath(dir)
+	if !ok {
+		return ""
+	}
 	checks := []struct {
 		file    string
 		project string
@@ -778,8 +784,8 @@ func detectProjectType(dir string) string {
 		{"index.html", "static"},
 	}
 	for _, c := range checks {
-		target := filepath.Join(cleanDir, c.file)
-		rel, err := filepath.Rel(cleanDir, target)
+		target := filepath.Join(safeDir, filepath.Base(c.file))
+		rel, err := filepath.Rel(safeDir, target)
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
