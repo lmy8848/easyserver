@@ -155,7 +155,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [location.hash]);
+  }, [location.key, location.hash]);
 
   useEffect(() => {
     if (settings?.auth) {
