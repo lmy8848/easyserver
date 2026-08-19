@@ -105,12 +105,13 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 		backup.Status = "success"
 		if instance, errInst := s.repo.GetInstance(ctx, backup.DBInstanceID); errInst == nil && instance != nil {
 			baseFile := filepath.Base(filepath.Clean(backup.FilePath))
-			backupDir := filepath.Join(instance.VolumeName, esBackupsDir)
-			safePath := filepath.Join(backupDir, baseFile)
-			rel, relErr := filepath.Rel(backupDir, safePath)
-			if relErr == nil && !strings.HasPrefix(rel, "..") {
-				if info, err := os.Stat(safePath); err == nil {
-					backup.FileSize = info.Size()
+			if isSafePathComponent(baseFile) {
+				backupDir := filepath.Join(instance.VolumeName, esBackupsDir)
+				safePath := filepath.Join(backupDir, baseFile)
+				if ok, _ := isPathWithinBase(safePath, backupDir); ok {
+					if info, err := os.Stat(safePath); err == nil {
+						backup.FileSize = info.Size()
+					}
 				}
 			}
 		}
@@ -228,9 +229,15 @@ func isPathWithinBase(targetPath, baseDir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if realBase, err := filepath.EvalSymlinks(absBase); err == nil {
+		absBase = realBase
+	}
 	absTarget, err := filepath.Abs(filepath.Clean(targetPath))
 	if err != nil {
 		return false, err
+	}
+	if realTarget, err := filepath.EvalSymlinks(absTarget); err == nil {
+		absTarget = realTarget
 	}
 	rel, err := filepath.Rel(absBase, absTarget)
 	if err != nil {
