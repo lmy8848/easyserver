@@ -272,17 +272,25 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 			return uninstallErr
 		}
 		// 卸载后标记随目录删除；此处显式删标记防目录残留半截。
+		if !isValidVersion(version) {
+			return fmt.Errorf("invalid runtime version: %s", version)
+		}
 		tool := miseToolDir(name)
-		if tool != "" && isValidVersion(version) {
-			cleanExact := filepath.Base(filepath.Clean(version))
-			if cleanExact == version && cleanExact != "." && cleanExact != "/" {
-				cleanRoot := filepath.Clean(mise.DataDir)
-				p := filepath.Join(cleanRoot, "installs", tool, cleanExact, okMarker)
-				rel, err := filepath.Rel(cleanRoot, p)
-				if err == nil && !strings.HasPrefix(rel, "..") {
-					_ = os.Remove(p)
-				}
-			}
+		if tool == "" {
+			return fmt.Errorf("invalid runtime: %s", name)
+		}
+		cleanExact := filepath.Base(filepath.Clean(version))
+		if cleanExact != version || cleanExact == "." || cleanExact == ".." || cleanExact == "/" {
+			return fmt.Errorf("invalid runtime version path: %s", version)
+		}
+		cleanRoot := filepath.Clean(mise.DataDir)
+		p := filepath.Join(cleanRoot, "installs", tool, cleanExact, okMarker)
+		rel, err := filepath.Rel(cleanRoot, p)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			return errors.New("invalid runtime marker path")
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("卸载完成但删除标记失败: %w", err)
 		}
 		return nil
 	}); err != nil {
