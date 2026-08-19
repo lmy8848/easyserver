@@ -95,13 +95,13 @@
 
 ### 13. 监控与告警
 
-- **System Monitor（系统监控）** — 实时采集与历史存储系统性能指标（CPU、内存、磁盘 IO、网络吞吐、系统负载、分区状态与 Top 进程），采集层通过 `MetricSource` 接口解耦（见 ADR-0003）。
+- **System Monitor（系统监控）** — 实时采集与历史存储系统性能指标。历史存储（`MonitorPoint` 表）包含：CPU、内存、磁盘（根分区）、磁盘 IO、网络吞吐、系统负载；分区状态（`DiskPartition`）与 Top 进程（`SystemProcess`）通过独立 API 按需查询，不进入历史表。采集层通过 `MetricSource` 接口解耦（见 ADR-0003）。
 - **Alert Rule（告警规则）** — 监控指标告警阈值配置（如 CPU > 90% 持续 5 分钟），触发告警生命周期。
 
 ### 14. 通知系统
 
-- **In-App Notification（站内通知）** — 面板右上角铃铛消息（告警触发、安全事件、系统通知），通过 SSE（`/api/notifications/stream`）实时推送至前端。
-- **Notification Channel（站外推送）** — 站外通知渠道配置（Webhook、邮件 Email、企业微信、钉钉、飞书、Telegram 等），用于将重要告警向管理员外部设备分发。
+- **In-App Notification（站内通知）** — 面板右上角铃铛消息（告警触发、安全事件、系统通知），通过 SSE（`/api/notifications/stream`，需 JWT 与 Session 双重验证）实时推送至前端。
+- **Notification Channel（站外推送）** — 站外通知渠道配置，当前已实现：通用 Webhook、钉钉（DingTalk）、飞书（Feishu）、企业微信（WeCom）；通过 URL 模式识别渠道类型并适配消息格式（见 `internal/notify`）。用于将重要告警向管理员外部设备分发。
   _Avoid_: 用 "Notification" 同时模糊指代站内铃铛与站外推送。
 
 ### 15. 审计与环境配置
