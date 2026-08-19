@@ -48,6 +48,10 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 		return nil, err
 	}
 
+	if err := req.ValidateDomain(); err != nil {
+		return nil, errx.BadRequest("无效的域名: %w", err)
+	}
+
 	// Check web server is installed
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
@@ -228,6 +232,9 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 		w.Name = *req.Name
 	}
 	if req.Domain != nil && *req.Domain != w.Domain {
+		if !domainRegexp.MatchString(*req.Domain) {
+			return errx.BadRequest("invalid domain format: must be a valid RFC 1123 hostname")
+		}
 		// Check new domain uniqueness
 		count, _ := s.repo.CountByDomainExcludingID(ctx, *req.Domain, id)
 		if count > 0 {
@@ -294,10 +301,16 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 	if w.Status == "active" && oldDomain != w.Domain {
 		ws, _ := s.webServerRepo.Get(ctx, webServerID)
 		if ws != nil && ws.SitesAvailable != "" && ws.SitesEnabled != "" {
-			confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
-			linkPath := filepath.Join(ws.SitesEnabled, w.Domain+".conf")
-			_ = os.MkdirAll(ws.SitesEnabled, 0755)
-			_ = os.Symlink(confPath, linkPath)
+			if domainRegexp.MatchString(w.Domain) {
+				confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
+				linkPath := filepath.Join(ws.SitesEnabled, w.Domain+".conf")
+				relConf, errConf := filepath.Rel(ws.SitesAvailable, confPath)
+				relLink, errLink := filepath.Rel(ws.SitesEnabled, linkPath)
+				if errConf == nil && !strings.HasPrefix(relConf, "..") && errLink == nil && !strings.HasPrefix(relLink, "..") {
+					_ = os.MkdirAll(ws.SitesEnabled, 0755)
+					_ = os.Symlink(confPath, linkPath)
+				}
+			}
 		}
 	}
 
@@ -534,10 +547,18 @@ func (s *WebsiteService) writeConfigForServer(ctx context.Context, webServerID i
 		return nil
 	}
 
+	if !domainRegexp.MatchString(w.Domain) {
+		return fmt.Errorf("invalid domain: %s", w.Domain)
+	}
+
 	_ = os.MkdirAll(ws.SitesAvailable, 0755)
 	_ = os.MkdirAll(ws.SitesEnabled, 0755)
 
 	confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
+	rel, err := filepath.Rel(ws.SitesAvailable, confPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("invalid domain config path: %s", w.Domain)
+	}
 
 	if w.CustomConfig != "" {
 		return os.WriteFile(confPath, []byte(w.CustomConfig), 0644)
@@ -565,15 +586,24 @@ func (s *WebsiteService) writeConfigForServer(ctx context.Context, webServerID i
 }
 
 func (s *WebsiteService) removeConfigForServer(ctx context.Context, webServerID int64, domain string) {
+	if !domainRegexp.MatchString(domain) {
+		return
+	}
 	ws, _ := s.webServerRepo.Get(ctx, webServerID)
 	if ws == nil {
 		return
 	}
 	if ws.SitesEnabled != "" {
-		os.Remove(filepath.Join(ws.SitesEnabled, domain+".conf"))
+		linkPath := filepath.Join(ws.SitesEnabled, domain+".conf")
+		if rel, err := filepath.Rel(ws.SitesEnabled, linkPath); err == nil && !strings.HasPrefix(rel, "..") {
+			_ = os.Remove(linkPath)
+		}
 	}
 	if ws.SitesAvailable != "" {
-		os.Remove(filepath.Join(ws.SitesAvailable, domain+".conf"))
+		confPath := filepath.Join(ws.SitesAvailable, domain+".conf")
+		if rel, err := filepath.Rel(ws.SitesAvailable, confPath); err == nil && !strings.HasPrefix(rel, "..") {
+			_ = os.Remove(confPath)
+		}
 	}
 }
 
