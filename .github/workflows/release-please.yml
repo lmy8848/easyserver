@@ -1,32 +1,47 @@
-name: Release
+name: Release Please
 
 on:
   push:
-    tags: ['v*']
+    branches:
+      - master
+      - main
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
-    name: Build & Release
+  release-please:
+    name: Release Please
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: googleapis/release-please-action@v4
+        id: release
         with:
-          fetch-depth: 0  # 需要完整历史用于 git describe
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # 当 Release PR 被合并、Release 被创建时触发打包并上传资产
+      - name: Checkout repository
+        if: ${{ steps.release.outputs.releases_created }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
+        if: ${{ steps.release.outputs.releases_created }}
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
           cache: true
 
       - uses: pnpm/action-setup@v4
+        if: ${{ steps.release.outputs.releases_created }}
         with:
           version: latest
 
       - name: Set up Node.js
+        if: ${{ steps.release.outputs.releases_created }}
         uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -34,6 +49,7 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Build frontend
+        if: ${{ steps.release.outputs.releases_created }}
         run: |
           cd web
           pnpm install
@@ -42,20 +58,23 @@ jobs:
           cp -a dist/. ../internal/api/web/dist/
 
       - name: Build linux-amd64
+        if: ${{ steps.release.outputs.releases_created }}
         run: |
-          VERSION=${{ github.ref_name }}
+          VERSION=${{ steps.release.outputs.tag_name }}
           LDFLAGS="-X easyserver/internal/infra/version.Version=${VERSION}"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o easyserver-linux-amd64 ./cmd/server
 
       - name: Build linux-arm64
+        if: ${{ steps.release.outputs.releases_created }}
         run: |
-          VERSION=${{ github.ref_name }}
+          VERSION=${{ steps.release.outputs.tag_name }}
           LDFLAGS="-X easyserver/internal/infra/version.Version=${VERSION}"
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o easyserver-linux-arm64 ./cmd/server
 
       - name: Smoke test (amd64)
+        if: ${{ steps.release.outputs.releases_created }}
         run: |
-          cat > /tmp/easyserver-test.toml << 'EOF'
+          cat > /tmp/easyserver-test.toml << 'TEST_CONFIG'
           [server]
           port = 18080
           host = "127.0.0.1"
@@ -65,7 +84,7 @@ jobs:
 
           [filemanager]
           base_path = "/tmp/easyserver-data"
-          EOF
+          TEST_CONFIG
           chmod +x easyserver-linux-amd64
           MISE_DATA_DIR=/tmp/mise-data ./easyserver-linux-amd64 -config /tmp/easyserver-test.toml &
           PID=$!
@@ -82,15 +101,16 @@ jobs:
           kill "$PID" 2>/dev/null || true
 
       - name: Calculate checksums
+        if: ${{ steps.release.outputs.releases_created }}
         run: sha256sum easyserver-linux-amd64 easyserver-linux-arm64 > checksums-sha256.txt
 
-      - name: Create Release
+      - name: Upload Release Assets
+        if: ${{ steps.release.outputs.releases_created }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create ${{ github.ref_name }} \
+          gh release upload ${{ steps.release.outputs.tag_name }} \
             ./easyserver-linux-amd64 \
             ./easyserver-linux-arm64 \
             ./checksums-sha256.txt \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+            --clobber
