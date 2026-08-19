@@ -11,7 +11,7 @@ import (
 	"sync"
 	"syscall"
 
-	"easyserver/internal/infra/errx"
+	"easyserver/internal/infra/pathutil"
 )
 
 // FileEntry represents a file or directory entry.
@@ -91,65 +91,7 @@ func NewManager(basePath string) (*Manager, error) {
 // ValidatePath checks if path is safe (no path traversal, no symlink escape).
 // An empty path or "." is treated as basePath (root of sandbox).
 func (m *Manager) ValidatePath(path string) (string, error) {
-	if strings.Contains(path, "\x00") {
-		return "", errors.New("invalid path: contains null byte")
-	}
-	if path == "" || path == "." || path == "/" {
-		return m.basePath, nil
-	}
-	cleanPath := filepath.Clean(path)
-	if strings.HasPrefix(cleanPath, "..") {
-		return "", errx.Forbidden("path traversal detected: path escapes base directory")
-	}
-	absBase := filepath.Clean(m.basePath)
-	var absPath string
-
-	if filepath.IsAbs(cleanPath) {
-		// Convert absolute path to sandbox path
-		// e.g., basePath="/home/user", input="/etc/passwd" -> "/home/user/etc/passwd"
-		absPath = filepath.Join(absBase, strings.TrimPrefix(cleanPath, "/"))
-	} else {
-		absPath = filepath.Join(absBase, cleanPath)
-	}
-
-	rel, err := filepath.Rel(absBase, absPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", errx.Forbidden("path traversal detected: path escapes base directory")
-	}
-
-	// Resolve symlinks by climbing up to the first existing parent directory.
-	checkPath := absPath
-	var resolvedPath string
-	for {
-		resolved, err := filepath.EvalSymlinks(checkPath)
-		if err == nil {
-			// Found the closest existing path.
-			relSub, err := filepath.Rel(checkPath, absPath)
-			if err != nil {
-				return "", fmt.Errorf("calculate relative path: %w", err)
-			}
-			resolvedPath = filepath.Join(resolved, relSub)
-			break
-		}
-		if !os.IsNotExist(err) {
-			// 底层 os 错误可能含绝对路径，只进日志；前端只见友好文案。
-			return "", errx.Forbidden("路径解析失败，拒绝访问: %w", err)
-		}
-
-		parent := filepath.Dir(checkPath)
-		if parent == checkPath {
-			// Reached system root directory and it still doesn't exist
-			resolvedPath = filepath.Clean(absPath)
-			break
-		}
-		checkPath = parent
-	}
-
-	if !isSubPath(absBase, resolvedPath) {
-		return "", errx.Forbidden("path traversal detected: path escapes base directory")
-	}
-
-	return resolvedPath, nil
+	return pathutil.ResolveInSandbox(m.basePath, path)
 }
 
 // validateRealPath checks that an already-resolved filesystem path stays in basePath.
@@ -158,17 +100,7 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 // absolute input as user-facing sandbox-relative and would double-Join the basePath,
 // silently turning the symlink-escape check into dead code.
 func (m *Manager) validateRealPath(realPath string) error {
-	if strings.Contains(realPath, "\x00") {
-		return errors.New("invalid path: contains null byte")
-	}
-	resolved, err := filepath.EvalSymlinks(realPath)
-	if err != nil {
-		return fmt.Errorf("resolve symlinks: %w", err)
-	}
-	if !isSubPath(m.basePath, resolved) {
-		return errx.Forbidden("path traversal detected: path escapes base directory")
-	}
-	return nil
+	return pathutil.ValidateRealPath(m.basePath, realPath)
 }
 
 // ResolveShareSubpath anchors subpath under shareRoot (a ValidatePath-validated
@@ -177,33 +109,9 @@ func (m *Manager) validateRealPath(realPath string) error {
 //
 // ".." is neutralized by Clean+Join against "/", so the only escape vector is a
 // symlink planted inside the share pointing outside (e.g. to /etc/passwd, or to a
-// sandbox sibling the owner never shared). The previous callers used a bare
-// strings.HasPrefix check, which does not resolve symlinks and followed them out.
+// sandbox sibling the owner never shared).
 func (m *Manager) ResolveShareSubpath(shareRoot, subpath string) (string, error) {
-	if strings.Contains(subpath, "\x00") {
-		return "", errors.New("invalid path: contains null byte")
-	}
-	cleanSub := filepath.Clean(filepath.Join("/", subpath))
-	if cleanSub == "/" {
-		cleanSub = ""
-	} else {
-		cleanSub = strings.TrimPrefix(cleanSub, "/")
-	}
-	target := shareRoot
-	if cleanSub != "" {
-		target = filepath.Join(shareRoot, cleanSub)
-	}
-	resolved, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return "", err
-	}
-	if !isSubPath(m.basePath, resolved) {
-		return "", errx.Forbidden("path traversal detected: path escapes base directory")
-	}
-	if !isSubPath(shareRoot, resolved) {
-		return "", errx.Forbidden("path traversal detected: path escapes share root")
-	}
-	return target, nil
+	return pathutil.ResolveShareSubpath(m.basePath, shareRoot, subpath)
 }
 
 // ValidateWalkPath guards a real filesystem path surfaced by filepath.Walk inside
@@ -542,16 +450,6 @@ func (m *Manager) Move(paths []string, dest string) error {
 }
 
 // isSubPath checks if childPath is under parentPath (or is equal to it).
-// Both parentPath and childPath should be cleaned before calling if needed.
 func isSubPath(parentPath, childPath string) bool {
-	cleanParent := filepath.Clean(parentPath)
-	cleanChild := filepath.Clean(childPath)
-	if cleanParent == cleanChild {
-		return true
-	}
-	rel, err := filepath.Rel(cleanParent, cleanChild)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return false
-	}
-	return true
+	return pathutil.IsSubPath(parentPath, childPath)
 }

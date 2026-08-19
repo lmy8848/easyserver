@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/infra/pathutil"
 )
 
 var errSearchLimit = errors.New("search result limit reached")
@@ -375,16 +376,18 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 	}()
 
 	for _, file := range reader.File {
+		if pathutil.IsTraversal(file.Name) {
+			return errx.Forbidden("path traversal not allowed in archive: %s", file.Name)
+		}
 		if filepath.IsAbs(file.Name) {
 			return fmt.Errorf("absolute path not allowed in archive: %s", file.Name)
 		}
 		cleanName := filepath.Clean(file.Name)
-		if strings.HasPrefix(cleanName, "..") || strings.Contains(file.Name, "..") {
+		if strings.HasPrefix(cleanName, "..") {
 			return errx.Forbidden("path traversal not allowed in archive: %s", file.Name)
 		}
 		path := filepath.Join(destPath, cleanName)
-		cleanDest := filepath.Clean(destPath)
-		if !strings.HasPrefix(path, cleanDest+string(os.PathSeparator)) && path != cleanDest {
+		if !pathutil.HasPathPrefix(path, destPath) {
 			return fmt.Errorf("invalid file path: %s", file.Name)
 		}
 
@@ -477,16 +480,18 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 			return err
 		}
 
+		if pathutil.IsTraversal(header.Name) {
+			return errx.Forbidden("path traversal not allowed in archive: %s", header.Name)
+		}
 		if filepath.IsAbs(header.Name) {
 			return fmt.Errorf("absolute path not allowed in archive: %s", header.Name)
 		}
 		cleanName := filepath.Clean(header.Name)
-		if strings.HasPrefix(cleanName, "..") || strings.Contains(header.Name, "..") {
+		if strings.HasPrefix(cleanName, "..") {
 			return errx.Forbidden("path traversal not allowed in archive: %s", header.Name)
 		}
 		path := filepath.Join(destPath, cleanName)
-		cleanDest := filepath.Clean(destPath)
-		if !strings.HasPrefix(path, cleanDest+string(os.PathSeparator)) && path != cleanDest {
+		if !pathutil.HasPathPrefix(path, destPath) {
 			return fmt.Errorf("invalid file path: %s", header.Name)
 		}
 
@@ -742,6 +747,9 @@ func (m *Manager) GetMimeType(path string) (string, error) {
 func (m *Manager) mkdirAllWithRecord(path string, perm os.FileMode, createdPaths *[]string) error {
 	var toCreate []string
 	curr := filepath.Clean(path)
+	if !pathutil.HasPathPrefix(curr, m.basePath) || !isSubPath(m.basePath, curr) {
+		return errx.Forbidden("path traversal detected: path escapes base directory")
+	}
 	for {
 		info, err := os.Stat(curr)
 		if err == nil {

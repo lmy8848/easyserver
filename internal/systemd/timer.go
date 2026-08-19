@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/infra/pathutil"
 )
 
 // 定时任务（cron → systemd timer）的 unit 命名：每个任务一对 .timer + .service，
@@ -227,14 +228,7 @@ func buildCronExecStart(lang, exact, execStart string, p mise.Provider) (string,
 }
 
 func validateCronUnitFileName(fileName string) error {
-	if fileName == "" {
-		return errors.New("file name cannot be empty")
-	}
-	clean := filepath.Clean(fileName)
-	if filepath.Base(clean) != clean || strings.Contains(clean, "..") || strings.Contains(clean, "/") || strings.Contains(clean, "\\") {
-		return errors.New("invalid cron unit file name")
-	}
-	return nil
+	return pathutil.ValidateFilename(fileName)
 }
 
 // WriteCronUnitFile 原子写入 cron unit 文件到 managedUnitDir。
@@ -242,16 +236,16 @@ func WriteCronUnitFile(fileName, content string) error {
 	if err := validateCronUnitFileName(fileName); err != nil {
 		return err
 	}
-	path := filepath.Join(managedUnitDir, fileName)
-	rel, err := filepath.Rel(managedUnitDir, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	path, err := pathutil.JoinSafe(managedUnitDir, fileName)
+	if err != nil {
 		return errors.New("invalid unit file path")
 	}
 	dir := filepath.Dir(path)
 	if err := ensureManagedUnitDir(); err != nil {
 		return fmt.Errorf("创建 unit 目录失败: %w", err)
 	}
-	tmpFile, err := os.CreateTemp(dir, fileName+".*.tmp")
+	cleanFile := filepath.Base(fileName)
+	tmpFile, err := os.CreateTemp(dir, cleanFile+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("创建临时 unit 文件失败: %w", err)
 	}
@@ -288,9 +282,8 @@ func ReadCronUnitFile(fileName string) (string, error) {
 	if err := validateCronUnitFileName(fileName); err != nil {
 		return "", err
 	}
-	path := filepath.Join(managedUnitDir, fileName)
-	rel, err := filepath.Rel(managedUnitDir, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	path, err := pathutil.JoinSafe(managedUnitDir, fileName)
+	if err != nil {
 		return "", errors.New("invalid unit file path")
 	}
 	data, err := os.ReadFile(path)
@@ -308,9 +301,8 @@ func RemoveCronUnitFile(fileName string) error {
 	if err := validateCronUnitFileName(fileName); err != nil {
 		return err
 	}
-	path := filepath.Join(managedUnitDir, fileName)
-	rel, err := filepath.Rel(managedUnitDir, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	path, err := pathutil.JoinSafe(managedUnitDir, fileName)
+	if err != nil {
 		return errors.New("invalid unit file path")
 	}
 	err = os.Remove(path)

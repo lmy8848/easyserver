@@ -23,6 +23,7 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/infra/pathutil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -99,6 +100,9 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) (any, error) {
 	}
 
 	// Validate file path
+	if pathutil.IsTraversal(req.FilePath) {
+		return nil, errx.Forbidden("文件路径包含非法字符")
+	}
 	validPath, err := h.fileManager.ValidatePath(req.FilePath)
 	if err != nil {
 		return nil, errx.BadRequest("文件路径无效")
@@ -482,6 +486,9 @@ func (h *FileShareHandler) PublicList(c *gin.Context) (any, error) {
 	token := c.Param("token")
 	ticket := c.Query("ticket")
 	subpath := c.Query("subpath")
+	if pathutil.IsTraversal(subpath) {
+		return nil, errx.Forbidden("非法路径")
+	}
 	if token == "" || ticket == "" {
 		return nil, errx.BadRequest("缺少令牌或凭证")
 	}
@@ -542,6 +549,9 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) (any, error) {
 	token := c.Param("token")
 	ticket := c.Query("ticket")
 	subpath := c.Query("subpath")
+	if pathutil.IsTraversal(subpath) {
+		return nil, errx.Forbidden("非法路径")
+	}
 
 	if token == "" || ticket == "" {
 		return nil, errx.BadRequest("缺少令牌或凭证")

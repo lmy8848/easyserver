@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/infra/pathutil"
 	"easyserver/internal/web/security"
 )
 
@@ -554,9 +555,8 @@ func (s *WebsiteService) writeConfigForServer(ctx context.Context, webServerID i
 	_ = os.MkdirAll(ws.SitesAvailable, 0755)
 	_ = os.MkdirAll(ws.SitesEnabled, 0755)
 
-	confPath := filepath.Join(ws.SitesAvailable, w.Domain+".conf")
-	rel, err := filepath.Rel(ws.SitesAvailable, confPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	confPath, err := pathutil.JoinSafe(ws.SitesAvailable, w.Domain+".conf")
+	if err != nil {
 		return fmt.Errorf("invalid domain config path: %s", w.Domain)
 	}
 
@@ -594,14 +594,12 @@ func (s *WebsiteService) removeConfigForServer(ctx context.Context, webServerID 
 		return
 	}
 	if ws.SitesEnabled != "" {
-		linkPath := filepath.Join(ws.SitesEnabled, domain+".conf")
-		if rel, err := filepath.Rel(ws.SitesEnabled, linkPath); err == nil && !strings.HasPrefix(rel, "..") {
+		if linkPath, err := pathutil.JoinSafe(ws.SitesEnabled, domain+".conf"); err == nil {
 			_ = os.Remove(linkPath)
 		}
 	}
 	if ws.SitesAvailable != "" {
-		confPath := filepath.Join(ws.SitesAvailable, domain+".conf")
-		if rel, err := filepath.Rel(ws.SitesAvailable, confPath); err == nil && !strings.HasPrefix(rel, "..") {
+		if confPath, err := pathutil.JoinSafe(ws.SitesAvailable, domain+".conf"); err == nil {
 			_ = os.Remove(confPath)
 		}
 	}

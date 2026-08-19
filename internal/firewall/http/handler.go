@@ -98,15 +98,17 @@ func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) (any, error) {
 	return gin.H{"message": fmt.Sprintf("%s 的默认策略已设置为 %s", chain, policy)}, nil
 }
 
+const (
+	defaultFirewallLogLines = 100
+	maxFirewallLogLines     = 1000
+)
+
 // GetLogs returns firewall log entries from system log files
 func (h *FirewallHandler) GetLogs(c *gin.Context) (any, error) {
 	linesParam := c.DefaultQuery("lines", "100")
-	lines, err := strconv.Atoi(linesParam)
-	if err != nil || lines < 1 {
-		lines = 100
-	}
-	if lines > 1000 {
-		lines = 1000
+	lines := defaultFirewallLogLines
+	if parsed, err := strconv.Atoi(linesParam); err == nil && parsed >= 1 && parsed <= maxFirewallLogLines {
+		lines = parsed
 	}
 
 	logFiles := []string{
@@ -144,8 +146,9 @@ var ufwActionRegex = regexp.MustCompile(`\[UFW\s+(\w+)\]`)
 // readFirewallLog reads a log file and parses firewall entries.
 // Uses a ring buffer to keep only the last maxLines matching lines in memory.
 func readFirewallLog(filePath string, maxLines int) ([]firewall.FirewallLogEntry, error) {
-	if maxLines <= 0 || maxLines > 1000 {
-		maxLines = 100
+	capSize := defaultFirewallLogLines
+	if maxLines > 0 && maxLines <= maxFirewallLogLines {
+		capSize = maxLines
 	}
 
 	file, err := os.Open(filePath)
@@ -155,7 +158,8 @@ func readFirewallLog(filePath string, maxLines int) ([]firewall.FirewallLogEntry
 	defer file.Close()
 
 	// Ring buffer to keep only the last maxLines lines
-	lines := make([]string, 0, maxLines)
+	lines := make([]string, 0, capSize)
+	maxLines = capSize
 	writeIdx := 0
 
 	scanner := bufio.NewScanner(file)

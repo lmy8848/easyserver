@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/infra/pathutil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -145,6 +146,9 @@ func (h *FileManagerHandler) Download(c *gin.Context) (any, error) {
 	path := c.Query("path")
 	if path == "" {
 		return nil, errx.BadRequest("path is required")
+	}
+	if pathutil.IsTraversal(path) {
+		return nil, errx.Forbidden("path traversal detected")
 	}
 
 	validPath, err := h.fileManager.ValidatePath(path)
