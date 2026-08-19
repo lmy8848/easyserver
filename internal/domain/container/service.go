@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	infracontainer "easyserver/internal/infra/container"
 	"easyserver/internal/infra/errx"
 	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
@@ -29,12 +30,7 @@ const (
 	MaxLogTail       = 10000            // 最大日志行数
 )
 
-// portMappingRE parses a single `docker ps` port token:
-//
-//	[ip:]hostPort->containerPort/protocol
-var portMappingRE = regexp.MustCompile(`^(?:(.*?):)?(\d+)->(\d+)/(.+)$`)
-
-// engineBinary maps a engine name to the CLI binary that manages it.
+// engineBinary maps a engine name to the CLI binary that manages it (for compose & file ops).
 func engineBinary(engine Engine) string {
 	if engine == "podman" {
 		return "podman"
@@ -50,72 +46,152 @@ func NewService() *Service {
 	return &Service{}
 }
 
-// dockerPSRow mirrors the uppercase-keyed JSON emitted by `docker ps --format json`,
-// used as an unmarshal-only shim. toContainer() maps it onto the public lowercase Container.
-type dockerPSRow struct {
-	ID         string `json:"ID"`
-	Names      string `json:"Names"`
-	Image      string `json:"Image"`
-	Status     string `json:"Status"`
-	State      string `json:"State"`
-	Ports      string `json:"Ports"`
-	CreatedAt  string `json:"CreatedAt"`
-	Command    string `json:"Command"`
-	Labels     string `json:"Labels"`
-	Mounts     string `json:"Mounts"`
-	Networks   string `json:"Networks"`
-	Size       string `json:"Size"`
-	RunningFor string `json:"RunningFor"`
-}
-
-func (d dockerPSRow) toContainer() Container {
-	return Container{
-		ID:         d.ID,
-		Name:       strings.TrimPrefix(d.Names, "/"),
-		Image:      d.Image,
-		Status:     d.Status,
-		State:      d.State,
-		Ports:      parsePortsString(d.Ports),
-		CreatedAt:  d.CreatedAt,
-		Command:    d.Command,
-		Labels:     d.Labels,
-		Mounts:     d.Mounts,
-		Networks:   d.Networks,
-		Size:       d.Size,
-		RunningFor: d.RunningFor,
+func mapSummaryToContainer(s infracontainer.ContainerSummary) Container {
+	name := ""
+	if len(s.Names) > 0 {
+		name = strings.TrimPrefix(s.Names[0], "/")
 	}
-}
 
-// parsePortsString turns the comma-separated `docker ps` Ports string
-// (e.g. "0.0.0.0:8080->80/tcp, :::8080->80/tcp") into structured PortMappings.
-// Falls back to a host-only entry for tokens that don't match the expected shape.
-func parsePortsString(s string) []PortMapping {
-	if s = strings.TrimSpace(s); s == "" {
-		return []PortMapping{}
-	}
-	out := make([]PortMapping, 0)
-	for tok := range strings.SplitSeq(s, ",") {
-		t := strings.TrimSpace(tok)
-		if t == "" {
-			continue
-		}
-		// match optional "ip:" prefix, then "hostPort->containerPort/protocol"
-		m := portMappingRE.FindStringSubmatch(t)
-		if m != nil {
-			ip := ""
-			if m[1] != "" {
-				ip = m[1] + ":"
+	ports := make([]PortMapping, 0, len(s.Ports))
+	for _, p := range s.Ports {
+		hostPort := ""
+		if p.PublicPort > 0 {
+			if p.IP != "" && p.IP != "0.0.0.0" {
+				hostPort = fmt.Sprintf("%s:%d", p.IP, p.PublicPort)
+			} else {
+				hostPort = strconv.Itoa(int(p.PublicPort))
 			}
-			out = append(out, PortMapping{
-				HostPort:      ip + m[2],
-				ContainerPort: m[3],
-				Protocol:      m[4],
-			})
-			continue
 		}
-		out = append(out, PortMapping{HostPort: t})
+		ports = append(ports, PortMapping{
+			HostPort:      hostPort,
+			ContainerPort: strconv.Itoa(int(p.PrivatePort)),
+			Protocol:      p.Type,
+		})
 	}
-	return out
+
+	mounts := make([]string, 0, len(s.Mounts))
+	for _, m := range s.Mounts {
+		mounts = append(mounts, m.Source+":"+m.Destination)
+	}
+
+	networks := make([]string, 0, len(s.NetworkSettings.Networks))
+	for netName := range s.NetworkSettings.Networks {
+		networks = append(networks, netName)
+	}
+
+	labelsStr := ""
+	if len(s.Labels) > 0 {
+		labelPairs := make([]string, 0, len(s.Labels))
+		for k, v := range s.Labels {
+			labelPairs = append(labelPairs, k+"="+v)
+		}
+		labelsStr = strings.Join(labelPairs, ",")
+	}
+
+	createdAt := ""
+	if s.Created > 0 {
+		createdAt = time.Unix(s.Created, 0).Format(time.RFC3339)
+	}
+
+	return Container{
+		ID:         s.ID,
+		Name:       name,
+		Image:      s.Image,
+		Status:     s.Status,
+		State:      s.State,
+		Ports:      ports,
+		CreatedAt:  createdAt,
+		Command:    s.Command,
+		Labels:     labelsStr,
+		Mounts:     strings.Join(mounts, ","),
+		Networks:   strings.Join(networks, ","),
+		Size:       humanSize(s.SizeRw),
+		RunningFor: "",
+	}
+}
+
+func mapInspectToContainer(insp infracontainer.ContainerInspect) Container {
+	name := strings.TrimPrefix(insp.Name, "/")
+
+	ports := make([]PortMapping, 0)
+	for portProto, bindings := range insp.NetworkSettings.Ports {
+		parts := strings.Split(portProto, "/")
+		cPort := parts[0]
+		proto := "tcp"
+		if len(parts) > 1 {
+			proto = parts[1]
+		}
+		if len(bindings) == 0 {
+			ports = append(ports, PortMapping{
+				HostPort:      "",
+				ContainerPort: cPort,
+				Protocol:      proto,
+			})
+		} else {
+			for _, b := range bindings {
+				hPort := b.HostPort
+				if b.HostIP != "" && b.HostIP != "0.0.0.0" {
+					hPort = b.HostIP + ":" + hPort
+				}
+				ports = append(ports, PortMapping{
+					HostPort:      hPort,
+					ContainerPort: cPort,
+					Protocol:      proto,
+				})
+			}
+		}
+	}
+
+	mounts := make([]string, 0, len(insp.Mounts))
+	for _, m := range insp.Mounts {
+		mounts = append(mounts, m.Source+":"+m.Destination)
+	}
+
+	networks := make([]string, 0, len(insp.NetworkSettings.Networks))
+	for netName := range insp.NetworkSettings.Networks {
+		networks = append(networks, netName)
+	}
+
+	labelsStr := ""
+	if len(insp.Config.Labels) > 0 {
+		labelPairs := make([]string, 0, len(insp.Config.Labels))
+		for k, v := range insp.Config.Labels {
+			labelPairs = append(labelPairs, k+"="+v)
+		}
+		labelsStr = strings.Join(labelPairs, ",")
+	}
+
+	state := insp.State.Status
+	if state == "" {
+		if insp.State.Running {
+			state = "running"
+		} else {
+			state = "exited"
+		}
+	}
+
+	cmdStr := ""
+	if len(insp.Config.Cmd) > 0 {
+		cmdStr = strings.Join(insp.Config.Cmd, " ")
+	} else if insp.Path != "" {
+		cmdStr = insp.Path + " " + strings.Join(insp.Args, " ")
+	}
+
+	return Container{
+		ID:         insp.ID,
+		Name:       name,
+		Image:      insp.Config.Image,
+		Status:     state,
+		State:      state,
+		Ports:      ports,
+		CreatedAt:  insp.Created,
+		Command:    strings.TrimSpace(cmdStr),
+		Labels:     labelsStr,
+		Mounts:     strings.Join(mounts, ","),
+		Networks:   strings.Join(networks, ","),
+		Size:       "",
+		RunningFor: "",
+	}
 }
 
 // dockerImageRow mirrors the uppercase-keyed JSON emitted by `docker images --format json`.
@@ -131,65 +207,6 @@ type dockerImageRow struct {
 func (d dockerImageRow) toImage() Image {
 	// 字段名与类型与 Image 一致，直接类型转换即可。
 	return Image(d)
-}
-
-// podmanPSRow mirrors a single element of the JSON array emitted by
-// `podman ps --format json`. Fields differ in casing and type from Docker's
-// NDJSON rows (arrays where Docker uses strings), so it needs its own shim.
-type podmanPSRow struct {
-	ID        string            `json:"Id"`
-	Names     []string          `json:"Names"`
-	Image     string            `json:"Image"`
-	State     string            `json:"State"`
-	Ports     json.RawMessage   `json:"Ports"`
-	CreatedAt string            `json:"CreatedAt"`
-	Command   []string          `json:"Command"`
-	Labels    map[string]string `json:"Labels"`
-	Mounts    []string          `json:"Mounts"`
-	Networks  []string          `json:"Networks"`
-	Size      int64             `json:"Size"`
-}
-
-type podmanPort struct {
-	HostIP        string `json:"host_ip"`
-	HostPort      string `json:"host_port"`
-	ContainerPort string `json:"container_port"`
-	Protocol      string `json:"protocol"`
-}
-
-func (p podmanPSRow) toContainer() Container {
-	ports := make([]PortMapping, 0)
-	if len(p.Ports) > 0 && string(p.Ports) != "null" {
-		var pp []podmanPort
-		if json.Unmarshal(p.Ports, &pp) == nil {
-			for _, pr := range pp {
-				hostPort := pr.HostPort
-				if pr.HostIP != "" {
-					hostPort = pr.HostIP + ":" + hostPort
-				}
-				ports = append(ports, PortMapping{
-					HostPort:      hostPort,
-					ContainerPort: pr.ContainerPort,
-					Protocol:      pr.Protocol,
-				})
-			}
-		}
-	}
-	return Container{
-		ID:    p.ID,
-		Name:  strings.Join(p.Names, ","),
-		Image: p.Image,
-		// podman JSON has no Status field; State is the closest equivalent.
-		Status:    p.State,
-		State:     p.State,
-		Ports:     ports,
-		CreatedAt: p.CreatedAt,
-		Command:   strings.Join(p.Command, " "),
-		Labels:    fmt.Sprint(p.Labels),
-		Mounts:    strings.Join(p.Mounts, ","),
-		Networks:  strings.Join(p.Networks, ","),
-		Size:      humanSize(p.Size),
-	}
 }
 
 // podmanImageRow mirrors one element of `podman images --format json`.
@@ -253,11 +270,11 @@ func isPodmanEngine(engine Engine) bool { return engineBinary(engine) == "podman
 // edit or delete a managed database container; its lifecycle belongs to the
 // database module (PRD: generic Container cannot bypass database rules).
 func (s *Service) rejectManaged(ctx context.Context, engine Engine, id string) error {
-	out, err := exec.CommandContext(ctx, engineBinary(engine), "inspect", "--format", "{{index .Config.Labels \"com.easyserver.managed\"}}", id).CombinedOutput()
+	insp, err := infracontainer.DefaultClient().ContainerInspect(ctx, infracontainer.Engine(engine), id)
 	if err != nil {
-		return nil //nolint:nilerr // 非受管容器时返回 nil，让操作自然失败
+		return nil //nolint:nilerr // 非受管容器时返回 nil，让后续操作自然处理
 	}
-	if strings.TrimSpace(string(out)) == "true" {
+	if insp.Config.Labels != nil && insp.Config.Labels["com.easyserver.managed"] == "true" {
 		return errors.New("受管数据库容器，请通过数据库模块操作")
 	}
 	return nil
@@ -265,13 +282,11 @@ func (s *Service) rejectManaged(ctx context.Context, engine Engine, id string) e
 
 // --- Container operations ---
 
-// checkEngine checks if the given engine CLI is installed and accessible.
-// Uses `--version` (client-only, no daemon) so a stopped Docker daemon is not
-// misreported as "not installed".
+// checkEngine checks if the given engine socket is accessible.
 func (s *Service) checkEngine(ctx context.Context, engine Engine) error {
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "--version").CombinedOutput()
+	_, err := infracontainer.DefaultClient().Ping(ctx, infracontainer.Engine(engine))
 	if err != nil {
-		return errx.Unavailable("%s is not installed or not accessible", engine)
+		return errx.Unavailable("%s is not running or socket is not accessible: %w", engine, err)
 	}
 	return nil
 }
@@ -282,78 +297,26 @@ func (s *Service) ListContainers(ctx context.Context, engine Engine, all bool) (
 		return nil, err
 	}
 
-	args := []string{"ps", "--format", "json"}
-	if all {
-		args = append(args, "-a")
-	}
-
-	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	summaries, err := infracontainer.DefaultClient().ContainerList(ctx, infracontainer.Engine(engine), all)
 	if err != nil {
-		return nil, errx.Internal("%s ps failed: %s", engine, output)
+		return nil, errx.Internal("%s ps failed: %w", engine, err)
 	}
 
-	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
-		if isPodmanEngine(engine) {
-			var d podmanPSRow
-			if err := json.Unmarshal(line, &d); err != nil {
-				log.Printf("container: parse podman container json error: %v, line: %s", err, line[:min(100, len(line))])
-				return nil, false
-			}
-			return d.toContainer(), true
-		}
-		var d dockerPSRow
-		if err := json.Unmarshal(line, &d); err != nil {
-			log.Printf("container: parse docker container json error: %v, line: %s", err, line[:min(100, len(line))])
-			return nil, false
-		}
-		return d.toContainer(), true
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	containers := make([]Container, 0, len(rows))
-	for _, r := range rows {
-		containers = append(containers, r.(Container))
+	containers := make([]Container, 0, len(summaries))
+	for _, sum := range summaries {
+		containers = append(containers, mapSummaryToContainer(sum))
 	}
 	return containers, nil
 }
 
 // GetContainer returns details of a specific container.
 func (s *Service) GetContainer(ctx context.Context, engine Engine, id string) (*Container, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "inspect", "--format", "{{json .}}", id).CombinedOutput()
+	insp, err := infracontainer.DefaultClient().ContainerInspect(ctx, infracontainer.Engine(engine), id)
 	if err != nil {
-		return nil, errx.Internal("%s inspect failed: %s", engine, output)
+		return nil, errx.NotFound("container not found: %s (%v)", id, err)
 	}
-
-	trimmed := strings.TrimSpace(string(output))
-	var rows []dockerPSRow
-	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
-		var d dockerPSRow
-		if err2 := json.Unmarshal([]byte(trimmed), &d); err2 != nil {
-			return nil, fmt.Errorf("parse container: %w", err2)
-		}
-		c := d.toContainer()
-		return &c, nil
-	}
-
-	if len(rows) == 0 {
-		return nil, errx.NotFound("container not found: %s", id)
-	}
-
-	c := rows[0].toContainer()
+	c := mapInspectToContainer(insp)
 	return &c, nil
-}
-
-func (s *Service) containerAction(ctx context.Context, engine Engine, action, id string) error {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), action, id).CombinedOutput()
-	if err != nil {
-		if len(output) != 0 {
-			return errx.Internal("%s %s failed: %s", engine, action, output)
-		}
-		return errx.Internal("%s %s failed: %w", engine, action, err)
-	}
-	return nil
 }
 
 // StartContainer starts a container.
@@ -361,7 +324,10 @@ func (s *Service) StartContainer(ctx context.Context, engine Engine, id string) 
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	return s.containerAction(ctx, engine, "start", id)
+	if err := infracontainer.DefaultClient().ContainerStart(ctx, infracontainer.Engine(engine), id); err != nil {
+		return errx.Internal("%s start failed: %w", engine, err)
+	}
+	return nil
 }
 
 // StopContainer stops a container.
@@ -369,7 +335,10 @@ func (s *Service) StopContainer(ctx context.Context, engine Engine, id string) e
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	return s.containerAction(ctx, engine, "stop", id)
+	if err := infracontainer.DefaultClient().ContainerStop(ctx, infracontainer.Engine(engine), id, 10); err != nil {
+		return errx.Internal("%s stop failed: %w", engine, err)
+	}
+	return nil
 }
 
 // RestartContainer restarts a container.
@@ -377,7 +346,10 @@ func (s *Service) RestartContainer(ctx context.Context, engine Engine, id string
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	return s.containerAction(ctx, engine, "restart", id)
+	if err := infracontainer.DefaultClient().ContainerRestart(ctx, infracontainer.Engine(engine), id, 10); err != nil {
+		return errx.Internal("%s restart failed: %w", engine, err)
+	}
+	return nil
 }
 
 // PauseContainer pauses a container.
@@ -385,7 +357,10 @@ func (s *Service) PauseContainer(ctx context.Context, engine Engine, id string) 
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	return s.containerAction(ctx, engine, "pause", id)
+	if err := infracontainer.DefaultClient().ContainerPause(ctx, infracontainer.Engine(engine), id); err != nil {
+		return errx.Internal("%s pause failed: %w", engine, err)
+	}
+	return nil
 }
 
 // UnpauseContainer unpauses a container.
@@ -393,7 +368,10 @@ func (s *Service) UnpauseContainer(ctx context.Context, engine Engine, id string
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	return s.containerAction(ctx, engine, "unpause", id)
+	if err := infracontainer.DefaultClient().ContainerUnpause(ctx, infracontainer.Engine(engine), id); err != nil {
+		return errx.Internal("%s unpause failed: %w", engine, err)
+	}
+	return nil
 }
 
 // RemoveContainer removes a container.
@@ -401,14 +379,7 @@ func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string,
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return err
 	}
-	args := []string{"rm"}
-	if force {
-		args = append(args, "-f")
-	}
-	args = append(args, id)
-
-	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
-	if err != nil {
+	if err := infracontainer.DefaultClient().ContainerRemove(ctx, infracontainer.Engine(engine), id, force); err != nil {
 		return errx.Internal("%s rm failed: %w", engine, err)
 	}
 	return nil
@@ -461,69 +432,88 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 
 // CreateContainer creates a new container.
 func (s *Service) CreateContainer(ctx context.Context, engine Engine, req CreateRequest) (string, error) {
-	args := []string{"create"}
-
-	if req.Name != "" {
-		args = append(args, "--name", req.Name)
+	imageRef := req.Image
+	if isPodmanEngine(engine) {
+		imageRef = expandImageRef(imageRef)
 	}
 
-	for _, p := range req.Ports {
-		args = append(args, "-p", fmt.Sprintf("%s:%s/%s", p.HostPort, p.ContainerPort, p.Protocol))
+	var cmd []string
+	if req.Command != "" {
+		cmd = strings.Fields(req.Command)
 	}
 
+	env := make([]string, 0, len(req.EnvVars))
 	for k, v := range req.EnvVars {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	exposedPorts := make(map[string]struct{})
+	portBindings := make(map[string][]infracontainer.PortBinding)
+	for _, p := range req.Ports {
+		proto := p.Protocol
+		if proto == "" {
+			proto = "tcp"
+		}
+		key := fmt.Sprintf("%s/%s", p.ContainerPort, proto)
+		exposedPorts[key] = struct{}{}
+		if p.HostPort != "" {
+			hostIP := ""
+			hostPort := p.HostPort
+			if strings.Contains(hostPort, ":") {
+				parts := strings.Split(hostPort, ":")
+				hostIP = parts[0]
+				hostPort = parts[1]
+			}
+			portBindings[key] = append(portBindings[key], infracontainer.PortBinding{
+				HostIP:   hostIP,
+				HostPort: hostPort,
+			})
+		}
+	}
+
+	binds := make([]string, 0, len(req.Volumes))
 	for _, v := range req.Volumes {
 		mode := ""
 		if v.Mode != "" {
 			mode = ":" + v.Mode
 		}
-		args = append(args, "-v", fmt.Sprintf("%s:%s%s", v.Source, v.Destination, mode))
+		binds = append(binds, fmt.Sprintf("%s:%s%s", v.Source, v.Destination, mode))
 	}
 
-	for _, n := range req.Networks {
-		args = append(args, "--network", n)
+	hostConfig := &infracontainer.HostConfig{
+		Binds:        binds,
+		PortBindings: portBindings,
+		AutoRemove:   req.AutoRemove,
+		Memory:       req.Memory,
+		NanoCPUs:     int64(req.CPUs * 1e9),
 	}
 
 	if req.RestartPolicy != "" {
-		args = append(args, "--restart", req.RestartPolicy)
+		hostConfig.RestartPolicy = &infracontainer.RestartPolicy{
+			Name: req.RestartPolicy,
+		}
 	}
 
-	for k, v := range req.Labels {
-		args = append(args, "--label", fmt.Sprintf("%s=%s", k, v))
+	if len(req.Networks) > 0 {
+		hostConfig.NetworkMode = req.Networks[0]
 	}
 
-	if req.AutoRemove {
-		args = append(args, "--rm")
+	createReq := infracontainer.ContainerCreateRequest{
+		ContainerConfig: infracontainer.ContainerConfig{
+			Image:        imageRef,
+			Cmd:          cmd,
+			Env:          env,
+			Labels:       req.Labels,
+			ExposedPorts: exposedPorts,
+		},
+		HostConfig: hostConfig,
 	}
 
-	if req.Memory > 0 {
-		args = append(args, "--memory", strconv.FormatInt(req.Memory, 10))
-	}
-	if req.CPUs > 0 {
-		args = append(args, "--cpus", fmt.Sprintf("%.2f", req.CPUs))
-	}
-
-	// Podman can't resolve short image names without a registries.conf; expand
-	// them to the docker.io namespace so creation works out of the box.
-	image := req.Image
-	if isPodmanEngine(engine) {
-		image = expandImageRef(image)
-	}
-	args = append(args, image)
-
-	if req.Command != "" {
-		args = append(args, strings.Fields(req.Command)...)
-	}
-
-	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	resp, err := infracontainer.DefaultClient().ContainerCreate(ctx, infracontainer.Engine(engine), req.Name, createReq)
 	if err != nil {
-		return "", errx.Internal("%s create failed: %s", engine, output)
+		return "", errx.Internal("%s create failed: %w", engine, err)
 	}
-
-	return strings.TrimSpace(string(output)), nil
+	return resp.ID, nil
 }
 
 // ListImages returns all images for the given engine.

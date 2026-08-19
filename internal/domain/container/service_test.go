@@ -1,96 +1,95 @@
 package container
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"reflect"
 	"testing"
+
+	infracontainer "easyserver/internal/infra/container"
 )
 
-func TestParsePortsString(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want []PortMapping
-	}{
-		{"empty", "", []PortMapping{}},
-		{"whitespace", "   ", []PortMapping{}},
-		{
-			"single ipv4",
-			"0.0.0.0:8080->80/tcp",
-			[]PortMapping{{HostPort: "0.0.0.0:8080", ContainerPort: "80", Protocol: "tcp"}},
+func TestMapSummaryToContainer(t *testing.T) {
+	summary := infracontainer.ContainerSummary{
+		ID:    "c123",
+		Names: []string{"/web-server"},
+		Image: "nginx:latest",
+		State: "running",
+		Ports: []infracontainer.PortMapping{
+			{IP: "0.0.0.0", PublicPort: 8080, PrivatePort: 80, Type: "tcp"},
+			{IP: "127.0.0.1", PublicPort: 8443, PrivatePort: 443, Type: "tcp"},
 		},
-		{
-			"ipv4 + ipv6 + udp",
-			"0.0.0.0:8080->80/tcp, :::8080->80/tcp, 5353/udp",
-			[]PortMapping{
-				{HostPort: "0.0.0.0:8080", ContainerPort: "80", Protocol: "tcp"},
-				{HostPort: ":::8080", ContainerPort: "80", Protocol: "tcp"},
-				{HostPort: "5353/udp"}, // non-mapping token falls back to host-only
-			},
-		},
-		{
-			"no-ip prefix",
-			"8080->80/tcp",
-			[]PortMapping{{HostPort: "8080", ContainerPort: "80", Protocol: "tcp"}},
+		Mounts: []infracontainer.ContainerMount{
+			{Source: "/host/data", Destination: "/container/data"},
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parsePortsString(tc.in)
-			if len(got) != len(tc.want) {
-				t.Fatalf("len=%d want=%d (got=%+v)", len(got), len(tc.want), got)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("[%d] got=%+v want=%+v", i, got[i], tc.want[i])
-				}
-			}
-		})
+	c := mapSummaryToContainer(summary)
+	if c.ID != "c123" || c.Name != "web-server" || c.State != "running" {
+		t.Errorf("unexpected mapped container: %+v", c)
+	}
+	if len(c.Ports) != 2 || c.Ports[0].HostPort != "8080" || c.Ports[1].HostPort != "127.0.0.1:8443" {
+		t.Errorf("unexpected mapped ports: %+v", c.Ports)
+	}
+	if c.Mounts != "/host/data:/container/data" {
+		t.Errorf("unexpected mapped mounts: %s", c.Mounts)
 	}
 }
 
-// TestParseJSONRowsPodman ensures the Podman output shape (single JSON array,
-// lowercase-ish fields, typed arrays where Docker uses strings) parses via the
-// centralized dispatch into the public Container/Image models.
-func TestParseJSONRowsPodman(t *testing.T) {
-	psOutput := `[
-	  {"Id":"34359ee","Names":["debian-dev"],"Image":"docker.io/library/debian:13-slim",
-	   "State":"exited","CreatedAt":"4 days ago","Command":["--init"],
-	   "Ports":null,"Labels":{"a":"b"},"Mounts":["/dev"],"Networks":["podman"],"Size":0}
-	]`
-	rows, err := parseJSONRows(psOutput, func(line []byte) (any, bool) {
-		var d podmanPSRow
-		if err := json.Unmarshal(line, &d); err != nil {
-			return nil, false
-		}
-		return d.toContainer(), true
-	})
-	if err != nil {
-		t.Fatalf("parseJSONRows: %v", err)
+func TestMapInspectToContainer(t *testing.T) {
+	var insp infracontainer.ContainerInspect
+	insp.ID = "c456"
+	insp.Name = "/db"
+	insp.Config.Image = "postgres:15"
+	insp.State.Running = true
+	insp.State.Status = "running"
+	insp.NetworkSettings.Ports = map[string][]infracontainer.PortBinding{
+		"5432/tcp": {{HostIP: "0.0.0.0", HostPort: "5432"}},
 	}
-	if len(rows) != 1 {
-		t.Fatalf("len=%d want=1", len(rows))
+	c := mapInspectToContainer(insp)
+	if c.ID != "c456" || c.Name != "db" || c.State != "running" {
+		t.Errorf("unexpected mapped container: %+v", c)
 	}
-	c := rows[0].(Container)
-	if c.Name != "debian-dev" || c.State != "exited" || c.Image == "" {
-		t.Errorf("container mapping wrong: %+v", c)
+	if len(c.Ports) != 1 || c.Ports[0].HostPort != "5432" {
+		t.Errorf("unexpected mapped ports: %+v", c.Ports)
+	}
+}
+
+func TestService_ContainerOperations_Mock(t *testing.T) {
+	mock := &infracontainer.MockEngineClient{
+		ContainerListFn: func(ctx context.Context, engine infracontainer.Engine, all bool) ([]infracontainer.ContainerSummary, error) {
+			return []infracontainer.ContainerSummary{
+				{ID: "c1", Names: []string{"/app"}, Image: "app:v1", State: "running"},
+			}, nil
+		},
+		ContainerStartFn: func(ctx context.Context, engine infracontainer.Engine, containerID string) error {
+			if containerID != "c1" {
+				return errors.New("not found")
+			}
+			return nil
+		},
+		ContainerCreateFn: func(ctx context.Context, engine infracontainer.Engine, name string, req infracontainer.ContainerCreateRequest) (infracontainer.ContainerCreateResponse, error) {
+			return infracontainer.ContainerCreateResponse{ID: "new-id-" + name}, nil
+		},
+	}
+	infracontainer.SetDefaultClient(mock)
+	defer infracontainer.SetDefaultClient(nil)
+
+	svc := NewService()
+	list, err := svc.ListContainers(context.Background(), EngineDocker, true)
+	if err != nil || len(list) != 1 || list[0].ID != "c1" {
+		t.Fatalf("ListContainers error: %v, list: %+v", err, list)
 	}
 
-	imgOutput := `[{"Id":"b82115d","Repository":"docker.io/library/nginx","Tag":"1.25",
-	  "Size":123456,"CreatedAt":"2026-08-05T16:18:31Z","Labels":{"k":"v"}}]`
-	rows, err = parseJSONRows(imgOutput, func(line []byte) (any, bool) {
-		var d podmanImageRow
-		if err := json.Unmarshal(line, &d); err != nil {
-			return nil, false
-		}
-		return d.toImage(), true
-	})
-	if err != nil {
-		t.Fatalf("parseJSONRows images: %v", err)
+	if err := svc.StartContainer(context.Background(), EngineDocker, "c1"); err != nil {
+		t.Errorf("StartContainer error: %v", err)
 	}
-	img := rows[0].(Image)
-	if img.Repository != "docker.io/library/nginx" || img.Tag != "1.25" {
-		t.Errorf("image mapping wrong: %+v", img)
+
+	createdID, err := svc.CreateContainer(context.Background(), EngineDocker, CreateRequest{
+		Name:  "my-app",
+		Image: "nginx:latest",
+	})
+	if err != nil || createdID != "new-id-my-app" {
+		t.Errorf("CreateContainer error: %v, id: %s", err, createdID)
 	}
 }
 
