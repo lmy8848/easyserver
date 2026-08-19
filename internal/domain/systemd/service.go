@@ -14,6 +14,7 @@ import (
 
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/mise"
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -75,18 +76,58 @@ type ServiceManager struct {
 	mu       sync.Mutex    // 保护 managed CRUD 并发（创建/更新/删除互斥）
 	runtime  RuntimeLookup // 可选，nil 时跳过 runtime 补全
 	provider mise.Provider
+	client   infrasystemd.SystemdClient
 }
 
 // NewServiceManager creates a new ServiceManager.
 func NewServiceManager(runtimeLookup RuntimeLookup, provider mise.Provider) *ServiceManager {
-	return &ServiceManager{runtime: runtimeLookup, provider: provider}
+	return &ServiceManager{runtime: runtimeLookup, provider: provider, client: infrasystemd.DefaultClient()}
+}
+
+// SetClient overrides the systemd client (useful for unit testing).
+func (m *ServiceManager) SetClient(client infrasystemd.SystemdClient) {
+	m.client = client
+}
+
+func (m *ServiceManager) getClient() infrasystemd.SystemdClient {
+	if m.client != nil {
+		return m.client
+	}
+	return infrasystemd.DefaultClient()
 }
 
 // List returns all systemd services with basic info (name, state, description).
 // 对 easyserver-svc- 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
-// 只调一次 list-units（~16ms），不查 PID/内存/enabled（list-unit-files 要 ~1.8s，
-// systemctl show 全部要更久），前端用 GetDetails 按需加载当前页的运行时详情。
+// 前端用 GetDetails 按需加载当前页的运行时详情。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
+	client := m.getClient()
+	if client.IsAvailable() {
+		units, err := client.ListUnitsContext(ctx)
+		if err == nil {
+			var services []ServiceInfo
+			for _, u := range units {
+				if !strings.HasSuffix(u.Name, ".service") || u.LoadState == "not-found" {
+					continue
+				}
+				name := strings.TrimSuffix(u.Name, ".service")
+				svc := ServiceInfo{
+					Name:        name,
+					ShortName:   strings.TrimPrefix(name, managedUnitPrefix),
+					State:       u.ActiveState,
+					SubState:    u.SubState,
+					Description: u.Description,
+				}
+				if shortName := UnitName(u.Name); shortName != "" {
+					if content, _ := readUnitFile(shortName); content != "" {
+						ParseUnitMeta(m.provider, content, &svc)
+					}
+				}
+				services = append(services, svc)
+			}
+			return services, nil
+		}
+	}
+
 	stdout, err := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full").Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list services: %w", err)
@@ -155,6 +196,37 @@ func (m *ServiceManager) GetDetails(ctx context.Context, names []string) ([]Serv
 // batchGetDetailedInfo gets PID, memory, and enabled status for multiple services efficiently.
 func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []ServiceInfo) {
 	if len(services) == 0 {
+		return
+	}
+
+	client := m.getClient()
+	if client.IsAvailable() {
+		for i := range services {
+			unitName := services[i].Name + ".service"
+			props, err := client.GetUnitPropertiesContext(ctx, unitName)
+			if err != nil {
+				continue
+			}
+			if pid, ok := props["MainPID"].(uint32); ok {
+				services[i].PID = int(pid)
+			}
+			if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
+				services[i].MemoryBytes = mem
+			}
+			if ufs, ok := props["UnitFileState"].(string); ok {
+				services[i].UnitFileState = ufs
+				services[i].Enabled = ufs == "enabled"
+			}
+			if st, ok := props["ActiveState"].(string); ok {
+				services[i].State = st
+			}
+			if sub, ok := props["SubState"].(string); ok {
+				services[i].SubState = sub
+			}
+			if desc, ok := props["Description"].(string); ok && desc != "" {
+				services[i].Description = desc
+			}
+		}
 		return
 	}
 
@@ -254,14 +326,49 @@ func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, pr
 
 // Get returns info for a specific service.
 func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, error) {
+	svc := &ServiceInfo{
+		Name:      name,
+		ShortName: strings.TrimPrefix(name, managedUnitPrefix),
+	}
+
+	client := m.getClient()
+	if client.IsAvailable() {
+		props, err := client.GetUnitPropertiesContext(ctx, name+".service")
+		if err == nil && props != nil {
+			if pid, ok := props["MainPID"].(uint32); ok {
+				svc.PID = int(pid)
+			}
+			if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
+				svc.MemoryBytes = mem
+			}
+			if ufs, ok := props["UnitFileState"].(string); ok {
+				svc.UnitFileState = ufs
+				svc.Enabled = ufs == "enabled"
+			}
+			if st, ok := props["ActiveState"].(string); ok {
+				svc.State = st
+			}
+			if sub, ok := props["SubState"].(string); ok {
+				svc.SubState = sub
+			}
+			if desc, ok := props["Description"].(string); ok {
+				svc.Description = desc
+			}
+
+			// 托管服务：读 unit 文件补元数据
+			if shortName := UnitName(name + ".service"); shortName != "" {
+				if content, _ := readUnitFile(shortName); content != "" {
+					ParseUnitMeta(m.provider, content, svc)
+				}
+			}
+			return svc, nil
+		}
+	}
+
 	stdout, err := exec.CommandContext(ctx, "systemctl", "show", name+".service",
 		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description,UnitFileState").Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service info: %w", err)
-	}
-
-	svc := &ServiceInfo{
-		Name: name,
 	}
 
 	lines := strings.SplitSeq(string(stdout), "\n")
@@ -315,6 +422,15 @@ func (m *ServiceManager) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already running", name)
 	}
 
+	client := m.getClient()
+	if client.IsAvailable() {
+		if _, err := client.StartUnitContext(ctx, name+".service", "replace"); err != nil {
+			return fmt.Errorf("failed to start service: %w", err)
+		}
+		log.Printf("service: started %s", name)
+		return nil
+	}
+
 	output, err := exec.CommandContext(ctx, "systemctl", "start", name+".service").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to start service: %s", output)
@@ -337,6 +453,15 @@ func (m *ServiceManager) Stop(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already stopped", name)
 	}
 
+	client := m.getClient()
+	if client.IsAvailable() {
+		if _, err := client.StopUnitContext(ctx, name+".service", "replace"); err != nil {
+			return fmt.Errorf("failed to stop service: %w", err)
+		}
+		log.Printf("service: stopped %s", name)
+		return nil
+	}
+
 	output, err := exec.CommandContext(ctx, "systemctl", "stop", name+".service").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to stop service: %s", output)
@@ -349,6 +474,15 @@ func (m *ServiceManager) Stop(ctx context.Context, name string) error {
 func (m *ServiceManager) Restart(ctx context.Context, name string) error {
 	if err := m.requireServiceExists(ctx, name); err != nil {
 		return err
+	}
+
+	client := m.getClient()
+	if client.IsAvailable() {
+		if _, err := client.RestartUnitContext(ctx, name+".service", "replace"); err != nil {
+			return fmt.Errorf("failed to restart service: %w", err)
+		}
+		log.Printf("service: restarted %s", name)
+		return nil
 	}
 
 	output, err := exec.CommandContext(ctx, "systemctl", "restart", name+".service").CombinedOutput()
@@ -369,6 +503,15 @@ func (m *ServiceManager) Enable(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already enabled", name)
 	}
 
+	client := m.getClient()
+	if client.IsAvailable() {
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{name + ".service"}, false, false); err != nil {
+			return fmt.Errorf("failed to enable service: %w", err)
+		}
+		log.Printf("service: enabled %s", name)
+		return nil
+	}
+
 	output, err := exec.CommandContext(ctx, "systemctl", "enable", name+".service").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to enable service: %s", output)
@@ -385,6 +528,15 @@ func (m *ServiceManager) Disable(ctx context.Context, name string) error {
 
 	if !m.isEnabled(ctx, name) {
 		return fmt.Errorf("service %s is already disabled", name)
+	}
+
+	client := m.getClient()
+	if client.IsAvailable() {
+		if _, err := client.DisableUnitFilesContext(ctx, []string{name + ".service"}, false); err != nil {
+			return fmt.Errorf("failed to disable service: %w", err)
+		}
+		log.Printf("service: disabled %s", name)
+		return nil
 	}
 
 	output, err := exec.CommandContext(ctx, "systemctl", "disable", name+".service").CombinedOutput()
@@ -473,11 +625,29 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 
 // isEnabled checks if a service is enabled.
 func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
+	client := m.getClient()
+	if client.IsAvailable() {
+		props, err := client.GetUnitPropertiesContext(ctx, name+".service")
+		if err == nil && props != nil {
+			if ufs, ok := props["UnitFileState"].(string); ok && ufs != "" {
+				return ufs == "enabled"
+			}
+		}
+	}
 	return util.SystemdUnitEnabled(ctx, name+".service")
 }
 
 // serviceExists checks if a service unit exists on the system.
 func (m *ServiceManager) serviceExists(ctx context.Context, name string) bool {
+	client := m.getClient()
+	if client.IsAvailable() {
+		props, err := client.GetUnitPropertiesContext(ctx, name+".service")
+		if err == nil && props != nil {
+			if ls, ok := props["LoadState"].(string); ok && ls != "" && ls != "not-found" {
+				return true
+			}
+		}
+	}
 	_, err := exec.CommandContext(ctx, "systemctl", "cat", name+".service").CombinedOutput()
 	return err == nil
 }
@@ -576,15 +746,30 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 			// enable 失败：回滚 unit 文件 + reload + reset-failed。
 			_ = removeUnitFile(spec.Name)
 			_ = m.daemonReload(ctx)
-			_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix).CombinedOutput()
+			fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
+			client := m.getClient()
+			if client.IsAvailable() {
+				_ = client.ResetFailedUnitContext(ctx, fullName)
+			} else {
+				_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", fullName).CombinedOutput()
+			}
 			return fmt.Errorf("enable 失败（已回滚）: %w", err)
 		}
 		if err := m.startManaged(ctx, spec.Name); err != nil {
 			// start 失败：disable + 回滚 unit 文件 + reload + reset-failed。
-			_, _ = exec.CommandContext(ctx, "systemctl", "disable", managedUnitPrefix+spec.Name+managedUnitSuffix).CombinedOutput()
-			_ = removeUnitFile(spec.Name)
-			_ = m.daemonReload(ctx)
-			_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", managedUnitPrefix+spec.Name+managedUnitSuffix).CombinedOutput()
+			fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
+			client := m.getClient()
+			if client.IsAvailable() {
+				_, _ = client.DisableUnitFilesContext(ctx, []string{fullName}, false)
+				_ = removeUnitFile(spec.Name)
+				_ = m.daemonReload(ctx)
+				_ = client.ResetFailedUnitContext(ctx, fullName)
+			} else {
+				_, _ = exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput()
+				_ = removeUnitFile(spec.Name)
+				_ = m.daemonReload(ctx)
+				_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", fullName).CombinedOutput()
+			}
 			return fmt.Errorf("start 失败（已回滚）: %w", err)
 		}
 	}
@@ -630,7 +815,12 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 			}
 			if wasActive {
 				fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-				_, _ = exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
+				client := m.getClient()
+				if client.IsAvailable() {
+					_, _ = client.RestartUnitContext(ctx, fullName, "replace")
+				} else {
+					_, _ = exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
+				}
 			}
 		}
 	}
@@ -664,10 +854,18 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 	info, err := m.Get(ctx, managedUnitPrefix+spec.Name)
 	if err == nil && info.State == "active" {
 		fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-		output, rerr := exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
-		if rerr != nil {
-			rollback()
-			return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %s", output)
+		client := m.getClient()
+		if client.IsAvailable() {
+			if _, rerr := client.RestartUnitContext(ctx, fullName, "replace"); rerr != nil {
+				rollback()
+				return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %w", rerr)
+			}
+		} else {
+			output, rerr := exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
+			if rerr != nil {
+				rollback()
+				return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %s", output)
+			}
 		}
 	}
 	return nil
@@ -688,15 +886,28 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 	}
 
 	fullName := managedUnitPrefix + name + managedUnitSuffix
+	client := m.getClient()
 
 	// 先 disable（best-effort，可能本来就未 enable）
-	if _, err := exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput(); err != nil {
-		log.Printf("systemd: disable %s during delete: %v", fullName, err)
+	if client.IsAvailable() {
+		if _, err := client.DisableUnitFilesContext(ctx, []string{fullName}, false); err != nil {
+			log.Printf("systemd: disable %s during delete: %v", fullName, err)
+		}
+	} else {
+		if _, err := exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput(); err != nil {
+			log.Printf("systemd: disable %s during delete: %v", fullName, err)
+		}
 	}
 
 	// 停止：失败则返回错误，避免删 unit 后留孤儿进程。
-	if _, err := exec.CommandContext(ctx, "systemctl", "stop", fullName).CombinedOutput(); err != nil {
-		return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
+	if client.IsAvailable() {
+		if _, err := client.StopUnitContext(ctx, fullName, "replace"); err != nil {
+			return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
+		}
+	} else {
+		if _, err := exec.CommandContext(ctx, "systemctl", "stop", fullName).CombinedOutput(); err != nil {
+			return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
+		}
 	}
 
 	if err := removeUnitFile(name); err != nil {
@@ -733,6 +944,14 @@ func (m *ServiceManager) managedUnitExists(name string) bool {
 }
 
 func (m *ServiceManager) daemonReload(ctx context.Context) error {
+	client := m.getClient()
+	if client.IsAvailable() {
+		if err := client.ReloadContext(ctx); err != nil {
+			return fmt.Errorf("daemon-reload 失败: %w", err)
+		}
+		return nil
+	}
+
 	output, err := exec.CommandContext(ctx, "systemctl", "daemon-reload").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("daemon-reload 失败: %s", output)
@@ -741,8 +960,16 @@ func (m *ServiceManager) daemonReload(ctx context.Context) error {
 }
 
 func (m *ServiceManager) enableManaged(ctx context.Context, name string) error {
-	output, err := exec.CommandContext(ctx, "systemctl", "enable",
-		managedUnitPrefix+name+managedUnitSuffix).CombinedOutput()
+	client := m.getClient()
+	fullName := managedUnitPrefix + name + managedUnitSuffix
+	if client.IsAvailable() {
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{fullName}, false, false); err != nil {
+			return fmt.Errorf("enable 失败: %w", err)
+		}
+		return nil
+	}
+
+	output, err := exec.CommandContext(ctx, "systemctl", "enable", fullName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("enable 失败: %s", output)
 	}
@@ -750,8 +977,16 @@ func (m *ServiceManager) enableManaged(ctx context.Context, name string) error {
 }
 
 func (m *ServiceManager) disableManaged(ctx context.Context, name string) error {
-	output, err := exec.CommandContext(ctx, "systemctl", "disable",
-		managedUnitPrefix+name+managedUnitSuffix).CombinedOutput()
+	client := m.getClient()
+	fullName := managedUnitPrefix + name + managedUnitSuffix
+	if client.IsAvailable() {
+		if _, err := client.DisableUnitFilesContext(ctx, []string{fullName}, false); err != nil {
+			return fmt.Errorf("disable 失败: %w", err)
+		}
+		return nil
+	}
+
+	output, err := exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("disable 失败: %s", output)
 	}
@@ -765,6 +1000,15 @@ func (m *ServiceManager) startManaged(ctx context.Context, name string) error {
 	if err == nil && info.State == "active" {
 		return nil
 	}
+
+	client := m.getClient()
+	if client.IsAvailable() {
+		if _, err := client.StartUnitContext(ctx, fullName, "replace"); err != nil {
+			return fmt.Errorf("start 失败: %w", err)
+		}
+		return nil
+	}
+
 	output, err := exec.CommandContext(ctx, "systemctl", "start", fullName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("start 失败: %s", output)

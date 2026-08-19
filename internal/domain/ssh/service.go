@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -216,6 +217,16 @@ func (s *Service) TestConfig(ctx context.Context) (string, error) {
 
 // ReloadSSH reloads the SSH service.
 func (s *Service) ReloadSSH(ctx context.Context) error {
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.ReloadUnitContext(ctx, "sshd.service", "replace"); err == nil {
+			return nil
+		}
+		if _, err := client.ReloadUnitContext(ctx, "ssh.service", "replace"); err == nil {
+			return nil
+		}
+	}
+
 	output, err := exec.CommandContext(ctx, "systemctl", "reload", "sshd").CombinedOutput()
 	if err != nil {
 		// Try ssh service name

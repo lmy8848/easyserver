@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/errx"
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -346,6 +347,16 @@ bantime = 1h
 	if err := os.WriteFile("/etc/fail2ban/jail.d/sshd.local", []byte(jail), 0644); err != nil {
 		return err
 	}
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{"fail2ban.service"}, false, false); err != nil {
+			return fmt.Errorf("启用 fail2ban 失败: %w", err)
+		}
+		if _, err := client.StartUnitContext(ctx, "fail2ban.service", "replace"); err != nil {
+			return fmt.Errorf("启动 fail2ban 失败: %w", err)
+		}
+		return nil
+	}
 	if _, err := exec.CommandContext(ctx, "systemctl", "enable", "--now", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("启用 fail2ban 失败: %w", err)
 	}
@@ -356,6 +367,13 @@ bantime = 1h
 func (s *Service) ReloadFail2ban(ctx context.Context) error {
 	if _, err := exec.LookPath("fail2ban-client"); err != nil {
 		return errx.BadRequest("fail2ban 未安装")
+	}
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.ReloadUnitContext(ctx, "fail2ban.service", "replace"); err != nil {
+			return fmt.Errorf("重载 fail2ban 失败: %w", err)
+		}
+		return nil
 	}
 	if _, err := exec.CommandContext(ctx, "systemctl", "reload", "fail2ban").CombinedOutput(); err != nil {
 		return fmt.Errorf("重载 fail2ban 失败: %w", err)

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/errx"
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -859,6 +860,15 @@ func (s *Service) dockerServerVersion(ctx context.Context) string {
 
 // unitExists reports whether a systemd unit file is present.
 func (s *Service) unitExists(ctx context.Context, unit string) bool {
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		props, err := client.GetUnitPropertiesContext(ctx, unit)
+		if err == nil && props != nil {
+			if ls, ok := props["LoadState"].(string); ok && ls != "" && ls != "not-found" {
+				return true
+			}
+		}
+	}
 	_, err := exec.CommandContext(ctx, "systemctl", "cat", unit).CombinedOutput()
 	return err == nil
 }
@@ -982,20 +992,33 @@ func (s *Service) installDocker(ctx context.Context) error {
 		log.Printf("docker: installation failed: %s", output)
 		return fmt.Errorf("docker 安装脚本执行失败: %s", truncateOutput(string(output), 500))
 	}
-	log.Printf("docker: installation script completed")
-
 	log.Println("docker: enabling service...")
-	output, err = exec.CommandContext(ctx, "systemctl", "enable", "docker").CombinedOutput()
-	if err != nil {
-		log.Printf("docker: enable failed: %s", output)
-		return fmt.Errorf("启用 Docker 服务失败: %s", truncateOutput(string(output), 200))
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{"docker.service"}, false, false); err != nil {
+			log.Printf("docker: enable failed: %v", err)
+			return fmt.Errorf("启用 Docker 服务失败: %w", err)
+		}
+	} else {
+		output, err = exec.CommandContext(ctx, "systemctl", "enable", "docker").CombinedOutput()
+		if err != nil {
+			log.Printf("docker: enable failed: %s", output)
+			return fmt.Errorf("启用 Docker 服务失败: %s", truncateOutput(string(output), 200))
+		}
 	}
 
 	log.Println("docker: starting service...")
-	output, err = exec.CommandContext(ctx, "systemctl", "start", "docker").CombinedOutput()
-	if err != nil {
-		log.Printf("docker: start failed: %s", output)
-		return fmt.Errorf("启动 Docker 服务失败: %s", truncateOutput(string(output), 200))
+	if client.IsAvailable() {
+		if _, err := client.StartUnitContext(ctx, "docker.service", "replace"); err != nil {
+			log.Printf("docker: start failed: %v", err)
+			return fmt.Errorf("启动 Docker 服务失败: %w", err)
+		}
+	} else {
+		output, err = exec.CommandContext(ctx, "systemctl", "start", "docker").CombinedOutput()
+		if err != nil {
+			log.Printf("docker: start failed: %s", output)
+			return fmt.Errorf("启动 Docker 服务失败: %s", truncateOutput(string(output), 200))
+		}
 	}
 
 	log.Println("docker: installation completed successfully")
@@ -1008,25 +1031,28 @@ func (s *Service) installPodman(ctx context.Context) error {
 	var pkgCmd string
 	switch os {
 	case "debian", "ubuntu":
-		pkgCmd = "apt-get update && apt-get install -y podman podman-compose"
-	case "centos", "rhel", "fedora":
-		pkgCmd = "dnf install -y podman podman-compose"
+		pkgCmd = "apt-get update && apt-get install -y podman"
+	case "centos", "rhel", "fedora", "almalinux", "rocky":
+		pkgCmd = "dnf install -y podman || yum install -y podman"
 	case "alpine":
-		pkgCmd = "apk add podman podman-compose"
+		pkgCmd = "apk add podman"
 	case "arch":
-		pkgCmd = "pacman -S --noconfirm podman podman-compose"
+		pkgCmd = "pacman -Sy --noconfirm podman"
 	default:
-		return fmt.Errorf("不支持的发行版：%s，请手动安装 Podman", os)
+		return fmt.Errorf("不支持的操作系统类型: %s，请手动安装 Podman", os)
 	}
 
-	log.Println("podman: starting installation...")
-	pkgCtx, pkgCancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer pkgCancel()
-	output, err := exec.CommandContext(pkgCtx, "bash", "-c", pkgCmd).CombinedOutput()
+	log.Printf("podman: running install command: %s", pkgCmd)
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	output, err := exec.CommandContext(runCtx, "sh", "-c", pkgCmd).CombinedOutput()
 	if err != nil {
+		log.Printf("podman: installation failed: %s", output)
 		return fmt.Errorf("podman 安装失败: %s", truncateOutput(string(output), 500))
 	}
-	log.Printf("podman: installation completed")
+
+	log.Println("podman: installation completed successfully")
 	return nil
 }
 
@@ -1048,7 +1074,15 @@ func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
 		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
 	}
-	output, err := exec.CommandContext(ctx, "systemctl", "start", serviceUnit(engine)).CombinedOutput()
+	unit := serviceUnit(engine)
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.StartUnitContext(ctx, unit, "replace"); err != nil {
+			return fmt.Errorf("failed to start %s: %w", engine, err)
+		}
+		return nil
+	}
+	output, err := exec.CommandContext(ctx, "systemctl", "start", unit).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to start %s: %s", engine, output)
 	}
@@ -1060,7 +1094,15 @@ func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
 		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
 	}
-	output, err := exec.CommandContext(ctx, "systemctl", "stop", serviceUnit(engine)).CombinedOutput()
+	unit := serviceUnit(engine)
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.StopUnitContext(ctx, unit, "replace"); err != nil {
+			return fmt.Errorf("failed to stop %s: %w", engine, err)
+		}
+		return nil
+	}
+	output, err := exec.CommandContext(ctx, "systemctl", "stop", unit).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to stop %s: %s", engine, output)
 	}
@@ -1072,7 +1114,15 @@ func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
 		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
 	}
-	output, err := exec.CommandContext(ctx, "systemctl", "restart", serviceUnit(engine)).CombinedOutput()
+	unit := serviceUnit(engine)
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.RestartUnitContext(ctx, unit, "replace"); err != nil {
+			return fmt.Errorf("failed to restart %s: %w", engine, err)
+		}
+		return nil
+	}
+	output, err := exec.CommandContext(ctx, "systemctl", "restart", unit).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to restart %s: %s", engine, output)
 	}
@@ -1093,6 +1143,13 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
 	}
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{enableSocketUnit}, false, false); err != nil {
+			return fmt.Errorf("failed to enable %s socket: %w", engine, err)
+		}
+		return nil
+	}
 	output, err := exec.CommandContext(ctx, "systemctl", "enable", enableSocketUnit).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to enable %s socket: %s", engine, output)
@@ -1104,6 +1161,13 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
+	}
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
+			return fmt.Errorf("failed to disable %s socket: %w", engine, err)
+		}
+		return nil
 	}
 	output, err := exec.CommandContext(ctx, "systemctl", "disable", enableSocketUnit).CombinedOutput()
 	if err != nil {

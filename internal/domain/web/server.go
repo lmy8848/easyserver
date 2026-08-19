@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/errx"
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -111,8 +112,14 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		_, _ = exec.CommandContext(ctx, "systemctl", "enable", ws.ServiceName).CombinedOutput()
-		_, _ = exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
+		client := infrasystemd.DefaultClient()
+		if client.IsAvailable() {
+			_, _, _ = client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false)
+			_, _ = client.StartUnitContext(ctx, ws.ServiceName, "replace")
+		} else {
+			_, _ = exec.CommandContext(ctx, "systemctl", "enable", ws.ServiceName).CombinedOutput()
+			_, _ = exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
+		}
 	}
 
 	_ = s.RefreshStatus(ctx, id)
@@ -135,8 +142,14 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		_, _ = exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
-		_, _ = exec.CommandContext(ctx, "systemctl", "disable", ws.ServiceName).CombinedOutput()
+		client := infrasystemd.DefaultClient()
+		if client.IsAvailable() {
+			_, _ = client.StopUnitContext(ctx, ws.ServiceName, "replace")
+			_, _ = client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false)
+		} else {
+			_, _ = exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
+			_, _ = exec.CommandContext(ctx, "systemctl", "disable", ws.ServiceName).CombinedOutput()
+		}
 	}
 
 	// Always use the predefined uninstall command, never trust the database value
@@ -174,6 +187,14 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		return errx.BadRequest("未配置服务名称")
 	}
 
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.StartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+			return fmt.Errorf("start failed: %w", err)
+		}
+		return s.repo.UpdateStatus(ctx, id, "running")
+	}
+
 	out, err := exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("start failed: %s", out)
@@ -195,6 +216,14 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 		return errx.BadRequest("未配置服务名称")
 	}
 
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.StopUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+			return fmt.Errorf("stop failed: %w", err)
+		}
+		return s.repo.UpdateStatus(ctx, id, "stopped")
+	}
+
 	out, err := exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("stop failed: %s", out)
@@ -214,6 +243,14 @@ func (s *Service) Restart(ctx context.Context, id int64) error {
 	}
 	if ws.ServiceName == "" {
 		return errx.BadRequest("未配置服务名称")
+	}
+
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if _, err := client.RestartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+			return fmt.Errorf("restart failed: %w", err)
+		}
+		return s.repo.UpdateStatus(ctx, id, "running")
 	}
 
 	out, err := exec.CommandContext(ctx, "systemctl", "restart", ws.ServiceName).CombinedOutput()
@@ -240,6 +277,13 @@ func (s *Service) Reload(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
+		client := infrasystemd.DefaultClient()
+		if client.IsAvailable() {
+			if _, err := client.ReloadUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+				return fmt.Errorf("reload failed: %w", err)
+			}
+			return nil
+		}
 		out, err := exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("reload failed: %s", out)
@@ -394,6 +438,20 @@ func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) erro
 		return errx.BadRequest("未配置服务名称")
 	}
 
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		if enabled {
+			if _, _, err := client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false); err != nil {
+				return fmt.Errorf("enable failed: %w", err)
+			}
+		} else {
+			if _, err := client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false); err != nil {
+				return fmt.Errorf("disable failed: %w", err)
+			}
+		}
+		return nil
+	}
+
 	action := "disable"
 	if enabled {
 		action = "enable"
@@ -508,6 +566,30 @@ func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memByt
 	}
 	if ws.ServiceName == "" {
 		return 0, 0, "", nil
+	}
+
+	client := infrasystemd.DefaultClient()
+	if client.IsAvailable() {
+		props, err := client.GetUnitPropertiesContext(ctx, ws.ServiceName)
+		if err == nil && props != nil {
+			if mainPID, ok := props["MainPID"].(uint32); ok {
+				pid = int(mainPID)
+			}
+			if aetUSec, ok := props["ActiveEnterTimestamp"].(uint64); ok && aetUSec > 0 {
+				t := util.UnixMicros(int64(aetUSec))
+				d := time.Since(t)
+				if d < time.Minute {
+					uptime = fmt.Sprintf("%ds", int(d.Seconds()))
+				} else if d < time.Hour {
+					uptime = fmt.Sprintf("%dm", int(d.Minutes()))
+				} else if d < 24*time.Hour {
+					uptime = fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+				} else {
+					uptime = fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
+				}
+			}
+			return pid, 0, uptime, nil
+		}
 	}
 
 	// Get main PID via systemctl
