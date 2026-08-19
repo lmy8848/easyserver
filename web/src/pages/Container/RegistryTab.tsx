@@ -33,7 +33,7 @@ export default function RegistryTab({ engine }: { engine: string }) {
         mirrors: (cfg.mirrors || []).map((v: string) => ({ value: v })),
         insecure: (cfg.insecure_registries || []).map((v: string) => ({ value: v })),
       });
-      setLoggedIn(authRes.data?.data?.registries || []);
+      setLoggedIn(authRes.data?.data?.items ?? []);
     } catch {
       message.error('加载镜像仓库配置失败');
     } finally {

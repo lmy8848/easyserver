@@ -17,6 +17,7 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -65,7 +66,7 @@ func (h *ServiceHandler) List(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	return services, nil
+	return httpx.Paginate(services, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // GetDetails returns detailed info (PID, memory, enabled) for specific services
@@ -274,17 +275,17 @@ func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) (any, error) {
 			}
 
 			logData := map[string]any{
-				"time":     time.Now().Format("2006-01-02 15:04:05"),
+				"time":     time.Now().Format(util.TimeLayout),
 				"message":  line,
 				"priority": "info",
 			}
 
 			if err := json.Unmarshal([]byte(line), &entry); err == nil && entry.Message != "" {
-				logTime := time.Now().Format("2006-01-02 15:04:05")
+				logTime := time.Now().Format(util.TimeLayout)
 				if entry.RealtimeTimestamp != "" {
 					var usec int64
 					if _, err := fmt.Sscanf(entry.RealtimeTimestamp, "%d", &usec); err == nil {
-						logTime = time.Unix(usec/1000000, (usec%1000000)*1000).Format("2006-01-02 15:04:05")
+						logTime = util.UnixMicros(usec).Format(util.TimeLayout)
 					}
 				}
 

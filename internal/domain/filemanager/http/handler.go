@@ -365,7 +365,7 @@ func (h *FileManagerHandler) Search(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("search query is required")
 	}
 
-	maxResults, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	maxResults := httpx.QueryInt(c, "limit", 100)
 
 	results, err := h.fileManager.Search(rootPath, pattern, maxResults)
 	if err != nil {
@@ -386,7 +386,7 @@ func (h *FileManagerHandler) SearchContent(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("search query is required")
 	}
 
-	maxResults, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	maxResults := httpx.QueryInt(c, "limit", 50)
 
 	results, err := h.fileManager.SearchContent(rootPath, text, maxResults)
 	if err != nil {
@@ -447,7 +447,7 @@ func (h *FileManagerHandler) ArchiveList(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"entries": entries}, nil
+	return httpx.Paginate(entries, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // Chmod changes file permissions

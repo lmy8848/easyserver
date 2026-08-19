@@ -22,7 +22,7 @@ export default function VolumeTab({ engine }: { engine: string }) {
   const loadVolumes = async () => {
     try {
       const res = await api.get(withEngine('/container/volumes', engine));
-      setVolumes(res.data?.data?.volumes || []);
+      setVolumes(res.data?.data?.items ?? []);
     } catch {
       message.error('加载存储卷列表失败');
     } finally {

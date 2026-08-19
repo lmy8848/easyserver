@@ -179,7 +179,7 @@ type PortInfo struct {
 // GetListeningPorts returns all TCP/UDP listening ports.
 func (h *MonitorHandler) GetListeningPorts(c *gin.Context) (any, error) {
 	ports := getListeningPorts()
-	return gin.H{"ports": ports, "total": len(ports)}, nil
+	return httpx.Paginate(ports, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // parseProcNet parses /proc/net/tcp, /proc/net/tcp6, /proc/net/udp, /proc/net/udp6.
@@ -459,14 +459,12 @@ func (h *MonitorHandler) ListSystemProcesses(c *gin.Context) (any, error) {
 	sortBy := c.DefaultQuery("sort_by", "memory")
 	order := c.DefaultQuery("order", "desc")
 	search := c.Query("search")
-	limitStr := c.DefaultQuery("limit", "100")
-	limit, _ := strconv.Atoi(limitStr)
-
-	processes, err := h.monitorService.ListSystemProcesses(sortBy, order, search, limit)
+	p := httpx.ParsePagination(c, 100, 1000)
+	processes, err := h.monitorService.ListSystemProcesses(sortBy, order, search, p.Size+p.Offset)
 	if err != nil {
 		return nil, err
 	}
-	return processes, nil
+	return httpx.Paginate(processes, p), nil
 }
 
 func (h *MonitorHandler) GetSystemProcess(c *gin.Context) (any, error) {

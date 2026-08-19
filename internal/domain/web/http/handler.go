@@ -41,7 +41,7 @@ func (h *WebServerHandler) List(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return servers, nil
+	return httpx.Paginate(servers, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 func (h *WebServerHandler) Get(c *gin.Context) (any, error) {
@@ -261,7 +261,7 @@ func (h *WebServerHandler) GetServiceLogs(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "100"))
+	lines := httpx.QueryInt(c, "lines", 100)
 	if lines <= 0 {
 		lines = 100
 	}
@@ -318,7 +318,7 @@ func (h *WebServerHandler) ListWebsites(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sites, nil
+	return httpx.Paginate(sites, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 func (h *WebServerHandler) GetWebsite(c *gin.Context) (any, error) {
@@ -452,7 +452,7 @@ func (h *WebServerHandler) GetWebsiteLogs(c *gin.Context) (any, error) {
 	}
 
 	logType := c.DefaultQuery("type", "access")
-	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "200"))
+	lines := httpx.QueryInt(c, "lines", 200)
 	if lines <= 0 {
 		lines = 200
 	}
@@ -854,7 +854,7 @@ func (h *WebServerHandler) GetWebsiteParsedLogs(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 	logType := c.DefaultQuery("type", "access")
-	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "500"))
+	lines := httpx.QueryInt(c, "lines", 500)
 	if lines <= 0 {
 		lines = 500
 	}
@@ -892,7 +892,7 @@ func (h *WebServerHandler) ProbeWebsiteHealth(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, errx.BadRequest("无效的 ID")
 	}
-	port, _ := strconv.Atoi(c.DefaultQuery("port", "0"))
+	port := httpx.QueryInt(c, "port", 0)
 	res, err := h.websiteService.ProbeHealth(c.Request.Context(), sid, id, port)
 	if err != nil {
 		return nil, err

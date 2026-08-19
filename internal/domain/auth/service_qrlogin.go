@@ -2,13 +2,12 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
 
 	"easyserver/internal/infra/config"
+	"easyserver/internal/util"
 )
 
 // qrTokenBytes is the entropy for a QR session token (32 bytes => 64 hex chars).
@@ -43,11 +42,10 @@ func NewQRLoginService(store *config.Store, sessionService *SessionService) *QRL
 func (s *QRLoginService) CreateSession(ctx context.Context) (*CreateResult, error) {
 	s.cleanupExpiredLocked()
 
-	b := make([]byte, qrTokenBytes)
-	if _, err := rand.Read(b); err != nil {
+	qrToken, err := util.RandomHex(qrTokenBytes)
+	if err != nil {
 		return nil, fmt.Errorf("generate qr token: %w", err)
 	}
-	qrToken := hex.EncodeToString(b)
 
 	now := time.Now()
 	sess := &QRLoginSession{

@@ -195,8 +195,8 @@ function ManagedTab() {
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await serviceApi.list({ managed: true });
-      const managed = res.data?.data || [];
+      const res = await serviceApi.list({ managed: true, page: 1, page_size: 1000 });
+      const managed = res.data?.data?.items ?? [];
       // 托管服务通常很少，直接全部补详情（PID/内存/enabled）
       if (managed.length > 0) {
         try {
@@ -577,9 +577,9 @@ function SystemTab() {
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await serviceApi.list();
+      const res = await serviceApi.list({ page: 1, page_size: 1000 });
       // 排除面板托管服务（managed=true）
-      setServices((res.data?.data || []).filter(s => !s.managed));
+      setServices((res.data?.data?.items ?? []).filter(s => !s.managed));
     } catch {
       // ignore
     } finally {

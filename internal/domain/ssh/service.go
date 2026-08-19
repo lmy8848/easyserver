@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"easyserver/internal/util"
 )
 
 const (
@@ -54,8 +56,7 @@ func (s *Service) CheckStatus(ctx context.Context) (map[string]any, error) {
 	// 服务状态：先试 sshd 再试 ssh（Debian 的服务名是 ssh）。
 	running := false
 	for _, unit := range []string{"sshd", "ssh"} {
-		out, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).Output()
-		if err == nil && strings.TrimSpace(string(out)) == "active" {
+		if util.SystemdUnitActive(ctx, unit) {
 			running = true
 			break
 		}

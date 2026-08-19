@@ -19,8 +19,8 @@ export default function FIM() {
         api.get('/security/fim/baseline'),
         api.get('/security/fim/changes'),
       ]);
-      setBaseline(b.data.data?.baseline || []);
-      setChanges(c.data.data?.changes || []);
+      setBaseline(b.data.data?.items ?? []);
+      setChanges(c.data.data?.items ?? []);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);

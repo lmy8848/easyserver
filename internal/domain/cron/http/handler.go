@@ -16,6 +16,7 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -40,7 +41,7 @@ func (h *CronHandler) ListTasks(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return tasks, nil
+	return httpx.Paginate(tasks, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // GetTask returns a cron task by name
@@ -264,19 +265,12 @@ func (h *CronHandler) RunTask(c *gin.Context) (any, error) {
 // GetTaskRuns returns execution history for a task
 func (h *CronHandler) GetTaskRuns(c *gin.Context) (any, error) {
 	name := c.Param("name")
-	limit := 20
-	if l := c.Query("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
-			limit = parsed
-		}
-	}
-
-	runs, err := h.cronService.GetRuns(c.Request.Context(), name, limit)
+	p := httpx.ParsePagination(c, 20, 100)
+	runs, err := h.cronService.GetRuns(c.Request.Context(), name, p.Size+p.Offset)
 	if err != nil {
 		return nil, err
 	}
-
-	return runs, nil
+	return httpx.Paginate(runs, p), nil
 }
 
 // ========== Script Management (独立脚本库) ==========
@@ -287,7 +281,7 @@ func (h *CronHandler) ListScripts(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scripts, nil
+	return httpx.Paginate(scripts, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // GetScript returns a script by ID
@@ -370,16 +364,13 @@ func parseScriptJournalLogs(stdout string) []cron.ScriptLogLine {
 	return logs
 }
 
-// formatJournalTimestamp 把 journald 微秒级 __REALTIME_TIMESTAMP 转成 "2006-01-02 15:04:05"。
+// formatJournalTimestamp 把 journald 微秒级 __REALTIME_TIMESTAMP 转成 util.TimeLayout。
 func formatJournalTimestamp(realtime string) string {
-	if realtime == "" {
-		return time.Now().Format("2006-01-02 15:04:05")
-	}
 	var usec int64
 	if _, err := fmt.Sscanf(realtime, "%d", &usec); err == nil {
-		return time.Unix(usec/1000000, (usec%1000000)*1000).Format("2006-01-02 15:04:05")
+		return util.UnixMicros(usec).Format(util.TimeLayout)
 	}
-	return time.Now().Format("2006-01-02 15:04:05")
+	return time.Now().Format(util.TimeLayout)
 }
 
 // CreateScript creates a new script

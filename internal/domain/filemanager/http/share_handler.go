@@ -48,14 +48,10 @@ const fileShareMaxSize = 500 * 1024 * 1024
 
 // generateToken creates a secure random token for file sharing
 func generateToken() (string, error) {
-	b := make([]byte, fileShareTokenBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate token: %w", err)
-	}
-	return hex.EncodeToString(b), nil
+	return util.RandomHex(fileShareTokenBytes)
 }
 
-// parseExpiresAt normalizes an expiry input to an absolute "2006-01-02 15:04:05"
+// parseExpiresAt normalizes an expiry input to an absolute util.TimeLayout
 // string. Accepts relative ("1h", "7d") or absolute ("2026-07-01 12:00:00").
 // Empty input yields "". Malformed input yields an error (guard: the original
 // create flow silently ignored bad relative input).
@@ -84,9 +80,9 @@ func parseExpiresAt(s string) (string, error) {
 			}
 			duration = time.Duration(val) * time.Minute
 		}
-		return time.Now().Add(duration).Format("2006-01-02 15:04:05"), nil
+		return time.Now().Add(duration).Format(util.TimeLayout), nil
 	}
-	if _, err := time.Parse("2006-01-02 15:04:05", s); err != nil {
+	if _, err := time.Parse(util.TimeLayout, s); err != nil {
 		return "", errors.New("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
 	}
 	return s, nil
@@ -341,7 +337,7 @@ func (h *FileShareHandler) ShareInfo(c *gin.Context) (any, error) {
 		resp.DownloadsLeft = max(share.MaxDownloads-share.DownloadCount, 0)
 	}
 	if share.ExpiresAt != "" {
-		if expires, perr := time.Parse("2006-01-02 15:04:05", share.ExpiresAt); perr == nil {
+		if expires, perr := time.Parse(util.TimeLayout, share.ExpiresAt); perr == nil {
 			resp.Expired = time.Now().After(expires)
 		}
 	}
@@ -409,7 +405,7 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) (any, error) {
 
 	// Check expiration
 	if share.ExpiresAt != "" {
-		expires, err := time.Parse("2006-01-02 15:04:05", share.ExpiresAt)
+		expires, err := time.Parse(util.TimeLayout, share.ExpiresAt)
 		if err == nil && time.Now().After(expires) {
 			if delErr := h.shareRepo.Delete(c.Request.Context(), share.ID); delErr != nil {
 				return nil, delErr

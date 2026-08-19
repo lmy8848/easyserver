@@ -2,8 +2,6 @@ package http
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +13,7 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -84,9 +83,8 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) (any, error) {
 	}
 
 	// Generate unique session ID
-	var randBytes [8]byte
-	_, _ = rand.Read(randBytes[:])
-	sessionID := fmt.Sprintf("term-%d-%s", time.Now().UnixMilli(), hex.EncodeToString(randBytes[:]))
+	token, _ := util.RandomHex(8)
+	sessionID := fmt.Sprintf("term-%d-%s", time.Now().UnixMilli(), token)
 
 	// Create session
 	session, err := h.terminalManager.CreateSession(sessionID)

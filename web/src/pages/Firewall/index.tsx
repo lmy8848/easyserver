@@ -55,11 +55,11 @@ export default function FirewallPage() {
     setLoading(true);
     try {
       const [dbRes, sysRes] = await Promise.all([
-        firewallApi.listRules(),
-        firewallApi.getSystemRules(),
+        firewallApi.listRules(1, 1000),
+        firewallApi.getSystemRules(1, 1000),
       ]);
-      setRules(dbRes.data?.data || []);
-      setSystemRules(sysRes.data?.data || []);
+      setRules(dbRes.data?.data?.items ?? []);
+      setSystemRules(sysRes.data?.data?.items ?? []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取规则失败'));
     } finally {
@@ -250,8 +250,8 @@ export default function FirewallPage() {
   const fetchTemplates = async () => {
     setTemplatesLoading(true);
     try {
-      const res = await firewallApi.getTemplates();
-      setTemplates(res.data?.data || []);
+      const res = await firewallApi.getTemplates(1, 1000);
+      setTemplates(res.data?.data?.items ?? []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取模板失败'));
     } finally {

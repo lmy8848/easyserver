@@ -143,7 +143,7 @@ func (h *SSHHandler) GetSessions(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"sessions": sessions}, nil
+	return httpx.Paginate(sessions, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // KillSession kills an SSH session
@@ -204,7 +204,7 @@ func (h *SSHHandler) ListAuthorizedKeys(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"keys": keys}, nil
+	return httpx.Paginate(keys, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // AddAuthorizedKey appends a public key.

@@ -457,15 +457,6 @@ func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tabl
 	if !isValidTableName(tableName) {
 		return nil, errx.BadRequest("invalid table name")
 	}
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 50
-	}
-	if pageSize > 200 {
-		pageSize = 200
-	}
 
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {

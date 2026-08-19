@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"easyserver/internal/domain/systemd"
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/util"
 )
 
 // TimerManager 是把定时任务承载在 systemd timer 上的编排器（ADR-0004）。
@@ -376,7 +376,7 @@ func (m *TimerManager) loadTask(ctx context.Context, name string) (*CronTask, er
 // fillStatus 用 systemctl show 补全状态字段。
 func (m *TimerManager) fillStatus(ctx context.Context, t *CronTask) {
 	// timer：enabled + active + next elapse
-	if out, _ := exec.CommandContext(ctx, "systemctl", "is-enabled", systemd.CronTimerFileName(t.Name)).Output(); strings.TrimSpace(string(out)) == "enabled" {
+	if util.SystemdUnitEnabled(ctx, systemd.CronTimerFileName(t.Name)) {
 		t.Enabled = true
 	}
 	showTimer := m.show(ctx, systemd.CronTimerFileName(t.Name),
@@ -670,8 +670,7 @@ func (m *TimerManager) timerUnitExists(name string) bool {
 }
 
 func (m *TimerManager) timerEnabled(ctx context.Context, name string) bool {
-	out, _ := exec.CommandContext(ctx, "systemctl", "is-enabled", systemd.CronTimerFileName(name)).Output()
-	return strings.TrimSpace(string(out)) == "enabled"
+	return util.SystemdUnitEnabled(ctx, systemd.CronTimerFileName(name))
 }
 
 func (m *TimerManager) timerActive(ctx context.Context, name string) bool {
@@ -754,7 +753,7 @@ func parseJournalRuns(stdout string) []CronRun {
 	return runs
 }
 
-// formatJournalTime 把微秒时间戳格式化为 "2006-01-02 15:04:05"。空值返回空串。
+// formatJournalTime 把微秒时间戳格式化为 util.TimeLayout。空值返回空串。
 func formatJournalTime(usec string) string {
 	if usec == "" {
 		return ""
@@ -763,7 +762,7 @@ func formatJournalTime(usec string) string {
 	if _, err := fmt.Sscanf(usec, "%d", &n); err != nil {
 		return ""
 	}
-	return time.Unix(n/1e6, (n%1e6)*1000).Format("2006-01-02 15:04:05")
+	return util.UnixMicros(n).Format(util.TimeLayout)
 }
 
 // priorityName 把 journald 优先级数字映射为可读名。

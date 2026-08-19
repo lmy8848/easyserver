@@ -21,7 +21,7 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const loadNetworks = async () => {
     try {
       const res = await api.get(withEngine('/container/networks', engine));
-      setNetworks(res.data?.data?.networks || []);
+      setNetworks(res.data?.data?.items ?? []);
     } catch {
       message.error('加载网络列表失败');
     } finally {

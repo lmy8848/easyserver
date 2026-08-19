@@ -10,6 +10,13 @@ export interface PaginatedData<T> {
   items: T[];
 }
 
+// Page is the uniform paginated list shape every list endpoint returns.
+// Request's page/page_size are not echoed back — the caller already knows them.
+export interface Page<T> {
+  items: T[];
+  total: number;
+}
+
 // User types
 export interface User {
   id: number;

@@ -432,9 +432,9 @@ export default function FileManager() {
 
     if (type === 'archive') {
       try {
-        const res = await fileApi.archiveList(path);
+        const res = await fileApi.archiveList(path, 1, 1000);
         setPreviewType('archive');
-        setPreviewContent(JSON.stringify(res.data.data?.entries || []));
+        setPreviewContent(JSON.stringify(res.data.data?.items ?? []));
         setPreviewPath(path);
       } catch {
         message.error('无法读取压缩文件');

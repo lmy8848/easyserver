@@ -25,7 +25,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const loadProjects = async () => {
     try {
       const res = await api.get(withEngine('/container/compose/projects', engine));
-      setProjects(res.data?.data?.projects || []);
+      setProjects(res.data?.data?.items ?? []);
     } catch {
       // Compose might not be available
     } finally {

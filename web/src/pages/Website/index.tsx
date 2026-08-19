@@ -33,8 +33,8 @@ export default function WebsitePage() {
   const fetchServers = async () => {
     setLoading(true);
     try {
-      const res = await webServerApi.list();
-      setServers(res.data.data || []);
+      const res = await webServerApi.list(1, 1000);
+      setServers(res.data.data?.items ?? []);
     } catch (error) {
       console.error('Failed to fetch servers:', error);
     } finally {

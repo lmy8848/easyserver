@@ -48,8 +48,8 @@ export default function Notifications() {
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await notificationApi.list(unreadFilter, 200);
-      let data = res.data?.data || [];
+      const res = await notificationApi.list(unreadFilter, 1, 200);
+      let data = res.data?.data?.items || [];
 
       // Apply client-side filters
       if (levelFilter) {

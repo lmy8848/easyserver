@@ -1,12 +1,12 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
+
+	"easyserver/internal/util"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -242,11 +242,11 @@ func Load(path string) (*Config, error) {
 
 // generateRandomSecret generates a cryptographically secure hex-encoded random string.
 func generateRandomSecret(numBytes int) string {
-	b := make([]byte, numBytes)
-	if _, err := rand.Read(b); err != nil {
+	s, err := util.RandomHex(numBytes)
+	if err != nil {
 		panic("crypto/rand read failed: " + err.Error())
 	}
-	return hex.EncodeToString(b)
+	return s
 }
 
 // mergeDefaults restores default values for fields that were

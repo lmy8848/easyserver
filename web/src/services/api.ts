@@ -8,7 +8,7 @@ import type {
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
-  InstanceConfigView, AppSettings,
+  InstanceConfigView, AppSettings, Page,
 } from '../types';
 
 const api = axios.create({
@@ -155,8 +155,8 @@ export const monitorApi = {
 
 // Service API
 export const serviceApi = {
-  list: (params?: { managed?: boolean }) =>
-    api.get<ApiResponse<Service[]>>('/services', { params }),
+  list: (params?: { managed?: boolean; page?: number; page_size?: number }) =>
+    api.get<ApiResponse<Page<Service>>>('/services', { params }),
 
   // 创建托管服务（生成 easyserver-svc-* unit）
   create: (data: ManagedServiceSpec) =>
@@ -282,8 +282,8 @@ export const fileApi = {
   extract: (source: string, dest: string) =>
     api.post<ApiResponse>('/files/extract', { source, dest }),
 
-  archiveList: (path: string) =>
-    api.get<ApiResponse<{ entries: Array<{ name: string; size: number; is_dir: boolean }> }>>('/files/archive-list', { params: { path } }),
+  archiveList: (path: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<{ name: string; size: number; is_dir: boolean }>>>('/files/archive-list', { params: { path, page, page_size: pageSize } }),
 
   chmod: (path: string, mode: string) =>
     api.put<ApiResponse>('/files/chmod', { path, mode }),
@@ -294,8 +294,8 @@ export const fileApi = {
 
 // Monitor API (ports + port availability check)
 export const systemApi = {
-  getListeningPorts: () =>
-    api.get<ApiResponse<{ ports: Array<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>; total: number }>>('/monitor/ports'),
+  getListeningPorts: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>>>('/monitor/ports', { params: { page, page_size: pageSize } }),
 
   checkPort: (port: number) =>
     api.get<ApiResponse<{ available: boolean; port: number; process?: string; message: string }>>('/monitor/check-port', { params: { port } }),
@@ -417,8 +417,8 @@ export const websiteSecurityApi = {
 
 // Web Server API
 export const webServerApi = {
-  list: () =>
-    api.get<ApiResponse<WebServer[]>>('/web-servers'),
+  list: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<WebServer>>>('/web-servers', { params: { page, page_size: pageSize } }),
 
   get: (id: number) =>
     api.get<ApiResponse<WebServer>>(`/web-servers/${id}`),
@@ -480,8 +480,8 @@ export const webServerApi = {
 
 // Website API (nested under web server)
 export const websiteApi = {
-  list: (serverId: number) =>
-    api.get<ApiResponse<Website[]>>(`/web-servers/${serverId}/websites`),
+  list: (serverId: number, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Website>>>(`/web-servers/${serverId}/websites`, { params: { page, page_size: pageSize } }),
 
   get: (serverId: number, id: number) =>
     api.get<ApiResponse<Website>>(`/web-servers/${serverId}/websites/${id}`),
@@ -517,8 +517,8 @@ export const websiteApi = {
 // Database Server API
 export const dbServerApi = {
   // Instance lifecycle, scoped by engine enum.
-  listInstances: (dbtype: string) =>
-    api.get<ApiResponse<DBInstance[]>>(`/db/instances`, { params: { dbtype } }),
+  listInstances: (dbtype: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<DBInstance>>>(`/db/instances`, { params: { dbtype, page, page_size: pageSize } }),
 
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string; container_name?: string }) =>
     api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/instances`, { ...data, dbtype }),
@@ -530,7 +530,7 @@ export const dbServerApi = {
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),
   // paginated — the version Select flips pages through this.
   listDockerTags: (dbtype: string, page = 1, pageSize = 10) =>
-    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/docker-tags`, { params: { dbtype, page, page_size: pageSize } }),
+    api.get<ApiResponse<Page<string>>>(`/db/docker-tags`, { params: { dbtype, page, page_size: pageSize } }),
 
   // Uninstall the instance. purge=true also deletes the data (and config) volumes.
   uninstallInstance: (iid: number, purge = false) =>
@@ -559,8 +559,8 @@ export const dbServerApi = {
 
   // Databases (instance-scoped; logical databases are live engine state, so the
   // database name is the identifier — never a persisted id)
-  listDatabases: (instanceId: number) =>
-    api.get<ApiResponse<Database[]>>(`/db/instances/${instanceId}/databases`),
+  listDatabases: (instanceId: number, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Database>>>(`/db/instances/${instanceId}/databases`, { params: { page, page_size: pageSize } }),
 
   createDatabase: (instanceId: number, data: { name: string; charset?: string; description?: string }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/databases`, data),
@@ -569,8 +569,8 @@ export const dbServerApi = {
     api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}`),
 
   // DB Users (instance-scoped; username + host for MySQL)
-  listUsers: (instanceId: number) =>
-    api.get<ApiResponse<DBUser[]>>(`/db/instances/${instanceId}/users`),
+  listUsers: (instanceId: number, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<DBUser>>>(`/db/instances/${instanceId}/users`, { params: { page, page_size: pageSize } }),
 
   createUser: (instanceId: number, data: { username: string; password: string; host?: string }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/users`, data),
@@ -585,8 +585,8 @@ export const dbServerApi = {
     api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/password`, data, { params: { host } }),
 
   // Database introspection
-  listTables: (instanceId: number, dbName: string) =>
-    api.get<ApiResponse<Array<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`),
+  listTables: (instanceId: number, dbName: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, { params: { page, page_size: pageSize } }),
 
   describeTable: (instanceId: number, dbName: string, table: string) =>
     api.get<ApiResponse<{ table_name: string; primary_key: string; collation: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
@@ -617,8 +617,8 @@ export const dbServerApi = {
   createBackup: (instanceId: number, dbName: string) =>
     api.post<ApiResponse<DBBackup>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backup`),
 
-  listBackups: (instanceId: number, dbName: string) =>
-    api.get<ApiResponse<DBBackup[]>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backups`),
+  listBackups: (instanceId: number, dbName: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<DBBackup>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backups`, { params: { page, page_size: pageSize } }),
 
   downloadBackup: (backupId: number) =>
     api.get(`/db/backups/${backupId}/download`, { responseType: 'blob' }),
@@ -666,8 +666,8 @@ export const dbServerApi = {
 
 // Cron task management
 export const cronApi = {
-  list: () =>
-    api.get<ApiResponse<CronTask[]>>('/cron/tasks'),
+  list: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<CronTask>>>('/cron/tasks', { params: { page, page_size: pageSize } }),
 
   get: (name: string) =>
     api.get<ApiResponse<CronTask>>(`/cron/tasks/${name}`),
@@ -690,12 +690,12 @@ export const cronApi = {
   run: (name: string) =>
     api.post<ApiResponse>(`/cron/tasks/${name}/run`),
 
-  getRuns: (name: string, limit?: number) =>
-    api.get<ApiResponse<CronRun[]>>(`/cron/tasks/${name}/runs`, { params: { limit: limit || 100 } }),
+  getRuns: (name: string, page = 1, pageSize = 20) =>
+    api.get<ApiResponse<Page<CronRun>>>(`/cron/tasks/${name}/runs`, { params: { page, page_size: pageSize } }),
 
   // Scripts
-  listScripts: () =>
-    api.get<ApiResponse<Script[]>>('/cron/scripts'),
+  listScripts: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Script>>>('/cron/scripts', { params: { page, page_size: pageSize } }),
 
   getScript: (id: number) =>
     api.get<ApiResponse<Script>>(`/cron/scripts/${id}`),
@@ -740,8 +740,8 @@ export const firewallApi = {
   disable: () =>
     api.post<ApiResponse>('/firewall/disable', { confirm: true }),
 
-  listRules: () =>
-    api.get<ApiResponse<FirewallRule[]>>('/firewall/rules'),
+  listRules: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<FirewallRule>>>('/firewall/rules', { params: { page, page_size: pageSize } }),
 
   getRule: (id: number) =>
     api.get<ApiResponse<FirewallRule>>(`/firewall/rules/${id}`),
@@ -776,8 +776,8 @@ export const firewallApi = {
   bulkDeleteRules: (ids: number[]) =>
     api.post<ApiResponse<{ succeeded: number; failed: number; errors: string[] }>>('/firewall/rules/bulk-delete', { ids }),
 
-  getSystemRules: () =>
-    api.get<ApiResponse<FirewallRule[]>>('/firewall/system-rules'),
+  getSystemRules: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<FirewallRule>>>('/firewall/system-rules', { params: { page, page_size: pageSize } }),
 
   deleteSystemRule: (rule: FirewallRule) =>
     api.post<ApiResponse>('/firewall/system-rules/delete', rule),
@@ -785,8 +785,8 @@ export const firewallApi = {
   setDefaultPolicy: (data: { chain: string; policy: string }) =>
     api.post<ApiResponse>('/firewall/default-policy', data),
 
-  getTemplates: () =>
-    api.get<ApiResponse<FirewallRuleTemplate[]>>('/firewall/templates'),
+  getTemplates: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<FirewallRuleTemplate>>>('/firewall/templates', { params: { page, page_size: pageSize } }),
 
   applyTemplate: (name: string) =>
     api.post<ApiResponse<FirewallRule>>('/firewall/templates/apply', { name }),
@@ -860,8 +860,8 @@ export const settingsApi = {
 // Process Guardian API
 // System Process API
 export const systemProcessApi = {
-  listProcesses: (params?: { sort_by?: string; order?: string; search?: string; limit?: number }) =>
-    api.get<ApiResponse<SystemProcess[]>>('/monitor/processes', { params }),
+  listProcesses: (params?: { sort_by?: string; order?: string; search?: string; page?: number; page_size?: number }) =>
+    api.get<ApiResponse<Page<SystemProcess>>>('/monitor/processes', { params }),
 
   getProcess: (pid: number) =>
     api.get<ApiResponse<SystemProcess>>(`/monitor/processes/${pid}`),
@@ -869,8 +869,8 @@ export const systemProcessApi = {
 
 // Notification API
 export const notificationApi = {
-  list: (unreadOnly = false, limit = 50) =>
-    api.get<ApiResponse<Notification[]>>('/notifications', { params: { unread: unreadOnly, limit } }),
+  list: (unreadOnly = false, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Notification>>>('/notifications', { params: { unread: unreadOnly, page, page_size: pageSize } }),
 
   unreadCount: () =>
     api.get<ApiResponse<{ count: number }>>('/notifications/unread-count'),

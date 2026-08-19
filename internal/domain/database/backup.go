@@ -13,6 +13,7 @@ import (
 
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/task"
+	"easyserver/internal/util"
 )
 
 // esBackupsDir 是实例宿主数据目录内备份的子目录名（dump 直接落这里宿主直见）。
@@ -313,7 +314,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 	}
 
 	key := fmt.Sprintf("restore-%d", id)
-	st := &RestoreStatus{Status: "running", StartedAt: time.Now().Format("2006-01-02 15:04:05")}
+	st := &RestoreStatus{Status: "running", StartedAt: time.Now().Format(util.TimeLayout)}
 	s.restoreMu.Lock()
 	s.restoreTask[id] = st
 	s.restoreMu.Unlock()

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 )
 
 // 容器管理常量
@@ -864,8 +865,7 @@ func (s *Service) unitExists(ctx context.Context, unit string) bool {
 
 // unitActive reports whether a systemd unit is currently active.
 func (s *Service) unitActive(ctx context.Context, unit string) bool {
-	_, err := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit).CombinedOutput()
-	return err == nil
+	return util.SystemdUnitActive(ctx, unit)
 }
 
 // versionRE extracts a semver from `docker --version` / `podman --version`
@@ -1085,8 +1085,7 @@ const enableSocketUnit = "podman.socket"
 
 // socketEnabled reports whether Podman's API socket unit is enabled at boot.
 func (s *Service) socketEnabled(ctx context.Context) bool {
-	_, err := exec.CommandContext(ctx, "systemctl", "is-enabled", enableSocketUnit).CombinedOutput()
-	return err == nil
+	return util.SystemdUnitEnabled(ctx, enableSocketUnit)
 }
 
 // EnableSocket enables Podman's API socket unit at boot.

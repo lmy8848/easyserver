@@ -72,8 +72,8 @@ export default function ScriptPage() {
   const fetchScripts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await cronApi.listScripts();
-      setScripts(res.data?.data || []);
+      const res = await cronApi.listScripts(1, 1000);
+      setScripts(res.data?.data?.items ?? []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '加载脚本失败'));
     } finally {

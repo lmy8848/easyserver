@@ -89,17 +89,17 @@ func (h *Handler) ListBaseline(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"baseline": bl}, nil
+	return httpx.Paginate(bl, httpx.ParsePagination(c, 100, 1000)), nil
 }
 
 // ListChanges returns recent FIM changes.
 func (h *Handler) ListChanges(c *gin.Context) (any, error) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	changes, err := h.svc.ListChanges(c.Request.Context(), limit)
+	p := httpx.ParsePagination(c, 100, 1000)
+	changes, err := h.svc.ListChanges(c.Request.Context(), p.Size+p.Offset)
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"changes": changes}, nil
+	return httpx.Paginate(changes, p), nil
 }
 
 // ResetBaseline resets the FIM baseline.

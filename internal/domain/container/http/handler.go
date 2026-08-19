@@ -1,8 +1,6 @@
 package http
 
 import (
-	"strconv"
-
 	"easyserver/internal/domain/container"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
@@ -168,7 +166,7 @@ func (h *ContainerHandler) RegistryLogin(c *gin.Context) (any, error) {
 // GetLoggedInRegistries lists the registries the engine is logged into.
 func (h *ContainerHandler) GetLoggedInRegistries(c *gin.Context) (any, error) {
 	regs := h.containerService.GetLoggedInRegistries(c.Request.Context(), h.engineName(c))
-	return gin.H{"registries": regs}, nil
+	return httpx.Paginate(regs, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // RegistryLogout clears stored credentials for a registry.
@@ -194,7 +192,7 @@ func (h *ContainerHandler) ListContainers(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"containers": containers}, nil
+	return httpx.Paginate(containers, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // GetContainer returns a specific container
@@ -287,7 +285,7 @@ func (h *ContainerHandler) RemoveContainer(c *gin.Context) (any, error) {
 func (h *ContainerHandler) GetContainerLogs(c *gin.Context) (any, error) {
 	id := c.Param("id")
 	tail := container.DefaultLogTail
-	if t, err := strconv.Atoi(c.Query("tail")); err == nil && t > 0 {
+	if t := httpx.QueryInt(c, "tail", 0); t > 0 {
 		if t > container.MaxLogTail {
 			t = container.MaxLogTail
 		}
@@ -417,7 +415,7 @@ func (h *ContainerHandler) ListImages(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"images": images}, nil
+	return httpx.Paginate(images, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // PullImage pulls an image
@@ -452,7 +450,7 @@ func (h *ContainerHandler) RemoveImage(c *gin.Context) (any, error) {
 // ListComposeProjects lists all compose projects
 func (h *ContainerHandler) ListComposeProjects(c *gin.Context) (any, error) {
 	projects := h.containerService.ListProjects(c.Request.Context(), h.engineName(c))
-	return gin.H{"projects": projects}, nil
+	return httpx.Paginate(projects, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // ComposeUp runs compose up -d
@@ -507,7 +505,7 @@ func (h *ContainerHandler) ComposeRestart(c *gin.Context) (any, error) {
 func (h *ContainerHandler) ComposeLogs(c *gin.Context) (any, error) {
 	projectDir := c.Query("dir")
 	tail := container.DefaultLogTail
-	if t, err := strconv.Atoi(c.Query("tail")); err == nil && t > 0 {
+	if t := httpx.QueryInt(c, "tail", 0); t > 0 {
 		if t > container.MaxLogTail {
 			t = container.MaxLogTail
 		}
@@ -556,7 +554,7 @@ func (h *ContainerHandler) ListVolumes(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"volumes": volumes}, nil
+	return httpx.Paginate(volumes, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // CreateVolume creates a new volume
@@ -596,7 +594,7 @@ func (h *ContainerHandler) ListNetworks(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"networks": networks}, nil
+	return httpx.Paginate(networks, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // CreateNetwork creates a new network

@@ -24,8 +24,8 @@ export default function CronPage() {
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await cronApi.list();
-      setTasks(res.data?.data || []);
+      const res = await cronApi.list(1, 1000);
+      setTasks(res.data?.data?.items ?? []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取任务列表失败'));
     } finally {
@@ -37,8 +37,8 @@ export default function CronPage() {
 
   // Fetch scripts on mount
   useEffect(() => {
-    cronApi.listScripts().then(res => {
-      setScripts(res.data?.data || []);
+    cronApi.listScripts(1, 1000).then(res => {
+      setScripts(res.data?.data?.items ?? []);
     }).catch(() => {});
   }, []);
 
@@ -87,8 +87,8 @@ export default function CronPage() {
     setLogsTask(task);
     setLogsLoading(true);
     try {
-      const res = await cronApi.getRuns(task.name, 100);
-      setRuns(res.data?.data || []);
+      const res = await cronApi.getRuns(task.name, 1, 1000);
+      setRuns(res.data?.data?.items ?? []);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {

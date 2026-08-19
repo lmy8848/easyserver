@@ -125,7 +125,7 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return instances, nil
+	return httpx.Paginate(instances, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // ListDockerTags returns available Docker image tags for a database type.
@@ -134,18 +134,12 @@ func (h *InstanceHandler) ListDockerTags(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	tags, total, err := h.svc.ListDockerTags(c.Request.Context(), dbType, page, pageSize)
+	p := httpx.ParsePagination(c, 10, 100)
+	tags, err := h.svc.ListDockerTags(c.Request.Context(), dbType)
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{
-		"tags":      tags,
-		"total":     total,
-		"page":      page,
-		"page_size": pageSize,
-	}, nil
+	return httpx.Paginate(tags, p), nil
 }
 
 // InstallLogStream streams installation progress for a pending/failed install via SSE.
@@ -309,7 +303,7 @@ func (h *InstanceHandler) GetInstanceLogs(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines, _ := strconv.Atoi(c.DefaultQuery("lines", "200"))
+	lines := httpx.QueryInt(c, "lines", 200)
 	logs, err := h.svc.GetInstanceServiceLogs(c.Request.Context(), iid, lines)
 	if err != nil {
 		return nil, err
@@ -368,7 +362,7 @@ func (h *DatabaseHandler) ListDatabases(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return dbs, nil
+	return httpx.Paginate(dbs, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 func (h *DatabaseHandler) CreateDatabase(c *gin.Context) (any, error) {
@@ -437,7 +431,7 @@ func (h *DatabaseHandler) ListTables(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	return tables, nil
+	return httpx.Paginate(tables, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 func (h *DatabaseHandler) DescribeTable(c *gin.Context) (any, error) {
@@ -475,10 +469,9 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	p := httpx.ParsePagination(c, 50, 200)
 
-	result, err := h.svc.QueryTable(c.Request.Context(), iid, dbName, tableName, page, pageSize)
+	result, err := h.svc.QueryTable(c.Request.Context(), iid, dbName, tableName, p.Page, p.Size)
 	if err != nil {
 		return nil, err
 	}
@@ -713,7 +706,7 @@ func (h *UserHandler) ListDBUsers(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return users, nil
+	return httpx.Paginate(users, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 func (h *UserHandler) CreateDBUser(c *gin.Context) (any, error) {
@@ -844,7 +837,7 @@ func (h *BackupHandler) ListBackups(c *gin.Context) (any, error) {
 		backups = []database.DBBackup{}
 	}
 
-	return backups, nil
+	return httpx.Paginate(backups, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 func (h *BackupHandler) DownloadBackup(c *gin.Context) (any, error) {

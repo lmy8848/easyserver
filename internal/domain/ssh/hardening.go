@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 )
 
 // HardenOptions controls a one-shot SSH hardening pass.
@@ -290,14 +291,8 @@ func (s *Service) Fail2banStatus(ctx context.Context) *Fail2banStatus {
 		return st // fail2ban 未安装时返回未安装状态
 	}
 	st.Installed = true
-	out, _ := exec.CommandContext(ctx, "systemctl", "is-active", "fail2ban").CombinedOutput()
-	if strings.TrimSpace(string(out)) == "active" {
-		st.Active = true
-	}
-	out, _ = exec.CommandContext(ctx, "systemctl", "is-enabled", "fail2ban").CombinedOutput()
-	if strings.TrimSpace(string(out)) == "enabled" {
-		st.Enabled = true
-	}
+	st.Active = util.SystemdUnitActive(ctx, "fail2ban")
+	st.Enabled = util.SystemdUnitEnabled(ctx, "fail2ban")
 	// List jails.
 	out, err := exec.CommandContext(ctx, "fail2ban-client", "status").CombinedOutput()
 	if err == nil {

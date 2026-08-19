@@ -26,7 +26,7 @@ export default function SSHHardeningTab() {
     setKeysLoading(true);
     try {
       const res = await api.get('/ssh/authorized-keys');
-      setKeys(res.data.data?.keys || []);
+      setKeys(res.data.data?.items ?? []);
     } catch { message.error('加载公钥失败'); }
     finally { setKeysLoading(false); }
   };

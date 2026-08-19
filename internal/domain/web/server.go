@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 )
 
 // sanitizePackageName allows only alphanumeric characters, hyphens, dots, and plus signs
@@ -458,8 +459,7 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 	if installed {
 		status = "stopped"
 		if ws.ServiceName != "" {
-			out, _ := exec.CommandContext(ctx, "systemctl", "is-active", ws.ServiceName).CombinedOutput()
-			if strings.TrimSpace(string(out)) == "active" {
+			if util.SystemdUnitActive(ctx, ws.ServiceName) {
 				status = "running"
 			}
 		}

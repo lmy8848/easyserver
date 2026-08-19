@@ -3,9 +3,7 @@
 package api
 
 import (
-	"crypto/rand"
 	"embed"
-	"encoding/base64"
 	"io/fs"
 	"log"
 	"net/http"
@@ -14,6 +12,7 @@ import (
 	"sync"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -68,9 +67,8 @@ func CSPNonce() string {
 
 // generateNonce generates a random nonce for CSP
 func generateNonce() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return base64.StdEncoding.EncodeToString(b)
+	s, _ := util.RandomBase64(16)
+	return s
 }
 
 // ServeWeb serves the embedded frontend files

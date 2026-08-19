@@ -23,7 +23,7 @@ export default function ImageTab({ engine }: { engine: string }) {
   const loadImages = async () => {
     try {
       const res = await api.get(withEngine('/container/images', engine));
-      setImages(res.data?.data?.images || []);
+      setImages(res.data?.data?.items ?? []);
     } catch {
       message.error('加载镜像列表失败');
     } finally {

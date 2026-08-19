@@ -34,7 +34,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const loadContainers = async () => {
     try {
       const res = await api.get(withEngine('/container/instances?all=true', engine));
-      setContainers(res.data?.data?.containers || []);
+      setContainers(res.data?.data?.items ?? []);
     } catch {
       message.error('加载容器列表失败');
     } finally {

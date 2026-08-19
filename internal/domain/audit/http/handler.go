@@ -10,6 +10,7 @@ import (
 	"easyserver/internal/domain/audit"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,17 +38,11 @@ type AuditLogItem struct {
 	CreatedAt string `json:"created_at"`
 }
 
-type AuditLogListResponse struct {
-	Total int64          `json:"total"`
-	Items []AuditLogItem `json:"items"`
-}
-
 // List returns audit logs with pagination and filtering
 func (h *AuditHandler) List(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
 	// Parse query params
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	p := httpx.ParsePagination(c, 50, 200)
 	username := c.Query("username")
 	action := c.Query("action")
 	resource := c.Query("resource")
@@ -56,14 +51,6 @@ func (h *AuditHandler) List(c *gin.Context) (any, error) {
 	endDate := c.Query("end_date")
 	logType := c.Query("type")
 	status := c.Query("status")
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 200 {
-		pageSize = 50
-	}
-	offset := (page - 1) * pageSize
 
 	// Use repository if available
 	if h.auditRepo != nil {
@@ -76,8 +63,8 @@ func (h *AuditHandler) List(c *gin.Context) (any, error) {
 			StartDate: startDate,
 			EndDate:   endDate,
 			Status:    status,
-			Offset:    offset,
-			Limit:     pageSize,
+			Offset:    p.Offset,
+			Limit:     p.Size,
 		}
 		total, logs, err := h.auditRepo.Query(c.Request.Context(), filter)
 		if err != nil {
@@ -95,12 +82,12 @@ func (h *AuditHandler) List(c *gin.Context) (any, error) {
 				IP:        log.IP,
 				UserAgent: log.UserAgent,
 				Type:      log.Type,
-				CreatedAt: log.CreatedAt.Format("2006-01-02 15:04:05"),
+				CreatedAt: log.CreatedAt.Format(util.TimeLayout),
 			})
 		}
-		return AuditLogListResponse{
-			Total: total,
+		return httpx.Page[AuditLogItem]{
 			Items: items,
+			Total: total,
 		}, nil
 	}
 
@@ -167,7 +154,7 @@ func (h *AuditHandler) List(c *gin.Context) (any, error) {
 	// Get items
 	query := `SELECT id, user_id, username, action, resource, detail, ip, user_agent, type, created_at
 		          FROM audit_logs WHERE ` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
-	args = append(args, pageSize, offset)
+	args = append(args, p.Size, p.Offset)
 
 	rows, err := h.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -183,16 +170,16 @@ func (h *AuditHandler) List(c *gin.Context) (any, error) {
 			&item.Resource, &item.Detail, &item.IP, &item.UserAgent, &item.Type, &createdAt); err != nil {
 			continue
 		}
-		item.CreatedAt = createdAt.Format("2006-01-02 15:04:05")
+		item.CreatedAt = createdAt.Format(util.TimeLayout)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return AuditLogListResponse{
-		Total: total,
+	return httpx.Page[AuditLogItem]{
 		Items: items,
+		Total: total,
 	}, nil
 }
 
@@ -237,7 +224,7 @@ func (h *AuditHandler) GetActions(c *gin.Context) (any, error) {
 // Stats returns audit log statistics
 func (h *AuditHandler) Stats(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
-	days, _ := strconv.Atoi(c.DefaultQuery("days", "7"))
+	days := httpx.QueryInt(c, "days", 7)
 	if days < 1 || days > 90 {
 		days = 7
 	}
@@ -486,7 +473,7 @@ func (h *AuditHandler) Export(c *gin.Context) (any, error) {
 // Clean deletes audit logs older than specified days
 func (h *AuditHandler) Clean(c *gin.Context) (any, error) {
 	ctx := c.Request.Context()
-	days, _ := strconv.Atoi(c.DefaultQuery("days", "90"))
+	days := httpx.QueryInt(c, "days", 90)
 	if days < 1 {
 		days = 90
 	}

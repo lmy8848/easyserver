@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra"
+	"easyserver/internal/util"
 )
 
 // RunningScript 表示一个正在运行的脚本实例。
@@ -86,7 +87,7 @@ func (r *ScriptRunner) List() []Running {
 	defer r.mu.RUnlock()
 	list := make([]Running, 0, len(r.running))
 	for id, rs := range r.running {
-		list = append(list, Running{ID: id, StartedAt: rs.startTime.Format("2006-01-02 15:04:05")})
+		list = append(list, Running{ID: id, StartedAt: rs.startTime.Format(util.TimeLayout)})
 	}
 	return list
 }
@@ -216,7 +217,7 @@ func (rs *RunningScript) Done() <-chan struct{} { return rs.done }
 func (rs *RunningScript) Cmd() *exec.Cmd { return rs.cmd }
 
 // StartedAtStr 返回启动时间字符串。
-func (rs *RunningScript) StartedAtStr() string { return rs.startTime.Format("2006-01-02 15:04:05") }
+func (rs *RunningScript) StartedAtStr() string { return rs.startTime.Format(util.TimeLayout) }
 
 // runPumps 启动 stdout/stderr pump goroutine：读进程输出 → 写 journald + 广播订阅者。
 // 任一 pump 结束即视为进程接近退出，由 Wait goroutine 完成清理。
@@ -243,7 +244,7 @@ func (rs *RunningScript) runPumps() {
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // 行缓冲最大 1MB
 		for scanner.Scan() {
 			line := scanner.Text()
-			now := time.Now().Format("2006-01-02 15:04:05")
+			now := time.Now().Format(util.TimeLayout)
 			msg, _ := json.Marshal(map[string]any{
 				"type": "log",
 				"data": map[string]any{

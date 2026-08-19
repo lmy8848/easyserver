@@ -11,6 +11,7 @@ import (
 
 	"easyserver/internal/domain/firewall"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 )
 
 const (
@@ -173,7 +174,7 @@ func (s *SecurityService) refreshNginxBanFile(ctx context.Context) error {
 	seen := map[string]bool{}
 	var lines []string
 	lines = append(lines, "# EasyServer - auto-generated IP ban list. Do not edit manually.")
-	lines = append(lines, "# Updated: "+time.Now().Format("2006-01-02 15:04:05"))
+	lines = append(lines, "# Updated: "+time.Now().Format(util.TimeLayout))
 	now := time.Now()
 	for _, b := range bans {
 		if b.ExpiresAt != nil && b.ExpiresAt.Before(now) {

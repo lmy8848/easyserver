@@ -124,8 +124,8 @@ export default function WebsiteList({
 
   const fetchWebsites = useCallback(async () => {
     try {
-      const res = await websiteApi.list(selectedServer.id);
-      setWebsites(res.data.data || []);
+      const res = await websiteApi.list(selectedServer.id, 1, 1000);
+      setWebsites(res.data.data?.items ?? []);
     } catch (error) {
       console.error('Failed to fetch websites:', error);
     } finally {

@@ -2,8 +2,6 @@ package database
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,11 +16,11 @@ import (
 	"time"
 	"unicode"
 
-	"easyserver/internal/infra/errx"
-
 	"easyserver/internal/domain/notification"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/task"
+	"easyserver/internal/util"
 )
 
 const (
@@ -355,26 +353,11 @@ const dockerTagsCacheTTL = 10 * time.Minute
 // image, proxied from Docker Hub (filtered to version-like tags, cached). It
 // powers the front-end "更多版本" flow — users can pick any published tag, not
 // just the curated presets.
-func (s *Service) ListDockerTags(ctx context.Context, dbType DBType, page, pageSize int) ([]string, int, error) {
+func (s *Service) ListDockerTags(ctx context.Context, dbType DBType) ([]string, error) {
 	if !IsValidDBType(dbType) {
-		return nil, 0, fmt.Errorf("unsupported database type %q", dbType)
+		return nil, fmt.Errorf("unsupported database type %q", dbType)
 	}
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 10
-	}
-	tags, err := s.dockerTags(ctx, dbType)
-	if err != nil {
-		return nil, 0, err
-	}
-	start := (page - 1) * pageSize
-	if start >= len(tags) {
-		return []string{}, len(tags), nil
-	}
-	end := min(start+pageSize, len(tags))
-	return tags[start:end], len(tags), nil
+	return s.dockerTags(ctx, dbType)
 }
 
 func (s *Service) dockerTags(ctx context.Context, dbType DBType) ([]string, error) {
@@ -856,11 +839,7 @@ func defaultContainerName(dbType DBType, version, custom string) string {
 }
 
 func generateAdminPassword() (string, error) {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate database password: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
+	return util.RandomBase64(24)
 }
 
 // containerPortForType is the port the database engine listens on INSIDE the

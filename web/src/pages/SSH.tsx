@@ -71,7 +71,7 @@ export default function SSH() {
   const loadSessions = async () => {
     try {
       const res = await api.get('/ssh/sessions');
-      setSessions(res.data?.data?.sessions || []);
+      setSessions(res.data?.data?.items ?? []);
     } catch {
       message.error('加载会话列表失败');
     } finally {

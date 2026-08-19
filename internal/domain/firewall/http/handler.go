@@ -339,7 +339,7 @@ func (h *FirewallRuleHandler) ListRules(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rules, nil
+	return httpx.Paginate(rules, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // GetRule returns a firewall rule by ID
@@ -736,7 +736,7 @@ func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rules, nil
+	return httpx.Paginate(rules, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // DeleteSystemRule deletes a rule directly from the system (not from database)
@@ -972,7 +972,7 @@ var firewallRuleTemplates = []FirewallRuleTemplate{
 
 // GetTemplates returns the list of available rule templates
 func (h *FirewallTemplateHandler) GetTemplates(c *gin.Context) (any, error) {
-	return firewallRuleTemplates, nil
+	return httpx.Paginate(firewallRuleTemplates, httpx.ParsePagination(c, 50, 200)), nil
 }
 
 // ApplyTemplate creates a firewall rule from a named template

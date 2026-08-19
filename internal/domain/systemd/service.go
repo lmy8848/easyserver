@@ -14,6 +14,7 @@ import (
 
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/util"
 )
 
 // ServiceInfo represents a systemd service.
@@ -428,7 +429,7 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			logs = append(logs, LogLine{
 				Message: line,
-				Time:    time.Now().Format("2006-01-02 15:04:05"),
+				Time:    time.Now().Format(util.TimeLayout),
 			})
 			continue
 		}
@@ -437,8 +438,7 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 		if entry.RealtimeTimestamp != "" {
 			var usec int64
 			_, _ = fmt.Sscanf(entry.RealtimeTimestamp, "%d", &usec)
-			t := time.Unix(usec/1000000, (usec%1000000)*1000)
-			logTime = t.Format("2006-01-02 15:04:05")
+			logTime = util.UnixMicros(usec).Format(util.TimeLayout)
 		}
 
 		priority := "info"
@@ -473,10 +473,7 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 
 // isEnabled checks if a service is enabled.
 func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
-	stdout, _ := exec.CommandContext(ctx, "systemctl", "is-enabled", name+".service").Output()
-	// systemctl is-enabled returns exit code 1 for disabled services,
-	// so we check the output string instead of relying on exit code.
-	return strings.TrimSpace(string(stdout)) == "enabled"
+	return util.SystemdUnitEnabled(ctx, name+".service")
 }
 
 // serviceExists checks if a service unit exists on the system.
