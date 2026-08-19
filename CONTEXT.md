@@ -58,7 +58,7 @@
 - **Runtime** — 编程语言运行时（PHP、Node.js、Python、Go、Java 等）。由 Rust 编写的多语言版本管理器 `mise` 接管（见 ADR-0001、ADR-0002）。
 - **Runtime Version** — 由 `mise` 安装的精确版本号（如 `20.11.0`）。权威来源是 `$MISE_DATA_DIR/installs/<tool>/<version>/` 目录；面板安装成功会写入 `.easyserver-ok` 完成标记文件，扫描只认带标记的目录。手动 `mise install` 的版本不带标记，面板不显示（见 ADR-0009）。
 - **Runtime Binding（运行时绑定）** — 用 `lang@exact`（如 `node@20.11.0`）唯一确定一个已安装版本，cron/进程守护通过它绑定执行环境。持久化形态是 systemd unit 文件的 `RuntimeLang`/`RuntimeExact` 注释；前端 Select 的值即此字符串（见 ADR-0009）。
-- **Global Default** — 通过面板私有 `/opt/easyserver/mise/config.toml` 写入的默认版本，仅作为未指定版本时的解析兜底，面板业务流强制显式声明版本。
+- **Global Default** — 通过面板私有 `config.DataRoot/mise/config.toml` 写入的默认版本，仅作为未指定版本时的解析兜底，面板业务流强制显式声明版本。
 - **Execution Shim** — 面板主动发起的执行（进程守护、定时任务）强制包裹为 `mise exec <lang>@<exact> -- <cmd>`，彻底隔离 PATH。
 - **Mirror Source（镜像源）** — 面板根（Panel Root）下 `mise/config.toml` `[env]` 段的条目，文件即权威：无 DB 副本、无启用/禁用状态，UI 编辑保存即写入文件生效。
 - **Package Registry（包管理源）** — 各语言包管理器（npm、pip、goproxy、composer、maven）的国内/官方源配置与镜像切换。
