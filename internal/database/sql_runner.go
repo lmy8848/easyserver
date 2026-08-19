@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -186,11 +187,15 @@ func openDirectDB(inst *DBInstance, dbName string) (*sql.DB, error) {
 }
 
 func (r *driverSQLRunner) Query(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*QueryResult, error) {
+	trimmed := strings.TrimSpace(sql)
+	if trimmed == "" {
+		return nil, errors.New("empty sql query")
+	}
 	db, err := r.poolFor(ctx, inst, dbName)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, sql, args...)
+	rows, err := db.QueryContext(ctx, trimmed, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -235,11 +240,15 @@ func (r *driverSQLRunner) Query(ctx context.Context, inst *DBInstance, dbName, s
 }
 
 func (r *driverSQLRunner) Exec(ctx context.Context, inst *DBInstance, dbName, sql string, args ...any) (*ExecResult, error) {
+	trimmed := strings.TrimSpace(sql)
+	if trimmed == "" {
+		return nil, errors.New("empty sql statement")
+	}
 	db, err := r.poolFor(ctx, inst, dbName)
 	if err != nil {
 		return nil, err
 	}
-	result, err := db.ExecContext(ctx, sql, args...)
+	result, err := db.ExecContext(ctx, trimmed, args...)
 	if err != nil {
 		return nil, err
 	}
