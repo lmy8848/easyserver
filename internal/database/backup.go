@@ -165,19 +165,33 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 	time.Sleep(2 * time.Second)
 	src := filepath.Join(instance.VolumeName, "dump.rdb")
 	baseFile := filepath.Base(filepath.Clean(backup.FilePath))
-	targetPath := filepath.Join(instance.VolumeName, esBackupsDir, baseFile)
-	if err := copyFile(src, targetPath); err != nil {
+	if !isSafePathComponent(baseFile) {
+		return errx.BadRequest("invalid backup file name")
+	}
+	safeBackupDir := filepath.Join(instance.VolumeName, esBackupsDir)
+	targetPath := filepath.Join(safeBackupDir, baseFile)
+	if err := copyFile(src, targetPath, safeBackupDir); err != nil {
 		return fmt.Errorf("copy redis dump: %w", err)
 	}
 	return nil
 }
 
 // copyFile copies a file byte-for-byte (host-side file operation).
-func copyFile(src, dst string) error {
+// When safeBaseDir is provided, dst must resolve inside that directory.
+func copyFile(src, dst string, safeBaseDir string) error {
 	cleanSrc := filepath.Clean(src)
 	cleanDst := filepath.Clean(dst)
 	if strings.Contains(cleanSrc, "\x00") || strings.Contains(cleanDst, "\x00") {
 		return errors.New("invalid file path")
+	}
+	if safeBaseDir != "" {
+		ok, err := isPathWithinBase(cleanDst, safeBaseDir)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("destination path escapes safe directory")
+		}
 	}
 	in, err := os.Open(cleanSrc)
 	if err != nil {
@@ -193,6 +207,35 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func isSafePathComponent(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.Contains(name, "\x00") || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return false
+	}
+	return true
+}
+
+func isPathWithinBase(targetPath, baseDir string) (bool, error) {
+	absBase, err := filepath.Abs(filepath.Clean(baseDir))
+	if err != nil {
+		return false, err
+	}
+	absTarget, err := filepath.Abs(filepath.Clean(targetPath))
+	if err != nil {
+		return false, err
+	}
+	rel, err := filepath.Rel(absBase, absTarget)
+	if err != nil {
+		return false, err
+	}
+	if rel == "." {
+		return true, nil
+	}
+	return !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != "..", nil
 }
 
 func (s *Service) ListBackups(ctx context.Context, instanceID int64, dbName string) ([]DBBackup, error) {
