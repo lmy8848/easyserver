@@ -144,6 +144,10 @@ var ufwActionRegex = regexp.MustCompile(`\[UFW\s+(\w+)\]`)
 // readFirewallLog reads a log file and parses firewall entries.
 // Uses a ring buffer to keep only the last maxLines matching lines in memory.
 func readFirewallLog(filePath string, maxLines int) ([]firewall.FirewallLogEntry, error) {
+	if maxLines <= 0 || maxLines > 1000 {
+		maxLines = 100
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
