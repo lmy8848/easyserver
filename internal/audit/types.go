@@ -10,7 +10,6 @@ const (
 	ResourceRuntime      = middleware.ResourceRuntime
 	ResourcePackage      = middleware.ResourcePackage
 	ResourceContainer    = middleware.ResourceContainer
-	ResourceCloud        = middleware.ResourceCloud
 	ResourceCron         = middleware.ResourceCron
 	ResourceFirewall     = middleware.ResourceFirewall
 	ResourceSSH          = middleware.ResourceSSH

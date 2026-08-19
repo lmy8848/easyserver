@@ -87,28 +87,24 @@
 - **Authorized Keys** — 服务器 `~/.ssh/authorized_keys` 授权公钥的管理与分发。
 - **Terminal（Web 终端）** — 基于 WebSocket + PTY（xterm.js）的网页交互式 Shell 终端会话。
 
-### 12. 云厂商集成
-
-- **Cloud Provider** — 云厂商集成（如腾讯云 Tencent Cloud），通过 SecretID/SecretKey 与 API 管理云主机实例、安全组规则与云上监控数据。
-
-### 13. 后台任务
+### 12. 后台任务
 
 - **Background Task（后台任务）** — 由通用任务执行器（`internal/infra/task`）管理的一次后台执行单元。执行器提供：Task Key 去重（同键同时只跑一个）、任务级超时、失败重试、全局并发上限控制、终态保留（失败/取消保留至同 key 重装，成功即清）（见 ADR-0008）。
 - **Task Key** — 后台任务的去重键兼查找句柄（key 唯一标识一次执行）。
 - **Task Log（任务日志）** — 后台任务的可选附件：内存环形缓冲 + 游标回放，订阅者先回放已缓冲行再收实时行；不接收日志则不产生流式成本。
 
-### 14. 监控与告警
+### 13. 监控与告警
 
 - **System Monitor（系统监控）** — 实时采集与历史存储系统性能指标（CPU、内存、磁盘 IO、网络吞吐、系统负载、分区状态与 Top 进程），采集层通过 `MetricSource` 接口解耦（见 ADR-0003）。
 - **Alert Rule（告警规则）** — 监控指标告警阈值配置（如 CPU > 90% 持续 5 分钟），触发告警生命周期。
 
-### 15. 通知系统
+### 14. 通知系统
 
 - **In-App Notification（站内通知）** — 面板右上角铃铛消息（告警触发、安全事件、系统通知），通过 SSE（`/api/notifications/stream`）实时推送至前端。
 - **Notification Channel（站外推送）** — 站外通知渠道配置（Webhook、邮件 Email、企业微信、钉钉、飞书、Telegram 等），用于将重要告警向管理员外部设备分发。
   _Avoid_: 用 "Notification" 同时模糊指代站内铃铛与站外推送。
 
-### 16. 审计与环境配置
+### 15. 审计与环境配置
 
 - **Audit Log（审计日志）** — 操作审计记录（记录操作人、模块、动作、目标对象、IP 地址、响应状态与时间戳）。
 - **Env Config（环境配置）** — 面板统一纳管的系统/应用通用环境变量与全局配置项（`env_configs` 表）。
@@ -120,6 +116,7 @@
 为了保持架构整洁，以下旧模块与概念已全面移除或重构，开发与阅读代码时应避免混淆：
 
 1. **Deploy（部署同步）** — ⚠ **已全面移除**（见 issue #23 / PR #23）：原 `internal/deploy` 业务包、前端 Deploy 页面与路由、数据库 `deploy_*` 表及加密密钥逻辑已彻底清理。面板不承担多节点部署同步职责。
-2. **ProcessManager** — ⚠ **已废弃**：旧文档中的进程管理器已被基于 systemd unit 的 **Process Guardian（进程守护）** 与 **System Process（系统服务）** 取代。
-3. **Cron Log & cron_tasks 表** — ⚠ **已废弃**：定时任务日志全部由 **journald** 承载，任务定义以 systemd timer/service unit 为唯一权威。
-4. **runtime_version 表** — ⚠ **已废弃**：运行时已全面基于 `$MISE_DATA_DIR/installs/` 目录与 `.easyserver-ok` 完成标记文件进行扫描与状态判断。
+2. **Cloud Provider（云厂商集成 / 腾讯云管理）** — ⚠ **已全面移除**：原 `internal/cloud` 业务包、前端 Cloud 页面与路由、Tencent Cloud SDK 依赖以及面板设置中的腾讯云配置已彻底清理。EasyServer 专注于单机管理面板核心能力。
+3. **ProcessManager** — ⚠ **已废弃**：旧文档中的进程管理器已被基于 systemd unit 的 **Process Guardian（进程守护）** 与 **System Process（系统服务）** 取代。
+4. **Cron Log & cron_tasks 表** — ⚠ **已废弃**：定时任务日志全部由 **journald** 承载，任务定义以 systemd timer/service unit 为唯一权威。
+5. **runtime_version 表** — ⚠ **已废弃**：运行时已全面基于 `$MISE_DATA_DIR/installs/` 目录与 `.easyserver-ok` 完成标记文件进行扫描与状态判断。

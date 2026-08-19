@@ -13,9 +13,6 @@ require (
 	github.com/pquerna/otp v1.5.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.0
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.159
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse v1.3.153
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor v1.3.158
 	golang.org/x/crypto v0.55.0
 	modernc.org/sqlite v1.56.0
 )

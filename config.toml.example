@@ -54,13 +54,6 @@ retention_days = 90
 [filemanager]
 base_path = "/opt/easyserver/data" # 文件管理器根目录；留空 = 整个文件系统（/）
 
-[tencentcloud]
-enabled = false
-secret_id = ""
-secret_key = ""
-region = "ap-guangzhou"
-instance_id = ""
-
 [notify]
 enabled = false
 webhook_url = "" # 钉钉/飞书/企微 Webhook URL

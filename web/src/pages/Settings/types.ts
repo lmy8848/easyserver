@@ -47,12 +47,6 @@ export interface Settings {
     enabled: boolean;
     webhook_url: string;
   };
-  tencentcloud: {
-    enabled: boolean;
-    region: string;
-    instance_id: string;
-    has_secret: boolean;
-  };
   features: {
     fim: boolean;
   };
@@ -77,17 +71,3 @@ export interface AlertRule {
   duration: number;
   enabled: boolean;
 }
-
-export const REGION_OPTIONS = [
-  { label: '广州 (ap-guangzhou)', value: 'ap-guangzhou' },
-  { label: '上海 (ap-shanghai)', value: 'ap-shanghai' },
-  { label: '北京 (ap-beijing)', value: 'ap-beijing' },
-  { label: '南京 (ap-nanjing)', value: 'ap-nanjing' },
-  { label: '成都 (ap-chengdu)', value: 'ap-chengdu' },
-  { label: '重庆 (ap-chongqing)', value: 'ap-chongqing' },
-  { label: '中国香港 (ap-hongkong)', value: 'ap-hongkong' },
-  { label: '新加坡 (ap-singapore)', value: 'ap-singapore' },
-  { label: '东京 (ap-tokyo)', value: 'ap-tokyo' },
-  { label: '硅谷 (na-siliconvalley)', value: 'na-siliconvalley' },
-  { label: '法兰克福 (eu-frankfurt)', value: 'eu-frankfurt' },
-];

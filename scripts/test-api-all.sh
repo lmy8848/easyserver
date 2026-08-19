@@ -442,10 +442,6 @@ test_all_get_endpoints() {
         "SystemProcess|/api/system/services"
         "SystemProcess|/api/system/services/protected"
         "SystemProcess|/api/system/services/whitelist"
-        # Cloud
-        "Cloud|/api/cloud/instances"
-        "Cloud|/api/cloud/snapshots"
-        "Cloud|/api/cloud/traffic"
         # Deploy
         "Deploy|/api/deploy/servers"
         "Deploy|/api/deploy/tasks"
@@ -703,7 +699,6 @@ $(echo -e "$FAIL_DETAILS")
 | Settings | 系统设置 |
 | System | 系统工具 |
 | SystemProcess | 系统进程 |
-| Cloud | 腾讯云 |
 | Deploy | 部署管理 |
 | Runtime | 运行时环境 |
 | EnvConfig | 环境配置 |

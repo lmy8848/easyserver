@@ -26,7 +26,6 @@ const (
 	ResourceRuntime      ResourceCategory = "运行环境"
 	ResourcePackage      ResourceCategory = "软件包"
 	ResourceContainer    ResourceCategory = "容器"
-	ResourceCloud        ResourceCategory = "云服务器"
 	ResourceCron         ResourceCategory = "定时任务"
 	ResourceFirewall     ResourceCategory = "防火墙"
 	ResourceSSH          ResourceCategory = "SSH"
@@ -91,7 +90,6 @@ var categoryPrefixes = []struct {
 	{"/api/compose", ResourceContainer},
 	{"/api/volumes", ResourceContainer},
 	{"/api/networks", ResourceContainer},
-	{"/api/cloud", ResourceCloud},
 	{"/api/cron", ResourceCron},
 	{"/api/firewall", ResourceFirewall},
 	{"/api/ssh", ResourceSSH},

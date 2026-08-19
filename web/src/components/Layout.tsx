@@ -45,7 +45,6 @@ const MENU_GROUPS = [
   {
     label: '系统',
     items: [
-      { key: '/cloud', icon: 'cloud', label: '腾讯云' },
       { key: '/audit', icon: 'file-text', label: '审计日志' },
       { key: '/settings', icon: 'tool', label: '面板设置' },
       { key: '/vulnerabilities', icon: 'alert', label: '漏洞扫描' },
@@ -70,7 +69,6 @@ const ICONS: Record<string, string> = {
   code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
-  cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
   'file-text': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>',
   tool: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
   bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
@@ -115,7 +113,6 @@ const PAGE_TITLES: Record<string, string> = {
   '/firewall': '防火墙',
   '/ssh': 'SSH 管理',
   '/containers': '容器管理',
-  '/cloud': '腾讯云',
   '/audit': '审计日志',
   '/settings': '面板设置',
   '/security': '安全设置',

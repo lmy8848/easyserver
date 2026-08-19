@@ -24,17 +24,16 @@ const DataRoot = "/opt/easyserver"
 // （写回 config.Save、推导配置目录、热重启传参、FIM 默认监视项）统一从
 // 它取，避免把 configPath 作为独立参数在调用链里层层传递。
 type Config struct {
-	Path         string             `toml:"-" json:"-"`
-	Server       ServerConfig       `toml:"server"`
-	Auth         AuthConfig         `toml:"auth"`
-	Monitor      MonitorConfig      `toml:"monitor"`
-	Alerts       AlertConfig        `toml:"alerts"`
-	Audit        AuditConfig        `toml:"audit"`
-	FileManager  FileManagerConfig  `toml:"filemanager"`
-	TencentCloud TencentCloudConfig `toml:"tencentcloud"`
-	Notify       NotifyConfig       `toml:"notify"`
-	Logs         LogsConfig         `toml:"logs"`
-	Features     FeaturesConfig     `toml:"features"`
+	Path        string            `toml:"-" json:"-"`
+	Server      ServerConfig      `toml:"server"`
+	Auth        AuthConfig        `toml:"auth"`
+	Monitor     MonitorConfig     `toml:"monitor"`
+	Alerts      AlertConfig       `toml:"alerts"`
+	Audit       AuditConfig       `toml:"audit"`
+	FileManager FileManagerConfig `toml:"filemanager"`
+	Notify      NotifyConfig      `toml:"notify"`
+	Logs        LogsConfig        `toml:"logs"`
+	Features    FeaturesConfig    `toml:"features"`
 }
 
 // FeaturesConfig holds optional feature toggles. Disabled by default to save
@@ -120,14 +119,6 @@ type AuditConfig struct {
 
 type FileManagerConfig struct {
 	BasePath string `toml:"base_path"`
-}
-
-type TencentCloudConfig struct {
-	Enabled    bool   `toml:"enabled"`
-	SecretID   string `toml:"secret_id"`
-	SecretKey  string `toml:"secret_key"`
-	Region     string `toml:"region"`
-	InstanceID string `toml:"instance_id"`
 }
 
 // LogsConfig 控制全局运行日志：文件落盘（应用根目录）、分级、源码定位、轮转。
@@ -355,23 +346,6 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv("EASYSERVER_TLS_KEY_FILE"); v != "" {
 		c.Server.TLS.KeyFile = v
-	}
-
-	// Tencent Cloud
-	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_ENABLED"); v == "true" {
-		c.TencentCloud.Enabled = true
-	}
-	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_SECRET_ID"); v != "" {
-		c.TencentCloud.SecretID = v
-	}
-	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_SECRET_KEY"); v != "" {
-		c.TencentCloud.SecretKey = v
-	}
-	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_REGION"); v != "" {
-		c.TencentCloud.Region = v
-	}
-	if v := os.Getenv("EASYSERVER_TENCENTCLOUD_INSTANCE_ID"); v != "" {
-		c.TencentCloud.InstanceID = v
 	}
 }
 
