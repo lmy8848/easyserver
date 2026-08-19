@@ -24,19 +24,26 @@ reviews:
     - "!migrations/**"
     - "!**/*.min.*"
     - "!**/*.map"
+    - "!**/*.example"
+    - "!scripts/**"
   path_instructions:
-    - path: "internal/**"
+    - path: "{cmd,internal}/**/*.go"
       instructions: |
         Go 后端代码审查重点：
-        1. 安全与输入校验：用户输入的路径、参数、版本、域名需严格校验，严防路径穿越（Path Traversal / ZipSlip）、命令注入与 SQL 注入。
-        2. 错误处理与日志：禁止静默吞掉底层 error；后台任务失败时需正确向上传播并记录错误信息。
-        3. 资源释放与并发：文件句柄、网络连接、互斥锁必须确保 defer 正确释放，防止资源泄露与并发竞争。
-    - path: "web/src/**"
+        1. 安全与输入校验：严格校验用户输入的路径、参数、版本、域名，严防路径穿越（Path Traversal / ZipSlip）、命令注入与 SQL 注入。
+        2. 项目契约规范：
+           - 面板根目录严禁硬编码字面量，一律使用 `config.DataRoot` 派生。
+           - 配置权威：动态配置通过 `config.Store` 获取最新快照，避免脏读。
+           - 外部命令执行必须保持环境隔离（使用 mise 隔离环境），避免直接拼装 shell 字符串。
+        3. 错误处理与日志：禁止静默忽略 error（严禁无理由的 `_ = ...`）；后台任务失败时需正确记录并向上传播。
+        4. 资源释放与并发：文件句柄、网络连接、互斥锁必须确保 defer 正确释放，防止资源泄露与并发竞争。
+    - path: "web/src/**/*.{ts,tsx}"
       instructions: |
         React + TypeScript 前端代码审查重点：
         1. 类型安全：优先保持严格的 TypeScript 类型推导，避免滥用 any。
-        2. Hook 依赖规范：检查 useEffect、useMemo、useCallback 依赖项完整性，确保路由与锚点跳转逻辑正确。
-        3. 交互反馈：异步调用需具备友好的 Loading 状态与错误捕获提示。
+        2. 架构规范：API 请求必须统一通过 `services/api.ts` 导出调用，禁止组件内直接裸调 axios。
+        3. Hook 规范：检查 useEffect、useMemo、useCallback 依赖项完整性，防止陈旧闭包与意外死循环。
+        4. 交互体验：异步操作必须有完整的 Loading 态与友好的 message/notification 错误兜底。
   tone_instructions: |
     - 请使用规范的简体中文进行代码评审。
     - 评审意见应简洁、专业、直击核心，重点关注安全性、逻辑缺陷、边界情况与数据一致性。
