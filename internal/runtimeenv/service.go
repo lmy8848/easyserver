@@ -41,7 +41,11 @@ func (s *Service) Installed(ctx context.Context, lang, exact string) bool {
 // Installed 包级函数：磁盘判定，纯只读。cron/systemd 经 RuntimeLookup 用，
 // runtimeenv 内部（install 去重、uninstall 存在性）直接调。
 func Installed(ctx context.Context, lang, exact string) bool {
-	_, err := os.Stat(markerPath(lang, exact))
+	p := markerPath(lang, exact)
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
 	return err == nil
 }
 
@@ -192,7 +196,11 @@ func (s *Service) installRuntime(ctx context.Context, name, exactVersion string,
 	}
 
 	// 安装成功后写完成标记；卸载删除目录时一并消失。
-	if err := os.WriteFile(markerPath(name, exactVersion), []byte("ok\n"), 0644); err != nil {
+	p := markerPath(name, exactVersion)
+	if p == "" {
+		return fmt.Errorf("invalid runtime version: %s", exactVersion)
+	}
+	if err := os.WriteFile(p, []byte("ok\n"), 0644); err != nil {
 		stdlog.Printf("runtime: failed to write marker for %s %s: %v", name, exactVersion, err)
 		return fmt.Errorf("安装完成但写入标记失败: %w", err)
 	}
@@ -245,7 +253,9 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 			return uninstallErr
 		}
 		// 卸载后标记随目录删除；此处显式删标记防目录残留半截。
-		_ = os.Remove(markerPath(name, version))
+		if p := markerPath(name, version); p != "" {
+			_ = os.Remove(p)
+		}
 		return nil
 	}); err != nil {
 		return err

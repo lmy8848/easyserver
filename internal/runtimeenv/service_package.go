@@ -9,11 +9,43 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/infra/mise"
 )
+
+var (
+	validPkgName    = regexp.MustCompile(`^(@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.-]+$`)
+	validPkgVersion = regexp.MustCompile(`^[a-zA-Z0-9_.\-+^~>=<*]+$`)
+)
+
+func validatePackageName(name string) error {
+	if name == "" || strings.HasPrefix(name, "-") || !validPkgName.MatchString(name) {
+		return errx.BadRequest("invalid package name: %s", name)
+	}
+	return nil
+}
+
+func validatePackageVersion(version string) error {
+	if version == "" {
+		return nil
+	}
+	if strings.HasPrefix(version, "-") || !validPkgVersion.MatchString(version) {
+		return errx.BadRequest("invalid package version: %s", version)
+	}
+	return nil
+}
+
+func isAllowedManager(name string) bool {
+	switch name {
+	case "npm", "pnpm", "pip", "corepack":
+		return true
+	default:
+		return false
+	}
+}
 
 // PackageService manages packages installed under a runtime environment.
 // Package state is sourced live from the underlying package manager (npm/pip/...);
@@ -45,13 +77,17 @@ func runCombinedEnv(ctx context.Context, env []string, name string, args ...stri
 // 自带的可执行文件，而非系统 PATH 的同名工具；pnpm 走全局 PNPM_HOME；corepack
 // 等系统工具传空 runtimePath 走 PATH。
 func (s *PackageService) runManagerCmd(ctx context.Context, runtimePath, name string, args ...string) (string, error) {
+	if !isAllowedManager(name) {
+		return "", fmt.Errorf("unsupported package manager: %s", name)
+	}
 	if name == "pnpm" {
-		return runCombinedEnv(ctx, pnpmEnv(), name, args...)
+		return runCombinedEnv(ctx, pnpmEnv(), "pnpm", args...)
 	}
+	bin := name
 	if runtimePath != "" {
-		name = managerBin(runtimePath, name)
+		bin = managerBin(runtimePath, name)
 	}
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	output, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
 	return string(output), err
 }
 
@@ -142,6 +178,12 @@ func (s *PackageService) ListPackages(ctx context.Context, runtimeName, runtimeP
 
 // InstallPackage installs a package
 func (s *PackageService) InstallPackage(ctx context.Context, req *PackageInstallRequest, runtimeName, runtimePath string) error {
+	if err := validatePackageName(req.Name); err != nil {
+		return err
+	}
+	if err := validatePackageVersion(req.Version); err != nil {
+		return err
+	}
 	switch runtimeName {
 	case "node":
 		return s.installNpmPackage(ctx, req, runtimePath)
@@ -156,6 +198,9 @@ func (s *PackageService) InstallPackage(ctx context.Context, req *PackageInstall
 
 // UninstallPackage uninstalls a package
 func (s *PackageService) UninstallPackage(ctx context.Context, req *PackageUninstallRequest, runtimeName, runtimePath string) error {
+	if err := validatePackageName(req.Name); err != nil {
+		return err
+	}
 	switch runtimeName {
 	case "node":
 		return s.uninstallNpmPackage(ctx, req, runtimePath)
@@ -170,6 +215,9 @@ func (s *PackageService) UninstallPackage(ctx context.Context, req *PackageUnins
 
 // UpdatePackage updates a package
 func (s *PackageService) UpdatePackage(ctx context.Context, req *PackageUpdateRequest, runtimeName, runtimePath string) error {
+	if err := validatePackageName(req.Name); err != nil {
+		return err
+	}
 	switch runtimeName {
 	case "node":
 		return s.updateNpmPackage(ctx, req, runtimePath)
