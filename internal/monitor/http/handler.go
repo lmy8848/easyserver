@@ -258,8 +258,9 @@ func formatHostAddr(hexIP string, port int) string {
 		// IPv4
 		var ip = make(net.IP, 4)
 		for i := range 4 {
-			b, _ := strconv.ParseInt(hexIP[6-i*2:8-i*2], 16, 32)
-			ip[i] = byte(b)
+			if b, err := strconv.ParseUint(hexIP[6-i*2:8-i*2], 16, 8); err == nil {
+				ip[i] = byte(b)
+			}
 		}
 		return fmt.Sprintf("%s:%d", ip.String(), port)
 	} else if len(hexIP) == 32 {
@@ -267,8 +268,9 @@ func formatHostAddr(hexIP string, port int) string {
 		var ip = make(net.IP, 16)
 		for i := 0; i < 16; i += 4 {
 			for j := range 4 {
-				b, _ := strconv.ParseInt(hexIP[i*2+(3-j)*2:i*2+(4-j)*2], 16, 32)
-				ip[i+j] = byte(b)
+				if b, err := strconv.ParseUint(hexIP[i*2+(3-j)*2:i*2+(4-j)*2], 16, 8); err == nil {
+					ip[i+j] = byte(b)
+				}
 			}
 		}
 		return fmt.Sprintf("[%s]:%d", ip.String(), port)
