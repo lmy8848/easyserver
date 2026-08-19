@@ -234,14 +234,18 @@ func (s *Service) GenerateKeyPair(ctx context.Context, name, keyType string) (st
 	default:
 		return "", errx.BadRequest("不支持的密钥类型")
 	}
+	cleanName := filepath.Clean(name)
+	if cleanName == "" || strings.Contains(cleanName, "\x00") || strings.Contains(cleanName, "\n") || strings.Contains(cleanName, "\r") {
+		return "", errx.BadRequest("invalid key comment name")
+	}
 	dir, err := os.MkdirTemp("", "es-key-*")
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, name)
+	path := filepath.Join(dir, "id_key")
 
-	args := []string{"-t", keyType, "-f", path, "-N", "", "-C", name + "@easyserver"}
+	args := []string{"-t", keyType, "-f", path, "-N", "", "-C", cleanName + "@easyserver"}
 	if bits != "" {
 		args = append(strings.Split(bits, " "), args...)
 	}
