@@ -717,9 +717,17 @@ func sanitizeAllowedPath(p string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	realPath := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		realPath = resolved
+	}
 	for _, root := range allowedRoots {
 		cleanRoot := filepath.Clean(root)
-		rel, err := filepath.Rel(cleanRoot, absPath)
+		realRoot := cleanRoot
+		if resolved, err := filepath.EvalSymlinks(cleanRoot); err == nil {
+			realRoot = resolved
+		}
+		rel, err := filepath.Rel(realRoot, realPath)
 		if err == nil && !strings.HasPrefix(rel, "..") {
 			return absPath, true
 		}
