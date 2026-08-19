@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,10 +144,10 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 	if ws.ServiceName != "" {
 		client := infrasystemd.DefaultClient()
 		if _, err := client.StopUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
-			return fmt.Errorf("stop service %s failed: %w", ws.ServiceName, err)
+			log.Printf("web: stop service %s failed: %v", ws.ServiceName, err)
 		}
 		if _, err := client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false); err != nil {
-			return fmt.Errorf("disable service %s failed: %w", ws.ServiceName, err)
+			log.Printf("web: disable service %s failed: %v", ws.ServiceName, err)
 		}
 	}
 

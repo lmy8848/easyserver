@@ -227,7 +227,7 @@ func (s *Service) ReloadSSH(ctx context.Context) error {
 		return nil
 	}
 	// Both attempts failed, return wrapped error preserving underlying causes
-	return fmt.Errorf("reload SSH failed: sshd.service error: %v; ssh.service error: %w", sshdErr, sshErr)
+	return fmt.Errorf("reload SSH failed: sshd.service error: %w; ssh.service error: %w", sshdErr, sshErr)
 }
 
 // GetSessions returns active SSH sessions.

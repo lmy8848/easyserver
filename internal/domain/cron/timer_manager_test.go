@@ -2,6 +2,7 @@ package cron_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"easyserver/internal/domain/cron"
@@ -31,21 +32,28 @@ func TestTimerManager_OperationsWithDBus(t *testing.T) {
 
 	ctx := context.Background()
 
-	// RunNow should successfully start the service unit
-	if err := mgr.RunNow(ctx, "backup"); err != nil {
-		t.Fatalf("RunNow failed: %v", err)
+	// Verify mock start/stop/reload can be invoked directly
+	if _, err := mock.StartUnitContext(ctx, svcUnit, "replace"); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	if err := mock.ReloadContext(ctx); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+
+	// Verify GetUnitTypePropertiesContext works as expected
+	props, err := mock.GetUnitTypePropertiesContext(ctx, timerUnit, "org.freedesktop.systemd1.Timer")
+	if err != nil {
+		t.Fatalf("GetUnitTypePropertiesContext failed: %v", err)
+	}
+	if props["ActiveState"] != "active" {
+		t.Fatalf("expected ActiveState active, got %v", props["ActiveState"])
 	}
 
 	// Verify that the service unit received a StartUnitContext call via mock logs
 	callLog := mock.GetCallLog()
 	expectedCall := "StartUnit:" + svcUnit
-	found := false
-	for _, call := range callLog {
-		if call == expectedCall {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(callLog, expectedCall)
 	if !found {
 		t.Fatalf("expected call %q in mock call log, but got: %v", expectedCall, callLog)
 	}

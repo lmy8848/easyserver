@@ -260,23 +260,22 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 	timerFull := systemd.CronTimerFileName(name)
 	svcFull := systemd.CronServiceFileName(name)
 
-	// 先 disable + stop，仅允许 "not loaded" / "already stopped" 等预期错误
+	// 先 disable + stop，仅允许 "not loaded" / "NoSuchUnit" / "inactive" 等预期错误
 	client := m.getClient()
 	if _, err := client.DisableUnitFilesContext(ctx, []string{timerFull}, false); err != nil {
-		// 只有 "NoSuchUnit" / "not loaded" 才可忽略
-		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "NoSuchUnit") {
+		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "NoSuchUnit") && !strings.Contains(err.Error(), "does not exist") {
 			log.Printf("cron: disable timer %s failed: %v", timerFull, err)
 			return fmt.Errorf("disable timer 失败: %w", err)
 		}
 	}
 	if _, err := client.StopUnitContext(ctx, timerFull, "replace"); err != nil {
-		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "inactive") {
+		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "NoSuchUnit") && !strings.Contains(err.Error(), "inactive") {
 			log.Printf("cron: stop timer %s failed: %v", timerFull, err)
 			return fmt.Errorf("stop timer 失败: %w", err)
 		}
 	}
 	if _, err := client.StopUnitContext(ctx, svcFull, "replace"); err != nil {
-		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "inactive") {
+		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "NoSuchUnit") && !strings.Contains(err.Error(), "inactive") {
 			log.Printf("cron: stop service %s failed: %v", svcFull, err)
 			return fmt.Errorf("stop service 失败: %w", err)
 		}
@@ -447,7 +446,7 @@ func (m *TimerManager) fillStatus(ctx context.Context, t *CronTask) error {
 		}
 	} else {
 		// NextElapseUSecRealtime is uint64 microseconds since epoch
-		if nextUsec, ok := timerProps["NextElapseUSecRealtime"].(uint64); ok && nextUsec > 0 {
+		if nextUsec, ok := timerProps["NextElapseUSecRealtime"].(uint64); ok && nextUsec > 0 && nextUsec != ^uint64(0) {
 			t.NextRun = util.UnixMicros(int64(nextUsec)).Format(util.TimeLayout)
 		}
 	}
@@ -467,7 +466,7 @@ func (m *TimerManager) fillStatus(ctx context.Context, t *CronTask) error {
 			t.LastResult = v
 		}
 		// ExecMainExitTimestamp is uint64 microseconds since epoch
-		if exitUsec, ok := svcProps["ExecMainExitTimestamp"].(uint64); ok && exitUsec > 0 {
+		if exitUsec, ok := svcProps["ExecMainExitTimestamp"].(uint64); ok && exitUsec > 0 && exitUsec != ^uint64(0) {
 			t.LastRun = util.UnixMicros(int64(exitUsec)).Format(util.TimeLayout)
 		}
 	}
@@ -730,7 +729,13 @@ func (m *TimerManager) timerUnitExists(name string) bool {
 }
 
 func (m *TimerManager) timerEnabled(ctx context.Context, name string) bool {
-	return util.SystemdUnitEnabled(ctx, systemd.CronTimerFileName(name))
+	props, err := m.getClient().GetUnitPropertiesContext(ctx, systemd.CronTimerFileName(name))
+	if err == nil && props != nil {
+		if ufs, ok := props["UnitFileState"].(string); ok && ufs != "" {
+			return ufs == "enabled"
+		}
+	}
+	return false
 }
 
 func (m *TimerManager) timerActive(ctx context.Context, name string) bool {
