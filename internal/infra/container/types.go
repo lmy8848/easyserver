@@ -118,7 +118,7 @@ type HostConfig struct {
 	AutoRemove    bool                     `json:"AutoRemove,omitempty"`
 	NetworkMode   string                   `json:"NetworkMode,omitempty"`
 	Memory        int64                    `json:"Memory,omitempty"`
-	NanoCPUs      int64                    `json:"NanoCPUs,omitempty"`
+	NanoCPUs      int64                    `json:"NanoCpus,omitempty"`
 }
 
 type ContainerCreateRequest struct {

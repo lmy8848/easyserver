@@ -29,6 +29,7 @@ const (
 	ImagePullTimeout = 10 * time.Minute // 镜像拉取超时
 	DefaultLogTail   = 100              // 默认日志行数
 	MaxLogTail       = 10000            // 最大日志行数
+	maxStreamBytes   = 10 * 1024 * 1024 // 流式输出最大字节数限制（10MB）
 )
 
 // engineBinary maps a engine name to the CLI binary that manages it (for compose & file ops).
@@ -229,7 +230,11 @@ func mapSummaryToImages(sum infracontainer.ImageSummary) []Image {
 
 func splitRepoTag(rt string) (string, string) {
 	if i := strings.LastIndex(rt, ":"); i != -1 {
-		return rt[:i], rt[i+1:]
+		// Only split at colon if the substring after it contains no slash
+		// (a colon after a slash, like in host:5000/repo, is a registry port, not a tag separator)
+		if !strings.Contains(rt[i+1:], "/") {
+			return rt[:i], rt[i+1:]
+		}
 	}
 	return rt, "latest"
 }
@@ -358,13 +363,17 @@ func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string,
 
 // GetContainerLogs returns container logs.
 func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string, tail int) (string, error) {
+	// Apply default tail when not specified
+	if tail <= 0 {
+		tail = DefaultLogTail
+	}
 	rc, err := infracontainer.DefaultClient().ContainerLogs(ctx, infracontainer.Engine(engine), id, tail, true, true)
 	if err != nil {
 		return "", errx.Internal("%s logs failed: %w", engine, err)
 	}
 	defer rc.Close()
 
-	rawBytes, err := io.ReadAll(rc)
+	rawBytes, err := io.ReadAll(io.LimitReader(rc, maxStreamBytes))
 	if err != nil {
 		return "", errx.Internal("read logs failed: %w", err)
 	}
@@ -422,7 +431,7 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 	}
 	defer rc.Close()
 
-	rawBytes, err := io.ReadAll(rc)
+	rawBytes, err := io.ReadAll(io.LimitReader(rc, maxStreamBytes))
 	if err != nil {
 		return "", errx.Internal("%s exec read failed: %w", engine, err)
 	}
@@ -464,9 +473,10 @@ func (s *Service) CreateContainer(ctx context.Context, engine Engine, req Create
 			hostIP := ""
 			hostPort := p.HostPort
 			if strings.Contains(hostPort, ":") {
-				parts := strings.Split(hostPort, ":")
-				hostIP = parts[0]
-				hostPort = parts[1]
+				// Split at the final colon to handle IPv6 addresses like ::1
+				idx := strings.LastIndex(hostPort, ":")
+				hostIP = hostPort[:idx]
+				hostPort = hostPort[idx+1:]
 			}
 			portBindings[key] = append(portBindings[key], infracontainer.PortBinding{
 				HostIP:   hostIP,
@@ -498,6 +508,9 @@ func (s *Service) CreateContainer(ctx context.Context, engine Engine, req Create
 		}
 	}
 
+	if len(req.Networks) > 1 {
+		return "", errx.BadRequest("multiple networks not supported; please specify only one network")
+	}
 	if len(req.Networks) > 0 {
 		hostConfig.NetworkMode = req.Networks[0]
 	}
@@ -549,7 +562,28 @@ func (s *Service) PullImage(ctx context.Context, engine Engine, image string) er
 	}
 	defer rc.Close()
 
-	_, _ = io.Copy(io.Discard, rc)
+	// Decode JSON stream line-by-line and check for errors
+	decoder := json.NewDecoder(rc)
+	for {
+		var event struct {
+			Error       string `json:"error"`
+			ErrorDetail struct {
+				Message string `json:"message"`
+			} `json:"errorDetail"`
+		}
+		if err := decoder.Decode(&event); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return errx.Internal("failed to decode pull response: %w", err)
+		}
+		if event.Error != "" {
+			return errx.Internal("image pull error: %s", event.Error)
+		}
+		if event.ErrorDetail.Message != "" {
+			return errx.Internal("image pull error: %s", event.ErrorDetail.Message)
+		}
+	}
 	return nil
 }
 
@@ -586,17 +620,21 @@ func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id strin
 
 	stats := &Stats{}
 	// CPU calculation: (cpu_delta / system_cpu_delta) * number_cpus * 100.0
-	cpuDelta := float64(raw.CPUStats.CPUUsage.TotalUsage) - float64(raw.PreCPUStats.CPUUsage.TotalUsage)
-	systemDelta := float64(raw.CPUStats.SystemCPUUsage) - float64(raw.PreCPUStats.SystemCPUUsage)
-	numCPUs := float64(raw.CPUStats.OnlineCPUs)
-	if numCPUs == 0 {
-		numCPUs = float64(len(raw.CPUStats.CPUUsage.PercpuUsage))
-	}
-	if numCPUs == 0 {
-		numCPUs = 1
-	}
-	if systemDelta > 0 && cpuDelta > 0 {
-		stats.CPUPercent = (cpuDelta / systemDelta) * numCPUs * 100.0
+	// Check if precpu_stats is valid (Podman may return zeroed precpu_stats on first sample)
+	preCPUValid := raw.PreCPUStats.CPUUsage.TotalUsage > 0 || raw.PreCPUStats.SystemCPUUsage > 0
+	if preCPUValid {
+		cpuDelta := float64(raw.CPUStats.CPUUsage.TotalUsage) - float64(raw.PreCPUStats.CPUUsage.TotalUsage)
+		systemDelta := float64(raw.CPUStats.SystemCPUUsage) - float64(raw.PreCPUStats.SystemCPUUsage)
+		numCPUs := float64(raw.CPUStats.OnlineCPUs)
+		if numCPUs == 0 {
+			numCPUs = float64(len(raw.CPUStats.CPUUsage.PercpuUsage))
+		}
+		if numCPUs == 0 {
+			numCPUs = 1
+		}
+		if systemDelta > 0 && cpuDelta > 0 {
+			stats.CPUPercent = (cpuDelta / systemDelta) * numCPUs * 100.0
+		}
 	}
 
 	stats.MemUsage = int64(raw.MemoryStats.Usage)
