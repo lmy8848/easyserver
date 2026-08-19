@@ -154,8 +154,8 @@ export default function DatabasePage() {
     setTableLoading(true);
     try {
       const res = await dbServerApi.listTables(instanceId, dbName, 1, 1000);
-      const data = res.data?.data;
-      setTableList(Array.isArray(data) ? (data as any).items.map((t: any) => t.name) : []);
+      const items = res.data?.data?.items ?? [];
+      setTableList(items.map(t => t.name));
     } catch (error) {
       console.error('Failed to fetch tables:', error);
       setTableList([]);

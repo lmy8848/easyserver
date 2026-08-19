@@ -404,7 +404,11 @@ function ManagedTab() {
           dataSource={services}
           loading={loading}
           size="small"
-          pagination={false}
+          pagination={{
+            defaultPageSize: 20,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个托管服务`,
+          }}
           scroll={{ x: 700 }}
           locale={{ emptyText: <Empty description="暂无托管服务，点击「添加服务」开始" /> }}
         />
@@ -577,7 +581,7 @@ function SystemTab() {
   const fetch = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await serviceApi.list({ page: 1, page_size: 1000 });
+      const res = await serviceApi.list({ page: 1, page_size: 5000 });
       // 排除面板托管服务（managed=true）
       setServices((res.data?.data?.items ?? []).filter(s => !s.managed));
     } catch {

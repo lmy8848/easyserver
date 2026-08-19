@@ -9,6 +9,9 @@ import CronDocs from './CronDocs';
 export default function CronPage() {
   const [tasks, setTasks] = useState<CronTask[]>([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [operating, setOperating] = useState('');
   const [scripts, setScripts] = useState<Script[]>([]);
 
@@ -21,17 +24,20 @@ export default function CronPage() {
   // Docs drawer state
   const [helpVisible, setHelpVisible] = useState(false);
 
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (p = page, ps = pageSize) => {
     setLoading(true);
     try {
-      const res = await cronApi.list(1, 1000);
+      const res = await cronApi.list(p, ps);
       setTasks(res.data?.data?.items ?? []);
+      setTotal(res.data?.data?.total ?? 0);
+      setPage(p);
+      setPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取任务列表失败'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
@@ -83,22 +89,29 @@ export default function CronPage() {
     }
   };
 
-  const fetchRuns = useCallback(async (task: CronTask) => {
+  const [runsPage, setRunsPage] = useState(1);
+  const [runsPageSize, setRunsPageSize] = useState(20);
+  const [runsTotal, setRunsTotal] = useState(0);
+
+  const fetchRuns = useCallback(async (task: CronTask, p = runsPage, ps = runsPageSize) => {
     setLogsTask(task);
     setLogsLoading(true);
     try {
-      const res = await cronApi.getRuns(task.name, 1, 1000);
+      const res = await cronApi.getRuns(task.name, p, ps);
       setRuns(res.data?.data?.items ?? []);
+      setRunsTotal(res.data?.data?.total ?? 0);
+      setRunsPage(p);
+      setRunsPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
-  }, []);
+  }, [runsPage, runsPageSize]);
 
   const handleViewLogs = (task: CronTask) => {
     setLogsVisible(true);
-    fetchRuns(task);
+    fetchRuns(task, 1, runsPageSize);
   };
 
   const handleShowHelp = useCallback(() => {
@@ -110,9 +123,13 @@ export default function CronPage() {
       <CronTasks
         tasks={tasks}
         loading={loading}
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={(p, ps) => fetchTasks(p, ps)}
         operating={operating}
         scripts={scripts}
-        onRefresh={fetchTasks}
+        onRefresh={() => fetchTasks(page, pageSize)}
         onDelete={handleDelete}
         onToggle={handleToggle}
         onRun={handleRun}
@@ -124,8 +141,12 @@ export default function CronPage() {
         task={logsTask}
         runs={runs}
         loading={logsLoading}
+        page={runsPage}
+        pageSize={runsPageSize}
+        total={runsTotal}
+        onPageChange={(p, ps) => logsTask && fetchRuns(logsTask, p, ps)}
         onClose={() => setLogsVisible(false)}
-        onRefresh={fetchRuns}
+        onRefresh={() => logsTask && fetchRuns(logsTask, runsPage, runsPageSize)}
       />
       <CronDocs
         visible={helpVisible}

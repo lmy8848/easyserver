@@ -19,12 +19,18 @@ export default function FileShares() {
   const [editForm] = Form.useForm();
   const [editLoading, setEditLoading] = useState(false);
   const [editClearExpiry, setEditClearExpiry] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
 
-  const fetchShares = async () => {
+  const fetchShares = async (p = page, ps = pageSize) => {
     setLoading(true);
     try {
-      const res = await fileShareApi.list();
-      setShares(res.data.data || []);
+      const res = await fileShareApi.list(p, ps);
+      setShares(res.data.data?.items || []);
+      setTotal(res.data.data?.total || 0);
+      setPage(p);
+      setPageSize(ps);
     } catch (error) {
       console.error('Failed to fetch shares:', error);
     } finally {
@@ -244,7 +250,7 @@ export default function FileShares() {
         title={<span><LinkOutlined style={{ marginRight: 8 }} />文件外链管理</span>}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchShares}>刷新</Button>
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => fetchShares(page, pageSize)}>刷新</Button>
             <Button onClick={handleCleanup}>清理</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>生成外链</Button>
           </Space>
@@ -255,7 +261,14 @@ export default function FileShares() {
           dataSource={shares}
           rowKey="id"
           loading={loading}
-          pagination={{ defaultPageSize: 20, showTotal: (t) => `共 ${t} 个外链` }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个外链`,
+            onChange: (p, ps) => fetchShares(p, ps),
+          }}
           size="small"
           scroll={{ x: 1000 }}
         />

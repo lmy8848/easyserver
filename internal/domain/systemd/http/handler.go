@@ -66,7 +66,7 @@ func (h *ServiceHandler) List(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	return httpx.Paginate(services, httpx.ParsePagination(c, 50, 200)), nil
+	return httpx.Paginate(services, httpx.ParsePagination(c, 50, 5000)), nil
 }
 
 // GetDetails returns detailed info (PID, memory, enabled) for specific services

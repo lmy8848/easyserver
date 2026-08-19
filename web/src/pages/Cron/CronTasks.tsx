@@ -17,6 +17,10 @@ import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 interface CronTasksProps {
   tasks: CronTask[];
   loading: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number, pageSize: number) => void;
   operating: string;
   scripts: Script[];
   onRefresh: () => void;
@@ -70,7 +74,7 @@ function serializeEnvVars(entries: EnvEntry[] | undefined): string {
 }
 
 export default function CronTasks({
-  tasks, loading, operating, scripts,
+  tasks, loading, page, pageSize, total, onPageChange, operating, scripts,
   onRefresh, onDelete, onToggle, onRun, onViewLogs, onShowHelp,
 }: CronTasksProps) {
   const [modalVisible, setModalVisible] = useState(false);
@@ -368,6 +372,14 @@ export default function CronTasks({
           dataSource={tasks}
           rowKey="name"
           loading={loading}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个任务`,
+            onChange: onPageChange,
+          }}
           size="small"
           locale={{ emptyText: <Empty description="暂无计划任务" /> }}
         />

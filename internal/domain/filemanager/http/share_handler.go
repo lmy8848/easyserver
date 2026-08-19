@@ -164,6 +164,7 @@ type ShareListItem struct {
 
 // ListShares lists all file shares for the current user
 func (h *FileShareHandler) ListShares(c *gin.Context) (any, error) {
+	p := httpx.ParsePagination(c, 20, 100)
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(int64)
 
@@ -187,7 +188,7 @@ func (h *FileShareHandler) ListShares(c *gin.Context) (any, error) {
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return httpx.Paginate(items, p), nil
 }
 
 // GetShare returns a single share owned by the current user, including its

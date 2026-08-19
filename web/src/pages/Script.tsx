@@ -69,17 +69,24 @@ export default function ScriptPage() {
     },
   });
 
-  const fetchScripts = useCallback(async () => {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+
+  const fetchScripts = useCallback(async (p = page, ps = pageSize) => {
     setLoading(true);
     try {
-      const res = await cronApi.listScripts(1, 1000);
+      const res = await cronApi.listScripts(p, ps);
       setScripts(res.data?.data?.items ?? []);
+      setTotal(res.data?.data?.total ?? 0);
+      setPage(p);
+      setPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '加载脚本失败'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   const fetchRunning = useCallback(async () => {
     try {
@@ -359,6 +366,14 @@ export default function ScriptPage() {
           dataSource={scripts}
           rowKey="id"
           loading={loading}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个脚本`,
+            onChange: (p, ps) => fetchScripts(p, ps),
+          }}
           size="small"
           locale={{ emptyText: <Empty description="暂无脚本" /> }}
         />

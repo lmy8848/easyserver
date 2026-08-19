@@ -365,8 +365,8 @@ export const fileShareApi = {
   create: (data: { file_path: string; password?: string; expires_at?: string; max_downloads?: number }) =>
     api.post<ApiResponse<FileShare>>('/shares', data),
 
-  list: () =>
-    api.get<ApiResponse<FileShare[]>>('/shares'),
+  list: (page = 1, pageSize = 20) =>
+    api.get<ApiResponse<Page<FileShare>>>('/shares', { params: { page, page_size: pageSize } }),
 
   get: (id: number) =>
     api.get<ApiResponse<FileShare>>(`/shares/${id}`),

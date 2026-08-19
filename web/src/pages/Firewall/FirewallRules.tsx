@@ -13,7 +13,15 @@ import { actionColor } from './types';
 
 interface Props {
   rules: FirewallRule[];
+  rulesPage?: number;
+  rulesPageSize?: number;
+  rulesTotal?: number;
+  onRulesPageChange?: (page: number, pageSize: number) => void;
   systemRules: FirewallRule[];
+  sysPage?: number;
+  sysPageSize?: number;
+  sysTotal?: number;
+  onSysPageChange?: (page: number, pageSize: number) => void;
   loading: boolean;
   operating: string;
   selectedRowKeys: Key[];
@@ -38,7 +46,15 @@ interface Props {
 
 export default function FirewallRules({
   rules,
+  rulesPage = 1,
+  rulesPageSize = 20,
+  rulesTotal = 0,
+  onRulesPageChange,
   systemRules,
+  sysPage = 1,
+  sysPageSize = 20,
+  sysTotal = 0,
+  onSysPageChange,
   loading,
   operating,
   selectedRowKeys,
@@ -245,7 +261,14 @@ export default function FirewallRules({
           loading={loading}
           size="small"
           locale={{ emptyText: <Empty description="暂无自定义规则" /> }}
-          pagination={false}
+          pagination={{
+            current: rulesPage,
+            pageSize: rulesPageSize,
+            total: rulesTotal,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条自定义规则`,
+            onChange: onRulesPageChange,
+          }}
           rowSelection={rowSelection}
           rowClassName={(record) => record.enabled ? '' : 'firewall-rule-disabled'}
         />
@@ -271,7 +294,14 @@ export default function FirewallRules({
             dataSource={systemRules}
             rowKey={(r) => `${r.chain}-${r.protocol}-${r.port}-${r.action}-${r.source}`}
             size="small"
-            pagination={false}
+            pagination={{
+              current: sysPage,
+              pageSize: sysPageSize,
+              total: sysTotal,
+              showSizeChanger: true,
+              showTotal: (t) => `共 ${t} 条系统规则`,
+              onChange: onSysPageChange,
+            }}
           />
         </div>
       )}

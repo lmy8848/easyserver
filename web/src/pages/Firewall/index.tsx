@@ -51,21 +51,36 @@ export default function FirewallPage() {
     }
   }, []);
 
-  const fetchRules = useCallback(async () => {
+  const [rulesPage, setRulesPage] = useState(1);
+  const [rulesPageSize, setRulesPageSize] = useState(20);
+  const [rulesTotal, setRulesTotal] = useState(0);
+
+  const [sysPage, setSysPage] = useState(1);
+  const [sysPageSize, setSysPageSize] = useState(20);
+  const [sysTotal, setSysTotal] = useState(0);
+
+  const fetchRules = useCallback(async (rp = rulesPage, rps = rulesPageSize, sp = sysPage, sps = sysPageSize) => {
     setLoading(true);
     try {
       const [dbRes, sysRes] = await Promise.all([
-        firewallApi.listRules(1, 1000),
-        firewallApi.getSystemRules(1, 1000),
+        firewallApi.listRules(rp, rps),
+        firewallApi.getSystemRules(sp, sps),
       ]);
       setRules(dbRes.data?.data?.items ?? []);
+      setRulesTotal(dbRes.data?.data?.total ?? 0);
+      setRulesPage(rp);
+      setRulesPageSize(rps);
+
       setSystemRules(sysRes.data?.data?.items ?? []);
+      setSysTotal(sysRes.data?.data?.total ?? 0);
+      setSysPage(sp);
+      setSysPageSize(sps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取规则失败'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [rulesPage, rulesPageSize, sysPage, sysPageSize]);
 
   useEffect(() => {
     fetchStatus();
@@ -247,11 +262,18 @@ export default function FirewallPage() {
     }
   };
 
-  const fetchTemplates = async () => {
+  const [tmplPage, setTmplPage] = useState(1);
+  const [tmplPageSize, setTmplPageSize] = useState(20);
+  const [tmplTotal, setTmplTotal] = useState(0);
+
+  const fetchTemplates = async (p = tmplPage, ps = tmplPageSize) => {
     setTemplatesLoading(true);
     try {
-      const res = await firewallApi.getTemplates(1, 1000);
+      const res = await firewallApi.getTemplates(p, ps);
       setTemplates(res.data?.data?.items ?? []);
+      setTmplTotal(res.data?.data?.total ?? 0);
+      setTmplPage(p);
+      setTmplPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取模板失败'));
     } finally {
@@ -261,7 +283,7 @@ export default function FirewallPage() {
 
   const handleOpenTemplates = () => {
     setTemplateModalVisible(true);
-    fetchTemplates();
+    fetchTemplates(1, tmplPageSize);
   };
 
   const handleApplyTemplate = (template: FirewallRuleTemplate) => {
@@ -483,7 +505,15 @@ export default function FirewallPage() {
 
       <FirewallRules
         rules={rules}
+        rulesPage={rulesPage}
+        rulesPageSize={rulesPageSize}
+        rulesTotal={rulesTotal}
+        onRulesPageChange={(rp, rps) => fetchRules(rp, rps, sysPage, sysPageSize)}
         systemRules={systemRules}
+        sysPage={sysPage}
+        sysPageSize={sysPageSize}
+        sysTotal={sysTotal}
+        onSysPageChange={(sp, sps) => fetchRules(rulesPage, rulesPageSize, sp, sps)}
         loading={loading}
         operating={operating}
         selectedRowKeys={selectedRowKeys}
@@ -502,7 +532,7 @@ export default function FirewallPage() {
         onExport={handleExport}
         onImportFileChange={handleImportFileChange}
         onOpenTemplates={handleOpenTemplates}
-        onRefresh={fetchRules}
+        onRefresh={() => fetchRules(rulesPage, rulesPageSize, sysPage, sysPageSize)}
         onSelectedRowKeysChange={(keys) => setSelectedRowKeys(keys)}
       />
 
@@ -609,6 +639,10 @@ export default function FirewallPage() {
         visible={templateModalVisible}
         templates={templates}
         loading={templatesLoading}
+        page={tmplPage}
+        pageSize={tmplPageSize}
+        total={tmplTotal}
+        onPageChange={(p, ps) => fetchTemplates(p, ps)}
         onClose={() => setTemplateModalVisible(false)}
         onApply={handleApplyTemplate}
       />

@@ -8,6 +8,10 @@ interface CronLogsProps {
   task: CronTask | null;
   runs: CronRun[];
   loading: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number, pageSize: number) => void;
   onClose: () => void;
   onRefresh: (task: CronTask) => void;
 }
@@ -25,7 +29,9 @@ function statusTag(status: string) {
   }
 }
 
-export default function CronLogs({ visible, task, runs, loading, onClose, onRefresh }: CronLogsProps) {
+export default function CronLogs({
+  visible, task, runs, loading, page, pageSize, total, onPageChange, onClose, onRefresh,
+}: CronLogsProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<[string, string] | null>(null);
   const [filter, setFilter] = useState<'all' | 'success' | 'failed'>('all');
@@ -82,6 +88,14 @@ export default function CronLogs({ visible, task, runs, loading, onClose, onRefr
             size="small"
             loading={loading}
             dataSource={filtered}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              size: 'small',
+              showSizeChanger: true,
+              onChange: onPageChange,
+            }}
             style={{ flex: 1, overflowY: 'auto', padding: 12 }}
             locale={{ emptyText: <Empty description="暂无执行记录" /> }}
             renderItem={(r: CronRun) => (

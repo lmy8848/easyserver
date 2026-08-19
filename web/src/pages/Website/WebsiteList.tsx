@@ -122,16 +122,24 @@ export default function WebsiteList({
   // Debounce timer for path validation
   const pathTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchWebsites = useCallback(async () => {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+
+  const fetchWebsites = useCallback(async (p = page, ps = pageSize) => {
+    setSitesLoading(true);
     try {
-      const res = await websiteApi.list(selectedServer.id, 1, 1000);
+      const res = await websiteApi.list(selectedServer.id, p, ps);
       setWebsites(res.data.data?.items ?? []);
+      setTotal(res.data.data?.total ?? 0);
+      setPage(p);
+      setPageSize(ps);
     } catch (error) {
       console.error('Failed to fetch websites:', error);
     } finally {
       setSitesLoading(false);
     }
-  }, [selectedServer.id]);
+  }, [selectedServer.id, page, pageSize]);
 
   const fetchProjectTypes = async () => {
     try {
@@ -517,7 +525,14 @@ export default function WebsiteList({
           dataSource={websites}
           rowKey="id"
           loading={sitesLoading}
-          pagination={{ defaultPageSize: 20, showTotal: (t) => `共 ${t} 个网站` }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个网站`,
+            onChange: (p, ps) => fetchWebsites(p, ps),
+          }}
           size="small"
           locale={{ emptyText: selectedServer.status === 'not_installed'
             ? <Empty description="请先安装 Web 服务器" />

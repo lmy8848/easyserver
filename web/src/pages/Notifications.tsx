@@ -41,15 +41,19 @@ const LEVEL_ICONS: Record<string, React.ReactNode> = {
 export default function Notifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [unreadFilter, setUnreadFilter] = useState(false);
   const [levelFilter, setLevelFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotifications = useCallback(async (p = page, ps = pageSize) => {
     setLoading(true);
     try {
-      const res = await notificationApi.list(unreadFilter, 1, 200);
+      const res = await notificationApi.list(unreadFilter, p, ps);
       let data = res.data?.data?.items || [];
+      const totalCount = res.data?.data?.total || 0;
 
       // Apply client-side filters
       if (levelFilter) {
@@ -60,12 +64,15 @@ export default function Notifications() {
       }
 
       setNotifications(data);
+      setTotal(totalCount);
+      setPage(p);
+      setPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取通知失败'));
     } finally {
       setLoading(false);
     }
-  }, [unreadFilter, levelFilter, typeFilter]);
+  }, [unreadFilter, levelFilter, typeFilter, page, pageSize]);
 
   useEffect(() => {
     fetchNotifications();
@@ -255,7 +262,7 @@ export default function Notifications() {
                 全部已读
               </Button>
             )}
-            <Button icon={<ReloadOutlined />} onClick={fetchNotifications}>
+            <Button icon={<ReloadOutlined />} onClick={() => fetchNotifications(page, pageSize)}>
               刷新
             </Button>
           </Space>
@@ -268,9 +275,12 @@ export default function Notifications() {
           loading={loading}
           rowClassName={(record) => record.is_read ? '' : 'unread-row'}
           pagination={{
-            pageSize: 20,
-            showTotal: (total) => `共 ${total} 条`,
-            showSizeChanger: false,
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条`,
+            onChange: (p, ps) => fetchNotifications(p, ps),
           }}
           locale={{ emptyText: <Empty description="暂无通知" /> }}
         />
