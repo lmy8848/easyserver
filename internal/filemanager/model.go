@@ -98,15 +98,23 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 		return m.basePath, nil
 	}
 	cleanPath := filepath.Clean(path)
-	absBase := m.basePath
+	if strings.HasPrefix(cleanPath, "..") {
+		return "", errx.Forbidden("path traversal detected: path escapes base directory")
+	}
+	absBase := filepath.Clean(m.basePath)
 	var absPath string
 
 	if filepath.IsAbs(cleanPath) {
 		// Convert absolute path to sandbox path
 		// e.g., basePath="/home/user", input="/etc/passwd" -> "/home/user/etc/passwd"
-		absPath = filepath.Join(absBase, cleanPath)
+		absPath = filepath.Join(absBase, strings.TrimPrefix(cleanPath, "/"))
 	} else {
 		absPath = filepath.Join(absBase, cleanPath)
+	}
+
+	rel, err := filepath.Rel(absBase, absPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", errx.Forbidden("path traversal detected: path escapes base directory")
 	}
 
 	// Resolve symlinks by climbing up to the first existing parent directory.
@@ -116,11 +124,11 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 		resolved, err := filepath.EvalSymlinks(checkPath)
 		if err == nil {
 			// Found the closest existing path.
-			rel, err := filepath.Rel(checkPath, absPath)
+			relSub, err := filepath.Rel(checkPath, absPath)
 			if err != nil {
 				return "", fmt.Errorf("calculate relative path: %w", err)
 			}
-			resolvedPath = filepath.Join(resolved, rel)
+			resolvedPath = filepath.Join(resolved, relSub)
 			break
 		}
 		if !os.IsNotExist(err) {
@@ -541,8 +549,9 @@ func isSubPath(parentPath, childPath string) bool {
 	if cleanParent == cleanChild {
 		return true
 	}
-	if !strings.HasSuffix(cleanParent, string(filepath.Separator)) {
-		cleanParent += string(filepath.Separator)
+	rel, err := filepath.Rel(cleanParent, cleanChild)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return false
 	}
-	return strings.HasPrefix(cleanChild, cleanParent)
+	return true
 }

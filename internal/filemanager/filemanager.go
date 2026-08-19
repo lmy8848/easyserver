@@ -375,18 +375,22 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 	}()
 
 	for _, file := range reader.File {
-		path := filepath.Join(destPath, file.Name)
-		validPath, err := m.ValidatePath(m.toRelativePath(path))
-		if err != nil || !isSubPath(destPath, validPath) {
-			return fmt.Errorf("invalid file path: %s", file.Name)
-		}
-
 		if filepath.IsAbs(file.Name) {
 			return fmt.Errorf("absolute path not allowed in archive: %s", file.Name)
 		}
-
-		if strings.Contains(file.Name, "..") {
+		cleanName := filepath.Clean(file.Name)
+		if strings.HasPrefix(cleanName, "..") || strings.Contains(file.Name, "..") {
 			return errx.Forbidden("path traversal not allowed in archive: %s", file.Name)
+		}
+		path := filepath.Join(destPath, cleanName)
+		cleanDest := filepath.Clean(destPath)
+		if !strings.HasPrefix(path, cleanDest+string(os.PathSeparator)) && path != cleanDest {
+			return fmt.Errorf("invalid file path: %s", file.Name)
+		}
+
+		validPath, err := m.ValidatePath(m.toRelativePath(path))
+		if err != nil || !isSubPath(destPath, validPath) {
+			return fmt.Errorf("invalid file path: %s", file.Name)
 		}
 
 		if file.Mode()&os.ModeSymlink != 0 {
@@ -473,18 +477,22 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 			return err
 		}
 
-		path := filepath.Join(destPath, header.Name)
-		validPath, err := m.ValidatePath(m.toRelativePath(path))
-		if err != nil || !isSubPath(destPath, validPath) {
-			return fmt.Errorf("invalid file path: %s", header.Name)
-		}
-
 		if filepath.IsAbs(header.Name) {
 			return fmt.Errorf("absolute path not allowed in archive: %s", header.Name)
 		}
-
-		if strings.Contains(header.Name, "..") {
+		cleanName := filepath.Clean(header.Name)
+		if strings.HasPrefix(cleanName, "..") || strings.Contains(header.Name, "..") {
 			return errx.Forbidden("path traversal not allowed in archive: %s", header.Name)
+		}
+		path := filepath.Join(destPath, cleanName)
+		cleanDest := filepath.Clean(destPath)
+		if !strings.HasPrefix(path, cleanDest+string(os.PathSeparator)) && path != cleanDest {
+			return fmt.Errorf("invalid file path: %s", header.Name)
+		}
+
+		validPath, err := m.ValidatePath(m.toRelativePath(path))
+		if err != nil || !isSubPath(destPath, validPath) {
+			return fmt.Errorf("invalid file path: %s", header.Name)
 		}
 
 		fileCount++
