@@ -195,40 +195,43 @@ func mapInspectToContainer(insp infracontainer.ContainerInspect) Container {
 	}
 }
 
-// dockerImageRow mirrors the uppercase-keyed JSON emitted by `docker images --format json`.
-type dockerImageRow struct {
-	ID         string            `json:"ID"`
-	Repository string            `json:"Repository"`
-	Tag        string            `json:"Tag"`
-	Size       string            `json:"Size"`
-	CreatedAt  string            `json:"CreatedAt"`
-	Labels     map[string]string `json:"Labels"`
-}
-
-func (d dockerImageRow) toImage() Image {
-	// 字段名与类型与 Image 一致，直接类型转换即可。
-	return Image(d)
-}
-
-// podmanImageRow mirrors one element of `podman images --format json`.
-type podmanImageRow struct {
-	ID         string            `json:"Id"`
-	Repository string            `json:"Repository"`
-	Tag        string            `json:"Tag"`
-	Size       int64             `json:"Size"`
-	CreatedAt  string            `json:"CreatedAt"` // RFC3339
-	Labels     map[string]string `json:"Labels"`
-}
-
-func (p podmanImageRow) toImage() Image {
-	return Image{
-		ID:         p.ID,
-		Repository: p.Repository,
-		Tag:        p.Tag,
-		Size:       humanSize(p.Size),
-		CreatedAt:  p.CreatedAt,
-		Labels:     p.Labels,
+func mapSummaryToImages(sum infracontainer.ImageSummary) []Image {
+	createdAt := ""
+	if sum.Created > 0 {
+		createdAt = time.Unix(sum.Created, 0).Format(time.RFC3339)
 	}
+
+	if len(sum.RepoTags) == 0 {
+		return []Image{{
+			ID:         sum.ID,
+			Repository: "<none>",
+			Tag:        "<none>",
+			Size:       humanSize(sum.Size),
+			CreatedAt:  createdAt,
+			Labels:     sum.Labels,
+		}}
+	}
+
+	images := make([]Image, 0, len(sum.RepoTags))
+	for _, rt := range sum.RepoTags {
+		repo, tag := splitRepoTag(rt)
+		images = append(images, Image{
+			ID:         sum.ID,
+			Repository: repo,
+			Tag:        tag,
+			Size:       humanSize(sum.Size),
+			CreatedAt:  createdAt,
+			Labels:     sum.Labels,
+		})
+	}
+	return images
+}
+
+func splitRepoTag(rt string) (string, string) {
+	if i := strings.LastIndex(rt, ":"); i != -1 {
+		return rt[:i], rt[i+1:]
+	}
+	return rt, "latest"
 }
 
 // parseJSONRows splits engine CLI output into rows. Docker emits one JSON
@@ -556,34 +559,14 @@ func (s *Service) ListImages(ctx context.Context, engine Engine) ([]Image, error
 		return nil, err
 	}
 
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "images", "--format", "json").CombinedOutput()
+	summaries, err := infracontainer.DefaultClient().ImageList(ctx, infracontainer.Engine(engine))
 	if err != nil {
-		return nil, errx.Internal("%s images failed: %s", engine, output)
+		return nil, errx.Internal("%s images failed: %w", engine, err)
 	}
 
-	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
-		if isPodmanEngine(engine) {
-			var d podmanImageRow
-			if err := json.Unmarshal(line, &d); err != nil {
-				log.Printf("container: parse podman image json error: %v, line: %s", err, line[:min(100, len(line))])
-				return nil, false
-			}
-			return d.toImage(), true
-		}
-		var d dockerImageRow
-		if err := json.Unmarshal(line, &d); err != nil {
-			log.Printf("container: parse docker image json error: %v, line: %s", err, line[:min(100, len(line))])
-			return nil, false
-		}
-		return d.toImage(), true
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	images := make([]Image, 0, len(rows))
-	for _, r := range rows {
-		images = append(images, r.(Image))
+	var images []Image
+	for _, sum := range summaries {
+		images = append(images, mapSummaryToImages(sum)...)
 	}
 	return images, nil
 }
@@ -592,26 +575,33 @@ func (s *Service) ListImages(ctx context.Context, engine Engine) ([]Image, error
 func (s *Service) PullImage(ctx context.Context, engine Engine, image string) error {
 	pullCtx, cancel := context.WithTimeout(ctx, ImagePullTimeout)
 	defer cancel()
-	_, err := exec.CommandContext(pullCtx, engineBinary(engine), "pull", image).CombinedOutput()
+
+	rc, err := infracontainer.DefaultClient().ImagePull(pullCtx, infracontainer.Engine(engine), image, "")
 	if err != nil {
 		return errx.Internal("%s pull failed: %w", engine, err)
 	}
+	defer rc.Close()
+
+	_, _ = io.Copy(io.Discard, rc)
 	return nil
 }
 
 // RemoveImage removes an image.
 func (s *Service) RemoveImage(ctx context.Context, engine Engine, id string, force bool) error {
-	args := []string{"rmi"}
-	if force {
-		args = append(args, "-f")
-	}
-	args = append(args, id)
-
-	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	_, err := infracontainer.DefaultClient().ImageRemove(ctx, infracontainer.Engine(engine), id, force)
 	if err != nil {
 		return errx.Internal("%s rmi failed: %w", engine, err)
 	}
 	return nil
+}
+
+// PruneImages cleans up unused images.
+func (s *Service) PruneImages(ctx context.Context, engine Engine) (*infracontainer.ImagesPruneReport, error) {
+	report, err := infracontainer.DefaultClient().ImagesPrune(ctx, infracontainer.Engine(engine))
+	if err != nil {
+		return nil, errx.Internal("%s prune images failed: %w", engine, err)
+	}
+	return &report, nil
 }
 
 // GetContainerStats returns real-time resource usage stats for a container.

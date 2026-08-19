@@ -127,6 +127,64 @@ func TestService_ContainerOperations_Mock(t *testing.T) {
 	}
 }
 
+func TestMapSummaryToImages(t *testing.T) {
+	sum := infracontainer.ImageSummary{
+		ID:       "img1",
+		RepoTags: []string{"nginx:latest", "nginx:1.25"},
+		Size:     1024 * 1024 * 50,
+	}
+	images := mapSummaryToImages(sum)
+	if len(images) != 2 {
+		t.Fatalf("expected 2 images, got %d", len(images))
+	}
+	if images[0].Repository != "nginx" || images[0].Tag != "latest" {
+		t.Errorf("unexpected image 0: %+v", images[0])
+	}
+	if images[1].Repository != "nginx" || images[1].Tag != "1.25" {
+		t.Errorf("unexpected image 1: %+v", images[1])
+	}
+}
+
+func TestService_ImageOperations_Mock(t *testing.T) {
+	mock := &infracontainer.MockEngineClient{
+		ImageListFn: func(ctx context.Context, engine infracontainer.Engine) ([]infracontainer.ImageSummary, error) {
+			return []infracontainer.ImageSummary{
+				{ID: "i1", RepoTags: []string{"redis:7.0"}, Size: 10485760},
+			}, nil
+		},
+		ImagePullFn: func(ctx context.Context, engine infracontainer.Engine, imageRef string, authEncoded string) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("pulling...")), nil
+		},
+		ImageRemoveFn: func(ctx context.Context, engine infracontainer.Engine, imageID string, force bool) ([]infracontainer.ImageDeleteResponseItem, error) {
+			return []infracontainer.ImageDeleteResponseItem{{Deleted: imageID}}, nil
+		},
+		ImagesPruneFn: func(ctx context.Context, engine infracontainer.Engine) (infracontainer.ImagesPruneReport, error) {
+			return infracontainer.ImagesPruneReport{SpaceReclaimed: 2048}, nil
+		},
+	}
+	infracontainer.SetDefaultClient(mock)
+	defer infracontainer.SetDefaultClient(nil)
+
+	svc := NewService()
+	images, err := svc.ListImages(context.Background(), EngineDocker)
+	if err != nil || len(images) != 1 || images[0].Repository != "redis" {
+		t.Fatalf("ListImages error: %v, images: %+v", err, images)
+	}
+
+	if err := svc.PullImage(context.Background(), EngineDocker, "redis:7.0"); err != nil {
+		t.Errorf("PullImage error: %v", err)
+	}
+
+	if err := svc.RemoveImage(context.Background(), EngineDocker, "i1", true); err != nil {
+		t.Errorf("RemoveImage error: %v", err)
+	}
+
+	report, err := svc.PruneImages(context.Background(), EngineDocker)
+	if err != nil || report.SpaceReclaimed != 2048 {
+		t.Errorf("PruneImages error: %v, report: %+v", err, report)
+	}
+}
+
 func TestHumanSize(t *testing.T) {
 	cases := []struct {
 		in   int64
