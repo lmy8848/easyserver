@@ -9,7 +9,6 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "chore(deps)"
-      include: "scope"
 
   # 2. 前端 Web 依赖 (web/package.json)
   - package-ecosystem: "npm"
@@ -20,7 +19,6 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "chore(deps-web)"
-      include: "scope"
 
   # 3. GitHub Actions 工作流依赖 (.github/workflows)
   - package-ecosystem: "github-actions"
@@ -30,4 +28,3 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(ci)"
-      include: "scope"
