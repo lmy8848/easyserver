@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"easyserver/internal/infra/mise"
-	"easyserver/internal/infra/pathutil"
+	"easyserver/internal/util"
 )
 
 // 定时任务（cron → systemd timer）的 unit 命名：每个任务一对 .timer + .service，
@@ -228,7 +228,7 @@ func buildCronExecStart(lang, exact, execStart string, p mise.Provider) (string,
 }
 
 func validateCronUnitFileName(fileName string) error {
-	return pathutil.ValidateFilename(fileName)
+	return util.ValidateFilename(fileName)
 }
 
 // WriteCronUnitFile 原子写入 cron unit 文件到 managedUnitDir。
@@ -236,7 +236,7 @@ func WriteCronUnitFile(fileName, content string) error {
 	if err := validateCronUnitFileName(fileName); err != nil {
 		return err
 	}
-	path, err := pathutil.JoinSafe(managedUnitDir, fileName)
+	path, err := util.JoinSafe(managedUnitDir, fileName)
 	if err != nil {
 		return errors.New("invalid unit file path")
 	}
@@ -282,7 +282,7 @@ func ReadCronUnitFile(fileName string) (string, error) {
 	if err := validateCronUnitFileName(fileName); err != nil {
 		return "", err
 	}
-	path, err := pathutil.JoinSafe(managedUnitDir, fileName)
+	path, err := util.JoinSafe(managedUnitDir, fileName)
 	if err != nil {
 		return "", errors.New("invalid unit file path")
 	}
@@ -301,7 +301,7 @@ func RemoveCronUnitFile(fileName string) error {
 	if err := validateCronUnitFileName(fileName); err != nil {
 		return err
 	}
-	path, err := pathutil.JoinSafe(managedUnitDir, fileName)
+	path, err := util.JoinSafe(managedUnitDir, fileName)
 	if err != nil {
 		return errors.New("invalid unit file path")
 	}

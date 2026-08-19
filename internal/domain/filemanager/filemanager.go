@@ -15,7 +15,7 @@ import (
 	"syscall"
 
 	"easyserver/internal/infra/errx"
-	"easyserver/internal/infra/pathutil"
+	"easyserver/internal/util"
 )
 
 var errSearchLimit = errors.New("search result limit reached")
@@ -376,7 +376,7 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 	}()
 
 	for _, file := range reader.File {
-		if pathutil.IsTraversal(file.Name) {
+		if util.IsTraversal(file.Name) {
 			return errx.Forbidden("path traversal not allowed in archive: %s", file.Name)
 		}
 		if filepath.IsAbs(file.Name) {
@@ -387,7 +387,7 @@ func (m *Manager) extractZip(zipPath, destPath string) error {
 			return errx.Forbidden("path traversal not allowed in archive: %s", file.Name)
 		}
 		path := filepath.Join(destPath, cleanName)
-		if !pathutil.HasPathPrefix(path, destPath) {
+		if !util.HasPathPrefix(path, destPath) {
 			return fmt.Errorf("invalid file path: %s", file.Name)
 		}
 
@@ -480,7 +480,7 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 			return err
 		}
 
-		if pathutil.IsTraversal(header.Name) {
+		if util.IsTraversal(header.Name) {
 			return errx.Forbidden("path traversal not allowed in archive: %s", header.Name)
 		}
 		if filepath.IsAbs(header.Name) {
@@ -491,7 +491,7 @@ func (m *Manager) extractTarGz(tarPath, destPath string) error {
 			return errx.Forbidden("path traversal not allowed in archive: %s", header.Name)
 		}
 		path := filepath.Join(destPath, cleanName)
-		if !pathutil.HasPathPrefix(path, destPath) {
+		if !util.HasPathPrefix(path, destPath) {
 			return fmt.Errorf("invalid file path: %s", header.Name)
 		}
 
@@ -747,7 +747,7 @@ func (m *Manager) GetMimeType(path string) (string, error) {
 func (m *Manager) mkdirAllWithRecord(path string, perm os.FileMode, createdPaths *[]string) error {
 	var toCreate []string
 	curr := filepath.Clean(path)
-	if !pathutil.HasPathPrefix(curr, m.basePath) || !isSubPath(m.basePath, curr) {
+	if !util.HasPathPrefix(curr, m.basePath) || !isSubPath(m.basePath, curr) {
 		return errx.Forbidden("path traversal detected: path escapes base directory")
 	}
 	for {

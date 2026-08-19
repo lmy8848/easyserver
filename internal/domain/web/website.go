@@ -14,7 +14,7 @@ import (
 
 	"easyserver/internal/domain/web/security"
 	"easyserver/internal/infra/errx"
-	"easyserver/internal/infra/pathutil"
+	"easyserver/internal/util"
 )
 
 // WebsiteService manages website deployment and configuration.
@@ -555,7 +555,7 @@ func (s *WebsiteService) writeConfigForServer(ctx context.Context, webServerID i
 	_ = os.MkdirAll(ws.SitesAvailable, 0755)
 	_ = os.MkdirAll(ws.SitesEnabled, 0755)
 
-	confPath, err := pathutil.JoinSafe(ws.SitesAvailable, w.Domain+".conf")
+	confPath, err := util.JoinSafe(ws.SitesAvailable, w.Domain+".conf")
 	if err != nil {
 		return fmt.Errorf("invalid domain config path: %s", w.Domain)
 	}
@@ -594,12 +594,12 @@ func (s *WebsiteService) removeConfigForServer(ctx context.Context, webServerID 
 		return
 	}
 	if ws.SitesEnabled != "" {
-		if linkPath, err := pathutil.JoinSafe(ws.SitesEnabled, domain+".conf"); err == nil {
+		if linkPath, err := util.JoinSafe(ws.SitesEnabled, domain+".conf"); err == nil {
 			_ = os.Remove(linkPath)
 		}
 	}
 	if ws.SitesAvailable != "" {
-		if confPath, err := pathutil.JoinSafe(ws.SitesAvailable, domain+".conf"); err == nil {
+		if confPath, err := util.JoinSafe(ws.SitesAvailable, domain+".conf"); err == nil {
 			_ = os.Remove(confPath)
 		}
 	}

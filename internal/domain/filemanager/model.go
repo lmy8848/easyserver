@@ -11,7 +11,7 @@ import (
 	"sync"
 	"syscall"
 
-	"easyserver/internal/infra/pathutil"
+	"easyserver/internal/util"
 )
 
 // FileEntry represents a file or directory entry.
@@ -91,7 +91,7 @@ func NewManager(basePath string) (*Manager, error) {
 // ValidatePath checks if path is safe (no path traversal, no symlink escape).
 // An empty path or "." is treated as basePath (root of sandbox).
 func (m *Manager) ValidatePath(path string) (string, error) {
-	return pathutil.ResolveInSandbox(m.basePath, path)
+	return util.ResolveInSandbox(m.basePath, path)
 }
 
 // validateRealPath checks that an already-resolved filesystem path stays in basePath.
@@ -100,7 +100,7 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 // absolute input as user-facing sandbox-relative and would double-Join the basePath,
 // silently turning the symlink-escape check into dead code.
 func (m *Manager) validateRealPath(realPath string) error {
-	return pathutil.ValidateRealPath(m.basePath, realPath)
+	return util.ValidateRealPath(m.basePath, realPath)
 }
 
 // ResolveShareSubpath anchors subpath under shareRoot (a ValidatePath-validated
@@ -111,7 +111,7 @@ func (m *Manager) validateRealPath(realPath string) error {
 // symlink planted inside the share pointing outside (e.g. to /etc/passwd, or to a
 // sandbox sibling the owner never shared).
 func (m *Manager) ResolveShareSubpath(shareRoot, subpath string) (string, error) {
-	return pathutil.ResolveShareSubpath(m.basePath, shareRoot, subpath)
+	return util.ResolveShareSubpath(m.basePath, shareRoot, subpath)
 }
 
 // ValidateWalkPath guards a real filesystem path surfaced by filepath.Walk inside
@@ -451,5 +451,5 @@ func (m *Manager) Move(paths []string, dest string) error {
 
 // isSubPath checks if childPath is under parentPath (or is equal to it).
 func isSubPath(parentPath, childPath string) bool {
-	return pathutil.IsSubPath(parentPath, childPath)
+	return util.IsSubPath(parentPath, childPath)
 }
