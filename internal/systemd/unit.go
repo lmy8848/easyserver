@@ -365,8 +365,15 @@ func ensureManagedUnitDir() error {
 
 // writeUnitFile 原子写入 unit 文件到磁盘（0644 权限，原子 rename 模式，防并发读到空文件）。
 func writeUnitFile(name, content string) error {
+	if err := ValidateManagedName(name); err != nil {
+		return err
+	}
 	path := UnitFilePath(name)
 	dir := filepath.Dir(path)
+	rel, err := filepath.Rel(managedUnitDir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return errors.New("invalid unit file path")
+	}
 	if err := ensureManagedUnitDir(); err != nil {
 		return fmt.Errorf("创建 unit 目录失败: %w", err)
 	}
@@ -404,6 +411,9 @@ func writeUnitFile(name, content string) error {
 
 // readUnitFile 读 unit 文件内容。文件不存在返回空串 + nil error（视为无元数据）。
 func readUnitFile(name string) (string, error) {
+	if err := ValidateManagedName(name); err != nil {
+		return "", err
+	}
 	path := UnitFilePath(name)
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -417,6 +427,9 @@ func readUnitFile(name string) (string, error) {
 
 // removeUnitFile 删除 unit 文件。文件不存在视为成功。
 func removeUnitFile(name string) error {
+	if err := ValidateManagedName(name); err != nil {
+		return err
+	}
 	path := UnitFilePath(name)
 	err := os.Remove(path)
 	if os.IsNotExist(err) {

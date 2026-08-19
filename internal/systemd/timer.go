@@ -46,12 +46,28 @@ func CronServiceFileName(name string) string {
 
 // CronTimerPath 返回 .timer 的绝对路径。
 func CronTimerPath(name string) string {
-	return filepath.Join(managedUnitDir, CronTimerFileName(name))
+	if err := ValidateCronName(name); err != nil {
+		return ""
+	}
+	p := filepath.Join(managedUnitDir, CronTimerFileName(name))
+	rel, err := filepath.Rel(managedUnitDir, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return p
 }
 
 // CronServicePath 返回 .service 的绝对路径。
 func CronServicePath(name string) string {
-	return filepath.Join(managedUnitDir, CronServiceFileName(name))
+	if err := ValidateCronName(name); err != nil {
+		return ""
+	}
+	p := filepath.Join(managedUnitDir, CronServiceFileName(name))
+	rel, err := filepath.Rel(managedUnitDir, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return p
 }
 
 // CronTimerName 从 unit 文件名提取 <name>。
@@ -210,9 +226,27 @@ func buildCronExecStart(lang, exact, execStart string, p mise.Provider) (string,
 	return execStart, nil
 }
 
+func validateCronUnitFileName(fileName string) error {
+	if fileName == "" {
+		return errors.New("file name cannot be empty")
+	}
+	clean := filepath.Clean(fileName)
+	if filepath.Base(clean) != clean || strings.Contains(clean, "..") || strings.Contains(clean, "/") || strings.Contains(clean, "\\") {
+		return errors.New("invalid cron unit file name")
+	}
+	return nil
+}
+
 // WriteCronUnitFile 原子写入 cron unit 文件到 managedUnitDir。
 func WriteCronUnitFile(fileName, content string) error {
+	if err := validateCronUnitFileName(fileName); err != nil {
+		return err
+	}
 	path := filepath.Join(managedUnitDir, fileName)
+	rel, err := filepath.Rel(managedUnitDir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return errors.New("invalid unit file path")
+	}
 	dir := filepath.Dir(path)
 	if err := ensureManagedUnitDir(); err != nil {
 		return fmt.Errorf("创建 unit 目录失败: %w", err)
@@ -251,7 +285,14 @@ func WriteCronUnitFile(fileName, content string) error {
 
 // ReadCronUnitFile 读 cron unit 文件内容。文件不存在返回空串 + nil error。
 func ReadCronUnitFile(fileName string) (string, error) {
+	if err := validateCronUnitFileName(fileName); err != nil {
+		return "", err
+	}
 	path := filepath.Join(managedUnitDir, fileName)
+	rel, err := filepath.Rel(managedUnitDir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", errors.New("invalid unit file path")
+	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -264,8 +305,15 @@ func ReadCronUnitFile(fileName string) (string, error) {
 
 // RemoveCronUnitFile 删除 cron unit 文件。文件不存在视为成功。
 func RemoveCronUnitFile(fileName string) error {
+	if err := validateCronUnitFileName(fileName); err != nil {
+		return err
+	}
 	path := filepath.Join(managedUnitDir, fileName)
-	err := os.Remove(path)
+	rel, err := filepath.Rel(managedUnitDir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return errors.New("invalid unit file path")
+	}
+	err = os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
