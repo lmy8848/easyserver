@@ -146,29 +146,31 @@ export default function FirewallRules({
       title: '操作',
       key: 'actions',
       width: 180,
-      render: (_: unknown, record: FirewallRule, index: number) => (
-        <Space>
-          <Tooltip title="上移">
-            <Button
-              type="link"
-              icon={<ArrowUpOutlined />}
-              disabled={index === 0}
-              loading={operating === `move-${record.id}`}
-              onClick={() => onMoveUp(record.id)}
-            />
-          </Tooltip>
-          <Tooltip title="下移">
-            <Button
-              type="link"
-              icon={<ArrowDownOutlined />}
-              disabled={index === rules.length - 1}
-              loading={operating === `move-${record.id}`}
-              onClick={() => onMoveDown(record.id)}
-            />
-          </Tooltip>
-          <Tooltip title="编辑">
-            <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(record)} />
-          </Tooltip>
+      render: (_: unknown, record: FirewallRule, index: number) => {
+        const globalIndex = (rulesPage - 1) * rulesPageSize + index;
+        return (
+          <Space>
+            <Tooltip title="上移">
+              <Button
+                type="link"
+                icon={<ArrowUpOutlined />}
+                disabled={globalIndex === 0}
+                loading={operating === `move-${record.id}`}
+                onClick={() => onMoveUp(record.id)}
+              />
+            </Tooltip>
+            <Tooltip title="下移">
+              <Button
+                type="link"
+                icon={<ArrowDownOutlined />}
+                disabled={globalIndex === rulesTotal - 1}
+                loading={operating === `move-${record.id}`}
+                onClick={() => onMoveDown(record.id)}
+              />
+            </Tooltip>
+            <Tooltip title="编辑">
+              <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(record)} />
+            </Tooltip>
           <Popconfirm
             title="确定删除此规则？"
             description="删除后将从系统中移除"
@@ -182,7 +184,8 @@ export default function FirewallRules({
             </Tooltip>
           </Popconfirm>
         </Space>
-      ),
+        );
+      },
     },
   ];
 

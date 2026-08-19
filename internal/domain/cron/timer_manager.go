@@ -298,8 +298,15 @@ func (m *TimerManager) RunNow(ctx context.Context, name string) error {
 }
 
 // GetRuns 返回任务的 journald 日志，按 invocation ID 分组为每次执行。
-func (m *TimerManager) GetRuns(ctx context.Context, name string, limit int) ([]CronRun, error) {
+// 支持 since / until 时间窗口过滤（格式如 "2006-01-02" 或 "2006-01-02 15:04:05"）。
+func (m *TimerManager) GetRuns(ctx context.Context, name string, limit int, since, until string) ([]CronRun, error) {
 	args := []string{"-u", systemd.CronServiceFileName(name), "--no-pager", "--output=json"}
+	if since != "" {
+		args = append(args, "--since", since)
+	}
+	if until != "" {
+		args = append(args, "--until", until)
+	}
 	if limit > 0 {
 		args = append(args, "-n", strconv.Itoa(limit))
 	}

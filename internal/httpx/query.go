@@ -40,6 +40,9 @@ func QueryInt(c *gin.Context, key string, def int) int {
 	return v
 }
 
+// MaxPage is the upper bound on the page query parameter to prevent integer overflow.
+const MaxPage = 1_000_000
+
 // ParsePagination parses page/page_size, clamping them, and returns Page, Size, and Offset.
 // Clamping lives here (the HTTP boundary) so callers never need to re-validate.
 func ParsePagination(c *gin.Context, defaultSize, maxSize int) Pagination {
@@ -49,6 +52,8 @@ func ParsePagination(c *gin.Context, defaultSize, maxSize int) Pagination {
 	}
 	if p.Page < 1 {
 		p.Page = 1
+	} else if p.Page > MaxPage {
+		p.Page = MaxPage
 	}
 	if p.Size < 1 || p.Size > maxSize {
 		p.Size = defaultSize

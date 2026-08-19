@@ -3,9 +3,8 @@ import {
   Card, Form, Input, Button, message, Divider, List, Popconfirm, Tag, Alert,
 } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, LogoutOutlined } from '@ant-design/icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
-import { withEngine } from './types';
 
 interface LoggedInRegistry {
   server: string;
@@ -25,8 +24,8 @@ export default function RegistryTab({ engine }: { engine: string }) {
     setLoading(true);
     try {
       const [cfgRes, authRes] = await Promise.all([
-        api.get(withEngine('/container/registry', engine)),
-        api.get(withEngine('/container/registry/auth', engine)),
+        containerApi.getRegistryConfig(engine),
+        containerApi.getRegistryAuth(engine),
       ]);
       const cfg = cfgRes.data?.data || {};
       configForm.setFieldsValue({
@@ -48,7 +47,7 @@ export default function RegistryTab({ engine }: { engine: string }) {
       const values = await configForm.validateFields();
       const mirrors = (values.mirrors || []).map((i: { value?: string }) => i.value?.trim()).filter(Boolean);
       const insecure_registries = (values.insecure || []).map((i: { value?: string }) => i.value?.trim()).filter(Boolean);
-      await runSave(() => api.post(withEngine('/container/registry', engine), { mirrors, insecure_registries }));
+      await runSave(() => containerApi.saveRegistryConfig({ mirrors, insecure_registries }, engine));
       message.success('镜像仓库配置已保存');
     } catch {
       message.error('保存失败');
@@ -58,9 +57,9 @@ export default function RegistryTab({ engine }: { engine: string }) {
   const handleLogin = async () => {
     try {
       const values = await authForm.validateFields();
-      await runLogin(() => api.post(withEngine('/container/registry/login', engine), {
+      await runLogin(() => containerApi.loginRegistry({
         server: values.server, username: values.username, password: values.password,
-      }));
+      }, engine));
       message.success('登录成功');
       authForm.resetFields();
       await load();
@@ -72,7 +71,7 @@ export default function RegistryTab({ engine }: { engine: string }) {
   const handleLogout = async (server: string) => {
     setLogoutLoading(server);
     try {
-      await api.post(withEngine(`/container/registry/logout?server=${encodeURIComponent(server)}`, engine));
+      await containerApi.logoutRegistry(server, engine);
       message.success('已退出登录');
       await load();
     } catch {

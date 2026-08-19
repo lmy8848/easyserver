@@ -1,14 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Button, Space, message, Popconfirm, Modal, Form, Input, Select,
 } from 'antd';
 import {
   DeleteOutlined, PlusOutlined, ReloadOutlined,
 } from '@ant-design/icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Volume } from './types';
-import { withEngine } from './types';
 import { formatDateTime } from '../../utils/format';
 
 export default function VolumeTab({ engine }: { engine: string }) {
@@ -19,18 +18,18 @@ export default function VolumeTab({ engine }: { engine: string }) {
   const [removing, setRemoving] = useState<string>('');
   const [createLoading, runCreate] = useAsyncRun();
 
-  const loadVolumes = async () => {
+  const loadVolumes = useCallback(async () => {
     try {
-      const res = await api.get(withEngine('/container/volumes', engine));
+      const res = await containerApi.listVolumes(engine);
       setVolumes(res.data?.data?.items ?? []);
     } catch {
       message.error('加载存储卷列表失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [engine]);
 
-  useEffect(() => { loadVolumes(); }, [engine]);
+  useEffect(() => { loadVolumes(); }, [loadVolumes]);
 
   const handleCreate = async () => {
     try {
@@ -39,7 +38,7 @@ export default function VolumeTab({ engine }: { engine: string }) {
       (values.labels || []).forEach((l: { key?: string; value?: string }) => {
         if (l.key) labels[l.key] = l.value || '';
       });
-      await runCreate(() => api.post(withEngine('/container/volumes', engine), { ...values, labels }));
+      await runCreate(() => containerApi.createVolume({ ...values, labels }, engine));
       message.success('存储卷创建成功');
       setCreateVisible(false);
       createForm.resetFields();
@@ -53,7 +52,7 @@ export default function VolumeTab({ engine }: { engine: string }) {
   const handleRemove = async (name: string) => {
     setRemoving(name);
     try {
-      await api.delete(withEngine(`/container/volumes/${name}?force=true`, engine));
+      await containerApi.deleteVolume(name, true, engine);
       message.success('存储卷已删除');
       setLoading(true);
       loadVolumes();

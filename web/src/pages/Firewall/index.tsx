@@ -59,22 +59,17 @@ export default function FirewallPage() {
   const [sysPageSize, setSysPageSize] = useState(20);
   const [sysTotal, setSysTotal] = useState(0);
 
-  const fetchRules = useCallback(async (rp = rulesPage, rps = rulesPageSize, sp = sysPage, sps = sysPageSize) => {
+  const fetchRules = useCallback(async () => {
     setLoading(true);
     try {
       const [dbRes, sysRes] = await Promise.all([
-        firewallApi.listRules(rp, rps),
-        firewallApi.getSystemRules(sp, sps),
+        firewallApi.listRules(rulesPage, rulesPageSize),
+        firewallApi.getSystemRules(sysPage, sysPageSize),
       ]);
       setRules(dbRes.data?.data?.items ?? []);
       setRulesTotal(dbRes.data?.data?.total ?? 0);
-      setRulesPage(rp);
-      setRulesPageSize(rps);
-
       setSystemRules(sysRes.data?.data?.items ?? []);
       setSysTotal(sysRes.data?.data?.total ?? 0);
-      setSysPage(sp);
-      setSysPageSize(sps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取规则失败'));
     } finally {
@@ -508,12 +503,12 @@ export default function FirewallPage() {
         rulesPage={rulesPage}
         rulesPageSize={rulesPageSize}
         rulesTotal={rulesTotal}
-        onRulesPageChange={(rp, rps) => fetchRules(rp, rps, sysPage, sysPageSize)}
+        onRulesPageChange={(rp, rps) => { setRulesPage(rp); setRulesPageSize(rps); }}
         systemRules={systemRules}
         sysPage={sysPage}
         sysPageSize={sysPageSize}
         sysTotal={sysTotal}
-        onSysPageChange={(sp, sps) => fetchRules(rulesPage, rulesPageSize, sp, sps)}
+        onSysPageChange={(sp, sps) => { setSysPage(sp); setSysPageSize(sps); }}
         loading={loading}
         operating={operating}
         selectedRowKeys={selectedRowKeys}
@@ -532,7 +527,7 @@ export default function FirewallPage() {
         onExport={handleExport}
         onImportFileChange={handleImportFileChange}
         onOpenTemplates={handleOpenTemplates}
-        onRefresh={() => fetchRules(rulesPage, rulesPageSize, sysPage, sysPageSize)}
+        onRefresh={fetchRules}
         onSelectedRowKeysChange={(keys) => setSelectedRowKeys(keys)}
       />
 

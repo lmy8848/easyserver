@@ -28,6 +28,8 @@ func TestParsePagination(t *testing.T) {
 		{"size over max clamps", "page_size=999", Pagination{1, 50, 0}},
 		{"size 0 clamps", "page_size=0", Pagination{1, 50, 0}},
 		{"page 0 clamps", "page=0", Pagination{1, 50, 0}},
+		{"negative page clamps", "page=-5", Pagination{1, 50, 0}},
+		{"huge page clamps to MaxPage", "page=999999999", Pagination{MaxPage, 50, (MaxPage - 1) * 50}},
 		{"garbage falls back", "page=abc&page_size=xyz", Pagination{1, 50, 0}},
 		{"valid within bounds", "page=2&page_size=20", Pagination{2, 20, 20}},
 	}

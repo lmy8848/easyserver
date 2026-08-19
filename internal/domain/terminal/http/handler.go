@@ -83,7 +83,10 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) (any, error) {
 	}
 
 	// Generate unique session ID
-	token, _ := util.RandomHex(8)
+	token, err := util.RandomHex(8)
+	if err != nil {
+		return nil, errx.Internal("生成终端会话ID失败")
+	}
 	sessionID := fmt.Sprintf("term-%d-%s", time.Now().UnixMilli(), token)
 
 	// Create session

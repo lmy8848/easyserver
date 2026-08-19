@@ -3,8 +3,8 @@ package notification
 import (
 	"context"
 	"database/sql"
-
 	"fmt"
+	"strings"
 )
 
 // sqliteRepo implements Repository for SQLite
@@ -17,18 +17,41 @@ func NewSQLiteRepository(db *sql.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-// List returns notifications with optional filters
-func (r *sqliteRepo) List(ctx context.Context, unreadOnly bool, limit int) ([]Notification, error) {
-	query := `SELECT id, type, title, message, level, is_read, COALESCE(metadata,''), created_at
-	          FROM notifications`
-	if unreadOnly {
-		query += ` WHERE is_read = 0`
-	}
-	query += ` ORDER BY created_at DESC LIMIT ?`
+// List returns notifications with optional filters and total count
+func (r *sqliteRepo) List(ctx context.Context, filter ListFilter) ([]Notification, int64, error) {
+	var whereClauses []string
+	var args []any
 
-	rows, err := r.db.QueryContext(ctx, query, limit)
+	if filter.UnreadOnly {
+		whereClauses = append(whereClauses, "is_read = 0")
+	}
+	if filter.Level != "" {
+		whereClauses = append(whereClauses, "level = ?")
+		args = append(args, filter.Level)
+	}
+	if filter.Type != "" {
+		whereClauses = append(whereClauses, "type = ?")
+		args = append(args, filter.Type)
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	countQuery := "SELECT COUNT(*) FROM notifications" + whereSQL
+	var total int64
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count notifications: %w", err)
+	}
+
+	query := `SELECT id, type, title, message, level, is_read, COALESCE(metadata,''), created_at
+	          FROM notifications` + whereSQL + ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+
+	queryArgs := append(slicesClone(args), filter.Limit, filter.Offset)
+	rows, err := r.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("list notifications: %w", err)
+		return nil, 0, fmt.Errorf("list notifications: %w", err)
 	}
 	defer rows.Close()
 
@@ -43,9 +66,15 @@ func (r *sqliteRepo) List(ctx context.Context, unreadOnly bool, limit int) ([]No
 		result = append(result, n)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list notifications: %w", err)
+		return nil, 0, fmt.Errorf("list notifications: %w", err)
 	}
-	return result, nil
+	return result, total, nil
+}
+
+func slicesClone(s []any) []any {
+	c := make([]any, len(s))
+	copy(c, s)
+	return c
 }
 
 // CountUnread returns the count of unread notifications

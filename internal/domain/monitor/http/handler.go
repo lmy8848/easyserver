@@ -460,7 +460,7 @@ func (h *MonitorHandler) ListSystemProcesses(c *gin.Context) (any, error) {
 	order := c.DefaultQuery("order", "desc")
 	search := c.Query("search")
 	p := httpx.ParsePagination(c, 100, 1000)
-	processes, err := h.monitorService.ListSystemProcesses(sortBy, order, search, p.Size+p.Offset)
+	processes, err := h.monitorService.ListSystemProcesses(sortBy, order, search, 1000)
 	if err != nil {
 		return nil, err
 	}

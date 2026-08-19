@@ -18,20 +18,28 @@ func newMockRepo() *mockRepo {
 	return &mockRepo{nextID: 1}
 }
 
-func (m *mockRepo) List(ctx context.Context, unreadOnly bool, limit int) ([]Notification, error) {
+func (m *mockRepo) List(ctx context.Context, filter ListFilter) ([]Notification, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var res []Notification
+	var all []Notification
 	for _, n := range m.notifications {
-		if unreadOnly && n.IsRead {
+		if filter.UnreadOnly && n.IsRead {
 			continue
 		}
-		res = append(res, n)
-		if len(res) >= limit {
-			break
+		if filter.Level != "" && n.Level != filter.Level {
+			continue
 		}
+		if filter.Type != "" && n.Type != filter.Type {
+			continue
+		}
+		all = append(all, n)
 	}
-	return res, nil
+	total := int64(len(all))
+	if filter.Offset >= len(all) {
+		return []Notification{}, total, nil
+	}
+	end := min(filter.Offset+filter.Limit, len(all))
+	return all[filter.Offset:end], total, nil
 }
 
 func (m *mockRepo) CountUnread(ctx context.Context) (int, error) {

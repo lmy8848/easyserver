@@ -44,12 +44,15 @@ func (s *Service) Hub() *NotificationHub {
 	return s.hub
 }
 
-// List returns notifications with optional filters
-func (s *Service) List(notOnly bool, limit int) ([]Notification, error) {
-	if limit <= 0 || limit > maxLimit {
-		limit = defaultLimit
+// List returns notifications with optional filters and total count
+func (s *Service) List(filter ListFilter) ([]Notification, int64, error) {
+	if filter.Limit <= 0 || filter.Limit > maxLimit {
+		filter.Limit = defaultLimit
 	}
-	return s.repo.List(context.Background(), notOnly, limit)
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	return s.repo.List(context.Background(), filter)
 }
 
 // CountUnread returns the count of unread notifications

@@ -432,7 +432,7 @@ export default function FileManager() {
 
     if (type === 'archive') {
       try {
-        const res = await fileApi.archiveList(path, 1, 1000);
+        const res = await fileApi.archiveList(path);
         setPreviewType('archive');
         setPreviewContent(JSON.stringify(res.data.data?.items ?? []));
         setPreviewPath(path);

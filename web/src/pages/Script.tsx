@@ -73,14 +73,12 @@ export default function ScriptPage() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
 
-  const fetchScripts = useCallback(async (p = page, ps = pageSize) => {
+  const fetchScripts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await cronApi.listScripts(p, ps);
+      const res = await cronApi.listScripts(page, pageSize);
       setScripts(res.data?.data?.items ?? []);
       setTotal(res.data?.data?.total ?? 0);
-      setPage(p);
-      setPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '加载脚本失败'));
     } finally {
@@ -372,7 +370,7 @@ export default function ScriptPage() {
             total,
             showSizeChanger: true,
             showTotal: (t) => `共 ${t} 个脚本`,
-            onChange: (p, ps) => fetchScripts(p, ps),
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
           }}
           size="small"
           locale={{ emptyText: <Empty description="暂无脚本" /> }}

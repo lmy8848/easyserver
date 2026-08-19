@@ -9,6 +9,7 @@ import type {
   ManagedServiceSpec,
   Notification, FileSearchResult,
   InstanceConfigView, AppSettings, Page,
+  SSHSession, DockerStatus, Container, Image, ComposeProject, Volume, Network, ContainerStats,
 } from '../types';
 
 const api = axios.create({
@@ -282,8 +283,8 @@ export const fileApi = {
   extract: (source: string, dest: string) =>
     api.post<ApiResponse>('/files/extract', { source, dest }),
 
-  archiveList: (path: string, page = 1, pageSize = 50) =>
-    api.get<ApiResponse<Page<{ name: string; size: number; is_dir: boolean }>>>('/files/archive-list', { params: { path, page, page_size: pageSize } }),
+  archiveList: (path: string) =>
+    api.get<ApiResponse<Page<{ name: string; size: number; is_dir: boolean }>>>('/files/archive-list', { params: { path } }),
 
   chmod: (path: string, mode: string) =>
     api.put<ApiResponse>('/files/chmod', { path, mode }),
@@ -313,8 +314,161 @@ export interface SSHLoginRecord {
 }
 
 export const sshApi = {
+  getStatus: () =>
+    api.get<ApiResponse<{ available: boolean; reason?: string; installed: boolean; running: boolean }>>('/ssh/status'),
+  getConfig: () =>
+    api.get<ApiResponse<any>>('/ssh/config'),
+  saveConfig: (data: any) =>
+    api.put<ApiResponse>('/ssh/config', data),
+  testConfig: () =>
+    api.post<ApiResponse<{ message: string }>>('/ssh/config/test'),
+  reloadService: () =>
+    api.post<ApiResponse>('/ssh/config/reload'),
+  listSessions: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<SSHSession>>>('/ssh/sessions', { params: { page, page_size: pageSize } }),
+  killSession: (pid: number) =>
+    api.post<ApiResponse>(`/ssh/sessions/${pid}/kill`),
   getLogins: (limit?: number) =>
     api.get<ApiResponse<{ records: SSHLoginRecord[] }>>('/ssh/logins', { params: { limit } }),
+  listAuthorizedKeys: (page = 1, pageSize = 20) =>
+    api.get<ApiResponse<Page<{ comment: string; type: string; key: string }>>>('/ssh/authorized-keys', {
+      params: { page, page_size: pageSize },
+    }),
+  addAuthorizedKey: (data: { key: string }) =>
+    api.post<ApiResponse>('/ssh/authorized-keys', data),
+  deleteAuthorizedKey: (comment: string) =>
+    api.delete<ApiResponse>('/ssh/authorized-keys', { params: { comment } }),
+  generateKey: (data: { name: string; key_type: string }) =>
+    api.post<ApiResponse<{ private_key: string; public_key: string }>>('/ssh/keys/generate', data),
+  harden: (data?: any) =>
+    api.post<ApiResponse>('/ssh/harden', data),
+  getFail2banStatus: () =>
+    api.get<ApiResponse<any>>('/ssh/fail2ban'),
+  installFail2ban: () =>
+    api.post<ApiResponse>('/ssh/fail2ban/install'),
+  reloadFail2ban: () =>
+    api.post<ApiResponse>('/ssh/fail2ban/reload'),
+};
+
+// Container API
+export const containerApi = {
+  getStatus: (engine?: string) =>
+    api.get<ApiResponse<DockerStatus>>('/container/status', { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  install: (engine?: string) =>
+    api.post<ApiResponse>('/container/install', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  start: (engine?: string) =>
+    api.post<ApiResponse>('/container/start', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  controlSocket: (action: string, engine?: string) =>
+    api.post<ApiResponse>(`/container/socket/${action}`, null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+
+  listContainers: (engine?: string, all = true, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Container>>>('/container/instances', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, all: all ? 'true' : 'false', page, page_size: pageSize },
+    }),
+  getContainer: (id: string, engine?: string) =>
+    api.get<ApiResponse<Container>>(`/container/instances/${id}`, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  actionContainer: (id: string, action: string, engine?: string) =>
+    api.post<ApiResponse>(`/container/instances/${id}/${action}`, null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  deleteContainer: (id: string, force = true, engine?: string) =>
+    api.delete<ApiResponse>(`/container/instances/${id}`, { params: { force, engine: engine === 'podman' ? 'podman' : undefined } }),
+  createContainer: (data: any, engine?: string) =>
+    api.post<ApiResponse<{ id: string; name: string }>>('/container/instances', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+      timeout: 600000,
+    }),
+  execContainer: (id: string, data: { command: string }, engine?: string) =>
+    api.post<ApiResponse<{ exit_code: number; output: string }>>(`/container/instances/${id}/exec`, data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getContainerLogs: (id: string, tail = 200, engine?: string) =>
+    api.get<ApiResponse<{ logs: string }>>(`/container/instances/${id}/logs`, {
+      params: { tail, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getContainerStats: (id: string, engine?: string) =>
+    api.get<ApiResponse<ContainerStats>>(`/container/instances/${id}/stats`, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listComposeProjects: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<ComposeProject>>>('/container/compose/projects', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  composeAction: (action: string, projectDir: string, engine?: string) =>
+    api.post<ApiResponse>(`/container/compose/${action}`, { project_dir: projectDir }, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getComposeLogs: (dir: string, tail = 200, engine?: string) =>
+    api.get<ApiResponse<{ logs: string }>>('/container/compose/logs', {
+      params: { dir, tail, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getComposeConfig: (dir: string, engine?: string) =>
+    api.get<ApiResponse<{ content: string }>>('/container/compose/config', {
+      params: { dir, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  saveComposeConfig: (projectDir: string, content: string, engine?: string) =>
+    api.put<ApiResponse>('/container/compose/config', { project_dir: projectDir, content }, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listImages: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Image>>>('/container/images', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  pullImage: (data: { image: string; tag?: string }, engine?: string) =>
+    api.post<ApiResponse>('/container/images/pull', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  deleteImage: (id: string, force = true, engine?: string) =>
+    api.delete<ApiResponse>(`/container/images/${id}`, {
+      params: { force, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listNetworks: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Network>>>('/container/networks', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  createNetwork: (data: any, engine?: string) =>
+    api.post<ApiResponse>('/container/networks', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  deleteNetwork: (id: string, engine?: string) =>
+    api.delete<ApiResponse>(`/container/networks/${id}`, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listVolumes: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Volume>>>('/container/volumes', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  createVolume: (data: any, engine?: string) =>
+    api.post<ApiResponse>('/container/volumes', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  deleteVolume: (name: string, force = true, engine?: string) =>
+    api.delete<ApiResponse>(`/container/volumes/${name}`, {
+      params: { force, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  getRegistryConfig: (engine?: string) =>
+    api.get<ApiResponse<any>>('/container/registry', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getRegistryAuth: (engine?: string) =>
+    api.get<ApiResponse<any>>('/container/registry/auth', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  saveRegistryConfig: (data: { mirrors: string[]; insecure_registries: string[] }, engine?: string) =>
+    api.post<ApiResponse>('/container/registry', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  loginRegistry: (data: any, engine?: string) =>
+    api.post<ApiResponse>('/container/registry/login', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  logoutRegistry: (server: string, engine?: string) =>
+    api.post<ApiResponse>('/container/registry/logout', null, {
+      params: { server, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
 };
 
 // Audit Log API
@@ -690,8 +844,10 @@ export const cronApi = {
   run: (name: string) =>
     api.post<ApiResponse>(`/cron/tasks/${name}/run`),
 
-  getRuns: (name: string, page = 1, pageSize = 20) =>
-    api.get<ApiResponse<Page<CronRun>>>(`/cron/tasks/${name}/runs`, { params: { page, page_size: pageSize } }),
+  getRuns: (name: string, page = 1, pageSize = 20, since?: string, until?: string) =>
+    api.get<ApiResponse<Page<CronRun>>>(`/cron/tasks/${name}/runs`, {
+      params: { page, page_size: pageSize, since: since || undefined, until: until || undefined },
+    }),
 
   // Scripts
   listScripts: (page = 1, pageSize = 50) =>
@@ -869,8 +1025,16 @@ export const systemProcessApi = {
 
 // Notification API
 export const notificationApi = {
-  list: (unreadOnly = false, page = 1, pageSize = 50) =>
-    api.get<ApiResponse<Page<Notification>>>('/notifications', { params: { unread: unreadOnly, page, page_size: pageSize } }),
+  list: (unreadOnly = false, page = 1, pageSize = 50, level?: string, type?: string) =>
+    api.get<ApiResponse<Page<Notification>>>('/notifications', {
+      params: {
+        unread: unreadOnly || undefined,
+        level: level || undefined,
+        type: type || undefined,
+        page,
+        page_size: pageSize,
+      },
+    }),
 
   unreadCount: () =>
     api.get<ApiResponse<{ count: number }>>('/notifications/unread-count'),

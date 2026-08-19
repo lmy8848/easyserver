@@ -8,9 +8,18 @@ type Sink interface {
 	CreateIfNotExists(req CreateNotificationRequest) (*Notification, error)
 }
 
+// ListFilter specifies filtering criteria for notifications
+type ListFilter struct {
+	UnreadOnly bool
+	Level      string
+	Type       string
+	Offset     int
+	Limit      int
+}
+
 // Repository defines the interface for notification data access
 type Repository interface {
-	List(ctx context.Context, unreadOnly bool, limit int) ([]Notification, error)
+	List(ctx context.Context, filter ListFilter) ([]Notification, int64, error)
 	CountUnread(ctx context.Context) (int, error)
 	Create(ctx context.Context, req CreateNotificationRequest) (*Notification, error)
 	CreateIfNotExists(ctx context.Context, req CreateNotificationRequest) (*Notification, error)

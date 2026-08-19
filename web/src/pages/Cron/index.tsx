@@ -24,14 +24,12 @@ export default function CronPage() {
   // Docs drawer state
   const [helpVisible, setHelpVisible] = useState(false);
 
-  const fetchTasks = useCallback(async (p = page, ps = pageSize) => {
+  const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await cronApi.list(p, ps);
+      const res = await cronApi.list(page, pageSize);
       setTasks(res.data?.data?.items ?? []);
       setTotal(res.data?.data?.total ?? 0);
-      setPage(p);
-      setPageSize(ps);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取任务列表失败'));
     } finally {
@@ -92,26 +90,44 @@ export default function CronPage() {
   const [runsPage, setRunsPage] = useState(1);
   const [runsPageSize, setRunsPageSize] = useState(20);
   const [runsTotal, setRunsTotal] = useState(0);
+  const [runsSince, setRunsSince] = useState<string | undefined>(undefined);
+  const [runsUntil, setRunsUntil] = useState<string | undefined>(undefined);
 
-  const fetchRuns = useCallback(async (task: CronTask, p = runsPage, ps = runsPageSize) => {
+  const fetchRuns = useCallback(async (
+    task: CronTask,
+    p = runsPage,
+    ps = runsPageSize,
+    since = runsSince,
+    until = runsUntil,
+  ) => {
     setLogsTask(task);
     setLogsLoading(true);
     try {
-      const res = await cronApi.getRuns(task.name, p, ps);
+      const res = await cronApi.getRuns(task.name, p, ps, since, until);
       setRuns(res.data?.data?.items ?? []);
       setRunsTotal(res.data?.data?.total ?? 0);
       setRunsPage(p);
       setRunsPageSize(ps);
+      setRunsSince(since);
+      setRunsUntil(until);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
-  }, [runsPage, runsPageSize]);
+  }, [runsPage, runsPageSize, runsSince, runsUntil]);
 
   const handleViewLogs = (task: CronTask) => {
     setLogsVisible(true);
-    fetchRuns(task, 1, runsPageSize);
+    setRunsSince(undefined);
+    setRunsUntil(undefined);
+    fetchRuns(task, 1, runsPageSize, undefined, undefined);
+  };
+
+  const handleRunsDateRangeChange = (since?: string, until?: string) => {
+    if (logsTask) {
+      fetchRuns(logsTask, 1, runsPageSize, since, until);
+    }
   };
 
   const handleShowHelp = useCallback(() => {
@@ -126,10 +142,10 @@ export default function CronPage() {
         page={page}
         pageSize={pageSize}
         total={total}
-        onPageChange={(p, ps) => fetchTasks(p, ps)}
+        onPageChange={(p, ps) => { setPage(p); setPageSize(ps); }}
         operating={operating}
         scripts={scripts}
-        onRefresh={() => fetchTasks(page, pageSize)}
+        onRefresh={fetchTasks}
         onDelete={handleDelete}
         onToggle={handleToggle}
         onRun={handleRun}
@@ -144,9 +160,10 @@ export default function CronPage() {
         page={runsPage}
         pageSize={runsPageSize}
         total={runsTotal}
-        onPageChange={(p, ps) => logsTask && fetchRuns(logsTask, p, ps)}
+        onPageChange={(p, ps) => logsTask && fetchRuns(logsTask, p, ps, runsSince, runsUntil)}
+        onDateRangeChange={handleRunsDateRangeChange}
         onClose={() => setLogsVisible(false)}
-        onRefresh={() => logsTask && fetchRuns(logsTask, runsPage, runsPageSize)}
+        onRefresh={() => logsTask && fetchRuns(logsTask, runsPage, runsPageSize, runsSince, runsUntil)}
       />
       <CronDocs
         visible={helpVisible}

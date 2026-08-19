@@ -265,8 +265,10 @@ func (h *CronHandler) RunTask(c *gin.Context) (any, error) {
 // GetTaskRuns returns execution history for a task
 func (h *CronHandler) GetTaskRuns(c *gin.Context) (any, error) {
 	name := c.Param("name")
+	since := c.Query("since")
+	until := c.Query("until")
 	p := httpx.ParsePagination(c, 20, 100)
-	runs, err := h.cronService.GetRuns(c.Request.Context(), name, p.Size+p.Offset)
+	runs, err := h.cronService.GetRuns(c.Request.Context(), name, 2000, since, until)
 	if err != nil {
 		return nil, err
 	}

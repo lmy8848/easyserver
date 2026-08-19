@@ -26,12 +26,20 @@ func NewNotificationHandler(ns *notification.Service) *NotificationHandler {
 // List returns notifications
 func (h *NotificationHandler) List(c *gin.Context) (any, error) {
 	unreadOnly := c.Query("unread") == "true"
+	level := c.Query("level")
+	typeStr := c.Query("type")
 	p := httpx.ParsePagination(c, 50, 200)
-	notifications, err := h.ns.List(unreadOnly, p.Size+p.Offset)
+	items, total, err := h.ns.List(notification.ListFilter{
+		UnreadOnly: unreadOnly,
+		Level:      level,
+		Type:       typeStr,
+		Offset:     p.Offset,
+		Limit:      p.Size,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return httpx.Paginate(notifications, p), nil
+	return httpx.Page[notification.Notification]{Items: items, Total: total}, nil
 }
 
 // CountUnread returns unread count

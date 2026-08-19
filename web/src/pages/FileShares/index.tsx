@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, Table, Button, Space, Tag, Modal, Form, Input, InputNumber, message, Popconfirm, Tooltip, Checkbox } from 'antd';
 import { LinkOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, CopyOutlined, EditOutlined, LockOutlined } from '@ant-design/icons';
 import { fileShareApi } from '../../services/api';
@@ -23,24 +23,23 @@ export default function FileShares() {
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
 
-  const fetchShares = async (p = page, ps = pageSize) => {
+  const fetchShares = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fileShareApi.list(p, ps);
+      const res = await fileShareApi.list(page, pageSize);
       setShares(res.data.data?.items || []);
       setTotal(res.data.data?.total || 0);
-      setPage(p);
-      setPageSize(ps);
     } catch (error) {
       console.error('Failed to fetch shares:', error);
+      message.error('获取文件外链失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize]);
 
   useEffect(() => {
     fetchShares();
-  }, []);
+  }, [fetchShares]);
 
   const handleCreate = () => {
     form.resetFields();
@@ -250,7 +249,7 @@ export default function FileShares() {
         title={<span><LinkOutlined style={{ marginRight: 8 }} />文件外链管理</span>}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => fetchShares(page, pageSize)}>刷新</Button>
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchShares}>刷新</Button>
             <Button onClick={handleCleanup}>清理</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>生成外链</Button>
           </Space>
@@ -267,7 +266,7 @@ export default function FileShares() {
             total,
             showSizeChanger: true,
             showTotal: (t) => `共 ${t} 个外链`,
-            onChange: (p, ps) => fetchShares(p, ps),
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
           }}
           size="small"
           scroll={{ x: 1000 }}

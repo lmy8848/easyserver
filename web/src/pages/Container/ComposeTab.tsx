@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Tag, Button, Space, message, Modal, Form, Input,
 } from 'antd';
@@ -6,10 +6,9 @@ import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
   InfoCircleOutlined, EditOutlined,
 } from '@ant-design/icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { ComposeProject } from './types';
-import { withEngine } from './types';
 
 export default function ComposeTab({ engine }: { engine: string }) {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
@@ -22,23 +21,23 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const [actionLoading, setActionLoading] = useState<string>('');
   const [saveLoading, runSaveConfig] = useAsyncRun();
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     try {
-      const res = await api.get(withEngine('/container/compose/projects', engine));
+      const res = await containerApi.listComposeProjects(engine);
       setProjects(res.data?.data?.items ?? []);
     } catch {
       // Compose might not be available
     } finally {
       setLoading(false);
     }
-  };
+  }, [engine]);
 
-  useEffect(() => { loadProjects(); }, [engine]);
+  useEffect(() => { loadProjects(); }, [loadProjects]);
 
   const handleAction = async (action: string, dir: string) => {
     setActionLoading(`${dir}:${action}`);
     try {
-      await api.post(withEngine(`/container/compose/${action}`, engine), { project_dir: dir });
+      await containerApi.composeAction(action, dir, engine);
       message.success(`compose ${action} 成功`);
       setLoading(true);
       loadProjects();
@@ -51,7 +50,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
 
   const handleLogs = async (dir: string) => {
     try {
-      const res = await api.get(withEngine(`/container/compose/logs?dir=${encodeURIComponent(dir)}&tail=200`, engine));
+      const res = await containerApi.getComposeLogs(dir, 200, engine);
       setLogs(res.data?.data?.logs || '');
       setLogsVisible(true);
     } catch {
@@ -61,7 +60,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
 
   const handleGetConfig = async (dir: string) => {
     try {
-      const res = await api.get(withEngine(`/container/compose/config?dir=${encodeURIComponent(dir)}`, engine));
+      const res = await containerApi.getComposeConfig(dir, engine);
       const content = res.data?.data?.content || '';
       setConfigDir(dir);
       configForm.setFieldsValue({ content });
@@ -74,7 +73,7 @@ export default function ComposeTab({ engine }: { engine: string }) {
   const handleSaveConfig = async () => {
     try {
       const values = await configForm.validateFields();
-      await runSaveConfig(() => api.put(withEngine('/container/compose/config', engine), { project_dir: configDir, content: values.content }));
+      await runSaveConfig(() => containerApi.saveComposeConfig(configDir, values.content, engine));
       message.success('配置已保存');
       setConfigVisible(false);
     } catch {

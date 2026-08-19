@@ -447,7 +447,7 @@ func (h *FileManagerHandler) ArchiveList(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return httpx.Paginate(entries, httpx.ParsePagination(c, 50, 200)), nil
+	return httpx.Page[filemanager.ArchiveEntry]{Items: entries, Total: int64(len(entries))}, nil
 }
 
 // Chmod changes file permissions

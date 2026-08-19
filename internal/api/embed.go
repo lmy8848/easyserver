@@ -47,7 +47,12 @@ func InitCSPNonce() string {
 		}
 
 		// Generate a static nonce (valid for the lifetime of this process)
-		cspNonce = generateNonce()
+		nonce, err := util.RandomBase64(16)
+		if err != nil {
+			log.Printf("embed: failed to generate CSP nonce: %v", err)
+			return
+		}
+		cspNonce = nonce
 
 		// Inject nonce into all <script> tags
 		cachedIndexHTML = scriptTagRegex.ReplaceAllFunc(data, func(match []byte) []byte {
@@ -63,12 +68,6 @@ func InitCSPNonce() string {
 // CSPNonce returns the pre-generated CSP nonce. Must call InitCSPNonce first.
 func CSPNonce() string {
 	return cspNonce
-}
-
-// generateNonce generates a random nonce for CSP
-func generateNonce() string {
-	s, _ := util.RandomBase64(16)
-	return s
 }
 
 // ServeWeb serves the embedded frontend files

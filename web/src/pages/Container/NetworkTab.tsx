@@ -1,14 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Tag, Button, Space, message, Popconfirm, Modal, Form, Input, Select,
 } from 'antd';
 import {
   DeleteOutlined, PlusOutlined, ReloadOutlined,
 } from '@ant-design/icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Network } from './types';
-import { withEngine } from './types';
 
 export default function NetworkTab({ engine }: { engine: string }) {
   const [networks, setNetworks] = useState<Network[]>([]);
@@ -18,23 +17,23 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const [removing, setRemoving] = useState<string>('');
   const [createLoading, runCreate] = useAsyncRun();
 
-  const loadNetworks = async () => {
+  const loadNetworks = useCallback(async () => {
     try {
-      const res = await api.get(withEngine('/container/networks', engine));
+      const res = await containerApi.listNetworks(engine);
       setNetworks(res.data?.data?.items ?? []);
     } catch {
       message.error('加载网络列表失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [engine]);
 
-  useEffect(() => { loadNetworks(); }, [engine]);
+  useEffect(() => { loadNetworks(); }, [loadNetworks]);
 
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      await runCreate(() => api.post(withEngine('/container/networks', engine), values));
+      await runCreate(() => containerApi.createNetwork(values, engine));
       message.success('网络创建成功');
       setCreateVisible(false);
       createForm.resetFields();
@@ -48,7 +47,7 @@ export default function NetworkTab({ engine }: { engine: string }) {
   const handleRemove = async (id: string) => {
     setRemoving(id);
     try {
-      await api.delete(withEngine(`/container/networks/${id}`, engine));
+      await containerApi.deleteNetwork(id, engine);
       message.success('网络已删除');
       setLoading(true);
       loadNetworks();

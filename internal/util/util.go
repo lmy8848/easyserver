@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"os/exec"
 	"strings"
 	"time"
@@ -29,6 +30,9 @@ func SystemdUnitEnabled(ctx context.Context, unit string) bool {
 
 // RandomHex returns n cryptographically random bytes hex-encoded.
 func RandomHex(n int) (string, error) {
+	if n <= 0 {
+		return "", errors.New("length must be positive")
+	}
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -38,6 +42,9 @@ func RandomHex(n int) (string, error) {
 
 // RandomBase64 returns n cryptographically random bytes URL-safe base64-encoded.
 func RandomBase64(n int) (string, error) {
+	if n <= 0 {
+		return "", errors.New("length must be positive")
+	}
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		return "", err

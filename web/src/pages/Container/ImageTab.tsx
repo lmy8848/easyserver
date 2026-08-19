@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Tag, Button, Space, message, Popconfirm, Modal, Form, Input,
 } from 'antd';
 import {
   DeleteOutlined, CloudDownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Image, ImageCategory } from './types';
-import { withEngine } from './types';
 
 export default function ImageTab({ engine }: { engine: string }) {
   const [images, setImages] = useState<Image[]>([]);
@@ -20,18 +19,18 @@ export default function ImageTab({ engine }: { engine: string }) {
   const [pulling, runPull] = useAsyncRun();
   const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
-  const loadImages = async () => {
+  const loadImages = useCallback(async () => {
     try {
-      const res = await api.get(withEngine('/container/images', engine));
+      const res = await containerApi.listImages(engine);
       setImages(res.data?.data?.items ?? []);
     } catch {
       message.error('加载镜像列表失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [engine]);
 
-  useEffect(() => { loadImages(); }, [engine]);
+  useEffect(() => { loadImages(); }, [loadImages]);
 
   const handlePull = async () => {
     let values;
@@ -41,7 +40,7 @@ export default function ImageTab({ engine }: { engine: string }) {
       return; // 校验失败由表单自身提示，无需 loading
     }
     try {
-      await runPull(() => api.post(withEngine('/container/images/pull', engine), values));
+      await runPull(() => containerApi.pullImage(values, engine));
       message.success('镜像拉取成功');
       setPullVisible(false);
       pullForm.resetFields();
@@ -55,7 +54,7 @@ export default function ImageTab({ engine }: { engine: string }) {
   const handleRemove = async (id: string) => {
     setRemoving(id);
     try {
-      await api.delete(withEngine(`/container/images/${id}?force=true`, engine));
+      await containerApi.deleteImage(id, true, engine);
       message.success('镜像已删除');
       setLoading(true);
       loadImages();

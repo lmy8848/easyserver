@@ -318,8 +318,8 @@ export function PreviewModal({ visible, path, type, content, onClose }: PreviewM
           size="small"
           dataSource={archiveEntries}
           rowKey="name"
-          pagination={{ pageSize: 50 }}
-          style={{ maxHeight: '70vh', overflow: 'auto' }}
+          pagination={false}
+          scroll={{ y: 480 }}
           locale={{ emptyText: '压缩文件为空或无法读取' }}
           columns={[
             { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true,
