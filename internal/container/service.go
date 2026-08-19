@@ -421,8 +421,20 @@ func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string
 	return string(output), nil
 }
 
+var validContainerIDRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+
+func validateContainerID(id string) error {
+	if id == "" || strings.HasPrefix(id, "-") || !validContainerIDRE.MatchString(id) {
+		return errx.BadRequest("invalid container ID or name: %s", id)
+	}
+	return nil
+}
+
 // ExecInContainer executes a command in a running container.
 func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd string) (string, error) {
+	if err := validateContainerID(id); err != nil {
+		return "", err
+	}
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return "", err
 	}
@@ -1479,9 +1491,13 @@ func (s *Service) ComposeGetLogs(ctx context.Context, engine Engine, projectDir 
 
 // ComposeGetConfig reads the compose file content.
 func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
-	composeFile := s.findComposeFile(projectDir)
+	if projectDir == "" || strings.Contains(projectDir, "\x00") {
+		return "", errx.BadRequest("invalid project directory")
+	}
+	cleanDir := filepath.Clean(projectDir)
+	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
-		return "", fmt.Errorf("no compose file found in %s", projectDir)
+		return "", fmt.Errorf("no compose file found in %s", cleanDir)
 	}
 
 	data, err := os.ReadFile(composeFile)
@@ -1493,9 +1509,17 @@ func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (stri
 
 // ComposeSaveConfig writes content to the compose file.
 func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content string) error {
-	composeFile := s.findComposeFile(projectDir)
+	if projectDir == "" || strings.Contains(projectDir, "\x00") {
+		return errx.BadRequest("invalid project directory")
+	}
+	cleanDir := filepath.Clean(projectDir)
+	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
-		composeFile = projectDir + "/docker-compose.yml"
+		composeFile = filepath.Join(cleanDir, "docker-compose.yml")
+	}
+	rel, err := filepath.Rel(cleanDir, composeFile)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return errx.BadRequest("invalid compose file path")
 	}
 
 	if err := os.WriteFile(composeFile, []byte(content), 0644); err != nil {
@@ -1505,6 +1529,10 @@ func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content str
 }
 
 func (s *Service) findComposeFile(projectDir string) string {
+	if projectDir == "" || strings.Contains(projectDir, "\x00") {
+		return ""
+	}
+	cleanDir := filepath.Clean(projectDir)
 	candidates := []string{
 		"docker-compose.yml",
 		"docker-compose.yaml",
@@ -1513,7 +1541,11 @@ func (s *Service) findComposeFile(projectDir string) string {
 	}
 
 	for _, name := range candidates {
-		path := projectDir + "/" + name
+		path := filepath.Join(cleanDir, name)
+		rel, err := filepath.Rel(cleanDir, path)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
