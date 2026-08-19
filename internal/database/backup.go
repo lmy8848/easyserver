@@ -105,9 +105,13 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 		backup.Status = "success"
 		if instance, errInst := s.repo.GetInstance(ctx, backup.DBInstanceID); errInst == nil && instance != nil {
 			baseFile := filepath.Base(filepath.Clean(backup.FilePath))
-			safePath := filepath.Join(instance.VolumeName, esBackupsDir, baseFile)
-			if info, err := os.Stat(safePath); err == nil {
-				backup.FileSize = info.Size()
+			backupDir := filepath.Join(instance.VolumeName, esBackupsDir)
+			safePath := filepath.Join(backupDir, baseFile)
+			rel, relErr := filepath.Rel(backupDir, safePath)
+			if relErr == nil && !strings.HasPrefix(rel, "..") {
+				if info, err := os.Stat(safePath); err == nil {
+					backup.FileSize = info.Size()
+				}
 			}
 		}
 	}
