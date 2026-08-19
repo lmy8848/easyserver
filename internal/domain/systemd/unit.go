@@ -44,7 +44,7 @@ type ManagedUnitSpec struct {
 	MaxRestarts  int               `json:"max_restarts"`  // StartLimitBurst=
 	RestartDelay int               `json:"restart_delay"` // RestartSec=
 	StopTimeout  int               `json:"stop_timeout"`  // TimeoutStopSec=
-	AutoStart    bool              `json:"auto_start"`    // [Install] + systemctl enable
+	AutoStart    bool              `json:"auto_start"`    // [Install] + unit enable
 	Runtime      string            `json:"runtime"`       // lang@exact，"" = 不绑定（ADR-0009 绑定键）
 }
 
@@ -176,7 +176,7 @@ func RenderUnit(spec *ManagedUnitSpec, p mise.Provider) (string, error) {
 	fmt.Fprintf(&b, "RestartSec=%d\n", restartDelay)
 	fmt.Fprintf(&b, "TimeoutStopSec=%d\n\n", stopTimeout)
 
-	// [Install] 段：AutoStart=true 时 systemctl enable 才会生效。
+	// [Install] 段：AutoStart=true 时 unit enable 才会生效。
 	fmt.Fprintf(&b, "[Install]\n")
 	fmt.Fprintf(&b, "WantedBy=multi-user.target\n")
 

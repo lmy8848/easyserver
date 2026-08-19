@@ -27,7 +27,7 @@ type WebServer struct {
 	PID         int    `json:"pid"`
 	MemoryBytes int64  `json:"memory_bytes"`
 	Uptime      string `json:"uptime"`     // human-readable uptime
-	AutoStart   bool   `json:"auto_start"` // systemctl is-enabled
+	AutoStart   bool   `json:"auto_start"` // unit is-enabled (D-Bus)
 	ConfigOK    bool   `json:"config_ok"`  // config test result
 	CreatedAt   string `json:"created_at"`
 }

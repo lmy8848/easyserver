@@ -57,7 +57,7 @@ func (m *TimerManager) getClient() infrasystemd.SystemdClient {
 }
 
 // List 返回全部定时任务。扫描 /usr/local/lib/systemd/system/ 下的 easyserver-cron-*.timer，
-// 保证新建但未 enable 的任务也能列出。状态用 systemctl show 批量补全。
+// 保证新建但未 enable 的任务也能列出。状态用 D-Bus 批量补全。
 func (m *TimerManager) List(ctx context.Context) ([]CronTask, error) {
 	names, err := m.listTimerNames()
 	if err != nil {
@@ -637,7 +637,7 @@ func readTaskCommand(name string) (string, error) {
 	return "", nil
 }
 
-// --- systemctl helpers ---
+// --- systemd unit helpers ---
 
 func (m *TimerManager) daemonReload(ctx context.Context) error {
 	if err := m.getClient().ReloadContext(ctx); err != nil {
