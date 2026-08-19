@@ -260,11 +260,27 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 	timerFull := systemd.CronTimerFileName(name)
 	svcFull := systemd.CronServiceFileName(name)
 
-	// 先 disable + stop（best-effort，可能本来就未启用）
+	// 先 disable + stop，仅允许 "not loaded" / "already stopped" 等预期错误
 	client := m.getClient()
-	_, _ = client.DisableUnitFilesContext(ctx, []string{timerFull}, false)
-	_, _ = client.StopUnitContext(ctx, timerFull, "replace")
-	_, _ = client.StopUnitContext(ctx, svcFull, "replace")
+	if _, err := client.DisableUnitFilesContext(ctx, []string{timerFull}, false); err != nil {
+		// 只有 "NoSuchUnit" / "not loaded" 才可忽略
+		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "NoSuchUnit") {
+			log.Printf("cron: disable timer %s failed: %v", timerFull, err)
+			return fmt.Errorf("disable timer 失败: %w", err)
+		}
+	}
+	if _, err := client.StopUnitContext(ctx, timerFull, "replace"); err != nil {
+		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "inactive") {
+			log.Printf("cron: stop timer %s failed: %v", timerFull, err)
+			return fmt.Errorf("stop timer 失败: %w", err)
+		}
+	}
+	if _, err := client.StopUnitContext(ctx, svcFull, "replace"); err != nil {
+		if !strings.Contains(err.Error(), "not loaded") && !strings.Contains(err.Error(), "inactive") {
+			log.Printf("cron: stop service %s failed: %v", svcFull, err)
+			return fmt.Errorf("stop service 失败: %w", err)
+		}
+	}
 
 	if err := systemd.RemoveCronUnitFile(timerFull); err != nil {
 		return fmt.Errorf("删除 timer unit 失败: %w", err)
@@ -400,36 +416,62 @@ func (m *TimerManager) loadTask(ctx context.Context, name string) (*CronTask, er
 		t.Command = script
 	}
 
-	m.fillStatus(ctx, t)
+	if err := m.fillStatus(ctx, t); err != nil {
+		return nil, err
+	}
 	return t, nil
 }
 
 // fillStatus 用 D-Bus 补全状态字段。
-func (m *TimerManager) fillStatus(ctx context.Context, t *CronTask) {
+func (m *TimerManager) fillStatus(ctx context.Context, t *CronTask) error {
 	client := m.getClient()
 	timerName := systemd.CronTimerFileName(t.Name)
 	svcName := systemd.CronServiceFileName(t.Name)
 
-	if prop, err := client.GetUnitPropertyContext(ctx, timerName, "UnitFileState"); err == nil && prop != nil {
+	// Read UnitFileState from generic Unit interface
+	if prop, err := client.GetUnitPropertyContext(ctx, timerName, "UnitFileState"); err != nil {
+		if errors.Is(err, infrasystemd.ErrSystemdUnavailable) {
+			return err
+		}
+	} else if prop != nil {
 		if str, ok := prop.Value.Value().(string); ok && str == "enabled" {
 			t.Enabled = true
 		}
 	}
-	showTimer, _ := client.GetUnitPropertiesContext(ctx, timerName)
-	if v, ok := showTimer["NextElapseRealtime"].(string); ok && v != "" && !strings.HasPrefix(v, "39766") {
-		t.NextRun = v
+
+	// Query Timer-specific properties
+	timerProps, err := client.GetUnitTypePropertiesContext(ctx, timerName, "org.freedesktop.systemd1.Timer")
+	if err != nil {
+		if errors.Is(err, infrasystemd.ErrSystemdUnavailable) {
+			return err
+		}
+	} else {
+		// NextElapseUSecRealtime is uint64 microseconds since epoch
+		if nextUsec, ok := timerProps["NextElapseUSecRealtime"].(uint64); ok && nextUsec > 0 {
+			t.NextRun = util.UnixMicros(int64(nextUsec)).Format(util.TimeLayout)
+		}
 	}
-	showSvc, _ := client.GetUnitPropertiesContext(ctx, svcName)
-	t.Status = "inactive"
-	if v, ok := showSvc["ActiveState"].(string); ok && v != "" {
-		t.Status = v
+
+	// Query Service-specific properties
+	svcProps, err := client.GetUnitTypePropertiesContext(ctx, svcName, "org.freedesktop.systemd1.Service")
+	if err != nil {
+		if errors.Is(err, infrasystemd.ErrSystemdUnavailable) {
+			return err
+		}
+	} else {
+		t.Status = "inactive"
+		if v, ok := svcProps["ActiveState"].(string); ok && v != "" {
+			t.Status = v
+		}
+		if v, ok := svcProps["Result"].(string); ok && v != "" {
+			t.LastResult = v
+		}
+		// ExecMainExitTimestamp is uint64 microseconds since epoch
+		if exitUsec, ok := svcProps["ExecMainExitTimestamp"].(uint64); ok && exitUsec > 0 {
+			t.LastRun = util.UnixMicros(int64(exitUsec)).Format(util.TimeLayout)
+		}
 	}
-	if v, ok := showSvc["Result"].(string); ok && v != "" {
-		t.LastResult = v
-	}
-	if v, ok := showSvc["ExecMainExitTimestamp"].(string); ok && v != "" {
-		t.LastRun = v
-	}
+	return nil
 }
 
 // --- parse unit helpers ---
@@ -692,7 +734,15 @@ func (m *TimerManager) timerEnabled(ctx context.Context, name string) bool {
 }
 
 func (m *TimerManager) timerActive(ctx context.Context, name string) bool {
-	return util.SystemdUnitActive(ctx, systemd.CronTimerFileName(name))
+	timerFile := systemd.CronTimerFileName(name)
+	props, err := m.getClient().GetUnitPropertiesContext(ctx, timerFile)
+	if err != nil {
+		return false
+	}
+	if state, ok := props["ActiveState"].(string); ok {
+		return state == "active" || state == "activating" || state == "reloading"
+	}
+	return false
 }
 
 // rollbackCreate 回滚 Create 失败时已写入的 unit 与命令脚本文件。

@@ -15,7 +15,7 @@
 
 - **分层架构**：
   - 在 `internal/infra/systemd` 抽象 `SystemdClient` 接口并提供基于 `go-systemd/v22/dbus` 的默认实现与 `MockSystemdClient`。
-  - 维护单一复用的 D-Bus Unix Socket 长连接（通过互斥锁与懒加载重连兜底断线场景）。
+  - 维护单一复用的 D-Bus Unix Socket 长连接。连接缓存在 `realClient` 中，每次获取连接时通过 `Connected()` 检测连接有效性；若连接已失效（如 systemd 重启或 socket 断开），自动关闭旧连接、清除缓存并重新创建新连接，全程由互斥锁保护以保证并发安全。
   - `domain/systemd`、`domain/cron`、`domain/container`、`domain/ssh` 等业务包统一依赖 `infra/systemd` 接口。
 - **阻塞与超时语义**：
   - 接口方法默认保持同步阻塞（等待 D-Bus Job 返回 channel 直到 "done" 或 context 超时），并在超时或错误时直接返回强类型结构化错误信息。

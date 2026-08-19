@@ -218,13 +218,16 @@ func (s *Service) TestConfig(ctx context.Context) (string, error) {
 // ReloadSSH reloads the SSH service.
 func (s *Service) ReloadSSH(ctx context.Context) error {
 	client := infrasystemd.DefaultClient()
-	if _, err := client.ReloadUnitContext(ctx, "sshd.service", "replace"); err == nil {
+	_, sshdErr := client.ReloadUnitContext(ctx, "sshd.service", "replace")
+	if sshdErr == nil {
 		return nil
 	}
-	if _, err := client.ReloadUnitContext(ctx, "ssh.service", "replace"); err == nil {
+	_, sshErr := client.ReloadUnitContext(ctx, "ssh.service", "replace")
+	if sshErr == nil {
 		return nil
 	}
-	return errors.New("reload SSH failed")
+	// Both attempts failed, return wrapped error preserving underlying causes
+	return fmt.Errorf("reload SSH failed: sshd.service error: %v; ssh.service error: %w", sshdErr, sshErr)
 }
 
 // GetSessions returns active SSH sessions.

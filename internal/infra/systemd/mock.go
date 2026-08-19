@@ -120,6 +120,24 @@ func (m *MockSystemdClient) GetUnitPropertyContext(_ context.Context, unit strin
 	return &dbus.Property{Name: propertyName, Value: godbus.MakeVariant("")}, nil
 }
 
+func (m *MockSystemdClient) GetUnitTypePropertiesContext(_ context.Context, unit string, dbusInterface string) (map[string]any, error) {
+	m.record("GetUnitTypeProperties:" + unit + ":" + dbusInterface)
+	if !m.Available {
+		return nil, ErrSystemdUnavailable
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if props, ok := m.Properties[unit]; ok {
+		return props, nil
+	}
+	return map[string]any{
+		"ActiveState":   "active",
+		"SubState":      "running",
+		"LoadState":     "loaded",
+		"UnitFileState": "enabled",
+	}, nil
+}
+
 func (m *MockSystemdClient) StartUnitContext(ctx context.Context, name string, mode string) (string, error) {
 	m.record("StartUnit:" + name)
 	if !m.Available {

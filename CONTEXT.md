@@ -47,7 +47,7 @@
 
 - **Process Guardian（进程守护）** — 面板托管的持久化后台进程。底层生成独立的 systemd unit（`easyserver-<name>.service`），unit 文件即权威；执行命令统一使用 `mise exec <lang>@<exact> -- <cmd>` 隔离 PATH；生命周期、自动拉起与状态查看由 `internal/infra/systemd` D-Bus 客户端与 journald 承载（见 ADR-0010）。
 - **System Process（系统服务）** — 宿主机系统级 systemd 服务的查看与启停管理（如 nginx.service、redis.service），统一经由 `infra/systemd` D-Bus 客户端直连通信（见 ADR-0010）。
-- **Systemd D-Bus Client（D-Bus 客户端）** — 基础设施层（`internal/infra/systemd`）封装的 systemd 通信通道（基于 `coreos/go-systemd/v22/dbus`，纯 Go 零 C 依赖），提供长连接复用、断线重连与强类型单元控制，彻底消除 `systemctl` 子进程开销与文本解析脆弱性（见 ADR-0010）。
+- **Systemd D-Bus Client（D-Bus 客户端）** — 基础设施层（`internal/infra/systemd`）封装的 systemd 通信通道（基于 `coreos/go-systemd/v22/dbus`，纯 Go 零 C 依赖），提供长连接复用、自动断线检测与重连（通过 `Connected()` 检测有效性，失效时自动重建）以及强类型单元控制，彻底消除 `systemctl` 子进程开销与文本解析脆弱性（见 ADR-0010）。
   _Avoid_: ProcessManager（旧架构术语，已废弃）。
 
 ### 6. 防火墙与网络

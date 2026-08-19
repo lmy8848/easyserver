@@ -31,6 +31,9 @@ type SystemdClient interface {
 	// GetUnitPropertyContext returns a single typed property for the specified unit.
 	GetUnitPropertyContext(ctx context.Context, unit string, propertyName string) (*dbus.Property, error)
 
+	// GetUnitTypePropertiesContext returns properties from a specific D-Bus interface for the unit.
+	GetUnitTypePropertiesContext(ctx context.Context, unit string, dbusInterface string) (map[string]any, error)
+
 	// StartUnitContext synchronously starts a unit and waits for the job to complete.
 	StartUnitContext(ctx context.Context, name string, mode string) (string, error)
 
@@ -100,9 +103,18 @@ func NewSystemdClient() SystemdClient {
 func (c *realClient) getConn(ctx context.Context) (*dbus.Conn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	// If we have a cached connection, check if it's still valid
 	if c.conn != nil {
-		return c.conn, nil
+		if c.conn.Connected() {
+			return c.conn, nil
+		}
+		// Connection is invalid, close it and clear cache
+		c.conn.Close()
+		c.conn = nil
 	}
+
+	// Create a new connection
 	conn, err := dbus.NewSystemConnectionContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSystemdUnavailable, err)
@@ -146,6 +158,14 @@ func (c *realClient) GetUnitPropertyContext(ctx context.Context, unit string, pr
 		return nil, err
 	}
 	return conn.GetUnitPropertyContext(ctx, unit, propertyName)
+}
+
+func (c *realClient) GetUnitTypePropertiesContext(ctx context.Context, unit string, dbusInterface string) (map[string]any, error) {
+	conn, err := c.getConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return conn.GetUnitTypePropertiesContext(ctx, unit, dbusInterface)
 }
 
 // waitJob runs a unit action and waits for the job result channel.

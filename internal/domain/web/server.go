@@ -113,8 +113,12 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 
 	if ws.ServiceName != "" {
 		client := infrasystemd.DefaultClient()
-		_, _, _ = client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false)
-		_, _ = client.StartUnitContext(ctx, ws.ServiceName, "replace")
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false); err != nil {
+			return fmt.Errorf("enable service %s failed: %w", ws.ServiceName, err)
+		}
+		if _, err := client.StartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+			return fmt.Errorf("start service %s failed: %w", ws.ServiceName, err)
+		}
 	}
 
 	_ = s.RefreshStatus(ctx, id)
@@ -138,8 +142,12 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 
 	if ws.ServiceName != "" {
 		client := infrasystemd.DefaultClient()
-		_, _ = client.StopUnitContext(ctx, ws.ServiceName, "replace")
-		_, _ = client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false)
+		if _, err := client.StopUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+			return fmt.Errorf("stop service %s failed: %w", ws.ServiceName, err)
+		}
+		if _, err := client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false); err != nil {
+			return fmt.Errorf("disable service %s failed: %w", ws.ServiceName, err)
+		}
 	}
 
 	// Always use the predefined uninstall command, never trust the database value

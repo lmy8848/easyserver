@@ -155,28 +155,36 @@ func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []Se
 	client := m.getClient()
 	for i := range services {
 		unitName := services[i].Name + ".service"
-		props, err := client.GetUnitPropertiesContext(ctx, unitName)
+
+		// Read Unit-interface properties (UnitFileState, ActiveState, SubState, Description)
+		unitProps, err := client.GetUnitPropertiesContext(ctx, unitName)
 		if err != nil {
 			continue
 		}
-		if pid, ok := props["MainPID"].(uint32); ok {
-			services[i].PID = int(pid)
-		}
-		if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
-			services[i].MemoryBytes = mem
-		}
-		if ufs, ok := props["UnitFileState"].(string); ok {
+		if ufs, ok := unitProps["UnitFileState"].(string); ok {
 			services[i].UnitFileState = ufs
 			services[i].Enabled = ufs == "enabled"
 		}
-		if st, ok := props["ActiveState"].(string); ok {
+		if st, ok := unitProps["ActiveState"].(string); ok {
 			services[i].State = st
 		}
-		if sub, ok := props["SubState"].(string); ok {
+		if sub, ok := unitProps["SubState"].(string); ok {
 			services[i].SubState = sub
 		}
-		if desc, ok := props["Description"].(string); ok && desc != "" {
+		if desc, ok := unitProps["Description"].(string); ok && desc != "" {
 			services[i].Description = desc
+		}
+
+		// Read Service-interface properties (MainPID, MemoryCurrent)
+		svcProps, err := client.GetUnitTypePropertiesContext(ctx, unitName, "org.freedesktop.systemd1.Service")
+		if err != nil {
+			continue
+		}
+		if pid, ok := svcProps["MainPID"].(uint32); ok {
+			services[i].PID = int(pid)
+		}
+		if mem, ok := svcProps["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
+			services[i].MemoryBytes = mem
 		}
 	}
 }
@@ -189,29 +197,35 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 	}
 
 	client := m.getClient()
-	props, err := client.GetUnitPropertiesContext(ctx, name+".service")
+	unitName := name + ".service"
+
+	// Read Unit-interface properties
+	unitProps, err := client.GetUnitPropertiesContext(ctx, unitName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service info: %w", err)
 	}
 
-	if pid, ok := props["MainPID"].(uint32); ok {
-		svc.PID = int(pid)
-	}
-	if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
-		svc.MemoryBytes = mem
-	}
-	if ufs, ok := props["UnitFileState"].(string); ok {
+	if ufs, ok := unitProps["UnitFileState"].(string); ok {
 		svc.UnitFileState = ufs
 		svc.Enabled = ufs == "enabled"
 	}
-	if st, ok := props["ActiveState"].(string); ok {
+	if st, ok := unitProps["ActiveState"].(string); ok {
 		svc.State = st
 	}
-	if sub, ok := props["SubState"].(string); ok {
+	if sub, ok := unitProps["SubState"].(string); ok {
 		svc.SubState = sub
 	}
-	if desc, ok := props["Description"].(string); ok {
+	if desc, ok := unitProps["Description"].(string); ok {
 		svc.Description = desc
+	}
+
+	// Read Service-interface properties (MainPID, MemoryCurrent)
+	svcProps, _ := client.GetUnitTypePropertiesContext(ctx, unitName, "org.freedesktop.systemd1.Service")
+	if pid, ok := svcProps["MainPID"].(uint32); ok {
+		svc.PID = int(pid)
+	}
+	if mem, ok := svcProps["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
+		svc.MemoryBytes = mem
 	}
 
 	// 托管服务：读 unit 文件补元数据
@@ -397,7 +411,7 @@ func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
 			return ufs == "enabled"
 		}
 	}
-	return util.SystemdUnitEnabled(ctx, name+".service")
+	return false
 }
 
 // serviceExists checks if a service unit exists on the system.
@@ -503,19 +517,33 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 	if spec.AutoStart {
 		if err := m.enableManaged(ctx, spec.Name); err != nil {
 			// enable 失败：回滚 unit 文件 + reload + reset-failed。
-			_ = removeUnitFile(spec.Name)
-			_ = m.daemonReload(ctx)
+			if rerr := removeUnitFile(spec.Name); rerr != nil {
+				log.Printf("systemd: rollback remove unit file for %s failed: %v", spec.Name, rerr)
+			}
+			if rerr := m.daemonReload(ctx); rerr != nil {
+				log.Printf("systemd: rollback daemon-reload for %s failed: %v", spec.Name, rerr)
+			}
 			fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-			_ = m.getClient().ResetFailedUnitContext(ctx, fullName)
+			if rerr := m.getClient().ResetFailedUnitContext(ctx, fullName); rerr != nil {
+				log.Printf("systemd: rollback reset-failed for %s failed: %v", fullName, rerr)
+			}
 			return fmt.Errorf("enable 失败（已回滚）: %w", err)
 		}
 		if err := m.startManaged(ctx, spec.Name); err != nil {
 			// start 失败：disable + 回滚 unit 文件 + reload + reset-failed。
 			fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-			_, _ = m.getClient().DisableUnitFilesContext(ctx, []string{fullName}, false)
-			_ = removeUnitFile(spec.Name)
-			_ = m.daemonReload(ctx)
-			_ = m.getClient().ResetFailedUnitContext(ctx, fullName)
+			if _, rerr := m.getClient().DisableUnitFilesContext(ctx, []string{fullName}, false); rerr != nil {
+				log.Printf("systemd: rollback disable for %s failed: %v", fullName, rerr)
+			}
+			if rerr := removeUnitFile(spec.Name); rerr != nil {
+				log.Printf("systemd: rollback remove unit file for %s failed: %v", spec.Name, rerr)
+			}
+			if rerr := m.daemonReload(ctx); rerr != nil {
+				log.Printf("systemd: rollback daemon-reload for %s failed: %v", spec.Name, rerr)
+			}
+			if rerr := m.getClient().ResetFailedUnitContext(ctx, fullName); rerr != nil {
+				log.Printf("systemd: rollback reset-failed for %s failed: %v", fullName, rerr)
+			}
 			return fmt.Errorf("start 失败（已回滚）: %w", err)
 		}
 	}
@@ -551,17 +579,27 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 
 	rollback := func() {
 		if oldContent != "" {
-			_ = writeUnitFile(spec.Name, oldContent)
-			_ = m.daemonReload(ctx)
+			if err := writeUnitFile(spec.Name, oldContent); err != nil {
+				log.Printf("systemd: rollback write unit file for %s failed: %v", spec.Name, err)
+			}
+			if err := m.daemonReload(ctx); err != nil {
+				log.Printf("systemd: rollback daemon-reload for %s failed: %v", spec.Name, err)
+			}
 			nowEnabled := m.isEnabled(ctx, managedUnitPrefix+spec.Name)
 			if wasEnabled && !nowEnabled {
-				_ = m.enableManaged(ctx, spec.Name)
+				if err := m.enableManaged(ctx, spec.Name); err != nil {
+					log.Printf("systemd: rollback enable for %s failed: %v", spec.Name, err)
+				}
 			} else if !wasEnabled && nowEnabled {
-				_ = m.disableManaged(ctx, spec.Name)
+				if err := m.disableManaged(ctx, spec.Name); err != nil {
+					log.Printf("systemd: rollback disable for %s failed: %v", spec.Name, err)
+				}
 			}
 			if wasActive {
 				fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-				_, _ = m.getClient().RestartUnitContext(ctx, fullName, "replace")
+				if _, err := m.getClient().RestartUnitContext(ctx, fullName, "replace"); err != nil {
+					log.Printf("systemd: rollback restart for %s failed: %v", fullName, err)
+				}
 			}
 		}
 	}
