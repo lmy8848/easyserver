@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { notificationApi, settingsApi, authApi } from '../services/api';
+import { notificationApi, settingsApi } from '../services/api';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
-import { message, Button, Badge, Dropdown, Tooltip, Modal, Form, Input } from 'antd';
+import { message, Button, Badge, Dropdown, Tooltip } from 'antd';
 import { SunMoon, Sun, Moon } from 'lucide-react';
 import { useSSE } from '../hooks/useSSE';
 import { useThemeStore, type ThemeMode } from '../store/useThemeStore';
@@ -142,13 +142,7 @@ export default function Layout() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const [showChangePassModal, setShowChangePassModal] = useState(false);
-  const [changePassLoading, setChangePassLoading] = useState(false);
-  const [changePassForm] = Form.useForm();
-  const [showChangeUserModal, setShowChangeUserModal] = useState(false);
-  const [changeUserLoading, setChangeUserLoading] = useState(false);
-  const [changeUserForm] = Form.useForm();
-  const { user, logout, updateUser } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const { mode: themeMode, setMode: setThemeMode } = useThemeStore();
 
   // 登录态判定由 App 顶层负责（loadUser），这里不再重复请求。
@@ -225,46 +219,6 @@ export default function Layout() {
     navigate('/login');
   }, [logout, navigate]);
 
-  const handleChangePassword = async (values: { old_password: string; new_password: string; confirm_password: string }) => {
-    if (values.old_password === values.new_password) {
-      message.error('新密码不能与当前密码相同');
-      return;
-    }
-    if (values.new_password !== values.confirm_password) {
-      message.error('两次输入的密码不一致');
-      return;
-    }
-    setChangePassLoading(true);
-    try {
-      await authApi.changePassword(values.old_password, values.new_password);
-      message.success('密码修改成功，请重新登录');
-      setShowChangePassModal(false);
-      changePassForm.resetFields();
-      localStorage.removeItem('must_change_pass');
-      handleLogout();
-    } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '密码修改失败');
-    } finally {
-      setChangePassLoading(false);
-    }
-  };
-
-  const handleChangeUsername = async (values: { new_username: string; password: string }) => {
-    setChangeUserLoading(true);
-    try {
-      const res = await authApi.changeUsername(values.new_username, values.password);
-      if (res.data?.data?.user) {
-        updateUser(res.data.data.user);
-      }
-      message.success('用户名修改成功');
-      setShowChangeUserModal(false);
-      changeUserForm.resetFields();
-    } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '用户名修改失败');
-    } finally {
-      setChangeUserLoading(false);
-    }
-  };
 
   const handleCmdSelect = useCallback((path: string) => {
     setCmdOpen(false);
@@ -452,11 +406,11 @@ export default function Layout() {
                     </div>
                   </div>
                   <div className="user-dropdown-divider" />
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); setShowChangeUserModal(true); }}>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings?tab=auth#admin-account'); }}>
                     <Icon name="user" size={16} />
                     <span>修改用户名</span>
                   </div>
-                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); setShowChangePassModal(true); }}>
+                  <div className="user-dropdown-item" onClick={() => { setShowUserMenu(false); navigate('/settings?tab=auth#admin-account'); }}>
                     <Icon name="key" size={16} />
                     <span>修改密码</span>
                   </div>
@@ -476,145 +430,6 @@ export default function Layout() {
         </header>
         <main className="content"><Outlet /></main>
       </div>
-
-      {/* 修改密码弹窗 */}
-      <Modal
-        title="修改密码"
-        open={showChangePassModal}
-        onCancel={() => {
-          if (!changePassLoading) {
-            setShowChangePassModal(false);
-            changePassForm.resetFields();
-          }
-        }}
-        footer={null}
-        destroyOnClose
-        centered
-        width={420}
-      >
-        <Form
-          form={changePassForm}
-          layout="vertical"
-          onFinish={handleChangePassword}
-          autoComplete="off"
-          style={{ marginTop: 16 }}
-        >
-          <Form.Item
-            name="old_password"
-            label="当前密码"
-            rules={[{ required: true, message: '请输入当前密码' }]}
-          >
-            <Input.Password placeholder="请输入当前密码" />
-          </Form.Item>
-
-          <Form.Item
-            name="new_password"
-            label="新密码"
-            dependencies={['old_password']}
-            rules={[
-              { required: true, message: '请输入新密码' },
-              { min: 8, message: '密码至少8个字符' },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (value && getFieldValue('old_password') === value) {
-                    return Promise.reject(new Error('新密码不能与当前密码相同'));
-                  }
-                  return Promise.resolve();
-                },
-              }),
-            ]}
-            extra="密码需包含大写字母、小写字母和数字，至少8位"
-          >
-            <Input.Password placeholder="请输入新密码" />
-          </Form.Item>
-
-          <Form.Item
-            name="confirm_password"
-            label="确认新密码"
-            dependencies={['new_password']}
-            rules={[
-              { required: true, message: '请确认新密码' },
-              ({ getFieldValue }) => ({
-                validator(_, value) {
-                  if (!value || getFieldValue('new_password') === value) {
-                    return Promise.resolve();
-                  }
-                  return Promise.reject(new Error('两次输入的密码不一致'));
-                },
-              }),
-            ]}
-          >
-            <Input.Password placeholder="请再次输入新密码" />
-          </Form.Item>
-
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button onClick={() => { setShowChangePassModal(false); changePassForm.resetFields(); }} disabled={changePassLoading}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit" loading={changePassLoading}>
-                确认修改
-              </Button>
-            </div>
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 修改用户名弹窗 */}
-      <Modal
-        title="修改用户名"
-        open={showChangeUserModal}
-        onCancel={() => {
-          if (!changeUserLoading) {
-            setShowChangeUserModal(false);
-            changeUserForm.resetFields();
-          }
-        }}
-        footer={null}
-        destroyOnClose
-        centered
-        width={420}
-      >
-        <Form
-          form={changeUserForm}
-          layout="vertical"
-          onFinish={handleChangeUsername}
-          autoComplete="off"
-          style={{ marginTop: 16 }}
-        >
-          <Form.Item
-            name="new_username"
-            label="新用户名"
-            rules={[
-              { required: true, message: '请输入新用户名' },
-              { min: 3, max: 32, message: '用户名长度需为 3-32 位' },
-              { pattern: /^[a-zA-Z0-9_-]+$/, message: '仅支持字母、数字、下划线或短横线' },
-            ]}
-          >
-            <Input placeholder="请输入新用户名" />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            label="当前密码"
-            rules={[{ required: true, message: '请输入当前密码以验证身份' }]}
-            extra="为了保障账户安全，修改用户名需要验证当前密码"
-          >
-            <Input.Password placeholder="请输入当前密码" />
-          </Form.Item>
-
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button onClick={() => { setShowChangeUserModal(false); changeUserForm.resetFields(); }} disabled={changeUserLoading}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit" loading={changeUserLoading}>
-                确认修改
-              </Button>
-            </div>
-          </Form.Item>
-        </Form>
-      </Modal>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onSelect={handleCmdSelect} />
     </div>

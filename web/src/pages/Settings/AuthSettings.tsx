@@ -135,14 +135,26 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
   }, []);
 
   useEffect(() => {
-    if (location.hash !== '#2fa') return;
-    const timer = setTimeout(() => {
-      const el = document.getElementById('2fa');
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-    return () => clearTimeout(timer);
+    const hash = location.hash;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (hash === '#2fa') {
+      timer = setTimeout(() => {
+        const el = document.getElementById('2fa');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    } else if (hash === '#admin-account' || hash === '#account') {
+      timer = setTimeout(() => {
+        const el = document.getElementById('admin-account');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [location.hash]);
 
   useEffect(() => {
@@ -289,13 +301,19 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
     <div>
       {/* Administrator Account Card */}
       <Card
+        id="admin-account"
         title={
           <Space>
             <UserOutlined />
             <span>管理员账户</span>
           </Space>
         }
-        style={{ marginBottom: 16 }}
+        style={{
+          marginBottom: 16,
+          ...(location.hash === '#admin-account' || location.hash === '#account'
+            ? { borderColor: '#6366f1', boxShadow: '0 0 0 2px rgba(99, 102, 241, 0.2)' }
+            : {}),
+        }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <Space size="middle">
