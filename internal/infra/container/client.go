@@ -1,35 +1,19 @@
 package container
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
 	"sync"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/system"
-	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/client"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-)
-
-// Engine identifies a container runtime engine.
-type Engine string
-
-const (
-	EngineDocker Engine = "docker"
-	EnginePodman Engine = "podman"
-)
-
-// Default Unix Socket paths for Docker and Podman.
-const (
-	DefaultDockerHost = "unix:///var/run/docker.sock"
-	DefaultPodmanHost = "unix:///run/podman/podman.sock"
+	"time"
 )
 
 var (
@@ -39,64 +23,61 @@ var (
 	ErrUnsupportedEngine = errors.New("unsupported container engine")
 )
 
-// EngineClient abstracts all Docker/Podman Engine API operations for EasyServer.
+// EngineClient defines all container engine operations needed by EasyServer.
 type EngineClient interface {
 	// Ping checks if the specified engine's socket is reachable.
-	Ping(ctx context.Context, engine Engine) (types.Ping, error)
+	Ping(ctx context.Context, engine Engine) (PingResponse, error)
 
-	// Info returns system info from the engine daemon.
-	Info(ctx context.Context, engine Engine) (system.Info, error)
-
-	// ServerVersion returns version details of the engine.
-	ServerVersion(ctx context.Context, engine Engine) (types.Version, error)
+	// Version returns version details of the engine.
+	Version(ctx context.Context, engine Engine) (VersionResponse, error)
 
 	// Container operations
-	ContainerList(ctx context.Context, engine Engine, options container.ListOptions) ([]types.Container, error)
-	ContainerInspect(ctx context.Context, engine Engine, containerID string) (types.ContainerJSON, error)
-	ContainerStart(ctx context.Context, engine Engine, containerID string, options container.StartOptions) error
-	ContainerStop(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error
-	ContainerRestart(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error
+	ContainerList(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error)
+	ContainerInspect(ctx context.Context, engine Engine, containerID string) (ContainerInspect, error)
+	ContainerStart(ctx context.Context, engine Engine, containerID string) error
+	ContainerStop(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
+	ContainerRestart(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
 	ContainerPause(ctx context.Context, engine Engine, containerID string) error
 	ContainerUnpause(ctx context.Context, engine Engine, containerID string) error
-	ContainerRemove(ctx context.Context, engine Engine, containerID string, options container.RemoveOptions) error
-	ContainerCreate(ctx context.Context, engine Engine, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	ContainerLogs(ctx context.Context, engine Engine, containerID string, options container.LogsOptions) (io.ReadCloser, error)
-	ContainerStats(ctx context.Context, engine Engine, containerID string, stream bool) (container.StatsResponseReader, error)
-	ContainerExecCreate(ctx context.Context, engine Engine, containerID string, config container.ExecOptions) (types.IDResponse, error)
-	ContainerExecAttach(ctx context.Context, engine Engine, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
-	ContainerExecInspect(ctx context.Context, engine Engine, execID string) (container.ExecInspect, error)
+	ContainerRemove(ctx context.Context, engine Engine, containerID string, force bool) error
+	ContainerCreate(ctx context.Context, engine Engine, name string, req ContainerCreateRequest) (ContainerCreateResponse, error)
+	ContainerLogs(ctx context.Context, engine Engine, containerID string, tail int, stdout, stderr bool) (io.ReadCloser, error)
+	ContainerStats(ctx context.Context, engine Engine, containerID string, stream bool) (io.ReadCloser, error)
+	ContainerExecCreate(ctx context.Context, engine Engine, containerID string, req ExecCreateRequest) (ExecCreateResponse, error)
+	ContainerExecStart(ctx context.Context, engine Engine, execID string, req ExecStartRequest) (io.ReadCloser, error)
+	ContainerExecInspect(ctx context.Context, engine Engine, execID string) (ExecInspectResponse, error)
 
 	// Image operations
-	ImageList(ctx context.Context, engine Engine, options image.ListOptions) ([]image.Summary, error)
-	ImageInspect(ctx context.Context, engine Engine, imageID string) (types.ImageInspect, error)
-	ImagePull(ctx context.Context, engine Engine, refStr string, options image.PullOptions) (io.ReadCloser, error)
-	ImageRemove(ctx context.Context, engine Engine, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error)
-	ImagesPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (image.PruneReport, error)
+	ImageList(ctx context.Context, engine Engine) ([]ImageSummary, error)
+	ImageInspect(ctx context.Context, engine Engine, imageID string) (ImageInspect, error)
+	ImagePull(ctx context.Context, engine Engine, imageRef string, authEncoded string) (io.ReadCloser, error)
+	ImageRemove(ctx context.Context, engine Engine, imageID string, force bool) ([]ImageDeleteResponseItem, error)
+	ImagesPrune(ctx context.Context, engine Engine) (ImagesPruneReport, error)
 
 	// Volume operations
-	VolumeList(ctx context.Context, engine Engine, options volume.ListOptions) (volume.ListResponse, error)
-	VolumeInspect(ctx context.Context, engine Engine, volumeID string) (volume.Volume, error)
-	VolumeCreate(ctx context.Context, engine Engine, options volume.CreateOptions) (volume.Volume, error)
+	VolumeList(ctx context.Context, engine Engine) (VolumeListResponse, error)
+	VolumeInspect(ctx context.Context, engine Engine, volumeID string) (Volume, error)
+	VolumeCreate(ctx context.Context, engine Engine, req VolumeCreateRequest) (Volume, error)
 	VolumeRemove(ctx context.Context, engine Engine, volumeID string, force bool) error
-	VolumesPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (volume.PruneReport, error)
+	VolumesPrune(ctx context.Context, engine Engine) (VolumesPruneReport, error)
 
 	// Network operations
-	NetworkList(ctx context.Context, engine Engine, options network.ListOptions) ([]network.Summary, error)
-	NetworkInspect(ctx context.Context, engine Engine, networkID string, options network.InspectOptions) (network.Inspect, error)
-	NetworkCreate(ctx context.Context, engine Engine, name string, options network.CreateOptions) (network.CreateResponse, error)
+	NetworkList(ctx context.Context, engine Engine) ([]NetworkSummary, error)
+	NetworkInspect(ctx context.Context, engine Engine, networkID string) (NetworkSummary, error)
+	NetworkCreate(ctx context.Context, engine Engine, req NetworkCreateRequest) (NetworkCreateResponse, error)
 	NetworkRemove(ctx context.Context, engine Engine, networkID string) error
-	NetworksPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (network.PruneReport, error)
+	NetworksPrune(ctx context.Context, engine Engine) (NetworksPruneReport, error)
 
-	// Close closes all underlying engine socket connections.
+	// Close closes any idle connections.
 	Close() error
 }
 
 type realClient struct {
-	mu         sync.Mutex
-	dockerHost string
-	podmanHost string
-	dockerCli  *client.Client
-	podmanCli  *client.Client
+	mu           sync.Mutex
+	dockerSocket string
+	podmanSocket string
+	dockerHTTP   *http.Client
+	podmanHTTP   *http.Client
 }
 
 var (
@@ -121,338 +102,459 @@ func SetDefaultClient(c EngineClient) {
 	globalClient = c
 }
 
-// NewEngineClient creates a new EngineClient with configurable socket paths and lazy connection initialization.
-func NewEngineClient(dockerHost, podmanHost string) EngineClient {
-	if dockerHost == "" {
-		dockerHost = DefaultDockerHost
+// NewEngineClient creates a new pure Go stdlib EngineClient with configurable Unix socket paths.
+func NewEngineClient(dockerSocket, podmanSocket string) EngineClient {
+	if dockerSocket == "" {
+		dockerSocket = DefaultDockerHost
 	}
-	if podmanHost == "" {
-		podmanHost = DefaultPodmanHost
+	if podmanSocket == "" {
+		podmanSocket = DefaultPodmanHost
 	}
 	return &realClient{
-		dockerHost: dockerHost,
-		podmanHost: podmanHost,
+		dockerSocket: dockerSocket,
+		podmanSocket: podmanSocket,
 	}
 }
 
-func (c *realClient) getCli(engine Engine) (*client.Client, error) {
+func newUnixHTTPClient(socketPath string) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socketPath)
+			},
+			DisableKeepAlives: false,
+			MaxIdleConns:      10,
+			IdleConnTimeout:   90 * time.Second,
+		},
+	}
+}
+
+func (c *realClient) getHTTP(engine Engine) (*http.Client, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	switch engine {
 	case EngineDocker, "":
-		if c.dockerCli != nil {
-			return c.dockerCli, nil
+		if c.dockerHTTP == nil {
+			c.dockerHTTP = newUnixHTTPClient(c.dockerSocket)
 		}
-		cli, err := client.NewClientWithOpts(
-			client.WithHost(c.dockerHost),
-			client.WithAPIVersionNegotiation(),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrEngineUnavailable, err)
-		}
-		c.dockerCli = cli
-		return c.dockerCli, nil
-
+		return c.dockerHTTP, nil
 	case EnginePodman:
-		if c.podmanCli != nil {
-			return c.podmanCli, nil
+		if c.podmanHTTP == nil {
+			c.podmanHTTP = newUnixHTTPClient(c.podmanSocket)
 		}
-		cli, err := client.NewClientWithOpts(
-			client.WithHost(c.podmanHost),
-			client.WithAPIVersionNegotiation(),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrEngineUnavailable, err)
-		}
-		c.podmanCli = cli
-		return c.podmanCli, nil
-
+		return c.podmanHTTP, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedEngine, engine)
 	}
 }
 
-func (c *realClient) Ping(ctx context.Context, engine Engine) (types.Ping, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) do(ctx context.Context, engine Engine, method, path string, query url.Values, body any, headers map[string]string) (*http.Response, error) {
+	client, err := c.getHTTP(engine)
 	if err != nil {
-		return types.Ping{}, err
+		return nil, err
 	}
-	return cli.Ping(ctx)
+
+	u := "http://localhost" + path
+	if len(query) > 0 {
+		u += "?" + query.Encode()
+	}
+
+	var reqBody io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request body: %w", err)
+		}
+		reqBody = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrEngineUnavailable, err)
+	}
+	return resp, nil
 }
 
-func (c *realClient) Info(ctx context.Context, engine Engine) (system.Info, error) {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return system.Info{}, err
+func parseJSON[T any](resp *http.Response) (T, error) {
+	defer resp.Body.Close()
+	var out T
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return out, fmt.Errorf("engine API error (status %d): %s", resp.StatusCode, string(body))
 	}
-	return cli.Info(ctx)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, fmt.Errorf("decode json: %w", err)
+	}
+	return out, nil
 }
 
-func (c *realClient) ServerVersion(ctx context.Context, engine Engine) (types.Version, error) {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return types.Version{}, err
+func checkStatus(resp *http.Response, expectedCodes ...int) error {
+	defer resp.Body.Close()
+	if slices.Contains(expectedCodes, resp.StatusCode) {
+		return nil
 	}
-	return cli.ServerVersion(ctx)
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("engine API error (status %d): %s", resp.StatusCode, string(body))
+}
+
+// System methods
+
+func (c *realClient) Ping(ctx context.Context, engine Engine) (PingResponse, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/_ping", nil, nil, nil)
+	if err != nil {
+		return PingResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return PingResponse{}, fmt.Errorf("ping status: %d", resp.StatusCode)
+	}
+	return PingResponse{
+		APIVersion: resp.Header.Get("API-Version"),
+		OSType:     resp.Header.Get("OSType"),
+	}, nil
+}
+
+func (c *realClient) Version(ctx context.Context, engine Engine) (VersionResponse, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/version", nil, nil, nil)
+	if err != nil {
+		return VersionResponse{}, err
+	}
+	return parseJSON[VersionResponse](resp)
 }
 
 // Container methods
 
-func (c *realClient) ContainerList(ctx context.Context, engine Engine, options container.ListOptions) ([]types.Container, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerList(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error) {
+	q := url.Values{}
+	if all {
+		q.Set("all", "1")
+	}
+	resp, err := c.do(ctx, engine, http.MethodGet, "/containers/json", q, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return cli.ContainerList(ctx, options)
+	return parseJSON[[]ContainerSummary](resp)
 }
 
-func (c *realClient) ContainerInspect(ctx context.Context, engine Engine, containerID string) (types.ContainerJSON, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerInspect(ctx context.Context, engine Engine, containerID string) (ContainerInspect, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/containers/"+url.PathEscape(containerID)+"/json", nil, nil, nil)
 	if err != nil {
-		return types.ContainerJSON{}, err
+		return ContainerInspect{}, err
 	}
-	return cli.ContainerInspect(ctx, containerID)
+	return parseJSON[ContainerInspect](resp)
 }
 
-func (c *realClient) ContainerStart(ctx context.Context, engine Engine, containerID string, options container.StartOptions) error {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return err
-	}
-	return cli.ContainerStart(ctx, containerID, options)
-}
-
-func (c *realClient) ContainerStop(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerStart(ctx context.Context, engine Engine, containerID string) error {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/start", nil, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.ContainerStop(ctx, containerID, options)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent, http.StatusNotModified)
 }
 
-func (c *realClient) ContainerRestart(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerStop(ctx context.Context, engine Engine, containerID string, timeoutSec int) error {
+	q := url.Values{}
+	if timeoutSec > 0 {
+		q.Set("t", strconv.Itoa(timeoutSec))
+	}
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/stop", q, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.ContainerRestart(ctx, containerID, options)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent, http.StatusNotModified)
+}
+
+func (c *realClient) ContainerRestart(ctx context.Context, engine Engine, containerID string, timeoutSec int) error {
+	q := url.Values{}
+	if timeoutSec > 0 {
+		q.Set("t", strconv.Itoa(timeoutSec))
+	}
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/restart", q, nil, nil)
+	if err != nil {
+		return err
+	}
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent)
 }
 
 func (c *realClient) ContainerPause(ctx context.Context, engine Engine, containerID string) error {
-	cli, err := c.getCli(engine)
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/pause", nil, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.ContainerPause(ctx, containerID)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent)
 }
 
 func (c *realClient) ContainerUnpause(ctx context.Context, engine Engine, containerID string) error {
-	cli, err := c.getCli(engine)
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/unpause", nil, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.ContainerUnpause(ctx, containerID)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent)
 }
 
-func (c *realClient) ContainerRemove(ctx context.Context, engine Engine, containerID string, options container.RemoveOptions) error {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerRemove(ctx context.Context, engine Engine, containerID string, force bool) error {
+	q := url.Values{}
+	if force {
+		q.Set("force", "1")
+	}
+	resp, err := c.do(ctx, engine, http.MethodDelete, "/containers/"+url.PathEscape(containerID), q, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.ContainerRemove(ctx, containerID, options)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent)
 }
 
-func (c *realClient) ContainerCreate(ctx context.Context, engine Engine, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return container.CreateResponse{}, err
+func (c *realClient) ContainerCreate(ctx context.Context, engine Engine, name string, req ContainerCreateRequest) (ContainerCreateResponse, error) {
+	q := url.Values{}
+	if name != "" {
+		q.Set("name", name)
 	}
-	return cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, platform, containerName)
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/create", q, req, nil)
+	if err != nil {
+		return ContainerCreateResponse{}, err
+	}
+	return parseJSON[ContainerCreateResponse](resp)
 }
 
-func (c *realClient) ContainerLogs(ctx context.Context, engine Engine, containerID string, options container.LogsOptions) (io.ReadCloser, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerLogs(ctx context.Context, engine Engine, containerID string, tail int, stdout, stderr bool) (io.ReadCloser, error) {
+	q := url.Values{}
+	if stdout {
+		q.Set("stdout", "1")
+	}
+	if stderr {
+		q.Set("stderr", "1")
+	}
+	if tail > 0 {
+		q.Set("tail", strconv.Itoa(tail))
+	} else {
+		q.Set("tail", "all")
+	}
+	resp, err := c.do(ctx, engine, http.MethodGet, "/containers/"+url.PathEscape(containerID)+"/logs", q, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return cli.ContainerLogs(ctx, containerID, options)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("logs failed (status %d): %s", resp.StatusCode, string(body))
+	}
+	return resp.Body, nil
 }
 
-func (c *realClient) ContainerStats(ctx context.Context, engine Engine, containerID string, stream bool) (container.StatsResponseReader, error) {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return container.StatsResponseReader{}, err
+func (c *realClient) ContainerStats(ctx context.Context, engine Engine, containerID string, stream bool) (io.ReadCloser, error) {
+	q := url.Values{}
+	if !stream {
+		q.Set("stream", "0")
 	}
-	return cli.ContainerStats(ctx, containerID, stream)
+	resp, err := c.do(ctx, engine, http.MethodGet, "/containers/"+url.PathEscape(containerID)+"/stats", q, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("stats failed (status %d): %s", resp.StatusCode, string(body))
+	}
+	return resp.Body, nil
 }
 
-func (c *realClient) ContainerExecCreate(ctx context.Context, engine Engine, containerID string, config container.ExecOptions) (types.IDResponse, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerExecCreate(ctx context.Context, engine Engine, containerID string, req ExecCreateRequest) (ExecCreateResponse, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/exec", nil, req, nil)
 	if err != nil {
-		return types.IDResponse{}, err
+		return ExecCreateResponse{}, err
 	}
-	return cli.ContainerExecCreate(ctx, containerID, config)
+	return parseJSON[ExecCreateResponse](resp)
 }
 
-func (c *realClient) ContainerExecAttach(ctx context.Context, engine Engine, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerExecStart(ctx context.Context, engine Engine, execID string, req ExecStartRequest) (io.ReadCloser, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/exec/"+url.PathEscape(execID)+"/start", nil, req, nil)
 	if err != nil {
-		return types.HijackedResponse{}, err
+		return nil, err
 	}
-	return cli.ContainerExecAttach(ctx, execID, config)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("exec start failed (status %d): %s", resp.StatusCode, string(body))
+	}
+	return resp.Body, nil
 }
 
-func (c *realClient) ContainerExecInspect(ctx context.Context, engine Engine, execID string) (container.ExecInspect, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ContainerExecInspect(ctx context.Context, engine Engine, execID string) (ExecInspectResponse, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/exec/"+url.PathEscape(execID)+"/json", nil, nil, nil)
 	if err != nil {
-		return container.ExecInspect{}, err
+		return ExecInspectResponse{}, err
 	}
-	return cli.ContainerExecInspect(ctx, execID)
+	return parseJSON[ExecInspectResponse](resp)
 }
 
 // Image methods
 
-func (c *realClient) ImageList(ctx context.Context, engine Engine, options image.ListOptions) ([]image.Summary, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ImageList(ctx context.Context, engine Engine) ([]ImageSummary, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/images/json", nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return cli.ImageList(ctx, options)
+	return parseJSON[[]ImageSummary](resp)
 }
 
-func (c *realClient) ImageInspect(ctx context.Context, engine Engine, imageID string) (types.ImageInspect, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) ImageInspect(ctx context.Context, engine Engine, imageID string) (ImageInspect, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/images/"+url.PathEscape(imageID)+"/json", nil, nil, nil)
 	if err != nil {
-		return types.ImageInspect{}, err
+		return ImageInspect{}, err
 	}
-	inspect, _, err := cli.ImageInspectWithRaw(ctx, imageID)
-	return inspect, err
+	return parseJSON[ImageInspect](resp)
 }
 
-func (c *realClient) ImagePull(ctx context.Context, engine Engine, refStr string, options image.PullOptions) (io.ReadCloser, error) {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return nil, err
+func (c *realClient) ImagePull(ctx context.Context, engine Engine, imageRef string, authEncoded string) (io.ReadCloser, error) {
+	q := url.Values{}
+	q.Set("fromImage", imageRef)
+	headers := map[string]string{}
+	if authEncoded != "" {
+		headers["X-Registry-Auth"] = authEncoded
 	}
-	return cli.ImagePull(ctx, refStr, options)
-}
-
-func (c *realClient) ImageRemove(ctx context.Context, engine Engine, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
-	cli, err := c.getCli(engine)
+	resp, err := c.do(ctx, engine, http.MethodPost, "/images/create", q, nil, headers)
 	if err != nil {
 		return nil, err
 	}
-	return cli.ImageRemove(ctx, imageID, options)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("image pull failed (status %d): %s", resp.StatusCode, string(body))
+	}
+	return resp.Body, nil
 }
 
-func (c *realClient) ImagesPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (image.PruneReport, error) {
-	cli, err := c.getCli(engine)
-	if err != nil {
-		return image.PruneReport{}, err
+func (c *realClient) ImageRemove(ctx context.Context, engine Engine, imageID string, force bool) ([]ImageDeleteResponseItem, error) {
+	q := url.Values{}
+	if force {
+		q.Set("force", "1")
 	}
-	return cli.ImagesPrune(ctx, pruneFilters)
+	resp, err := c.do(ctx, engine, http.MethodDelete, "/images/"+url.PathEscape(imageID), q, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return parseJSON[[]ImageDeleteResponseItem](resp)
+}
+
+func (c *realClient) ImagesPrune(ctx context.Context, engine Engine) (ImagesPruneReport, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/images/prune", nil, nil, nil)
+	if err != nil {
+		return ImagesPruneReport{}, err
+	}
+	return parseJSON[ImagesPruneReport](resp)
 }
 
 // Volume methods
 
-func (c *realClient) VolumeList(ctx context.Context, engine Engine, options volume.ListOptions) (volume.ListResponse, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) VolumeList(ctx context.Context, engine Engine) (VolumeListResponse, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/volumes", nil, nil, nil)
 	if err != nil {
-		return volume.ListResponse{}, err
+		return VolumeListResponse{}, err
 	}
-	return cli.VolumeList(ctx, options)
+	return parseJSON[VolumeListResponse](resp)
 }
 
-func (c *realClient) VolumeInspect(ctx context.Context, engine Engine, volumeID string) (volume.Volume, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) VolumeInspect(ctx context.Context, engine Engine, volumeID string) (Volume, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/volumes/"+url.PathEscape(volumeID), nil, nil, nil)
 	if err != nil {
-		return volume.Volume{}, err
+		return Volume{}, err
 	}
-	return cli.VolumeInspect(ctx, volumeID)
+	return parseJSON[Volume](resp)
 }
 
-func (c *realClient) VolumeCreate(ctx context.Context, engine Engine, options volume.CreateOptions) (volume.Volume, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) VolumeCreate(ctx context.Context, engine Engine, req VolumeCreateRequest) (Volume, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/volumes/create", nil, req, nil)
 	if err != nil {
-		return volume.Volume{}, err
+		return Volume{}, err
 	}
-	return cli.VolumeCreate(ctx, options)
+	return parseJSON[Volume](resp)
 }
 
 func (c *realClient) VolumeRemove(ctx context.Context, engine Engine, volumeID string, force bool) error {
-	cli, err := c.getCli(engine)
+	q := url.Values{}
+	if force {
+		q.Set("force", "1")
+	}
+	resp, err := c.do(ctx, engine, http.MethodDelete, "/volumes/"+url.PathEscape(volumeID), q, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.VolumeRemove(ctx, volumeID, force)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent)
 }
 
-func (c *realClient) VolumesPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (volume.PruneReport, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) VolumesPrune(ctx context.Context, engine Engine) (VolumesPruneReport, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/volumes/prune", nil, nil, nil)
 	if err != nil {
-		return volume.PruneReport{}, err
+		return VolumesPruneReport{}, err
 	}
-	return cli.VolumesPrune(ctx, pruneFilters)
+	return parseJSON[VolumesPruneReport](resp)
 }
 
 // Network methods
 
-func (c *realClient) NetworkList(ctx context.Context, engine Engine, options network.ListOptions) ([]network.Summary, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) NetworkList(ctx context.Context, engine Engine) ([]NetworkSummary, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/networks", nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return cli.NetworkList(ctx, options)
+	return parseJSON[[]NetworkSummary](resp)
 }
 
-func (c *realClient) NetworkInspect(ctx context.Context, engine Engine, networkID string, options network.InspectOptions) (network.Inspect, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) NetworkInspect(ctx context.Context, engine Engine, networkID string) (NetworkSummary, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/networks/"+url.PathEscape(networkID), nil, nil, nil)
 	if err != nil {
-		return network.Inspect{}, err
+		return NetworkSummary{}, err
 	}
-	return cli.NetworkInspect(ctx, networkID, options)
+	return parseJSON[NetworkSummary](resp)
 }
 
-func (c *realClient) NetworkCreate(ctx context.Context, engine Engine, name string, options network.CreateOptions) (network.CreateResponse, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) NetworkCreate(ctx context.Context, engine Engine, req NetworkCreateRequest) (NetworkCreateResponse, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/networks/create", nil, req, nil)
 	if err != nil {
-		return network.CreateResponse{}, err
+		return NetworkCreateResponse{}, err
 	}
-	return cli.NetworkCreate(ctx, name, options)
+	return parseJSON[NetworkCreateResponse](resp)
 }
 
 func (c *realClient) NetworkRemove(ctx context.Context, engine Engine, networkID string) error {
-	cli, err := c.getCli(engine)
+	resp, err := c.do(ctx, engine, http.MethodDelete, "/networks/"+url.PathEscape(networkID), nil, nil, nil)
 	if err != nil {
 		return err
 	}
-	return cli.NetworkRemove(ctx, networkID)
+	return checkStatus(resp, http.StatusOK, http.StatusNoContent, http.StatusAccepted)
 }
 
-func (c *realClient) NetworksPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (network.PruneReport, error) {
-	cli, err := c.getCli(engine)
+func (c *realClient) NetworksPrune(ctx context.Context, engine Engine) (NetworksPruneReport, error) {
+	resp, err := c.do(ctx, engine, http.MethodPost, "/networks/prune", nil, nil, nil)
 	if err != nil {
-		return network.PruneReport{}, err
+		return NetworksPruneReport{}, err
 	}
-	return cli.NetworksPrune(ctx, pruneFilters)
+	return parseJSON[NetworksPruneReport](resp)
 }
 
 func (c *realClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var errs []error
-	if c.dockerCli != nil {
-		if err := c.dockerCli.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		c.dockerCli = nil
+	if c.dockerHTTP != nil {
+		c.dockerHTTP.CloseIdleConnections()
+		c.dockerHTTP = nil
 	}
-	if c.podmanCli != nil {
-		if err := c.podmanCli.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		c.podmanCli = nil
+	if c.podmanHTTP != nil {
+		c.podmanHTTP.CloseIdleConnections()
+		c.podmanHTTP = nil
 	}
-	return errors.Join(errs...)
+	return nil
 }

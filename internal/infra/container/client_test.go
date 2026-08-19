@@ -4,18 +4,15 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 )
 
 func TestDefaultClient_SetAndGet(t *testing.T) {
 	mock := &MockEngineClient{
-		PingFn: func(ctx context.Context, engine Engine) (types.Ping, error) {
+		PingFn: func(ctx context.Context, engine Engine) (PingResponse, error) {
 			if engine == EnginePodman {
-				return types.Ping{APIVersion: "1.41"}, nil
+				return PingResponse{APIVersion: "1.41"}, nil
 			}
-			return types.Ping{APIVersion: "1.45"}, nil
+			return PingResponse{APIVersion: "1.45"}, nil
 		},
 	}
 	SetDefaultClient(mock)
@@ -39,10 +36,10 @@ func TestDefaultClient_SetAndGet(t *testing.T) {
 
 func TestMockEngineClient_Operations(t *testing.T) {
 	mock := &MockEngineClient{
-		ContainerListFn: func(ctx context.Context, engine Engine, options container.ListOptions) ([]types.Container, error) {
-			return []types.Container{{ID: "c1", Names: []string{"/web"}}}, nil
+		ContainerListFn: func(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error) {
+			return []ContainerSummary{{ID: "c1", Names: []string{"/web"}}}, nil
 		},
-		ContainerStartFn: func(ctx context.Context, engine Engine, containerID string, options container.StartOptions) error {
+		ContainerStartFn: func(ctx context.Context, engine Engine, containerID string) error {
 			if containerID != "c1" {
 				return errors.New("container not found")
 			}
@@ -50,16 +47,16 @@ func TestMockEngineClient_Operations(t *testing.T) {
 		},
 	}
 
-	list, err := mock.ContainerList(context.Background(), EngineDocker, container.ListOptions{})
+	list, err := mock.ContainerList(context.Background(), EngineDocker, true)
 	if err != nil || len(list) != 1 || list[0].ID != "c1" {
 		t.Fatalf("unexpected ContainerList result: %v, %v", list, err)
 	}
 
-	if err := mock.ContainerStart(context.Background(), EngineDocker, "c1", container.StartOptions{}); err != nil {
+	if err := mock.ContainerStart(context.Background(), EngineDocker, "c1"); err != nil {
 		t.Errorf("ContainerStart failed: %v", err)
 	}
 
-	if err := mock.ContainerStart(context.Background(), EngineDocker, "unknown", container.StartOptions{}); err == nil {
+	if err := mock.ContainerStart(context.Background(), EngineDocker, "unknown"); err == nil {
 		t.Errorf("expected error for unknown container, got nil")
 	}
 }

@@ -4,106 +4,91 @@ import (
 	"context"
 	"io"
 	"strings"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/system"
-	"github.com/docker/docker/api/types/volume"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // MockEngineClient is a test stub implementing EngineClient.
 type MockEngineClient struct {
-	PingFn                 func(ctx context.Context, engine Engine) (types.Ping, error)
-	InfoFn                 func(ctx context.Context, engine Engine) (system.Info, error)
-	ServerVersionFn        func(ctx context.Context, engine Engine) (types.Version, error)
-	ContainerListFn        func(ctx context.Context, engine Engine, options container.ListOptions) ([]types.Container, error)
-	ContainerInspectFn     func(ctx context.Context, engine Engine, containerID string) (types.ContainerJSON, error)
-	ContainerStartFn       func(ctx context.Context, engine Engine, containerID string, options container.StartOptions) error
-	ContainerStopFn        func(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error
-	ContainerRestartFn     func(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error
+	PingFn                 func(ctx context.Context, engine Engine) (PingResponse, error)
+	VersionFn              func(ctx context.Context, engine Engine) (VersionResponse, error)
+	ContainerListFn        func(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error)
+	ContainerInspectFn     func(ctx context.Context, engine Engine, containerID string) (ContainerInspect, error)
+	ContainerStartFn       func(ctx context.Context, engine Engine, containerID string) error
+	ContainerStopFn        func(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
+	ContainerRestartFn     func(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
 	ContainerPauseFn       func(ctx context.Context, engine Engine, containerID string) error
 	ContainerUnpauseFn     func(ctx context.Context, engine Engine, containerID string) error
-	ContainerRemoveFn      func(ctx context.Context, engine Engine, containerID string, options container.RemoveOptions) error
-	ContainerCreateFn      func(ctx context.Context, engine Engine, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
-	ContainerLogsFn        func(ctx context.Context, engine Engine, containerID string, options container.LogsOptions) (io.ReadCloser, error)
-	ContainerStatsFn       func(ctx context.Context, engine Engine, containerID string, stream bool) (container.StatsResponseReader, error)
-	ContainerExecCreateFn  func(ctx context.Context, engine Engine, containerID string, config container.ExecOptions) (types.IDResponse, error)
-	ContainerExecAttachFn  func(ctx context.Context, engine Engine, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
-	ContainerExecInspectFn func(ctx context.Context, engine Engine, execID string) (container.ExecInspect, error)
-	ImageListFn            func(ctx context.Context, engine Engine, options image.ListOptions) ([]image.Summary, error)
-	ImageInspectFn         func(ctx context.Context, engine Engine, imageID string) (types.ImageInspect, error)
-	ImagePullFn            func(ctx context.Context, engine Engine, refStr string, options image.PullOptions) (io.ReadCloser, error)
-	ImageRemoveFn          func(ctx context.Context, engine Engine, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error)
-	ImagesPruneFn          func(ctx context.Context, engine Engine, pruneFilters filters.Args) (image.PruneReport, error)
-	VolumeListFn           func(ctx context.Context, engine Engine, options volume.ListOptions) (volume.ListResponse, error)
-	VolumeInspectFn        func(ctx context.Context, engine Engine, volumeID string) (volume.Volume, error)
-	VolumeCreateFn         func(ctx context.Context, engine Engine, options volume.CreateOptions) (volume.Volume, error)
+	ContainerRemoveFn      func(ctx context.Context, engine Engine, containerID string, force bool) error
+	ContainerCreateFn      func(ctx context.Context, engine Engine, name string, req ContainerCreateRequest) (ContainerCreateResponse, error)
+	ContainerLogsFn        func(ctx context.Context, engine Engine, containerID string, tail int, stdout, stderr bool) (io.ReadCloser, error)
+	ContainerStatsFn       func(ctx context.Context, engine Engine, containerID string, stream bool) (io.ReadCloser, error)
+	ContainerExecCreateFn  func(ctx context.Context, engine Engine, containerID string, req ExecCreateRequest) (ExecCreateResponse, error)
+	ContainerExecStartFn   func(ctx context.Context, engine Engine, execID string, req ExecStartRequest) (io.ReadCloser, error)
+	ContainerExecInspectFn func(ctx context.Context, engine Engine, execID string) (ExecInspectResponse, error)
+	ImageListFn            func(ctx context.Context, engine Engine) ([]ImageSummary, error)
+	ImageInspectFn         func(ctx context.Context, engine Engine, imageID string) (ImageInspect, error)
+	ImagePullFn            func(ctx context.Context, engine Engine, imageRef string, authEncoded string) (io.ReadCloser, error)
+	ImageRemoveFn          func(ctx context.Context, engine Engine, imageID string, force bool) ([]ImageDeleteResponseItem, error)
+	ImagesPruneFn          func(ctx context.Context, engine Engine) (ImagesPruneReport, error)
+	VolumeListFn           func(ctx context.Context, engine Engine) (VolumeListResponse, error)
+	VolumeInspectFn        func(ctx context.Context, engine Engine, volumeID string) (Volume, error)
+	VolumeCreateFn         func(ctx context.Context, engine Engine, req VolumeCreateRequest) (Volume, error)
 	VolumeRemoveFn         func(ctx context.Context, engine Engine, volumeID string, force bool) error
-	VolumesPruneFn         func(ctx context.Context, engine Engine, pruneFilters filters.Args) (volume.PruneReport, error)
-	NetworkListFn          func(ctx context.Context, engine Engine, options network.ListOptions) ([]network.Summary, error)
-	NetworkInspectFn       func(ctx context.Context, engine Engine, networkID string, options network.InspectOptions) (network.Inspect, error)
-	NetworkCreateFn        func(ctx context.Context, engine Engine, name string, options network.CreateOptions) (network.CreateResponse, error)
+	VolumesPruneFn         func(ctx context.Context, engine Engine) (VolumesPruneReport, error)
+	NetworkListFn          func(ctx context.Context, engine Engine) ([]NetworkSummary, error)
+	NetworkInspectFn       func(ctx context.Context, engine Engine, networkID string) (NetworkSummary, error)
+	NetworkCreateFn        func(ctx context.Context, engine Engine, req NetworkCreateRequest) (NetworkCreateResponse, error)
 	NetworkRemoveFn        func(ctx context.Context, engine Engine, networkID string) error
-	NetworksPruneFn        func(ctx context.Context, engine Engine, pruneFilters filters.Args) (network.PruneReport, error)
+	NetworksPruneFn        func(ctx context.Context, engine Engine) (NetworksPruneReport, error)
 	CloseFn                func() error
 }
 
-func (m *MockEngineClient) Ping(ctx context.Context, engine Engine) (types.Ping, error) {
+func (m *MockEngineClient) Ping(ctx context.Context, engine Engine) (PingResponse, error) {
 	if m.PingFn != nil {
 		return m.PingFn(ctx, engine)
 	}
-	return types.Ping{APIVersion: "1.45"}, nil
+	return PingResponse{APIVersion: "1.45"}, nil
 }
 
-func (m *MockEngineClient) Info(ctx context.Context, engine Engine) (system.Info, error) {
-	if m.InfoFn != nil {
-		return m.InfoFn(ctx, engine)
+func (m *MockEngineClient) Version(ctx context.Context, engine Engine) (VersionResponse, error) {
+	if m.VersionFn != nil {
+		return m.VersionFn(ctx, engine)
 	}
-	return system.Info{ServerVersion: "27.5.1"}, nil
+	return VersionResponse{Version: "27.5.1", APIVersion: "1.45"}, nil
 }
 
-func (m *MockEngineClient) ServerVersion(ctx context.Context, engine Engine) (types.Version, error) {
-	if m.ServerVersionFn != nil {
-		return m.ServerVersionFn(ctx, engine)
-	}
-	return types.Version{Version: "27.5.1", APIVersion: "1.45"}, nil
-}
-
-func (m *MockEngineClient) ContainerList(ctx context.Context, engine Engine, options container.ListOptions) ([]types.Container, error) {
+func (m *MockEngineClient) ContainerList(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error) {
 	if m.ContainerListFn != nil {
-		return m.ContainerListFn(ctx, engine, options)
+		return m.ContainerListFn(ctx, engine, all)
 	}
-	return []types.Container{}, nil
+	return []ContainerSummary{}, nil
 }
 
-func (m *MockEngineClient) ContainerInspect(ctx context.Context, engine Engine, containerID string) (types.ContainerJSON, error) {
+func (m *MockEngineClient) ContainerInspect(ctx context.Context, engine Engine, containerID string) (ContainerInspect, error) {
 	if m.ContainerInspectFn != nil {
 		return m.ContainerInspectFn(ctx, engine, containerID)
 	}
-	return types.ContainerJSON{ContainerJSONBase: &types.ContainerJSONBase{ID: containerID}}, nil
+	var out ContainerInspect
+	out.ID = containerID
+	return out, nil
 }
 
-func (m *MockEngineClient) ContainerStart(ctx context.Context, engine Engine, containerID string, options container.StartOptions) error {
+func (m *MockEngineClient) ContainerStart(ctx context.Context, engine Engine, containerID string) error {
 	if m.ContainerStartFn != nil {
-		return m.ContainerStartFn(ctx, engine, containerID, options)
+		return m.ContainerStartFn(ctx, engine, containerID)
 	}
 	return nil
 }
 
-func (m *MockEngineClient) ContainerStop(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error {
+func (m *MockEngineClient) ContainerStop(ctx context.Context, engine Engine, containerID string, timeoutSec int) error {
 	if m.ContainerStopFn != nil {
-		return m.ContainerStopFn(ctx, engine, containerID, options)
+		return m.ContainerStopFn(ctx, engine, containerID, timeoutSec)
 	}
 	return nil
 }
 
-func (m *MockEngineClient) ContainerRestart(ctx context.Context, engine Engine, containerID string, options container.StopOptions) error {
+func (m *MockEngineClient) ContainerRestart(ctx context.Context, engine Engine, containerID string, timeoutSec int) error {
 	if m.ContainerRestartFn != nil {
-		return m.ContainerRestartFn(ctx, engine, containerID, options)
+		return m.ContainerRestartFn(ctx, engine, containerID, timeoutSec)
 	}
 	return nil
 }
@@ -122,109 +107,109 @@ func (m *MockEngineClient) ContainerUnpause(ctx context.Context, engine Engine, 
 	return nil
 }
 
-func (m *MockEngineClient) ContainerRemove(ctx context.Context, engine Engine, containerID string, options container.RemoveOptions) error {
+func (m *MockEngineClient) ContainerRemove(ctx context.Context, engine Engine, containerID string, force bool) error {
 	if m.ContainerRemoveFn != nil {
-		return m.ContainerRemoveFn(ctx, engine, containerID, options)
+		return m.ContainerRemoveFn(ctx, engine, containerID, force)
 	}
 	return nil
 }
 
-func (m *MockEngineClient) ContainerCreate(ctx context.Context, engine Engine, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+func (m *MockEngineClient) ContainerCreate(ctx context.Context, engine Engine, name string, req ContainerCreateRequest) (ContainerCreateResponse, error) {
 	if m.ContainerCreateFn != nil {
-		return m.ContainerCreateFn(ctx, engine, config, hostConfig, networkingConfig, platform, containerName)
+		return m.ContainerCreateFn(ctx, engine, name, req)
 	}
-	return container.CreateResponse{ID: "mock-id-" + containerName}, nil
+	return ContainerCreateResponse{ID: "mock-id-" + name}, nil
 }
 
-func (m *MockEngineClient) ContainerLogs(ctx context.Context, engine Engine, containerID string, options container.LogsOptions) (io.ReadCloser, error) {
+func (m *MockEngineClient) ContainerLogs(ctx context.Context, engine Engine, containerID string, tail int, stdout, stderr bool) (io.ReadCloser, error) {
 	if m.ContainerLogsFn != nil {
-		return m.ContainerLogsFn(ctx, engine, containerID, options)
+		return m.ContainerLogsFn(ctx, engine, containerID, tail, stdout, stderr)
 	}
 	return io.NopCloser(strings.NewReader("")), nil
 }
 
-func (m *MockEngineClient) ContainerStats(ctx context.Context, engine Engine, containerID string, stream bool) (container.StatsResponseReader, error) {
+func (m *MockEngineClient) ContainerStats(ctx context.Context, engine Engine, containerID string, stream bool) (io.ReadCloser, error) {
 	if m.ContainerStatsFn != nil {
 		return m.ContainerStatsFn(ctx, engine, containerID, stream)
 	}
-	return container.StatsResponseReader{Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	return io.NopCloser(strings.NewReader("{}")), nil
 }
 
-func (m *MockEngineClient) ContainerExecCreate(ctx context.Context, engine Engine, containerID string, config container.ExecOptions) (types.IDResponse, error) {
+func (m *MockEngineClient) ContainerExecCreate(ctx context.Context, engine Engine, containerID string, req ExecCreateRequest) (ExecCreateResponse, error) {
 	if m.ContainerExecCreateFn != nil {
-		return m.ContainerExecCreateFn(ctx, engine, containerID, config)
+		return m.ContainerExecCreateFn(ctx, engine, containerID, req)
 	}
-	return types.IDResponse{ID: "mock-exec-id"}, nil
+	return ExecCreateResponse{ID: "mock-exec-id"}, nil
 }
 
-func (m *MockEngineClient) ContainerExecAttach(ctx context.Context, engine Engine, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error) {
-	if m.ContainerExecAttachFn != nil {
-		return m.ContainerExecAttachFn(ctx, engine, execID, config)
+func (m *MockEngineClient) ContainerExecStart(ctx context.Context, engine Engine, execID string, req ExecStartRequest) (io.ReadCloser, error) {
+	if m.ContainerExecStartFn != nil {
+		return m.ContainerExecStartFn(ctx, engine, execID, req)
 	}
-	return types.HijackedResponse{}, nil
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
-func (m *MockEngineClient) ContainerExecInspect(ctx context.Context, engine Engine, execID string) (container.ExecInspect, error) {
+func (m *MockEngineClient) ContainerExecInspect(ctx context.Context, engine Engine, execID string) (ExecInspectResponse, error) {
 	if m.ContainerExecInspectFn != nil {
 		return m.ContainerExecInspectFn(ctx, engine, execID)
 	}
-	return container.ExecInspect{ExitCode: 0}, nil
+	return ExecInspectResponse{ExitCode: 0}, nil
 }
 
-func (m *MockEngineClient) ImageList(ctx context.Context, engine Engine, options image.ListOptions) ([]image.Summary, error) {
+func (m *MockEngineClient) ImageList(ctx context.Context, engine Engine) ([]ImageSummary, error) {
 	if m.ImageListFn != nil {
-		return m.ImageListFn(ctx, engine, options)
+		return m.ImageListFn(ctx, engine)
 	}
-	return []image.Summary{}, nil
+	return []ImageSummary{}, nil
 }
 
-func (m *MockEngineClient) ImageInspect(ctx context.Context, engine Engine, imageID string) (types.ImageInspect, error) {
+func (m *MockEngineClient) ImageInspect(ctx context.Context, engine Engine, imageID string) (ImageInspect, error) {
 	if m.ImageInspectFn != nil {
 		return m.ImageInspectFn(ctx, engine, imageID)
 	}
-	return types.ImageInspect{ID: imageID}, nil
+	return ImageInspect{ID: imageID}, nil
 }
 
-func (m *MockEngineClient) ImagePull(ctx context.Context, engine Engine, refStr string, options image.PullOptions) (io.ReadCloser, error) {
+func (m *MockEngineClient) ImagePull(ctx context.Context, engine Engine, imageRef string, authEncoded string) (io.ReadCloser, error) {
 	if m.ImagePullFn != nil {
-		return m.ImagePullFn(ctx, engine, refStr, options)
+		return m.ImagePullFn(ctx, engine, imageRef, authEncoded)
 	}
 	return io.NopCloser(strings.NewReader(`{"status":"Pull complete"}`)), nil
 }
 
-func (m *MockEngineClient) ImageRemove(ctx context.Context, engine Engine, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error) {
+func (m *MockEngineClient) ImageRemove(ctx context.Context, engine Engine, imageID string, force bool) ([]ImageDeleteResponseItem, error) {
 	if m.ImageRemoveFn != nil {
-		return m.ImageRemoveFn(ctx, engine, imageID, options)
+		return m.ImageRemoveFn(ctx, engine, imageID, force)
 	}
-	return []image.DeleteResponse{{Deleted: imageID}}, nil
+	return []ImageDeleteResponseItem{{Deleted: imageID}}, nil
 }
 
-func (m *MockEngineClient) ImagesPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (image.PruneReport, error) {
+func (m *MockEngineClient) ImagesPrune(ctx context.Context, engine Engine) (ImagesPruneReport, error) {
 	if m.ImagesPruneFn != nil {
-		return m.ImagesPruneFn(ctx, engine, pruneFilters)
+		return m.ImagesPruneFn(ctx, engine)
 	}
-	return image.PruneReport{}, nil
+	return ImagesPruneReport{}, nil
 }
 
-func (m *MockEngineClient) VolumeList(ctx context.Context, engine Engine, options volume.ListOptions) (volume.ListResponse, error) {
+func (m *MockEngineClient) VolumeList(ctx context.Context, engine Engine) (VolumeListResponse, error) {
 	if m.VolumeListFn != nil {
-		return m.VolumeListFn(ctx, engine, options)
+		return m.VolumeListFn(ctx, engine)
 	}
-	return volume.ListResponse{}, nil
+	return VolumeListResponse{}, nil
 }
 
-func (m *MockEngineClient) VolumeInspect(ctx context.Context, engine Engine, volumeID string) (volume.Volume, error) {
+func (m *MockEngineClient) VolumeInspect(ctx context.Context, engine Engine, volumeID string) (Volume, error) {
 	if m.VolumeInspectFn != nil {
 		return m.VolumeInspectFn(ctx, engine, volumeID)
 	}
-	return volume.Volume{Name: volumeID}, nil
+	return Volume{Name: volumeID}, nil
 }
 
-func (m *MockEngineClient) VolumeCreate(ctx context.Context, engine Engine, options volume.CreateOptions) (volume.Volume, error) {
+func (m *MockEngineClient) VolumeCreate(ctx context.Context, engine Engine, req VolumeCreateRequest) (Volume, error) {
 	if m.VolumeCreateFn != nil {
-		return m.VolumeCreateFn(ctx, engine, options)
+		return m.VolumeCreateFn(ctx, engine, req)
 	}
-	return volume.Volume{Name: options.Name}, nil
+	return Volume{Name: req.Name}, nil
 }
 
 func (m *MockEngineClient) VolumeRemove(ctx context.Context, engine Engine, volumeID string, force bool) error {
@@ -234,32 +219,32 @@ func (m *MockEngineClient) VolumeRemove(ctx context.Context, engine Engine, volu
 	return nil
 }
 
-func (m *MockEngineClient) VolumesPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (volume.PruneReport, error) {
+func (m *MockEngineClient) VolumesPrune(ctx context.Context, engine Engine) (VolumesPruneReport, error) {
 	if m.VolumesPruneFn != nil {
-		return m.VolumesPruneFn(ctx, engine, pruneFilters)
+		return m.VolumesPruneFn(ctx, engine)
 	}
-	return volume.PruneReport{}, nil
+	return VolumesPruneReport{}, nil
 }
 
-func (m *MockEngineClient) NetworkList(ctx context.Context, engine Engine, options network.ListOptions) ([]network.Summary, error) {
+func (m *MockEngineClient) NetworkList(ctx context.Context, engine Engine) ([]NetworkSummary, error) {
 	if m.NetworkListFn != nil {
-		return m.NetworkListFn(ctx, engine, options)
+		return m.NetworkListFn(ctx, engine)
 	}
-	return []network.Summary{}, nil
+	return []NetworkSummary{}, nil
 }
 
-func (m *MockEngineClient) NetworkInspect(ctx context.Context, engine Engine, networkID string, options network.InspectOptions) (network.Inspect, error) {
+func (m *MockEngineClient) NetworkInspect(ctx context.Context, engine Engine, networkID string) (NetworkSummary, error) {
 	if m.NetworkInspectFn != nil {
-		return m.NetworkInspectFn(ctx, engine, networkID, options)
+		return m.NetworkInspectFn(ctx, engine, networkID)
 	}
-	return network.Inspect{ID: networkID, Name: "mock-net"}, nil
+	return NetworkSummary{ID: networkID, Name: "mock-net"}, nil
 }
 
-func (m *MockEngineClient) NetworkCreate(ctx context.Context, engine Engine, name string, options network.CreateOptions) (network.CreateResponse, error) {
+func (m *MockEngineClient) NetworkCreate(ctx context.Context, engine Engine, req NetworkCreateRequest) (NetworkCreateResponse, error) {
 	if m.NetworkCreateFn != nil {
-		return m.NetworkCreateFn(ctx, engine, name, options)
+		return m.NetworkCreateFn(ctx, engine, req)
 	}
-	return network.CreateResponse{ID: "mock-net-id"}, nil
+	return NetworkCreateResponse{ID: "mock-net-id"}, nil
 }
 
 func (m *MockEngineClient) NetworkRemove(ctx context.Context, engine Engine, networkID string) error {
@@ -269,11 +254,11 @@ func (m *MockEngineClient) NetworkRemove(ctx context.Context, engine Engine, net
 	return nil
 }
 
-func (m *MockEngineClient) NetworksPrune(ctx context.Context, engine Engine, pruneFilters filters.Args) (network.PruneReport, error) {
+func (m *MockEngineClient) NetworksPrune(ctx context.Context, engine Engine) (NetworksPruneReport, error) {
 	if m.NetworksPruneFn != nil {
-		return m.NetworksPruneFn(ctx, engine, pruneFilters)
+		return m.NetworksPruneFn(ctx, engine)
 	}
-	return network.PruneReport{}, nil
+	return NetworksPruneReport{}, nil
 }
 
 func (m *MockEngineClient) Close() error {
