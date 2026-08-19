@@ -20,8 +20,6 @@ import (
 	cronhttp "easyserver/internal/cron/http"
 	dbdomain "easyserver/internal/database"
 	databasehttp "easyserver/internal/database/http"
-	"easyserver/internal/deploy"
-	deployhttp "easyserver/internal/deploy/http"
 	"easyserver/internal/envconfig"
 	envconfighttp "easyserver/internal/envconfig/http"
 	"easyserver/internal/filemanager"
@@ -152,12 +150,6 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	dbRepo := dbdomain.NewSQLiteRepository(db)
 	dbService := dbdomain.NewServiceWithSink(dbRepo, dbdomain.NewCLIContainerRuntime(nil), notificationService)
 
-	deployRepo := deploy.NewSQLiteRepository(db)
-	deploySvc, err := deploy.NewService(deployRepo, cfg.Deploy.EncryptionKey)
-	if err != nil {
-		log.Fatalf("init deploy service: %v", err)
-	}
-
 	firewallRepo := firewall.NewSQLiteRepository(db)
 	firewallService := firewall.NewService(firewallRepo, cfg.Server.Port)
 
@@ -211,7 +203,6 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo)
 	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig)
 	cloudhttp.RegisterRoutes(g.Protected, cloudService, &cfg.TencentCloud, cfg.Server.Port)
-	deployhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), deploySvc)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)

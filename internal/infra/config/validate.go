@@ -84,27 +84,6 @@ func Validate(cfg *Config, devMode bool) error {
 		log.Println("WARNING: FileManager BasePath is '/' (full root access).")
 	}
 
-	// Deploy encryption key
-	if cfg.Deploy.EncryptionKey == "" {
-		if err := rejectOrWarn(devMode, true,
-			"deploy.encryption_key is required. Set via EASYSERVER_ENCRYPTION_KEY env var (32+ chars) or deploy.encryption_key in config.toml."); err != nil {
-			return err
-		}
-	}
-	knownWeakDeployKeys := []string{
-		"change-me-to-a-random-32-byte-key!!",
-		"change-me-to-a-random-32-byte-key",
-	}
-	for _, weak := range knownWeakDeployKeys {
-		if cfg.Deploy.EncryptionKey == weak {
-			if err := rejectOrWarn(devMode, true,
-				"deploy.encryption_key is set to a well-known default value."); err != nil {
-				return err
-			}
-			break
-		}
-	}
-
 	// TLS: when enabled, verify the cert/key pair is loadable and not expired.
 	// dev mode degrades to a warning; production rejects startup/restart.
 	if cfg.Server.TLS.Enabled {

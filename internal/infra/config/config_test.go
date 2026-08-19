@@ -64,9 +64,6 @@ secret_key = "tc-key"
 region = "ap-beijing"
 instance_id = "lhins-123"
 
-[deploy]
-encryption_key = "deploy-secret-key-32-bytes-length!"
-
 [notify]
 enabled = true
 webhook_url = "https://example.com/webhook"
@@ -129,7 +126,7 @@ func TestAutoGenerateSecretsAndPersist(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 
-	// Config without jwt_secret or encryption_key
+	// Config without jwt_secret
 	initial := `
 [server]
 port = 8080
@@ -146,9 +143,6 @@ port = 8080
 	if len(cfg.Auth.JWTSecret) < 32 {
 		t.Errorf("Expected generated JWTSecret >= 32 chars, got %d", len(cfg.Auth.JWTSecret))
 	}
-	if len(cfg.Deploy.EncryptionKey) < 32 {
-		t.Errorf("Expected generated EncryptionKey >= 32 chars, got %d", len(cfg.Deploy.EncryptionKey))
-	}
 
 	// Verify persistence
 	reloaded, err := Load(configPath)
@@ -158,9 +152,6 @@ port = 8080
 
 	if reloaded.Auth.JWTSecret != cfg.Auth.JWTSecret {
 		t.Errorf("Reloaded JWTSecret = %s, want %s (persistent)", reloaded.Auth.JWTSecret, cfg.Auth.JWTSecret)
-	}
-	if reloaded.Deploy.EncryptionKey != cfg.Deploy.EncryptionKey {
-		t.Errorf("Reloaded EncryptionKey = %s, want %s (persistent)", reloaded.Deploy.EncryptionKey, cfg.Deploy.EncryptionKey)
 	}
 }
 

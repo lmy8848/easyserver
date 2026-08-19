@@ -22,7 +22,6 @@
 - **Firewall** — iptables / nftables rule management
 - **Runtime Environment** — Node.js / Python / Go / Java runtime management (via mise)
 - **Scheduled Tasks** — Cron job management with a script library
-- **Remote Deployment** — SSH remote server management and one-click deployment
 - **Notifications & Alerts** — Webhook notifications (DingTalk / Feishu / WeCom) + metric alert rules
 - **Audit Logs** — Complete operation audit with export and cleanup policies
 - **Global Runtime Logging** — Persistent application logs in the app directory with level control (configurable from the panel) and source-location tracing for troubleshooting

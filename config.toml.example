@@ -51,11 +51,6 @@ collect_interval = "3s"
 [audit]
 retention_days = 90
 
-[deploy]
-# encryption_key: 留空时系统将在首次启动时自动生成 32 字节高强度随机密钥
-# 也可通过环境变量 EASYSERVER_ENCRYPTION_KEY 指定
-# encryption_key = ""
-
 [filemanager]
 base_path = "/opt/easyserver/data" # 文件管理器根目录；留空 = 整个文件系统（/）
 
