@@ -191,19 +191,29 @@ func copyFile(src, dst string, safeBaseDir string) error {
 	}
 	if safeBaseDir != "" {
 		ok, err := isPathWithinBase(cleanDst, safeBaseDir)
-		if err != nil {
-			return err
-		}
-		if !ok {
+		if err != nil || !ok {
 			return errors.New("destination path escapes safe directory")
 		}
 	}
-	in, err := os.Open(cleanSrc)
+	srcFi, err := os.Lstat(cleanSrc)
+	if err != nil {
+		return err
+	}
+	if !srcFi.Mode().IsRegular() {
+		return errors.New("source is not a regular file")
+	}
+	if dstFi, err := os.Lstat(cleanDst); err == nil {
+		if !dstFi.Mode().IsRegular() {
+			return errors.New("destination exists and is not a regular file")
+		}
+		_ = os.Remove(cleanDst)
+	}
+	in, err := os.OpenFile(cleanSrc, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(cleanDst)
+	out, err := os.OpenFile(cleanDst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
