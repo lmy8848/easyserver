@@ -12,7 +12,7 @@ import {
   FileTextOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import type { Service, ManagedServiceSpec } from '../../types';
-import { serviceApi } from '../../services/api';
+import { serviceApi } from '../../services/systemd';
 import { useTab } from '../../hooks/useTab';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 import { formatBytes, formatUptime } from '../../utils/format';

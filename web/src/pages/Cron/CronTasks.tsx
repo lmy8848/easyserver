@@ -9,7 +9,7 @@ import {
   ClockCircleOutlined, EyeOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons';
 import type { CronTask, Script } from '../../types';
-import { cronApi } from '../../services/api';
+import { cronApi } from '../../services/cron';
 import { buildOnCalendar, describeSchedule, computeNextRun, describeOnCalendar, type ScheduleForm } from './schedule';
 import { STYLES } from './types';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';

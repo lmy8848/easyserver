@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import { UploadOutlined, SyncOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { settingsApi } from '../../services/api';
+import { settingsApi } from '../../services/settings';
 import type { Settings, SystemInfo, TLSCertInfo } from './types';
 
 const { TextArea } = Input;

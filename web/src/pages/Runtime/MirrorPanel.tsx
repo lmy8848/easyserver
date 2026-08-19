@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Modal, Table, Input, Button, Space, Tag, message, Popconfirm, Form, Select } from 'antd';
 import { SyncOutlined, PlusOutlined } from '@ant-design/icons';
-import api from '../../services/api';
+import api from '../../services/client';
 import type { CatalogEntry } from './types';
 
 // MirrorPanel operates on the dedicated /api/runtime/mirrors API.

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Table, Button, Modal, Form, Input, message, Popconfirm, Tabs, Switch } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
-import api from '../services/api';
+import api from '../services/client';
 import { useTab } from '../hooks/useTab';
 
 interface EnvConfig {

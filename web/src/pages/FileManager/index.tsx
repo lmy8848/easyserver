@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Modal, message, Input, Form, InputNumber, Progress, Spin, Button, Space } from 'antd';
-import { fileApi, fileShareApi } from '../../services/api';
+import { fileApi, fileShareApi } from '../../services/filemanager';
 import type { FileEntry } from '../../types';
 import { isValidPath } from './types';
 import FileManagerHeader from './FileManagerHeader';

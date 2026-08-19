@@ -7,7 +7,7 @@ import {
   SettingOutlined, TeamOutlined, HistoryOutlined,
   ReloadOutlined, SaveOutlined, DeleteOutlined, SafetyOutlined,
 } from '@ant-design/icons';
-import { sshApi } from '../services/api';
+import { sshApi } from '../services/ssh';
 import { useTab } from '../hooks/useTab';
 import SSHHardeningTab from './SSHHardeningTab';
 

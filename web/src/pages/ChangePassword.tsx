@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Form, Input, Button, Card, message, Typography } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { authApi } from '../services/api';
+import { authApi } from '../services/auth';
 import { useAuthStore } from '../store/useAuthStore';
 import { COLORS } from '../utils/theme';
 

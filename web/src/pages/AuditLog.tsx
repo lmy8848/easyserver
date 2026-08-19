@@ -9,7 +9,7 @@ import {
   DownloadOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { auditApi } from '../services/api';
+import { auditApi } from '../services/audit';
 import { useTab } from '../hooks/useTab';
 import { getHttpStatusColor } from '../utils/status';
 import dayjs from 'dayjs';

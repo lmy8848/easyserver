@@ -3,7 +3,7 @@ import {
   Card, Form, Input, Button, message, Divider, List, Popconfirm, Tag, Alert,
 } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, LogoutOutlined } from '@ant-design/icons';
-import { containerApi } from '../../services/api';
+import { containerApi } from '../../services/container';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 
 interface LoggedInRegistry {

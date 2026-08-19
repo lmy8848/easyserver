@@ -8,7 +8,7 @@ import {
   ArrowDownUp,
 } from 'lucide-react';
 import ReactECharts from 'echarts-for-react';
-import { monitorApi } from '../services/api';
+import { monitorApi } from '../services/monitor';
 import type { MonitorSnapshot, HistoryPoint } from '../types';
 import { formatBytes, formatUptime, formatDateTime } from '../utils/format';
 import { getPercentColor } from '../utils/status';

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, Button, Table, Tag, Space, message, Popconfirm, Alert } from 'antd';
 import { ReloadOutlined, ScanOutlined, CheckCircleOutlined, UndoOutlined } from '@ant-design/icons';
-import api from '../../services/api';
+import api from '../../services/client';
 
 interface FIMBaseline { path: string; hash: string; size: number; mtime: string; updated_at: string; }
 interface FIMChange { path: string; change_type: string; old_hash: string; new_hash: string; detected_at: string; }

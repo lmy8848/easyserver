@@ -5,7 +5,7 @@ import { SunMoon, Sun, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { useThemeStore, type ThemeMode } from '../store/useThemeStore';
-import { authApi } from '../services/api';
+import { authApi } from '../services/auth';
 import type { User } from '../types';
 import Turnstile from '../components/Turnstile';
 

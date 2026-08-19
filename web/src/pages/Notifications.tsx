@@ -7,7 +7,7 @@ import {
   WarningOutlined, InfoCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import type { Notification } from '../types';
-import { notificationApi } from '../services/api';
+import { notificationApi } from '../services/notification';
 import { useSSE } from '../hooks/useSSE';
 
 const LEVEL_OPTIONS = [

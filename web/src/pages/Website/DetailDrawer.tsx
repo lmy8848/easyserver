@@ -6,7 +6,7 @@ import {
 import {
   ReloadOutlined, ThunderboltOutlined, SafetyOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
-import api from '../../services/api';
+import api from '../../services/client';
 import type { Website } from '../../types';
 import SecurityTab from './SecurityTab';
 

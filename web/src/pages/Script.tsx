@@ -10,7 +10,7 @@ import {
   PlayCircleOutlined, StopOutlined, HistoryOutlined,
 } from '@ant-design/icons';
 import type { Script, ScriptLogLine } from '../types';
-import { cronApi } from '../services/api';
+import { cronApi } from '../services/cron';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
 import { useSSE } from '../hooks/useSSE';
 

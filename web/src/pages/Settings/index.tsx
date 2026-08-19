@@ -7,7 +7,7 @@ import {
   MonitorOutlined, InfoCircleOutlined,
   AlertOutlined,
 } from '@ant-design/icons';
-import { settingsApi } from '../../services/api';
+import { settingsApi } from '../../services/settings';
 import { useTab } from '../../hooks/useTab';
 import type { Settings, SystemInfo } from './types';
 import ServerSettings from './ServerSettings';

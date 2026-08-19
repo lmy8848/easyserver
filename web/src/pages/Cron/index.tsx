@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import type { CronTask, CronRun, Script } from '../../types';
-import { cronApi } from '../../services/api';
+import { cronApi } from '../../services/cron';
 import CronTasks from './CronTasks';
 import CronLogs from './CronLogs';
 import CronDocs from './CronDocs';

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { User } from '../types';
-import { authApi } from '../services/api';
+import { authApi } from '../services/auth';
 
 // Validate user object shape from localStorage to prevent tampering
 function isValidUser(obj: unknown): obj is User {

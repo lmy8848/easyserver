@@ -5,7 +5,7 @@ import {
 import {
   DeleteOutlined, PlusOutlined, ReloadOutlined,
 } from '@ant-design/icons';
-import { containerApi } from '../../services/api';
+import { containerApi } from '../../services/container';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Network } from './types';
 
