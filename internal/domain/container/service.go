@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -387,12 +388,25 @@ func (s *Service) RemoveContainer(ctx context.Context, engine Engine, id string,
 
 // GetContainerLogs returns container logs.
 func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string, tail int) (string, error) {
-	args := []string{"logs", "--tail", strconv.Itoa(tail), id}
-	output, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	rc, err := infracontainer.DefaultClient().ContainerLogs(ctx, infracontainer.Engine(engine), id, tail, true, true)
 	if err != nil {
-		return "", errx.Internal("%s logs failed: %s", engine, output)
+		return "", errx.Internal("%s logs failed: %w", engine, err)
 	}
-	return string(output), nil
+	defer rc.Close()
+
+	rawBytes, err := io.ReadAll(rc)
+	if err != nil {
+		return "", errx.Internal("read logs failed: %w", err)
+	}
+	if len(rawBytes) == 0 {
+		return "", nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := infracontainer.DemuxLogs(bytes.NewReader(rawBytes), &stdout, &stderr); err == nil && (stdout.Len() > 0 || stderr.Len() > 0) {
+		return stdout.String() + stderr.String(), nil
+	}
+	return string(rawBytes), nil
 }
 
 var validContainerIDRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
@@ -423,11 +437,31 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 		return "", errx.BadRequest("command cannot be empty")
 	}
 
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "exec", id, "sh", "-c", cmd).CombinedOutput()
+	createResp, err := infracontainer.DefaultClient().ContainerExecCreate(ctx, infracontainer.Engine(engine), id, infracontainer.ExecCreateRequest{
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd:          []string{"sh", "-c", cmd},
+	})
 	if err != nil {
-		return string(output), errx.Internal("%s exec failed: %s", engine, output)
+		return "", errx.Internal("%s exec create failed: %w", engine, err)
 	}
-	return string(output), nil
+
+	rc, err := infracontainer.DefaultClient().ContainerExecStart(ctx, infracontainer.Engine(engine), createResp.ID, infracontainer.ExecStartRequest{})
+	if err != nil {
+		return "", errx.Internal("%s exec start failed: %w", engine, err)
+	}
+	defer rc.Close()
+
+	rawBytes, err := io.ReadAll(rc)
+	if err != nil {
+		return "", errx.Internal("%s exec read failed: %w", engine, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := infracontainer.DemuxLogs(bytes.NewReader(rawBytes), &stdout, &stderr); err == nil && (stdout.Len() > 0 || stderr.Len() > 0) {
+		return stdout.String() + stderr.String(), nil
+	}
+	return string(rawBytes), nil
 }
 
 // CreateContainer creates a new container.
@@ -582,58 +616,54 @@ func (s *Service) RemoveImage(ctx context.Context, engine Engine, id string, for
 
 // GetContainerStats returns real-time resource usage stats for a container.
 func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id string) (*Stats, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "stats", id, "--no-stream", "--format",
-		`{"cpu_percent":"{{.CPUPerc}}","mem_usage":"{{.MemUsage}}","mem_percent":"{{.MemPerc}}","net_rx":"{{.NetIO}}","block_read":"{{.BlockIO}}","pids":"{{.PIDs}}"}`).CombinedOutput()
+	rc, err := infracontainer.DefaultClient().ContainerStats(ctx, infracontainer.Engine(engine), id, false)
 	if err != nil {
-		return nil, errx.Internal("%s stats failed: %s", engine, output)
+		return nil, errx.Internal("%s stats failed: %w", engine, err)
 	}
+	defer rc.Close()
 
-	var raw struct {
-		CPUPercent string `json:"cpu_percent"`
-		MemUsage   string `json:"mem_usage"`
-		MemPercent string `json:"mem_percent"`
-		NetRx      string `json:"net_rx"`
-		BlockRead  string `json:"block_read"`
-		PIDs       string `json:"pids"`
-	}
-
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &raw); err != nil {
-		return nil, fmt.Errorf("parse stats: %w", err)
+	var raw infracontainer.StatsJSON
+	if err := json.NewDecoder(rc).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("parse stats json: %w", err)
 	}
 
 	stats := &Stats{}
-
-	cpuStr := strings.TrimSuffix(raw.CPUPercent, "%")
-	if v, err := strconv.ParseFloat(cpuStr, 64); err == nil {
-		stats.CPUPercent = v
+	// CPU calculation: (cpu_delta / system_cpu_delta) * number_cpus * 100.0
+	cpuDelta := float64(raw.CPUStats.CPUUsage.TotalUsage) - float64(raw.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(raw.CPUStats.SystemCPUUsage) - float64(raw.PreCPUStats.SystemCPUUsage)
+	numCPUs := float64(raw.CPUStats.OnlineCPUs)
+	if numCPUs == 0 {
+		numCPUs = float64(len(raw.CPUStats.CPUUsage.PercpuUsage))
+	}
+	if numCPUs == 0 {
+		numCPUs = 1
+	}
+	if systemDelta > 0 && cpuDelta > 0 {
+		stats.CPUPercent = (cpuDelta / systemDelta) * numCPUs * 100.0
 	}
 
-	memParts := strings.Split(raw.MemUsage, " / ")
-	if len(memParts) == 2 {
-		stats.MemUsage = parseBytes(strings.TrimSpace(memParts[0]))
-		stats.MemLimit = parseBytes(strings.TrimSpace(memParts[1]))
+	stats.MemUsage = int64(raw.MemoryStats.Usage)
+	stats.MemLimit = int64(raw.MemoryStats.Limit)
+	if stats.MemLimit > 0 {
+		stats.MemPercent = (float64(stats.MemUsage) / float64(stats.MemLimit)) * 100.0
 	}
 
-	memPctStr := strings.TrimSuffix(raw.MemPercent, "%")
-	if v, err := strconv.ParseFloat(memPctStr, 64); err == nil {
-		stats.MemPercent = v
+	for _, net := range raw.Networks {
+		stats.NetRx += int64(net.RxBytes)
+		stats.NetTx += int64(net.TxBytes)
 	}
 
-	netParts := strings.Split(raw.NetRx, " / ")
-	if len(netParts) == 2 {
-		stats.NetRx = parseBytes(strings.TrimSpace(netParts[0]))
-		stats.NetTx = parseBytes(strings.TrimSpace(netParts[1]))
+	for _, bio := range raw.BlkioStats.IOServiceBytesRecursive {
+		op := strings.ToLower(bio.Op)
+		switch op {
+		case "read":
+			stats.BlockRead += int64(bio.Value)
+		case "write":
+			stats.BlockWrite += int64(bio.Value)
+		}
 	}
 
-	blockParts := strings.Split(raw.BlockRead, " / ")
-	if len(blockParts) == 2 {
-		stats.BlockRead = parseBytes(strings.TrimSpace(blockParts[0]))
-		stats.BlockWrite = parseBytes(strings.TrimSpace(blockParts[1]))
-	}
-
-	if v, err := strconv.Atoi(raw.PIDs); err == nil {
-		stats.PIDs = v
-	}
+	stats.PIDs = int(raw.PidsStats.Current)
 
 	return stats, nil
 }
@@ -753,51 +783,6 @@ func (s *Service) UpdateContainer(ctx context.Context, engine Engine, id string,
 		return errx.Internal("%s update failed: %s", engine, output)
 	}
 	return nil
-}
-
-func parseBytes(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" || s == "--" {
-		return 0
-	}
-
-	var numStr string
-	var unit string
-	var numStrSb642 strings.Builder
-	for i, c := range s {
-		if (c >= '0' && c <= '9') || c == '.' {
-			numStrSb642.WriteString(string(c))
-		} else {
-			unit = s[i:]
-			break
-		}
-	}
-	numStr += numStrSb642.String()
-
-	if numStr == "" {
-		return 0
-	}
-
-	val, err := strconv.ParseFloat(numStr, 64)
-	if err != nil {
-		return 0
-	}
-
-	unit = strings.TrimSpace(strings.ToUpper(unit))
-	switch unit {
-	case "B", "":
-		return int64(val)
-	case "KB", "KIB":
-		return int64(val * 1024)
-	case "MB", "MIB":
-		return int64(val * 1024 * 1024)
-	case "GB", "GIB":
-		return int64(val * 1024 * 1024 * 1024)
-	case "TB", "TIB":
-		return int64(val * 1024 * 1024 * 1024 * 1024)
-	default:
-		return int64(val)
-	}
 }
 
 // --- System operations ---

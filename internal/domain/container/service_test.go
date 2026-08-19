@@ -3,7 +3,9 @@ package container
 import (
 	"context"
 	"errors"
+	"io"
 	"reflect"
+	"strings"
 	"testing"
 
 	infracontainer "easyserver/internal/infra/container"
@@ -70,6 +72,23 @@ func TestService_ContainerOperations_Mock(t *testing.T) {
 		ContainerCreateFn: func(ctx context.Context, engine infracontainer.Engine, name string, req infracontainer.ContainerCreateRequest) (infracontainer.ContainerCreateResponse, error) {
 			return infracontainer.ContainerCreateResponse{ID: "new-id-" + name}, nil
 		},
+		ContainerLogsFn: func(ctx context.Context, engine infracontainer.Engine, containerID string, tail int, stdout, stderr bool) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("sample log line\n")), nil
+		},
+		ContainerExecCreateFn: func(ctx context.Context, engine infracontainer.Engine, containerID string, req infracontainer.ExecCreateRequest) (infracontainer.ExecCreateResponse, error) {
+			return infracontainer.ExecCreateResponse{ID: "exec-123"}, nil
+		},
+		ContainerExecStartFn: func(ctx context.Context, engine infracontainer.Engine, execID string, req infracontainer.ExecStartRequest) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("exec output")), nil
+		},
+		ContainerStatsFn: func(ctx context.Context, engine infracontainer.Engine, containerID string, stream bool) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(`{
+				"cpu_stats": {"cpu_usage": {"total_usage": 200000000}, "system_cpu_usage": 200000000, "online_cpus": 2},
+				"precpu_stats": {"cpu_usage": {"total_usage": 100000000}, "system_cpu_usage": 100000000, "online_cpus": 2},
+				"memory_stats": {"usage": 104857600, "limit": 1073741824},
+				"pids_stats": {"current": 10}
+			}`)), nil
+		},
 	}
 	infracontainer.SetDefaultClient(mock)
 	defer infracontainer.SetDefaultClient(nil)
@@ -90,6 +109,21 @@ func TestService_ContainerOperations_Mock(t *testing.T) {
 	})
 	if err != nil || createdID != "new-id-my-app" {
 		t.Errorf("CreateContainer error: %v, id: %s", err, createdID)
+	}
+
+	logs, err := svc.GetContainerLogs(context.Background(), EngineDocker, "c1", 100)
+	if err != nil || logs != "sample log line\n" {
+		t.Errorf("GetContainerLogs error: %v, logs: %s", err, logs)
+	}
+
+	execOut, err := svc.ExecInContainer(context.Background(), EngineDocker, "c1", "echo hello")
+	if err != nil || execOut != "exec output" {
+		t.Errorf("ExecInContainer error: %v, output: %s", err, execOut)
+	}
+
+	stats, err := svc.GetContainerStats(context.Background(), EngineDocker, "c1")
+	if err != nil || stats.PIDs != 10 || stats.MemUsage != 104857600 {
+		t.Errorf("GetContainerStats error: %v, stats: %+v", err, stats)
 	}
 }
 
