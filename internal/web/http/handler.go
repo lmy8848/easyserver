@@ -709,10 +709,13 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) (any, error) {
 
 // sanitizeAllowedPath checks if a path is under allowed root directories
 func sanitizeAllowedPath(p string) (string, bool) {
-	if p == "" || strings.Contains(p, "\x00") {
+	if p == "" || strings.Contains(p, "\x00") || strings.Contains(p, "..") {
 		return "", false
 	}
 	clean := filepath.Clean(p)
+	if !filepath.IsAbs(clean) {
+		return "", false
+	}
 	absPath, err := filepath.Abs(clean)
 	if err != nil {
 		return "", false
@@ -728,8 +731,8 @@ func sanitizeAllowedPath(p string) (string, bool) {
 			realRoot = resolved
 		}
 		rel, err := filepath.Rel(realRoot, realPath)
-		if err == nil && !strings.HasPrefix(rel, "..") {
-			return absPath, true
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			return realPath, true
 		}
 	}
 	return "", false
@@ -757,12 +760,13 @@ func hasProjectFiles(dir string) bool {
 		"index.html", "index.htm", // Static
 	}
 	for _, f := range indicators {
-		target := filepath.Join(safeDir, filepath.Base(f))
+		baseName := filepath.Base(filepath.Clean(f))
+		target := filepath.Join(safeDir, baseName)
 		rel, err := filepath.Rel(safeDir, target)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 			continue
 		}
-		if _, err := os.Stat(target); err == nil {
+		if fi, err := os.Lstat(target); err == nil && fi.Mode().IsRegular() {
 			return true
 		}
 	}
@@ -792,12 +796,13 @@ func detectProjectType(dir string) string {
 		{"index.html", "static"},
 	}
 	for _, c := range checks {
-		target := filepath.Join(safeDir, filepath.Base(c.file))
+		baseName := filepath.Base(filepath.Clean(c.file))
+		target := filepath.Join(safeDir, baseName)
 		rel, err := filepath.Rel(safeDir, target)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 			continue
 		}
-		if _, err := os.Stat(target); err == nil {
+		if fi, err := os.Lstat(target); err == nil && fi.Mode().IsRegular() {
 			return c.project
 		}
 	}
