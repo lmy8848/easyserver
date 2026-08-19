@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -216,25 +217,17 @@ func (s *Service) TestConfig(ctx context.Context) (string, error) {
 
 // ReloadSSH reloads the SSH service.
 func (s *Service) ReloadSSH(ctx context.Context) error {
-	output, err := exec.CommandContext(ctx, "systemctl", "reload", "sshd").CombinedOutput()
-	if err != nil {
-		// Try ssh service name
-		output2, err2 := exec.CommandContext(ctx, "systemctl", "reload", "ssh").CombinedOutput()
-		if err2 != nil {
-			msg := string(output)
-			if msg == "" {
-				msg = string(output2)
-			}
-			// coalesceErr 可能返回 nil（executor 对非零退出码不返回 error）——
-			// nil 时拼 %w 会打出 %!w(<nil>)，单独处理。
-			if rel := coalesceErr(err, err2); rel != nil {
-				return fmt.Errorf("reload failed: %s: %w", msg, rel)
-			}
-			return fmt.Errorf("reload failed: %s", msg)
-		}
+	client := infrasystemd.DefaultClient()
+	_, sshdErr := client.ReloadUnitContext(ctx, "sshd.service", "replace")
+	if sshdErr == nil {
+		return nil
 	}
-	log.Printf("ssh: service reloaded")
-	return nil
+	_, sshErr := client.ReloadUnitContext(ctx, "ssh.service", "replace")
+	if sshErr == nil {
+		return nil
+	}
+	// Both attempts failed, return wrapped error preserving underlying causes
+	return fmt.Errorf("reload SSH failed: sshd.service error: %w; ssh.service error: %w", sshdErr, sshErr)
 }
 
 // GetSessions returns active SSH sessions.
@@ -567,15 +560,6 @@ func parseSSHLogLine(line string) *LoginRecord {
 }
 
 // --- File helpers ---
-
-func coalesceErr(errs ...error) error {
-	for _, err := range errs {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)

@@ -39,14 +39,15 @@
 
 ### 4. 定时任务
 
-- **Cron Task** — 一条定时任务定义，全面承载为 systemd 的一对 `.timer`（OnCalendar 触发）+ `.service`（mise exec 执行）。状态读 `systemctl show`，日志走 journald，重试/超时由 systemd 原生处理。任务用 UI 预设调度表单描述，后端转为 OnCalendar 表达式（见 ADR-0004）。
+- **Cron Task** — 一条定时任务定义，全面承载为 systemd 的一对 `.timer`（OnCalendar 触发）+ `.service`（mise exec 执行）。状态由 `internal/infra/systemd` D-Bus 客户端读取，日志走 journald，重试/超时由 systemd 原生处理。任务用 UI 预设调度表单描述，后端转为 OnCalendar 表达式（见 ADR-0004、ADR-0010）。
   _Avoid_: Cron Log（已弃用，日志由 journald 承载；`cron_tasks` 表已由 systemd unit 替代为权威）。
 - **Cron Script** — 可被 Cron Task 引用的可复用脚本（sh/bash/python）。内容落盘面板根（Panel Root）的 `scripts/` 子目录，DB `scripts` 表仅存元数据（名称/语言/描述）。
 
 ### 5. 进程守护与系统服务
 
-- **Process Guardian（进程守护）** — 面板托管的持久化后台进程。底层生成独立的 systemd unit（`easyserver-<name>.service`），unit 文件即权威；执行命令统一使用 `mise exec <lang>@<exact> -- <cmd>` 隔离 PATH；生命周期、自动拉起与状态查看由 systemd 与 journald 承载。
-- **System Process（系统服务）** — 宿主机系统级 systemd 服务的查看与启停管理（如 nginx.service、redis.service）。
+- **Process Guardian（进程守护）** — 面板托管的持久化后台进程。底层生成独立的 systemd unit（`easyserver-<name>.service`），unit 文件即权威；执行命令统一使用 `mise exec <lang>@<exact> -- <cmd>` 隔离 PATH；生命周期、自动拉起与状态查看由 `internal/infra/systemd` D-Bus 客户端与 journald 承载（见 ADR-0010）。
+- **System Process（系统服务）** — 宿主机系统级 systemd 服务的查看与启停管理（如 nginx.service、redis.service），统一经由 `infra/systemd` D-Bus 客户端直连通信（见 ADR-0010）。
+- **Systemd D-Bus Client（D-Bus 客户端）** — 基础设施层（`internal/infra/systemd`）封装的 systemd 通信通道（基于 `coreos/go-systemd/v22/dbus`，纯 Go 零 C 依赖），提供长连接复用、自动断线检测与重连（通过 `Connected()` 检测有效性，失效时自动重建）以及强类型单元控制，彻底消除 `systemctl` 子进程开销与文本解析脆弱性（见 ADR-0010）。
   _Avoid_: ProcessManager（旧架构术语，已废弃）。
 
 ### 6. 防火墙与网络

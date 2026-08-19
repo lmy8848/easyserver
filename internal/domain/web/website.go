@@ -14,6 +14,7 @@ import (
 
 	"easyserver/internal/domain/web/security"
 	"easyserver/internal/infra/errx"
+	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
 )
 
@@ -616,7 +617,10 @@ func (s *WebsiteService) reloadWebServer(ctx context.Context, ws *WebServer) {
 			return
 		}
 	}
-	_, _ = exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
+
+	if _, err := infrasystemd.DefaultClient().ReloadUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+		log.Printf("website: reload %s failed: %v", ws.ServiceName, err)
+	}
 }
 
 // Nginx config templates per project type

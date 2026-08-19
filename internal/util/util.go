@@ -6,9 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"os/exec"
-	"strings"
 	"time"
+
+	infrasystemd "easyserver/internal/infra/systemd"
 )
 
 // TimeLayout is the standard human-readable timestamp layout used across the app.
@@ -16,16 +16,22 @@ const TimeLayout = "2006-01-02 15:04:05"
 
 // SystemdUnitActive reports whether a systemd unit is in the active state.
 func SystemdUnitActive(ctx context.Context, unit string) bool {
-	err := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit).Run()
-	return err == nil
+	prop, err := infrasystemd.DefaultClient().GetUnitPropertyContext(ctx, unit, "ActiveState")
+	if err != nil || prop == nil {
+		return false
+	}
+	str, ok := prop.Value.Value().(string)
+	return ok && str == "active"
 }
 
 // SystemdUnitEnabled reports whether a systemd unit is enabled at boot.
 func SystemdUnitEnabled(ctx context.Context, unit string) bool {
-	out, _ := exec.CommandContext(ctx, "systemctl", "is-enabled", unit).Output()
-	// is-enabled returns exit code 1 for disabled units, so compare output
-	// instead of relying on the exit code.
-	return strings.TrimSpace(string(out)) == "enabled"
+	prop, err := infrasystemd.DefaultClient().GetUnitPropertyContext(ctx, unit, "UnitFileState")
+	if err != nil || prop == nil {
+		return false
+	}
+	str, ok := prop.Value.Value().(string)
+	return ok && str == "enabled"
 }
 
 // RandomHex returns n cryptographically random bytes hex-encoded.

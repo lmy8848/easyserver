@@ -180,7 +180,7 @@ func taskResults(tasks []CronTask) map[string]string {
 }
 
 // taskFailedResult 判定 systemd 的 Result 属性是否代表执行失败。LastResult 是
-// systemctl show 的 Result 值原样（timer_manager.go），成功为 "success"；失败
+// D-Bus 的 Result 属性值原样（timer_manager.go），成功为 "success"；失败
 // 是 exit-code / signal / timeout / start-limit-hit 等，绝不等于字面 "failed"。
 func taskFailedResult(result string) bool {
 	switch result {

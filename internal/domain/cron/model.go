@@ -1,8 +1,8 @@
 package cron
 
 // CronTask 表示一条定时任务，承载为 systemd 的一对 .timer + .service（ADR-0004）。
-// 任务以 Name（unit 名，不含前缀）为唯一标识，无 DB 记录；状态读 systemctl，
-// 日志走 journald。Schedule 是 OnCalendar 表达式（前端预设频率或手写均转为它）。
+// 任务以 Name（unit 名，不含前缀）为唯一标识，无 DB 记录；状态读 D-Bus，
+// 脚本内容落盘在 /opt/easyserver/scripts/<name>/command.sh。Schedule 是 OnCalendar 表达式（前端预设频率或手写均转为它）。
 // Runtime 是运行时绑定键 lang@exact（ADR-0009），空串 = 不绑定。
 type CronTask struct {
 	Name        string `json:"name"`
