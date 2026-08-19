@@ -30,9 +30,13 @@ var (
 	collationRegexp  = regexp.MustCompile(`^[a-zA-Z0-9_.\-]{1,64}$`)
 )
 
-// isValidTableName checks table name validity.
-func isValidTableName(name string) bool {
+// IsValidTableName checks table name validity.
+func IsValidTableName(name string) bool {
 	return tableNameRegexp.MatchString(name)
+}
+
+func isValidTableName(name string) bool {
+	return IsValidTableName(name)
 }
 
 // isValidColumnName checks a column name for use in DML statements. Columns
@@ -44,8 +48,13 @@ func isValidColumnName(name string) error {
 	return nil
 }
 
-func isValidDBName(name string) bool {
+// IsValidDBName checks database name validity.
+func IsValidDBName(name string) bool {
 	return dbNameRegexp.MatchString(name)
+}
+
+func isValidDBName(name string) bool {
+	return IsValidDBName(name)
 }
 
 func isValidUsername(name string) bool {

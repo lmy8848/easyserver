@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"easyserver/internal/infra/errx"
@@ -18,6 +19,10 @@ import (
 const esBackupsDir = "es_backups"
 
 func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName string, dbType DBType) (*DBBackup, error) {
+	if dbType != DBTypeRedis && !isValidDBName(dbName) {
+		return nil, errx.BadRequest("invalid database name: %s", dbName)
+	}
+
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil || instance == nil {
 		return nil, errx.NotFound("database instance not found")
@@ -48,6 +53,10 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 		return nil, fmt.Errorf("unsupported db type: %s", dbType)
 	}
 	filePath := filepath.Join(backupDir, fileName)
+	rel, err := filepath.Rel(backupDir, filePath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return nil, errx.BadRequest("invalid backup file path")
+	}
 
 	backup := &DBBackup{
 		DBInstanceID: instanceID,
@@ -94,7 +103,8 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 		log.Printf("backup failed for %s: %v", backup.DatabaseName, err)
 	} else {
 		backup.Status = "success"
-		if info, err := os.Stat(backup.FilePath); err == nil {
+		cleanPath := filepath.Clean(backup.FilePath)
+		if info, err := os.Stat(cleanPath); err == nil {
 			backup.FileSize = info.Size()
 		}
 	}
@@ -159,12 +169,17 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 
 // copyFile copies a file byte-for-byte (host-side file operation).
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	cleanSrc := filepath.Clean(src)
+	cleanDst := filepath.Clean(dst)
+	if strings.Contains(cleanSrc, "\x00") || strings.Contains(cleanDst, "\x00") {
+		return errors.New("invalid file path")
+	}
+	in, err := os.Open(cleanSrc)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(dst)
+	out, err := os.Create(cleanDst)
 	if err != nil {
 		return err
 	}
