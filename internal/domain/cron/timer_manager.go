@@ -262,15 +262,9 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 
 	// 先 disable + stop（best-effort，可能本来就未启用）
 	client := m.getClient()
-	if client.IsAvailable() {
-		_, _ = client.DisableUnitFilesContext(ctx, []string{timerFull}, false)
-		_, _ = client.StopUnitContext(ctx, timerFull, "replace")
-		_, _ = client.StopUnitContext(ctx, svcFull, "replace")
-	} else {
-		_, _ = exec.CommandContext(ctx, "systemctl", "disable", timerFull).CombinedOutput()
-		_, _ = exec.CommandContext(ctx, "systemctl", "stop", timerFull).CombinedOutput()
-		_, _ = exec.CommandContext(ctx, "systemctl", "stop", svcFull).CombinedOutput()
-	}
+	_, _ = client.DisableUnitFilesContext(ctx, []string{timerFull}, false)
+	_, _ = client.StopUnitContext(ctx, timerFull, "replace")
+	_, _ = client.StopUnitContext(ctx, svcFull, "replace")
 
 	if err := systemd.RemoveCronUnitFile(timerFull); err != nil {
 		return fmt.Errorf("删除 timer unit 失败: %w", err)
@@ -282,7 +276,7 @@ func (m *TimerManager) Delete(ctx context.Context, name string) error {
 	return m.daemonReload(ctx)
 }
 
-// Enable 启用定时任务（systemctl enable timer）。
+// Enable 启用定时任务（enable timer）。
 func (m *TimerManager) Enable(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -306,23 +300,14 @@ func (m *TimerManager) Disable(ctx context.Context, name string) error {
 	return m.stopTimer(ctx, name)
 }
 
-// RunNow 立即手动执行任务：systemctl start <name>.service，与 timer 触发同路径。
+// RunNow 立即手动执行任务：start <name>.service，与 timer 触发同路径。
 func (m *TimerManager) RunNow(ctx context.Context, name string) error {
 	if !m.timerUnitExists(name) {
 		return errx.NotFound("定时任务 %s 不存在", name)
 	}
 	svcName := systemd.CronServiceFileName(name)
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, err := client.StartUnitContext(ctx, svcName, "replace"); err != nil {
-			return fmt.Errorf("立即执行失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "start", svcName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("立即执行失败: %s", output)
+	if _, err := m.getClient().StartUnitContext(ctx, svcName, "replace"); err != nil {
+		return fmt.Errorf("立即执行失败: %w", err)
 	}
 	return nil
 }
@@ -338,13 +323,17 @@ func (m *TimerManager) GetRuns(ctx context.Context, name string, limit int, sinc
 		args = append(args, "--until", until)
 	}
 	if limit > 0 {
-		args = append(args, "-n", strconv.Itoa(limit))
+		args = append(args, "-n", strconv.Itoa(limit*50))
 	}
 	stdout, err := exec.CommandContext(ctx, "journalctl", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("读取日志失败: %w", err)
 	}
-	return parseJournalRuns(string(stdout)), nil
+	runs := parseJournalRuns(string(stdout))
+	if limit > 0 && len(runs) > limit {
+		runs = runs[:limit]
+	}
+	return runs, nil
 }
 
 // --- rendering + fill ---
@@ -392,7 +381,7 @@ func (m *TimerManager) fillRuntime(ctx context.Context, spec *CronTask) error {
 
 // --- load/parse ---
 
-// loadTask 从 unit 文件 + systemctl show 组装 CronTask。
+// loadTask 从 unit 文件 + D-Bus 组装 CronTask。
 func (m *TimerManager) loadTask(ctx context.Context, name string) (*CronTask, error) {
 	timerContent, err := systemd.ReadCronUnitFile(systemd.CronTimerFileName(name))
 	if err != nil || timerContent == "" {
@@ -406,76 +395,41 @@ func (m *TimerManager) loadTask(ctx context.Context, name string) (*CronTask, er
 		parseServiceUnit(m.provider, svcContent, t)
 	}
 
+	// 从 command.sh 读回原始用户脚本
+	if script, err := readTaskCommand(name); err == nil && script != "" {
+		t.Command = script
+	}
+
 	m.fillStatus(ctx, t)
 	return t, nil
 }
 
-// fillStatus 用 D-Bus/systemctl show 补全状态字段。
+// fillStatus 用 D-Bus 补全状态字段。
 func (m *TimerManager) fillStatus(ctx context.Context, t *CronTask) {
 	client := m.getClient()
 	timerName := systemd.CronTimerFileName(t.Name)
 	svcName := systemd.CronServiceFileName(t.Name)
 
-	if client.IsAvailable() {
-		if prop, err := client.GetUnitPropertyContext(ctx, timerName, "UnitFileState"); err == nil && prop != nil {
-			if str, ok := prop.Value.Value().(string); ok && str == "enabled" {
-				t.Enabled = true
-			}
+	if prop, err := client.GetUnitPropertyContext(ctx, timerName, "UnitFileState"); err == nil && prop != nil {
+		if str, ok := prop.Value.Value().(string); ok && str == "enabled" {
+			t.Enabled = true
 		}
-		showTimer, _ := client.GetUnitPropertiesContext(ctx, timerName)
-		if v, ok := showTimer["NextElapseRealtime"].(string); ok && v != "" && !strings.HasPrefix(v, "39766") {
-			t.NextRun = v
-		}
-		showSvc, _ := client.GetUnitPropertiesContext(ctx, svcName)
-		t.Status = "inactive"
-		if v, ok := showSvc["ActiveState"].(string); ok && v != "" {
-			t.Status = v
-		}
-		if v, ok := showSvc["Result"].(string); ok && v != "" {
-			t.LastResult = v
-		}
-		if v, ok := showSvc["ExecMainExitTimestamp"].(string); ok && v != "" {
-			t.LastRun = v
-		}
-		return
 	}
-
-	// timer：enabled + active + next elapse
-	if util.SystemdUnitEnabled(ctx, timerName) {
-		t.Enabled = true
-	}
-	showTimer := m.show(ctx, timerName,
-		"--property=ActiveState,NextElapseRealtime")
-	// systemd 对永不触发的 timer 用远未来哨兵 "39766-..." 表示；此时不填下次执行。
-	if v, ok := showTimer["NextElapseRealtime"]; ok && v != "" && !strings.HasPrefix(v, "39766") {
+	showTimer, _ := client.GetUnitPropertiesContext(ctx, timerName)
+	if v, ok := showTimer["NextElapseRealtime"].(string); ok && v != "" && !strings.HasPrefix(v, "39766") {
 		t.NextRun = v
 	}
-	showSvc := m.show(ctx, svcName,
-		"--property=ActiveState,Result,ExecMainExitTimestamp")
-
+	showSvc, _ := client.GetUnitPropertiesContext(ctx, svcName)
 	t.Status = "inactive"
-	if v, ok := showSvc["ActiveState"]; ok {
+	if v, ok := showSvc["ActiveState"].(string); ok && v != "" {
 		t.Status = v
 	}
-	if v, ok := showSvc["Result"]; ok {
+	if v, ok := showSvc["Result"].(string); ok && v != "" {
 		t.LastResult = v
 	}
-	if v, ok := showSvc["ExecMainExitTimestamp"]; ok {
+	if v, ok := showSvc["ExecMainExitTimestamp"].(string); ok && v != "" {
 		t.LastRun = v
 	}
-}
-
-// show 执行 systemctl show 并把 KEY=VAL 解析成 map。
-func (m *TimerManager) show(ctx context.Context, unit string, props ...string) map[string]string {
-	args := append([]string{"show", unit}, props...)
-	out, _ := exec.CommandContext(ctx, "systemctl", args...).Output()
-	res := make(map[string]string)
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok {
-			res[k] = v
-		}
-	}
-	return res
 }
 
 // --- parse unit helpers ---
@@ -686,85 +640,40 @@ func readTaskCommand(name string) (string, error) {
 // --- systemctl helpers ---
 
 func (m *TimerManager) daemonReload(ctx context.Context) error {
-	client := m.getClient()
-	if client.IsAvailable() {
-		if err := client.ReloadContext(ctx); err != nil {
-			return fmt.Errorf("daemon-reload 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "daemon-reload").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("daemon-reload 失败: %s", output)
+	if err := m.getClient().ReloadContext(ctx); err != nil {
+		return fmt.Errorf("daemon-reload 失败: %w", err)
 	}
 	return nil
 }
 
 func (m *TimerManager) enableTimer(ctx context.Context, name string) error {
-	client := m.getClient()
 	timerFile := systemd.CronTimerFileName(name)
-	if client.IsAvailable() {
-		if _, _, err := client.EnableUnitFilesContext(ctx, []string{timerFile}, false, false); err != nil {
-			return fmt.Errorf("enable 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "enable", timerFile).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("enable 失败: %s", output)
+	if _, _, err := m.getClient().EnableUnitFilesContext(ctx, []string{timerFile}, false, false); err != nil {
+		return fmt.Errorf("enable 失败: %w", err)
 	}
 	return nil
 }
 
 func (m *TimerManager) disableTimer(ctx context.Context, name string) error {
-	client := m.getClient()
 	timerFile := systemd.CronTimerFileName(name)
-	if client.IsAvailable() {
-		if _, err := client.DisableUnitFilesContext(ctx, []string{timerFile}, false); err != nil {
-			return fmt.Errorf("disable 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "disable", timerFile).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("disable 失败: %s", output)
+	if _, err := m.getClient().DisableUnitFilesContext(ctx, []string{timerFile}, false); err != nil {
+		return fmt.Errorf("disable 失败: %w", err)
 	}
 	return nil
 }
 
 func (m *TimerManager) stopTimer(ctx context.Context, name string) error {
-	client := m.getClient()
 	timerFile := systemd.CronTimerFileName(name)
-	if client.IsAvailable() {
-		if _, err := client.StopUnitContext(ctx, timerFile, "replace"); err != nil {
-			return fmt.Errorf("stop 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "stop", timerFile).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("stop 失败: %s", output)
+	if _, err := m.getClient().StopUnitContext(ctx, timerFile, "replace"); err != nil {
+		return fmt.Errorf("stop 失败: %w", err)
 	}
 	return nil
 }
 
 func (m *TimerManager) restartTimer(ctx context.Context, name string) error {
-	client := m.getClient()
 	timerFile := systemd.CronTimerFileName(name)
-	if client.IsAvailable() {
-		if _, err := client.RestartUnitContext(ctx, timerFile, "replace"); err != nil {
-			return fmt.Errorf("restart 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "restart", timerFile).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("restart 失败: %s", output)
+	if _, err := m.getClient().RestartUnitContext(ctx, timerFile, "replace"); err != nil {
+		return fmt.Errorf("restart 失败: %w", err)
 	}
 	return nil
 }
@@ -779,30 +688,11 @@ func (m *TimerManager) timerUnitExists(name string) bool {
 }
 
 func (m *TimerManager) timerEnabled(ctx context.Context, name string) bool {
-	client := m.getClient()
-	timerFile := systemd.CronTimerFileName(name)
-	if client.IsAvailable() {
-		if prop, err := client.GetUnitPropertyContext(ctx, timerFile, "UnitFileState"); err == nil && prop != nil {
-			if str, ok := prop.Value.Value().(string); ok && str != "" {
-				return str == "enabled"
-			}
-		}
-	}
-	return util.SystemdUnitEnabled(ctx, timerFile)
+	return util.SystemdUnitEnabled(ctx, systemd.CronTimerFileName(name))
 }
 
 func (m *TimerManager) timerActive(ctx context.Context, name string) bool {
-	client := m.getClient()
-	timerFile := systemd.CronTimerFileName(name)
-	if client.IsAvailable() {
-		if prop, err := client.GetUnitPropertyContext(ctx, timerFile, "ActiveState"); err == nil && prop != nil {
-			if str, ok := prop.Value.Value().(string); ok && str != "" {
-				return str == "active"
-			}
-		}
-	}
-	props := m.show(ctx, timerFile, "--property=ActiveState")
-	return props["ActiveState"] == "active"
+	return util.SystemdUnitActive(ctx, systemd.CronTimerFileName(name))
 }
 
 // rollbackCreate 回滚 Create 失败时已写入的 unit 与命令脚本文件。

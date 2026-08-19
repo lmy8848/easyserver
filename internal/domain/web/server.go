@@ -113,13 +113,8 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 
 	if ws.ServiceName != "" {
 		client := infrasystemd.DefaultClient()
-		if client.IsAvailable() {
-			_, _, _ = client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false)
-			_, _ = client.StartUnitContext(ctx, ws.ServiceName, "replace")
-		} else {
-			_, _ = exec.CommandContext(ctx, "systemctl", "enable", ws.ServiceName).CombinedOutput()
-			_, _ = exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
-		}
+		_, _, _ = client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false)
+		_, _ = client.StartUnitContext(ctx, ws.ServiceName, "replace")
 	}
 
 	_ = s.RefreshStatus(ctx, id)
@@ -143,13 +138,8 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 
 	if ws.ServiceName != "" {
 		client := infrasystemd.DefaultClient()
-		if client.IsAvailable() {
-			_, _ = client.StopUnitContext(ctx, ws.ServiceName, "replace")
-			_, _ = client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false)
-		} else {
-			_, _ = exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
-			_, _ = exec.CommandContext(ctx, "systemctl", "disable", ws.ServiceName).CombinedOutput()
-		}
+		_, _ = client.StopUnitContext(ctx, ws.ServiceName, "replace")
+		_, _ = client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false)
 	}
 
 	// Always use the predefined uninstall command, never trust the database value
@@ -187,19 +177,9 @@ func (s *Service) Start(ctx context.Context, id int64) error {
 		return errx.BadRequest("未配置服务名称")
 	}
 
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.StartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
-			return fmt.Errorf("start failed: %w", err)
-		}
-		return s.repo.UpdateStatus(ctx, id, "running")
+	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+		return fmt.Errorf("start failed: %w", err)
 	}
-
-	out, err := exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("start failed: %s", out)
-	}
-
 	return s.repo.UpdateStatus(ctx, id, "running")
 }
 
@@ -216,19 +196,9 @@ func (s *Service) Stop(ctx context.Context, id int64) error {
 		return errx.BadRequest("未配置服务名称")
 	}
 
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.StopUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
-			return fmt.Errorf("stop failed: %w", err)
-		}
-		return s.repo.UpdateStatus(ctx, id, "stopped")
+	if _, err := infrasystemd.DefaultClient().StopUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+		return fmt.Errorf("stop failed: %w", err)
 	}
-
-	out, err := exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("stop failed: %s", out)
-	}
-
 	return s.repo.UpdateStatus(ctx, id, "stopped")
 }
 
@@ -245,19 +215,9 @@ func (s *Service) Restart(ctx context.Context, id int64) error {
 		return errx.BadRequest("未配置服务名称")
 	}
 
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.RestartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
-			return fmt.Errorf("restart failed: %w", err)
-		}
-		return s.repo.UpdateStatus(ctx, id, "running")
+	if _, err := infrasystemd.DefaultClient().RestartUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+		return fmt.Errorf("restart failed: %w", err)
 	}
-
-	out, err := exec.CommandContext(ctx, "systemctl", "restart", ws.ServiceName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("restart failed: %s", out)
-	}
-
 	return s.repo.UpdateStatus(ctx, id, "running")
 }
 
@@ -277,16 +237,8 @@ func (s *Service) Reload(ctx context.Context, id int64) error {
 	}
 
 	if ws.ServiceName != "" {
-		client := infrasystemd.DefaultClient()
-		if client.IsAvailable() {
-			if _, err := client.ReloadUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
-				return fmt.Errorf("reload failed: %w", err)
-			}
-			return nil
-		}
-		out, err := exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("reload failed: %s", out)
+		if _, err := infrasystemd.DefaultClient().ReloadUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+			return fmt.Errorf("reload failed: %w", err)
 		}
 	}
 	return nil
@@ -439,27 +391,14 @@ func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) erro
 	}
 
 	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if enabled {
-			if _, _, err := client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false); err != nil {
-				return fmt.Errorf("enable failed: %w", err)
-			}
-		} else {
-			if _, err := client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false); err != nil {
-				return fmt.Errorf("disable failed: %w", err)
-			}
-		}
-		return nil
-	}
-
-	action := "disable"
 	if enabled {
-		action = "enable"
-	}
-
-	out, err := exec.CommandContext(ctx, "systemctl", action, ws.ServiceName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("systemctl %s failed: %s", action, out)
+		if _, _, err := client.EnableUnitFilesContext(ctx, []string{ws.ServiceName}, false, false); err != nil {
+			return fmt.Errorf("enable failed: %w", err)
+		}
+	} else {
+		if _, err := client.DisableUnitFilesContext(ctx, []string{ws.ServiceName}, false); err != nil {
+			return fmt.Errorf("disable failed: %w", err)
+		}
 	}
 	return nil
 }
@@ -568,55 +507,22 @@ func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memByt
 		return 0, 0, "", nil
 	}
 
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		props, err := client.GetUnitPropertiesContext(ctx, ws.ServiceName)
-		if err == nil && props != nil {
-			if mainPID, ok := props["MainPID"].(uint32); ok {
-				pid = int(mainPID)
-			}
-			if aetUSec, ok := props["ActiveEnterTimestamp"].(uint64); ok && aetUSec > 0 {
-				t := util.UnixMicros(int64(aetUSec))
-				d := time.Since(t)
-				if d < time.Minute {
-					uptime = fmt.Sprintf("%ds", int(d.Seconds()))
-				} else if d < time.Hour {
-					uptime = fmt.Sprintf("%dm", int(d.Minutes()))
-				} else if d < 24*time.Hour {
-					uptime = fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
-				} else {
-					uptime = fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
-				}
-			}
-			return pid, 0, uptime, nil
+	props, err := infrasystemd.DefaultClient().GetUnitPropertiesContext(ctx, ws.ServiceName)
+	if err == nil && props != nil {
+		if mainPID, ok := props["MainPID"].(uint32); ok {
+			pid = int(mainPID)
 		}
-	}
-
-	// Get main PID via systemctl
-	out, e := exec.CommandContext(ctx, "systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp").CombinedOutput()
-	if e != nil {
-		return 0, 0, "", nil //nolint:nilerr // systemctl 查询失败时返回零值
-	}
-
-	lines := strings.SplitSeq(strings.TrimSpace(string(out)), "\n")
-	for line := range lines {
-		if after, ok := strings.CutPrefix(line, "MainPID="); ok {
-			pidStr := after
-			pid, _ = strconv.Atoi(pidStr)
-		}
-		if after, ok := strings.CutPrefix(line, "ActiveEnterTimestamp="); ok {
-			ts := after
-			if t, e := time.Parse("Mon 2006-01-02 15:04:05 MST", ts); e == nil {
-				d := time.Since(t)
-				if d < time.Minute {
-					uptime = fmt.Sprintf("%ds", int(d.Seconds()))
-				} else if d < time.Hour {
-					uptime = fmt.Sprintf("%dm", int(d.Minutes()))
-				} else if d < 24*time.Hour {
-					uptime = fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
-				} else {
-					uptime = fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
-				}
+		if aetUSec, ok := props["ActiveEnterTimestamp"].(uint64); ok && aetUSec > 0 {
+			t := util.UnixMicros(int64(aetUSec))
+			d := time.Since(t)
+			if d < time.Minute {
+				uptime = fmt.Sprintf("%ds", int(d.Seconds()))
+			} else if d < time.Hour {
+				uptime = fmt.Sprintf("%dm", int(d.Minutes()))
+			} else if d < 24*time.Hour {
+				uptime = fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+			} else {
+				uptime = fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
 			}
 		}
 	}

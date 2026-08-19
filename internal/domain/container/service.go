@@ -860,17 +860,13 @@ func (s *Service) dockerServerVersion(ctx context.Context) string {
 
 // unitExists reports whether a systemd unit file is present.
 func (s *Service) unitExists(ctx context.Context, unit string) bool {
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		props, err := client.GetUnitPropertiesContext(ctx, unit)
-		if err == nil && props != nil {
-			if ls, ok := props["LoadState"].(string); ok && ls != "" && ls != "not-found" {
-				return true
-			}
+	props, err := infrasystemd.DefaultClient().GetUnitPropertiesContext(ctx, unit)
+	if err == nil && props != nil {
+		if ls, ok := props["LoadState"].(string); ok && ls != "" && ls != "not-found" {
+			return true
 		}
 	}
-	_, err := exec.CommandContext(ctx, "systemctl", "cat", unit).CombinedOutput()
-	return err == nil
+	return false
 }
 
 // unitActive reports whether a systemd unit is currently active.
@@ -994,31 +990,15 @@ func (s *Service) installDocker(ctx context.Context) error {
 	}
 	log.Println("docker: enabling service...")
 	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, _, err := client.EnableUnitFilesContext(ctx, []string{"docker.service"}, false, false); err != nil {
-			log.Printf("docker: enable failed: %v", err)
-			return fmt.Errorf("启用 Docker 服务失败: %w", err)
-		}
-	} else {
-		output, err = exec.CommandContext(ctx, "systemctl", "enable", "docker").CombinedOutput()
-		if err != nil {
-			log.Printf("docker: enable failed: %s", output)
-			return fmt.Errorf("启用 Docker 服务失败: %s", truncateOutput(string(output), 200))
-		}
+	if _, _, err := client.EnableUnitFilesContext(ctx, []string{"docker.service"}, false, false); err != nil {
+		log.Printf("docker: enable failed: %v", err)
+		return fmt.Errorf("启用 Docker 服务失败: %w", err)
 	}
 
 	log.Println("docker: starting service...")
-	if client.IsAvailable() {
-		if _, err := client.StartUnitContext(ctx, "docker.service", "replace"); err != nil {
-			log.Printf("docker: start failed: %v", err)
-			return fmt.Errorf("启动 Docker 服务失败: %w", err)
-		}
-	} else {
-		output, err = exec.CommandContext(ctx, "systemctl", "start", "docker").CombinedOutput()
-		if err != nil {
-			log.Printf("docker: start failed: %s", output)
-			return fmt.Errorf("启动 Docker 服务失败: %s", truncateOutput(string(output), 200))
-		}
+	if _, err := client.StartUnitContext(ctx, "docker.service", "replace"); err != nil {
+		log.Printf("docker: start failed: %v", err)
+		return fmt.Errorf("启动 Docker 服务失败: %w", err)
 	}
 
 	log.Println("docker: installation completed successfully")
@@ -1075,16 +1055,8 @@ func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.StartUnitContext(ctx, unit, "replace"); err != nil {
-			return fmt.Errorf("failed to start %s: %w", engine, err)
-		}
-		return nil
-	}
-	output, err := exec.CommandContext(ctx, "systemctl", "start", unit).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to start %s: %s", engine, output)
+	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, unit, "replace"); err != nil {
+		return fmt.Errorf("failed to start %s: %w", engine, err)
 	}
 	return nil
 }
@@ -1095,16 +1067,8 @@ func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.StopUnitContext(ctx, unit, "replace"); err != nil {
-			return fmt.Errorf("failed to stop %s: %w", engine, err)
-		}
-		return nil
-	}
-	output, err := exec.CommandContext(ctx, "systemctl", "stop", unit).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to stop %s: %s", engine, output)
+	if _, err := infrasystemd.DefaultClient().StopUnitContext(ctx, unit, "replace"); err != nil {
+		return fmt.Errorf("failed to stop %s: %w", engine, err)
 	}
 	return nil
 }
@@ -1115,16 +1079,8 @@ func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.RestartUnitContext(ctx, unit, "replace"); err != nil {
-			return fmt.Errorf("failed to restart %s: %w", engine, err)
-		}
-		return nil
-	}
-	output, err := exec.CommandContext(ctx, "systemctl", "restart", unit).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to restart %s: %s", engine, output)
+	if _, err := infrasystemd.DefaultClient().RestartUnitContext(ctx, unit, "replace"); err != nil {
+		return fmt.Errorf("failed to restart %s: %w", engine, err)
 	}
 	return nil
 }
@@ -1143,16 +1099,8 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
 	}
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, _, err := client.EnableUnitFilesContext(ctx, []string{enableSocketUnit}, false, false); err != nil {
-			return fmt.Errorf("failed to enable %s socket: %w", engine, err)
-		}
-		return nil
-	}
-	output, err := exec.CommandContext(ctx, "systemctl", "enable", enableSocketUnit).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to enable %s socket: %s", engine, output)
+	if _, _, err := infrasystemd.DefaultClient().EnableUnitFilesContext(ctx, []string{enableSocketUnit}, false, false); err != nil {
+		return fmt.Errorf("failed to enable %s socket: %w", engine, err)
 	}
 	return nil
 }
@@ -1162,16 +1110,8 @@ func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
 	}
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
-			return fmt.Errorf("failed to disable %s socket: %w", engine, err)
-		}
-		return nil
-	}
-	output, err := exec.CommandContext(ctx, "systemctl", "disable", enableSocketUnit).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to disable %s socket: %s", engine, output)
+	if _, err := infrasystemd.DefaultClient().DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
+		return fmt.Errorf("failed to disable %s socket: %w", engine, err)
 	}
 	return nil
 }

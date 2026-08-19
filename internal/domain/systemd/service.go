@@ -97,83 +97,36 @@ func (m *ServiceManager) getClient() infrasystemd.SystemdClient {
 }
 
 // List returns all systemd services with basic info (name, state, description).
+// List returns all systemd services with basic info (name, state, description).
 // 对 easyserver-svc- 前缀的托管服务，额外读 unit 文件填充 managed/runtime_* 元数据。
 // 前端用 GetDetails 按需加载当前页的运行时详情。
 func (m *ServiceManager) List(ctx context.Context) ([]ServiceInfo, error) {
 	client := m.getClient()
-	if client.IsAvailable() {
-		units, err := client.ListUnitsContext(ctx)
-		if err == nil {
-			var services []ServiceInfo
-			for _, u := range units {
-				if !strings.HasSuffix(u.Name, ".service") || u.LoadState == "not-found" {
-					continue
-				}
-				name := strings.TrimSuffix(u.Name, ".service")
-				svc := ServiceInfo{
-					Name:        name,
-					ShortName:   strings.TrimPrefix(name, managedUnitPrefix),
-					State:       u.ActiveState,
-					SubState:    u.SubState,
-					Description: u.Description,
-				}
-				if shortName := UnitName(u.Name); shortName != "" {
-					if content, _ := readUnitFile(shortName); content != "" {
-						ParseUnitMeta(m.provider, content, &svc)
-					}
-				}
-				services = append(services, svc)
-			}
-			return services, nil
-		}
-	}
-
-	stdout, err := exec.CommandContext(ctx, "systemctl", "list-units", "--type=service", "--all", "--no-pager", "--plain", "--full").Output()
+	units, err := client.ListUnitsContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
 	var services []ServiceInfo
-	lines := strings.SplitSeq(string(stdout), "\n")
-
-	for line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "UNIT") || strings.HasPrefix(line, "LOAD") {
+	for _, u := range units {
+		if !strings.HasSuffix(u.Name, ".service") || u.LoadState == "not-found" {
 			continue
 		}
-
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-
-		// 跳过不存在的服务（LOAD 列为 not-found）
-		if fields[1] == "not-found" {
-			continue
-		}
-
-		name := strings.TrimSuffix(fields[0], ".service")
+		name := strings.TrimSuffix(u.Name, ".service")
 		svc := ServiceInfo{
-			Name:      name,
-			ShortName: strings.TrimPrefix(name, managedUnitPrefix),
-			State:     fields[2],
-			SubState:  fields[3],
+			Name:        name,
+			ShortName:   strings.TrimPrefix(name, managedUnitPrefix),
+			State:       u.ActiveState,
+			SubState:    u.SubState,
+			Description: u.Description,
 		}
-
-		if len(fields) > 4 {
-			svc.Description = strings.Join(fields[4:], " ")
-		}
-
-		// 托管服务：读 unit 文件补元数据 + 配置回显（本地 IO，不调 systemctl）
-		if shortName := UnitName(fields[0]); shortName != "" {
+		if shortName := UnitName(u.Name); shortName != "" {
 			if content, _ := readUnitFile(shortName); content != "" {
 				ParseUnitMeta(m.provider, content, &svc)
 			}
 		}
-
 		services = append(services, svc)
 	}
-
 	return services, nil
 }
 
@@ -200,126 +153,30 @@ func (m *ServiceManager) batchGetDetailedInfo(ctx context.Context, services []Se
 	}
 
 	client := m.getClient()
-	if client.IsAvailable() {
-		for i := range services {
-			unitName := services[i].Name + ".service"
-			props, err := client.GetUnitPropertiesContext(ctx, unitName)
-			if err != nil {
-				continue
-			}
-			if pid, ok := props["MainPID"].(uint32); ok {
-				services[i].PID = int(pid)
-			}
-			if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
-				services[i].MemoryBytes = mem
-			}
-			if ufs, ok := props["UnitFileState"].(string); ok {
-				services[i].UnitFileState = ufs
-				services[i].Enabled = ufs == "enabled"
-			}
-			if st, ok := props["ActiveState"].(string); ok {
-				services[i].State = st
-			}
-			if sub, ok := props["SubState"].(string); ok {
-				services[i].SubState = sub
-			}
-			if desc, ok := props["Description"].(string); ok && desc != "" {
-				services[i].Description = desc
-			}
-		}
-		return
-	}
-
-	// Batch into groups to avoid systemd "Unknown object" errors with too many units
-	const batchSize = 50
-	for start := 0; start < len(services); start += batchSize {
-		end := min(start+batchSize, len(services))
-		m.batchGetDetailedInfoChunk(ctx, services[start:end])
-	}
-}
-
-func (m *ServiceManager) batchGetDetailedInfoChunk(ctx context.Context, services []ServiceInfo) {
-	args := make([]string, 0, 1+len(services)+1)
-	args = append(args, "show")
-	for _, svc := range services {
-		args = append(args, svc.Name+".service")
-	}
-	args = append(args, "--property=Id,MainPID,MemoryCurrent,ActiveState,UnitFileState,Description,SubState")
-
-	stdout, _ := exec.CommandContext(ctx, "systemctl", args...).Output()
-	if len(stdout) == 0 {
-		return
-	}
-
-	currentName := ""
-	props := make(map[string]string)
-
-	lines := strings.SplitSeq(string(stdout), "\n")
-	for line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			if currentName != "" {
-				m.applyServiceProps(services, currentName, props)
-			}
-			currentName = ""
-			props = make(map[string]string)
+	for i := range services {
+		unitName := services[i].Name + ".service"
+		props, err := client.GetUnitPropertiesContext(ctx, unitName)
+		if err != nil {
 			continue
 		}
-
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			if parts[0] == "Id" {
-				currentName = parts[1]
-			}
-			props[parts[0]] = parts[1]
+		if pid, ok := props["MainPID"].(uint32); ok {
+			services[i].PID = int(pid)
 		}
-	}
-
-	if currentName != "" {
-		m.applyServiceProps(services, currentName, props)
-	}
-}
-
-// parseMemoryCurrent parses systemd MemoryCurrent value.
-// systemd returns "[not set]" or uint64 max when memory accounting is
-// unavailable; both should be treated as 0.
-func parseMemoryCurrent(v string) uint64 {
-	if v == "" || v == "[not set]" {
-		return 0
-	}
-	var n uint64
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-		return 0
-	}
-	if n == ^uint64(0) {
-		return 0
-	}
-	return n
-}
-
-func (m *ServiceManager) applyServiceProps(services []ServiceInfo, id string, props map[string]string) {
-	for i := range services {
-		if services[i].Name+".service" == id || services[i].Name == id {
-			if v, ok := props["MainPID"]; ok {
-				_, _ = fmt.Sscanf(v, "%d", &services[i].PID)
-			}
-			if v, ok := props["MemoryCurrent"]; ok {
-				services[i].MemoryBytes = parseMemoryCurrent(v)
-			}
-			if v, ok := props["UnitFileState"]; ok {
-				services[i].UnitFileState = v
-				services[i].Enabled = v == "enabled"
-			}
-			if v, ok := props["ActiveState"]; ok {
-				services[i].State = v
-			}
-			if v, ok := props["SubState"]; ok {
-				services[i].SubState = v
-			}
-			if v, ok := props["Description"]; ok {
-				services[i].Description = v
-			}
-			break
+		if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
+			services[i].MemoryBytes = mem
+		}
+		if ufs, ok := props["UnitFileState"].(string); ok {
+			services[i].UnitFileState = ufs
+			services[i].Enabled = ufs == "enabled"
+		}
+		if st, ok := props["ActiveState"].(string); ok {
+			services[i].State = st
+		}
+		if sub, ok := props["SubState"].(string); ok {
+			services[i].SubState = sub
+		}
+		if desc, ok := props["Description"].(string); ok && desc != "" {
+			services[i].Description = desc
 		}
 	}
 }
@@ -332,70 +189,29 @@ func (m *ServiceManager) Get(ctx context.Context, name string) (*ServiceInfo, er
 	}
 
 	client := m.getClient()
-	if client.IsAvailable() {
-		props, err := client.GetUnitPropertiesContext(ctx, name+".service")
-		if err == nil && props != nil {
-			if pid, ok := props["MainPID"].(uint32); ok {
-				svc.PID = int(pid)
-			}
-			if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
-				svc.MemoryBytes = mem
-			}
-			if ufs, ok := props["UnitFileState"].(string); ok {
-				svc.UnitFileState = ufs
-				svc.Enabled = ufs == "enabled"
-			}
-			if st, ok := props["ActiveState"].(string); ok {
-				svc.State = st
-			}
-			if sub, ok := props["SubState"].(string); ok {
-				svc.SubState = sub
-			}
-			if desc, ok := props["Description"].(string); ok {
-				svc.Description = desc
-			}
-
-			// 托管服务：读 unit 文件补元数据
-			if shortName := UnitName(name + ".service"); shortName != "" {
-				if content, _ := readUnitFile(shortName); content != "" {
-					ParseUnitMeta(m.provider, content, svc)
-				}
-			}
-			return svc, nil
-		}
-	}
-
-	stdout, err := exec.CommandContext(ctx, "systemctl", "show", name+".service",
-		"--property=ActiveState,SubState,MainPID,MemoryCurrent,Description,UnitFileState").Output()
+	props, err := client.GetUnitPropertiesContext(ctx, name+".service")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service info: %w", err)
 	}
 
-	lines := strings.SplitSeq(string(stdout), "\n")
-	for line := range lines {
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := parts[0]
-		value := parts[1]
-
-		switch key {
-		case "ActiveState":
-			svc.State = value
-		case "SubState":
-			svc.SubState = value
-		case "MainPID":
-			_, _ = fmt.Sscanf(value, "%d", &svc.PID)
-		case "MemoryCurrent":
-			svc.MemoryBytes = parseMemoryCurrent(value)
-		case "Description":
-			svc.Description = value
-		case "UnitFileState":
-			svc.UnitFileState = value
-			svc.Enabled = value == "enabled"
-		}
+	if pid, ok := props["MainPID"].(uint32); ok {
+		svc.PID = int(pid)
+	}
+	if mem, ok := props["MemoryCurrent"].(uint64); ok && mem != ^uint64(0) {
+		svc.MemoryBytes = mem
+	}
+	if ufs, ok := props["UnitFileState"].(string); ok {
+		svc.UnitFileState = ufs
+		svc.Enabled = ufs == "enabled"
+	}
+	if st, ok := props["ActiveState"].(string); ok {
+		svc.State = st
+	}
+	if sub, ok := props["SubState"].(string); ok {
+		svc.SubState = sub
+	}
+	if desc, ok := props["Description"].(string); ok {
+		svc.Description = desc
 	}
 
 	// 托管服务：读 unit 文件补元数据
@@ -422,18 +238,8 @@ func (m *ServiceManager) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already running", name)
 	}
 
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, err := client.StartUnitContext(ctx, name+".service", "replace"); err != nil {
-			return fmt.Errorf("failed to start service: %w", err)
-		}
-		log.Printf("service: started %s", name)
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "start", name+".service").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to start service: %s", output)
+	if _, err := m.getClient().StartUnitContext(ctx, name+".service", "replace"); err != nil {
+		return fmt.Errorf("failed to start service: %w", err)
 	}
 	log.Printf("service: started %s", name)
 	return nil
@@ -453,18 +259,8 @@ func (m *ServiceManager) Stop(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already stopped", name)
 	}
 
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, err := client.StopUnitContext(ctx, name+".service", "replace"); err != nil {
-			return fmt.Errorf("failed to stop service: %w", err)
-		}
-		log.Printf("service: stopped %s", name)
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "stop", name+".service").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to stop service: %s", output)
+	if _, err := m.getClient().StopUnitContext(ctx, name+".service", "replace"); err != nil {
+		return fmt.Errorf("failed to stop service: %w", err)
 	}
 	log.Printf("service: stopped %s", name)
 	return nil
@@ -476,18 +272,8 @@ func (m *ServiceManager) Restart(ctx context.Context, name string) error {
 		return err
 	}
 
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, err := client.RestartUnitContext(ctx, name+".service", "replace"); err != nil {
-			return fmt.Errorf("failed to restart service: %w", err)
-		}
-		log.Printf("service: restarted %s", name)
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "restart", name+".service").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to restart service: %s", output)
+	if _, err := m.getClient().RestartUnitContext(ctx, name+".service", "replace"); err != nil {
+		return fmt.Errorf("failed to restart service: %w", err)
 	}
 	log.Printf("service: restarted %s", name)
 	return nil
@@ -503,18 +289,8 @@ func (m *ServiceManager) Enable(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already enabled", name)
 	}
 
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, _, err := client.EnableUnitFilesContext(ctx, []string{name + ".service"}, false, false); err != nil {
-			return fmt.Errorf("failed to enable service: %w", err)
-		}
-		log.Printf("service: enabled %s", name)
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "enable", name+".service").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to enable service: %s", output)
+	if _, _, err := m.getClient().EnableUnitFilesContext(ctx, []string{name + ".service"}, false, false); err != nil {
+		return fmt.Errorf("failed to enable service: %w", err)
 	}
 	log.Printf("service: enabled %s", name)
 	return nil
@@ -530,18 +306,8 @@ func (m *ServiceManager) Disable(ctx context.Context, name string) error {
 		return fmt.Errorf("service %s is already disabled", name)
 	}
 
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, err := client.DisableUnitFilesContext(ctx, []string{name + ".service"}, false); err != nil {
-			return fmt.Errorf("failed to disable service: %w", err)
-		}
-		log.Printf("service: disabled %s", name)
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "disable", name+".service").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to disable service: %s", output)
+	if _, err := m.getClient().DisableUnitFilesContext(ctx, []string{name + ".service"}, false); err != nil {
+		return fmt.Errorf("failed to disable service: %w", err)
 	}
 	log.Printf("service: disabled %s", name)
 	return nil
@@ -625,13 +391,10 @@ func (m *ServiceManager) GetLogs(ctx context.Context, name string, tail int, sin
 
 // isEnabled checks if a service is enabled.
 func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
-	client := m.getClient()
-	if client.IsAvailable() {
-		props, err := client.GetUnitPropertiesContext(ctx, name+".service")
-		if err == nil && props != nil {
-			if ufs, ok := props["UnitFileState"].(string); ok && ufs != "" {
-				return ufs == "enabled"
-			}
+	props, err := m.getClient().GetUnitPropertiesContext(ctx, name+".service")
+	if err == nil && props != nil {
+		if ufs, ok := props["UnitFileState"].(string); ok && ufs != "" {
+			return ufs == "enabled"
 		}
 	}
 	return util.SystemdUnitEnabled(ctx, name+".service")
@@ -639,17 +402,13 @@ func (m *ServiceManager) isEnabled(ctx context.Context, name string) bool {
 
 // serviceExists checks if a service unit exists on the system.
 func (m *ServiceManager) serviceExists(ctx context.Context, name string) bool {
-	client := m.getClient()
-	if client.IsAvailable() {
-		props, err := client.GetUnitPropertiesContext(ctx, name+".service")
-		if err == nil && props != nil {
-			if ls, ok := props["LoadState"].(string); ok && ls != "" && ls != "not-found" {
-				return true
-			}
+	props, err := m.getClient().GetUnitPropertiesContext(ctx, name+".service")
+	if err == nil && props != nil {
+		if ls, ok := props["LoadState"].(string); ok && ls != "" && ls != "not-found" {
+			return true
 		}
 	}
-	_, err := exec.CommandContext(ctx, "systemctl", "cat", name+".service").CombinedOutput()
-	return err == nil
+	return false
 }
 
 // requireServiceExists returns an error if the service does not exist.
@@ -747,29 +506,16 @@ func (m *ServiceManager) CreateManaged(ctx context.Context, spec *ManagedUnitSpe
 			_ = removeUnitFile(spec.Name)
 			_ = m.daemonReload(ctx)
 			fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-			client := m.getClient()
-			if client.IsAvailable() {
-				_ = client.ResetFailedUnitContext(ctx, fullName)
-			} else {
-				_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", fullName).CombinedOutput()
-			}
+			_ = m.getClient().ResetFailedUnitContext(ctx, fullName)
 			return fmt.Errorf("enable 失败（已回滚）: %w", err)
 		}
 		if err := m.startManaged(ctx, spec.Name); err != nil {
 			// start 失败：disable + 回滚 unit 文件 + reload + reset-failed。
 			fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-			client := m.getClient()
-			if client.IsAvailable() {
-				_, _ = client.DisableUnitFilesContext(ctx, []string{fullName}, false)
-				_ = removeUnitFile(spec.Name)
-				_ = m.daemonReload(ctx)
-				_ = client.ResetFailedUnitContext(ctx, fullName)
-			} else {
-				_, _ = exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput()
-				_ = removeUnitFile(spec.Name)
-				_ = m.daemonReload(ctx)
-				_, _ = exec.CommandContext(ctx, "systemctl", "reset-failed", fullName).CombinedOutput()
-			}
+			_, _ = m.getClient().DisableUnitFilesContext(ctx, []string{fullName}, false)
+			_ = removeUnitFile(spec.Name)
+			_ = m.daemonReload(ctx)
+			_ = m.getClient().ResetFailedUnitContext(ctx, fullName)
 			return fmt.Errorf("start 失败（已回滚）: %w", err)
 		}
 	}
@@ -815,12 +561,7 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 			}
 			if wasActive {
 				fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-				client := m.getClient()
-				if client.IsAvailable() {
-					_, _ = client.RestartUnitContext(ctx, fullName, "replace")
-				} else {
-					_, _ = exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
-				}
+				_, _ = m.getClient().RestartUnitContext(ctx, fullName, "replace")
 			}
 		}
 	}
@@ -854,18 +595,9 @@ func (m *ServiceManager) UpdateManaged(ctx context.Context, spec *ManagedUnitSpe
 	info, err := m.Get(ctx, managedUnitPrefix+spec.Name)
 	if err == nil && info.State == "active" {
 		fullName := managedUnitPrefix + spec.Name + managedUnitSuffix
-		client := m.getClient()
-		if client.IsAvailable() {
-			if _, rerr := client.RestartUnitContext(ctx, fullName, "replace"); rerr != nil {
-				rollback()
-				return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %w", rerr)
-			}
-		} else {
-			output, rerr := exec.CommandContext(ctx, "systemctl", "restart", fullName).CombinedOutput()
-			if rerr != nil {
-				rollback()
-				return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %s", output)
-			}
+		if _, rerr := m.getClient().RestartUnitContext(ctx, fullName, "replace"); rerr != nil {
+			rollback()
+			return fmt.Errorf("unit 已更新但重启失败（已回滚旧配置）: %w", rerr)
 		}
 	}
 	return nil
@@ -889,25 +621,13 @@ func (m *ServiceManager) DeleteManaged(ctx context.Context, name string) error {
 	client := m.getClient()
 
 	// 先 disable（best-effort，可能本来就未 enable）
-	if client.IsAvailable() {
-		if _, err := client.DisableUnitFilesContext(ctx, []string{fullName}, false); err != nil {
-			log.Printf("systemd: disable %s during delete: %v", fullName, err)
-		}
-	} else {
-		if _, err := exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput(); err != nil {
-			log.Printf("systemd: disable %s during delete: %v", fullName, err)
-		}
+	if _, err := client.DisableUnitFilesContext(ctx, []string{fullName}, false); err != nil {
+		log.Printf("systemd: disable %s during delete: %v", fullName, err)
 	}
 
 	// 停止：失败则返回错误，避免删 unit 后留孤儿进程。
-	if client.IsAvailable() {
-		if _, err := client.StopUnitContext(ctx, fullName, "replace"); err != nil {
-			return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
-		}
-	} else {
-		if _, err := exec.CommandContext(ctx, "systemctl", "stop", fullName).CombinedOutput(); err != nil {
-			return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
-		}
+	if _, err := client.StopUnitContext(ctx, fullName, "replace"); err != nil {
+		return fmt.Errorf("停止 %s 失败，未删除 unit（避免孤儿进程）: %w", fullName, err)
 	}
 
 	if err := removeUnitFile(name); err != nil {
@@ -944,51 +664,24 @@ func (m *ServiceManager) managedUnitExists(name string) bool {
 }
 
 func (m *ServiceManager) daemonReload(ctx context.Context) error {
-	client := m.getClient()
-	if client.IsAvailable() {
-		if err := client.ReloadContext(ctx); err != nil {
-			return fmt.Errorf("daemon-reload 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "daemon-reload").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("daemon-reload 失败: %s", output)
+	if err := m.getClient().ReloadContext(ctx); err != nil {
+		return fmt.Errorf("daemon-reload 失败: %w", err)
 	}
 	return nil
 }
 
 func (m *ServiceManager) enableManaged(ctx context.Context, name string) error {
-	client := m.getClient()
 	fullName := managedUnitPrefix + name + managedUnitSuffix
-	if client.IsAvailable() {
-		if _, _, err := client.EnableUnitFilesContext(ctx, []string{fullName}, false, false); err != nil {
-			return fmt.Errorf("enable 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "enable", fullName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("enable 失败: %s", output)
+	if _, _, err := m.getClient().EnableUnitFilesContext(ctx, []string{fullName}, false, false); err != nil {
+		return fmt.Errorf("enable 失败: %w", err)
 	}
 	return nil
 }
 
 func (m *ServiceManager) disableManaged(ctx context.Context, name string) error {
-	client := m.getClient()
 	fullName := managedUnitPrefix + name + managedUnitSuffix
-	if client.IsAvailable() {
-		if _, err := client.DisableUnitFilesContext(ctx, []string{fullName}, false); err != nil {
-			return fmt.Errorf("disable 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "disable", fullName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("disable 失败: %s", output)
+	if _, err := m.getClient().DisableUnitFilesContext(ctx, []string{fullName}, false); err != nil {
+		return fmt.Errorf("disable 失败: %w", err)
 	}
 	return nil
 }
@@ -1001,17 +694,8 @@ func (m *ServiceManager) startManaged(ctx context.Context, name string) error {
 		return nil
 	}
 
-	client := m.getClient()
-	if client.IsAvailable() {
-		if _, err := client.StartUnitContext(ctx, fullName, "replace"); err != nil {
-			return fmt.Errorf("start 失败: %w", err)
-		}
-		return nil
-	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "start", fullName).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("start 失败: %s", output)
+	if _, err := m.getClient().StartUnitContext(ctx, fullName, "replace"); err != nil {
+		return fmt.Errorf("start 失败: %w", err)
 	}
 	return nil
 }

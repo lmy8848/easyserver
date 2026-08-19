@@ -218,34 +218,13 @@ func (s *Service) TestConfig(ctx context.Context) (string, error) {
 // ReloadSSH reloads the SSH service.
 func (s *Service) ReloadSSH(ctx context.Context) error {
 	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.ReloadUnitContext(ctx, "sshd.service", "replace"); err == nil {
-			return nil
-		}
-		if _, err := client.ReloadUnitContext(ctx, "ssh.service", "replace"); err == nil {
-			return nil
-		}
+	if _, err := client.ReloadUnitContext(ctx, "sshd.service", "replace"); err == nil {
+		return nil
 	}
-
-	output, err := exec.CommandContext(ctx, "systemctl", "reload", "sshd").CombinedOutput()
-	if err != nil {
-		// Try ssh service name
-		output2, err2 := exec.CommandContext(ctx, "systemctl", "reload", "ssh").CombinedOutput()
-		if err2 != nil {
-			msg := string(output)
-			if msg == "" {
-				msg = string(output2)
-			}
-			// coalesceErr 可能返回 nil（executor 对非零退出码不返回 error）——
-			// nil 时拼 %w 会打出 %!w(<nil>)，单独处理。
-			if rel := coalesceErr(err, err2); rel != nil {
-				return fmt.Errorf("reload failed: %s: %w", msg, rel)
-			}
-			return fmt.Errorf("reload failed: %s", msg)
-		}
+	if _, err := client.ReloadUnitContext(ctx, "ssh.service", "replace"); err == nil {
+		return nil
 	}
-	log.Printf("ssh: service reloaded")
-	return nil
+	return errors.New("reload SSH failed")
 }
 
 // GetSessions returns active SSH sessions.
@@ -578,15 +557,6 @@ func parseSSHLogLine(line string) *LoginRecord {
 }
 
 // --- File helpers ---
-
-func coalesceErr(errs ...error) error {
-	for _, err := range errs {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)

@@ -618,15 +618,9 @@ func (s *WebsiteService) reloadWebServer(ctx context.Context, ws *WebServer) {
 		}
 	}
 
-	client := infrasystemd.DefaultClient()
-	if client.IsAvailable() {
-		if _, err := client.ReloadUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
-			log.Printf("website: reload %s failed: %v", ws.ServiceName, err)
-		}
-		return
+	if _, err := infrasystemd.DefaultClient().ReloadUnitContext(ctx, ws.ServiceName, "replace"); err != nil {
+		log.Printf("website: reload %s failed: %v", ws.ServiceName, err)
 	}
-
-	_, _ = exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
 }
 
 // Nginx config templates per project type
