@@ -25,14 +25,14 @@ func markerPath(lang, exact string) string {
 		return ""
 	}
 	cleanExact := filepath.Base(filepath.Clean(exact))
-	if cleanExact != exact || cleanExact == "." || cleanExact == "/" {
+	if cleanExact != exact || cleanExact == "." || cleanExact == ".." || cleanExact == "/" || strings.Contains(cleanExact, "..") {
 		return ""
 	}
 	p := filepath.Join(mise.DataDir, "installs", tool, cleanExact, okMarker)
 	cleanPath := filepath.Clean(p)
 	cleanRoot := filepath.Clean(mise.DataDir)
 	rel, err := filepath.Rel(cleanRoot, cleanPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 		return ""
 	}
 	return cleanPath

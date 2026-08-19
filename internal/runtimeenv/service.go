@@ -232,10 +232,13 @@ func (s *Service) InstallTask(lang, exact string) (*task.Task, bool) {
 	return s.taskMgr.Get(runtimeTaskKey(lang, exact))
 }
 
-// isValidVersion validates version string to prevent command injection
+// isValidVersion validates version string to prevent command injection and path traversal
 // Only allows numbers, letters, dots, hyphens, plus, and underscores (e.g., 17.0.19, 20.10.0, 1.21.5-beta, 21.0.1+12-LTS, temurin-21.0.1)
 func isValidVersion(version string) bool {
 	if len(version) == 0 || len(version) > 50 {
+		return false
+	}
+	if strings.Contains(version, "..") || strings.Contains(version, "/") || strings.Contains(version, "\\") || version == "." || version == ".." {
 		return false
 	}
 	for _, c := range version {

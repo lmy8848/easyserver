@@ -38,6 +38,17 @@ func TestMarkerPathShape(t *testing.T) {
 	if len(p) < len(wantSuffix) || p[len(p)-len(wantSuffix):] != wantSuffix {
 		t.Errorf("markerPath(java,21) = %q, want suffix %q", p, wantSuffix)
 	}
+
+	// 路径穿越和非法版本拒绝
+	invalidVersions := []string{"..", ".", "../20.10.0", "20/10", "../../etc", "20..10"}
+	for _, v := range invalidVersions {
+		if res := markerPath("node", v); res != "" {
+			t.Errorf("markerPath(node, %q) = %q, want empty string", v, res)
+		}
+		if isValidVersion(v) {
+			t.Errorf("isValidVersion(%q) = true, want false", v)
+		}
+	}
 }
 
 func TestTaskStatusToRuntime(t *testing.T) {
