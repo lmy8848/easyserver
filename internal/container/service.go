@@ -1490,12 +1490,23 @@ func (s *Service) ComposeGetLogs(ctx context.Context, engine Engine, projectDir 
 	return string(output), nil
 }
 
-// ComposeGetConfig reads the compose file content.
-func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
+func isSafeProjectPath(projectDir string) (string, error) {
 	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
-		return "", errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+		return "", errors.New("invalid project directory")
 	}
 	cleanDir := filepath.Clean(projectDir)
+	if !filepath.IsAbs(cleanDir) || cleanDir == "/" || cleanDir == "." || strings.Contains(cleanDir, "..") {
+		return "", errors.New("invalid project directory path")
+	}
+	return cleanDir, nil
+}
+
+// ComposeGetConfig reads the compose file content.
+func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
+	cleanDir, err := isSafeProjectPath(projectDir)
+	if err != nil {
+		return "", errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+	}
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
 		return "", fmt.Errorf("no compose file found in %s", cleanDir)
@@ -1519,13 +1530,14 @@ func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (stri
 
 // ComposeSaveConfig writes content to the compose file.
 func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content string) error {
-	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
+	cleanDir, err := isSafeProjectPath(projectDir)
+	if err != nil {
 		return errx.BadRequest("invalid project directory: must be an absolute path without traversal")
 	}
-	cleanDir := filepath.Clean(projectDir)
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
-		composeFile = filepath.Join(cleanDir, "docker-compose.yml")
+		baseName := filepath.Base("docker-compose.yml")
+		composeFile = filepath.Join(cleanDir, baseName)
 	}
 	rel, err := filepath.Rel(cleanDir, composeFile)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
@@ -1547,10 +1559,10 @@ func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content str
 }
 
 func (s *Service) findComposeFile(projectDir string) string {
-	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
+	cleanDir, err := isSafeProjectPath(projectDir)
+	if err != nil {
 		return ""
 	}
-	cleanDir := filepath.Clean(projectDir)
 	candidates := []string{
 		"docker-compose.yml",
 		"docker-compose.yaml",
