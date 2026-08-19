@@ -45,7 +45,7 @@ func TestValidatePasswordStrength(t *testing.T) {
 		{"valid with special", "Abc@1234!", true, ""},
 		{"valid long", "Abcdefghij12345", true, ""},
 		{"valid exactly 8", "Abcdefg1", true, ""},
-		{"valid 128 chars", buildTestPassword(128), true, ""},
+		{"valid 72 chars", buildTestPassword(72), true, ""},
 		{"valid unicode upper", "Αβγ1abcD", true, ""},
 
 		// Too short
@@ -54,7 +54,7 @@ func TestValidatePasswordStrength(t *testing.T) {
 		{"7 chars", "Abc1234", false, "密码长度不足"},
 
 		// Too long
-		{"129 chars", buildTestPassword(129), false, "密码长度不能超过128个字符"},
+		{"73 chars", buildTestPassword(73), false, "密码长度不能超过72个字符"},
 
 		// Missing uppercase
 		{"no upper", "abcdefg1", false, "密码需要包含大写字母"},

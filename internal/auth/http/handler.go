@@ -88,6 +88,7 @@ func clearAuthCookie(c *gin.Context) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
+		Secure:   c.Request.TLS != nil,
 		MaxAge:   -1,
 	})
 }

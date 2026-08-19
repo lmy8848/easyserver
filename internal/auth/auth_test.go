@@ -28,7 +28,7 @@ func TestValidatePassword(t *testing.T) {
 		{"too short", "Abc12", true, "password must be at least 8 characters"},
 		{"exactly 7 chars", "Abc1234", true, "password must be at least 8 characters"},
 		{"exactly 8 chars valid", "Abcdefg1", false, ""},
-		{"too long (>128)", string(make([]byte, 129)), true, "password must be less than 128 characters"},
+		{"too long (>72)", string(make([]byte, 73)), true, "password must be less than 72 characters"},
 		{"no uppercase", "abcdefg1", true, "password must contain upper, lower case and digit"},
 		{"no lowercase", "ABCDEFG1", true, "password must contain upper, lower case and digit"},
 		{"no digit", "Abcdefgh", true, "password must contain upper, lower case and digit"},
@@ -36,7 +36,7 @@ func TestValidatePassword(t *testing.T) {
 		{"only lowercase", "abcdefgh", true, "password must contain upper, lower case and digit"},
 		{"only uppercase", "ABCDEFGH", true, "password must contain upper, lower case and digit"},
 		{"empty string", "", true, "password must be at least 8 characters"},
-		{"128 chars valid", buildPassword(128, true, true, true), false, ""},
+		{"72 chars valid", buildPassword(72, true, true, true), false, ""},
 	}
 
 	for _, tt := range tests {
