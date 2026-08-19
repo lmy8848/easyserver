@@ -395,6 +395,9 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 }
 
 func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, tableName string) (*DescribeResult, error) {
+	if !isValidTableName(tableName) {
+		return nil, errx.BadRequest("invalid table name")
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -451,6 +454,9 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 }
 
 func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tableName string, page, pageSize int) (*PagedQueryResult, error) {
+	if !isValidTableName(tableName) {
+		return nil, errx.BadRequest("invalid table name")
+	}
 	if page < 1 {
 		page = 1
 	}
@@ -589,6 +595,9 @@ func isReadStatement(stmt string) bool {
 }
 
 func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]any, dryRun bool) (*DMLResult, error) {
+	if !isValidTableName(table) {
+		return &DMLResult{Success: false, Error: "invalid table name"}, nil
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -616,6 +625,12 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]any, pk string, pkVal any, dryRun bool) (*DMLResult, error) {
+	if !isValidTableName(table) {
+		return &DMLResult{Success: false, Error: "invalid table name"}, nil
+	}
+	if err := isValidColumnName(pk); err != nil {
+		return &DMLResult{Success: false, Error: "invalid primary key column"}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -643,6 +658,12 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal any, dryRun bool) (*DMLResult, error) {
+	if !isValidTableName(table) {
+		return &DMLResult{Success: false, Error: "invalid table name"}, nil
+	}
+	if err := isValidColumnName(pk); err != nil {
+		return &DMLResult{Success: false, Error: "invalid primary key column"}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
