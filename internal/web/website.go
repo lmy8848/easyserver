@@ -232,8 +232,8 @@ func (s *WebsiteService) Update(ctx context.Context, webServerID, id int64, req 
 		w.Name = *req.Name
 	}
 	if req.Domain != nil && *req.Domain != w.Domain {
-		if !domainRegexp.MatchString(*req.Domain) {
-			return errx.BadRequest("invalid domain format: must be a valid RFC 1123 hostname")
+		if err := req.ValidateDomain(); err != nil {
+			return errx.BadRequest("无效的域名: %w", err)
 		}
 		// Check new domain uniqueness
 		count, _ := s.repo.CountByDomainExcludingID(ctx, *req.Domain, id)

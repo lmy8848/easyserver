@@ -76,14 +76,18 @@ type CreateWebsiteRequest struct {
 // separated by dots, total length <= 253. Does not allow leading/trailing hyphens per label.
 var domainRegexp = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
 
-func (r *CreateWebsiteRequest) ValidateDomain() error {
-	if len(r.Domain) == 0 || len(r.Domain) > 253 {
+func ValidateDomainName(domain string) error {
+	if len(domain) == 0 || len(domain) > 253 {
 		return errors.New("domain length must be between 1 and 253 characters")
 	}
-	if !domainRegexp.MatchString(r.Domain) {
+	if !domainRegexp.MatchString(domain) {
 		return errors.New("invalid domain format: must be a valid RFC 1123 hostname")
 	}
 	return nil
+}
+
+func (r *CreateWebsiteRequest) ValidateDomain() error {
+	return ValidateDomainName(r.Domain)
 }
 
 type UpdateWebsiteRequest struct {
@@ -98,6 +102,13 @@ type UpdateWebsiteRequest struct {
 	CustomConfig  *string `json:"custom_config"`
 	ConfigOptions *string `json:"config_options"`
 	ProcessID     *int64  `json:"process_id"`
+}
+
+func (r *UpdateWebsiteRequest) ValidateDomain() error {
+	if r.Domain == nil {
+		return nil
+	}
+	return ValidateDomainName(*r.Domain)
 }
 
 // ProjectTypeConfig defines Nginx config templates per project type
