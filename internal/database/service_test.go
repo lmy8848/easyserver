@@ -231,10 +231,7 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
-	got := findInstanceByStatus(repo, "running")
-	if got == nil {
-		t.Fatalf("expected running instance after install, got %+v", repo.instances)
-	}
+	got := findInstanceByStatus(t, repo, "running")
 	if got.BindAddress != "127.0.0.1" {
 		t.Fatalf("expected loopback bind by default, got %q", got.BindAddress)
 	}
@@ -265,10 +262,7 @@ func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 	if len(rt.removed) != 0 {
 		t.Fatalf("failed install must keep the container for inspection, removed=%v", rt.removed)
 	}
-	got := findInstanceByStatus(repo, "failed")
-	if got == nil {
-		t.Fatalf("expected failed instance row kept for inspection, got %+v", repo.instances)
-	}
+	_ = findInstanceByStatus(t, repo, "failed")
 }
 
 // withTempHostBase 把 hostDBBaseDir 指到临时目录，避免测试真实操作 /opt，用后还原。
@@ -293,10 +287,7 @@ func TestUninstallPurgeRemovesHostDataDir(t *testing.T) {
 	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
-	got := findInstanceByStatus(repo, "running")
-	if got == nil {
-		t.Fatalf("expected running instance after install, got %+v", repo.instances)
-	}
+	got := findInstanceByStatus(t, repo, "running")
 	// 宿主数据目录真实创建（安装时 prepareHostDirs）。
 	instanceDir := filepath.Join(hostDBBaseDir, "mysql-8.0")
 	if _, err := os.Stat(filepath.Join(instanceDir, "data")); err != nil {
@@ -332,10 +323,7 @@ func TestUninstallKeepsHostDataDirWithoutPurge(t *testing.T) {
 	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
-	got := findInstanceByStatus(repo, "running")
-	if got == nil {
-		t.Fatalf("expected running instance after install, got %+v", repo.instances)
-	}
+	got := findInstanceByStatus(t, repo, "running")
 
 	if err := svc.UninstallInstance(context.Background(), got.ID, false); err != nil {
 		t.Fatalf("uninstall(no purge): %v", err)
@@ -399,10 +387,7 @@ func TestCreateBackupWritesToDataESBackups(t *testing.T) {
 	if err := svc.WaitForInstall(res.InstallID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
-	got := findInstanceByStatus(repo, "running")
-	if got == nil {
-		t.Fatalf("expected running instance after install, got %+v", repo.instances)
-	}
+	got := findInstanceByStatus(t, repo, "running")
 
 	backup, err := svc.CreateBackup(context.Background(), got.ID, "testdb", DBTypeMySQL)
 	if err != nil {
@@ -490,14 +475,15 @@ func TestCreateInstanceRejectsTakenContainerName(t *testing.T) {
 }
 
 // findInstanceByStatus returns the (single) instance row for the database type with
-// the given status, or nil. Installs write exactly one row on completion.
-func findInstanceByStatus(repo *fakeRepo, status string) *DBInstance {
-	rows, _ := repo.ListInstances(context.Background(), DBTypeMySQL)
-	for i := range rows {
-		if rows[i].Status == status {
-			return &rows[i]
+// the given status. Installs write exactly one row on completion.
+func findInstanceByStatus(t *testing.T, repo *fakeRepo, status string) *DBInstance {
+	t.Helper()
+	for _, v := range repo.instances {
+		if v.Status == status {
+			return v
 		}
 	}
+	t.Fatalf("expected instance with status %q, got %+v", status, repo.instances)
 	return nil
 }
 

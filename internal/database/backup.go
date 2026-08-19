@@ -103,9 +103,12 @@ func (s *Service) executeBackup(ctx context.Context, backup *DBBackup, dbType DB
 		log.Printf("backup failed for %s: %v", backup.DatabaseName, err)
 	} else {
 		backup.Status = "success"
-		cleanPath := filepath.Clean(backup.FilePath)
-		if info, err := os.Stat(cleanPath); err == nil {
-			backup.FileSize = info.Size()
+		if instance, errInst := s.repo.GetInstance(ctx, backup.DBInstanceID); errInst == nil && instance != nil {
+			baseFile := filepath.Base(filepath.Clean(backup.FilePath))
+			safePath := filepath.Join(instance.VolumeName, esBackupsDir, baseFile)
+			if info, err := os.Stat(safePath); err == nil {
+				backup.FileSize = info.Size()
+			}
 		}
 	}
 
@@ -161,7 +164,9 @@ func (s *Service) backupRedis(ctx context.Context, backup *DBBackup) error {
 
 	time.Sleep(2 * time.Second)
 	src := filepath.Join(instance.VolumeName, "dump.rdb")
-	if err := copyFile(src, backup.FilePath); err != nil {
+	baseFile := filepath.Base(filepath.Clean(backup.FilePath))
+	targetPath := filepath.Join(instance.VolumeName, esBackupsDir, baseFile)
+	if err := copyFile(src, targetPath); err != nil {
 		return fmt.Errorf("copy redis dump: %w", err)
 	}
 	return nil
