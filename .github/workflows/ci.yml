@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0  # git describe 需要完整历史
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.25'
           cache: true # caches both GOMODCACHE and GOCACHE
