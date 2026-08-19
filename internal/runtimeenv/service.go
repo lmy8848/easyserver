@@ -202,11 +202,16 @@ func (s *Service) installRuntime(ctx context.Context, name, exactVersion string,
 	}
 
 	// 安装成功后写完成标记；卸载删除目录时一并消失。
-	p := markerPath(name, exactVersion)
-	if p == "" {
+	tool := miseToolDir(name)
+	if tool == "" || !isValidVersion(exactVersion) {
 		return fmt.Errorf("invalid runtime version: %s", exactVersion)
 	}
+	cleanExact := filepath.Base(filepath.Clean(exactVersion))
+	if cleanExact != exactVersion || cleanExact == "." || cleanExact == "/" {
+		return fmt.Errorf("invalid runtime version path: %s", exactVersion)
+	}
 	cleanRoot := filepath.Clean(mise.DataDir)
+	p := filepath.Join(cleanRoot, "installs", tool, cleanExact, okMarker)
 	rel, err := filepath.Rel(cleanRoot, p)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return errors.New("invalid runtime marker path")
@@ -264,10 +269,16 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 			return uninstallErr
 		}
 		// 卸载后标记随目录删除；此处显式删标记防目录残留半截。
-		if p := markerPath(name, version); p != "" {
-			cleanRoot := filepath.Clean(mise.DataDir)
-			if rel, err := filepath.Rel(cleanRoot, p); err == nil && !strings.HasPrefix(rel, "..") {
-				_ = os.Remove(p)
+		tool := miseToolDir(name)
+		if tool != "" && isValidVersion(version) {
+			cleanExact := filepath.Base(filepath.Clean(version))
+			if cleanExact == version && cleanExact != "." && cleanExact != "/" {
+				cleanRoot := filepath.Clean(mise.DataDir)
+				p := filepath.Join(cleanRoot, "installs", tool, cleanExact, okMarker)
+				rel, err := filepath.Rel(cleanRoot, p)
+				if err == nil && !strings.HasPrefix(rel, "..") {
+					_ = os.Remove(p)
+				}
 			}
 		}
 		return nil
