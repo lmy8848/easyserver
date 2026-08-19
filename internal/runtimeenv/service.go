@@ -2,6 +2,7 @@ package runtimeenv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -45,7 +46,12 @@ func Installed(ctx context.Context, lang, exact string) bool {
 	if p == "" {
 		return false
 	}
-	_, err := os.Stat(p)
+	cleanRoot := filepath.Clean(mise.DataDir)
+	rel, err := filepath.Rel(cleanRoot, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	_, err = os.Stat(p)
 	return err == nil
 }
 
@@ -200,6 +206,11 @@ func (s *Service) installRuntime(ctx context.Context, name, exactVersion string,
 	if p == "" {
 		return fmt.Errorf("invalid runtime version: %s", exactVersion)
 	}
+	cleanRoot := filepath.Clean(mise.DataDir)
+	rel, err := filepath.Rel(cleanRoot, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return errors.New("invalid runtime marker path")
+	}
 	if err := os.WriteFile(p, []byte("ok\n"), 0644); err != nil {
 		stdlog.Printf("runtime: failed to write marker for %s %s: %v", name, exactVersion, err)
 		return fmt.Errorf("安装完成但写入标记失败: %w", err)
@@ -254,7 +265,10 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 		}
 		// 卸载后标记随目录删除；此处显式删标记防目录残留半截。
 		if p := markerPath(name, version); p != "" {
-			_ = os.Remove(p)
+			cleanRoot := filepath.Clean(mise.DataDir)
+			if rel, err := filepath.Rel(cleanRoot, p); err == nil && !strings.HasPrefix(rel, "..") {
+				_ = os.Remove(p)
+			}
 		}
 		return nil
 	}); err != nil {

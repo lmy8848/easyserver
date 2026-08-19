@@ -24,12 +24,18 @@ func markerPath(lang, exact string) string {
 	if tool == "" || !isValidVersion(exact) {
 		return ""
 	}
-	p := filepath.Join(mise.DataDir, "installs", tool, exact, okMarker)
-	rel, err := filepath.Rel(mise.DataDir, p)
+	cleanExact := filepath.Base(filepath.Clean(exact))
+	if cleanExact != exact || cleanExact == "." || cleanExact == "/" {
+		return ""
+	}
+	p := filepath.Join(mise.DataDir, "installs", tool, cleanExact, okMarker)
+	cleanPath := filepath.Clean(p)
+	cleanRoot := filepath.Clean(mise.DataDir)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return ""
 	}
-	return p
+	return cleanPath
 }
 
 // miseToolDir 返回 lang 在 installs/ 下的目录名（与 provider 的 InstallPath 同构）。
