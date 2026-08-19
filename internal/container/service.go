@@ -1521,6 +1521,9 @@ func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content str
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return errx.BadRequest("invalid compose file path")
 	}
+	if fi, err := os.Lstat(composeFile); err == nil && !fi.Mode().IsRegular() {
+		return errx.BadRequest("cannot write to non-regular file or symlink")
+	}
 
 	if err := os.WriteFile(composeFile, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
@@ -1546,7 +1549,8 @@ func (s *Service) findComposeFile(projectDir string) string {
 		if err != nil || strings.HasPrefix(rel, "..") {
 			continue
 		}
-		if _, err := os.Stat(path); err == nil {
+		fi, err := os.Lstat(path)
+		if err == nil && fi.Mode().IsRegular() {
 			return path
 		}
 	}
