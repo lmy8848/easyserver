@@ -59,14 +59,11 @@ internal/api/web/
 
 # Claude Code local settings
 .claude/
-CLAUDE.md
 
 # Temporary files
 *.tmp
 tmp/
 .tmp/
 
-AGENTS.md
 .scratch/
 .qoder/
-docs/
