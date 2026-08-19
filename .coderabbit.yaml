@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "zh-CN"
+early_access: false
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "master"
+      - "main"
+  path_filters:
+    - "!web/dist/**"
+    - "!internal/api/web/dist/**"
+    - "!**/node_modules/**"
+    - "!**/*.sum"
+    - "!**/pnpm-lock.yaml"
+    - "!migrations/**"
+    - "!**/*.min.*"
+    - "!**/*.map"
+  path_instructions:
+    - path: "internal/**"
+      instructions: |
+        Go 后端代码审查重点：
+        1. 安全与输入校验：用户输入的路径、参数、版本、域名需严格校验，严防路径穿越（Path Traversal / ZipSlip）、命令注入与 SQL 注入。
+        2. 错误处理与日志：禁止静默吞掉底层 error；后台任务失败时需正确向上传播并记录错误信息。
+        3. 资源释放与并发：文件句柄、网络连接、互斥锁必须确保 defer 正确释放，防止资源泄露与并发竞争。
+    - path: "web/src/**"
+      instructions: |
+        React + TypeScript 前端代码审查重点：
+        1. 类型安全：优先保持严格的 TypeScript 类型推导，避免滥用 any。
+        2. Hook 依赖规范：检查 useEffect、useMemo、useCallback 依赖项完整性，确保路由与锚点跳转逻辑正确。
+        3. 交互反馈：异步调用需具备友好的 Loading 状态与错误捕获提示。
+  tone_instructions: |
+    - 请使用规范的简体中文进行代码评审。
+    - 评审意见应简洁、专业、直击核心，重点关注安全性、逻辑缺陷、边界情况与数据一致性。
+    - 避免提出无关紧要的代码风格或纯格式化争论，优先聚焦高质量工程实践。
+
+chat:
+  auto_reply: true
