@@ -591,13 +591,12 @@ type DirEntry struct {
 func (h *WebServerHandler) BrowseDirs(c *gin.Context) (any, error) {
 	reqPath := c.DefaultQuery("path", "/var/www")
 
-	// Clean and resolve path
-	reqPath = filepath.Clean(reqPath)
-
 	// Security: must be under allowed roots
-	if !isAllowedPath(reqPath) {
+	safePath, ok := sanitizeAllowedPath(reqPath)
+	if !ok {
 		return nil, errx.BadRequest("路径必须在以下目录下: %s", strings.Join(allowedRoots, ", "))
 	}
+	reqPath = safePath
 
 	// Check directory exists
 	info, err := os.Stat(reqPath)
@@ -652,15 +651,15 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("路径不能为空")
 	}
 
-	reqPath = filepath.Clean(reqPath)
-
 	// Security check
-	if !isAllowedPath(reqPath) {
+	safePath, ok := sanitizeAllowedPath(reqPath)
+	if !ok {
 		return gin.H{
 			"valid":   false,
 			"message": "路径必须在以下目录下: " + strings.Join(allowedRoots, ", "),
 		}, nil
 	}
+	reqPath = safePath
 
 	// Check if exists
 	info, err := os.Stat(reqPath)
@@ -708,22 +707,49 @@ func (h *WebServerHandler) ValidatePath(c *gin.Context) (any, error) {
 	}, nil
 }
 
-// isAllowedPath checks if a path is under allowed root directories
-func isAllowedPath(p string) bool {
-	absPath, err := filepath.Abs(p)
+// sanitizeAllowedPath checks if a path is under allowed root directories
+func sanitizeAllowedPath(p string) (string, bool) {
+	if p == "" || strings.Contains(p, "\x00") || strings.Contains(p, "..") {
+		return "", false
+	}
+	clean := filepath.Clean(p)
+	if !filepath.IsAbs(clean) {
+		return "", false
+	}
+	absPath, err := filepath.Abs(clean)
 	if err != nil {
-		return false
+		return "", false
+	}
+	realPath := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		realPath = resolved
 	}
 	for _, root := range allowedRoots {
-		if strings.HasPrefix(absPath, root) {
-			return true
+		cleanRoot := filepath.Clean(root)
+		realRoot := cleanRoot
+		if resolved, err := filepath.EvalSymlinks(cleanRoot); err == nil {
+			realRoot = resolved
+		}
+		rel, err := filepath.Rel(realRoot, realPath)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			return realPath, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// isAllowedPath checks if a path is under allowed root directories
+func isAllowedPath(p string) bool {
+	_, ok := sanitizeAllowedPath(p)
+	return ok
 }
 
 // hasProjectFiles checks if a directory contains project indicator files
 func hasProjectFiles(dir string) bool {
+	safeDir, ok := sanitizeAllowedPath(dir)
+	if !ok {
+		return false
+	}
 	indicators := []string{
 		"package.json", "index.js", "app.js", "server.js", // Node.js
 		"index.php", "composer.json", // PHP
@@ -734,7 +760,13 @@ func hasProjectFiles(dir string) bool {
 		"index.html", "index.htm", // Static
 	}
 	for _, f := range indicators {
-		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+		baseName := filepath.Base(filepath.Clean(f))
+		target := filepath.Join(safeDir, baseName)
+		rel, err := filepath.Rel(safeDir, target)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			continue
+		}
+		if fi, err := os.Lstat(target); err == nil && fi.Mode().IsRegular() {
 			return true
 		}
 	}
@@ -743,6 +775,10 @@ func hasProjectFiles(dir string) bool {
 
 // detectProjectType detects the project type in a directory
 func detectProjectType(dir string) string {
+	safeDir, ok := sanitizeAllowedPath(dir)
+	if !ok {
+		return ""
+	}
 	checks := []struct {
 		file    string
 		project string
@@ -760,7 +796,13 @@ func detectProjectType(dir string) string {
 		{"index.html", "static"},
 	}
 	for _, c := range checks {
-		if _, err := os.Stat(filepath.Join(dir, c.file)); err == nil {
+		baseName := filepath.Base(filepath.Clean(c.file))
+		target := filepath.Join(safeDir, baseName)
+		rel, err := filepath.Rel(safeDir, target)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			continue
+		}
+		if fi, err := os.Lstat(target); err == nil && fi.Mode().IsRegular() {
 			return c.project
 		}
 	}

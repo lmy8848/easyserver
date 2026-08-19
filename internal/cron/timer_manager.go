@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -543,7 +544,15 @@ func parseEnvMap(envStr string) map[string]string {
 // 从而支持多行命令且规避 systemd unit 换行注入。脚本目录与脚本库分离。
 
 func taskCommandPath(name string) string {
-	return filepath.Join(taskCommandDir, name)
+	if err := systemd.ValidateCronName(name); err != nil {
+		return ""
+	}
+	p := filepath.Join(taskCommandDir, name)
+	rel, err := filepath.Rel(taskCommandDir, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return p
 }
 
 // writeTaskCommand 把命令内容落盘为可执行脚本（shebang + chmod 0755）。
@@ -556,6 +565,9 @@ func writeTaskCommand(name, command string) error {
 		content += "\n"
 	}
 	path := taskCommandPath(name)
+	if path == "" {
+		return errors.New("invalid task name")
+	}
 	tmp, err := os.CreateTemp(taskCommandDir, name+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("创建临时命令文件失败: %w", err)
@@ -583,12 +595,20 @@ func writeTaskCommand(name, command string) error {
 }
 
 func removeTaskCommand(name string) error {
-	return os.Remove(taskCommandPath(name)) // 文件不存在时返回 os.ErrNotExist，调用方按需忽略
+	p := taskCommandPath(name)
+	if p == "" {
+		return errors.New("invalid task name")
+	}
+	return os.Remove(p) // 文件不存在时返回 os.ErrNotExist，调用方按需忽略
 }
 
 // readTaskCommand 读回命令内容，剥离 shebang 首行，供编辑表单回显。
 func readTaskCommand(name string) (string, error) {
-	data, err := os.ReadFile(taskCommandPath(name))
+	p := taskCommandPath(name)
+	if p == "" {
+		return "", errors.New("invalid task name")
+	}
+	data, err := os.ReadFile(p)
 	if err != nil {
 		return "", err
 	}
@@ -641,7 +661,11 @@ func (m *TimerManager) restartTimer(ctx context.Context, name string) error {
 }
 
 func (m *TimerManager) timerUnitExists(name string) bool {
-	_, err := os.Stat(systemd.CronTimerPath(name))
+	p := systemd.CronTimerPath(name)
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
 	return err == nil
 }
 

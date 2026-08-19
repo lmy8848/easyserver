@@ -20,7 +20,22 @@ const okMarker = ".easyserver-ok"
 
 // markerPath 返回 (lang, exact) 的完成标记路径（纯计算，不 stat 磁盘）。
 func markerPath(lang, exact string) string {
-	return filepath.Join(mise.DataDir, "installs", miseToolDir(lang), exact, okMarker)
+	tool := miseToolDir(lang)
+	if tool == "" || !isValidVersion(exact) {
+		return ""
+	}
+	cleanExact := filepath.Base(filepath.Clean(exact))
+	if cleanExact != exact || cleanExact == "." || cleanExact == ".." || cleanExact == "/" || strings.Contains(cleanExact, "..") {
+		return ""
+	}
+	p := filepath.Join(mise.DataDir, "installs", tool, cleanExact, okMarker)
+	cleanPath := filepath.Clean(p)
+	cleanRoot := filepath.Clean(mise.DataDir)
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return ""
+	}
+	return cleanPath
 }
 
 // miseToolDir 返回 lang 在 installs/ 下的目录名（与 provider 的 InstallPath 同构）。

@@ -3,13 +3,12 @@ package auth
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -87,14 +86,14 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-		fmt.Println("=================================================")
-		fmt.Println("EasyServer 初次启动 - 管理员账号信息")
-		fmt.Println("=================================================")
-		fmt.Printf("用户名: admin\n")
-		fmt.Printf("密码:   %s\n", password)
-		fmt.Println("=================================================")
-		fmt.Println("请登录后立即修改密码！")
-		fmt.Println("=================================================")
+		_, _ = os.Stdout.WriteString("=================================================\n")
+		_, _ = os.Stdout.WriteString("EasyServer 初次启动 - 管理员账号信息\n")
+		_, _ = os.Stdout.WriteString("=================================================\n")
+		_, _ = os.Stdout.WriteString("用户名: admin\n")
+		_, _ = os.Stdout.WriteString("密码:   " + password + "\n")
+		_, _ = os.Stdout.WriteString("=================================================\n")
+		_, _ = os.Stdout.WriteString("请登录后立即修改密码！\n")
+		_, _ = os.Stdout.WriteString("=================================================\n")
 		return nil
 	}
 	return nil
@@ -276,8 +275,8 @@ func (s *AuthService) ValidatePassword(password string) error {
 	if len(password) < 8 {
 		return errors.New("password must be at least 8 characters")
 	}
-	if len(password) > 128 {
-		return errors.New("password must be less than 128 characters")
+	if len(password) > 72 {
+		return errors.New("password must be less than 72 characters")
 	}
 
 	var hasUpper, hasLower, hasDigit bool
@@ -468,12 +467,10 @@ func generateRandomCode(length int) (string, error) {
 }
 
 func hashPassword(password string) (string, error) {
-	passwordBytes := []byte(password)
-	if len(passwordBytes) > 72 {
-		hash := sha256.Sum256(passwordBytes)
-		passwordBytes = []byte(hex.EncodeToString(hash[:]))
+	if len(password) > 72 {
+		return "", errors.New("password exceeds maximum length of 72 bytes")
 	}
-	hash, err := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
@@ -481,11 +478,9 @@ func hashPassword(password string) (string, error) {
 }
 
 func verifyPassword(password, hash string) bool {
-	passwordBytes := []byte(password)
-	if len(passwordBytes) > 72 {
-		h := sha256.Sum256(passwordBytes)
-		passwordBytes = []byte(hex.EncodeToString(h[:]))
+	if len(password) > 72 {
+		return false
 	}
-	err := bcrypt.CompareHashAndPassword([]byte(hash), passwordBytes)
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
 }

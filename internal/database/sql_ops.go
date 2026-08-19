@@ -97,10 +97,15 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 	// DDL statements cannot be parameter-bound; names/hosts are validated and
 	// passwords escaped by the builder. The system database hosts instance-level
 	// statements — including CREATE DATABASE itself, which must not run on the
-	// target database.
+	if !isValidDBName(req.Name) {
+		return nil, errx.BadRequest("invalid database name")
+	}
 	charset := req.Charset
 	if charset == "" {
 		charset = defaultCharset
+	}
+	if !isValidCharset(charset) {
+		return nil, errx.BadRequest("invalid charset")
 	}
 	builder := NewSQLBuilder(instance.DBType)
 	sqlStr, err := builder.BuildCreateDatabase(req.Name, charset)
@@ -121,6 +126,9 @@ func (s *Service) CreateDatabase(ctx context.Context, instanceID int64, req *Cre
 }
 
 func (s *Service) DeleteDatabase(ctx context.Context, instanceID int64, dbName string) error {
+	if !isValidDBName(dbName) {
+		return errx.BadRequest("invalid database name")
+	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -209,6 +217,12 @@ func isAdminUser(dbType DBType, username string) bool {
 }
 
 func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *CreateDBUserRequest) (*DBUser, error) {
+	if !isValidUsername(req.Username) {
+		return nil, errx.BadRequest("invalid username")
+	}
+	if req.Host != "" && !isValidHost(req.Host) {
+		return nil, errx.BadRequest("invalid host")
+	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get instance: %w", err)
@@ -243,6 +257,12 @@ func (s *Service) CreateDBUser(ctx context.Context, instanceID int64, req *Creat
 }
 
 func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, host string) error {
+	if !isValidUsername(username) {
+		return errx.BadRequest("invalid username")
+	}
+	if host != "" && !isValidHost(host) {
+		return errx.BadRequest("invalid host")
+	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -274,6 +294,15 @@ func (s *Service) DeleteDBUser(ctx context.Context, instanceID int64, username, 
 }
 
 func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, username, host string, req *GrantRequest) error {
+	if !isValidUsername(username) {
+		return errx.BadRequest("invalid username")
+	}
+	if host != "" && !isValidHost(host) {
+		return errx.BadRequest("invalid host")
+	}
+	if req.Database != "*" && !isValidDBName(req.Database) {
+		return errx.BadRequest("invalid database name")
+	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -304,6 +333,12 @@ func (s *Service) GrantPrivileges(ctx context.Context, instanceID int64, usernam
 }
 
 func (s *Service) ResetPassword(ctx context.Context, instanceID int64, username, host, newPassword string) error {
+	if !isValidUsername(username) {
+		return errx.BadRequest("invalid username")
+	}
+	if host != "" && !isValidHost(host) {
+		return errx.BadRequest("invalid host")
+	}
 	instance, err := s.repo.GetInstance(ctx, instanceID)
 	if err != nil {
 		return fmt.Errorf("get instance: %w", err)
@@ -360,6 +395,9 @@ func (s *Service) ListTables(ctx context.Context, instanceID int64, dbName strin
 }
 
 func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, tableName string) (*DescribeResult, error) {
+	if !isValidTableName(tableName) {
+		return nil, errx.BadRequest("invalid table name")
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -416,6 +454,9 @@ func (s *Service) DescribeTable(ctx context.Context, instanceID int64, dbName, t
 }
 
 func (s *Service) QueryTable(ctx context.Context, instanceID int64, dbName, tableName string, page, pageSize int) (*PagedQueryResult, error) {
+	if !isValidTableName(tableName) {
+		return nil, errx.BadRequest("invalid table name")
+	}
 	if page < 1 {
 		page = 1
 	}
@@ -554,6 +595,9 @@ func isReadStatement(stmt string) bool {
 }
 
 func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]any, dryRun bool) (*DMLResult, error) {
+	if !isValidTableName(table) {
+		return &DMLResult{Success: false, Error: "invalid table name"}, nil
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -581,6 +625,12 @@ func (s *Service) InsertRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, table string, data map[string]any, pk string, pkVal any, dryRun bool) (*DMLResult, error) {
+	if !isValidTableName(table) {
+		return &DMLResult{Success: false, Error: "invalid table name"}, nil
+	}
+	if err := isValidColumnName(pk); err != nil {
+		return &DMLResult{Success: false, Error: "invalid primary key column"}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -608,6 +658,12 @@ func (s *Service) UpdateRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, table string, pk string, pkVal any, dryRun bool) (*DMLResult, error) {
+	if !isValidTableName(table) {
+		return &DMLResult{Success: false, Error: "invalid table name"}, nil
+	}
+	if err := isValidColumnName(pk); err != nil {
+		return &DMLResult{Success: false, Error: "invalid primary key column"}, nil //nolint:nilerr // DML 错误打包进 DMLResult.Error
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return nil, err
@@ -635,6 +691,15 @@ func (s *Service) DeleteRecord(ctx context.Context, instanceID int64, dbName, ta
 }
 
 func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tableName string, columns []TableColumn, charset, collation string) error {
+	if !isValidTableName(tableName) {
+		return errx.BadRequest("invalid table name")
+	}
+	if charset != "" && !isValidCharset(charset) {
+		return errx.BadRequest("invalid charset")
+	}
+	if collation != "" && !isValidCollation(collation) {
+		return errx.BadRequest("invalid collation")
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err
@@ -654,6 +719,9 @@ func (s *Service) CreateTable(ctx context.Context, instanceID int64, dbName, tab
 }
 
 func (s *Service) DropTable(ctx context.Context, instanceID int64, dbName, tableName string) error {
+	if !isValidTableName(tableName) {
+		return errx.BadRequest("invalid table name")
+	}
 	instance, err := s.getInstanceForSQL(ctx, instanceID, dbName)
 	if err != nil {
 		return err

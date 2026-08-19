@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -421,8 +422,20 @@ func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string
 	return string(output), nil
 }
 
+var validContainerIDRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+
+func validateContainerID(id string) error {
+	if id == "" || strings.HasPrefix(id, "-") || !validContainerIDRE.MatchString(id) {
+		return errx.BadRequest("invalid container ID or name: %s", id)
+	}
+	return nil
+}
+
 // ExecInContainer executes a command in a running container.
 func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd string) (string, error) {
+	if err := validateContainerID(id); err != nil {
+		return "", err
+	}
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
 		return "", err
 	}
@@ -1477,14 +1490,38 @@ func (s *Service) ComposeGetLogs(ctx context.Context, engine Engine, projectDir 
 	return string(output), nil
 }
 
+func isSafeProjectPath(projectDir string) (string, error) {
+	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
+		return "", errors.New("invalid project directory")
+	}
+	cleanDir := filepath.Clean(projectDir)
+	if !filepath.IsAbs(cleanDir) || cleanDir == "/" || cleanDir == "." || strings.Contains(cleanDir, "..") {
+		return "", errors.New("invalid project directory path")
+	}
+	return cleanDir, nil
+}
+
 // ComposeGetConfig reads the compose file content.
 func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
-	composeFile := s.findComposeFile(projectDir)
+	cleanDir, err := isSafeProjectPath(projectDir)
+	if err != nil {
+		return "", errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+	}
+	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
-		return "", fmt.Errorf("no compose file found in %s", projectDir)
+		return "", fmt.Errorf("no compose file found in %s", cleanDir)
+	}
+	rel, err := filepath.Rel(cleanDir, composeFile)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return "", errx.BadRequest("invalid compose file path")
 	}
 
-	data, err := os.ReadFile(composeFile)
+	f, err := os.OpenFile(composeFile, os.O_RDONLY, 0)
+	if err != nil {
+		return "", fmt.Errorf("read compose file: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return "", fmt.Errorf("read compose file: %w", err)
 	}
@@ -1493,18 +1530,39 @@ func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (stri
 
 // ComposeSaveConfig writes content to the compose file.
 func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content string) error {
-	composeFile := s.findComposeFile(projectDir)
+	cleanDir, err := isSafeProjectPath(projectDir)
+	if err != nil {
+		return errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+	}
+	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
-		composeFile = projectDir + "/docker-compose.yml"
+		baseName := filepath.Base("docker-compose.yml")
+		composeFile = filepath.Join(cleanDir, baseName)
+	}
+	rel, err := filepath.Rel(cleanDir, composeFile)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return errx.BadRequest("invalid compose file path")
+	}
+	if fi, err := os.Lstat(composeFile); err == nil && !fi.Mode().IsRegular() {
+		return errx.BadRequest("cannot write to non-regular file or symlink")
 	}
 
-	if err := os.WriteFile(composeFile, []byte(content), 0644); err != nil {
+	f, err := os.OpenFile(composeFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open compose file: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte(content)); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
 	}
 	return nil
 }
 
 func (s *Service) findComposeFile(projectDir string) string {
+	cleanDir, err := isSafeProjectPath(projectDir)
+	if err != nil {
+		return ""
+	}
 	candidates := []string{
 		"docker-compose.yml",
 		"docker-compose.yaml",
@@ -1513,8 +1571,14 @@ func (s *Service) findComposeFile(projectDir string) string {
 	}
 
 	for _, name := range candidates {
-		path := projectDir + "/" + name
-		if _, err := os.Stat(path); err == nil {
+		baseName := filepath.Base(filepath.Clean(name))
+		path := filepath.Join(cleanDir, baseName)
+		rel, err := filepath.Rel(cleanDir, path)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			continue
+		}
+		fi, err := os.Lstat(path)
+		if err == nil && fi.Mode().IsRegular() {
 			return path
 		}
 	}

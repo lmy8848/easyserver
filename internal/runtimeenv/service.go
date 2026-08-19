@@ -2,6 +2,7 @@ package runtimeenv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -41,7 +42,16 @@ func (s *Service) Installed(ctx context.Context, lang, exact string) bool {
 // Installed 包级函数：磁盘判定，纯只读。cron/systemd 经 RuntimeLookup 用，
 // runtimeenv 内部（install 去重、uninstall 存在性）直接调。
 func Installed(ctx context.Context, lang, exact string) bool {
-	_, err := os.Stat(markerPath(lang, exact))
+	p := markerPath(lang, exact)
+	if p == "" {
+		return false
+	}
+	cleanRoot := filepath.Clean(mise.DataDir)
+	rel, err := filepath.Rel(cleanRoot, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	_, err = os.Stat(p)
 	return err == nil
 }
 
@@ -192,7 +202,21 @@ func (s *Service) installRuntime(ctx context.Context, name, exactVersion string,
 	}
 
 	// 安装成功后写完成标记；卸载删除目录时一并消失。
-	if err := os.WriteFile(markerPath(name, exactVersion), []byte("ok\n"), 0644); err != nil {
+	tool := miseToolDir(name)
+	if tool == "" || !isValidVersion(exactVersion) {
+		return fmt.Errorf("invalid runtime version: %s", exactVersion)
+	}
+	cleanExact := filepath.Base(filepath.Clean(exactVersion))
+	if cleanExact != exactVersion || cleanExact == "." || cleanExact == "/" {
+		return fmt.Errorf("invalid runtime version path: %s", exactVersion)
+	}
+	cleanRoot := filepath.Clean(mise.DataDir)
+	p := filepath.Join(cleanRoot, "installs", tool, cleanExact, okMarker)
+	rel, err := filepath.Rel(cleanRoot, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return errors.New("invalid runtime marker path")
+	}
+	if err := os.WriteFile(p, []byte("ok\n"), 0644); err != nil {
 		stdlog.Printf("runtime: failed to write marker for %s %s: %v", name, exactVersion, err)
 		return fmt.Errorf("安装完成但写入标记失败: %w", err)
 	}
@@ -208,10 +232,13 @@ func (s *Service) InstallTask(lang, exact string) (*task.Task, bool) {
 	return s.taskMgr.Get(runtimeTaskKey(lang, exact))
 }
 
-// isValidVersion validates version string to prevent command injection
+// isValidVersion validates version string to prevent command injection and path traversal
 // Only allows numbers, letters, dots, hyphens, plus, and underscores (e.g., 17.0.19, 20.10.0, 1.21.5-beta, 21.0.1+12-LTS, temurin-21.0.1)
 func isValidVersion(version string) bool {
 	if len(version) == 0 || len(version) > 50 {
+		return false
+	}
+	if strings.Contains(version, "..") || strings.Contains(version, "/") || strings.Contains(version, "\\") || version == "." || version == ".." {
 		return false
 	}
 	for _, c := range version {
@@ -245,7 +272,26 @@ func (s *Service) Uninstall(ctx context.Context, name, version string) error {
 			return uninstallErr
 		}
 		// 卸载后标记随目录删除；此处显式删标记防目录残留半截。
-		_ = os.Remove(markerPath(name, version))
+		if !isValidVersion(version) {
+			return fmt.Errorf("invalid runtime version: %s", version)
+		}
+		tool := miseToolDir(name)
+		if tool == "" {
+			return fmt.Errorf("invalid runtime: %s", name)
+		}
+		cleanExact := filepath.Base(filepath.Clean(version))
+		if cleanExact != version || cleanExact == "." || cleanExact == ".." || cleanExact == "/" {
+			return fmt.Errorf("invalid runtime version path: %s", version)
+		}
+		cleanRoot := filepath.Clean(mise.DataDir)
+		p := filepath.Join(cleanRoot, "installs", tool, cleanExact, okMarker)
+		rel, err := filepath.Rel(cleanRoot, p)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			return errors.New("invalid runtime marker path")
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("卸载完成但删除标记失败: %w", err)
+		}
 		return nil
 	}); err != nil {
 		return err

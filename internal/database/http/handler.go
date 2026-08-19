@@ -388,14 +388,30 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) (any, error) {
 	return db, nil
 }
 
+func parseDBName(c *gin.Context) (string, error) {
+	dbName := c.Param("dbname")
+	if dbName == "" || !database.IsValidDBName(dbName) {
+		return "", errx.BadRequest("无效的数据库名")
+	}
+	return dbName, nil
+}
+
+func parseTableName(c *gin.Context) (string, error) {
+	tableName := c.Query("table")
+	if tableName == "" || !database.IsValidTableName(tableName) {
+		return "", errx.BadRequest("无效的表名")
+	}
+	return tableName, nil
+}
+
 func (h *DatabaseHandler) DeleteDatabase(c *gin.Context) (any, error) {
 	iid, err := parseIID(c)
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "删除数据库 "+dbName)
 	if err := h.svc.DeleteDatabase(c.Request.Context(), iid, dbName); err != nil {
@@ -411,9 +427,9 @@ func (h *DatabaseHandler) ListTables(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	tables, err := h.svc.ListTables(c.Request.Context(), iid, dbName)
@@ -429,13 +445,13 @@ func (h *DatabaseHandler) DescribeTable(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
-	tableName := c.Query("table")
-	if tableName == "" {
-		return nil, errx.BadRequest("表名不能为空")
+	tableName, err := parseTableName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := h.svc.DescribeTable(c.Request.Context(), iid, dbName, tableName)
@@ -451,13 +467,13 @@ func (h *DatabaseHandler) QueryTable(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
-	tableName := c.Query("table")
-	if tableName == "" {
-		return nil, errx.BadRequest("表名不能为空")
+	tableName, err := parseTableName(c)
+	if err != nil {
+		return nil, err
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
@@ -481,9 +497,9 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	var req struct {
@@ -507,9 +523,9 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	var req struct {
@@ -518,6 +534,9 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) (any, error) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
+	}
+	if !database.IsValidTableName(req.Table) {
+		return nil, errx.BadRequest("无效的表名")
 	}
 	middleware.AuditSummary(c, "插入记录到表 "+req.Table)
 
@@ -534,9 +553,9 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	var req struct {
@@ -547,6 +566,9 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) (any, error) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
+	}
+	if !database.IsValidTableName(req.Table) {
+		return nil, errx.BadRequest("无效的表名")
 	}
 	middleware.AuditSummary(c, "更新表 "+req.Table+" 记录")
 
@@ -563,9 +585,9 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	var req struct {
@@ -575,6 +597,9 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) (any, error) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
+	}
+	if !database.IsValidTableName(req.Table) {
+		return nil, errx.BadRequest("无效的表名")
 	}
 	middleware.AuditSummary(c, "删除表 "+req.Table+" 记录")
 
@@ -593,9 +618,9 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
 
 	var req struct {
@@ -615,6 +640,9 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) (any, error) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return nil, errx.BadRequest("invalid request: %w", err)
+	}
+	if !database.IsValidTableName(req.Name) {
+		return nil, errx.BadRequest("无效的表名")
 	}
 	middleware.AuditSummary(c, "创建表 "+req.Name)
 
@@ -647,14 +675,13 @@ func (h *DatabaseHandler) DropTable(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbName := c.Param("dbname")
-	if dbName == "" {
-		return nil, errx.BadRequest("无效的数据库名")
+	dbName, err := parseDBName(c)
+	if err != nil {
+		return nil, err
 	}
-
-	tableName := c.Query("table")
-	if tableName == "" {
-		return nil, errx.BadRequest("表名不能为空")
+	tableName, err := parseTableName(c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "删除表 "+tableName)
 
