@@ -234,39 +234,6 @@ func splitRepoTag(rt string) (string, string) {
 	return rt, "latest"
 }
 
-// parseJSONRows splits engine CLI output into rows. Docker emits one JSON
-// object per line (NDJSON); Podman emits a single JSON array. Both are
-// accepted, and each element is passed to `mapRow`.
-func parseJSONRows(output string, mapRow func([]byte) (any, bool)) ([]any, error) {
-	trimmed := strings.TrimSpace(output)
-	if trimmed == "" {
-		return []any{}, nil
-	}
-	if strings.HasPrefix(trimmed, "[") {
-		var raw []json.RawMessage
-		if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
-			return nil, err
-		}
-		out := make([]any, 0, len(raw))
-		for _, r := range raw {
-			if v, ok := mapRow(r); ok {
-				out = append(out, v)
-			}
-		}
-		return out, nil
-	}
-	out := make([]any, 0)
-	for line := range strings.SplitSeq(trimmed, "\n") {
-		if line = strings.TrimSpace(line); line == "" {
-			continue
-		}
-		if v, ok := mapRow([]byte(line)); ok {
-			out = append(out, v)
-		}
-	}
-	return out, nil
-}
-
 func isPodmanEngine(engine Engine) bool { return engineBinary(engine) == "podman" }
 
 // rejectManaged refuses mutating operations on EasyServer-managed database
@@ -1557,53 +1524,34 @@ func (s *Service) findComposeFile(projectDir string) string {
 
 // ListVolumes returns all volumes for the given engine.
 func (s *Service) ListVolumes(ctx context.Context, engine Engine) ([]Volume, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "volume", "ls", "--format", "json").CombinedOutput()
-	if err != nil {
-		return nil, errx.Internal("%s volume ls failed: %s", engine, output)
-	}
-
-	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
-		// Podman uses lowercase "name"/"driver"/"mountpoint"; Go's decoder is
-		// case-insensitive, so the lowercase tags match both.
-		var raw struct {
-			Name       string `json:"name"`
-			Driver     string `json:"driver"`
-			Mountpoint string `json:"mountpoint"`
-			CreatedAt  string `json:"createdat"`
-		}
-		if err := json.Unmarshal(line, &raw); err != nil {
-			return nil, false
-		}
-		return Volume{
-			Name:       raw.Name,
-			Driver:     raw.Driver,
-			Mountpoint: raw.Mountpoint,
-			CreatedAt:  raw.CreatedAt,
-		}, true
-	})
-	if err != nil {
+	if err := s.checkEngine(ctx, engine); err != nil {
 		return nil, err
 	}
 
-	volumes := make([]Volume, 0, len(rows))
-	for _, r := range rows {
-		volumes = append(volumes, r.(Volume))
+	resp, err := infracontainer.DefaultClient().VolumeList(ctx, infracontainer.Engine(engine))
+	if err != nil {
+		return nil, errx.Internal("%s volume ls failed: %w", engine, err)
+	}
+
+	volumes := make([]Volume, 0, len(resp.Volumes))
+	for _, v := range resp.Volumes {
+		volumes = append(volumes, Volume{
+			Name:       v.Name,
+			Driver:     v.Driver,
+			Mountpoint: v.Mountpoint,
+			CreatedAt:  v.CreatedAt,
+		})
 	}
 	return volumes, nil
 }
 
 // CreateVolume creates a new volume.
 func (s *Service) CreateVolume(ctx context.Context, engine Engine, name, driver string, labels map[string]string) error {
-	args := []string{"volume", "create"}
-	if driver != "" {
-		args = append(args, "--driver", driver)
-	}
-	for k, v := range labels {
-		args = append(args, "--label", k+"="+v)
-	}
-	args = append(args, name)
-
-	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	_, err := infracontainer.DefaultClient().VolumeCreate(ctx, infracontainer.Engine(engine), infracontainer.VolumeCreateRequest{
+		Name:   name,
+		Driver: driver,
+		Labels: labels,
+	})
 	if err != nil {
 		return errx.Internal("%s volume create failed: %w", engine, err)
 	}
@@ -1612,104 +1560,60 @@ func (s *Service) CreateVolume(ctx context.Context, engine Engine, name, driver 
 
 // RemoveVolume removes a volume.
 func (s *Service) RemoveVolume(ctx context.Context, engine Engine, name string, force bool) error {
-	args := []string{"volume", "rm"}
-	if force {
-		args = append(args, "-f")
-	}
-	args = append(args, name)
-
-	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
-	if err != nil {
+	if err := infracontainer.DefaultClient().VolumeRemove(ctx, infracontainer.Engine(engine), name, force); err != nil {
 		return errx.Internal("%s volume rm failed: %w", engine, err)
 	}
 	return nil
 }
 
-// --- Network operations ---
-
-type networkDetails struct {
-	Subnet  string
-	Gateway string
+// PruneVolumes removes unused volumes.
+func (s *Service) PruneVolumes(ctx context.Context, engine Engine) (*infracontainer.VolumesPruneReport, error) {
+	report, err := infracontainer.DefaultClient().VolumesPrune(ctx, infracontainer.Engine(engine))
+	if err != nil {
+		return nil, errx.Internal("%s volume prune failed: %w", engine, err)
+	}
+	return &report, nil
 }
+
+// --- Network operations ---
 
 // ListNetworks returns all networks for the given engine.
 func (s *Service) ListNetworks(ctx context.Context, engine Engine) ([]Network, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "network", "ls", "--format", "json").CombinedOutput()
-	if err != nil {
-		return nil, errx.Internal("%s network ls failed: %s", engine, output)
-	}
-
-	rows, err := parseJSONRows(string(output), func(line []byte) (any, bool) {
-		// Podman uses lowercase "id"/"name"/"driver"/"scope"; case-insensitive
-		// unmarshal lets lowercase tags match both.
-		var raw struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Driver string `json:"driver"`
-			Scope  string `json:"scope"`
-		}
-		if err := json.Unmarshal(line, &raw); err != nil {
-			return nil, false
-		}
-		return Network{
-			ID:     raw.ID,
-			Name:   raw.Name,
-			Driver: raw.Driver,
-			Scope:  raw.Scope,
-		}, true
-	})
-	if err != nil {
+	if err := s.checkEngine(ctx, engine); err != nil {
 		return nil, err
 	}
 
-	networks := make([]Network, 0, len(rows))
-	for _, r := range rows {
-		net := r.(Network)
-		details := s.inspectNetwork(ctx, engine, net.ID)
-		if details != nil {
-			net.Subnet = details.Subnet
-			net.Gateway = details.Gateway
-		}
-		networks = append(networks, net)
-	}
-
-	return networks, nil
-}
-
-func (s *Service) inspectNetwork(ctx context.Context, engine Engine, id string) *networkDetails {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "network", "inspect", "--format", "{{json .IPAM}}", id).CombinedOutput()
+	summaries, err := infracontainer.DefaultClient().NetworkList(ctx, infracontainer.Engine(engine))
 	if err != nil {
-		return nil
+		return nil, errx.Internal("%s network ls failed: %w", engine, err)
 	}
 
-	var ipam struct {
-		Config []struct {
-			Subnet  string `json:"Subnet"`
-			Gateway string `json:"Gateway"`
-		} `json:"Config"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &ipam); err != nil {
-		return nil
-	}
-
-	if len(ipam.Config) > 0 {
-		return &networkDetails{
-			Subnet:  ipam.Config[0].Subnet,
-			Gateway: ipam.Config[0].Gateway,
+	networks := make([]Network, 0, len(summaries))
+	for _, net := range summaries {
+		subnet := ""
+		gateway := ""
+		if len(net.IPAM.Config) > 0 {
+			subnet = net.IPAM.Config[0].Subnet
+			gateway = net.IPAM.Config[0].Gateway
 		}
+		networks = append(networks, Network{
+			ID:      net.ID,
+			Name:    net.Name,
+			Driver:  net.Driver,
+			Scope:   net.Scope,
+			Subnet:  subnet,
+			Gateway: gateway,
+		})
 	}
-	return nil
+	return networks, nil
 }
 
 // CreateNetwork creates a new network.
 func (s *Service) CreateNetwork(ctx context.Context, engine Engine, name, driver string) error {
-	args := []string{"network", "create"}
-	if driver != "" {
-		args = append(args, "--driver", driver)
-	}
-	args = append(args, name)
-
-	_, err := exec.CommandContext(ctx, engineBinary(engine), args...).CombinedOutput()
+	_, err := infracontainer.DefaultClient().NetworkCreate(ctx, infracontainer.Engine(engine), infracontainer.NetworkCreateRequest{
+		Name:   name,
+		Driver: driver,
+	})
 	if err != nil {
 		return errx.Internal("%s network create failed: %w", engine, err)
 	}
@@ -1718,9 +1622,17 @@ func (s *Service) CreateNetwork(ctx context.Context, engine Engine, name, driver
 
 // RemoveNetwork removes a network.
 func (s *Service) RemoveNetwork(ctx context.Context, engine Engine, id string) error {
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "network", "rm", id).CombinedOutput()
-	if err != nil {
+	if err := infracontainer.DefaultClient().NetworkRemove(ctx, infracontainer.Engine(engine), id); err != nil {
 		return errx.Internal("%s network rm failed: %w", engine, err)
 	}
 	return nil
+}
+
+// PruneNetworks removes unused networks.
+func (s *Service) PruneNetworks(ctx context.Context, engine Engine) (*infracontainer.NetworksPruneReport, error) {
+	report, err := infracontainer.DefaultClient().NetworksPrune(ctx, infracontainer.Engine(engine))
+	if err != nil {
+		return nil, errx.Internal("%s network prune failed: %w", engine, err)
+	}
+	return &report, nil
 }

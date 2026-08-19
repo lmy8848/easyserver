@@ -185,6 +185,92 @@ func TestService_ImageOperations_Mock(t *testing.T) {
 	}
 }
 
+func TestService_VolumeAndNetworkOperations_Mock(t *testing.T) {
+	mock := &infracontainer.MockEngineClient{
+		VolumeListFn: func(ctx context.Context, engine infracontainer.Engine) (infracontainer.VolumeListResponse, error) {
+			return infracontainer.VolumeListResponse{
+				Volumes: []infracontainer.Volume{
+					{Name: "data_vol", Driver: "local", Mountpoint: "/var/lib/docker/volumes/data_vol/_data"},
+				},
+			}, nil
+		},
+		VolumeCreateFn: func(ctx context.Context, engine infracontainer.Engine, req infracontainer.VolumeCreateRequest) (infracontainer.Volume, error) {
+			return infracontainer.Volume{Name: req.Name, Driver: req.Driver}, nil
+		},
+		VolumeRemoveFn: func(ctx context.Context, engine infracontainer.Engine, volumeID string, force bool) error {
+			return nil
+		},
+		VolumesPruneFn: func(ctx context.Context, engine infracontainer.Engine) (infracontainer.VolumesPruneReport, error) {
+			return infracontainer.VolumesPruneReport{VolumesDeleted: []string{"unused_vol"}, SpaceReclaimed: 1024}, nil
+		},
+		NetworkListFn: func(ctx context.Context, engine infracontainer.Engine) ([]infracontainer.NetworkSummary, error) {
+			return []infracontainer.NetworkSummary{
+				{
+					ID:     "net1",
+					Name:   "custom-net",
+					Driver: "bridge",
+					IPAM: infracontainer.IPAM{
+						Config: []infracontainer.IPAMConfig{
+							{Subnet: "172.20.0.0/16", Gateway: "172.20.0.1"},
+						},
+					},
+				},
+			}, nil
+		},
+		NetworkCreateFn: func(ctx context.Context, engine infracontainer.Engine, req infracontainer.NetworkCreateRequest) (infracontainer.NetworkCreateResponse, error) {
+			return infracontainer.NetworkCreateResponse{ID: "net-id-123"}, nil
+		},
+		NetworkRemoveFn: func(ctx context.Context, engine infracontainer.Engine, networkID string) error {
+			return nil
+		},
+		NetworksPruneFn: func(ctx context.Context, engine infracontainer.Engine) (infracontainer.NetworksPruneReport, error) {
+			return infracontainer.NetworksPruneReport{NetworksDeleted: []string{"unused_net"}}, nil
+		},
+	}
+	infracontainer.SetDefaultClient(mock)
+	defer infracontainer.SetDefaultClient(nil)
+
+	svc := NewService()
+
+	// Volumes
+	vols, err := svc.ListVolumes(context.Background(), EngineDocker)
+	if err != nil || len(vols) != 1 || vols[0].Name != "data_vol" {
+		t.Fatalf("ListVolumes error: %v, vols: %+v", err, vols)
+	}
+
+	if err := svc.CreateVolume(context.Background(), EngineDocker, "new_vol", "local", nil); err != nil {
+		t.Errorf("CreateVolume error: %v", err)
+	}
+
+	if err := svc.RemoveVolume(context.Background(), EngineDocker, "data_vol", true); err != nil {
+		t.Errorf("RemoveVolume error: %v", err)
+	}
+
+	volPrune, err := svc.PruneVolumes(context.Background(), EngineDocker)
+	if err != nil || len(volPrune.VolumesDeleted) != 1 {
+		t.Errorf("PruneVolumes error: %v, report: %+v", err, volPrune)
+	}
+
+	// Networks
+	nets, err := svc.ListNetworks(context.Background(), EngineDocker)
+	if err != nil || len(nets) != 1 || nets[0].Subnet != "172.20.0.0/16" {
+		t.Fatalf("ListNetworks error: %v, nets: %+v", err, nets)
+	}
+
+	if err := svc.CreateNetwork(context.Background(), EngineDocker, "app-net", "bridge"); err != nil {
+		t.Errorf("CreateNetwork error: %v", err)
+	}
+
+	if err := svc.RemoveNetwork(context.Background(), EngineDocker, "net1"); err != nil {
+		t.Errorf("RemoveNetwork error: %v", err)
+	}
+
+	netPrune, err := svc.PruneNetworks(context.Background(), EngineDocker)
+	if err != nil || len(netPrune.NetworksDeleted) != 1 {
+		t.Errorf("PruneNetworks error: %v, report: %+v", err, netPrune)
+	}
+}
+
 func TestHumanSize(t *testing.T) {
 	cases := []struct {
 		in   int64
