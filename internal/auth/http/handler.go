@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"easyserver/internal/auth"
@@ -66,6 +67,14 @@ type ChangeUsernameRequest struct {
 	Password    string `json:"password" binding:"required"`
 }
 
+func isSecureRequest(c *gin.Context) bool {
+	if c.Request.TLS != nil {
+		return true
+	}
+	proto := c.GetHeader("X-Forwarded-Proto")
+	return strings.EqualFold(proto, "https")
+}
+
 // setAuthCookie 把登录态 JWT 写入 HttpOnly cookie。无条件对所有登录设置：
 // 移动端原生 App 忽略 cookie（用响应体 token），无副作用。
 func setAuthCookie(c *gin.Context, token string, maxAge time.Duration) {
@@ -75,7 +84,7 @@ func setAuthCookie(c *gin.Context, token string, maxAge time.Duration) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   c.Request.TLS != nil, // 按协议动态：http 部署也能用，https 自动加
+		Secure:   isSecureRequest(c), // 按协议动态：支持本地 TLS 及反向代理 HTTPS
 		MaxAge:   int(maxAge / time.Second),
 	})
 }
@@ -88,7 +97,7 @@ func clearAuthCookie(c *gin.Context) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   c.Request.TLS != nil,
+		Secure:   isSecureRequest(c),
 		MaxAge:   -1,
 	})
 }

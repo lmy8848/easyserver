@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -478,9 +480,13 @@ func hashPassword(password string) (string, error) {
 }
 
 func verifyPassword(password, hash string) bool {
-	if len(password) > 72 {
-		return false
+	if len(password) <= 72 {
+		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err == nil {
+			return true
+		}
 	}
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
+	// Fallback for legacy passwords pre-hashed with SHA-256 hex
+	sum := sha256.Sum256([]byte(password))
+	legacyHex := hex.EncodeToString(sum[:])
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(legacyHex)) == nil
 }
