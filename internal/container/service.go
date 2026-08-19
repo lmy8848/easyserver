@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -1491,16 +1492,25 @@ func (s *Service) ComposeGetLogs(ctx context.Context, engine Engine, projectDir 
 
 // ComposeGetConfig reads the compose file content.
 func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
-	if projectDir == "" || strings.Contains(projectDir, "\x00") {
-		return "", errx.BadRequest("invalid project directory")
+	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
+		return "", errx.BadRequest("invalid project directory: must be an absolute path without traversal")
 	}
 	cleanDir := filepath.Clean(projectDir)
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
 		return "", fmt.Errorf("no compose file found in %s", cleanDir)
 	}
+	rel, err := filepath.Rel(cleanDir, composeFile)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return "", errx.BadRequest("invalid compose file path")
+	}
 
-	data, err := os.ReadFile(composeFile)
+	f, err := os.OpenFile(composeFile, os.O_RDONLY, 0)
+	if err != nil {
+		return "", fmt.Errorf("read compose file: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return "", fmt.Errorf("read compose file: %w", err)
 	}
@@ -1509,8 +1519,8 @@ func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (stri
 
 // ComposeSaveConfig writes content to the compose file.
 func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content string) error {
-	if projectDir == "" || strings.Contains(projectDir, "\x00") {
-		return errx.BadRequest("invalid project directory")
+	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
+		return errx.BadRequest("invalid project directory: must be an absolute path without traversal")
 	}
 	cleanDir := filepath.Clean(projectDir)
 	composeFile := s.findComposeFile(cleanDir)
@@ -1518,21 +1528,26 @@ func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content str
 		composeFile = filepath.Join(cleanDir, "docker-compose.yml")
 	}
 	rel, err := filepath.Rel(cleanDir, composeFile)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 		return errx.BadRequest("invalid compose file path")
 	}
 	if fi, err := os.Lstat(composeFile); err == nil && !fi.Mode().IsRegular() {
 		return errx.BadRequest("cannot write to non-regular file or symlink")
 	}
 
-	if err := os.WriteFile(composeFile, []byte(content), 0644); err != nil {
+	f, err := os.OpenFile(composeFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open compose file: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte(content)); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
 	}
 	return nil
 }
 
 func (s *Service) findComposeFile(projectDir string) string {
-	if projectDir == "" || strings.Contains(projectDir, "\x00") {
+	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
 		return ""
 	}
 	cleanDir := filepath.Clean(projectDir)
@@ -1544,9 +1559,10 @@ func (s *Service) findComposeFile(projectDir string) string {
 	}
 
 	for _, name := range candidates {
-		path := filepath.Join(cleanDir, name)
+		baseName := filepath.Base(filepath.Clean(name))
+		path := filepath.Join(cleanDir, baseName)
 		rel, err := filepath.Rel(cleanDir, path)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 			continue
 		}
 		fi, err := os.Lstat(path)
