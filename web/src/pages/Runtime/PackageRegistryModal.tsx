@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Modal, Select, Input, message } from 'antd';
-import api from '../../services/api';
+import api from '../../services/client';
 import type { RuntimeEnvironment } from './types';
 
 interface PackageRegistryModalProps {

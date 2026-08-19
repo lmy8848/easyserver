@@ -6,7 +6,7 @@ import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
   InfoCircleOutlined, EditOutlined,
 } from '@ant-design/icons';
-import { containerApi } from '../../services/api';
+import { containerApi } from '../../services/container';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { ComposeProject } from './types';
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Form, message, Modal, Tabs, Card, Button, Empty, Checkbox, Spin } from 'antd';
 import { DatabaseOutlined, UserOutlined, CodeOutlined, ConsoleSqlOutlined, PlusOutlined } from '@ant-design/icons';
-import { dbServerApi } from '../../services/api';
+import { dbServerApi } from '../../services/database';
 import type { Database, DBUser, DBInstance } from '../../types';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import { useTab } from '../../hooks/useTab';

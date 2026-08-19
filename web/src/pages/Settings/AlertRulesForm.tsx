@@ -4,7 +4,7 @@ import {
   InputNumber,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import { settingsApi } from '../../services/api';
+import { settingsApi } from '../../services/settings';
 import type { AlertRule } from './types';
 
 export default function AlertRulesForm() {

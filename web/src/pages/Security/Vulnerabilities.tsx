@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Card, Button, Table, Tag, Space, message, Alert, Descriptions } from 'antd';
 import { SafetyOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import api from '../../services/api';
+import api from '../../services/client';
 
 interface Vuln { package: string; version: string; vuln_ids: string[]; }
 interface KernelStatus { current: string; latest: string; needs_reboot: boolean; }

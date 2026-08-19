@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { notificationApi, settingsApi } from '../services/api';
+import { notificationApi } from '../services/notification';
+import { settingsApi } from '../services/settings';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';

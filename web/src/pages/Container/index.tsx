@@ -6,7 +6,7 @@ import {
   ReloadOutlined, RocketOutlined, PlayCircleOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
 import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
-import { containerApi } from '../../services/api';
+import { containerApi } from '../../services/container';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import { useTab } from '../../hooks/useTab';
 import type { DockerStatus } from './types';

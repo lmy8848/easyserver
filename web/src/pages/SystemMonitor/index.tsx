@@ -3,7 +3,7 @@ import { Card, Table, Tag, Space, Input, Select, Button, Tooltip, Typography, Ta
 import ReactECharts from 'echarts-for-react';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { SystemProcess, MonitorSnapshot } from '../../types';
-import { systemProcessApi, systemApi, monitorApi } from '../../services/api';
+import { systemProcessApi, systemApi, monitorApi } from '../../services/monitor';
 import { useTab } from '../../hooks/useTab';
 import { formatBytes } from '../../utils/format';
 import dayjs from 'dayjs';

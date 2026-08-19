@@ -6,7 +6,7 @@ import {
   FileTextOutlined, ReloadOutlined, CopyOutlined,
   CheckCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
-import { webServerApi } from '../../services/api';
+import { webServerApi } from '../../services/web';
 import type { WebServer } from '../../types';
 import type { ConfigTestResult } from './types';
 import { copyToClipboard } from '../../utils/clipboard';

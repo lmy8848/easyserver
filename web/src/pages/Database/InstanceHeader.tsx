@@ -8,7 +8,7 @@ import {
   FileTextOutlined, DeleteOutlined, DatabaseOutlined, InfoCircleOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
-import { dbServerApi } from '../../services/api';
+import { dbServerApi } from '../../services/database';
 import STYLES from './styles';
 import type { InstanceHeaderProps, DBInstance } from './types';
 

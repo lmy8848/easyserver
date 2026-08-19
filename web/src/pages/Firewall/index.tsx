@@ -5,7 +5,7 @@ import {
 import { ExclamationCircleOutlined } from '@ant-design/icons';
 import type { Key } from 'antd/es/table/interface';
 import type { FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry } from '../../types';
-import { firewallApi } from '../../services/api';
+import { firewallApi } from '../../services/firewall';
 import { CHAIN_OPTIONS, PROTOCOL_OPTIONS, ACTION_OPTIONS, IP_VERSION_OPTIONS, actionColor, disabledRowStyle } from './types';
 import FirewallStatusCard from './FirewallStatus';
 import FirewallRules from './FirewallRules';

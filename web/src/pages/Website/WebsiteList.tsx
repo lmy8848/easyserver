@@ -12,7 +12,7 @@ import {
   UndoOutlined, CodeOutlined, ToolOutlined,
   CheckCircleOutlined, CloseCircleOutlined, FolderOutlined, ProfileOutlined,
 } from '@ant-design/icons';
-import { webServerApi, websiteApi } from '../../services/api';
+import { webServerApi, websiteApi } from '../../services/web';
 import DetailDrawer from './DetailDrawer';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';

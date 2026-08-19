@@ -9,7 +9,8 @@ import {
   LockOutlined, DesktopOutlined, DeleteOutlined, LogoutOutlined, ReloadOutlined,
   UserOutlined, EditOutlined, KeyOutlined,
 } from '@ant-design/icons';
-import { settingsApi, authApi } from '../../services/api';
+import { authApi } from '../../services/auth';
+import { settingsApi } from '../../services/settings';
 import { useAuthStore } from '../../store/useAuthStore';
 import { copyToClipboard } from '../../utils/clipboard';
 import { formatDateTime } from '../../utils/format';

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Card, Alert, Form, Input, Switch, Button, Space, message,
 } from 'antd';
-import { settingsApi } from '../../services/api';
+import { settingsApi } from '../../services/settings';
 import type { Settings } from './types';
 
 export interface NotifySettingsProps {

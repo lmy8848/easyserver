@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, Table, Button, Space, Tag, Modal, Form, Input, InputNumber, message, Popconfirm, Tooltip, Checkbox } from 'antd';
 import { LinkOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, CopyOutlined, EditOutlined, LockOutlined } from '@ant-design/icons';
-import { fileShareApi } from '../../services/api';
+import { fileShareApi } from '../../services/filemanager';
 import type { FileShare } from '../../types';
 import { copyToClipboard } from '../../utils/clipboard';
 import { formatBytes, formatDateTime } from '../../utils/format';

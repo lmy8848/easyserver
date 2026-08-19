@@ -5,7 +5,7 @@ import {
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, ClearOutlined, ClockCircleOutlined, MinusCircleOutlined,
 } from '@ant-design/icons';
-import { dbServerApi } from '../../services/api';
+import { dbServerApi } from '../../services/database';
 import type { DBInstance, RedisKey } from '../../types';
 import { formatBytes } from '../../utils/format';
 

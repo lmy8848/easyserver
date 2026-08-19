@@ -5,7 +5,7 @@ import {
 import {
   DeleteOutlined, CloudDownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
-import { containerApi } from '../../services/api';
+import { containerApi } from '../../services/container';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Image, ImageCategory } from './types';

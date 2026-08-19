@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { message } from 'antd';
-import { webServerApi } from '../../services/api';
+import { webServerApi } from '../../services/web';
 import type { WebServer } from '../../types';
 import type { ConfigTestResult } from './types';
 import type { ConfigEditorRef } from './ConfigEditor';

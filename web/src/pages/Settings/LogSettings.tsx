@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, Form, Select, InputNumber, Button, Input, Alert, message } from 'antd';
-import { settingsApi } from '../../services/api';
+import { settingsApi } from '../../services/settings';
 import type { Settings } from './types';
 
 const LEVEL_OPTIONS = [

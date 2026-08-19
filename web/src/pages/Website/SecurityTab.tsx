@@ -3,7 +3,7 @@ import {
   Card, Switch, InputNumber, Button, Table, Tag, Space, message, Input, Popconfirm, Form, Alert,
 } from 'antd';
 import { SafetyOutlined, StopOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
-import { websiteSecurityApi } from '../../services/api';
+import { websiteSecurityApi } from '../../services/web';
 
 interface SecurityConfig {
   website_id: number;

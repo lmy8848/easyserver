@@ -4,7 +4,8 @@ import { Input, Button, message, Spin, List, Typography, Space, Breadcrumb } fro
 import {
   DownloadOutlined, LockOutlined, CloudServerOutlined, WarningOutlined, EyeOutlined, HomeOutlined, FileZipOutlined
 } from '@ant-design/icons';
-import { publicShareApi, authApi } from '../services/api';
+import { authApi } from '../services/auth';
+import { publicShareApi } from '../services/filemanager';
 import type { ShareInfo, ShareFileEntry } from '../types';
 import Turnstile from '../components/Turnstile';
 import { getFileIcon } from '../utils/fileType';

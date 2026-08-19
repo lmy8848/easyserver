@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, Button, Space, Modal, Tag, message } from 'antd';
 import { PlusOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons';
-import api from '../../services/api';
+import api from '../../services/client';
 import RuntimeList from './RuntimeList';
 import VersionList from './VersionList';
 // import PackageManager from './PackageManager';

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Select, Space } from 'antd';
-import api from '../services/api';
+import api from '../services/client';
 import { getRuntimeIcon } from '../pages/Runtime/types';
 
 interface RuntimeVersionOption {
