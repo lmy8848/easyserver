@@ -34,10 +34,9 @@ reviews:
         2. 项目契约规范：
            - 面板根目录严禁硬编码字面量，一律使用 `config.DataRoot` 派生。
            - 配置权威：动态配置通过 `config.Store` 获取最新快照，避免脏读。
-           - 外部命令执行必须保持环境隔离（使用 mise 隔离环境），避免直接拼装 shell 字符串。
         3. 错误处理与日志：禁止静默忽略 error（严禁无理由的 `_ = ...`）；后台任务失败时需正确记录并向上传播。
         4. 资源释放与并发：文件句柄、网络连接、互斥锁必须确保 defer 正确释放，防止资源泄露与并发竞争。
-    - path: "web/src/**/*.{ts,tsx}"
+    - path: "web/src/**/*.{js,ts,tsx}"
       instructions: |
         React + TypeScript 前端代码审查重点：
         1. 类型安全：优先保持严格的 TypeScript 类型推导，避免滥用 any。
