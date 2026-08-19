@@ -12,8 +12,6 @@ import (
 	audithttp "easyserver/internal/audit/http"
 	"easyserver/internal/auth"
 	authhttp "easyserver/internal/auth/http"
-	"easyserver/internal/cloud"
-	cloudhttp "easyserver/internal/cloud/http"
 	"easyserver/internal/container"
 	containerhttp "easyserver/internal/container/http"
 	"easyserver/internal/cron"
@@ -176,19 +174,6 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		log.Printf("Cleaned up %d expired file shares on startup", deleted)
 	}
 
-	var cloudService *cloud.Service
-	if cfg.TencentCloud.Enabled {
-		cloudService, err = cloud.NewService(
-			cfg.TencentCloud.SecretID,
-			cfg.TencentCloud.SecretKey,
-			cfg.TencentCloud.Region,
-			cfg.TencentCloud.InstanceID,
-		)
-		if err != nil {
-			log.Printf("WARNING: failed to init cloud service: %v", err)
-		}
-	}
-
 	// ── HTTP Engine + Routes ──
 
 	e := newEngine(cfg)
@@ -202,7 +187,6 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo)
 	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig)
-	cloudhttp.RegisterRoutes(g.Protected, cloudService, &cfg.TencentCloud, cfg.Server.Port)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)

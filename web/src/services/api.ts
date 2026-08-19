@@ -3,7 +3,6 @@ import type {
   ApiResponse, CronTask, CronRun, Script, ScriptLogLine,
   FirewallRule, FirewallStatus, FirewallRuleTemplate, FirewallLogEntry,
   DBBackup, User, Service, FileEntry, MonitorSnapshot, HistoryPoint,
-  CloudInstance, CloudFirewallRule, Snapshot, TrafficInfo,
   WebServer, Website, DBInstance, Database, DBUser, RedisKey, RedisValue,
   RedisHashField, RedisZSetMember,
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
@@ -291,48 +290,6 @@ export const fileApi = {
 
   chown: (path: string, uid: number, gid: number) =>
     api.put<ApiResponse>('/files/chown', { path, uid, gid }),
-};
-
-// Cloud API
-export const cloudApi = {
-  getInstances: () =>
-    api.get<ApiResponse<{ instances: CloudInstance[] }>>('/cloud/instances'),
-
-  getInstance: (id: string) =>
-    api.get<ApiResponse<CloudInstance>>(`/cloud/instances/${id}`),
-
-  startInstance: (id: string) =>
-    api.post<ApiResponse>(`/cloud/instances/${id}/start`),
-
-  stopInstance: (id: string) =>
-    api.post<ApiResponse>(`/cloud/instances/${id}/stop`),
-
-  restartInstance: (id: string) =>
-    api.post<ApiResponse>(`/cloud/instances/${id}/restart`),
-
-  getMonitor: (id: string, metric: string, start: string, end: string) =>
-    api.get<ApiResponse<{ metric: string; points: Array<{ timestamp: string; value: number }> }>>(`/cloud/monitor/${id}`, { params: { metric, start, end } }),
-
-  getFirewall: (id: string) =>
-    api.get<ApiResponse<{ rules: CloudFirewallRule[] }>>(`/cloud/firewall/${id}`),
-
-  addFirewallRule: (id: string, rule: Omit<CloudFirewallRule, 'rule_id'>) =>
-    api.post<ApiResponse>(`/cloud/firewall/${id}`, rule),
-
-  deleteFirewallRule: (id: string, ruleId: string) =>
-    api.delete<ApiResponse>(`/cloud/firewall/${id}/${ruleId}`),
-
-  getSnapshots: () =>
-    api.get<ApiResponse<{ snapshots: Snapshot[] }>>('/cloud/snapshots'),
-
-  createSnapshot: (instanceId: string, name: string) =>
-    api.post<ApiResponse>('/cloud/snapshots', { instance_id: instanceId, name }),
-
-  applySnapshot: (id: string) =>
-    api.post<ApiResponse>(`/cloud/snapshots/${id}/apply`),
-
-  getTraffic: () =>
-    api.get<ApiResponse<TrafficInfo>>('/cloud/traffic'),
 };
 
 // Monitor API (ports + port availability check)
@@ -877,12 +834,6 @@ export const settingsApi = {
 
   updateAudit: (data: { retention_days?: number }) =>
     api.put<ApiResponse>('/settings/audit', data),
-
-  updateCloud: (data: { enabled?: boolean; secret_id?: string; secret_key?: string; region?: string; instance_id?: string }) =>
-    api.put<ApiResponse>('/settings/cloud', data),
-
-  testCloud: () =>
-    api.post<ApiResponse<{ message: string; instance_count: number }>>('/settings/cloud/test'),
 
   restart: (force?: boolean) =>
     api.post<ApiResponse>('/settings/restart', force ? { force: true } : undefined),

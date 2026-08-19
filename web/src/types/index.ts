@@ -137,46 +137,6 @@ export interface FileContent {
   encoding: string;
 }
 
-// Cloud types
-export interface CloudInstance {
-  instance_id: string;
-  name: string;
-  state: string;
-  region: string;
-  public_ip: string;
-  private_ip: string;
-  cpu: number;
-  memory_gb: number;
-  disk_gb: number;
-  created_at: string;
-  expired_at: string;
-}
-
-export interface CloudFirewallRule {
-  rule_id: string;
-  protocol: string;
-  port: string;
-  source: string;
-  action: string;
-  remark: string;
-}
-
-export interface Snapshot {
-  snapshot_id: string;
-  name: string;
-  instance_id: string;
-  status: string;
-  disk_gb: number;
-  created_at: string;
-}
-
-export interface TrafficInfo {
-  package_total_gb: number;
-  package_used_gb: number;
-  package_remaining_gb: number;
-  package_expired_at: string;
-}
-
 // Web Server types
 export interface WebServer {
   id: number;
@@ -531,7 +491,6 @@ export interface AppSettings {
   monitor: { history_retention: number; collect_interval: number };
   audit: { retention_days: number };
   notify: { enabled: boolean; webhook_url: string };
-  tencentcloud: { enabled: boolean; region: string; instance_id: string; has_secret: boolean };
   features: { fim: boolean };
   logs: { level: string; path: string; format: string; max_size_mb: number; max_files: number };
 }

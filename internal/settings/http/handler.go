@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"easyserver/internal/alert"
-	"easyserver/internal/cloud"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra"
@@ -125,12 +124,6 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 			"enabled":     cfg.Notify.Enabled,
 			"webhook_url": webhookURL,
 		},
-		"tencentcloud": gin.H{
-			"enabled":     cfg.TencentCloud.Enabled,
-			"region":      cfg.TencentCloud.Region,
-			"instance_id": cfg.TencentCloud.InstanceID,
-			"has_secret":  cfg.TencentCloud.SecretID != "" && cfg.TencentCloud.SecretKey != "",
-		},
 		"features": gin.H{
 			"fim": cfg.Features.FIM,
 		},
@@ -162,66 +155,6 @@ func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
 		return nil, errx.Internal("保存配置失败: %w", err)
 	}
 	return gin.H{"message": "功能开关已更新"}, nil
-}
-
-// UpdateCloudConfig updates Tencent Cloud configuration
-func (h *SettingsHandler) UpdateCloudConfig(c *gin.Context) (any, error) {
-	var req struct {
-		Enabled    *bool   `json:"enabled"`
-		SecretID   *string `json:"secret_id"`
-		SecretKey  *string `json:"secret_key"`
-		Region     *string `json:"region"`
-		InstanceID *string `json:"instance_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
-	}
-
-	middleware.AuditSummary(c, "更新云配置")
-
-	// Validate region
-	validRegions := map[string]bool{
-		"ap-guangzhou":     true,
-		"ap-shanghai":      true,
-		"ap-beijing":       true,
-		"ap-nanjing":       true,
-		"ap-chengdu":       true,
-		"ap-chongqing":     true,
-		"ap-hongkong":      true,
-		"ap-singapore":     true,
-		"ap-tokyo":         true,
-		"na-siliconvalley": true,
-		"eu-frankfurt":     true,
-	}
-
-	if req.Region != nil && !validRegions[*req.Region] {
-		return nil, errx.BadRequest("无效的区域: %s", *req.Region)
-	}
-
-	h.store.Update(func(cfg *config.Config) {
-		if req.Enabled != nil {
-			cfg.TencentCloud.Enabled = *req.Enabled
-		}
-		if req.SecretID != nil {
-			cfg.TencentCloud.SecretID = *req.SecretID
-		}
-		if req.SecretKey != nil {
-			cfg.TencentCloud.SecretKey = *req.SecretKey
-		}
-		if req.Region != nil {
-			cfg.TencentCloud.Region = *req.Region
-		}
-		if req.InstanceID != nil {
-			cfg.TencentCloud.InstanceID = *req.InstanceID
-		}
-	})
-
-	// Save to config file
-	if err := h.saveConfig(); err != nil {
-		return nil, errx.Internal("保存配置失败: %w", err)
-	}
-
-	return gin.H{"message": "云配置已更新"}, nil
 }
 
 // UpdateServerConfig updates server configuration
@@ -788,36 +721,6 @@ func (h *SettingsHandler) TestWebhook(c *gin.Context) (any, error) {
 	return gin.H{"message": "测试通知已发送"}, nil
 }
 
-// TestCloudConnection tests the Tencent Cloud connection
-func (h *SettingsHandler) TestCloudConnection(c *gin.Context) (any, error) {
-	middleware.AuditSummary(c, "测试云连接")
-	cfg := h.store.Get()
-	if cfg.TencentCloud.SecretID == "" || cfg.TencentCloud.SecretKey == "" {
-		return nil, errx.BadRequest("请先配置 SecretID 和 SecretKey")
-	}
-
-	cloudService, err := cloud.NewService(
-		cfg.TencentCloud.SecretID,
-		cfg.TencentCloud.SecretKey,
-		cfg.TencentCloud.Region,
-		cfg.TencentCloud.InstanceID,
-	)
-	if err != nil {
-		return nil, errx.Internal("创建云客户端失败: %w", err)
-	}
-
-	// Try to get instances to verify connection
-	instances, err := cloudService.GetInstances(c.Request.Context())
-	if err != nil {
-		return nil, errx.Internal("连接失败: %w", err)
-	}
-
-	return gin.H{
-		"message":        "连接成功",
-		"instance_count": len(instances),
-	}, nil
-}
-
 // UpdateLogsConfig updates the global log configuration (level/format/rotation).
 // 等级通过 logger.SetLevel 运行时立即生效，其余字段持久化到 config.toml，重启后生效。
 func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
@@ -1003,7 +906,5 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertServic
 	protected.POST("/settings/notify/test", httpx.H(handler.TestWebhook))
 	protected.GET("/alerts/rules", httpx.H(handler.GetAlertRules))
 	protected.PUT("/alerts/rules", httpx.H(handler.UpdateAlertRules))
-	protected.PUT("/settings/cloud", httpx.H(handler.UpdateCloudConfig))
-	protected.POST("/settings/cloud/test", httpx.H(handler.TestCloudConnection))
 	protected.POST("/settings/restart", httpx.H(handler.RestartPanel))
 }

@@ -4,7 +4,7 @@ import {
 } from 'antd';
 import {
   SettingOutlined, SafetyOutlined,
-  CloudOutlined, MonitorOutlined, InfoCircleOutlined,
+  MonitorOutlined, InfoCircleOutlined,
   AlertOutlined,
 } from '@ant-design/icons';
 import { settingsApi } from '../../services/api';
@@ -15,7 +15,6 @@ import AuthSettings from './AuthSettings';
 import MonitorSettings from './MonitorSettings';
 import AuditSettings from './AuditSettings';
 import NotifySettings from './NotifySettings';
-import CloudSettings from './CloudSettings';
 import FeatureSettings from './FeatureSettings';
 import AlertRulesForm from './AlertRulesForm';
 import LogSettings from './LogSettings';
@@ -129,16 +128,6 @@ export default function SettingsPage() {
                 />
                 <AlertRulesForm />
               </Card>
-            ),
-          },
-          {
-            key: 'cloud',
-            label: <span><CloudOutlined /> 腾讯云</span>,
-            children: (
-              <CloudSettings
-                settings={settings}
-                onRefresh={fetchSettings}
-              />
             ),
           },
           {

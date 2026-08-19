@@ -14,7 +14,6 @@ import { useThemeStore } from './store/useThemeStore';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Terminal = lazy(() => import('./pages/Terminal'));
 const FileManager = lazy(() => import('./pages/FileManager'));
-const Cloud = lazy(() => import('./pages/Cloud'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Runtime = lazy(() => import('./pages/Runtime'));
@@ -141,7 +140,6 @@ function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="terminal" element={<Terminal />} />
                 <Route path="files" element={<FileManager />} />
-                <Route path="cloud" element={<Cloud />} />
                 <Route path="audit" element={<AuditLog />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="security" element={<SecuritySettings />} />

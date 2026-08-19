@@ -57,13 +57,6 @@ retention_days = 30
 [filemanager]
 base_path = "/tmp/data"
 
-[tencentcloud]
-enabled = true
-secret_id = "tc-id"
-secret_key = "tc-key"
-region = "ap-beijing"
-instance_id = "lhins-123"
-
 [notify]
 enabled = true
 webhook_url = "https://example.com/webhook"
