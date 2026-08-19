@@ -2,11 +2,11 @@
 
 **一站式 Linux 服务器管理面板** — Go + React 构建。轻量、安全、功能全面，通过浏览器管理 Linux 服务器。
 
-[English](README.md) · [文档网站](https://lmy8848.github.io/easyserver/) · [API 文档](https://lmy8848.github.io/easyserver/api-reference) · [部署指南](https://lmy8848.github.io/easyserver/linux-deploy)
+[English](README.md) · [文档网站](https://lmy8848.github.io/easyserver/) · [API 文档](https://lmy8848.github.io/easyserver/api-reference)
 
-![EasyServer 登录页](screenshots/login.png)
+![EasyServer 登录页](https://raw.githubusercontent.com/lmy8848/easyserver/gh-pages/screenshots/login.png)
 
-![EasyServer 仪表盘](screenshots/dashboard.png)
+![EasyServer 仪表盘](https://raw.githubusercontent.com/lmy8848/easyserver/gh-pages/screenshots/dashboard.png)
 
 ---
 
@@ -38,28 +38,21 @@
 
 ### 二进制部署
 
+一条命令安装并以 systemd 服务运行面板(需 root):
+
 ```bash
-# 下载最新版本
-wget https://github.com/lmy8848/easyserver/releases/latest/download/easyserver-linux-amd64
-chmod +x easyserver-linux-amd64
-
-# 生成配置文件
-cat > config.toml << 'EOF'
-[server]
-port = 8080
-host = "0.0.0.0"
-
-[filemanager]
-base_path = "/opt/easyserver/data"
-EOF
-
-# 启动面板
-./easyserver-linux-amd64 -config config.toml
+curl -fsSL https://raw.githubusercontent.com/lmy8848/easyserver/master/scripts/install.sh | bash
 ```
 
-管理员密码在首次启动时随机生成并打印。完整配置项见 [config.toml.example](config.toml.example)，systemd 部署见[部署指南](https://lmy8848.github.io/easyserver/linux-deploy)。
+安装指定版本:
 
-> 注意：生产环境运行时**不要加 `-dev`**（`-dev` = 仅 API、不内嵌前端）。
+```bash
+curl -fsSL https://raw.githubusercontent.com/lmy8848/easyserver/master/scripts/install.sh | bash -s v0.1.2
+```
+
+脚本将二进制安装至 `/usr/local/bin/easyserver`,创建 `/opt/easyserver`(数据目录 + 最小 `config.toml`),注册并启动 `easyserver` systemd 服务,完成后打印内外网访问地址与随机生成的管理员密码(仅首次安装)。
+
+密钥与未配置项由程序首次启动自动生成并写回 `config.toml`——完整配置项见 [config.toml.example](config.toml.example)。不想用 systemd 时,也可从 [Releases](https://github.com/lmy8848/easyserver/releases) 下载二进制直接前台运行(见 `easyserver --help`)。
 
 ---
 
@@ -79,7 +72,6 @@ EOF
 |------|------|
 | [文档网站](https://lmy8848.github.io/easyserver/) | 完整使用文档 |
 | [API 文档](https://lmy8848.github.io/easyserver/api-reference) | 完整接口文档 |
-| [Linux 部署手册](https://lmy8848.github.io/easyserver/linux-deploy) | 二进制部署 + systemd + Nginx |
 | [贡献指南](CONTRIBUTING.md) | 如何参与贡献 |
 
 ---
@@ -112,8 +104,6 @@ pnpm dev
 # 访问 http://localhost:5173
 ```
 
-完整本地开发环境搭建见 [docs/development.md](docs/development.md)。
-
 ---
 
 ## 安全建议
@@ -133,9 +123,3 @@ pnpm dev
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request！请先阅读[贡献指南](CONTRIBUTING.md)。
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'feat(x): add amazing feature'`)
-4. 推送分支 (`git push origin feature/amazing-feature`)
-5. 提交 Pull Request

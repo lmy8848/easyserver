@@ -2,11 +2,11 @@
 
 **All-in-One Linux Server Management Panel** — Built with Go + React. Lightweight, secure, and feature-rich for managing your Linux servers from a web browser.
 
-[简体中文](README_ZH.md) · [Documentation Site](https://lmy8848.github.io/easyserver/) · [API Reference](https://lmy8848.github.io/easyserver/api-reference) · [Deployment Guide](https://lmy8848.github.io/easyserver/linux-deploy)
+[简体中文](README_ZH.md) · [Documentation Site](https://lmy8848.github.io/easyserver/) · [API Reference](https://lmy8848.github.io/easyserver/api-reference)
 
-![EasyServer Login](screenshots/login.png)
+![EasyServer Login](https://raw.githubusercontent.com/lmy8848/easyserver/gh-pages/screenshots/login.png)
 
-![EasyServer Dashboard](screenshots/dashboard.png)
+![EasyServer Dashboard](https://raw.githubusercontent.com/lmy8848/easyserver/gh-pages/screenshots/dashboard.png)
 
 ---
 
@@ -38,28 +38,21 @@
 
 ### Deploy the Binary
 
+Install and run the panel as a systemd service with one command (requires root):
+
 ```bash
-# Download the latest release
-wget https://github.com/lmy8848/easyserver/releases/latest/download/easyserver-linux-amd64
-chmod +x easyserver-linux-amd64
-
-# Generate a config file
-cat > config.toml << 'EOF'
-[server]
-port = 8080
-host = "0.0.0.0"
-
-[filemanager]
-base_path = "/opt/easyserver/data"
-EOF
-
-# Start the panel
-./easyserver-linux-amd64 -config config.toml
+curl -fsSL https://raw.githubusercontent.com/lmy8848/easyserver/master/scripts/install.sh | bash
 ```
 
-The admin password is randomly generated and printed on first launch. See [config.toml.example](config.toml.example) for all options, and the [Deployment Guide](https://lmy8848.github.io/easyserver/linux-deploy) for systemd setup.
+To install a specific version:
 
-> Note: run without `-dev` so the embedded frontend is served. `-dev` disables the embed and serves API only.
+```bash
+curl -fsSL https://raw.githubusercontent.com/lmy8848/easyserver/master/scripts/install.sh | bash -s v0.1.2
+```
+
+The script installs the binary to `/usr/local/bin/easyserver`, creates `/opt/easyserver` (data dir + minimal `config.toml`), registers and starts the `easyserver` systemd service, then prints the access URLs and the randomly generated admin password (first launch only).
+
+Secrets and unset options are auto-generated on first start and written back to `config.toml` — see [config.toml.example](config.toml.example) for all options. Prefer a plain foreground run? Download the binary from [Releases](https://github.com/lmy8848/easyserver/releases) and start it directly (see `easyserver --help`).
 
 ---
 
@@ -79,7 +72,6 @@ The admin password is randomly generated and printed on first launch. See [confi
 |----------|-------------|
 | [Documentation Site](https://lmy8848.github.io/easyserver/) | Complete usage documentation |
 | [API Reference](https://lmy8848.github.io/easyserver/api-reference) | Full API documentation |
-| [Linux Deployment Guide](https://lmy8848.github.io/easyserver/linux-deploy) | Binary deployment + systemd + Nginx |
 | [Contributing Guide](CONTRIBUTING.md) | How to contribute |
 
 ---
@@ -112,8 +104,6 @@ pnpm dev
 # Visit http://localhost:5173
 ```
 
-See [docs/development.md](docs/development.md) for the full local setup guide.
-
 ---
 
 ## Security Recommendations
@@ -133,9 +123,3 @@ Released under the [MIT License](LICENSE).
 ## Contributing
 
 Issues and Pull Requests are welcome! Please read the [Contributing Guide](CONTRIBUTING.md) first.
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat(x): add amazing feature'`)
-4. Push the branch (`git push origin feature/amazing-feature`)
-5. Submit a Pull Request

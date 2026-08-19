@@ -20,8 +20,6 @@ docs/xxx         ← documentation branches
 chore/xxx        ← build / CI / tooling branches
 ```
 
-> Note: the panel's own remote-deployment feature name-collides with the `deploy/` directory — keep them conceptually separate.
-
 ## Commit Convention
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/):
@@ -56,8 +54,7 @@ fix(auth): login lockout not clearing after successful login
 docs(api): document websocket heartbeat section
 ```
 
-- Keep the subject under 72 characters
-- Use one scope per commit (no comma-separated scopes)
+- Use one scope per commit
 - Put a blank line between subject and body; the body should explain the *why*, not repeat the subject
 
 ## Pull Request Workflow
@@ -77,39 +74,31 @@ docs(api): document websocket heartbeat section
 
 ## Local Checks
 
-Both frontend and backend must compile and pass checks before submitting:
+Static checks run automatically via git hooks — enable once after clone:
 
 ```bash
-# Both frontend + backend
-make check
-
-# Backend only (gofmt / vet / test / build)
-make check-go
-
-# Frontend only (tsc / eslint / vite build)
-make check-web
+git config core.hooksPath .githooks
 ```
 
-> The backend targets Linux (uses Linux syscalls); a full backend build runs on the server or with `GOOS=linux` for cross-compilation checks. Frontend checks run locally.
+- **pre-commit** — backend `golangci-lint --fix` (auto-fixes and re-stages; skipped if golangci-lint isn't installed) + frontend `eslint --fix`
+- **pre-push** — backend `go test -tags dev ./cmd/... ./internal/...` + `go build -tags dev ./cmd/server`; frontend `pnpm run test` + `pnpm run build` (triggered only for the file types in the pushed range)
 
 Manual equivalents:
 
 ```bash
 # Backend tests
-go test ./... -v
+go test -tags dev ./cmd/... ./internal/...
 
-# Backend tests with coverage
-go test ./... -coverprofile=coverage.out
-go tool cover -html=coverage.out
+# Backend cross-compile for Linux (the panel targets Linux)
+make build-linux
 
-# Frontend type check + lint + build
-cd web && pnpm build
-cd web && pnpm lint
+# Frontend type check + lint + tests
+cd web && pnpm run build   # includes tsc --noEmit
+cd web && pnpm run lint
+cd web && pnpm run test
 ```
 
 ## Development Environment
-
-See [docs/development.md](docs/development.md) for the full local setup guide.
 
 | Tool   | Version |
 |--------|---------|
@@ -119,7 +108,6 @@ See [docs/development.md](docs/development.md) for the full local setup guide.
 
 ## Code Review Principles
 
-- Keep PRs small and focused (aim for ≤400 changed lines)
 - One PR does one thing
 - Review for: correctness, security, performance, maintainability
 - Use GitHub's "Request Changes" or "Approve" as appropriate
