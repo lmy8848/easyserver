@@ -55,9 +55,10 @@ func (m *Manager) BasePath() string {
 }
 
 // NewManager creates a new file Manager with a required base path.
+// An empty base path defaults to the filesystem root ("/").
 func NewManager(basePath string) (*Manager, error) {
 	if basePath == "" {
-		return nil, errors.New("filemanager base_path is required")
+		basePath = "/"
 	}
 
 	// Expand ~ to home directory

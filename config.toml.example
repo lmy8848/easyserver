@@ -57,7 +57,7 @@ retention_days = 90
 # encryption_key = ""
 
 [filemanager]
-base_path = "/opt/easyserver/data" # Restrict file access to this path
+base_path = "/opt/easyserver/data" # 文件管理器根目录；留空 = 整个文件系统（/）
 
 [tencentcloud]
 enabled = false
