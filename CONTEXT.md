@@ -2,7 +2,7 @@
 
 > EasyServer 是一个 Linux 服务器管理面板。它让单个管理员通过 Web 界面管理服务器上的软件、网站、数据库、定时任务、防火墙等——无需直接 SSH。
 >
-> ⚠ **术语约定**：文档用 "Service 层" 指 `internal/<domain>/` 下的业务逻辑（如 CronService、FirewallService）；"Systemd Service" 指 Linux 系统服务（如 nginx.service）。代码中两者都叫 "service"，靠上下文区分。
+> ⚠ **术语约定**：文档用 "Service 层" 指 `internal/domain/<domain>/` 下的业务逻辑（如 CronService、FirewallService）；"Systemd Service" 指 Linux 系统服务（如 nginx.service）。代码中两者都叫 "service"，靠上下文区分。
 
 ---
 
@@ -28,7 +28,7 @@
 
 ### 3. 数据库管理
 
-- **DB Type** — 数据库类型（MySQL、PostgreSQL、Redis）。每种类型有默认端口和预定义版本模板。代码中为 `DBType`（`internal/database/model.go`）。
+- **DB Type** — 数据库类型（MySQL、PostgreSQL、Redis）。每种类型有默认端口和预定义版本模板。代码中为 `DBType`（`internal/domain/database/model.go`）。
 - **Database Instance** — 某 DB Type 的受管数据库容器实例（例如 MySQL 8.0 运行在端口 3306）。它独占容器、数据卷和配置；一种类型可以同时有多个实例，宿主机安装的数据库不属于 EasyServer 的管理范围。
   _Avoid_: DB Version
 - **Managed Database Container** — 由 EasyServer 创建、标识并全生命周期管理的数据库容器。它是 Database Instance 的运行载体，不是通用容器列表中可任意编辑的普通 Container（见 ADR-0006）。
@@ -101,7 +101,7 @@
 ### 14. 通知系统
 
 - **In-App Notification（站内通知）** — 面板右上角铃铛消息（告警触发、安全事件、系统通知），通过 SSE（`/api/notifications/stream`，需 JWT 与 Session 双重验证）实时推送至前端。
-- **Notification Channel（站外推送）** — 站外通知渠道配置，当前已实现：通用 Webhook、钉钉（DingTalk）、飞书（Feishu）、企业微信（WeCom）；通过 URL 模式识别渠道类型并适配消息格式（见 `internal/notify`）。用于将重要告警向管理员外部设备分发。
+- **Notification Channel（站外推送）** — 站外通知渠道配置，当前已实现：通用 Webhook、钉钉（DingTalk）、飞书（Feishu）、企业微信（WeCom）；通过 URL 模式识别渠道类型并适配消息格式（见 `internal/domain/notify`）。用于将重要告警向管理员外部设备分发。
   _Avoid_: 用 "Notification" 同时模糊指代站内铃铛与站外推送。
 
 ### 15. 审计与环境配置

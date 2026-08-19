@@ -7,7 +7,7 @@ import {
   SettingOutlined, TeamOutlined, HistoryOutlined,
   ReloadOutlined, SaveOutlined, DeleteOutlined, SafetyOutlined,
 } from '@ant-design/icons';
-import api from '../services/api';
+import { sshApi } from '../services/api';
 import { useTab } from '../hooks/useTab';
 import SSHHardeningTab from './SSHHardeningTab';
 
@@ -44,7 +44,7 @@ export default function SSH() {
   // 挂载先检测 ssh 是否可用，避免不可用时各 tab 操作逐个报错
   const checkStatus = async () => {
     try {
-      const res = await api.get('/ssh/status');
+      const res = await sshApi.getStatus();
       const data = res.data?.data;
       setSSHAvailable(data?.available ?? false);
       setUnavailableReason(data?.reason || '');
@@ -56,7 +56,7 @@ export default function SSH() {
 
   const loadConfig = useCallback(async () => {
     try {
-      const res = await api.get('/ssh/config');
+      const res = await sshApi.getConfig();
       const config = res.data?.data;
       if (config) {
         configForm.setFieldsValue(config);
@@ -70,8 +70,8 @@ export default function SSH() {
 
   const loadSessions = async () => {
     try {
-      const res = await api.get('/ssh/sessions');
-      setSessions(res.data?.data?.sessions || []);
+      const res = await sshApi.listSessions();
+      setSessions(res.data?.data?.items ?? []);
     } catch {
       message.error('加载会话列表失败');
     } finally {
@@ -81,7 +81,7 @@ export default function SSH() {
 
   const loadLogins = async () => {
     try {
-      const res = await api.get('/ssh/logins');
+      const res = await sshApi.getLogins();
       setLogins(res.data?.data?.records || []);
     } catch {
       message.error('加载登录历史失败');
@@ -112,7 +112,7 @@ export default function SSH() {
   const handleSave = async () => {
     try {
       const values = await configForm.validateFields();
-      await api.put('/ssh/config', values);
+      await sshApi.saveConfig(values);
       message.success('SSH 配置已保存');
     } catch {
       message.error('保存失败');
@@ -122,7 +122,7 @@ export default function SSH() {
   // Test config
   const handleTest = async () => {
     try {
-      const res = await api.post('/ssh/config/test');
+      const res = await sshApi.testConfig();
       message.success(res.data?.data?.message || '配置有效');
     } catch {
       message.error('配置测试失败');
@@ -132,7 +132,7 @@ export default function SSH() {
   // Reload SSH
   const handleReload = async () => {
     try {
-      await api.post('/ssh/config/reload');
+      await sshApi.reloadService();
       message.success('SSH 服务已重载');
     } catch {
       message.error('重载失败');
@@ -142,7 +142,7 @@ export default function SSH() {
   // Kill session
   const handleKillSession = async (pid: number) => {
     try {
-      await api.post(`/ssh/sessions/${pid}/kill`);
+      await sshApi.killSession(pid);
       message.success('会话已终止');
       setSessionsLoading(true);
       loadSessions();

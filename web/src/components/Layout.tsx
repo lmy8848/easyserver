@@ -157,10 +157,10 @@ export default function Layout() {
   const fetchNotifications = useCallback(async () => {
     try {
       const [listRes, countRes] = await Promise.all([
-        notificationApi.list(false, 20),
+        notificationApi.list(false, 1, 20),
         notificationApi.unreadCount(),
       ]);
-      setNotifications(listRes.data?.data || []);
+      setNotifications(listRes.data?.data?.items || []);
       setUnreadCount(countRes.data?.data?.count || 0);
     } catch (err: unknown) {
       console.debug('Failed to fetch notifications:', err);

@@ -14,68 +14,15 @@ export interface ImageCategory {
   images: ImageTemplate[];
 }
 
-export interface DockerStatus {
-  installed: boolean;
-  version: string;
-  running: boolean;
-  os: string;
-  socket_enabled: boolean;
-}
-
-export interface Container {
-  id: string;
-  name: string;
-  image: string;
-  status: string;
-  state: string;
-  ports: Array<{ host_port: string; container_port: string; protocol: string }>;
-  created_at: string;
-}
-
-export interface Image {
-  id: string;
-  repository: string;
-  tag: string;
-  size: string; // 后端直传 docker images 的字符串（如 "133MB"），不再前端转换
-  created_at: string;
-}
-
-export interface ComposeProject {
-  name: string;
-  status: string;
-  config_file: string;
-  services: string[];
-  created_at: string;
-}
-
-export interface Volume {
-  name: string;
-  driver: string;
-  mountpoint: string;
-  created_at: string;
-  size: number;
-}
-
-export interface Network {
-  id: string;
-  name: string;
-  driver: string;
-  scope: string;
-  subnet: string;
-  gateway: string;
-}
-
-export interface ContainerStats {
-  cpu_percent: number;
-  mem_usage: number;
-  mem_limit: number;
-  mem_percent: number;
-  net_rx: number;
-  net_tx: number;
-  block_read: number;
-  block_write: number;
-  pids: number;
-}
+export type {
+  DockerStatus,
+  Container,
+  Image,
+  ComposeProject,
+  Volume,
+  Network,
+  ContainerStats,
+} from '../../types';
 
 // ==================== Helpers ====================
 

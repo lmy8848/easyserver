@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, Table, Button, Space, Tag, Modal, Form, Input, InputNumber, message, Popconfirm, Tooltip, Checkbox } from 'antd';
 import { LinkOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, CopyOutlined, EditOutlined, LockOutlined } from '@ant-design/icons';
 import { fileShareApi } from '../../services/api';
@@ -19,22 +19,27 @@ export default function FileShares() {
   const [editForm] = Form.useForm();
   const [editLoading, setEditLoading] = useState(false);
   const [editClearExpiry, setEditClearExpiry] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
 
-  const fetchShares = async () => {
+  const fetchShares = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fileShareApi.list();
-      setShares(res.data.data || []);
+      const res = await fileShareApi.list(page, pageSize);
+      setShares(res.data.data?.items || []);
+      setTotal(res.data.data?.total || 0);
     } catch (error) {
       console.error('Failed to fetch shares:', error);
+      message.error('获取文件外链失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize]);
 
   useEffect(() => {
     fetchShares();
-  }, []);
+  }, [fetchShares]);
 
   const handleCreate = () => {
     form.resetFields();
@@ -255,7 +260,14 @@ export default function FileShares() {
           dataSource={shares}
           rowKey="id"
           loading={loading}
-          pagination={{ defaultPageSize: 20, showTotal: (t) => `共 ${t} 个外链` }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个外链`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
           size="small"
           scroll={{ x: 1000 }}
         />

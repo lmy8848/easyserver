@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, message, Table, Input,
   Tag, Popconfirm, Alert, Descriptions, Statistic, Row, Col,
@@ -6,7 +6,7 @@ import {
 import {
   ReloadOutlined, PlusOutlined, DeleteOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import api from '../services/api';
+import { sshApi } from '../services/api';
 
 interface AuthorizedKey { comment: string; type: string; key: string; }
 interface Jail { name: string; failed: number; banned: number; }
@@ -16,36 +16,41 @@ export default function SSHHardeningTab() {
   const [hardening, setHardening] = useState(false);
   const [keys, setKeys] = useState<AuthorizedKey[]>([]);
   const [keysLoading, setKeysLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [addKey, setAddKey] = useState('');
   const [genName, setGenName] = useState('easyserver-key');
   const [genType, setGenType] = useState('ed25519');
   const [fail2ban, setFail2ban] = useState<Fail2banStatus | null>(null);
   const [failLoading, setFailLoading] = useState(false);
 
-  const loadKeys = async () => {
+  const loadKeys = useCallback(async () => {
     setKeysLoading(true);
     try {
-      const res = await api.get('/ssh/authorized-keys');
-      setKeys(res.data.data?.keys || []);
+      const res = await sshApi.listAuthorizedKeys(page, pageSize);
+      setKeys(res.data.data?.items ?? []);
+      setTotal(res.data.data?.total ?? 0);
     } catch { message.error('加载公钥失败'); }
     finally { setKeysLoading(false); }
-  };
+  }, [page, pageSize]);
 
-  const loadFail2ban = async () => {
+  const loadFail2ban = useCallback(async () => {
     setFailLoading(true);
     try {
-      const res = await api.get('/ssh/fail2ban');
+      const res = await sshApi.getFail2banStatus();
       setFail2ban(res.data.data);
     } catch { message.error('加载 fail2ban 状态失败'); }
     finally { setFailLoading(false); }
-  };
+  }, []);
 
-  useEffect(() => { loadKeys(); loadFail2ban(); }, []);
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+  useEffect(() => { loadFail2ban(); }, [loadFail2ban]);
 
   const onHarden = async () => {
     setHardening(true);
     try {
-      await api.post('/ssh/harden', {
+      await sshApi.harden({
         port: 0,
         disable_root_login: true,
         disable_password_auth: true,
@@ -62,7 +67,7 @@ export default function SSHHardeningTab() {
   const onAddKey = async () => {
     if (!addKey.trim()) { message.warning('请输入公钥'); return; }
     try {
-      await api.post('/ssh/authorized-keys', { key: addKey.trim() });
+      await sshApi.addAuthorizedKey({ key: addKey.trim() });
       message.success('公钥已添加');
       setAddKey('');
       loadKeys();
@@ -73,7 +78,7 @@ export default function SSHHardeningTab() {
 
   const onRemoveKey = async (comment: string) => {
     try {
-      await api.delete('/ssh/authorized-keys', { params: { comment } });
+      await sshApi.deleteAuthorizedKey(comment);
       message.success('公钥已删除');
       loadKeys();
     } catch { message.error('删除失败'); }
@@ -81,7 +86,7 @@ export default function SSHHardeningTab() {
 
   const onGenerate = async () => {
     try {
-      const res = await api.post('/ssh/keys/generate', { name: genName, key_type: genType });
+      const res = await sshApi.generateKey({ name: genName, key_type: genType });
       const priv = res.data.data?.private_key || '';
       // 下载私钥
       const blob = new Blob([priv], { type: 'text/plain' });
@@ -102,7 +107,7 @@ export default function SSHHardeningTab() {
 
   const onInstallFail2ban = async () => {
     try {
-      await api.post('/ssh/fail2ban/install');
+      await sshApi.installFail2ban();
       message.success('fail2ban 已安装');
       loadFail2ban();
     } catch (e: unknown) {
@@ -112,7 +117,7 @@ export default function SSHHardeningTab() {
 
   const onReloadFail2ban = async () => {
     try {
-      await api.post('/ssh/fail2ban/reload');
+      await sshApi.reloadFail2ban();
       message.success('fail2ban 已重载');
       loadFail2ban();
     } catch { message.error('重载失败'); }
@@ -139,13 +144,20 @@ export default function SSHHardeningTab() {
         </Button>
       </Card>
 
-      <Card title="SSH 公钥管理" extra={<Button icon={<ReloadOutlined />} onClick={loadKeys} loading={keysLoading}>刷新</Button>}>
+      <Card title="SSH 公钥管理" extra={<Button icon={<ReloadOutlined />} onClick={() => loadKeys()} loading={keysLoading}>刷新</Button>}>
         <Table
           size="small"
           dataSource={keys}
           rowKey={(r) => r.comment || r.key}
           loading={keysLoading}
-          locale={{ emptyText: '暂无授权公钥' }}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 个公钥`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
+          }}
           columns={[
             { title: '类型', dataIndex: 'type', key: 'type', width: 120, render: (t: string) => <Tag>{t}</Tag> },
             { title: '指纹', dataIndex: 'key', key: 'key', ellipsis: true },

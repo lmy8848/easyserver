@@ -6,11 +6,10 @@ import {
   ReloadOutlined, RocketOutlined, PlayCircleOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
 import { SiDocker, SiPodman } from '@icons-pack/react-simple-icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import { useTab } from '../../hooks/useTab';
 import type { DockerStatus } from './types';
-import { withEngine } from './types';
 import ContainerTab from './ContainerTab';
 import ImageTab from './ImageTab';
 import ComposeTab from './ComposeTab';
@@ -57,8 +56,8 @@ export default function Container() {
     const next: Record<string, DockerStatus | null> = { docker: null, podman: null };
     await Promise.all(ENGINES.map(async (r) => {
       try {
-        const res = await api.get(withEngine('/container/status', r));
-        next[r] = res.data?.data;
+        const res = await containerApi.getStatus(r);
+        next[r] = res.data?.data ?? null;
       } catch {
         next[r] = null;
       }
@@ -85,7 +84,7 @@ export default function Container() {
 
   const handleInstall = async () => {
     try {
-      await runInstall(() => api.post(withEngine('/container/install', engine)));
+      await runInstall(() => containerApi.install(engine));
       message.success(`${engine} 安装成功`);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } }; message?: string };
@@ -97,7 +96,7 @@ export default function Container() {
 
   const handleStart = async () => {
     try {
-      await runStart(() => api.post(withEngine('/container/start', engine)));
+      await runStart(() => containerApi.start(engine));
       message.success(`${engine} 已启动`);
     } catch {
       message.error(`启动 ${engine} 失败`);
@@ -108,7 +107,7 @@ export default function Container() {
 
   const handleSocket = async (action: 'enable' | 'disable') => {
     try {
-      await runSocket(() => api.post(withEngine(`/container/socket/${action}`, engine)));
+      await runSocket(() => containerApi.controlSocket(action, engine));
       message.success(`Socket 已${action === 'enable' ? '启用' : '禁用'}`);
     } catch {
       message.error('Socket 操作失败');

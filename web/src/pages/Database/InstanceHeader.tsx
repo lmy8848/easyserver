@@ -149,7 +149,7 @@ export default function InstanceHeader({
     try {
       const res = await dbServerApi.listDockerTags(server.db_type, page, DOCKER_PAGE_SIZE);
       setDockerTags(res.data?.data?.items || []);
-      setDockerPage(res.data?.data?.page || page);
+      setDockerPage(page);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '查询 Docker Hub 失败');
     } finally { setDockerLoading(false); }

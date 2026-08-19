@@ -9,6 +9,9 @@ import CronDocs from './CronDocs';
 export default function CronPage() {
   const [tasks, setTasks] = useState<CronTask[]>([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
   const [operating, setOperating] = useState('');
   const [scripts, setScripts] = useState<Script[]>([]);
 
@@ -24,21 +27,22 @@ export default function CronPage() {
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await cronApi.list();
-      setTasks(res.data?.data || []);
+      const res = await cronApi.list(page, pageSize);
+      setTasks(res.data?.data?.items ?? []);
+      setTotal(res.data?.data?.total ?? 0);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取任务列表失败'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
   // Fetch scripts on mount
   useEffect(() => {
-    cronApi.listScripts().then(res => {
-      setScripts(res.data?.data || []);
+    cronApi.listScripts(1, 1000).then(res => {
+      setScripts(res.data?.data?.items ?? []);
     }).catch(() => {});
   }, []);
 
@@ -83,22 +87,47 @@ export default function CronPage() {
     }
   };
 
-  const fetchRuns = useCallback(async (task: CronTask) => {
+  const [runsPage, setRunsPage] = useState(1);
+  const [runsPageSize, setRunsPageSize] = useState(20);
+  const [runsTotal, setRunsTotal] = useState(0);
+  const [runsSince, setRunsSince] = useState<string | undefined>(undefined);
+  const [runsUntil, setRunsUntil] = useState<string | undefined>(undefined);
+
+  const fetchRuns = useCallback(async (
+    task: CronTask,
+    p = runsPage,
+    ps = runsPageSize,
+    since = runsSince,
+    until = runsUntil,
+  ) => {
     setLogsTask(task);
     setLogsLoading(true);
     try {
-      const res = await cronApi.getRuns(task.name, 100);
-      setRuns(res.data?.data || []);
+      const res = await cronApi.getRuns(task.name, p, ps, since, until);
+      setRuns(res.data?.data?.items ?? []);
+      setRunsTotal(res.data?.data?.total ?? 0);
+      setRunsPage(p);
+      setRunsPageSize(ps);
+      setRunsSince(since);
+      setRunsUntil(until);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取日志失败'));
     } finally {
       setLogsLoading(false);
     }
-  }, []);
+  }, [runsPage, runsPageSize, runsSince, runsUntil]);
 
   const handleViewLogs = (task: CronTask) => {
     setLogsVisible(true);
-    fetchRuns(task);
+    setRunsSince(undefined);
+    setRunsUntil(undefined);
+    fetchRuns(task, 1, runsPageSize, undefined, undefined);
+  };
+
+  const handleRunsDateRangeChange = (since?: string, until?: string) => {
+    if (logsTask) {
+      fetchRuns(logsTask, 1, runsPageSize, since, until);
+    }
   };
 
   const handleShowHelp = useCallback(() => {
@@ -110,6 +139,10 @@ export default function CronPage() {
       <CronTasks
         tasks={tasks}
         loading={loading}
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={(p, ps) => { setPage(p); setPageSize(ps); }}
         operating={operating}
         scripts={scripts}
         onRefresh={fetchTasks}
@@ -124,8 +157,13 @@ export default function CronPage() {
         task={logsTask}
         runs={runs}
         loading={logsLoading}
+        page={runsPage}
+        pageSize={runsPageSize}
+        total={runsTotal}
+        onPageChange={(p, ps) => logsTask && fetchRuns(logsTask, p, ps, runsSince, runsUntil)}
+        onDateRangeChange={handleRunsDateRangeChange}
         onClose={() => setLogsVisible(false)}
-        onRefresh={fetchRuns}
+        onRefresh={() => logsTask && fetchRuns(logsTask, runsPage, runsPageSize, runsSince, runsUntil)}
       />
       <CronDocs
         visible={helpVisible}

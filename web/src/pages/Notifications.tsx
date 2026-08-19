@@ -41,31 +41,38 @@ const LEVEL_ICONS: Record<string, React.ReactNode> = {
 export default function Notifications() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [unreadFilter, setUnreadFilter] = useState(false);
   const [levelFilter, setLevelFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
 
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const res = await notificationApi.unreadCount();
+      setUnreadCount(res.data?.data?.count ?? 0);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await notificationApi.list(unreadFilter, 200);
-      let data = res.data?.data || [];
-
-      // Apply client-side filters
-      if (levelFilter) {
-        data = data.filter(n => n.level === levelFilter);
-      }
-      if (typeFilter) {
-        data = data.filter(n => n.type === typeFilter);
-      }
-
-      setNotifications(data);
+      const [res] = await Promise.all([
+        notificationApi.list(unreadFilter, page, pageSize, levelFilter, typeFilter),
+        fetchUnreadCount(),
+      ]);
+      setNotifications(res.data?.data?.items || []);
+      setTotal(res.data?.data?.total || 0);
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '获取通知失败'));
     } finally {
       setLoading(false);
     }
-  }, [unreadFilter, levelFilter, typeFilter]);
+  }, [unreadFilter, levelFilter, typeFilter, page, pageSize, fetchUnreadCount]);
 
   useEffect(() => {
     fetchNotifications();
@@ -76,18 +83,21 @@ export default function Notifications() {
     onOpen: fetchNotifications,
     events: {
       notification: (data: Notification) => {
+        fetchUnreadCount();
         if (unreadFilter && data.is_read) return;
         if (levelFilter && data.level !== levelFilter) return;
         if (typeFilter && data.type !== typeFilter) return;
 
-        setNotifications(prev => {
-          if (prev.some(n => n.id === data.id)) {
-            return prev;
-          }
-          return [data, ...prev];
-        });
+        setTotal(t => t + 1);
+        if (page === 1) {
+          setNotifications(prev => {
+            const filtered = prev.filter(n => n.id !== data.id);
+            return [data, ...filtered].slice(0, pageSize);
+          });
+        }
       },
       read: (data: { ids: number[]; all: boolean }) => {
+        fetchUnreadCount();
         setNotifications(prev =>
           prev.map(n => {
             if (data.all || data.ids.includes(n.id)) {
@@ -106,6 +116,7 @@ export default function Notifications() {
       setNotifications(prev =>
         prev.map(n => n.id === id ? { ...n, is_read: true } : n)
       );
+      fetchUnreadCount();
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '标记失败'));
     }
@@ -115,6 +126,7 @@ export default function Notifications() {
     try {
       await notificationApi.markAllAsRead();
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      setUnreadCount(0);
       message.success('全部已读');
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '标记失败'));
@@ -125,13 +137,13 @@ export default function Notifications() {
     try {
       await notificationApi.delete(id);
       setNotifications(prev => prev.filter(n => n.id !== id));
+      setTotal(t => Math.max(0, t - 1));
+      fetchUnreadCount();
       message.success('已删除');
     } catch (error: unknown) {
       message.error((error instanceof Error ? error.message : '删除失败'));
     }
   };
-
-  const unreadCount = notifications.filter(n => !n.is_read).length;
 
   const columns = [
     {
@@ -229,7 +241,7 @@ export default function Notifications() {
           <Space>
             <Select
               value={unreadFilter}
-              onChange={setUnreadFilter}
+              onChange={(val) => { setUnreadFilter(val); setPage(1); }}
               style={{ width: 100 }}
               options={[
                 { label: '全部', value: false },
@@ -238,14 +250,14 @@ export default function Notifications() {
             />
             <Select
               value={levelFilter}
-              onChange={setLevelFilter}
+              onChange={(val) => { setLevelFilter(val); setPage(1); }}
               style={{ width: 100 }}
               options={LEVEL_OPTIONS}
               placeholder="级别"
             />
             <Select
               value={typeFilter}
-              onChange={setTypeFilter}
+              onChange={(val) => { setTypeFilter(val); setPage(1); }}
               style={{ width: 100 }}
               options={TYPE_OPTIONS}
               placeholder="类型"
@@ -268,9 +280,12 @@ export default function Notifications() {
           loading={loading}
           rowClassName={(record) => record.is_read ? '' : 'unread-row'}
           pagination={{
-            pageSize: 20,
-            showTotal: (total) => `共 ${total} 条`,
-            showSizeChanger: false,
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps); },
           }}
           locale={{ emptyText: <Empty description="暂无通知" /> }}
         />

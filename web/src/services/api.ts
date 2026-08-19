@@ -8,7 +8,8 @@ import type {
   SystemProcess, FileShare, ShareInfo, ShareFileEntry,
   ManagedServiceSpec,
   Notification, FileSearchResult,
-  InstanceConfigView, AppSettings,
+  InstanceConfigView, AppSettings, Page,
+  SSHSession, DockerStatus, Container, Image, ComposeProject, Volume, Network, ContainerStats,
 } from '../types';
 
 const api = axios.create({
@@ -155,8 +156,8 @@ export const monitorApi = {
 
 // Service API
 export const serviceApi = {
-  list: (params?: { managed?: boolean }) =>
-    api.get<ApiResponse<Service[]>>('/services', { params }),
+  list: (params?: { managed?: boolean; page?: number; page_size?: number }) =>
+    api.get<ApiResponse<Page<Service>>>('/services', { params }),
 
   // 创建托管服务（生成 easyserver-svc-* unit）
   create: (data: ManagedServiceSpec) =>
@@ -283,7 +284,7 @@ export const fileApi = {
     api.post<ApiResponse>('/files/extract', { source, dest }),
 
   archiveList: (path: string) =>
-    api.get<ApiResponse<{ entries: Array<{ name: string; size: number; is_dir: boolean }> }>>('/files/archive-list', { params: { path } }),
+    api.get<ApiResponse<Page<{ name: string; size: number; is_dir: boolean }>>>('/files/archive-list', { params: { path } }),
 
   chmod: (path: string, mode: string) =>
     api.put<ApiResponse>('/files/chmod', { path, mode }),
@@ -294,8 +295,8 @@ export const fileApi = {
 
 // Monitor API (ports + port availability check)
 export const systemApi = {
-  getListeningPorts: () =>
-    api.get<ApiResponse<{ ports: Array<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>; total: number }>>('/monitor/ports'),
+  getListeningPorts: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<{ protocol: string; port: number; local_addr: string; state: string; pid: number; process_name: string; user: string }>>>('/monitor/ports', { params: { page, page_size: pageSize } }),
 
   checkPort: (port: number) =>
     api.get<ApiResponse<{ available: boolean; port: number; process?: string; message: string }>>('/monitor/check-port', { params: { port } }),
@@ -313,8 +314,161 @@ export interface SSHLoginRecord {
 }
 
 export const sshApi = {
+  getStatus: () =>
+    api.get<ApiResponse<{ available: boolean; reason?: string; installed: boolean; running: boolean }>>('/ssh/status'),
+  getConfig: () =>
+    api.get<ApiResponse<any>>('/ssh/config'),
+  saveConfig: (data: any) =>
+    api.put<ApiResponse>('/ssh/config', data),
+  testConfig: () =>
+    api.post<ApiResponse<{ message: string }>>('/ssh/config/test'),
+  reloadService: () =>
+    api.post<ApiResponse>('/ssh/config/reload'),
+  listSessions: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<SSHSession>>>('/ssh/sessions', { params: { page, page_size: pageSize } }),
+  killSession: (pid: number) =>
+    api.post<ApiResponse>(`/ssh/sessions/${pid}/kill`),
   getLogins: (limit?: number) =>
     api.get<ApiResponse<{ records: SSHLoginRecord[] }>>('/ssh/logins', { params: { limit } }),
+  listAuthorizedKeys: (page = 1, pageSize = 20) =>
+    api.get<ApiResponse<Page<{ comment: string; type: string; key: string }>>>('/ssh/authorized-keys', {
+      params: { page, page_size: pageSize },
+    }),
+  addAuthorizedKey: (data: { key: string }) =>
+    api.post<ApiResponse>('/ssh/authorized-keys', data),
+  deleteAuthorizedKey: (comment: string) =>
+    api.delete<ApiResponse>('/ssh/authorized-keys', { params: { comment } }),
+  generateKey: (data: { name: string; key_type: string }) =>
+    api.post<ApiResponse<{ private_key: string; public_key: string }>>('/ssh/keys/generate', data),
+  harden: (data?: any) =>
+    api.post<ApiResponse>('/ssh/harden', data),
+  getFail2banStatus: () =>
+    api.get<ApiResponse<any>>('/ssh/fail2ban'),
+  installFail2ban: () =>
+    api.post<ApiResponse>('/ssh/fail2ban/install'),
+  reloadFail2ban: () =>
+    api.post<ApiResponse>('/ssh/fail2ban/reload'),
+};
+
+// Container API
+export const containerApi = {
+  getStatus: (engine?: string) =>
+    api.get<ApiResponse<DockerStatus>>('/container/status', { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  install: (engine?: string) =>
+    api.post<ApiResponse>('/container/install', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  start: (engine?: string) =>
+    api.post<ApiResponse>('/container/start', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  controlSocket: (action: string, engine?: string) =>
+    api.post<ApiResponse>(`/container/socket/${action}`, null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+
+  listContainers: (engine?: string, all = true, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Container>>>('/container/instances', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, all: all ? 'true' : 'false', page, page_size: pageSize },
+    }),
+  getContainer: (id: string, engine?: string) =>
+    api.get<ApiResponse<Container>>(`/container/instances/${id}`, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  actionContainer: (id: string, action: string, engine?: string) =>
+    api.post<ApiResponse>(`/container/instances/${id}/${action}`, null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  deleteContainer: (id: string, force = true, engine?: string) =>
+    api.delete<ApiResponse>(`/container/instances/${id}`, { params: { force, engine: engine === 'podman' ? 'podman' : undefined } }),
+  createContainer: (data: any, engine?: string) =>
+    api.post<ApiResponse<{ id: string; name: string }>>('/container/instances', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+      timeout: 600000,
+    }),
+  execContainer: (id: string, data: { command: string }, engine?: string) =>
+    api.post<ApiResponse<{ exit_code: number; output: string }>>(`/container/instances/${id}/exec`, data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getContainerLogs: (id: string, tail = 200, engine?: string) =>
+    api.get<ApiResponse<{ logs: string }>>(`/container/instances/${id}/logs`, {
+      params: { tail, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getContainerStats: (id: string, engine?: string) =>
+    api.get<ApiResponse<ContainerStats>>(`/container/instances/${id}/stats`, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listComposeProjects: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<ComposeProject>>>('/container/compose/projects', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  composeAction: (action: string, projectDir: string, engine?: string) =>
+    api.post<ApiResponse>(`/container/compose/${action}`, { project_dir: projectDir }, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getComposeLogs: (dir: string, tail = 200, engine?: string) =>
+    api.get<ApiResponse<{ logs: string }>>('/container/compose/logs', {
+      params: { dir, tail, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getComposeConfig: (dir: string, engine?: string) =>
+    api.get<ApiResponse<{ content: string }>>('/container/compose/config', {
+      params: { dir, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  saveComposeConfig: (projectDir: string, content: string, engine?: string) =>
+    api.put<ApiResponse>('/container/compose/config', { project_dir: projectDir, content }, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listImages: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Image>>>('/container/images', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  pullImage: (data: { image: string; tag?: string }, engine?: string) =>
+    api.post<ApiResponse>('/container/images/pull', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  deleteImage: (id: string, force = true, engine?: string) =>
+    api.delete<ApiResponse>(`/container/images/${id}`, {
+      params: { force, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listNetworks: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Network>>>('/container/networks', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  createNetwork: (data: any, engine?: string) =>
+    api.post<ApiResponse>('/container/networks', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  deleteNetwork: (id: string, engine?: string) =>
+    api.delete<ApiResponse>(`/container/networks/${id}`, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  listVolumes: (engine?: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Volume>>>('/container/volumes', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined, page, page_size: pageSize },
+    }),
+  createVolume: (data: any, engine?: string) =>
+    api.post<ApiResponse>('/container/volumes', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  deleteVolume: (name: string, force = true, engine?: string) =>
+    api.delete<ApiResponse>(`/container/volumes/${name}`, {
+      params: { force, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+
+  getRegistryConfig: (engine?: string) =>
+    api.get<ApiResponse<any>>('/container/registry', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  getRegistryAuth: (engine?: string) =>
+    api.get<ApiResponse<any>>('/container/registry/auth', {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  saveRegistryConfig: (data: { mirrors: string[]; insecure_registries: string[] }, engine?: string) =>
+    api.post<ApiResponse>('/container/registry', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  loginRegistry: (data: any, engine?: string) =>
+    api.post<ApiResponse>('/container/registry/login', data, {
+      params: { engine: engine === 'podman' ? 'podman' : undefined },
+    }),
+  logoutRegistry: (server: string, engine?: string) =>
+    api.post<ApiResponse>('/container/registry/logout', null, {
+      params: { server, engine: engine === 'podman' ? 'podman' : undefined },
+    }),
 };
 
 // Audit Log API
@@ -365,8 +519,8 @@ export const fileShareApi = {
   create: (data: { file_path: string; password?: string; expires_at?: string; max_downloads?: number }) =>
     api.post<ApiResponse<FileShare>>('/shares', data),
 
-  list: () =>
-    api.get<ApiResponse<FileShare[]>>('/shares'),
+  list: (page = 1, pageSize = 20) =>
+    api.get<ApiResponse<Page<FileShare>>>('/shares', { params: { page, page_size: pageSize } }),
 
   get: (id: number) =>
     api.get<ApiResponse<FileShare>>(`/shares/${id}`),
@@ -417,8 +571,8 @@ export const websiteSecurityApi = {
 
 // Web Server API
 export const webServerApi = {
-  list: () =>
-    api.get<ApiResponse<WebServer[]>>('/web-servers'),
+  list: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<WebServer>>>('/web-servers', { params: { page, page_size: pageSize } }),
 
   get: (id: number) =>
     api.get<ApiResponse<WebServer>>(`/web-servers/${id}`),
@@ -480,8 +634,8 @@ export const webServerApi = {
 
 // Website API (nested under web server)
 export const websiteApi = {
-  list: (serverId: number) =>
-    api.get<ApiResponse<Website[]>>(`/web-servers/${serverId}/websites`),
+  list: (serverId: number, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Website>>>(`/web-servers/${serverId}/websites`, { params: { page, page_size: pageSize } }),
 
   get: (serverId: number, id: number) =>
     api.get<ApiResponse<Website>>(`/web-servers/${serverId}/websites/${id}`),
@@ -517,8 +671,8 @@ export const websiteApi = {
 // Database Server API
 export const dbServerApi = {
   // Instance lifecycle, scoped by engine enum.
-  listInstances: (dbtype: string) =>
-    api.get<ApiResponse<DBInstance[]>>(`/db/instances`, { params: { dbtype } }),
+  listInstances: (dbtype: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<DBInstance>>>(`/db/instances`, { params: { dbtype, page, page_size: pageSize } }),
 
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string; container_name?: string }) =>
     api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/instances`, { ...data, dbtype }),
@@ -530,7 +684,7 @@ export const dbServerApi = {
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),
   // paginated — the version Select flips pages through this.
   listDockerTags: (dbtype: string, page = 1, pageSize = 10) =>
-    api.get<ApiResponse<{ items: string[]; total: number; page: number; page_size: number }>>(`/db/docker-tags`, { params: { dbtype, page, page_size: pageSize } }),
+    api.get<ApiResponse<Page<string>>>(`/db/docker-tags`, { params: { dbtype, page, page_size: pageSize } }),
 
   // Uninstall the instance. purge=true also deletes the data (and config) volumes.
   uninstallInstance: (iid: number, purge = false) =>
@@ -559,8 +713,8 @@ export const dbServerApi = {
 
   // Databases (instance-scoped; logical databases are live engine state, so the
   // database name is the identifier — never a persisted id)
-  listDatabases: (instanceId: number) =>
-    api.get<ApiResponse<Database[]>>(`/db/instances/${instanceId}/databases`),
+  listDatabases: (instanceId: number, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Database>>>(`/db/instances/${instanceId}/databases`, { params: { page, page_size: pageSize } }),
 
   createDatabase: (instanceId: number, data: { name: string; charset?: string; description?: string }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/databases`, data),
@@ -569,8 +723,8 @@ export const dbServerApi = {
     api.delete<ApiResponse>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}`),
 
   // DB Users (instance-scoped; username + host for MySQL)
-  listUsers: (instanceId: number) =>
-    api.get<ApiResponse<DBUser[]>>(`/db/instances/${instanceId}/users`),
+  listUsers: (instanceId: number, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<DBUser>>>(`/db/instances/${instanceId}/users`, { params: { page, page_size: pageSize } }),
 
   createUser: (instanceId: number, data: { username: string; password: string; host?: string }) =>
     api.post<ApiResponse>(`/db/instances/${instanceId}/users`, data),
@@ -585,8 +739,8 @@ export const dbServerApi = {
     api.post<ApiResponse>(`/db/instances/${instanceId}/users/${encodeURIComponent(username)}/password`, data, { params: { host } }),
 
   // Database introspection
-  listTables: (instanceId: number, dbName: string) =>
-    api.get<ApiResponse<Array<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`),
+  listTables: (instanceId: number, dbName: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<{ name: string }>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/tables`, { params: { page, page_size: pageSize } }),
 
   describeTable: (instanceId: number, dbName: string, table: string) =>
     api.get<ApiResponse<{ table_name: string; primary_key: string; collation: string; columns: Array<{ name: string; type: string; is_primary_key: boolean; is_nullable: boolean; is_auto_incr: boolean; default: string }> }>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/describe`, { params: { table } }),
@@ -617,8 +771,8 @@ export const dbServerApi = {
   createBackup: (instanceId: number, dbName: string) =>
     api.post<ApiResponse<DBBackup>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backup`),
 
-  listBackups: (instanceId: number, dbName: string) =>
-    api.get<ApiResponse<DBBackup[]>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backups`),
+  listBackups: (instanceId: number, dbName: string, page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<DBBackup>>>(`/db/instances/${instanceId}/databases/${encodeURIComponent(dbName)}/backups`, { params: { page, page_size: pageSize } }),
 
   downloadBackup: (backupId: number) =>
     api.get(`/db/backups/${backupId}/download`, { responseType: 'blob' }),
@@ -666,8 +820,8 @@ export const dbServerApi = {
 
 // Cron task management
 export const cronApi = {
-  list: () =>
-    api.get<ApiResponse<CronTask[]>>('/cron/tasks'),
+  list: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<CronTask>>>('/cron/tasks', { params: { page, page_size: pageSize } }),
 
   get: (name: string) =>
     api.get<ApiResponse<CronTask>>(`/cron/tasks/${name}`),
@@ -690,12 +844,14 @@ export const cronApi = {
   run: (name: string) =>
     api.post<ApiResponse>(`/cron/tasks/${name}/run`),
 
-  getRuns: (name: string, limit?: number) =>
-    api.get<ApiResponse<CronRun[]>>(`/cron/tasks/${name}/runs`, { params: { limit: limit || 100 } }),
+  getRuns: (name: string, page = 1, pageSize = 20, since?: string, until?: string) =>
+    api.get<ApiResponse<Page<CronRun>>>(`/cron/tasks/${name}/runs`, {
+      params: { page, page_size: pageSize, since: since || undefined, until: until || undefined },
+    }),
 
   // Scripts
-  listScripts: () =>
-    api.get<ApiResponse<Script[]>>('/cron/scripts'),
+  listScripts: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<Script>>>('/cron/scripts', { params: { page, page_size: pageSize } }),
 
   getScript: (id: number) =>
     api.get<ApiResponse<Script>>(`/cron/scripts/${id}`),
@@ -740,8 +896,8 @@ export const firewallApi = {
   disable: () =>
     api.post<ApiResponse>('/firewall/disable', { confirm: true }),
 
-  listRules: () =>
-    api.get<ApiResponse<FirewallRule[]>>('/firewall/rules'),
+  listRules: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<FirewallRule>>>('/firewall/rules', { params: { page, page_size: pageSize } }),
 
   getRule: (id: number) =>
     api.get<ApiResponse<FirewallRule>>(`/firewall/rules/${id}`),
@@ -776,8 +932,8 @@ export const firewallApi = {
   bulkDeleteRules: (ids: number[]) =>
     api.post<ApiResponse<{ succeeded: number; failed: number; errors: string[] }>>('/firewall/rules/bulk-delete', { ids }),
 
-  getSystemRules: () =>
-    api.get<ApiResponse<FirewallRule[]>>('/firewall/system-rules'),
+  getSystemRules: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<FirewallRule>>>('/firewall/system-rules', { params: { page, page_size: pageSize } }),
 
   deleteSystemRule: (rule: FirewallRule) =>
     api.post<ApiResponse>('/firewall/system-rules/delete', rule),
@@ -785,8 +941,8 @@ export const firewallApi = {
   setDefaultPolicy: (data: { chain: string; policy: string }) =>
     api.post<ApiResponse>('/firewall/default-policy', data),
 
-  getTemplates: () =>
-    api.get<ApiResponse<FirewallRuleTemplate[]>>('/firewall/templates'),
+  getTemplates: (page = 1, pageSize = 50) =>
+    api.get<ApiResponse<Page<FirewallRuleTemplate>>>('/firewall/templates', { params: { page, page_size: pageSize } }),
 
   applyTemplate: (name: string) =>
     api.post<ApiResponse<FirewallRule>>('/firewall/templates/apply', { name }),
@@ -860,8 +1016,8 @@ export const settingsApi = {
 // Process Guardian API
 // System Process API
 export const systemProcessApi = {
-  listProcesses: (params?: { sort_by?: string; order?: string; search?: string; limit?: number }) =>
-    api.get<ApiResponse<SystemProcess[]>>('/monitor/processes', { params }),
+  listProcesses: (params?: { sort_by?: string; order?: string; search?: string; page?: number; page_size?: number }) =>
+    api.get<ApiResponse<Page<SystemProcess>>>('/monitor/processes', { params }),
 
   getProcess: (pid: number) =>
     api.get<ApiResponse<SystemProcess>>(`/monitor/processes/${pid}`),
@@ -869,8 +1025,16 @@ export const systemProcessApi = {
 
 // Notification API
 export const notificationApi = {
-  list: (unreadOnly = false, limit = 50) =>
-    api.get<ApiResponse<Notification[]>>('/notifications', { params: { unread: unreadOnly, limit } }),
+  list: (unreadOnly = false, page = 1, pageSize = 50, level?: string, type?: string) =>
+    api.get<ApiResponse<Page<Notification>>>('/notifications', {
+      params: {
+        unread: unreadOnly || undefined,
+        level: level || undefined,
+        type: type || undefined,
+        page,
+        page_size: pageSize,
+      },
+    }),
 
   unreadCount: () =>
     api.get<ApiResponse<{ count: number }>>('/notifications/unread-count'),

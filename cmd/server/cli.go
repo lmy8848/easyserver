@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync"
 
-	"easyserver/internal/audit"
-	"easyserver/internal/auth"
+	"easyserver/internal/domain/audit"
+	"easyserver/internal/domain/auth"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
 )

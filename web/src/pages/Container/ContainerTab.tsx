@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Tag, Button, Space, message, Popconfirm, Modal, Form,
   Input, Select, Tabs, Descriptions, Tooltip,
@@ -8,11 +8,11 @@ import {
   ReloadOutlined, DeleteOutlined, PlusOutlined,
   CodeOutlined, InfoCircleOutlined, LineChartOutlined,
 } from '@ant-design/icons';
-import api from '../../services/api';
+import { containerApi } from '../../services/api';
 import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Container, ContainerStats, ImageCategory } from './types';
-import { formatBytes, getStatusColor, withEngine } from './types';
+import { formatBytes, getStatusColor } from './types';
 
 export default function ContainerTab({ engine }: { engine: string }) {
   const [containers, setContainers] = useState<Container[]>([]);
@@ -31,23 +31,23 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const [execLoading, runExec] = useAsyncRun();
   const templates: ImageCategory[] = DOCKER_IMAGE_TEMPLATES;
 
-  const loadContainers = async () => {
+  const loadContainers = useCallback(async () => {
     try {
-      const res = await api.get(withEngine('/container/instances?all=true', engine));
-      setContainers(res.data?.data?.containers || []);
+      const res = await containerApi.listContainers(engine, true);
+      setContainers(res.data?.data?.items ?? []);
     } catch {
       message.error('加载容器列表失败');
     } finally {
       setLoading(false);
     }
-  };
+  }, [engine]);
 
-  useEffect(() => { loadContainers(); }, [engine]);
+  useEffect(() => { loadContainers(); }, [loadContainers]);
 
   const handleAction = async (action: string, id: string) => {
     setActionLoading(`${id}:${action}`);
     try {
-      await api.post(withEngine(`/container/instances/${id}/${action}`, engine));
+      await containerApi.actionContainer(id, action, engine);
       message.success('操作成功');
       await loadContainers();
     } catch {
@@ -60,7 +60,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const handleRemove = async (id: string, force: boolean) => {
     setActionLoading(`${id}:remove`);
     try {
-      await api.delete(withEngine(`/container/instances/${id}?force=${force}`, engine));
+      await containerApi.deleteContainer(id, force, engine);
       message.success('容器已删除');
       await loadContainers();
     } catch {
@@ -73,7 +73,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const handleCreate = async () => {
     try {
       const values = await createForm.validateFields();
-      const res = await runCreate(() => api.post(withEngine('/container/instances', engine), values, { timeout: 600000 })); // 10 min: docker pull may take time
+      const res = await runCreate(() => containerApi.createContainer(values, engine));
       const resultData = res?.data?.data;
       const createdId = resultData?.id || resultData; // Backend might return { id: ... } or string
       message.success(createdId ? `容器创建成功 (ID: ${String(createdId).substring(0, 12)})` : '容器创建成功');
@@ -90,7 +90,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
   const handleExec = async () => {
     try {
       const values = await execForm.validateFields();
-      const res = await runExec(() => api.post(withEngine(`/container/instances/${selectedContainer}/exec`, engine), values));
+      const res = await runExec(() => containerApi.execContainer(selectedContainer, values, engine));
       Modal.info({
         title: '执行结果',
         content: <pre style={{ maxHeight: 400, overflow: 'auto' }}>{res?.data?.data?.output}</pre>,
@@ -105,7 +105,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
 
   const handleLogs = async (id: string) => {
     try {
-      const res = await api.get(withEngine(`/container/instances/${id}/logs?tail=200`, engine));
+      const res = await containerApi.getContainerLogs(id, 200, engine);
       setLogs(res.data?.data?.logs || '');
       setSelectedContainer(id);
       setLogsVisible(true);
@@ -116,8 +116,8 @@ export default function ContainerTab({ engine }: { engine: string }) {
 
   const handleStats = async (id: string) => {
     try {
-      const res = await api.get(withEngine(`/container/instances/${id}/stats`, engine));
-      setStats(res.data?.data);
+      const res = await containerApi.getContainerStats(id, engine);
+      setStats(res.data?.data ?? null);
       setSelectedContainer(id);
       setStatsVisible(true);
     } catch {

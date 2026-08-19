@@ -6,6 +6,10 @@ interface Props {
   visible: boolean;
   templates: FirewallRuleTemplate[];
   loading: boolean;
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  onPageChange?: (page: number, pageSize: number) => void;
   onClose: () => void;
   onApply: (template: FirewallRuleTemplate) => void;
 }
@@ -14,6 +18,10 @@ export default function FirewallTemplates({
   visible,
   templates,
   loading,
+  page = 1,
+  pageSize = 20,
+  total = 0,
+  onPageChange,
   onClose,
   onApply,
 }: Props) {
@@ -32,7 +40,15 @@ export default function FirewallTemplates({
         rowKey="name"
         loading={loading}
         size="small"
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          size: 'small',
+          showSizeChanger: true,
+          showTotal: (t) => `共 ${t} 个模板`,
+          onChange: onPageChange,
+        }}
         columns={[
           {
             title: '名称',

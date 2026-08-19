@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, Tag, Button, Space, Empty, List, DatePicker, Segmented } from 'antd';
+import { Modal, Tag, Button, Space, Empty, List, Segmented, DatePicker } from 'antd';
 import { HistoryOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { CronTask, CronRun } from '../../types';
 
@@ -8,6 +8,11 @@ interface CronLogsProps {
   task: CronTask | null;
   runs: CronRun[];
   loading: boolean;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number, pageSize: number) => void;
+  onDateRangeChange: (since?: string, until?: string) => void;
   onClose: () => void;
   onRefresh: (task: CronTask) => void;
 }
@@ -25,28 +30,30 @@ function statusTag(status: string) {
   }
 }
 
-export default function CronLogs({ visible, task, runs, loading, onClose, onRefresh }: CronLogsProps) {
+export default function CronLogs({
+  visible, task, runs, loading, page, pageSize, total, onPageChange, onDateRangeChange, onClose, onRefresh,
+}: CronLogsProps) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [dateRange, setDateRange] = useState<[string, string] | null>(null);
   const [filter, setFilter] = useState<'all' | 'success' | 'failed'>('all');
 
   // 切换任务时重置选中与筛选
   useEffect(() => {
     setSelected(null);
-    setDateRange(null);
     setFilter('all');
   }, [task?.name]);
 
   const filtered = runs.filter(r => {
-    if (dateRange) {
-      const day = r.started_at.slice(0, 10);
-      if (day < dateRange[0] || day > dateRange[1]) return false;
-    }
     if (filter !== 'all' && r.status !== filter) return false;
     return true;
   });
 
   const selectedRun = runs.find(r => r.invocation_id === selected) || null;
+
+  const handleDateRangeChange = (_dates: unknown, dateStrings: [string, string]) => {
+    const since = dateStrings[0] ? `${dateStrings[0]} 00:00:00` : undefined;
+    const until = dateStrings[1] ? `${dateStrings[1]} 23:59:59` : undefined;
+    onDateRangeChange(since, until);
+  };
 
   return (
     <Modal
@@ -58,13 +65,13 @@ export default function CronLogs({ visible, task, runs, loading, onClose, onRefr
       styles={{ body: { padding: 0 } }}
     >
       <div style={{ display: 'flex', height: 600 }}>
-        {/* 左侧：执行列表（宽度自适应筛选行内容） */}
-        <div style={{ width: 'fit-content', minWidth: 300, borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
+        {/* 左侧：执行列表 */}
+        <div style={{ width: 440, borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: 12, borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 8, alignItems: 'center' }}>
             <DatePicker.RangePicker
               placeholder={['开始日期', '结束日期']}
-              onChange={(_d, dStr) => setDateRange(dStr?.[0] && dStr[1] ? [dStr[0], dStr[1]] : null)}
-              style={{ width: 200 }}
+              onChange={handleDateRangeChange}
+              style={{ width: 220 }}
               allowClear
             />
             <Segmented
@@ -82,6 +89,14 @@ export default function CronLogs({ visible, task, runs, loading, onClose, onRefr
             size="small"
             loading={loading}
             dataSource={filtered}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              size: 'small',
+              showSizeChanger: true,
+              onChange: onPageChange,
+            }}
             style={{ flex: 1, overflowY: 'auto', padding: 12 }}
             locale={{ emptyText: <Empty description="暂无执行记录" /> }}
             renderItem={(r: CronRun) => (

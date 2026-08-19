@@ -118,7 +118,7 @@ export default function DatabasePage() {
 
   const fetchInstances = async (dbtype: string) => {
     setVersionsLoading(true);
-    try { const res = await dbServerApi.listInstances(dbtype); setVersions(res.data?.data || []); }
+    try { const res = await dbServerApi.listInstances(dbtype, 1, 1000); setVersions(res.data?.data?.items ?? []); }
     catch (error) { console.error('Failed to fetch instances:', error); message.error('加载实例列表失败'); } finally { setVersionsLoading(false); }
   };
 
@@ -140,22 +140,22 @@ export default function DatabasePage() {
 
   const fetchDatabases = async (instanceId: number) => {
     setDbsLoading(true);
-    try { const res = await dbServerApi.listDatabases(instanceId); setDatabases(res.data?.data || []); }
+    try { const res = await dbServerApi.listDatabases(instanceId, 1, 1000); setDatabases(res.data?.data?.items ?? []); }
     catch (error) { console.error('Failed to fetch databases:', error); message.error('加载数据库列表失败'); } finally { setDbsLoading(false); }
   };
 
   const fetchUsers = async (instanceId: number) => {
     setUsersLoading(true);
-    try { const res = await dbServerApi.listUsers(instanceId); setDBUsers(res.data?.data || []); }
+    try { const res = await dbServerApi.listUsers(instanceId, 1, 1000); setDBUsers(res.data?.data?.items ?? []); }
     catch (error) { console.error('Failed to fetch users:', error); message.error('加载用户列表失败'); } finally { setUsersLoading(false); }
   };
 
   const fetchTables = async (instanceId: number, dbName: string) => {
     setTableLoading(true);
     try {
-      const res = await dbServerApi.listTables(instanceId, dbName);
-      const data = res.data?.data;
-      setTableList(Array.isArray(data) ? data.map((t: any) => t.name) : []);
+      const res = await dbServerApi.listTables(instanceId, dbName, 1, 1000);
+      const items = res.data?.data?.items ?? [];
+      setTableList(items.map(t => t.name));
     } catch (error) {
       console.error('Failed to fetch tables:', error);
       setTableList([]);
@@ -205,8 +205,8 @@ export default function DatabasePage() {
   const fetchBackups = async (instanceId: number, dbName: string) => {
     setBackupsLoading(true);
     try {
-      const res = await dbServerApi.listBackups(instanceId, dbName);
-      setBackups(res.data?.data || []);
+      const res = await dbServerApi.listBackups(instanceId, dbName, 1, 1000);
+      setBackups(res.data?.data?.items ?? []);
     } catch (error) {
       console.error('Failed to fetch backups:', error);
       setBackups([]);

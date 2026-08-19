@@ -5,7 +5,7 @@ Linux 服务器管理面板 · Go + Gin + SQLite + React + TypeScript。
 ## Layout
 
 - `cmd/server/` — 后端入口（`main.go`）。
-- `internal/` — 后端业务包，按领域拆分（`auth` / `container` / `cron` / `database` / `monitor` / `ssh` / `firewall` / `filemanager` ...）。`internal/api` 是路由汇聚层（Gin），handler 在各领域的 `http` 子包；并 embed 前端产物（`internal/api/web/dist`）。
+- `internal/` — 后端核心包：`internal/api` 是路由汇聚层（Gin），embed 前端产物（`internal/api/web/dist`）；`internal/domain/` 是业务领域包，按领域拆分（`auth` / `container` / `cron` / `database` / `monitor` / `ssh` / `firewall` / `filemanager` ...），handler 在各领域的 `http` 子包；`internal/infra/` 是基础设施层；`internal/httpx/` 是 HTTP 通用增强与中间件。
 - `web/` — 前端（React + TS + Vite），源代码在 `web/src`。
 - `migrations/` — SQLite 迁移；`config.toml.example` 是配置模板。
 - `docs/` — 内部工程文档（`agents/` / `adr/`）；`CONTEXT.md` — 项目上下文。

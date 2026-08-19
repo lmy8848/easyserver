@@ -85,9 +85,9 @@ function ProcessTab() {
         sort_by: sortBy,
         order: 'desc',
         search: debouncedSearch,
-        limit: FETCH_PROCESS_LIMIT,
+        page_size: FETCH_PROCESS_LIMIT,
       });
-      setAllProcesses(res.data?.data || []);
+      setAllProcesses(res.data?.data?.items ?? []);
     } catch { /* silent */ }
     if (!isBackground) setLoading(false);
   }, [sortBy, debouncedSearch]);
@@ -159,7 +159,7 @@ function PortTab() {
     if (!isBackground) setLoading(true);
     try {
       const res = await systemApi.getListeningPorts();
-      setPorts(res.data?.data?.ports || []);
+      setPorts(res.data?.data?.items ?? []);
     } catch {
       if (!isBackground) message.error('获取端口信息失败');
     } finally {

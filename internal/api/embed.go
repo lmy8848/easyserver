@@ -3,9 +3,7 @@
 package api
 
 import (
-	"crypto/rand"
 	"embed"
-	"encoding/base64"
 	"io/fs"
 	"log"
 	"net/http"
@@ -14,6 +12,7 @@ import (
 	"sync"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,7 +47,12 @@ func InitCSPNonce() string {
 		}
 
 		// Generate a static nonce (valid for the lifetime of this process)
-		cspNonce = generateNonce()
+		nonce, err := util.RandomBase64(16)
+		if err != nil {
+			log.Printf("embed: failed to generate CSP nonce: %v", err)
+			return
+		}
+		cspNonce = nonce
 
 		// Inject nonce into all <script> tags
 		cachedIndexHTML = scriptTagRegex.ReplaceAllFunc(data, func(match []byte) []byte {
@@ -64,13 +68,6 @@ func InitCSPNonce() string {
 // CSPNonce returns the pre-generated CSP nonce. Must call InitCSPNonce first.
 func CSPNonce() string {
 	return cspNonce
-}
-
-// generateNonce generates a random nonce for CSP
-func generateNonce() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return base64.StdEncoding.EncodeToString(b)
 }
 
 // ServeWeb serves the embedded frontend files

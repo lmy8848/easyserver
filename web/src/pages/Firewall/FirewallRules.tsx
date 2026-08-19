@@ -13,7 +13,15 @@ import { actionColor } from './types';
 
 interface Props {
   rules: FirewallRule[];
+  rulesPage?: number;
+  rulesPageSize?: number;
+  rulesTotal?: number;
+  onRulesPageChange?: (page: number, pageSize: number) => void;
   systemRules: FirewallRule[];
+  sysPage?: number;
+  sysPageSize?: number;
+  sysTotal?: number;
+  onSysPageChange?: (page: number, pageSize: number) => void;
   loading: boolean;
   operating: string;
   selectedRowKeys: Key[];
@@ -38,7 +46,15 @@ interface Props {
 
 export default function FirewallRules({
   rules,
+  rulesPage = 1,
+  rulesPageSize = 20,
+  rulesTotal = 0,
+  onRulesPageChange,
   systemRules,
+  sysPage = 1,
+  sysPageSize = 20,
+  sysTotal = 0,
+  onSysPageChange,
   loading,
   operating,
   selectedRowKeys,
@@ -130,29 +146,31 @@ export default function FirewallRules({
       title: '操作',
       key: 'actions',
       width: 180,
-      render: (_: unknown, record: FirewallRule, index: number) => (
-        <Space>
-          <Tooltip title="上移">
-            <Button
-              type="link"
-              icon={<ArrowUpOutlined />}
-              disabled={index === 0}
-              loading={operating === `move-${record.id}`}
-              onClick={() => onMoveUp(record.id)}
-            />
-          </Tooltip>
-          <Tooltip title="下移">
-            <Button
-              type="link"
-              icon={<ArrowDownOutlined />}
-              disabled={index === rules.length - 1}
-              loading={operating === `move-${record.id}`}
-              onClick={() => onMoveDown(record.id)}
-            />
-          </Tooltip>
-          <Tooltip title="编辑">
-            <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(record)} />
-          </Tooltip>
+      render: (_: unknown, record: FirewallRule, index: number) => {
+        const globalIndex = (rulesPage - 1) * rulesPageSize + index;
+        return (
+          <Space>
+            <Tooltip title="上移">
+              <Button
+                type="link"
+                icon={<ArrowUpOutlined />}
+                disabled={globalIndex === 0}
+                loading={operating === `move-${record.id}`}
+                onClick={() => onMoveUp(record.id)}
+              />
+            </Tooltip>
+            <Tooltip title="下移">
+              <Button
+                type="link"
+                icon={<ArrowDownOutlined />}
+                disabled={globalIndex === rulesTotal - 1}
+                loading={operating === `move-${record.id}`}
+                onClick={() => onMoveDown(record.id)}
+              />
+            </Tooltip>
+            <Tooltip title="编辑">
+              <Button type="link" icon={<EditOutlined />} onClick={() => onEdit(record)} />
+            </Tooltip>
           <Popconfirm
             title="确定删除此规则？"
             description="删除后将从系统中移除"
@@ -166,7 +184,8 @@ export default function FirewallRules({
             </Tooltip>
           </Popconfirm>
         </Space>
-      ),
+        );
+      },
     },
   ];
 
@@ -245,7 +264,14 @@ export default function FirewallRules({
           loading={loading}
           size="small"
           locale={{ emptyText: <Empty description="暂无自定义规则" /> }}
-          pagination={false}
+          pagination={{
+            current: rulesPage,
+            pageSize: rulesPageSize,
+            total: rulesTotal,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条自定义规则`,
+            onChange: onRulesPageChange,
+          }}
           rowSelection={rowSelection}
           rowClassName={(record) => record.enabled ? '' : 'firewall-rule-disabled'}
         />
@@ -271,7 +297,14 @@ export default function FirewallRules({
             dataSource={systemRules}
             rowKey={(r) => `${r.chain}-${r.protocol}-${r.port}-${r.action}-${r.source}`}
             size="small"
-            pagination={false}
+            pagination={{
+              current: sysPage,
+              pageSize: sysPageSize,
+              total: sysTotal,
+              showSizeChanger: true,
+              showTotal: (t) => `共 ${t} 条系统规则`,
+              onChange: onSysPageChange,
+            }}
           />
         </div>
       )}

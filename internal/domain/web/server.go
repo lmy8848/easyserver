@@ -1,0 +1,559 @@
+package web
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
+)
+
+// sanitizePackageName allows only alphanumeric characters, hyphens, dots, and plus signs
+// in package names to prevent shell injection.
+func sanitizePackageName(name string) string {
+	var b strings.Builder
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '+' || c == '_' {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// Service manages web server lifecycle (install, start/stop, config).
+type Service struct {
+	repo ServerRepository
+}
+
+func NewService(repo ServerRepository) *Service {
+	return &Service{repo: repo}
+}
+
+// SeedPredefinedWebServers inserts predefined web server entries if not exists.
+// Called at startup to ensure default entries are present.
+func (s *Service) SeedPredefinedWebServers(ctx context.Context) {
+	existing, _ := s.repo.List(ctx)
+	existingByName := make(map[string]bool, len(existing))
+	for _, ws := range existing {
+		existingByName[ws.Name] = true
+	}
+
+	for _, ws := range PredefinedWebServers() {
+		if !existingByName[ws.Name] {
+			_ = s.repo.Create(ctx, &ws)
+		}
+	}
+}
+
+func (s *Service) List(ctx context.Context) ([]WebServer, error) {
+	return s.repo.List(ctx)
+}
+
+func (s *Service) Get(ctx context.Context, id int64) (*WebServer, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *Service) Create(ctx context.Context, ws *WebServer) error {
+	return s.repo.Create(ctx, ws)
+}
+
+func (s *Service) Delete(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+
+	count, _ := s.repo.CountWebsitesByServerID(ctx, id)
+	if count > 0 {
+		return errx.Conflict("无法删除：%d 个网站正在使用此服务器", count)
+	}
+
+	return s.repo.Delete(ctx, id)
+}
+
+// Install installs the web server software.
+// The install command is always looked up from the predefined template to prevent
+// execution of arbitrary commands stored in the database (e.g. via SQL injection).
+func (s *Service) Install(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+
+	// Always use the predefined install command, never trust the database value
+	predef := FindPredefinedWebServer(ws.Name)
+	if predef == nil {
+		return errx.BadRequest("未知的服务器类型 '%s'", ws.Name)
+	}
+	installCmd := predef.InstallCmd
+	if installCmd == "" {
+		return errx.BadRequest("服务器类型 '%s' 未配置安装命令", ws.Name)
+	}
+
+	_, _ = exec.CommandContext(ctx, "apt-get", "update", "-y").CombinedOutput()
+
+	parts := strings.Fields(installCmd)
+	out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install failed: %s", out)
+	}
+
+	if ws.ServiceName != "" {
+		_, _ = exec.CommandContext(ctx, "systemctl", "enable", ws.ServiceName).CombinedOutput()
+		_, _ = exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
+	}
+
+	_ = s.RefreshStatus(ctx, id)
+	return nil
+}
+
+// Uninstall removes the web server software
+func (s *Service) Uninstall(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+
+	count, _ := s.repo.CountWebsitesByServerID(ctx, id)
+	if count > 0 {
+		return errx.Conflict("无法卸载：%d 个网站正在使用此服务器", count)
+	}
+
+	if ws.ServiceName != "" {
+		_, _ = exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
+		_, _ = exec.CommandContext(ctx, "systemctl", "disable", ws.ServiceName).CombinedOutput()
+	}
+
+	// Always use the predefined uninstall command, never trust the database value
+	predef := FindPredefinedWebServer(ws.Name)
+	var uninstallCmd string
+	if predef != nil && predef.UninstallCmd != "" {
+		uninstallCmd = predef.UninstallCmd
+	} else {
+		// Sanitize ws.Name to prevent shell injection - only allow alphanumeric, hyphens, dots
+		safeName := sanitizePackageName(ws.Name)
+		if safeName == "" {
+			return errx.BadRequest("无效的服务器名称：%s", ws.Name)
+		}
+		uninstallCmd = "apt-get remove -y " + safeName
+	}
+	parts := strings.Fields(uninstallCmd)
+	out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("uninstall failed: %s", out)
+	}
+
+	return s.repo.UpdateStatus(ctx, id, "not_installed")
+}
+
+// Start starts the web server service
+func (s *Service) Start(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ServiceName == "" {
+		return errx.BadRequest("未配置服务名称")
+	}
+
+	out, err := exec.CommandContext(ctx, "systemctl", "start", ws.ServiceName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("start failed: %s", out)
+	}
+
+	return s.repo.UpdateStatus(ctx, id, "running")
+}
+
+// Stop stops the web server service
+func (s *Service) Stop(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ServiceName == "" {
+		return errx.BadRequest("未配置服务名称")
+	}
+
+	out, err := exec.CommandContext(ctx, "systemctl", "stop", ws.ServiceName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("stop failed: %s", out)
+	}
+
+	return s.repo.UpdateStatus(ctx, id, "stopped")
+}
+
+// Restart restarts the web server service
+func (s *Service) Restart(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ServiceName == "" {
+		return errx.BadRequest("未配置服务名称")
+	}
+
+	out, err := exec.CommandContext(ctx, "systemctl", "restart", ws.ServiceName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("restart failed: %s", out)
+	}
+
+	return s.repo.UpdateStatus(ctx, id, "running")
+}
+
+// Reload reloads the web server config without restarting
+func (s *Service) Reload(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+
+	// Test config first
+	if ok, _ := s.TestConfig(ctx, id); !ok {
+		return errx.BadRequest("配置测试失败，已中止重载")
+	}
+
+	if ws.ServiceName != "" {
+		out, err := exec.CommandContext(ctx, "systemctl", "reload", ws.ServiceName).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("reload failed: %s", out)
+		}
+	}
+	return nil
+}
+
+// TestConfig tests the web server configuration
+func (s *Service) TestConfig(ctx context.Context, id int64) (bool, string) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil || ws == nil {
+		return false, "web server not found"
+	}
+
+	switch ws.Name {
+	case "nginx":
+		out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput()
+		msg := strings.TrimSpace(string(out))
+		if err != nil {
+			return false, msg
+		}
+		return true, msg
+	case "apache":
+		out, err := exec.CommandContext(ctx, "apache2ctl", "configtest").CombinedOutput()
+		msg := strings.TrimSpace(string(out))
+		if err != nil {
+			return false, msg
+		}
+		return true, msg
+	case "caddy":
+		out, err := exec.CommandContext(ctx, "caddy", "validate", "--config", ws.ConfigFile).CombinedOutput()
+		msg := strings.TrimSpace(string(out))
+		if err != nil {
+			return false, msg
+		}
+		return true, msg
+	default:
+		return true, "no config test available"
+	}
+}
+
+// validateConfigPath checks that a config file path is safe and within allowed directories.
+// This prevents path traversal or manipulation of ConfigFile stored in the database.
+func validateConfigPath(path string) error {
+	if path == "" {
+		return errx.BadRequest("配置文件路径为空")
+	}
+	if strings.Contains(path, "..") {
+		return errx.BadRequest("配置路径不能包含 '..'")
+	}
+	// Clean the path to resolve any . or extra slashes
+	cleaned := filepath.Clean(path)
+	// Allowlist of config directory prefixes
+	allowedPrefixes := []string{
+		"/etc/nginx/",
+		"/etc/apache2/",
+		"/etc/tomcat9/",
+		"/etc/caddy/",
+		"/etc/httpd/",
+		"/etc/lighttpd/",
+	}
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(cleaned, prefix) || cleaned == strings.TrimSuffix(prefix, "/") {
+			return nil
+		}
+	}
+	return errx.Forbidden("配置路径 %q 不在允许的目录中", path)
+}
+
+// GetConfig reads the main config file content
+func (s *Service) GetConfig(ctx context.Context, id int64) (string, error) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if ws == nil {
+		return "", errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ConfigFile == "" {
+		return "", errx.BadRequest("未配置配置文件路径")
+	}
+	if err := validateConfigPath(ws.ConfigFile); err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(ws.ConfigFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read config: %w", err)
+	}
+	return string(data), nil
+}
+
+// SaveConfig writes content to the main config file
+func (s *Service) SaveConfig(ctx context.Context, id int64, content string) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ConfigFile == "" {
+		return errx.BadRequest("未配置配置文件路径")
+	}
+	if err := validateConfigPath(ws.ConfigFile); err != nil {
+		return err
+	}
+
+	// Backup current config
+	backupPath := ws.ConfigFile + ".bak." + time.Now().Format("20060102150405")
+	if data, err := os.ReadFile(ws.ConfigFile); err == nil {
+		_ = os.WriteFile(backupPath, data, 0644)
+	}
+
+	return os.WriteFile(ws.ConfigFile, []byte(content), 0644)
+}
+
+// GetServiceLogs returns recent service logs via journalctl
+func (s *Service) GetServiceLogs(ctx context.Context, id int64, lines int) (string, error) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if ws == nil {
+		return "", errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ServiceName == "" {
+		return "", errx.BadRequest("未配置服务名称")
+	}
+	if lines <= 0 {
+		lines = 100
+	}
+
+	out, err := exec.CommandContext(ctx, "journalctl", "-u", ws.ServiceName, "-n", strconv.Itoa(lines), "--no-pager").CombinedOutput()
+	if err != nil {
+		return string(out), nil //nolint:nilerr // journalctl 失败时返回已读到的输出
+	}
+	return string(out), nil
+}
+
+// SetAutoStart enables/disables auto-start on boot
+func (s *Service) SetAutoStart(ctx context.Context, id int64, enabled bool) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ServiceName == "" {
+		return errx.BadRequest("未配置服务名称")
+	}
+
+	action := "disable"
+	if enabled {
+		action = "enable"
+	}
+
+	out, err := exec.CommandContext(ctx, "systemctl", action, ws.ServiceName).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("systemctl %s failed: %s", action, out)
+	}
+	return nil
+}
+
+// RefreshStatus detects full runtime state
+func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return errx.NotFound("Web 服务器不存在")
+	}
+
+	installed := false
+	version := ""
+
+	switch ws.Name {
+	case "nginx":
+		if _, err := exec.LookPath("nginx"); err == nil {
+			installed = true
+			out, _ := exec.CommandContext(ctx, "nginx", "-v").CombinedOutput()
+			version = strings.TrimSpace(string(out))
+		}
+	case "apache":
+		if _, err := exec.LookPath("apache2"); err == nil {
+			installed = true
+			out, _ := exec.CommandContext(ctx, "apache2", "-v").CombinedOutput()
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			if len(lines) > 0 {
+				version = strings.TrimSpace(lines[0])
+			}
+		}
+	case "tomcat":
+		if _, err := os.Stat("/etc/tomcat9"); err == nil {
+			installed = true
+			version = "tomcat9"
+		}
+	case "caddy":
+		if _, err := exec.LookPath("caddy"); err == nil {
+			installed = true
+			out, _ := exec.CommandContext(ctx, "caddy", "version").CombinedOutput()
+			version = strings.TrimSpace(string(out))
+		}
+	default:
+		if ws.BinaryPath != "" {
+			if _, err := os.Stat(ws.BinaryPath); err == nil {
+				installed = true
+				version = "installed"
+			}
+		}
+	}
+
+	status := "not_installed"
+	if installed {
+		status = "stopped"
+		if ws.ServiceName != "" {
+			if util.SystemdUnitActive(ctx, ws.ServiceName) {
+				status = "running"
+			}
+		}
+	}
+
+	return s.repo.UpdateStatusAndVersion(ctx, id, status, version)
+}
+
+// RefreshAllStatus refreshes status for all web servers
+func (s *Service) RefreshAllStatus(ctx context.Context) {
+	servers, _ := s.repo.List(ctx)
+	for _, ws := range servers {
+		_ = s.RefreshStatus(ctx, ws.ID)
+	}
+}
+
+// GetConnections returns active connection count (for Nginx)
+func (s *Service) GetConnections(ctx context.Context, id int64) (int, error) {
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if ws == nil {
+		return 0, errx.NotFound("Web 服务器不存在")
+	}
+
+	// Count connections from ss
+	out, _ := exec.CommandContext(ctx, "ss", "-tlnp").CombinedOutput()
+	count := 0
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if ws.ServiceName != "" && strings.Contains(line, ws.ServiceName) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// GetProcessInfo returns PID, memory, uptime for the service
+func (s *Service) GetProcessInfo(ctx context.Context, id int64) (pid int, memBytes int64, uptime string, err error) {
+	ws, e := s.repo.Get(ctx, id)
+	if e != nil {
+		return 0, 0, "", e
+	}
+	if ws == nil {
+		return 0, 0, "", errx.NotFound("Web 服务器不存在")
+	}
+	if ws.ServiceName == "" {
+		return 0, 0, "", nil
+	}
+
+	// Get main PID via systemctl
+	out, e := exec.CommandContext(ctx, "systemctl", "show", ws.ServiceName, "--property=MainPID,ActiveEnterTimestamp").CombinedOutput()
+	if e != nil {
+		return 0, 0, "", nil //nolint:nilerr // systemctl 查询失败时返回零值
+	}
+
+	lines := strings.SplitSeq(strings.TrimSpace(string(out)), "\n")
+	for line := range lines {
+		if after, ok := strings.CutPrefix(line, "MainPID="); ok {
+			pidStr := after
+			pid, _ = strconv.Atoi(pidStr)
+		}
+		if after, ok := strings.CutPrefix(line, "ActiveEnterTimestamp="); ok {
+			ts := after
+			if t, e := time.Parse("Mon 2006-01-02 15:04:05 MST", ts); e == nil {
+				d := time.Since(t)
+				if d < time.Minute {
+					uptime = fmt.Sprintf("%ds", int(d.Seconds()))
+				} else if d < time.Hour {
+					uptime = fmt.Sprintf("%dm", int(d.Minutes()))
+				} else if d < 24*time.Hour {
+					uptime = fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+				} else {
+					uptime = fmt.Sprintf("%dd%dh", int(d.Hours()/24), int(d.Hours())%24)
+				}
+			}
+		}
+	}
+
+	// Get memory from /proc
+	if pid > 0 {
+		statusPath := fmt.Sprintf("/proc/%d/status", pid)
+		if data, e := os.ReadFile(statusPath); e == nil {
+			for line := range strings.SplitSeq(string(data), "\n") {
+				if strings.HasPrefix(line, "VmRSS:") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						kb, _ := strconv.ParseInt(fields[1], 10, 64)
+						memBytes = kb * 1024
+					}
+				}
+			}
+		}
+	}
+
+	return pid, memBytes, uptime, nil
+}
