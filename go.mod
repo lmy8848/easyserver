@@ -16,7 +16,7 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.159
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lighthouse v1.3.108
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/monitor v1.3.158
-	golang.org/x/crypto v0.48.0
+	golang.org/x/crypto v0.55.0
 	modernc.org/sqlite v1.56.0
 )
 
@@ -63,10 +63,10 @@ require (
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
