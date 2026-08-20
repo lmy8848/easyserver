@@ -1,8 +1,7 @@
-import { Drawer, Collapse } from 'antd';
+import { Drawer, Collapse, theme } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MARKDOWN_STYLES } from './types';
 
 interface CronDocsProps {
   visible: boolean;
@@ -113,12 +112,14 @@ exit 2   # 致命错误，不应重试
 ];
 
 export default function CronDocs({ visible, onClose }: CronDocsProps) {
+  const { token } = theme.useToken();
+
   return (
     <Drawer
       title={<span><QuestionCircleOutlined /> 使用手册</span>}
       open={visible}
       onClose={onClose}
-      size={600}
+      size={640}
       zIndex={1100}
     >
       <Collapse
@@ -128,20 +129,107 @@ export default function CronDocs({ visible, onClose }: CronDocsProps) {
           key: doc.key,
           label: <strong>{doc.title}</strong>,
           children: (
-            <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.8, color: token.colorText }}>
               <Markdown
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  table: ({children}) => <table style={MARKDOWN_STYLES.table}>{children}</table>,
-                  th: ({children}) => <th style={MARKDOWN_STYLES.th}>{children}</th>,
-                  td: ({children}) => <td style={MARKDOWN_STYLES.td}>{children}</td>,
-                  code: ({children, className}) => {
+                  table: ({ children }) => (
+                    <table
+                      style={{
+                        borderCollapse: 'collapse',
+                        width: '100%',
+                        marginBottom: 16,
+                        border: `1px solid ${token.colorBorderSecondary}`,
+                      }}
+                    >
+                      {children}
+                    </table>
+                  ),
+                  th: ({ children }) => (
+                    <th
+                      style={{
+                        border: `1px solid ${token.colorBorderSecondary}`,
+                        padding: '8px 12px',
+                        background: token.colorFillAlter,
+                        color: token.colorText,
+                        fontWeight: 600,
+                        textAlign: 'left',
+                      }}
+                    >
+                      {children}
+                    </th>
+                  ),
+                  td: ({ children }) => (
+                    <td
+                      style={{
+                        border: `1px solid ${token.colorBorderSecondary}`,
+                        padding: '8px 12px',
+                        color: token.colorText,
+                      }}
+                    >
+                      {children}
+                    </td>
+                  ),
+                  blockquote: ({ children }) => (
+                    <blockquote
+                      style={{
+                        borderLeft: `4px solid ${token.colorPrimary}`,
+                        margin: '16px 0',
+                        padding: '8px 16px',
+                        background: token.colorFillAlter,
+                        color: token.colorTextSecondary,
+                        borderRadius: token.borderRadiusSM,
+                      }}
+                    >
+                      {children}
+                    </blockquote>
+                  ),
+                  code: ({ children, className }) => {
                     const isInline = !className;
-                    return isInline
-                      ? <code style={MARKDOWN_STYLES.code}>{children}</code>
-                      : <code style={{...MARKDOWN_STYLES.code, display: 'block', padding: 16}}>{children}</code>;
+                    return isInline ? (
+                      <code
+                        style={{
+                          background: token.colorFillSecondary,
+                          color: token.colorText,
+                          padding: '2px 6px',
+                          borderRadius: token.borderRadiusSM,
+                          fontSize: 13,
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                        }}
+                      >
+                        {children}
+                      </code>
+                    ) : (
+                      <code
+                        style={{
+                          display: 'block',
+                          background: token.colorFillAlter,
+                          color: token.colorText,
+                          padding: 16,
+                          borderRadius: token.borderRadiusLG,
+                          fontSize: 13,
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                          overflowX: 'auto',
+                        }}
+                      >
+                        {children}
+                      </code>
+                    );
                   },
-                  pre: ({children}) => <pre style={MARKDOWN_STYLES.pre}>{children}</pre>,
+                  pre: ({ children }) => (
+                    <pre
+                      style={{
+                        background: token.colorFillAlter,
+                        border: `1px solid ${token.colorBorderSecondary}`,
+                        padding: 0,
+                        borderRadius: token.borderRadiusLG,
+                        overflow: 'auto',
+                        marginBottom: 16,
+                      }}
+                    >
+                      {children}
+                    </pre>
+                  ),
                 }}
               >
                 {doc.content}
