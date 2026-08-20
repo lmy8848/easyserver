@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 
 	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
@@ -302,10 +303,12 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 }
 
 // KillSession kills an SSH session by PID.
-func (s *Service) KillSession(ctx context.Context, pid int) error {
-	output, err := exec.CommandContext(ctx, "kill", strconv.Itoa(pid)).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("kill failed: %s: %w", output, err)
+func (s *Service) KillSession(_ context.Context, pid int) error {
+	if pid <= 0 {
+		return errors.New("invalid PID")
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		return fmt.Errorf("kill session %d failed: %w", pid, err)
 	}
 	log.Printf("ssh: killed session %d", pid)
 	return nil
