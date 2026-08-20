@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { LogEntry, LogStreamStatus, UseLogBufferReturn } from './types';
+import type { LogEntry, LogStreamStatus, UseLogBufferReturn, LogStreamMessageHandler } from './types';
 
 export interface UseLogStreamOptions {
   /** SSE path (e.g. '/api/runtime/logs/node@20.11.0') */
@@ -11,7 +11,7 @@ export interface UseLogStreamOptions {
   /** Auto reconnect on transient errors. Defaults to false for task/execution logs. */
   autoReconnect?: boolean;
   /** Custom transform handler. Return true or 'done' if stream reached terminal state. */
-  onMessage?: (data: unknown, helpers: { buffer?: UseLogBufferReturn; close: () => void }) => boolean | void;
+  onMessage?: LogStreamMessageHandler;
   /** Callback fired when stream reaches a completed, failed or stopped terminal state */
   onDone?: (result: { status: 'completed' | 'failed' | 'stopped'; error?: string; exitCode?: number }) => void;
 }
@@ -140,7 +140,7 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
           buffer: bufferRef.current,
           close: () => handleTerminalDone('stopped'),
         });
-        if (isDone) {
+        if (isDone === true || isDone === 'done') {
           handleTerminalDone('completed');
           return;
         }

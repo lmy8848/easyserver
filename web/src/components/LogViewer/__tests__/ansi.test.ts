@@ -34,6 +34,16 @@ describe('ANSI Parser & Utilities', () => {
       const privateCsi = '\x1b[?25lLoading...\x1b[?25h Done\x1b[?7h';
       expect(stripAnsi(privateCsi)).toBe('Loading... Done');
     });
+
+    it('should strip CSI sequences with colon subparameters', () => {
+      const colonCsi = '\x1b[38:2::255:0:0mRed Text\x1b[m';
+      expect(stripAnsi(colonCsi)).toBe('Red Text');
+    });
+
+    it('should strip CSI sequences with intermediate bytes', () => {
+      const intermediateCsi = '\x1b[1 qBlinking block\x1b[0 q Normal';
+      expect(stripAnsi(intermediateCsi)).toBe('Blinking block Normal');
+    });
   });
 
   describe('splitLinesWithCr', () => {
@@ -97,6 +107,15 @@ describe('ANSI Parser & Utilities', () => {
       const spans = parseAnsi('\x1b]0;Title\x07\x1b[?25l\x1b[32mSuccess\x1b[0m\x1b[?25h');
       expect(spans).toEqual([
         { text: 'Success', color: '#52c41a' },
+      ]);
+    });
+
+    it('should handle CSI with colon parameters and intermediate bytes without leaking escape codes', () => {
+      const spans = parseAnsi('\x1b[1 qStart \x1b[38:2::255:0:0mMiddle\x1b[m End\x1b[0 q');
+      expect(spans).toEqual([
+        { text: 'Start ' },
+        { text: 'Middle' },
+        { text: ' End' },
       ]);
     });
   });

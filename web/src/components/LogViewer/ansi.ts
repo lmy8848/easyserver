@@ -71,13 +71,14 @@ function get256Color(n: number): string {
 }
 
 /**
- * Comprehensive ANSI escape sequence regex:
+ * Comprehensive ANSI escape sequence regex matching standard ECMA-48 CSI, OSC, and 2-byte sequences:
  * 1. OSC sequences: \x1b\] ... (\x07|\x1b\\)
- * 2. CSI sequences (including private modes with ?/=/</>): \x1b\[ ... [a-zA-Z]
+ * 2. CSI sequences (full standard: parameter bytes, intermediate bytes, and final byte):
+ *    \x1b\[ ([0-9:;<=>?]*) ([ -/]*) ([@-~])
  * 3. 2-byte escape sequences: \x1b[@-Z\\-_]
  */
 // eslint-disable-next-line no-control-regex
-export const ANSI_REGEX = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[([?>=<]?)([0-9;]*)([a-zA-Z])|[@-Z\\-_])/g;
+export const ANSI_REGEX = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[([0-9:;<=>?]*)([ -/]*)([@-~])|[@-Z\\-_])/g;
 
 /**
  * Strips all ANSI, OSC, and terminal control codes from string for clean copy/download.
@@ -158,13 +159,13 @@ export function parseAnsi(input: string): AnsiSpan[] {
       );
     }
 
-    const prefix = match[1];
-    const paramsStr = match[2] ?? '';
+    const paramsStr = match[1] ?? '';
+    const intermediates = match[2] ?? '';
     const command = match[3];
     lastIndex = ANSI_REGEX.lastIndex;
 
-    // We only process standard SGR (Select Graphic Rendition) 'm' commands without private prefix
-    if (command === 'm' && !prefix) {
+    // We only process standard SGR (Select Graphic Rendition) 'm' commands without private prefix, colons, or intermediate bytes
+    if (command === 'm' && !intermediates && /^[0-9;]*$/.test(paramsStr)) {
       const codes = paramsStr.length === 0 ? [0] : paramsStr.split(';').map(Number);
       let i = 0;
       while (i < codes.length) {

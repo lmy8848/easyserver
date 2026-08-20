@@ -36,6 +36,7 @@ import type {
   LogEntry,
   LogStreamStatus,
   UseLogBufferReturn,
+  LogStreamMessageHandler,
 } from './types';
 import './LogViewer.css';
 
@@ -53,8 +54,8 @@ export interface LogViewerProps {
   streamEnabled?: boolean;
   /** 流完成或终止时的回调 */
   onDone?: (result: { status: 'completed' | 'failed' | 'stopped'; error?: string; exitCode?: number }) => void;
-  /** 自定义 SSE 消息解析适配器（如需拦截特殊协议帧） */
-  onStreamMessage?: (data: unknown, helpers: { buffer?: UseLogBufferReturn; close: () => void }) => boolean | void;
+  /** 自定义 SSE 消息解析适配器（如需拦截特殊协议帧，返回 true 或 'done' 标志流结束） */
+  onStreamMessage?: LogStreamMessageHandler;
 
   // ==================== 方式三（高级）：外部 Buffer 受控 ====================
   /** 外部传入的 useLogBuffer 实例 */

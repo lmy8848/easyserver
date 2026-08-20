@@ -38,3 +38,8 @@ export interface UseLogBufferReturn {
   clear: () => void;
   getPlainText: () => string;
 }
+
+export type LogStreamMessageHandler = (
+  data: unknown,
+  helpers: { buffer?: UseLogBufferReturn; close: () => void }
+) => boolean | 'done' | void;

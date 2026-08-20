@@ -241,4 +241,38 @@ describe('useLogStream Hook', () => {
     expect(result.current.stream.status).toBe('completed');
     expect(result.current.stream.exitCode).toBe(0);
   });
+
+  it('should support returning "done" string from onMessage handler', () => {
+    const onDone = vi.fn();
+    const { result } = renderHook(() => {
+      const buffer = useLogBuffer();
+      const stream = useLogStream({
+        path: '/api/logs/custom',
+        buffer,
+        onDone,
+        onMessage: (data, helpers) => {
+          helpers.buffer?.appendLine(String(data));
+          return 'done';
+        },
+      });
+      return { buffer, stream };
+    });
+
+    const es = MockEventSource.instances[0]!;
+
+    act(() => {
+      es.emitOpen();
+      es.emitMessage('finish signal');
+    });
+
+    expect(result.current.buffer.entries).toHaveLength(1);
+    expect(result.current.stream.status).toBe('completed');
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledWith({
+      status: 'completed',
+      error: undefined,
+      exitCode: undefined,
+    });
+  });
 });
+
