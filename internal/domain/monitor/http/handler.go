@@ -181,7 +181,7 @@ func (h *MonitorHandler) GetListeningPorts(c *gin.Context) (any, error) {
 }
 
 // parseProcNet parses /proc/net/tcp, /proc/net/tcp6, /proc/net/udp, /proc/net/udp6.
-func parseProcNet(path, proto string) []PortInfo {
+func parseProcNet(path, proto string, inodeMap map[string]int) []PortInfo {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -237,8 +237,8 @@ func parseProcNet(path, proto string) []PortInfo {
 		}
 
 		if inode != "" && inode != "0" {
-			pi.PID = findPIDByInode(inode)
-			if pi.PID > 0 {
+			if pid, ok := inodeMap[inode]; ok && pid > 0 {
+				pi.PID = pid
 				pi.ProcessName = getProcessName(pi.PID)
 				pi.User = getProcessUser(pi.PID)
 			}
@@ -276,16 +276,16 @@ func formatHostAddr(hexIP string, port int) string {
 	return fmt.Sprintf("%s:%d", hexIP, port)
 }
 
-// findPIDByInode searches /proc/*/fd/* for socket with given inode.
-func findPIDByInode(targetInode string) int {
+// buildSocketInodePIDMap scans /proc/*/fd/* once to build an inode to PID lookup table.
+func buildSocketInodePIDMap() map[string]int {
+	inodeMap := make(map[string]int)
 	if runtime.GOOS != "linux" {
-		return 0
+		return inodeMap
 	}
 
-	target := fmt.Sprintf("socket:[%s]", targetInode)
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return 0
+		return inodeMap
 	}
 
 	for _, entry := range entries {
@@ -308,23 +308,27 @@ func findPIDByInode(targetInode string) int {
 			if err != nil {
 				continue
 			}
-			if link == target {
-				return pid
+			if strings.HasPrefix(link, "socket:[") && strings.HasSuffix(link, "]") {
+				inode := link[8 : len(link)-1]
+				if inode != "" {
+					inodeMap[inode] = pid
+				}
 			}
 		}
 	}
 
-	return 0
+	return inodeMap
 }
 
 // getListeningPorts returns all listening ports across TCP/UDP by parsing /proc/net.
 func getListeningPorts() []PortInfo {
 	var allPorts []PortInfo
 	if runtime.GOOS == "linux" {
-		allPorts = append(allPorts, parseProcNet("/proc/net/tcp", "tcp")...)
-		allPorts = append(allPorts, parseProcNet("/proc/net/tcp6", "tcp6")...)
-		allPorts = append(allPorts, parseProcNet("/proc/net/udp", "udp")...)
-		allPorts = append(allPorts, parseProcNet("/proc/net/udp6", "udp6")...)
+		inodeMap := buildSocketInodePIDMap()
+		allPorts = append(allPorts, parseProcNet("/proc/net/tcp", "tcp", inodeMap)...)
+		allPorts = append(allPorts, parseProcNet("/proc/net/tcp6", "tcp6", inodeMap)...)
+		allPorts = append(allPorts, parseProcNet("/proc/net/udp", "udp", inodeMap)...)
+		allPorts = append(allPorts, parseProcNet("/proc/net/udp6", "udp6", inodeMap)...)
 	}
 	return allPorts
 }
