@@ -51,7 +51,7 @@ func generateToken() (string, error) {
 }
 
 // parseExpiresAt normalizes an expiry input to an absolute util.TimeLayout
-// string. Accepts relative ("1h", "7d") or absolute ("2026-07-01 12:00:00").
+// string. Accepts relative ("1h", "7d") or absolute ("YYYY-MM-DD HH:MM:SS").
 // Empty input yields "". Malformed input yields an error (guard: the original
 // create flow silently ignored bad relative input).
 func parseExpiresAt(s string) (string, error) {
@@ -82,7 +82,7 @@ func parseExpiresAt(s string) (string, error) {
 		return time.Now().Add(duration).Format(util.TimeLayout), nil
 	}
 	if _, err := time.Parse(util.TimeLayout, s); err != nil {
-		return "", errx.BadRequest("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
+		return "", errx.BadRequest("过期时间格式无效，支持 30m、1h、7d 或 YYYY-MM-DD HH:MM:SS")
 	}
 	return s, nil
 }

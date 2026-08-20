@@ -308,7 +308,7 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 			FROM information_schema.columns
 			WHERE table_name = $1 ORDER BY ordinal_position;`, nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -519,7 +519,7 @@ func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, e
 		}
 		return fmt.Sprintf(`CREATE DATABASE "%s" ENCODING '%s';`, name, encoding), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -534,7 +534,7 @@ func (b *SQLBuilder) BuildDropDatabase(name string) (string, error) {
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`DROP DATABASE "%s";`, name), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -558,7 +558,7 @@ func (b *SQLBuilder) BuildCreateUser(username, password, host string) (string, e
 		return fmt.Sprintf(`CREATE USER "%s" WITH PASSWORD '%s';`,
 			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(password)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -584,7 +584,7 @@ func (b *SQLBuilder) BuildResetPassword(username, newPassword, host string) (str
 		return fmt.Sprintf(`ALTER USER "%s" WITH PASSWORD '%s';`,
 			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(newPassword)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -603,7 +603,7 @@ func (b *SQLBuilder) BuildDropUser(username, host string) (string, error) {
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`DROP USER "%s";`, strings.ReplaceAll(username, `"`, `""`)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -628,7 +628,7 @@ func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) (st
 		return fmt.Sprintf(`GRANT %s ON DATABASE %s TO %s;`,
 			validatedPrivs, b.QuoteIdentifier(database), b.QuoteIdentifier(username)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 

@@ -51,7 +51,7 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	case DBTypeRedis:
 		fileName = fmt.Sprintf("dump_%s.rdb", timestamp)
 	default:
-		return nil, fmt.Errorf("unsupported db type: %s", dbType)
+		return nil, ErrUnsupportedDBType
 	}
 	filePath := filepath.Join(backupDir, fileName)
 	rel, err := filepath.Rel(backupDir, filePath)
@@ -329,7 +329,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 		case DBTypeRedis:
 			rerr = s.restoreRedis(ctx, backup)
 		default:
-			rerr = fmt.Errorf("unsupported db type: %s", dbType)
+			rerr = ErrUnsupportedDBType
 		}
 
 		s.restoreMu.Lock()

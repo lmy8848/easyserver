@@ -1026,13 +1026,16 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	return nil
 }
 
-// DisableSocket disables Podman's API socket unit.
+// DisableSocket disables and stops Podman's API socket unit.
 func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return ErrPodmanOnly
 	}
 	if _, err := infrasystemd.DefaultClient().DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
 		return fmt.Errorf("failed to disable %s socket: %w", engine, err)
+	}
+	if _, err := infrasystemd.DefaultClient().StopUnitContext(ctx, enableSocketUnit, "replace"); err != nil {
+		return fmt.Errorf("failed to stop %s socket: %w", engine, err)
 	}
 	return nil
 }
@@ -1428,7 +1431,7 @@ func isSafeProjectPath(projectDir string) (string, error) {
 func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
 	cleanDir, err := isSafeProjectPath(projectDir)
 	if err != nil {
-		return "", errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+		return "", err
 	}
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
@@ -1455,7 +1458,7 @@ func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (stri
 func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content string) error {
 	cleanDir, err := isSafeProjectPath(projectDir)
 	if err != nil {
-		return errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+		return err
 	}
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {

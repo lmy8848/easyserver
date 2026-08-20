@@ -200,7 +200,7 @@ func (s *Service) queryUsers(ctx context.Context, instance *DBInstance) ([]DBUse
 		// Redis 无用户体系（ACL 未接入），列表接口显式声明不支持，避免空列表误导。
 		return nil, errors.New("暂不支持 Redis 用户管理")
 	default:
-		return nil, fmt.Errorf("unsupported db type: %s", instance.DBType)
+		return nil, ErrUnsupportedDBType
 	}
 }
 
