@@ -7,7 +7,7 @@ import VersionList from './VersionList';
 // import PackageManager from './PackageManager';
 // import PackageRegistryModal from './PackageRegistryModal';
 import MirrorPanel from './MirrorPanel';
-import { LogModal } from '../../components/LogViewer';
+import { LogViewer } from '../../components/LogViewer';
 import type {
   RuntimeEnvironment,
   VersionInfo,
@@ -430,7 +430,7 @@ export default function Runtime() {
       />
 
       {/* Install/Uninstall logs modal */}
-      <LogModal
+      <Modal
         open={logsVisible}
         title={
           <Space>
@@ -452,22 +452,30 @@ export default function Runtime() {
             </Tag>
           </Space>
         }
-        streamUrl={
-          logsVisible && logsData?.name && logsData?.version
-            ? `/api/runtime/logs/${logsData.name}@${logsData.version}`
-            : undefined
-        }
-        downloadFileName={
-          logsData ? `runtime_${logsData.name}_${logsData.version}` : 'runtime_log'
-        }
-        onDone={handleLogDone}
         onCancel={() => {
           setLogsVisible(false);
           setLogsData(null);
         }}
+        footer={null}
         width={800}
-        viewerHeight={420}
-      />
+        destroyOnHidden
+        styles={{ body: { padding: 0 } }}
+      >
+        <LogViewer
+          streamUrl={
+            logsVisible && logsData?.name && logsData?.version
+              ? `/api/runtime/logs/${logsData.name}@${logsData.version}`
+              : undefined
+          }
+          streamEnabled={logsVisible && !!logsData?.name && !!logsData?.version}
+          downloadFileName={
+            logsData ? `runtime_${logsData.name}_${logsData.version}` : 'runtime_log'
+          }
+          onDone={handleLogDone}
+          height={450}
+          style={{ border: 'none', borderRadius: 0 }}
+        />
+      </Modal>
 
       {/* Cleanup confirmation modal */}
       <Modal

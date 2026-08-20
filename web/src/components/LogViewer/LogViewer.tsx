@@ -1,4 +1,12 @@
-import { type ReactNode, type CSSProperties, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import {
+  type ReactNode,
+  type CSSProperties,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from 'react';
 import {
   Button,
   Input,
@@ -6,7 +14,6 @@ import {
   Tag,
   Switch,
   Tooltip,
-  message,
 } from 'antd';
 import {
   SearchOutlined,
@@ -24,6 +31,7 @@ import {
 import { parseAnsi } from './ansi';
 import { useLogBuffer } from './useLogBuffer';
 import { useLogStream } from './useLogStream';
+import { copyToClipboard } from '../../utils/clipboard';
 import type {
   LogEntry,
   LogStreamStatus,
@@ -32,59 +40,74 @@ import type {
 import './LogViewer.css';
 
 export interface LogViewerProps {
-  /** Custom buffer, or default buffer will be created internally */
-  buffer?: UseLogBufferReturn;
-  /** Raw entries array (if controlled externally) */
-  entries?: LogEntry[];
-  /** Raw string (convenience for static logs) */
+  // ==================== 接入方式一：直接传入数据模式 ====================
+  /** 直接传入纯文本或 ANSI 字符串（自动按换行切分） */
+  logs?: string;
+  /** 兼容别名：直接传入文本 */
   rawLogs?: string;
-  /** SSE Stream URL to connect and consume logs automatically */
+  /** 直接传入字符串行数组 */
+  lines?: string[];
+  /** 直接传入结构化日志对象数组 */
+  entries?: LogEntry[];
+
+  // ==================== 接入方式二：SSE 实时流式模式 ====================
+  /** SSE 服务端流式接口相对路径（例如 '/api/runtime/logs/node@20.11.0'） */
   streamUrl?: string;
-  /** Whether SSE stream is active */
+  /** 是否开启 SSE 连接（默认在 streamUrl 存在时为 true） */
   streamEnabled?: boolean;
-  /** Stream lifecycle status override */
-  status?: LogStreamStatus;
-  /** Error message to display */
-  error?: string | null;
-  /** Exit code if execution completed */
-  exitCode?: number | null;
-  /** Elapsed execution time in ms */
-  elapsedMs?: number;
-  /** Title displayed on header */
-  title?: ReactNode;
-  /** Header left extra controls */
-  headerExtra?: ReactNode;
-  /** Header right extra actions */
-  extraActions?: ReactNode;
-  /** Max height of the log viewport */
-  height?: number | string;
-  maxHeight?: number | string;
-  /** Show line numbers (default true) */
-  showLineNumbers?: boolean;
-  /** Show timestamps if present (default true) */
-  showTimestamps?: boolean;
-  /** Show search bar in toolbar (default true) */
-  showSearch?: boolean;
-  /** Show copy button (default true) */
-  showCopy?: boolean;
-  /** Show download button (default true) */
-  showDownload?: boolean;
-  /** Show clear button (default false) */
-  showClear?: boolean;
-  /** Show wrap toggle (default true) */
-  showWrapToggle?: boolean;
-  /** Show auto-scroll follow toggle (default true) */
-  showFollowToggle?: boolean;
-  /** Allow fullscreen toggle (default true) */
-  allowFullscreen?: boolean;
-  /** Filename prefix for download */
-  downloadFileName?: string;
-  /** Custom empty text */
-  emptyText?: ReactNode;
-  /** Callback when stream finishes */
+  /** 流完成或终止时的回调 */
   onDone?: (result: { status: 'completed' | 'failed' | 'stopped'; error?: string; exitCode?: number }) => void;
-  /** Custom onMessage adapter for streamUrl */
+  /** 自定义 SSE 消息解析适配器（如需拦截特殊协议帧） */
   onStreamMessage?: (data: unknown, helpers: { buffer?: UseLogBufferReturn; close: () => void }) => boolean | void;
+
+  // ==================== 方式三（高级）：外部 Buffer 受控 ====================
+  /** 外部传入的 useLogBuffer 实例 */
+  buffer?: UseLogBufferReturn;
+
+  // ==================== 状态与元信息展示 ====================
+  /** 运行状态（直接数据模式下可显式指定，如 'completed'、'failed'） */
+  status?: LogStreamStatus;
+  /** 错误信息提示文案 */
+  error?: string | null;
+  /** 任务退出码 */
+  exitCode?: number | null;
+  /** 耗时（毫秒） */
+  elapsedMs?: number;
+  /** 工具栏左侧标题 */
+  title?: ReactNode;
+  /** 工具栏左侧额外自定义区域 */
+  headerExtra?: ReactNode;
+  /** 工具栏右侧额外操作按钮区域 */
+  extraActions?: ReactNode;
+
+  // ==================== 视图与交互控制 ====================
+  /** 视口高度（如 400, '100%', 'calc(100vh - 200px)'） */
+  height?: number | string;
+  /** 视口最大高度 */
+  maxHeight?: number | string;
+  /** 是否显示行号（默认 true） */
+  showLineNumbers?: boolean;
+  /** 是否显示单行时间戳（默认 true） */
+  showTimestamps?: boolean;
+  /** 是否显示搜索框（默认 true） */
+  showSearch?: boolean;
+  /** 是否显示复制按钮（默认 true） */
+  showCopy?: boolean;
+  /** 是否显示下载按钮（默认 true） */
+  showDownload?: boolean;
+  /** 是否显示清空按钮（默认 false） */
+  showClear?: boolean;
+  /** 是否显示自动换行切换按钮（默认 true） */
+  showWrapToggle?: boolean;
+  /** 是否显示自动滚动吸底开关（默认 true） */
+  showFollowToggle?: boolean;
+  /** 是否允许全屏切换（默认 true） */
+  allowFullscreen?: boolean;
+  /** 导出日志的文件名前缀 */
+  downloadFileName?: string;
+  /** 自定义空状态文案 */
+  emptyText?: ReactNode;
+
   className?: string;
   style?: CSSProperties;
 }
@@ -137,11 +160,15 @@ function renderAnsiSpans(rawText: string, keyword: string) {
 }
 
 export function LogViewer({
-  buffer: externalBuffer,
-  entries: externalEntries,
+  logs,
   rawLogs,
+  lines,
+  entries: externalEntries,
   streamUrl,
   streamEnabled = true,
+  onDone,
+  onStreamMessage,
+  buffer: externalBuffer,
   status: externalStatus,
   error: externalError,
   exitCode: externalExitCode,
@@ -162,15 +189,18 @@ export function LogViewer({
   allowFullscreen = true,
   downloadFileName = 'easyserver_log',
   emptyText,
-  onDone,
-  onStreamMessage,
   className = '',
   style = {},
 }: LogViewerProps) {
   const internalBuffer = useLogBuffer();
   const buffer = externalBuffer || internalBuffer;
 
-  // Stream integration
+  const bufferRef = useRef(buffer);
+  useEffect(() => {
+    bufferRef.current = buffer;
+  });
+
+  // SSE Stream integration
   const stream = useLogStream({
     path: streamUrl || '',
     enabled: Boolean(streamUrl && streamEnabled),
@@ -179,15 +209,19 @@ export function LogViewer({
     onMessage: onStreamMessage,
   });
 
-  // Handle external static entries or rawLogs
+  // Direct data integration (logs / rawLogs / lines / entries)
+  const directText = logs !== undefined ? logs : rawLogs;
   useEffect(() => {
     if (externalEntries) {
-      buffer.setEntries(externalEntries);
-    } else if (rawLogs) {
-      buffer.clear();
-      buffer.appendLine(rawLogs);
+      bufferRef.current.setEntries(externalEntries);
+    } else if (lines) {
+      bufferRef.current.clear();
+      bufferRef.current.appendLines(lines);
+    } else if (directText !== undefined) {
+      bufferRef.current.clear();
+      bufferRef.current.appendLine(directText);
     }
-  }, [externalEntries, rawLogs, buffer]);
+  }, [externalEntries, lines, directText]);
 
   const [follow, setFollow] = useState<boolean>(true);
   const [wrap, setWrap] = useState<boolean>(true);
@@ -228,24 +262,15 @@ export function LogViewer({
     }
   }, [buffer.filteredEntries.length, follow, isScrolledUp]);
 
-  const handleCopy = useCallback(async () => {
+  const handleCopy = useCallback(() => {
     const text = buffer.getPlainText();
-    if (!text) {
-      message.warning('日志为空');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      message.success('日志已复制到剪贴板');
-    } catch {
-      message.error('复制失败');
-    }
+    copyToClipboard(text, '日志已复制到剪贴板');
   }, [buffer]);
 
   const handleDownload = useCallback(() => {
     const text = buffer.getPlainText();
     if (!text) {
-      message.warning('日志为空');
+      copyToClipboard('', '日志为空');
       return;
     }
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });

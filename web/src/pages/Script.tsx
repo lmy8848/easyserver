@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, Modal, Form, Input,
   message, Popconfirm, Table, Empty, Tooltip, Collapse,
-  Select, Tag,
+  Select, Tag, Drawer,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
@@ -12,7 +12,7 @@ import {
 import type { Script, ScriptLogLine } from '../types';
 import { cronApi } from '../services/cron';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
-import { LogDrawer, useLogBuffer } from '../components/LogViewer';
+import { LogViewer, useLogBuffer } from '../components/LogViewer';
 
 // 历史日志可选条数
 const HISTORY_LIMITS = [50, 200, 500];
@@ -400,7 +400,7 @@ export default function ScriptPage() {
       </Modal>
 
       {/* 日志 Drawer：实时 + 历史 合一（按运行状态决定是否连 SSE） */}
-      <LogDrawer
+      <Drawer
         open={drawerVisible}
         title={
           <Space>
@@ -410,19 +410,22 @@ export default function ScriptPage() {
         }
         onClose={handleDrawerClose}
         width={800}
-        buffer={logBuffer}
-        streamUrl={
-          drawerVisible && drawerScript && stream
-            ? cronApi.scriptLogsStreamPath(drawerScript.id)
-            : undefined
-        }
-        streamEnabled={drawerVisible && !!drawerScript && stream}
-        downloadFileName={drawerScript ? `script_${drawerScript.name}` : 'script_log'}
-        onDone={() => {
-          setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
-        }}
-        viewerProps={{
-          headerExtra: (
+        destroyOnHidden
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+      >
+        <LogViewer
+          buffer={logBuffer}
+          streamUrl={
+            drawerVisible && drawerScript && stream
+              ? cronApi.scriptLogsStreamPath(drawerScript.id)
+              : undefined
+          }
+          streamEnabled={drawerVisible && !!drawerScript && stream}
+          downloadFileName={drawerScript ? `script_${drawerScript.name}` : 'script_log'}
+          onDone={() => {
+            setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
+          }}
+          headerExtra={
             <Space style={{ marginLeft: 8 }}>
               <Select
                 size="small"
@@ -440,9 +443,10 @@ export default function ScriptPage() {
                 </Button>
               )}
             </Space>
-          ),
-        }}
-      />
+          }
+          style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
+        />
+      </Drawer>
     </div>
   );
 }
