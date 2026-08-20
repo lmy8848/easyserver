@@ -365,6 +365,10 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return errx.NotFound("database instance not found")
 	}
+	within, err := isPathWithinBase(backup.FilePath, instance.VolumeName)
+	if err != nil || !within {
+		return errx.BadRequest("备份文件不在实例数据卷目录下")
+	}
 	rel, err := filepath.Rel(instance.VolumeName, backup.FilePath)
 	if err != nil {
 		return fmt.Errorf("rel backup path: %w", err)
@@ -387,6 +391,10 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 	instance, err := s.repo.GetInstance(ctx, backup.DBInstanceID)
 	if err != nil || instance == nil {
 		return errx.NotFound("database instance not found")
+	}
+	within, err := isPathWithinBase(backup.FilePath, instance.VolumeName)
+	if err != nil || !within {
+		return errx.BadRequest("备份文件不在实例数据卷目录下")
 	}
 	rel, err := filepath.Rel(instance.VolumeName, backup.FilePath)
 	if err != nil {
@@ -412,30 +420,55 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	}
 	// 宿主机挂载目录下 dump.rdb 直见，覆盖前先留底原 dump.rdb，恢复失败能回滚。
 	rdbHostPath := filepath.Join(instance.VolumeName, "dump.rdb")
-	rollback := backup.FilePath + ".pre-restore"
+	rollback := rdbHostPath + ".pre-restore"
+	hasOriginal := false
 	if original, err := os.ReadFile(rdbHostPath); err == nil {
-		if err := os.WriteFile(rollback, original, 0644); err != nil {
-			log.Printf("backup existing dump.rdb for rollback failed (continuing): %v", err)
+		if err := os.WriteFile(rollback, original, 0644); err == nil {
+			hasOriginal = true
+		} else {
+			log.Printf("backup existing dump.rdb for rollback failed: %v", err)
 		}
 	}
+
+	data, err := os.ReadFile(backup.FilePath)
+	if err != nil {
+		return fmt.Errorf("read Redis backup: %w", err)
+	}
+
 	if err := s.runtime.Stop(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("stop Redis failed: %w", err)
 	}
-	data, err := os.ReadFile(backup.FilePath)
-	if err != nil {
+
+	restoreFailed := true
+	defer func() {
+		if restoreFailed && hasOriginal {
+			if origData, err := os.ReadFile(rollback); err == nil {
+				_ = os.WriteFile(rdbHostPath, origData, 0644)
+			}
+		}
+		_ = os.Remove(rollback)
+	}()
+
+	// Atomic write: write to temp file in the same directory, then rename
+	tmpFile := fmt.Sprintf("%s.tmp.%d", rdbHostPath, time.Now().UnixNano())
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
 		_ = s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName)
-		return fmt.Errorf("read Redis backup: %w", err)
-	}
-	if err := os.WriteFile(rdbHostPath, data, 0644); err != nil {
-		_ = s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName)
-		return fmt.Errorf("write Redis backup: %w", err)
+		return fmt.Errorf("write temp Redis backup: %w", err)
 	}
 	if os.Geteuid() == 0 {
-		_ = os.Chown(rdbHostPath, containerUID, containerUID)
+		_ = os.Chown(tmpFile, containerUID, containerUID)
 	}
+	if err := os.Rename(tmpFile, rdbHostPath); err != nil {
+		_ = os.Remove(tmpFile)
+		_ = s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName)
+		return fmt.Errorf("atomic rename Redis backup: %w", err)
+	}
+
 	if err := s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("start Redis failed: %w", err)
 	}
+
+	restoreFailed = false
 	return nil
 }
 
