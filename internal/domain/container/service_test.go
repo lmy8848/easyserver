@@ -144,6 +144,29 @@ func TestService_ContainerOperations_Mock(t *testing.T) {
 	if err != nil || stats.PIDs != 10 || stats.MemUsage != 104857600 {
 		t.Errorf("GetContainerStats error: %v, stats: %+v", err, stats)
 	}
+
+	// Test RenameContainer
+	mock.ContainerRenameFn = func(ctx context.Context, engine infracontainer.Engine, containerID, newName string) error {
+		if newName != "new-name" {
+			return errors.New("unexpected rename name")
+		}
+		return nil
+	}
+	if err := svc.RenameContainer(context.Background(), EngineDocker, "c1", "new-name"); err != nil {
+		t.Errorf("RenameContainer error: %v", err)
+	}
+	if err := svc.RenameContainer(context.Background(), EngineDocker, "c1", "invalid!name"); err == nil {
+		t.Errorf("expected error for invalid container name, got nil")
+	}
+
+	// Test GetInfo
+	mock.InfoFn = func(ctx context.Context, engine infracontainer.Engine) (map[string]any, error) {
+		return map[string]any{"ServerVersion": "27.5.1", "Containers": float64(5)}, nil
+	}
+	info, err := svc.GetInfo(context.Background(), EngineDocker)
+	if err != nil || info["ServerVersion"] != "27.5.1" {
+		t.Errorf("GetInfo error: %v, info: %+v", err, info)
+	}
 }
 
 func TestMapSummaryToImages(t *testing.T) {

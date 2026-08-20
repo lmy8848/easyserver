@@ -329,52 +329,6 @@ func (h *ContainerHandler) GetContainerStats(c *gin.Context) (any, error) {
 	return stats, nil
 }
 
-// GetContainerTop returns processes running in a container
-func (h *ContainerHandler) GetContainerTop(c *gin.Context) (any, error) {
-	id := c.Param("id")
-	processes, err := h.containerService.GetContainerTop(c.Request.Context(), h.engineName(c), id)
-	if err != nil {
-		return nil, err
-	}
-	return gin.H{"processes": processes}, nil
-}
-
-// CopyToContainer copies a file to a container
-func (h *ContainerHandler) CopyToContainer(c *gin.Context) (any, error) {
-	id := c.Param("id")
-	var req struct {
-		SrcPath  string `json:"src_path" binding:"required"`
-		DestPath string `json:"dest_path" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
-	}
-
-	middleware.AuditSummary(c, "复制文件到容器 "+id+": "+req.SrcPath+" -> "+req.DestPath)
-	if err := h.containerService.CopyToContainer(c.Request.Context(), h.engineName(c), id, req.SrcPath, req.DestPath); err != nil {
-		return nil, err
-	}
-	return gin.H{"message": "文件已复制到容器"}, nil
-}
-
-// CopyFromContainer copies a file from a container
-func (h *ContainerHandler) CopyFromContainer(c *gin.Context) (any, error) {
-	id := c.Param("id")
-	var req struct {
-		SrcPath  string `json:"src_path" binding:"required"`
-		DestPath string `json:"dest_path" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
-	}
-
-	middleware.AuditSummary(c, "从容器复制文件 "+id+": "+req.SrcPath+" -> "+req.DestPath)
-	if err := h.containerService.CopyFromContainer(c.Request.Context(), h.engineName(c), id, req.SrcPath, req.DestPath); err != nil {
-		return nil, err
-	}
-	return gin.H{"message": "文件已从容器复制"}, nil
-}
-
 // RenameContainer renames a container
 func (h *ContainerHandler) RenameContainer(c *gin.Context) (any, error) {
 	id := c.Param("id")
@@ -656,9 +610,6 @@ func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Serv
 	protected.GET("/container/instances/:id/logs", httpx.H(handler.GetContainerLogs))
 	protected.POST("/container/instances/:id/exec", httpx.H(handler.ExecInContainer))
 	protected.GET("/container/instances/:id/stats", httpx.H(handler.GetContainerStats))
-	protected.GET("/container/instances/:id/top", httpx.H(handler.GetContainerTop))
-	protected.POST("/container/instances/:id/copy-to", httpx.H(handler.CopyToContainer))
-	protected.POST("/container/instances/:id/copy-from", httpx.H(handler.CopyFromContainer))
 	protected.POST("/container/instances/:id/rename", httpx.H(handler.RenameContainer))
 	protected.PUT("/container/instances/:id/update", httpx.H(handler.UpdateContainer))
 

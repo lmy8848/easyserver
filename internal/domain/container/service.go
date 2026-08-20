@@ -672,67 +672,6 @@ func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id strin
 	return stats, nil
 }
 
-// GetContainerTop returns the list of processes running inside a container.
-func (s *Service) GetContainerTop(ctx context.Context, engine Engine, id string) ([]ProcessInfo, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm").CombinedOutput()
-	if err != nil {
-		return nil, errx.Internal("%s top failed: %s", engine, output)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) < 2 {
-		return []ProcessInfo{}, nil
-	}
-
-	var processes []ProcessInfo
-	for _, line := range lines[1:] {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 12 {
-			continue
-		}
-		processes = append(processes, ProcessInfo{
-			User:    fields[0],
-			PID:     fields[1],
-			PPID:    fields[2],
-			CPU:     fields[3],
-			MEM:     fields[4],
-			VSZ:     fields[5],
-			RSS:     fields[6],
-			TTY:     fields[7],
-			Stat:    fields[8],
-			Start:   fields[9],
-			Time:    fields[10],
-			Command: strings.Join(fields[11:], " "),
-		})
-	}
-
-	return processes, nil
-}
-
-// CopyToContainer copies a file from host to container.
-func (s *Service) CopyToContainer(ctx context.Context, engine Engine, id, srcPath, destPath string) error {
-	if err := s.rejectManaged(ctx, engine, id); err != nil {
-		return err
-	}
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath).CombinedOutput()
-	if err != nil {
-		return errx.Internal("%s cp to container failed: %w", engine, err)
-	}
-	return nil
-}
-
-// CopyFromContainer copies a file from container to host.
-func (s *Service) CopyFromContainer(ctx context.Context, engine Engine, id, srcPath, destPath string) error {
-	if err := s.rejectManaged(ctx, engine, id); err != nil {
-		return err
-	}
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath).CombinedOutput()
-	if err != nil {
-		return errx.Internal("%s cp from container failed: %w", engine, err)
-	}
-	return nil
-}
-
 // RenameContainer renames a container.
 func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newName string) error {
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
@@ -756,8 +695,10 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 		return fmt.Errorf("container name cannot start with '%c'", newName[0])
 	}
 
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "rename", id, newName).CombinedOutput()
-	if err != nil {
+	if err := s.checkEngine(ctx, engine); err != nil {
+		return err
+	}
+	if err := infracontainer.DefaultClient().ContainerRename(ctx, infracontainer.Engine(engine), id, newName); err != nil {
 		return errx.Internal("%s rename failed: %w", engine, err)
 	}
 	return nil
@@ -1097,14 +1038,13 @@ func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
 
 // GetInfo returns the engine's system info as a map.
 func (s *Service) GetInfo(ctx context.Context, engine Engine) (map[string]any, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "info", "--format", "{{json .}}").CombinedOutput()
-	if err != nil {
-		return nil, errx.Internal("%s info failed: %s", engine, output)
+	if err := s.checkEngine(ctx, engine); err != nil {
+		return nil, err
 	}
 
-	var info map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &info); err != nil {
-		return nil, fmt.Errorf("parse %s info: %w", engine, err)
+	info, err := infracontainer.DefaultClient().Info(ctx, infracontainer.Engine(engine))
+	if err != nil {
+		return nil, errx.Internal("%s info failed: %w", engine, err)
 	}
 
 	return info, nil

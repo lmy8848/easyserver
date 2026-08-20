@@ -32,9 +32,13 @@ type EngineClient interface {
 	// Version returns version details of the engine.
 	Version(ctx context.Context, engine Engine) (VersionResponse, error)
 
+	// Info returns system-wide information.
+	Info(ctx context.Context, engine Engine) (map[string]any, error)
+
 	// Container operations
 	ContainerList(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error)
 	ContainerInspect(ctx context.Context, engine Engine, containerID string) (ContainerInspect, error)
+	ContainerRename(ctx context.Context, engine Engine, containerID string, newName string) error
 	ContainerStart(ctx context.Context, engine Engine, containerID string) error
 	ContainerStop(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
 	ContainerRestart(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
@@ -236,6 +240,14 @@ func (c *realClient) Version(ctx context.Context, engine Engine) (VersionRespons
 	return parseJSON[VersionResponse](resp)
 }
 
+func (c *realClient) Info(ctx context.Context, engine Engine) (map[string]any, error) {
+	resp, err := c.do(ctx, engine, http.MethodGet, "/info", nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return parseJSON[map[string]any](resp)
+}
+
 // Container methods
 
 func (c *realClient) ContainerList(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error) {
@@ -256,6 +268,15 @@ func (c *realClient) ContainerInspect(ctx context.Context, engine Engine, contai
 		return ContainerInspect{}, err
 	}
 	return parseJSON[ContainerInspect](resp)
+}
+
+func (c *realClient) ContainerRename(ctx context.Context, engine Engine, containerID string, newName string) error {
+	q := url.Values{"name": []string{newName}}
+	resp, err := c.do(ctx, engine, http.MethodPost, "/containers/"+url.PathEscape(containerID)+"/rename", q, nil, nil)
+	if err != nil {
+		return err
+	}
+	return checkStatus(resp, http.StatusNoContent, http.StatusOK)
 }
 
 func (c *realClient) ContainerStart(ctx context.Context, engine Engine, containerID string) error {

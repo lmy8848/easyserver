@@ -12,8 +12,10 @@ var _ EngineClient = (*MockEngineClient)(nil)
 type MockEngineClient struct {
 	PingFn                 func(ctx context.Context, engine Engine) (PingResponse, error)
 	VersionFn              func(ctx context.Context, engine Engine) (VersionResponse, error)
+	InfoFn                 func(ctx context.Context, engine Engine) (map[string]any, error)
 	ContainerListFn        func(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error)
 	ContainerInspectFn     func(ctx context.Context, engine Engine, containerID string) (ContainerInspect, error)
+	ContainerRenameFn      func(ctx context.Context, engine Engine, containerID string, newName string) error
 	ContainerStartFn       func(ctx context.Context, engine Engine, containerID string) error
 	ContainerStopFn        func(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
 	ContainerRestartFn     func(ctx context.Context, engine Engine, containerID string, timeoutSec int) error
@@ -58,6 +60,13 @@ func (m *MockEngineClient) Version(ctx context.Context, engine Engine) (VersionR
 	return VersionResponse{Version: "27.5.1", APIVersion: "1.45"}, nil
 }
 
+func (m *MockEngineClient) Info(ctx context.Context, engine Engine) (map[string]any, error) {
+	if m.InfoFn != nil {
+		return m.InfoFn(ctx, engine)
+	}
+	return map[string]any{"ServerVersion": "27.5.1"}, nil
+}
+
 func (m *MockEngineClient) ContainerList(ctx context.Context, engine Engine, all bool) ([]ContainerSummary, error) {
 	if m.ContainerListFn != nil {
 		return m.ContainerListFn(ctx, engine, all)
@@ -72,6 +81,13 @@ func (m *MockEngineClient) ContainerInspect(ctx context.Context, engine Engine, 
 	var out ContainerInspect
 	out.ID = containerID
 	return out, nil
+}
+
+func (m *MockEngineClient) ContainerRename(ctx context.Context, engine Engine, containerID string, newName string) error {
+	if m.ContainerRenameFn != nil {
+		return m.ContainerRenameFn(ctx, engine, containerID, newName)
+	}
+	return nil
 }
 
 func (m *MockEngineClient) ContainerStart(ctx context.Context, engine Engine, containerID string) error {
