@@ -682,15 +682,19 @@ func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, 
 }
 
 // postgresMajor extracts the PostgreSQL major version from an image reference
-// (e.g. "docker.io/postgres:18-alpine" → 18). Returns 0 when the tag carries no
-// leading version number.
+// (e.g. "docker.io/postgres:18-alpine" → 18, "postgres:18@sha256:..." → 18).
+// Returns 0 when the tag carries no leading version number.
 func postgresMajor(image string) int {
-	i := strings.LastIndex(image, ":")
-	if i < 0 {
+	if at := strings.Index(image, "@"); at >= 0 {
+		image = image[:at]
+	}
+	slash := strings.LastIndex(image, "/")
+	colon := strings.LastIndex(image, ":")
+	if colon < 0 || colon < slash {
 		return 0
 	}
 	var major int
-	if n, err := fmt.Sscanf(image[i+1:], "%d", &major); err != nil || n != 1 {
+	if n, err := fmt.Sscanf(image[colon+1:], "%d", &major); err != nil || n != 1 {
 		return 0
 	}
 	return major

@@ -414,8 +414,11 @@ func TestPostgres18MovesDataDir(t *testing.T) {
 	}{
 		{"docker.io/postgres:18", "/var/lib/postgresql"},
 		{"docker.io/postgres:18-alpine", "/var/lib/postgresql"},
+		{"postgres:18@sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069", "/var/lib/postgresql"},
+		{"myregistry:5000/postgres:18-alpine@sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069", "/var/lib/postgresql"},
 		{"docker.io/postgres:17", "/var/lib/postgresql/data"},
 		{"docker.io/postgres:16", "/var/lib/postgresql/data"},
+		{"myregistry:5000/postgres", "/var/lib/postgresql/data"},
 	}
 	for _, c := range cases {
 		if got := pgDataDir(c.image); got != c.dataDir {
