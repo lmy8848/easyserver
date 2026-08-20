@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
   message, Popconfirm, Tooltip, Row, Col,
-  Table, Tabs, Empty,
+  Table, Tabs, Empty, theme,
 } from 'antd';
 import {
   GlobalOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
@@ -77,11 +77,17 @@ export default function WebsiteList({
   const [form] = Form.useForm();
 
   // Log modal
+  const { token } = theme.useToken();
   const [logVisible, setLogVisible] = useState(false);
   const [logSite, setLogSite] = useState<Website | null>(null);
   const [logContent, setLogContent] = useState('');
   const [logType, setLogType] = useState('access');
   const [logLoading, setLogLoading] = useState(false);
+
+  const logLines = useMemo(
+    () => (logLoading ? [] : logContent ? logContent.split('\n') : []),
+    [logLoading, logContent]
+  );
 
   // SSL modal
   const [sslVisible, setSslVisible] = useState(false);
@@ -669,7 +675,7 @@ export default function WebsiteList({
         destroyOnHidden
         styles={{ body: { padding: 0 } }}
       >
-        <div style={{ padding: '0 16px', borderBottom: '1px solid #303030' }}>
+        <div style={{ padding: '0 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
           <Tabs
             activeKey={logType}
             onChange={(key) => { setLogType(key); if (logSite) showLogs(logSite, key); }}
@@ -682,7 +688,7 @@ export default function WebsiteList({
           />
         </div>
         <LogViewer
-          lines={logLoading ? [] : (logContent ? logContent.split('\n') : [])}
+          lines={logLines}
           downloadFileName={`${logSite?.domain}_${logType}_log`}
           emptyText={logLoading ? '加载日志中…' : '暂无日志'}
           height={480}

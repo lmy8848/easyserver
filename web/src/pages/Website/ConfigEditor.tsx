@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useState, useEffect, useMemo } from 'react';
 import {
-  Button, Space, Tag, Modal, Input, message, Spin, Row, Col,
+  Button, Space, Tag, Modal, Input, message, Spin, Row, Col, theme,
 } from 'antd';
 import {
   FileTextOutlined, ReloadOutlined,
@@ -25,6 +25,8 @@ interface ConfigEditorProps {
 
 const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
   ({ selectedServer, configTestResult, onTestConfig, onConfigTestResultChange }, ref) => {
+    const { token } = theme.useToken();
+
     // Config modal state
     const [configVisible, setConfigVisible] = useState(false);
     const [configContent, setConfigContent] = useState('');
@@ -155,8 +157,8 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
                 fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
                 fontSize: 13,
                 lineHeight: 1.6,
-                background: '#1e1e1e',
-                color: '#d4d4d4',
+                background: token.colorBgContainer,
+                color: token.colorText,
               }}
             />
           )}
