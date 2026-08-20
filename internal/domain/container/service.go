@@ -443,7 +443,10 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 	}
 
 	inspectResp, err := infracontainer.DefaultClient().ContainerExecInspect(ctx, infracontainer.Engine(engine), createResp.ID)
-	if err == nil && inspectResp.ExitCode != 0 {
+	if err != nil {
+		return output, errx.Internal("%s exec inspect failed: %w", engine, err)
+	}
+	if inspectResp.ExitCode != 0 {
 		return output, errx.Internal("%s exec failed: exit code %d: %s", engine, inspectResp.ExitCode, output)
 	}
 	return output, nil

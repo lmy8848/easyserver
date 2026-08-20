@@ -121,6 +121,25 @@ func TestService_ContainerOperations_Mock(t *testing.T) {
 		t.Errorf("ExecInContainer error: %v, output: %s", err, execOut)
 	}
 
+	// Test exec command failure (non-zero exit code)
+	mock.ContainerExecInspectFn = func(ctx context.Context, engine infracontainer.Engine, execID string) (infracontainer.ExecInspectResponse, error) {
+		return infracontainer.ExecInspectResponse{ExitCode: 127}, nil
+	}
+	if _, err := svc.ExecInContainer(context.Background(), EngineDocker, "c1", "unknown_cmd"); err == nil {
+		t.Errorf("expected error on non-zero exit code, got nil")
+	}
+
+	// Test exec inspect error
+	mock.ContainerExecInspectFn = func(ctx context.Context, engine infracontainer.Engine, execID string) (infracontainer.ExecInspectResponse, error) {
+		return infracontainer.ExecInspectResponse{}, errors.New("daemon inspect failure")
+	}
+	if _, err := svc.ExecInContainer(context.Background(), EngineDocker, "c1", "echo fail"); err == nil {
+		t.Errorf("expected error on exec inspect failure, got nil")
+	}
+
+	// Reset mock inspect
+	mock.ContainerExecInspectFn = nil
+
 	stats, err := svc.GetContainerStats(context.Background(), EngineDocker, "c1")
 	if err != nil || stats.PIDs != 10 || stats.MemUsage != 104857600 {
 		t.Errorf("GetContainerStats error: %v, stats: %+v", err, stats)
