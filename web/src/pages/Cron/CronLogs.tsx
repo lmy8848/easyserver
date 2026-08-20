@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, Tag, Button, Space, Empty, List, Segmented, DatePicker } from 'antd';
+import { Modal, Tag, Button, Space, Empty, List, Segmented, DatePicker, theme } from 'antd';
 import { HistoryOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { CronTask, CronRun } from '../../types';
 import { LogViewer } from '../../components/LogViewer';
@@ -29,6 +29,7 @@ function statusTag(status: string) {
 export default function CronLogs({
   visible, task, runs, loading, page, pageSize, total, onPageChange, onDateRangeChange, onClose, onRefresh,
 }: CronLogsProps) {
+  const { token } = theme.useToken();
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'success' | 'failed'>('all');
 
@@ -56,14 +57,15 @@ export default function CronLogs({
       title={<Space><HistoryOutlined /> {task?.name} - 执行记录</Space>}
       open={visible}
       onCancel={onClose}
-      footer={<Button onClick={onClose}>关闭</Button>}
+      footer={null}
       width={1300}
+      destroyOnHidden
       styles={{ body: { padding: 0 } }}
     >
       <div style={{ display: 'flex', height: 600 }}>
         {/* 左侧：执行列表 */}
-        <div style={{ width: 440, borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: 12, borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ width: 440, borderRight: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: 12, borderBottom: `1px solid ${token.colorBorderSecondary}`, display: 'flex', gap: 8, alignItems: 'center' }}>
             <DatePicker.RangePicker
               placeholder={['开始日期', '结束日期']}
               onChange={handleDateRangeChange}
@@ -100,7 +102,8 @@ export default function CronLogs({
                 onClick={() => setSelected(r.invocation_id)}
                 style={{
                   cursor: 'pointer',
-                  background: selected === r.invocation_id ? '#e6f4ff' : undefined,
+                  padding: '8px 12px',
+                  fontWeight: selected === r.invocation_id ? 600 : 'normal',
                 }}
               >
                 <Space style={{ width: '100%', justifyContent: 'space-between' }}>
