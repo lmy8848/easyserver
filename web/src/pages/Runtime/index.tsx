@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, Button, Space, Modal, Tag, message } from 'antd';
 import { PlusOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../../services/client';
@@ -7,6 +7,7 @@ import VersionList from './VersionList';
 // import PackageManager from './PackageManager';
 // import PackageRegistryModal from './PackageRegistryModal';
 import MirrorPanel from './MirrorPanel';
+import { LogModal } from '../../components/LogViewer';
 import type {
   RuntimeEnvironment,
   VersionInfo,
@@ -49,52 +50,18 @@ export default function Runtime() {
   // --- Logs modal state ---
   const [logsVisible, setLogsVisible] = useState(false);
   const [logsData, setLogsData] = useState<LogsData | null>(null);
-  // logStream 是 SSE 实时累积的日志内容（DB 的 logs 列不再存日志本体）。
-  const [logStream, setLogStream] = useState('');
-  const logsContainerRef = useRef<HTMLPreElement>(null);
 
-  // Auto-scroll log <pre> to bottom when new content arrives, but only if the user
-  // is already near the bottom — otherwise we'd yank them away from what they're reading.
-  useEffect(() => {
-    const el = logsContainerRef.current;
-    if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    if (nearBottom) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [logStream]);
-
-  // SSE 日志流：打开弹窗且有绑定（lang@exact）时连接 /runtime/logs/:lang@exact，
-  // 先回放已缓冲行再收实时行。done 帧更新状态/错误并关闭；关闭弹窗或切换目标时断开。
-  useEffect(() => {
-    if (!logsVisible || !logsData?.name || !logsData?.version) return;
-    const es = new EventSource(`/api/runtime/logs/${logsData.name}@${logsData.version}`);
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'line') {
-          setLogStream(prev => prev + (prev ? '\n' : '') + msg.text);
-        } else if (msg.type === 'done') {
-          es.close();
-          // 终态成功时任务已成功即清、SSE 无日志可回放——done 带的"日志已丢失"
-          // 说明对已完成操作是误导，别覆盖已成功的状态。
-          setLogsData(prev => {
-            if (!prev) return prev;
-            if (msg.error) {
-              if (prev.status === 'installed' || prev.status === 'uninstalled') return prev;
-              return { ...prev, status: prev.status === 'uninstalling' ? 'uninstall_failed' : 'failed' };
-            }
-            return { ...prev, status: prev.status === 'uninstalling' ? 'uninstalled' : 'installed' };
-          });
-          // 安装/卸载结束：刷新列表，让 installing → installed/failed 落地。
-          fetchEnvironments();
-        }
-      } catch { /* ignore malformed frames */ }
-    };
-    // 服务端关闭流或瞬断：关闭，让 done 状态接管 UI（EventSource 否则自动重连）。
-    es.onerror = () => { es.close(); };
-    return () => es.close();
-  }, [logsVisible, logsData?.name, logsData?.version, fetchEnvironments]);
+  const handleLogDone = useCallback((result: { status: 'completed' | 'failed' | 'stopped'; error?: string }) => {
+    setLogsData((prev) => {
+      if (!prev) return prev;
+      if (result.error || result.status === 'failed') {
+        if (prev.status === 'installed' || prev.status === 'uninstalled') return prev;
+        return { ...prev, status: prev.status === 'uninstalling' ? 'uninstall_failed' : 'failed' };
+      }
+      return { ...prev, status: prev.status === 'uninstalling' ? 'uninstalled' : 'installed' };
+    });
+    fetchEnvironments();
+  }, [fetchEnvironments]);
 
   // --- Cleanup modal state ---
   const [cleanupVisible, setCleanupVisible] = useState(false);
@@ -232,7 +199,6 @@ export default function Runtime() {
   // ==================== Logs modal actions ====================
 
   const openLogs = (name: string, version: string) => {
-    setLogStream('');
     setLogsData({ name, version, status: 'running', logs: '' });
     setLogsVisible(true);
   };
@@ -463,65 +429,45 @@ export default function Runtime() {
         onRefreshVersions={fetchVersions}
       />
 
-      {/* Install logs modal */}
-      <Modal
-        title={
-          // Identify the operation: explicit status first, then fall back to log content
-          // (status='failed' alone can't tell install-fail from uninstall-fail).
-          (logsData?.status === 'uninstalling'
-            || logsData?.status === 'uninstalled'
-            || logsData?.status === 'uninstall_failed'
-            || logStream.includes('正在卸载'))
-            ? '卸载日志'
-            : '安装日志'
-        }
+      {/* Install/Uninstall logs modal */}
+      <LogModal
         open={logsVisible}
+        title={
+          <Space>
+            <span>{logsData ? `${logsData.name} ${logsData.version}` : '运行环境'}</span>
+            <Tag
+              color={
+                logsData?.status === 'uninstalling' ||
+                logsData?.status === 'uninstalled' ||
+                logsData?.status === 'uninstall_failed'
+                  ? 'orange'
+                  : 'blue'
+              }
+            >
+              {logsData?.status === 'uninstalling' ||
+              logsData?.status === 'uninstalled' ||
+              logsData?.status === 'uninstall_failed'
+                ? '卸载日志'
+                : '安装日志'}
+            </Tag>
+          </Space>
+        }
+        streamUrl={
+          logsVisible && logsData?.name && logsData?.version
+            ? `/api/runtime/logs/${logsData.name}@${logsData.version}`
+            : undefined
+        }
+        downloadFileName={
+          logsData ? `runtime_${logsData.name}_${logsData.version}` : 'runtime_log'
+        }
+        onDone={handleLogDone}
         onCancel={() => {
           setLogsVisible(false);
           setLogsData(null);
         }}
-        footer={[
-          <Button key="close" onClick={() => {
-            setLogsVisible(false);
-            setLogsData(null);
-          }}>
-            关闭
-          </Button>,
-        ]}
-        width={700}
-      >
-        {logsData ? (
-          <div>
-            <div style={{ marginBottom: 16 }}>
-              <Space>
-                <span><strong>运行环境:</strong> {logsData.name}</span>
-                <span><strong>版本:</strong> {logsData.version}</span>
-              </Space>
-            </div>
-            {logStream && (
-              <div style={{ marginBottom: 16 }}>
-                <strong>日志:</strong>
-                <pre
-                  ref={logsContainerRef}
-                  style={{
-                    background: '#f5f5f5',
-                    padding: 16,
-                    borderRadius: 4,
-                    maxHeight: 300,
-                    overflow: 'auto',
-                    fontSize: 12,
-                    fontFamily: 'Consolas, Monaco, monospace',
-                  }}
-                >
-                  {logStream}
-                </pre>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: 20 }}>加载中...</div>
-        )}
-      </Modal>
+        width={800}
+        viewerHeight={420}
+      />
 
       {/* Cleanup confirmation modal */}
       <Modal
