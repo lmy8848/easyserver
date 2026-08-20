@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -319,95 +317,16 @@ func findPIDByInode(targetInode string) int {
 	return 0
 }
 
-// getListeningPorts returns all listening ports across TCP/UDP.
+// getListeningPorts returns all listening ports across TCP/UDP by parsing /proc/net.
 func getListeningPorts() []PortInfo {
 	var allPorts []PortInfo
-
 	if runtime.GOOS == "linux" {
 		allPorts = append(allPorts, parseProcNet("/proc/net/tcp", "tcp")...)
 		allPorts = append(allPorts, parseProcNet("/proc/net/tcp6", "tcp6")...)
 		allPorts = append(allPorts, parseProcNet("/proc/net/udp", "udp")...)
 		allPorts = append(allPorts, parseProcNet("/proc/net/udp6", "udp6")...)
 	}
-
-	// Fallback to netstat/ss if /proc/net didn't return anything or not on Linux
-	if len(allPorts) == 0 {
-		allPorts = parseSSPorts()
-	}
-
 	return allPorts
-}
-
-// parseSSPorts uses `ss -tulpn` command as fallback.
-func parseSSPorts() []PortInfo {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "ss", "-tulpn").Output()
-	if err != nil {
-		return nil
-	}
-
-	var ports []PortInfo
-	lines := strings.SplitSeq(string(out), "\n")
-	for line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) < 5 || fields[0] == "Netid" {
-			continue
-		}
-
-		proto := fields[0]
-		state := fields[1]
-		localAddr := fields[4]
-
-		if proto != "tcp" && proto != "udp" && proto != "tcp6" && proto != "udp6" {
-			continue
-		}
-		if proto == "tcp" || proto == "tcp6" {
-			if state != "LISTEN" {
-				continue
-			}
-		}
-
-		// Parse port from local address
-		lastColon := strings.LastIndex(localAddr, ":")
-		if lastColon == -1 {
-			continue
-		}
-		portStr := localAddr[lastColon+1:]
-		port, err := strconv.Atoi(portStr)
-		if err != nil {
-			continue
-		}
-
-		pi := PortInfo{
-			Protocol:  proto,
-			Port:      port,
-			LocalAddr: localAddr,
-			State:     state,
-		}
-
-		// Try to parse process info from the last column (e.g., users:(("nginx",pid=123,fd=6)))
-		if len(fields) >= 7 {
-			procField := fields[6]
-			if strings.Contains(procField, "pid=") {
-				pidIdx := strings.Index(procField, "pid=") + 4
-				pidEnd := strings.IndexAny(procField[pidIdx:], ",)")
-				if pidEnd != -1 {
-					pid, _ := strconv.Atoi(procField[pidIdx : pidIdx+pidEnd])
-					pi.PID = pid
-				}
-				nameStart := strings.Index(procField, `("`) + 2
-				nameEnd := strings.Index(procField[nameStart:], `"`)
-				if nameStart > 1 && nameEnd != -1 {
-					pi.ProcessName = procField[nameStart : nameStart+nameEnd]
-				}
-			}
-		}
-
-		ports = append(ports, pi)
-	}
-
-	return ports
 }
 
 func getProcessName(pid int) string {
@@ -536,35 +455,21 @@ func safeListen(addr string) (net.Listener, error) {
 	return listener, err
 }
 
-// getPortProcess finds the process using a given port via ss/netstat.
-func (h *MonitorHandler) getPortProcess(ctx context.Context, port int) string {
-	defer func() {
-		if r := recover(); r != nil {
-			// 解析过程中意外 panic 不扩散到整个接口，但必须留痕便于排查。
-			log.Printf("monitor: getPortProcess(%d) panic recovered: %v", port, r)
-		}
-	}()
-
-	out, err := exec.CommandContext(ctx, "ss", "-tlnp", fmt.Sprintf("sport = :%d", port)).CombinedOutput()
-	if err == nil && strings.TrimSpace(string(out)) != "" {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		if len(lines) > 1 {
-			for _, line := range lines[1:] {
-				if strings.Contains(line, fmt.Sprintf(":%d", port)) {
-					return strings.TrimSpace(line)
+// getPortProcess finds the process using a given port by inspecting listening ports from /proc/net.
+func (h *MonitorHandler) getPortProcess(_ context.Context, port int) string {
+	ports := getListeningPorts()
+	for _, p := range ports {
+		if p.Port == port {
+			if p.ProcessName != "" {
+				if p.PID > 0 {
+					return fmt.Sprintf("%s (PID: %d)", p.ProcessName, p.PID)
 				}
+				return p.ProcessName
+			}
+			if p.PID > 0 {
+				return fmt.Sprintf("PID: %d", p.PID)
 			}
 		}
 	}
-
-	out, err = exec.CommandContext(ctx, "netstat", "-tlnp").CombinedOutput()
-	if err == nil {
-		for line := range strings.SplitSeq(string(out), "\n") {
-			if strings.Contains(line, fmt.Sprintf(":%d ", port)) || strings.Contains(line, fmt.Sprintf(":%d\t", port)) {
-				return strings.TrimSpace(line)
-			}
-		}
-	}
-
 	return "unknown"
 }
