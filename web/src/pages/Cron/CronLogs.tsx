@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Modal, Tag, Button, Space, Empty, List, Segmented, DatePicker } from 'antd';
 import { HistoryOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { CronTask, CronRun } from '../../types';
+import { LogViewer } from '../../components/LogViewer';
 
 interface CronLogsProps {
   visible: boolean;
@@ -16,11 +17,6 @@ interface CronLogsProps {
   onClose: () => void;
   onRefresh: (task: CronTask) => void;
 }
-
-const priorityColor: Record<string, string> = {
-  err: 'error', crit: 'error', emerg: 'error', alert: 'error',
-  warn: 'warning', info: 'default', notice: 'blue', debug: 'default',
-};
 
 function statusTag(status: string) {
   switch (status) {
@@ -116,26 +112,22 @@ export default function CronLogs({
           />
         </div>
         {/* 右侧：选中执行的日志 */}
-        <div style={{ flex: 1, padding: 12, overflowY: 'auto' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {selectedRun ? (
-            <List
-              size="small"
-              dataSource={selectedRun.logs}
-              locale={{ emptyText: <Empty description="该次执行无日志输出" /> }}
-              renderItem={(l, i) => (
-                <List.Item key={`${l.time}-${i}`} style={{ padding: '8px 0' }}>
-                  <Space align="start" style={{ width: '100%' }}>
-                    <Tag color={priorityColor[l.priority] || 'default'} style={{ marginRight: 8, minWidth: 44, textAlign: 'center' }}>
-                      {l.priority || 'info'}
-                    </Tag>
-                    <span style={{ color: '#8c8c8c', fontSize: 12, whiteSpace: 'nowrap', marginTop: 2 }}>{l.time}</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', marginTop: 2 }}>{l.message}</span>
-                  </Space>
-                </List.Item>
-              )}
+            <LogViewer
+              entries={selectedRun.logs.map((l) => ({
+                text: l.message,
+                time: l.time,
+                level: l.priority,
+              }))}
+              downloadFileName={`cron_${task?.name}_${selectedRun.started_at}`}
+              emptyText="该次执行无日志输出"
+              style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
             />
           ) : (
-            <Empty description="选择左侧某次执行查看日志" style={{ marginTop: 150 }} />
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Empty description="选择左侧某次执行查看日志" />
+            </div>
           )}
         </div>
       </div>

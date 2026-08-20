@@ -9,6 +9,7 @@ import {
 import { containerApi } from '../../services/container';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { ComposeProject } from './types';
+import { LogViewer } from '../../components/LogViewer';
 
 export default function ComposeTab({ engine }: { engine: string }) {
   const [projects, setProjects] = useState<ComposeProject[]>([]);
@@ -121,10 +122,21 @@ export default function ComposeTab({ engine }: { engine: string }) {
         <Table columns={columns} dataSource={projects} rowKey="name" loading={loading} locale={{ emptyText: '暂无 Compose 项目' }} />
       </Card>
 
-      <Modal title="Compose 日志" open={logsVisible} onCancel={() => setLogsVisible(false)} footer={null} width={800}>
-        <pre style={{ maxHeight: 500, overflow: 'auto', background: '#f5f5f5', padding: 16, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-          {logs || '暂无日志'}
-        </pre>
+      <Modal
+        title="Compose 日志"
+        open={logsVisible}
+        onCancel={() => setLogsVisible(false)}
+        footer={null}
+        width={860}
+        destroyOnHidden
+        styles={{ body: { padding: 0 } }}
+      >
+        <LogViewer
+          lines={logs ? logs.split('\n') : []}
+          downloadFileName="compose_log"
+          height={480}
+          style={{ border: 'none', borderRadius: 0 }}
+        />
       </Modal>
 
       <Modal title="编辑 Compose 配置" open={configVisible} onOk={handleSaveConfig} onCancel={() => setConfigVisible(false)} width={800} confirmLoading={saveLoading}>

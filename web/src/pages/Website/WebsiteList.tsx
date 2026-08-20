@@ -20,6 +20,7 @@ import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './
 import { StatusTag } from '../../utils/status';
 import { formatBytes } from '../../utils/format';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
+import { LogViewer } from '../../components/LogViewer';
 
 function renderServerIcon(name: string, size = 32) {
   const s = (name || '').toLowerCase();
@@ -664,22 +665,28 @@ export default function WebsiteList({
         open={logVisible}
         onCancel={() => setLogVisible(false)}
         footer={null}
-        width={900}
+        width={920}
+        destroyOnHidden
+        styles={{ body: { padding: 0 } }}
       >
-        <Tabs
-          activeKey={logType}
-          onChange={(key) => { setLogType(key); if (logSite) showLogs(logSite, key); }}
-          items={[
-            { key: 'access', label: '访问日志' },
-            { key: 'error', label: '错误日志' },
-            { key: 'app', label: '应用日志' },
-          ]}
-        />
-        <Input.TextArea
-          value={logLoading ? 'Loading...' : logContent}
-          readOnly
-          rows={20}
-          style={{ fontFamily: 'monospace', fontSize: 12 }}
+        <div style={{ padding: '0 16px', borderBottom: '1px solid #303030' }}>
+          <Tabs
+            activeKey={logType}
+            onChange={(key) => { setLogType(key); if (logSite) showLogs(logSite, key); }}
+            items={[
+              { key: 'access', label: '访问日志' },
+              { key: 'error', label: '错误日志' },
+              { key: 'app', label: '应用日志' },
+            ]}
+            style={{ marginBottom: 0 }}
+          />
+        </div>
+        <LogViewer
+          lines={logLoading ? [] : (logContent ? logContent.split('\n') : [])}
+          downloadFileName={`${logSite?.domain}_${logType}_log`}
+          emptyText={logLoading ? '加载日志中…' : '暂无日志'}
+          height={480}
+          style={{ border: 'none', borderRadius: 0 }}
         />
       </Modal>
 

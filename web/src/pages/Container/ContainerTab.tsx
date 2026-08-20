@@ -13,6 +13,7 @@ import { DOCKER_IMAGE_TEMPLATES } from '../../constants/templates';
 import { useAsyncRun } from '../../hooks/useAsyncRun';
 import type { Container, ContainerStats, ImageCategory } from './types';
 import { formatBytes, getStatusColor } from './types';
+import { LogViewer } from '../../components/LogViewer';
 
 export default function ContainerTab({ engine }: { engine: string }) {
   const [containers, setContainers] = useState<Container[]>([]);
@@ -274,10 +275,21 @@ export default function ContainerTab({ engine }: { engine: string }) {
       </Modal>
 
       {/* Logs Modal */}
-      <Modal title={`容器日志 - ${selectedContainer}`} open={logsVisible} onCancel={() => setLogsVisible(false)} footer={null} width={800} destroyOnHidden>
-        <pre style={{ maxHeight: 500, overflow: 'auto', background: '#f5f5f5', padding: 16, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-          {logs || '暂无日志'}
-        </pre>
+      <Modal
+        title={`容器日志 - ${selectedContainer}`}
+        open={logsVisible}
+        onCancel={() => setLogsVisible(false)}
+        footer={null}
+        width={860}
+        destroyOnHidden
+        styles={{ body: { padding: 0 } }}
+      >
+        <LogViewer
+          lines={logs ? logs.split('\n') : []}
+          downloadFileName={`container_${selectedContainer}_log`}
+          height={480}
+          style={{ border: 'none', borderRadius: 0 }}
+        />
       </Modal>
 
       {/* Stats Modal */}

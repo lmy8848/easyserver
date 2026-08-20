@@ -16,6 +16,7 @@ import { serviceApi } from '../../services/systemd';
 import { useTab } from '../../hooks/useTab';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 import { formatBytes, formatUptime } from '../../utils/format';
+import { LogViewer } from '../../components/LogViewer';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -428,15 +429,25 @@ function ManagedTab() {
         title={<Space><FileTextOutlined />{logService} 日志</Space>}
         open={!!logService}
         onClose={() => setLogService(null)}
-        size={720}
-        extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
-          onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
+        width={800}
+        destroyOnHidden
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
       >
-        <pre style={{ fontSize: 12, lineHeight: 1.6, maxHeight: 'calc(100vh - 160px)', overflow: 'auto', margin: 0, padding: 8, background: '#fafafa', borderRadius: 4 }}>
-          {logs.length === 0
-            ? (logLoading ? '加载中...' : '暂无日志')
-            : logs.map((l) => `[${l.time}] ${l.message}`).join('\n')}
-        </pre>
+        <LogViewer
+          entries={logs.map((l) => ({ text: l.message, time: l.time, level: l.priority }))}
+          downloadFileName={`service_${logService}_log`}
+          headerExtra={
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={logLoading}
+              onClick={() => logService && fetchLogs(logService)}
+            >
+              刷新
+            </Button>
+          }
+          style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
+        />
       </Drawer>
 
       {/* 详情 Drawer */}
@@ -717,15 +728,25 @@ function SystemTab() {
         title={<Space><FileTextOutlined />{logService} 日志</Space>}
         open={!!logService}
         onClose={() => setLogService(null)}
-        size={720}
-        extra={<Button size="small" icon={<ReloadOutlined />} loading={logLoading}
-          onClick={() => logService && fetchLogs(logService)}>刷新</Button>}
+        width={800}
+        destroyOnHidden
+        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
       >
-        <pre style={{ fontSize: 12, lineHeight: 1.6, maxHeight: 'calc(100vh - 160px)', overflow: 'auto', margin: 0, padding: 8, background: '#fafafa', borderRadius: 4 }}>
-          {logs.length === 0
-            ? (logLoading ? '加载中...' : '暂无日志')
-            : logs.map((l) => `[${l.time}] ${l.message}`).join('\n')}
-        </pre>
+        <LogViewer
+          entries={logs.map((l) => ({ text: l.message, time: l.time, level: l.priority }))}
+          downloadFileName={`service_${logService}_log`}
+          headerExtra={
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={logLoading}
+              onClick={() => logService && fetchLogs(logService)}
+            >
+              刷新
+            </Button>
+          }
+          style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
+        />
       </Drawer>
 
       {/* 详情 Drawer */}
