@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Button, Space, message, Table, Input,
+  Card, Button, Space, message, Table, Input, Select,
   Tag, Popconfirm, Alert, Descriptions, Statistic, Row, Col,
 } from 'antd';
 import {
@@ -177,7 +177,15 @@ export default function SSHHardeningTab() {
           <Button icon={<PlusOutlined />} onClick={onAddKey}>添加公钥</Button>
           <Space>
             <Input placeholder="密钥名" value={genName} onChange={(e) => setGenName(e.target.value)} style={{ width: 160 }} />
-            <Input placeholder="类型" value={genType} onChange={(e) => setGenType(e.target.value)} style={{ width: 100 }} />
+            <Select
+              value={genType}
+              onChange={setGenType}
+              style={{ width: 160 }}
+              options={[
+                { value: 'ed25519', label: 'Ed25519 (推荐)' },
+                { value: 'rsa', label: 'RSA (4096位)' },
+              ]}
+            />
             <Button onClick={onGenerate}>生成密钥对（下载私钥）</Button>
           </Space>
         </Space>

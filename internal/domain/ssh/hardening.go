@@ -2,6 +2,10 @@ package ssh
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +16,8 @@ import (
 	"easyserver/internal/infra/errx"
 	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // HardenOptions controls a one-shot SSH hardening pass.
@@ -71,13 +77,14 @@ func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, erro
 	}
 
 	// Validate before reload; restore on failure.
-	if _, err := s.TestConfig(ctx); err != nil {
+	if out, err := s.TestConfig(ctx); err != nil {
+		// Rollback on test failure.
 		_ = s.restoreBackup()
 		_ = s.ReloadSSH(ctx)
-		return nil, errx.Internal("配置测试失败，已恢复原配置: %w", err)
+		return nil, errx.BadRequest("加固配置校验未通过，已自动回滚：%s", out)
 	}
 	if err := s.ReloadSSH(ctx); err != nil {
-		return nil, errx.Internal("重载 SSH 失败: %w", err)
+		return nil, errx.Internal("重载 SSH 服务失败: %w", err)
 	}
 	return cfg, nil
 }
@@ -102,10 +109,11 @@ func portAvailable(ctx context.Context, port int) bool {
 
 // AuthorizedKey represents one entry in ~/.ssh/authorized_keys.
 type AuthorizedKey struct {
-	Comment string `json:"comment"`
-	Type    string `json:"type"` // ssh-rsa, ssh-ed25519, ecdsa-...
-	Key     string `json:"key"`  // base64, truncated for display
-	Line    string `json:"-"`    // full original line
+	Comment     string `json:"comment"`
+	Type        string `json:"type"`        // ssh-rsa, ssh-ed25519, ecdsa-sha2-nistp521, etc.
+	Key         string `json:"key"`         // base64, truncated for display
+	Fingerprint string `json:"fingerprint"` // SHA256:...
+	Line        string `json:"-"`           // full original line
 }
 
 func authorizedKeysPath() (string, error) {
@@ -135,6 +143,28 @@ func (s *Service) ListAuthorizedKeys() ([]AuthorizedKey, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
+		pubKey, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+		if err == nil {
+			k := AuthorizedKey{
+				Type:        pubKey.Type(),
+				Key:         string(ssh.MarshalAuthorizedKey(pubKey)),
+				Fingerprint: ssh.FingerprintSHA256(pubKey),
+				Comment:     comment,
+				Line:        line,
+			}
+			parts := strings.Fields(k.Key)
+			if len(parts) >= 2 {
+				k.Key = parts[1]
+			}
+			if len(k.Key) > 20 {
+				k.Key = k.Key[:20] + "..."
+			}
+			keys = append(keys, k)
+			continue
+		}
+
+		// Fallback for custom or legacy lines
 		parts := strings.Fields(line)
 		if len(parts) < 2 {
 			continue
@@ -143,7 +173,6 @@ func (s *Service) ListAuthorizedKeys() ([]AuthorizedKey, error) {
 		if len(parts) > 2 {
 			k.Comment = strings.Join(parts[2:], " ")
 		}
-		// Truncate key for display.
 		if len(k.Key) > 20 {
 			k.Key = k.Key[:20] + "..."
 		}
@@ -158,8 +187,8 @@ func (s *Service) AddAuthorizedKey(pub string) error {
 	if pub == "" {
 		return errx.BadRequest("公钥不能为空")
 	}
-	if len(strings.Fields(pub)) < 2 {
-		return errx.BadRequest("公钥格式无效")
+	if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(pub)); err != nil {
+		return errx.BadRequest("公钥格式无效: %v", err)
 	}
 	p, err := authorizedKeysPath()
 	if err != nil {
@@ -214,9 +243,9 @@ func (s *Service) RemoveAuthorizedKey(comment string) error {
 	return os.WriteFile(p, []byte(strings.Join(kept, "\n")+"\n"), 0600)
 }
 
-// GenerateKeyPair runs ssh-keygen to create a new key pair. The private key is
-// returned to the caller (not stored server-side); the public key is added to
-// authorized_keys automatically.
+// GenerateKeyPair creates a new key pair in-memory using Go native cryptography APIs.
+// The private key is returned to the caller as an OpenSSH PEM block (not stored server-side);
+// the public key is added to authorized_keys automatically.
 func (s *Service) GenerateKeyPair(ctx context.Context, name, keyType string) (string, error) {
 	if name == "" {
 		name = "easyserver-key"
@@ -225,47 +254,56 @@ func (s *Service) GenerateKeyPair(ctx context.Context, name, keyType string) (st
 		keyType = "ed25519"
 	}
 	keyType = strings.ToLower(keyType)
-	bits := ""
-	switch keyType {
-	case "ed25519":
-		keyType = "ed25519"
-	case "rsa":
-		bits = "-b 4096"
-	case "ecdsa":
-		bits = "-b 521"
-	default:
-		return "", errx.BadRequest("不支持的密钥类型")
-	}
 	cleanName := filepath.Clean(name)
 	if cleanName == "" || strings.Contains(cleanName, "\x00") || strings.Contains(cleanName, "\n") || strings.Contains(cleanName, "\r") {
 		return "", errx.BadRequest("invalid key comment name")
 	}
-	dir, err := os.MkdirTemp("", "es-key-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "id_key")
+	comment := cleanName + "@easyserver"
 
-	args := []string{"-t", keyType, "-f", path, "-N", "", "-C", cleanName + "@easyserver"}
-	if bits != "" {
-		args = append(strings.Split(bits, " "), args...)
+	var (
+		privBlock *pem.Block
+		sshPub    ssh.PublicKey
+		err       error
+	)
+
+	switch keyType {
+	case "ed25519":
+		pub, priv, genErr := ed25519.GenerateKey(rand.Reader)
+		if genErr != nil {
+			return "", fmt.Errorf("generate ed25519 key: %w", genErr)
+		}
+		privBlock, err = ssh.MarshalPrivateKey(priv, comment)
+		if err != nil {
+			return "", fmt.Errorf("marshal ed25519 private key: %w", err)
+		}
+		sshPub, err = ssh.NewPublicKey(pub)
+		if err != nil {
+			return "", fmt.Errorf("convert ed25519 public key: %w", err)
+		}
+	case "rsa":
+		priv, genErr := rsa.GenerateKey(rand.Reader, 4096)
+		if genErr != nil {
+			return "", fmt.Errorf("generate rsa key: %w", genErr)
+		}
+		privBlock, err = ssh.MarshalPrivateKey(priv, comment)
+		if err != nil {
+			return "", fmt.Errorf("marshal rsa private key: %w", err)
+		}
+		sshPub, err = ssh.NewPublicKey(&priv.PublicKey)
+		if err != nil {
+			return "", fmt.Errorf("convert rsa public key: %w", err)
+		}
+	default:
+		return "", errx.BadRequest("不支持的密钥类型: %s", keyType)
 	}
-	if _, err := exec.CommandContext(ctx, "ssh-keygen", args...).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("ssh-keygen: %w", err)
-	}
-	pub, err := os.ReadFile(path + ".pub")
-	if err != nil {
+
+	pubLine := fmt.Sprintf("%s %s", strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))), comment)
+	if err := s.AddAuthorizedKey(pubLine); err != nil {
 		return "", err
 	}
-	if err := s.AddAuthorizedKey(strings.TrimSpace(string(pub))); err != nil {
-		return "", err
-	}
-	priv, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(priv), nil
+
+	privPEM := pem.EncodeToMemory(privBlock)
+	return string(privPEM), nil
 }
 
 // --- fail2ban ---
