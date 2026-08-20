@@ -321,10 +321,7 @@ func (s *Service) KillSession(ctx context.Context, pid int) error {
 		}
 	}
 	if !found {
-		comm, commErr := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
-		if commErr != nil || strings.TrimSpace(string(comm)) != "sshd" {
-			return fmt.Errorf("process %d is not an active SSH session", pid)
-		}
+		return fmt.Errorf("process %d is not an active SSH session", pid)
 	}
 
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
