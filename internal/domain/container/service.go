@@ -437,10 +437,16 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 	}
 
 	var stdout, stderr bytes.Buffer
+	output := string(rawBytes)
 	if err := infracontainer.DemuxLogs(bytes.NewReader(rawBytes), &stdout, &stderr); err == nil && (stdout.Len() > 0 || stderr.Len() > 0) {
-		return stdout.String() + stderr.String(), nil
+		output = stdout.String() + stderr.String()
 	}
-	return string(rawBytes), nil
+
+	inspectResp, err := infracontainer.DefaultClient().ContainerExecInspect(ctx, infracontainer.Engine(engine), createResp.ID)
+	if err == nil && inspectResp.ExitCode != 0 {
+		return output, errx.Internal("%s exec failed: exit code %d: %s", engine, inspectResp.ExitCode, output)
+	}
+	return output, nil
 }
 
 // CreateContainer creates a new container.

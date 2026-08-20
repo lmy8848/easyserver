@@ -106,10 +106,34 @@ func TestRealClient_UnixSocket_HTTP(t *testing.T) {
 		})
 	})
 	mux.HandleFunc("/containers/create", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		if name != "test-container" {
+			http.Error(w, "invalid name param", http.StatusBadRequest)
+			return
+		}
+		var req ContainerCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json body", http.StatusBadRequest)
+			return
+		}
+		if req.HostConfig.NanoCPUs != 500000000 {
+			http.Error(w, "unexpected NanoCPUs value", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(ContainerCreateResponse{
 			ID: "created-c1",
 		})
+	})
+	mux.HandleFunc("/images/create", func(w http.ResponseWriter, r *http.Request) {
+		fromImg := r.URL.Query().Get("fromImage")
+		tag := r.URL.Query().Get("tag")
+		if fromImg != "redis" || tag != "7.0" {
+			http.Error(w, "invalid fromImage or tag", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"Download complete"}` + "\n"))
 	})
 	mux.HandleFunc("/volumes", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -142,13 +166,30 @@ func TestRealClient_UnixSocket_HTTP(t *testing.T) {
 		t.Errorf("ContainerList failed: %v, containers: %+v", err, containers)
 	}
 
-	created, err := client.ContainerCreate(context.Background(), EngineDocker, "test", ContainerCreateRequest{})
+	created, err := client.ContainerCreate(context.Background(), EngineDocker, "test-container", ContainerCreateRequest{
+		HostConfig: &HostConfig{
+			NanoCPUs: 500000000,
+		},
+	})
 	if err != nil || created.ID != "created-c1" {
 		t.Errorf("ContainerCreate failed: %v, created: %+v", err, created)
+	}
+
+	pullStream, err := client.ImagePull(context.Background(), EngineDocker, "redis:7.0", "")
+	if err != nil {
+		t.Errorf("ImagePull failed: %v", err)
+	} else {
+		_ = pullStream.Close()
 	}
 
 	vols, err := client.VolumeList(context.Background(), EngineDocker)
 	if err != nil || len(vols.Volumes) != 1 || vols.Volumes[0].Name != "vol1" {
 		t.Errorf("VolumeList failed: %v, vols: %+v", err, vols)
+	}
+
+	// Verify error response on unknown container
+	_, err = client.ContainerInspect(context.Background(), EngineDocker, "non-existent")
+	if err == nil {
+		t.Errorf("expected error on ContainerInspect for non-existent container, got nil")
 	}
 }

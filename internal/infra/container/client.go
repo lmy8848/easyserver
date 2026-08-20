@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -420,7 +421,23 @@ func (c *realClient) ImageInspect(ctx context.Context, engine Engine, imageID st
 
 func (c *realClient) ImagePull(ctx context.Context, engine Engine, imageRef string, authEncoded string) (io.ReadCloser, error) {
 	q := url.Values{}
-	q.Set("fromImage", imageRef)
+	fromImage := imageRef
+	tag := ""
+
+	if strings.Contains(imageRef, "@") {
+		fromImage = imageRef
+	} else if i := strings.LastIndex(imageRef, ":"); i != -1 && !strings.Contains(imageRef[i+1:], "/") {
+		fromImage = imageRef[:i]
+		tag = imageRef[i+1:]
+	} else {
+		tag = "latest"
+	}
+
+	q.Set("fromImage", fromImage)
+	if tag != "" {
+		q.Set("tag", tag)
+	}
+
 	headers := map[string]string{}
 	if authEncoded != "" {
 		headers["X-Registry-Auth"] = authEncoded

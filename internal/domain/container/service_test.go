@@ -153,7 +153,10 @@ func TestService_ImageOperations_Mock(t *testing.T) {
 			}, nil
 		},
 		ImagePullFn: func(ctx context.Context, engine infracontainer.Engine, imageRef string, authEncoded string) (io.ReadCloser, error) {
-			return io.NopCloser(strings.NewReader("pulling...")), nil
+			if imageRef == "invalid:image" {
+				return io.NopCloser(strings.NewReader(`{"error":"manifest unknown","errorDetail":{"message":"manifest unknown"}}`)), nil
+			}
+			return io.NopCloser(strings.NewReader(`{"status":"Pull complete"}`)), nil
 		},
 		ImageRemoveFn: func(ctx context.Context, engine infracontainer.Engine, imageID string, force bool) ([]infracontainer.ImageDeleteResponseItem, error) {
 			return []infracontainer.ImageDeleteResponseItem{{Deleted: imageID}}, nil
@@ -175,6 +178,10 @@ func TestService_ImageOperations_Mock(t *testing.T) {
 		t.Errorf("PullImage error: %v", err)
 	}
 
+	if err := svc.PullImage(context.Background(), EngineDocker, "invalid:image"); err == nil {
+		t.Errorf("expected error for invalid image pull, got nil")
+	}
+
 	if err := svc.RemoveImage(context.Background(), EngineDocker, "i1", true); err != nil {
 		t.Errorf("RemoveImage error: %v", err)
 	}
@@ -182,6 +189,28 @@ func TestService_ImageOperations_Mock(t *testing.T) {
 	report, err := svc.PruneImages(context.Background(), EngineDocker)
 	if err != nil || report.SpaceReclaimed != 2048 {
 		t.Errorf("PruneImages error: %v, report: %+v", err, report)
+	}
+}
+
+func TestSplitRepoTag(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantRepo string
+		wantTag  string
+	}{
+		{"nginx:latest", "nginx", "latest"},
+		{"nginx:1.25", "nginx", "1.25"},
+		{"nginx", "nginx", "latest"},
+		{"redis:alpine", "redis", "alpine"},
+		{"localhost:5000/app:v1", "localhost:5000/app", "v1"},
+		{"localhost:5000/app", "localhost:5000/app", "latest"},
+		{"myregistry.com:8443/ns/app:2.0", "myregistry.com:8443/ns/app", "2.0"},
+	}
+	for _, tc := range cases {
+		repo, tag := splitRepoTag(tc.in)
+		if repo != tc.wantRepo || tag != tc.wantTag {
+			t.Errorf("splitRepoTag(%q) = (%q, %q), want (%q, %q)", tc.in, repo, tag, tc.wantRepo, tc.wantTag)
+		}
 	}
 }
 

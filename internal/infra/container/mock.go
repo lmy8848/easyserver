@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var _ EngineClient = (*MockEngineClient)(nil)
+
 // MockEngineClient is a test stub implementing EngineClient.
 type MockEngineClient struct {
 	PingFn                 func(ctx context.Context, engine Engine) (PingResponse, error)
