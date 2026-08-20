@@ -66,17 +66,18 @@ type ContainerInspect struct {
 	Path    string   `json:"Path"`
 	Args    []string `json:"Args"`
 	State   struct {
-		Status     string `json:"Status"`
-		Running    bool   `json:"Running"`
-		Paused     bool   `json:"Paused"`
-		Restarting bool   `json:"Restarting"`
-		OOMKilled  bool   `json:"OOMKilled"`
-		Dead       bool   `json:"Dead"`
-		Pid        int    `json:"Pid"`
-		ExitCode   int    `json:"ExitCode"`
-		Error      string `json:"Error"`
-		StartedAt  string `json:"StartedAt"`
-		FinishedAt string `json:"FinishedAt"`
+		Status     string           `json:"Status"`
+		Running    bool             `json:"Running"`
+		Paused     bool             `json:"Paused"`
+		Restarting bool             `json:"Restarting"`
+		OOMKilled  bool             `json:"OOMKilled"`
+		Dead       bool             `json:"Dead"`
+		Pid        int              `json:"Pid"`
+		ExitCode   int              `json:"ExitCode"`
+		Error      string           `json:"Error"`
+		StartedAt  string           `json:"StartedAt"`
+		FinishedAt string           `json:"FinishedAt"`
+		Health     *ContainerHealth `json:"Health,omitempty"`
 	} `json:"State"`
 	Image           string           `json:"Image"`
 	Name            string           `json:"Name"`
@@ -95,6 +96,19 @@ type ContainerInspect struct {
 	} `json:"NetworkSettings"`
 }
 
+type ContainerHealth struct {
+	Status        string `json:"Status"`
+	FailingStreak int    `json:"FailingStreak"`
+}
+
+type HealthcheckConfig struct {
+	Test        []string `json:"Test,omitempty"`
+	Interval    int64    `json:"Interval,omitempty"`
+	Timeout     int64    `json:"Timeout,omitempty"`
+	StartPeriod int64    `json:"StartPeriod,omitempty"`
+	Retries     int      `json:"Retries,omitempty"`
+}
+
 type ContainerConfig struct {
 	Hostname     string              `json:"Hostname,omitempty"`
 	User         string              `json:"User,omitempty"`
@@ -104,6 +118,7 @@ type ContainerConfig struct {
 	WorkingDir   string              `json:"WorkingDir,omitempty"`
 	Labels       map[string]string   `json:"Labels,omitempty"`
 	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
+	Healthcheck  *HealthcheckConfig  `json:"Healthcheck,omitempty"`
 }
 
 type RestartPolicy struct {
@@ -317,7 +332,10 @@ type ExecCreateRequest struct {
 	AttachStdout bool     `json:"AttachStdout"`
 	AttachStderr bool     `json:"AttachStderr"`
 	Tty          bool     `json:"Tty"`
+	Env          []string `json:"Env,omitempty"`
 	Cmd          []string `json:"Cmd"`
+	User         string   `json:"User,omitempty"`
+	WorkingDir   string   `json:"WorkingDir,omitempty"`
 }
 
 type ExecCreateResponse struct {

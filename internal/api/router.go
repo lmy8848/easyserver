@@ -146,7 +146,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	containerService := container.NewService()
 
 	dbRepo := dbdomain.NewSQLiteRepository(db)
-	dbService := dbdomain.NewServiceWithSink(dbRepo, dbdomain.NewCLIContainerRuntime(nil), notificationService)
+	dbService := dbdomain.NewServiceWithSink(dbRepo, dbdomain.NewSocketContainerRuntime(), notificationService)
 
 	firewallRepo := firewall.NewSQLiteRepository(db)
 	firewallService := firewall.NewService(firewallRepo, cfg.Server.Port)

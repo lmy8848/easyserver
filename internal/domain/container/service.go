@@ -672,67 +672,6 @@ func (s *Service) GetContainerStats(ctx context.Context, engine Engine, id strin
 	return stats, nil
 }
 
-// GetContainerTop returns the list of processes running inside a container.
-func (s *Service) GetContainerTop(ctx context.Context, engine Engine, id string) ([]ProcessInfo, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "top", id, "-eo", "user,pid,ppid,%cpu,%mem,vsz,rss,tty,stat,start,time,comm").CombinedOutput()
-	if err != nil {
-		return nil, errx.Internal("%s top failed: %s", engine, output)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) < 2 {
-		return []ProcessInfo{}, nil
-	}
-
-	var processes []ProcessInfo
-	for _, line := range lines[1:] {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 12 {
-			continue
-		}
-		processes = append(processes, ProcessInfo{
-			User:    fields[0],
-			PID:     fields[1],
-			PPID:    fields[2],
-			CPU:     fields[3],
-			MEM:     fields[4],
-			VSZ:     fields[5],
-			RSS:     fields[6],
-			TTY:     fields[7],
-			Stat:    fields[8],
-			Start:   fields[9],
-			Time:    fields[10],
-			Command: strings.Join(fields[11:], " "),
-		})
-	}
-
-	return processes, nil
-}
-
-// CopyToContainer copies a file from host to container.
-func (s *Service) CopyToContainer(ctx context.Context, engine Engine, id, srcPath, destPath string) error {
-	if err := s.rejectManaged(ctx, engine, id); err != nil {
-		return err
-	}
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", srcPath, id+":"+destPath).CombinedOutput()
-	if err != nil {
-		return errx.Internal("%s cp to container failed: %w", engine, err)
-	}
-	return nil
-}
-
-// CopyFromContainer copies a file from container to host.
-func (s *Service) CopyFromContainer(ctx context.Context, engine Engine, id, srcPath, destPath string) error {
-	if err := s.rejectManaged(ctx, engine, id); err != nil {
-		return err
-	}
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "cp", id+":"+srcPath, destPath).CombinedOutput()
-	if err != nil {
-		return errx.Internal("%s cp from container failed: %w", engine, err)
-	}
-	return nil
-}
-
 // RenameContainer renames a container.
 func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newName string) error {
 	if err := s.rejectManaged(ctx, engine, id); err != nil {
@@ -756,8 +695,10 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 		return fmt.Errorf("container name cannot start with '%c'", newName[0])
 	}
 
-	_, err := exec.CommandContext(ctx, engineBinary(engine), "rename", id, newName).CombinedOutput()
-	if err != nil {
+	if err := s.checkEngine(ctx, engine); err != nil {
+		return err
+	}
+	if err := infracontainer.DefaultClient().ContainerRename(ctx, infracontainer.Engine(engine), id, newName); err != nil {
 		return errx.Internal("%s rename failed: %w", engine, err)
 	}
 	return nil
@@ -800,7 +741,7 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 	status.OS = s.detectOS(ctx)
 
 	if isPodmanEngine(engine) {
-		// Podman is self-contained (no daemon): CLI present = usable.
+		// Podman: "Installed" means binary exists. "Running" means podman.socket is accessible.
 		stdout, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
 		if err != nil {
 			status.Installed = false
@@ -808,7 +749,8 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 		}
 		status.Installed = true
 		status.Version = extractVersion(string(stdout))
-		status.Running = true
+		_, pingErr := infracontainer.DefaultClient().Ping(ctx, infracontainer.EnginePodman)
+		status.Running = (pingErr == nil)
 		status.SocketEnabled = s.socketEnabled(ctx)
 	} else {
 		// Docker: CLI and engine (docker.service) are separate packages.
@@ -1011,6 +953,12 @@ func (s *Service) installPodman(ctx context.Context) error {
 		return fmt.Errorf("podman 安装失败: %s", truncateOutput(string(output), 500))
 	}
 
+	log.Println("podman: package installation completed, enabling and starting podman.socket...")
+	if err := s.EnableSocket(ctx, EnginePodman); err != nil {
+		log.Printf("podman: failed enabling socket: %v", err)
+		return fmt.Errorf("启用并启动 podman.socket 失败: %w", err)
+	}
+
 	log.Println("podman: installation completed successfully")
 	return nil
 }
@@ -1024,14 +972,14 @@ func serviceUnit(engine Engine) string {
 }
 
 // engineControlSupported reports whether the engine has a daemon/service that
-// can be started/stopped. Podman has no daemon (CLI talks directly), so its
-// engine-level start/stop is unsupported.
-func engineControlSupported(engine Engine) bool { return !isPodmanEngine(engine) }
+// can be started/stopped. Both Docker (docker.service) and Podman (podman.socket)
+// are supported.
+func engineControlSupported(_ Engine) bool { return true }
 
 // StartEngine starts the engine's systemd service.
 func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
-		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
+		return errx.Unavailable("%s 不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
 	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, unit, "replace"); err != nil {
@@ -1043,7 +991,7 @@ func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 // StopEngine stops the engine's systemd service.
 func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
-		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
+		return errx.Unavailable("%s 不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
 	if _, err := infrasystemd.DefaultClient().StopUnitContext(ctx, unit, "replace"); err != nil {
@@ -1055,7 +1003,7 @@ func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 // RestartEngine restarts the engine's systemd service.
 func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
-		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
+		return errx.Unavailable("%s 不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
 	if _, err := infrasystemd.DefaultClient().RestartUnitContext(ctx, unit, "replace"); err != nil {
@@ -1073,7 +1021,7 @@ func (s *Service) socketEnabled(ctx context.Context) bool {
 	return util.SystemdUnitEnabled(ctx, enableSocketUnit)
 }
 
-// EnableSocket enables Podman's API socket unit at boot.
+// EnableSocket enables and starts Podman's API socket unit.
 func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
@@ -1081,30 +1029,21 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if _, _, err := infrasystemd.DefaultClient().EnableUnitFilesContext(ctx, []string{enableSocketUnit}, false, false); err != nil {
 		return fmt.Errorf("failed to enable %s socket: %w", engine, err)
 	}
-	return nil
-}
-
-// DisableSocket disables Podman's API socket unit.
-func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
-	if !isPodmanEngine(engine) {
-		return errors.New("socket 操作仅支持 Podman")
-	}
-	if _, err := infrasystemd.DefaultClient().DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
-		return fmt.Errorf("failed to disable %s socket: %w", engine, err)
+	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, enableSocketUnit, "replace"); err != nil {
+		return fmt.Errorf("failed to start %s socket: %w", engine, err)
 	}
 	return nil
 }
 
 // GetInfo returns the engine's system info as a map.
 func (s *Service) GetInfo(ctx context.Context, engine Engine) (map[string]any, error) {
-	output, err := exec.CommandContext(ctx, engineBinary(engine), "info", "--format", "{{json .}}").CombinedOutput()
-	if err != nil {
-		return nil, errx.Internal("%s info failed: %s", engine, output)
+	if err := s.checkEngine(ctx, engine); err != nil {
+		return nil, err
 	}
 
-	var info map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(string(output))), &info); err != nil {
-		return nil, fmt.Errorf("parse %s info: %w", engine, err)
+	info, err := infracontainer.DefaultClient().Info(ctx, infracontainer.Engine(engine))
+	if err != nil {
+		return nil, errx.Internal("%s info failed: %w", engine, err)
 	}
 
 	return info, nil

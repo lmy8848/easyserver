@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Tabs, Select, Badge, Button, Switch, Space, message, Result } from 'antd';
+import { Tabs, Select, Badge, Button, Space, message, Result } from 'antd';
 import {
   CodeOutlined, CloudDownloadOutlined,
   DatabaseOutlined, GlobalOutlined, FolderOutlined,
@@ -31,11 +31,10 @@ const engineOptionLabel = (e: string) => (
   </span>
 );
 
-// Health score for engine auto-selection: running > installed-not-running >
-// not-installed > unknown. Podman counts as running once installed.
-function engineScore(e: string, s: DockerStatus | null): number {
+// Health score for engine auto-selection: running > installed-not-running > not-installed > unknown.
+function engineScore(_: string, s: DockerStatus | null): number {
   if (!s) return 0;
-  if (s.installed && (e === 'podman' || s.running)) return 3;
+  if (s.installed && s.running) return 3;
   if (s.installed) return 2;
   return 1;
 }
@@ -47,7 +46,6 @@ export default function Container() {
   const [checking, setChecking] = useState(true);
   const [installing, runInstall] = useAsyncRun();
   const [starting, runStart] = useAsyncRun();
-  const [socketLoading, runSocket] = useAsyncRun();
   const pickedRef = useRef(false); // auto-select the healthiest engine only on first load
 
   // Detect both engines on mount.
@@ -79,8 +77,7 @@ export default function Container() {
   useEffect(() => { checkRuntimes(); }, [checkRuntimes]);
 
   const status = statuses[engine];
-  // Podman has no daemon → running if installed; Docker needs docker.service running.
-  const ready = !!status?.installed && (engine === 'podman' || !!status?.running);
+  const ready = !!status?.installed && !!status?.running;
 
   const handleInstall = async () => {
     try {
@@ -100,17 +97,6 @@ export default function Container() {
       message.success(`${engine} 已启动`);
     } catch {
       message.error(`启动 ${engine} 失败`);
-    } finally {
-      await checkRuntimes();
-    }
-  };
-
-  const handleSocket = async (action: 'enable' | 'disable') => {
-    try {
-      await runSocket(() => containerApi.controlSocket(action, engine));
-      message.success(`Socket 已${action === 'enable' ? '启用' : '禁用'}`);
-    } catch {
-      message.error('Socket 操作失败');
     } finally {
       await checkRuntimes();
     }
@@ -155,18 +141,9 @@ export default function Container() {
         <Space style={{ marginLeft: 12 }}>
           {!status?.installed ? (
             <Button icon={<RocketOutlined />} loading={installing} onClick={handleInstall}>安装 {engine}</Button>
-          ) : engine === 'docker' && !status.running ? (
-            <Button icon={<PlayCircleOutlined />} loading={starting} onClick={handleStart}>启动</Button>
+          ) : !status.running ? (
+            <Button icon={<PlayCircleOutlined />} loading={starting} onClick={handleStart}>启动 {engine}</Button>
           ) : null}
-          {status?.installed && engine === 'podman' && (
-            <Switch
-              checked={!!status.socket_enabled}
-              checkedChildren="Socket"
-              unCheckedChildren="Socket"
-              loading={socketLoading}
-              onChange={(checked) => handleSocket(checked ? 'enable' : 'disable')}
-            />
-          )}
           <Button icon={<ReloadOutlined />} loading={checking} onClick={checkRuntimes}>刷新</Button>
         </Space>
       </div>

@@ -44,7 +44,7 @@ type Service struct {
 }
 
 // NewService creates a database Service over the given Repository and container
-// runtime. Production passes NewCLIContainerRuntime(exec); tests pass a fake
+// runtime. Production passes NewSocketContainerRuntime(); tests pass a fake
 // DatabaseRuntime. Sweeps orphaned backup rows (running → failed) from a
 // previous crashed process.
 func NewService(repo Repository, runtime DatabaseRuntime) *Service {
@@ -216,8 +216,10 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 	if _, err := s.taskMgr.StartWithLog(ctx, containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
-		if cli, ok := rt.(*CLIContainerRuntime); ok {
-			cli.SetOutputHook(func(line string) { log.Append(line) })
+		if sockRt, ok := rt.(*SocketContainerRuntime); ok {
+			dedicatedRt := NewSocketContainerRuntime(sockRt.client)
+			dedicatedRt.SetOutputHook(func(line string) { log.Append(line) })
+			rt = dedicatedRt
 		}
 		// Detach from the request context: the install outlives the HTTP request
 		// (which is canceled once CreateInstance responds), so it must not inherit
@@ -680,15 +682,19 @@ func (s *Service) recreateInstanceContainer(ctx context.Context, v *DBInstance, 
 }
 
 // postgresMajor extracts the PostgreSQL major version from an image reference
-// (e.g. "docker.io/postgres:18-alpine" → 18). Returns 0 when the tag carries no
-// leading version number.
+// (e.g. "docker.io/postgres:18-alpine" → 18, "postgres:18@sha256:..." → 18).
+// Returns 0 when the tag carries no leading version number.
 func postgresMajor(image string) int {
-	i := strings.LastIndex(image, ":")
-	if i < 0 {
+	if at := strings.Index(image, "@"); at >= 0 {
+		image = image[:at]
+	}
+	slash := strings.LastIndex(image, "/")
+	colon := strings.LastIndex(image, ":")
+	if colon < 0 || colon < slash {
 		return 0
 	}
 	var major int
-	if n, err := fmt.Sscanf(image[i+1:], "%d", &major); err != nil || n != 1 {
+	if n, err := fmt.Sscanf(image[colon+1:], "%d", &major); err != nil || n != 1 {
 		return 0
 	}
 	return major

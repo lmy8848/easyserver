@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 
 	infrasystemd "easyserver/internal/infra/systemd"
 	"easyserver/internal/util"
@@ -301,11 +302,30 @@ func (s *Service) GetSessions(ctx context.Context) ([]Session, error) {
 	return sessions, nil
 }
 
-// KillSession kills an SSH session by PID.
+// KillSession kills an active SSH session by PID after verifying its identity.
 func (s *Service) KillSession(ctx context.Context, pid int) error {
-	output, err := exec.CommandContext(ctx, "kill", strconv.Itoa(pid)).CombinedOutput()
+	if pid <= 1 || pid == os.Getpid() {
+		return errors.New("invalid or protected PID")
+	}
+
+	sessions, err := s.GetSessions(ctx)
 	if err != nil {
-		return fmt.Errorf("kill failed: %s: %w", output, err)
+		return fmt.Errorf("retrieve active sessions: %w", err)
+	}
+
+	var found bool
+	for _, sess := range sessions {
+		if sess.PID == pid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("process %d is not an active SSH session", pid)
+	}
+
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		return fmt.Errorf("kill session %d failed: %w", pid, err)
 	}
 	log.Printf("ssh: killed session %d", pid)
 	return nil

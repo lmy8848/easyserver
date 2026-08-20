@@ -116,22 +116,6 @@ type Stats struct {
 	PIDs       int     `json:"pids"`
 }
 
-// ProcessInfo represents a process running inside a container.
-type ProcessInfo struct {
-	User    string `json:"user"`
-	PID     string `json:"pid"`
-	PPID    string `json:"ppid"`
-	CPU     string `json:"cpu"`
-	MEM     string `json:"mem"`
-	VSZ     string `json:"vsz"`
-	RSS     string `json:"rss"`
-	TTY     string `json:"tty"`
-	Stat    string `json:"stat"`
-	Start   string `json:"start"`
-	Time    string `json:"time"`
-	Command string `json:"command"`
-}
-
 // UpdateRequest represents a request to update container resources.
 type UpdateRequest struct {
 	Memory  int64   `json:"memory"`

@@ -1,14 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Button, Space, message, Table, Input,
+  Card, Button, Space, message, Table, Input, Select,
   Tag, Popconfirm, Alert, Descriptions, Statistic, Row, Col,
 } from 'antd';
 import {
   ReloadOutlined, PlusOutlined, DeleteOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
-import { sshApi } from '../../services/ssh';
+import { sshApi, type AuthorizedKey } from '../../services/ssh';
 
-interface AuthorizedKey { comment: string; type: string; key: string; }
 interface Jail { name: string; failed: number; banned: number; }
 interface Fail2banStatus { installed: boolean; active: boolean; enabled: boolean; jails: Jail[]; }
 
@@ -160,7 +159,7 @@ export default function SSHHardeningTab() {
           }}
           columns={[
             { title: '类型', dataIndex: 'type', key: 'type', width: 120, render: (t: string) => <Tag>{t}</Tag> },
-            { title: '指纹', dataIndex: 'key', key: 'key', ellipsis: true },
+            { title: '指纹', dataIndex: 'fingerprint', key: 'fingerprint', ellipsis: true },
             { title: '备注', dataIndex: 'comment', key: 'comment', ellipsis: true },
             { title: '操作', key: 'action', width: 80, render: (_: unknown, r: AuthorizedKey) => (
               <Popconfirm title="确定删除该公钥？" onConfirm={() => onRemoveKey(r.comment)}>
@@ -177,7 +176,15 @@ export default function SSHHardeningTab() {
           <Button icon={<PlusOutlined />} onClick={onAddKey}>添加公钥</Button>
           <Space>
             <Input placeholder="密钥名" value={genName} onChange={(e) => setGenName(e.target.value)} style={{ width: 160 }} />
-            <Input placeholder="类型" value={genType} onChange={(e) => setGenType(e.target.value)} style={{ width: 100 }} />
+            <Select
+              value={genType}
+              onChange={setGenType}
+              style={{ width: 160 }}
+              options={[
+                { value: 'ed25519', label: 'Ed25519 (推荐)' },
+                { value: 'rsa', label: 'RSA (4096位)' },
+              ]}
+            />
             <Button onClick={onGenerate}>生成密钥对（下载私钥）</Button>
           </Space>
         </Space>
