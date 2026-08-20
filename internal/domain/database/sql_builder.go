@@ -308,7 +308,7 @@ func (b *SQLBuilder) BuildDescribeTable(table string) (string, error) {
 			FROM information_schema.columns
 			WHERE table_name = $1 ORDER BY ordinal_position;`, nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -434,7 +434,7 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 		}
 		return fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", ")), nil
 	default:
-		return "", errors.New("不支持的数据库类型")
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -493,7 +493,7 @@ func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
 	case DBTypePostgreSQL:
 		return fmt.Sprintf("DROP TABLE \"%s\";", tableName), nil
 	default:
-		return "", errors.New("不支持的数据库类型")
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -501,7 +501,7 @@ func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
 // and charset).
 func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, error) {
 	if !isValidDBName(name) {
-		return "", errors.New("invalid database name")
+		return "", ErrInvalidDBName
 	}
 	if charset == "" {
 		charset = defaultCharset
@@ -519,14 +519,14 @@ func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, e
 		}
 		return fmt.Sprintf(`CREATE DATABASE "%s" ENCODING '%s';`, name, encoding), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
 // BuildDropDatabase generates a DROP DATABASE statement (validated name).
 func (b *SQLBuilder) BuildDropDatabase(name string) (string, error) {
 	if !isValidDBName(name) {
-		return "", errors.New("invalid database name")
+		return "", ErrInvalidDBName
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
@@ -534,7 +534,7 @@ func (b *SQLBuilder) BuildDropDatabase(name string) (string, error) {
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`DROP DATABASE "%s";`, name), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -558,7 +558,7 @@ func (b *SQLBuilder) BuildCreateUser(username, password, host string) (string, e
 		return fmt.Sprintf(`CREATE USER "%s" WITH PASSWORD '%s';`,
 			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(password)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -584,7 +584,7 @@ func (b *SQLBuilder) BuildResetPassword(username, newPassword, host string) (str
 		return fmt.Sprintf(`ALTER USER "%s" WITH PASSWORD '%s';`,
 			strings.ReplaceAll(username, `"`, `""`), b.EscapeString(newPassword)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -603,7 +603,7 @@ func (b *SQLBuilder) BuildDropUser(username, host string) (string, error) {
 	case DBTypePostgreSQL:
 		return fmt.Sprintf(`DROP USER "%s";`, strings.ReplaceAll(username, `"`, `""`)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -628,7 +628,7 @@ func (b *SQLBuilder) BuildGrant(privileges, database, username, host string) (st
 		return fmt.Sprintf(`GRANT %s ON DATABASE %s TO %s;`,
 			validatedPrivs, b.QuoteIdentifier(database), b.QuoteIdentifier(username)), nil
 	default:
-		return "", fmt.Errorf("unsupported db type: %s", b.dbType)
+		return "", ErrUnsupportedDBType
 	}
 }
 

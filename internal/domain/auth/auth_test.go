@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -21,22 +22,21 @@ func TestValidatePassword(t *testing.T) {
 		name     string
 		password string
 		wantErr  bool
-		errMsg   string
 	}{
-		{"valid password", "Abcdef12", false, ""},
-		{"valid with special chars", "Abc@1234!", false, ""},
-		{"too short", "Abc12", true, "password must be at least 8 characters"},
-		{"exactly 7 chars", "Abc1234", true, "password must be at least 8 characters"},
-		{"exactly 8 chars valid", "Abcdefg1", false, ""},
-		{"too long (>72)", string(make([]byte, 73)), true, "password must be less than 72 characters"},
-		{"no uppercase", "abcdefg1", true, "password must contain upper, lower case and digit"},
-		{"no lowercase", "ABCDEFG1", true, "password must contain upper, lower case and digit"},
-		{"no digit", "Abcdefgh", true, "password must contain upper, lower case and digit"},
-		{"only digits", "12345678", true, "password must contain upper, lower case and digit"},
-		{"only lowercase", "abcdefgh", true, "password must contain upper, lower case and digit"},
-		{"only uppercase", "ABCDEFGH", true, "password must contain upper, lower case and digit"},
-		{"empty string", "", true, "password must be at least 8 characters"},
-		{"72 chars valid", buildPassword(72, true, true, true), false, ""},
+		{"valid password", "Abcdef12", false},
+		{"valid with special chars", "Abc@1234!", false},
+		{"too short", "Abc12", true},
+		{"exactly 7 chars", "Abc1234", true},
+		{"exactly 8 chars valid", "Abcdefg1", false},
+		{"too long (>72)", string(make([]byte, 73)), true},
+		{"no uppercase", "abcdefg1", true},
+		{"no lowercase", "ABCDEFG1", true},
+		{"no digit", "Abcdefgh", true},
+		{"only digits", "12345678", true},
+		{"only lowercase", "abcdefgh", true},
+		{"only uppercase", "ABCDEFGH", true},
+		{"empty string", "", true},
+		{"72 chars valid", buildPassword(72, true, true, true), false},
 	}
 
 	for _, tt := range tests {
@@ -45,8 +45,8 @@ func TestValidatePassword(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidatePassword(%q) error = %v, wantErr %v", tt.password, err, tt.wantErr)
 			}
-			if tt.wantErr && err != nil && err.Error() != tt.errMsg {
-				t.Errorf("ValidatePassword(%q) error message = %q, want %q", tt.password, err.Error(), tt.errMsg)
+			if tt.wantErr && !errors.Is(err, ErrInvalidPassword) {
+				t.Errorf("ValidatePassword(%q) error = %v, want ErrInvalidPassword", tt.password, err)
 			}
 		})
 	}
@@ -181,8 +181,8 @@ func TestLogin_InvalidPassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong password")
 	}
-	if err.Error() != "用户名或密码错误" {
-		t.Errorf("error = %q, want %q", err.Error(), "用户名或密码错误")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("error = %v, want ErrInvalidCredentials", err)
 	}
 }
 
@@ -195,8 +195,8 @@ func TestLogin_UserNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-existent user")
 	}
-	if err.Error() != "用户名或密码错误" {
-		t.Errorf("error = %q, want %q", err.Error(), "用户名或密码错误")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("error = %v, want ErrInvalidCredentials", err)
 	}
 }
 
@@ -210,8 +210,8 @@ func TestLogin_AccountLocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for locked account")
 	}
-	if err.Error() != "账号已被锁定" {
-		t.Errorf("error = %q, want %q", err.Error(), "账号已被锁定")
+	if !errors.Is(err, ErrAccountLocked) {
+		t.Errorf("error = %v, want ErrAccountLocked", err)
 	}
 }
 
@@ -270,8 +270,8 @@ func TestChangePassword_WrongOldPassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong old password")
 	}
-	if err.Error() != "invalid old password" {
-		t.Errorf("error = %q, want %q", err.Error(), "invalid old password")
+	if !errors.Is(err, ErrOldPasswordInvalid) {
+		t.Errorf("error = %v, want ErrOldPasswordInvalid", err)
 	}
 }
 
@@ -285,6 +285,9 @@ func TestChangePassword_SamePassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when new password equals old password")
 	}
+	if !errors.Is(err, ErrSamePassword) {
+		t.Errorf("error = %v, want ErrSamePassword", err)
+	}
 }
 
 func TestChangePassword_AccountLocked(t *testing.T) {
@@ -297,8 +300,8 @@ func TestChangePassword_AccountLocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for locked account")
 	}
-	if err.Error() != "account is locked" {
-		t.Errorf("error = %q, want %q", err.Error(), "account is locked")
+	if !errors.Is(err, ErrAccountLocked) {
+		t.Errorf("error = %v, want ErrAccountLocked", err)
 	}
 }
 
@@ -311,6 +314,9 @@ func TestChangePassword_WeakNewPassword(t *testing.T) {
 	err := svc.ChangePassword(context.Background(), userID, "Admin123", "weak")
 	if err == nil {
 		t.Fatal("expected error for weak new password")
+	}
+	if !errors.Is(err, ErrInvalidPassword) {
+		t.Errorf("error = %v, want ErrInvalidPassword", err)
 	}
 }
 
@@ -388,10 +394,14 @@ func TestChangeUsername_InvalidFormat(t *testing.T) {
 	// too short
 	if err := svc.ChangeUsername(context.Background(), userID, "ab", "Admin123"); err == nil {
 		t.Error("expected error for short username")
+	} else if !errors.Is(err, ErrInvalidUsername) {
+		t.Errorf("error = %v, want ErrInvalidUsername", err)
 	}
 
 	// illegal characters
 	if err := svc.ChangeUsername(context.Background(), userID, "bad user name!", "Admin123"); err == nil {
 		t.Error("expected error for username with invalid characters")
+	} else if !errors.Is(err, ErrInvalidUsername) {
+		t.Errorf("error = %v, want ErrInvalidUsername", err)
 	}
 }

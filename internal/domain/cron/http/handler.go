@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -56,9 +55,9 @@ func (h *CronHandler) GetTask(c *gin.Context) (any, error) {
 
 // CreateTask creates a new cron task
 func (h *CronHandler) CreateTask(c *gin.Context) (any, error) {
-	var req cron.CreateCronTaskRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[cron.CreateCronTaskRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建定时任务 "+req.Name)
@@ -127,9 +126,9 @@ func (h *CronHandler) UpdateTask(c *gin.Context) (any, error) {
 		return nil, errx.NotFound("任务不存在")
 	}
 
-	var req cron.UpdateCronTaskRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[cron.UpdateCronTaskRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新定时任务 "+name)
@@ -377,13 +376,13 @@ func formatJournalTimestamp(realtime string) string {
 
 // CreateScript creates a new script
 func (h *CronHandler) CreateScript(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name        string `json:"name" binding:"required"`
 		Content     string `json:"content"`
 		Description string `json:"description"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建脚本 "+req.Name)
@@ -430,13 +429,13 @@ func (h *CronHandler) UpdateScript(c *gin.Context) (any, error) {
 		return nil, errx.NotFound("脚本不存在")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name        *string `json:"name"`
 		Content     *string `json:"content"`
 		Description *string `json:"description"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新脚本 "+oldScript.Name)
@@ -636,7 +635,7 @@ func validateWorkDir(dir string) error {
 		return nil
 	}
 	if !filepath.IsAbs(dir) {
-		return errors.New("工作目录必须是绝对路径")
+		return cron.ErrInvalidWorkDir
 	}
 	return nil
 }

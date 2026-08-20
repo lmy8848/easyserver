@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math/big"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +20,14 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
+)
+
+var (
+	usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,32}$`)
+	weakPasswords = []string{
+		"password", "12345678", "qwerty123", "admin123",
+		"password123", "letmein123", "welcome123",
+	}
 )
 
 const (
@@ -136,11 +144,11 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		if s.notifier != nil {
 			s.notifier.NotifyLogin(evt)
 		}
-		return nil, errors.New("用户名或密码错误")
+		return nil, ErrInvalidCredentials
 	}
 
 	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
-		return nil, errors.New("账号已被锁定")
+		return nil, ErrAccountLocked
 	}
 
 	if !verifyPassword(password, user.PasswordHash) {
@@ -159,7 +167,7 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		if s.notifier != nil {
 			s.notifier.NotifyLogin(evt)
 		}
-		return nil, errors.New("用户名或密码错误")
+		return nil, ErrInvalidCredentials
 	}
 
 	if err := s.userRepo.ResetLoginState(ctx, user.ID, ip); err != nil {
@@ -181,15 +189,15 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 	}
 
 	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
-		return errors.New("account is locked")
+		return ErrAccountLocked
 	}
 
 	if !verifyPassword(oldPassword, user.PasswordHash) {
-		return errors.New("invalid old password")
+		return ErrOldPasswordInvalid
 	}
 
 	if oldPassword == newPassword {
-		return errors.New("新密码不能与旧密码相同")
+		return ErrSamePassword
 	}
 
 	if err := s.ValidatePassword(newPassword); err != nil {
@@ -206,15 +214,8 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID int64, oldPassw
 
 func (s *AuthService) ChangeUsername(ctx context.Context, userID int64, newUsername, password string) error {
 	newUsername = strings.TrimSpace(newUsername)
-	if len(newUsername) < 3 || len(newUsername) > 32 {
-		return errors.New("用户名长度必须在 3 到 32 个字符之间")
-	}
-
-	for _, ch := range newUsername {
-		isValid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-'
-		if !isValid {
-			return errors.New("用户名只能包含字母、数字、下划线或短横线")
-		}
+	if !usernameRegex.MatchString(newUsername) {
+		return ErrInvalidUsername
 	}
 
 	user, err := s.userRepo.GetByID(ctx, userID)
@@ -223,20 +224,20 @@ func (s *AuthService) ChangeUsername(ctx context.Context, userID int64, newUsern
 	}
 
 	if user.LockedUntil.Valid && user.LockedUntil.Time.After(time.Now()) {
-		return errors.New("账户已锁定")
+		return ErrAccountLocked
 	}
 
 	if !verifyPassword(password, user.PasswordHash) {
-		return errors.New("当前密码不正确")
+		return ErrOldPasswordInvalid
 	}
 
 	if user.Username == newUsername {
-		return errors.New("新用户名不能与当前用户名相同")
+		return ErrSameUsername
 	}
 
 	existing, err := s.userRepo.GetByUsername(ctx, newUsername)
 	if err == nil && existing != nil && existing.ID != userID {
-		return errors.New("该用户名已存在")
+		return ErrUsernameTaken
 	}
 
 	return s.userRepo.UpdateUsername(ctx, userID, newUsername)
@@ -272,11 +273,8 @@ func (s *AuthService) ResetPassword(ctx context.Context, userID int64, newPasswo
 }
 
 func (s *AuthService) ValidatePassword(password string) error {
-	if len(password) < 8 {
-		return errors.New("password must be at least 8 characters")
-	}
-	if len(password) > 72 {
-		return errors.New("password must be less than 72 characters")
+	if len(password) < 8 || len(password) > 72 {
+		return ErrInvalidPassword
 	}
 
 	var hasUpper, hasLower, hasDigit bool
@@ -291,17 +289,11 @@ func (s *AuthService) ValidatePassword(password string) error {
 		}
 	}
 	if !hasUpper || !hasLower || !hasDigit {
-		return errors.New("password must contain upper, lower case and digit")
+		return ErrInvalidPassword
 	}
 
-	// Check for common weak passwords (after complexity check)
-	weakPasswords := []string{
-		"password", "12345678", "qwerty123", "admin123",
-		"password123", "letmein123", "welcome123",
-	}
-	lower := strings.ToLower(password)
-	if slices.Contains(weakPasswords, lower) {
-		return errors.New("password is too common")
+	if slices.Contains(weakPasswords, strings.ToLower(password)) {
+		return ErrInvalidPassword
 	}
 
 	return nil
@@ -440,7 +432,7 @@ func (s *AuthService) VerifyBackupCode(ctx context.Context, userID int64, code s
 func (s *AuthService) GetPendingSecret(ctx context.Context, userID int64) (string, error) {
 	v, ok := s.pendingSecrets.Load(userID)
 	if !ok {
-		return "", errors.New("no pending TOTP secret found")
+		return "", ErrNoPendingTOTP
 	}
 	return v.(string), nil
 }
@@ -468,7 +460,7 @@ func generateRandomCode(length int) (string, error) {
 
 func hashPassword(password string) (string, error) {
 	if len(password) > 72 {
-		return "", errors.New("password exceeds maximum length of 72 bytes")
+		return "", ErrInvalidPassword
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

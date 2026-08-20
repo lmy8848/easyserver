@@ -17,23 +17,35 @@ import (
 )
 
 var (
-	validPkgName    = regexp.MustCompile(`^(@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.-]+$`)
-	validPkgVersion = regexp.MustCompile(`^[a-zA-Z0-9_.\-+^~>=<*]+$`)
+	validPkgName    = regexp.MustCompile(`^(@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.][a-zA-Z0-9_.-]*$`)
+	validNpmVersion = regexp.MustCompile(`^[a-zA-Z0-9_.+^~>=<*| -]+$`)
+	validPipVersion = regexp.MustCompile(`^[a-zA-Z0-9_.+-]+$`)
 )
 
 func validatePackageName(name string) error {
-	if name == "" || strings.HasPrefix(name, "-") || !validPkgName.MatchString(name) {
+	if !validPkgName.MatchString(name) {
 		return errx.BadRequest("invalid package name: %s", name)
 	}
 	return nil
 }
 
-func validatePackageVersion(version string) error {
+func validatePackageVersion(runtimeName, version string) error {
 	if version == "" {
 		return nil
 	}
-	if strings.HasPrefix(version, "-") || !validPkgVersion.MatchString(version) {
-		return errx.BadRequest("invalid package version: %s", version)
+	switch runtimeName {
+	case "node":
+		if !validNpmVersion.MatchString(version) {
+			return errx.BadRequest("invalid npm package version: %s", version)
+		}
+	case "python":
+		if !validPipVersion.MatchString(version) {
+			return errx.BadRequest("invalid pip package version: %s (must be an exact version like 1.2.3)", version)
+		}
+	default:
+		if !validNpmVersion.MatchString(version) {
+			return errx.BadRequest("invalid package version: %s", version)
+		}
 	}
 	return nil
 }
@@ -181,7 +193,7 @@ func (s *PackageService) InstallPackage(ctx context.Context, req *PackageInstall
 	if err := validatePackageName(req.Name); err != nil {
 		return err
 	}
-	if err := validatePackageVersion(req.Version); err != nil {
+	if err := validatePackageVersion(runtimeName, req.Version); err != nil {
 		return err
 	}
 	switch runtimeName {

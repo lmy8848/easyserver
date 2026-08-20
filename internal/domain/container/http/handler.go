@@ -104,11 +104,11 @@ func (h *ContainerHandler) GetEngineInfo(c *gin.Context) (any, error) {
 
 // ConfigureMirror configures a engine's registry mirror
 func (h *ContainerHandler) ConfigureMirror(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		MirrorURL string `json:"mirror_url"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	engine := h.engineName(c)
@@ -127,9 +127,9 @@ func (h *ContainerHandler) GetRegistryConfig(c *gin.Context) (any, error) {
 
 // SetRegistryConfig persists the engine's mirror + insecure registries.
 func (h *ContainerHandler) SetRegistryConfig(c *gin.Context) (any, error) {
-	var req container.RegistryConfig
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[container.RegistryConfig](c)
+	if err != nil {
+		return nil, err
 	}
 	engine := h.engineName(c)
 	middleware.AuditSummary(c, "配置 "+string(engine)+" 镜像仓库")
@@ -141,9 +141,9 @@ func (h *ContainerHandler) SetRegistryConfig(c *gin.Context) (any, error) {
 
 // RegistryLogin logs into a private registry.
 func (h *ContainerHandler) RegistryLogin(c *gin.Context) (any, error) {
-	var req container.RegistryAuth
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[container.RegistryAuth](c)
+	if err != nil {
+		return nil, err
 	}
 	engine := h.engineName(c)
 	middleware.AuditSummary(c, "登录 "+string(engine)+" 私有仓库 "+req.Server)
@@ -197,9 +197,9 @@ func (h *ContainerHandler) GetContainer(c *gin.Context) (any, error) {
 
 // CreateContainer creates a new container
 func (h *ContainerHandler) CreateContainer(c *gin.Context) (any, error) {
-	var req container.CreateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[container.CreateRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建容器 "+req.Name)
@@ -292,11 +292,11 @@ func (h *ContainerHandler) GetContainerLogs(c *gin.Context) (any, error) {
 // ExecInContainer executes a command in a container
 func (h *ContainerHandler) ExecInContainer(c *gin.Context) (any, error) {
 	id := c.Param("id")
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Command string `json:"command" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Log exec command for audit
@@ -322,11 +322,11 @@ func (h *ContainerHandler) GetContainerStats(c *gin.Context) (any, error) {
 // RenameContainer renames a container
 func (h *ContainerHandler) RenameContainer(c *gin.Context) (any, error) {
 	id := c.Param("id")
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name string `json:"name" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "重命名容器 "+id+" 为 "+req.Name)
@@ -339,9 +339,9 @@ func (h *ContainerHandler) RenameContainer(c *gin.Context) (any, error) {
 // UpdateContainer updates container resources
 func (h *ContainerHandler) UpdateContainer(c *gin.Context) (any, error) {
 	id := c.Param("id")
-	var req container.UpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[container.UpdateRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新容器 "+id)
@@ -364,11 +364,11 @@ func (h *ContainerHandler) ListImages(c *gin.Context) (any, error) {
 
 // PullImage pulls an image
 func (h *ContainerHandler) PullImage(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Image string `json:"image" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "拉取镜像 "+req.Image)
@@ -399,11 +399,11 @@ func (h *ContainerHandler) ListComposeProjects(c *gin.Context) (any, error) {
 
 // ComposeUp runs compose up -d
 func (h *ContainerHandler) ComposeUp(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "启动 Compose "+req.ProjectDir)
@@ -415,11 +415,11 @@ func (h *ContainerHandler) ComposeUp(c *gin.Context) (any, error) {
 
 // ComposeDown runs compose down
 func (h *ContainerHandler) ComposeDown(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "停止 Compose "+req.ProjectDir)
@@ -431,11 +431,11 @@ func (h *ContainerHandler) ComposeDown(c *gin.Context) (any, error) {
 
 // ComposeRestart runs compose restart
 func (h *ContainerHandler) ComposeRestart(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "重启 Compose "+req.ProjectDir)
@@ -475,12 +475,12 @@ func (h *ContainerHandler) ComposeGetConfig(c *gin.Context) (any, error) {
 
 // ComposeSaveConfig writes docker-compose.yml content
 func (h *ContainerHandler) ComposeSaveConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		ProjectDir string `json:"project_dir" binding:"required"`
 		Content    string `json:"content" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "保存 Compose 配置 "+req.ProjectDir)
@@ -503,13 +503,13 @@ func (h *ContainerHandler) ListVolumes(c *gin.Context) (any, error) {
 
 // CreateVolume creates a new volume
 func (h *ContainerHandler) CreateVolume(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name   string            `json:"name" binding:"required"`
 		Driver string            `json:"driver"`
 		Labels map[string]string `json:"labels"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建数据卷 "+req.Name)
@@ -543,12 +543,12 @@ func (h *ContainerHandler) ListNetworks(c *gin.Context) (any, error) {
 
 // CreateNetwork creates a new network
 func (h *ContainerHandler) CreateNetwork(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name   string `json:"name" binding:"required"`
 		Driver string `json:"driver"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建网络 "+req.Name)

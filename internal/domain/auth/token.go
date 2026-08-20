@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -58,7 +57,7 @@ func ValidateTOTPTempToken(secret string, tokenString string) (int64, error) {
 		return 0, err
 	}
 	if !token.Valid {
-		return 0, errors.New("invalid token")
+		return 0, ErrInvalidToken
 	}
 
 	return claims.UserID, nil

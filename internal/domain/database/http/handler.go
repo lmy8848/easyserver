@@ -220,9 +220,9 @@ func (h *InstanceHandler) CancelInstall(c *gin.Context) (any, error) {
 }
 
 func (h *InstanceHandler) CreateInstance(c *gin.Context) (any, error) {
-	var req database.CreateDBInstanceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[database.CreateDBInstanceRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	if !database.IsValidDBType(req.DBType) {
 		return nil, errx.BadRequest("无效的数据库类型")
@@ -328,11 +328,11 @@ func (h *InstanceHandler) SaveInstanceConfig(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Params map[string]string `json:"params"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if err := h.svc.SaveInstanceConfig(c.Request.Context(), iid, req.Params); err != nil {
 		return nil, err
@@ -370,9 +370,9 @@ func (h *DatabaseHandler) CreateDatabase(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req database.CreateDatabaseRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[database.CreateDatabaseRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建数据库 "+req.Name)
 	db, err := h.svc.CreateDatabase(c.Request.Context(), iid, &req)
@@ -495,11 +495,11 @@ func (h *DatabaseHandler) ExecuteSQL(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		SQL string `json:"sql" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "执行SQL (数据库: "+dbName+")")
 
@@ -521,12 +521,12 @@ func (h *DatabaseHandler) InsertRecord(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Table string         `json:"table" binding:"required"`
 		Data  map[string]any `json:"data" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if !database.IsValidTableName(req.Table) {
 		return nil, errx.BadRequest("无效的表名")
@@ -551,14 +551,14 @@ func (h *DatabaseHandler) UpdateRecord(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Table      string         `json:"table" binding:"required"`
 		Data       map[string]any `json:"data" binding:"required"`
 		PrimaryKey string         `json:"primary_key" binding:"required"`
 		PrimaryVal any            `json:"primary_val" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if !database.IsValidTableName(req.Table) {
 		return nil, errx.BadRequest("无效的表名")
@@ -583,13 +583,13 @@ func (h *DatabaseHandler) DeleteRecord(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Table      string `json:"table" binding:"required"`
 		PrimaryKey string `json:"primary_key" binding:"required"`
 		PrimaryVal any    `json:"primary_val" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if !database.IsValidTableName(req.Table) {
 		return nil, errx.BadRequest("无效的表名")
@@ -616,7 +616,7 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name      string `json:"name" binding:"required"`
 		Charset   string `json:"charset"`
 		Collation string `json:"collation"`
@@ -630,9 +630,9 @@ func (h *DatabaseHandler) CreateTable(c *gin.Context) (any, error) {
 			Unique       bool   `json:"unique"`
 			DefaultValue string `json:"default_value"`
 		} `json:"columns" binding:"required,min=1"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if !database.IsValidTableName(req.Name) {
 		return nil, errx.BadRequest("无效的表名")
@@ -714,9 +714,9 @@ func (h *UserHandler) CreateDBUser(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req database.CreateDBUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[database.CreateDBUserRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建数据库用户 "+req.Username)
 	user, err := h.svc.CreateDBUser(c.Request.Context(), iid, &req)
@@ -753,9 +753,9 @@ func (h *UserHandler) GrantPrivileges(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的用户名")
 	}
 	host := c.DefaultQuery("host", "%")
-	var req database.GrantRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[database.GrantRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "授权数据库用户 "+username)
 	if err := h.svc.GrantPrivileges(c.Request.Context(), iid, username, host, &req); err != nil {
@@ -774,9 +774,9 @@ func (h *UserHandler) ResetPassword(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的用户名")
 	}
 	host := c.DefaultQuery("host", "%")
-	var req database.ResetPasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[database.ResetPasswordRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "重置数据库用户密码 "+username)
 	if err := h.svc.ResetPassword(c.Request.Context(), iid, username, host, req.Password); err != nil {
@@ -871,10 +871,10 @@ func (h *BackupHandler) RestoreBackup(c *gin.Context) (any, error) {
 	}
 
 	// Require confirmation
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Confirm bool `json:"confirm"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
+	}](c)
+	if err != nil || !req.Confirm {
 		return nil, errx.BadRequest("请确认恢复，设置 {\"confirm\": true}")
 	}
 	backup, err := h.svc.GetBackup(c.Request.Context(), bid)

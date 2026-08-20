@@ -1,7 +1,6 @@
 package web
 
 import (
-	"errors"
 	"regexp"
 )
 
@@ -77,11 +76,8 @@ type CreateWebsiteRequest struct {
 var domainRegexp = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$`)
 
 func ValidateDomainName(domain string) error {
-	if len(domain) == 0 || len(domain) > 253 {
-		return errors.New("domain length must be between 1 and 253 characters")
-	}
-	if !domainRegexp.MatchString(domain) {
-		return errors.New("invalid domain format: must be a valid RFC 1123 hostname")
+	if len(domain) > 253 || !domainRegexp.MatchString(domain) {
+		return ErrInvalidDomain
 	}
 	return nil
 }

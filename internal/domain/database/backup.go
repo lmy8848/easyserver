@@ -51,7 +51,7 @@ func (s *Service) CreateBackup(ctx context.Context, instanceID int64, dbName str
 	case DBTypeRedis:
 		fileName = fmt.Sprintf("dump_%s.rdb", timestamp)
 	default:
-		return nil, fmt.Errorf("unsupported db type: %s", dbType)
+		return nil, ErrUnsupportedDBType
 	}
 	filePath := filepath.Join(backupDir, fileName)
 	rel, err := filepath.Rel(backupDir, filePath)
@@ -188,12 +188,12 @@ func copyFile(src, dst string, safeBaseDir string) error {
 	cleanSrc := filepath.Clean(src)
 	cleanDst := filepath.Clean(dst)
 	if strings.Contains(cleanSrc, "\x00") || strings.Contains(cleanDst, "\x00") {
-		return errors.New("invalid file path")
+		return errx.BadRequest("invalid file path")
 	}
 	if safeBaseDir != "" {
 		ok, err := isPathWithinBase(cleanDst, safeBaseDir)
 		if err != nil || !ok {
-			return errors.New("destination path escapes safe directory")
+			return errx.Forbidden("destination path escapes safe directory")
 		}
 	}
 	srcFi, err := os.Lstat(cleanSrc)
@@ -201,11 +201,11 @@ func copyFile(src, dst string, safeBaseDir string) error {
 		return err
 	}
 	if !srcFi.Mode().IsRegular() {
-		return errors.New("source is not a regular file")
+		return errx.BadRequest("source is not a regular file")
 	}
 	if dstFi, err := os.Lstat(cleanDst); err == nil {
 		if !dstFi.Mode().IsRegular() {
-			return errors.New("destination exists and is not a regular file")
+			return errx.BadRequest("destination exists and is not a regular file")
 		}
 		_ = os.Remove(cleanDst)
 	}
@@ -276,7 +276,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 
 	// 备份任务运行中不能删（task 可能正在写该行）。
 	if backup.Status == "running" {
-		return errors.New("备份进行中，请等待完成后再删除")
+		return ErrBackupInProgress
 	}
 
 	if err := os.Remove(backup.FilePath); err != nil && !os.IsNotExist(err) {
@@ -289,7 +289,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id int64) error {
 	st, restoring := s.restoreTask[id]
 	s.restoreMu.Unlock()
 	if restoring && st.Status == "running" {
-		return errors.New("该备份正在恢复中，无法删除")
+		return ErrRestoreInProgress
 	}
 
 	return s.repo.DeleteBackup(ctx, id)
@@ -306,7 +306,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 	}
 
 	if backup.Status != "success" {
-		return errors.New("备份不是已完成状态，无法恢复")
+		return ErrBackupNotFinished
 	}
 
 	if _, err := os.Stat(backup.FilePath); os.IsNotExist(err) {
@@ -329,7 +329,7 @@ func (s *Service) RestoreBackup(ctx context.Context, id int64, dbType DBType) er
 		case DBTypeRedis:
 			rerr = s.restoreRedis(ctx, backup)
 		default:
-			rerr = fmt.Errorf("unsupported db type: %s", dbType)
+			rerr = ErrUnsupportedDBType
 		}
 
 		s.restoreMu.Lock()
@@ -421,7 +421,7 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) (retErr er
 	}
 	// AOF 开启时 Redis 启动忽略 RDB（AOF 优先），恢复 RDB 会静默失效——直接拒绝。
 	if aof, err := s.redisFor().ConfigGet(ctx, instance, "appendonly"); err == nil && aof == "yes" {
-		return errors.New("redis 已开启 AOF（appendonly=yes），RDB 恢复会被忽略；请先在配置中关闭 AOF 再恢复")
+		return ErrRedisAOFEnabled
 	}
 
 	data, err := os.ReadFile(backup.FilePath)
@@ -546,7 +546,7 @@ func (s *Service) SweepOrphanBackups(ctx context.Context) {
 // reloads — never for SQL data operations, which use the driver channel.
 func (s *Service) runInContainer(ctx context.Context, instance *DBInstance, args ...string) (string, error) {
 	if instance == nil || instance.ContainerEngine == "" || instance.ContainerName == "" {
-		return "", errors.New("database instance is not container-managed")
+		return "", ErrNotContainerManaged
 	}
 	args = s.withAdminCredentials(instance, args)
 	return s.runtime.Exec(ctx, instance.ContainerEngine, instance.ContainerName, args...)

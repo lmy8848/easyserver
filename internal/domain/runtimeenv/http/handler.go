@@ -84,9 +84,9 @@ func (h *RuntimeHandler) ListByName(c *gin.Context) (any, error) {
 
 // Install installs a runtime environment
 func (h *RuntimeHandler) Install(c *gin.Context) (any, error) {
-	var req runtimeenv.RuntimeInstallRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[runtimeenv.RuntimeInstallRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate runtime name
@@ -106,9 +106,9 @@ func (h *RuntimeHandler) Install(c *gin.Context) (any, error) {
 
 // Uninstall uninstalls a runtime environment
 func (h *RuntimeHandler) Uninstall(c *gin.Context) (any, error) {
-	var req runtimeenv.RuntimeUninstallRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[runtimeenv.RuntimeUninstallRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate runtime name
@@ -285,9 +285,9 @@ func (h *PackageManagerHandler) ListPackages(c *gin.Context) (any, error) {
 
 // InstallPackage installs a package
 func (h *PackageManagerHandler) InstallPackage(c *gin.Context) (any, error) {
-	var req runtimeenv.PackageInstallRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[runtimeenv.PackageInstallRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
@@ -314,9 +314,9 @@ func (h *PackageManagerHandler) InstallPackage(c *gin.Context) (any, error) {
 
 // UninstallPackage uninstalls a package
 func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) (any, error) {
-	var req runtimeenv.PackageUninstallRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[runtimeenv.PackageUninstallRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
@@ -340,9 +340,9 @@ func (h *PackageManagerHandler) UninstallPackage(c *gin.Context) (any, error) {
 
 // UpdatePackage updates a package
 func (h *PackageManagerHandler) UpdatePackage(c *gin.Context) (any, error) {
-	var req runtimeenv.PackageUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	req, err := httpx.BindJSON[runtimeenv.PackageUpdateRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	lang, _, path, err := h.getRuntimeFromBinding(c, c.Query("runtime"))
@@ -453,14 +453,13 @@ func (h *PackageManagerHandler) GetRegistry(c *gin.Context) (any, error) {
 
 // SetRegistry sets the package manager registry
 func (h *PackageManagerHandler) SetRegistry(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Runtime  string `json:"runtime"` // lang@exact
 		Manager  string `json:"manager"`
 		Registry string `json:"registry"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	lang, _, path, err := h.getRuntimeFromBinding(c, req.Runtime)
@@ -501,12 +500,12 @@ func (h *MirrorHandler) List(c *gin.Context) (any, error) {
 
 // Create 新增/覆盖一个镜像源（保存即写入文件生效）。
 func (h *MirrorHandler) Create(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		EnvKey   string `json:"env_key" binding:"required"`
 		EnvValue string `json:"env_value" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建镜像源 "+req.EnvKey)
 	if err := h.mirrorService.Upsert(c.Request.Context(), req.EnvKey, req.EnvValue); err != nil {
@@ -518,11 +517,11 @@ func (h *MirrorHandler) Create(c *gin.Context) (any, error) {
 // Update 更新指定 env_key 的镜像地址。
 func (h *MirrorHandler) Update(c *gin.Context) (any, error) {
 	envKey := c.Param("env_key")
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		EnvValue string `json:"env_value" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "更新镜像源 "+envKey)
 	if err := h.mirrorService.Upsert(c.Request.Context(), envKey, req.EnvValue); err != nil {

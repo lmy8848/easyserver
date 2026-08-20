@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,6 +30,8 @@ const (
 	MaxLogTail       = 10000            // 最大日志行数
 	maxStreamBytes   = 10 * 1024 * 1024 // 流式输出最大字节数限制（10MB）
 )
+
+var containerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 // engineBinary maps a engine name to the CLI binary that manages it (for compose & file ops).
 func engineBinary(engine Engine) string {
@@ -251,7 +252,7 @@ func (s *Service) rejectManaged(ctx context.Context, engine Engine, id string) e
 		return nil //nolint:nilerr // 非受管容器时返回 nil，让后续操作自然处理
 	}
 	if insp.Config.Labels != nil && insp.Config.Labels["com.easyserver.managed"] == "true" {
-		return errors.New("受管数据库容器，请通过数据库模块操作")
+		return ErrManagedContainer
 	}
 	return nil
 }
@@ -388,11 +389,9 @@ func (s *Service) GetContainerLogs(ctx context.Context, engine Engine, id string
 	return string(rawBytes), nil
 }
 
-var validContainerIDRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
-
 func validateContainerID(id string) error {
-	if id == "" || strings.HasPrefix(id, "-") || !validContainerIDRE.MatchString(id) {
-		return errx.BadRequest("invalid container ID or name: %s", id)
+	if !containerNameRe.MatchString(id) {
+		return ErrInvalidContainerName
 	}
 	return nil
 }
@@ -406,7 +405,7 @@ func (s *Service) ExecInContainer(ctx context.Context, engine Engine, id, cmd st
 		return "", err
 	}
 	if strings.ContainsRune(cmd, '\x00') {
-		return "", errors.New("command contains null byte")
+		return "", ErrNullByteInCommand
 	}
 	const maxCmdLen = 4096
 	if len(cmd) > maxCmdLen {
@@ -683,16 +682,8 @@ func (s *Service) RenameContainer(ctx context.Context, engine Engine, id, newNam
 	if strings.TrimSpace(newName) == "" {
 		return errx.BadRequest("new container name cannot be empty")
 	}
-	if len(newName) > 128 {
-		return errors.New("container name too long (max 128 characters)")
-	}
-	for i, ch := range newName {
-		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') && ch != '_' && ch != '.' && ch != '-' {
-			return fmt.Errorf("invalid character '%c' in container name at position %d", ch, i)
-		}
-	}
-	if newName[0] == '.' || newName[0] == '-' {
-		return fmt.Errorf("container name cannot start with '%c'", newName[0])
+	if !containerNameRe.MatchString(newName) {
+		return ErrInvalidContainerName
 	}
 
 	if err := s.checkEngine(ctx, engine); err != nil {
@@ -1024,13 +1015,27 @@ func (s *Service) socketEnabled(ctx context.Context) bool {
 // EnableSocket enables and starts Podman's API socket unit.
 func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
-		return errors.New("socket 操作仅支持 Podman")
+		return ErrPodmanOnly
 	}
 	if _, _, err := infrasystemd.DefaultClient().EnableUnitFilesContext(ctx, []string{enableSocketUnit}, false, false); err != nil {
 		return fmt.Errorf("failed to enable %s socket: %w", engine, err)
 	}
 	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, enableSocketUnit, "replace"); err != nil {
 		return fmt.Errorf("failed to start %s socket: %w", engine, err)
+	}
+	return nil
+}
+
+// DisableSocket disables and stops Podman's API socket unit.
+func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
+	if !isPodmanEngine(engine) {
+		return ErrPodmanOnly
+	}
+	if _, err := infrasystemd.DefaultClient().DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
+		return fmt.Errorf("failed to disable %s socket: %w", engine, err)
+	}
+	if _, err := infrasystemd.DefaultClient().StopUnitContext(ctx, enableSocketUnit, "replace"); err != nil {
+		return fmt.Errorf("failed to stop %s socket: %w", engine, err)
 	}
 	return nil
 }
@@ -1413,11 +1418,11 @@ func (s *Service) ComposeGetLogs(ctx context.Context, engine Engine, projectDir 
 
 func isSafeProjectPath(projectDir string) (string, error) {
 	if projectDir == "" || !filepath.IsAbs(projectDir) || strings.Contains(projectDir, "\x00") || strings.Contains(projectDir, "..") {
-		return "", errors.New("invalid project directory")
+		return "", ErrInvalidProjectDir
 	}
 	cleanDir := filepath.Clean(projectDir)
 	if !filepath.IsAbs(cleanDir) || cleanDir == "/" || cleanDir == "." || strings.Contains(cleanDir, "..") {
-		return "", errors.New("invalid project directory path")
+		return "", ErrInvalidProjectDir
 	}
 	return cleanDir, nil
 }
@@ -1426,7 +1431,7 @@ func isSafeProjectPath(projectDir string) (string, error) {
 func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (string, error) {
 	cleanDir, err := isSafeProjectPath(projectDir)
 	if err != nil {
-		return "", errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+		return "", err
 	}
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {
@@ -1453,7 +1458,7 @@ func (s *Service) ComposeGetConfig(ctx context.Context, projectDir string) (stri
 func (s *Service) ComposeSaveConfig(ctx context.Context, projectDir, content string) error {
 	cleanDir, err := isSafeProjectPath(projectDir)
 	if err != nil {
-		return errx.BadRequest("invalid project directory: must be an absolute path without traversal")
+		return err
 	}
 	composeFile := s.findComposeFile(cleanDir)
 	if composeFile == "" {

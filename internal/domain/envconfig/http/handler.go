@@ -51,13 +51,13 @@ func (h *EnvConfigHandler) GetEnvConfig(c *gin.Context) (any, error) {
 
 // CreateEnvConfig creates a new environment configuration
 func (h *EnvConfigHandler) CreateEnvConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name    string `json:"name" binding:"required"`
 		Value   string `json:"value" binding:"required"`
 		Enabled bool   `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建环境变量 "+req.Name)
 
@@ -81,13 +81,13 @@ func (h *EnvConfigHandler) UpdateEnvConfig(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name    string `json:"name" binding:"required"`
 		Value   string `json:"value" binding:"required"`
 		Enabled bool   `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "更新环境变量 "+req.Name)
 
@@ -139,12 +139,12 @@ func (h *EnvConfigHandler) ListPathEntries(c *gin.Context) (any, error) {
 
 // CreatePathEntry creates a new PATH entry
 func (h *EnvConfigHandler) CreatePathEntry(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Path    string `json:"path" binding:"required"`
 		Enabled bool   `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "添加 PATH 条目 "+req.Path)
 
@@ -167,12 +167,12 @@ func (h *EnvConfigHandler) UpdatePathEntry(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Path    string `json:"path" binding:"required"`
 		Enabled bool   `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	existingPaths, err := h.envConfigService.ListPathEntries(c.Request.Context())

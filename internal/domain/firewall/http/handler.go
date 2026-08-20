@@ -57,10 +57,10 @@ func (h *FirewallHandler) EnableFirewall(c *gin.Context) (any, error) {
 // DisableFirewall disables the firewall
 func (h *FirewallHandler) DisableFirewall(c *gin.Context) (any, error) {
 	// Require confirmation
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Confirm bool `json:"confirm"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || !req.Confirm {
+	}](c)
+	if err != nil || !req.Confirm {
 		return nil, errx.BadRequest("请确认禁用防火墙，设置 {\"confirm\": true}")
 	}
 
@@ -73,9 +73,9 @@ func (h *FirewallHandler) DisableFirewall(c *gin.Context) (any, error) {
 
 // SetDefaultPolicy sets the default policy for a chain (INPUT or OUTPUT)
 func (h *FirewallHandler) SetDefaultPolicy(c *gin.Context) (any, error) {
-	var req firewall.SetDefaultPolicyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[firewall.SetDefaultPolicyRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "设置防火墙默认策略 "+req.Chain+" "+req.Policy)
@@ -366,9 +366,9 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("防火墙已禁用，请先启用防火墙")
 	}
 
-	var req firewall.CreateFirewallRuleRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[firewall.CreateFirewallRuleRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建防火墙规则 "+req.Port)
@@ -453,9 +453,9 @@ func (h *FirewallRuleHandler) UpdateRule(c *gin.Context) (any, error) {
 		return nil, errx.NotFound("规则不存在")
 	}
 
-	var req firewall.UpdateFirewallRuleRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[firewall.UpdateFirewallRuleRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	summary := "更新防火墙规则 (端口: " + rule.Port + ")"
@@ -633,9 +633,9 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("防火墙已禁用，请先启用防火墙")
 	}
 
-	var req firewall.BulkIDsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[firewall.BulkIDsRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "批量启用防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
@@ -670,9 +670,9 @@ func (h *FirewallRuleHandler) BulkEnableRules(c *gin.Context) (any, error) {
 
 // BulkDisableRules disables multiple firewall rules
 func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) (any, error) {
-	var req firewall.BulkIDsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[firewall.BulkIDsRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "批量禁用防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
@@ -701,9 +701,9 @@ func (h *FirewallRuleHandler) BulkDisableRules(c *gin.Context) (any, error) {
 
 // BulkDeleteRules deletes multiple firewall rules
 func (h *FirewallRuleHandler) BulkDeleteRules(c *gin.Context) (any, error) {
-	var req firewall.BulkIDsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[firewall.BulkIDsRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "批量删除防火墙规则 "+strconv.Itoa(len(req.IDs))+" 条")
@@ -741,9 +741,9 @@ func (h *FirewallRuleHandler) GetSystemRules(c *gin.Context) (any, error) {
 
 // DeleteSystemRule deletes a rule directly from the system (not from database)
 func (h *FirewallRuleHandler) DeleteSystemRule(c *gin.Context) (any, error) {
-	var rule firewall.FirewallRule
-	if err := c.ShouldBindJSON(&rule); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	rule, err := httpx.BindJSON[firewall.FirewallRule](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "删除系统防火墙规则 "+rule.Port)
@@ -813,9 +813,9 @@ func (h *FirewallRuleHandler) ExportRules(c *gin.Context) (any, error) {
 
 // ImportRules imports firewall rules from a JSON file
 func (h *FirewallRuleHandler) ImportRules(c *gin.Context) (any, error) {
-	var data FirewallExportData
-	if err := c.ShouldBindJSON(&data); err != nil {
-		return nil, errx.BadRequest("无效的 JSON: %w", err)
+	data, err := httpx.BindJSON[FirewallExportData](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "导入防火墙规则 "+strconv.Itoa(len(data.Rules))+" 条")
@@ -977,10 +977,10 @@ func (h *FirewallTemplateHandler) GetTemplates(c *gin.Context) (any, error) {
 
 // ApplyTemplate creates a firewall rule from a named template
 func (h *FirewallTemplateHandler) ApplyTemplate(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Name string `json:"name" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	}](c)
+	if err != nil {
 		return nil, errx.BadRequest("请提供模板名称")
 	}
 

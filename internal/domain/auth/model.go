@@ -3,20 +3,12 @@ package auth
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 )
 
 type Role string
 
 const RoleAdmin Role = "admin"
-
-// Sentinel errors for the confirm flow. The API layer maps these to HTTP
-// responses (expired vs. already-confirmed vs. generic).
-var (
-	ErrQRNotPending = errors.New("二维码已失效或已确认")
-	ErrQRExpired    = errors.New("二维码已过期")
-)
 
 // Status constants for a QR login session's lifecycle.
 const (

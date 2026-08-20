@@ -6,7 +6,6 @@ import (
 	"easyserver/internal/domain/security"
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
-	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,11 +31,11 @@ func (h *Handler) Scan(c *gin.Context) (any, error) {
 
 // Upgrade runs apt-get install --only-upgrade for the requested packages.
 func (h *Handler) Upgrade(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Packages []string `json:"packages" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "CVE 漏洞升级 "+strconv.Itoa(len(req.Packages))+" 个包")
 	out, err := h.svc.Upgrade(c.Request.Context(), req.Packages)

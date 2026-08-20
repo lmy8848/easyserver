@@ -17,6 +17,8 @@ import (
 	"easyserver/internal/infra/errx"
 )
 
+var portRegex = regexp.MustCompile(`^(\d+(-\d+)?)(,\d+(-\d+)?)*$`)
+
 // FirewallService manages local firewall rules
 type Service struct {
 	repo           Repository
@@ -631,11 +633,8 @@ func validateFirewallRuleFields(rule *FirewallRule) error {
 	}
 
 	// Validate Port (must be numeric or range)
-	if rule.Port != "" {
-		portRegex := regexp.MustCompile(`^(\d+(-\d+)?)(,\d+(-\d+)?)*$`)
-		if !portRegex.MatchString(rule.Port) {
-			return fmt.Errorf("invalid port: %s", rule.Port)
-		}
+	if rule.Port != "" && !portRegex.MatchString(rule.Port) {
+		return fmt.Errorf("invalid port: %s", rule.Port)
 	}
 
 	// Validate Source (must be valid IP/CIDR or empty)

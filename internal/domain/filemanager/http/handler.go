@@ -88,12 +88,11 @@ func (h *FileManagerHandler) List(c *gin.Context) (any, error) {
 
 // Mkdir creates a directory
 func (h *FileManagerHandler) Mkdir(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Path string `json:"path" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "创建目录 "+req.Path)
@@ -248,13 +247,12 @@ func inlineMIME(name string) (string, bool) {
 
 // Rename renames a file
 func (h *FileManagerHandler) Rename(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		OldPath string `json:"old_path" binding:"required"`
 		NewPath string `json:"new_path" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "重命名 "+req.OldPath+" 为 "+req.NewPath)
@@ -284,13 +282,12 @@ func (h *FileManagerHandler) Delete(c *gin.Context) (any, error) {
 
 // Move moves files
 func (h *FileManagerHandler) Move(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Paths []string `json:"paths" binding:"required"`
 		Dest  string   `json:"dest" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "移动文件到 "+req.Dest)
@@ -303,13 +300,12 @@ func (h *FileManagerHandler) Move(c *gin.Context) (any, error) {
 
 // Copy copies a file
 func (h *FileManagerHandler) Copy(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Source string `json:"source" binding:"required"`
 		Dest   string `json:"dest" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "复制文件 "+req.Source+" 到 "+req.Dest)
@@ -337,13 +333,12 @@ func (h *FileManagerHandler) GetContent(c *gin.Context) (any, error) {
 
 // SaveContent saves content to a file
 func (h *FileManagerHandler) SaveContent(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Path    string `json:"path" binding:"required"`
 		Content string `json:"content"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "保存文件内容 "+req.Path)
@@ -398,13 +393,12 @@ func (h *FileManagerHandler) SearchContent(c *gin.Context) (any, error) {
 
 // Compress creates a zip archive
 func (h *FileManagerHandler) Compress(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Sources []string `json:"sources" binding:"required"`
 		Dest    string   `json:"dest" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "压缩文件到 "+req.Dest)
@@ -420,13 +414,12 @@ func (h *FileManagerHandler) Extract(c *gin.Context) (any, error) {
 	// Dest 允许为空：空串表示解压到根目录(basePath)，与 ValidatePath 的
 	// "empty path or '.' is treated as basePath" 语义一致。前端 toRelativePath
 	// 在根目录下返回空串，这里不能用 binding:"required"，否则根目录解压会被拒。
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Source string `json:"source" binding:"required"`
 		Dest   string `json:"dest"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "解压文件 "+req.Source+" 到 "+req.Dest)
@@ -452,13 +445,12 @@ func (h *FileManagerHandler) ArchiveList(c *gin.Context) (any, error) {
 
 // Chmod changes file permissions
 func (h *FileManagerHandler) Chmod(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Path string `json:"path" binding:"required"`
 		Mode string `json:"mode" binding:"required"` // e.g., "0755", "644"
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse mode string
@@ -477,14 +469,13 @@ func (h *FileManagerHandler) Chmod(c *gin.Context) (any, error) {
 
 // Chown changes file ownership
 func (h *FileManagerHandler) Chown(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Path string `json:"path" binding:"required"`
 		UID  int    `json:"uid"`
 		GID  int    `json:"gid"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "修改文件所有者 "+req.Path)

@@ -1,7 +1,6 @@
 package filemanager
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"easyserver/internal/infra/errx"
 	"easyserver/internal/util"
 )
 
@@ -218,11 +218,11 @@ func (m *Manager) ReadContent(path string) (*FileContent, error) {
 	}
 
 	if info.IsDir() {
-		return nil, errors.New("cannot read content of a directory")
+		return nil, errx.BadRequest("cannot read content of a directory")
 	}
 
 	if info.Size() > maxReadFileSize {
-		return nil, fmt.Errorf("file too large (%d bytes), max %d bytes", info.Size(), maxReadFileSize)
+		return nil, errx.BadRequest("file too large (%d bytes), max %d bytes", info.Size(), maxReadFileSize)
 	}
 
 	// O_NOFOLLOW: refuse to read through a symlink — closes TOCTOU between
@@ -325,12 +325,12 @@ func (m *Manager) Delete(path string, recursive bool) error {
 
 	// Prevent deleting the base path itself
 	if validPath == m.basePath {
-		return errors.New("cannot delete the root data directory")
+		return ErrCannotDeleteRoot
 	}
 
 	// Prevent deleting parent of base path
 	if strings.HasPrefix(m.basePath, validPath+string(os.PathSeparator)) {
-		return errors.New("cannot delete a parent of the data directory")
+		return ErrCannotDeleteRoot
 	}
 
 	if recursive {
@@ -383,7 +383,7 @@ func (m *Manager) Copy(src, dst string) error {
 	}
 
 	if validSrc == validDst {
-		return errors.New("source and destination are the same")
+		return ErrSameSourceAndDest
 	}
 
 	srcFile, err := os.OpenFile(validSrc, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
@@ -398,7 +398,7 @@ func (m *Manager) Copy(src, dst string) error {
 	}
 
 	if srcInfo.IsDir() {
-		return errors.New("copying directories is not supported")
+		return ErrDirCopyNotSupported
 	}
 
 	// Use O_NOFOLLOW to prevent symlink attacks (TOCTOU)

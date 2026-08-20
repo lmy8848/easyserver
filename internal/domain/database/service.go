@@ -146,27 +146,27 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	// The client sends the image + version (the front-end owns the version/image
 	// catalogue); the image is required — without it there is nothing to pull.
 	if strings.TrimSpace(req.Image) == "" {
-		return nil, errors.New("image is required")
+		return nil, errx.BadRequest("image is required")
 	}
 	engineName := strings.ToLower(strings.TrimSpace(req.ContainerEngine))
 	if engineName == "" {
 		engineName = "docker"
 	}
 	if engineName != "docker" && engineName != "podman" {
-		return nil, fmt.Errorf("unsupported container runtime %q", engineName)
+		return nil, errx.BadRequest("unsupported container runtime %q", engineName)
 	}
 	// The client always sends the port (the front-end fills the type default);
 	// a missing/invalid value is rejected here.
 	port := req.Port
 	if port < 1 || port > 65535 {
-		return nil, errors.New("port must be between 1 and 65535")
+		return nil, errx.BadRequest("port must be between 1 and 65535")
 	}
 	bindAddress := strings.TrimSpace(req.BindAddress)
 	if bindAddress == "" {
 		bindAddress = "127.0.0.1"
 	}
 	if bindAddress != "127.0.0.1" && bindAddress != "0.0.0.0" {
-		return nil, fmt.Errorf("unsupported bind address %q (only 127.0.0.1 or 0.0.0.0)", bindAddress)
+		return nil, errx.BadRequest("unsupported bind address %q (only 127.0.0.1 or 0.0.0.0)", bindAddress)
 	}
 	// 自定义容器名（可选）：非空时校验格式；空则用默认名。预检必须发生在写
 	// row 之前，否则留下幽灵 installing 行。
@@ -279,7 +279,7 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 		if canceled() {
 			removeInstance()
 			log.Append("❌ 安装已取消")
-			return errors.New("安装已取消")
+			return ErrInstallCancelled
 		}
 		// 失败时保留容器，便于排查失败现场（容器日志还在）。重新安装走
 		// "卸载+安装"两步，卸载会先删掉这个残留容器，所以不会被占用卡住。
@@ -299,7 +299,7 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 		if canceled() {
 			removeInstance()
 			log.Append("❌ 安装已取消")
-			return errors.New("安装已取消")
+			return ErrInstallCancelled
 		}
 		// No container was created — still flip the row to "failed" so the
 		// instance doesn't sit at "installing" forever (the log panel surfaces
@@ -494,7 +494,7 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 		return "", errx.NotFound("instance not found")
 	}
 	if v.ContainerEngine == "" || v.ContainerName == "" {
-		return "", errors.New("database instance is not container-managed")
+		return "", ErrNotContainerManaged
 	}
 	oldPassword := v.AdminPassword
 	password, err := generateAdminPassword()
@@ -517,7 +517,7 @@ func (s *Service) ResetAdminPassword(ctx context.Context, instanceID int64) (str
 			return "", fmt.Errorf("reset Redis password: %w", err)
 		}
 	default:
-		return "", errors.New("password reset is not supported for this database type")
+		return "", ErrUnsupportedDBType
 	}
 	if err := s.repo.UpdateInstancePassword(ctx, instanceID, password); err != nil {
 		return "", err
@@ -817,20 +817,13 @@ func containerDataDir(instance *DBInstance) string {
 	}
 }
 
-// containerNameRe 是容器名的允许字符集（docker 与 podman 的规则交集）：
-// 首字符字母/数字，其余字母/数字/下划线/点/连字符。Docker 的 daemon 会拒绝
-// 不属于 [a-zA-Z0-9][a-zA-Z0-9_.-]* 的名字，Podman 更宽松但向下兼容该集合，
-// 因此按交集校验两个引擎都必然接受。
-var containerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-
-const maxContainerNameLen = 128
+// containerNameRe 是容器名的允许字符集与长度限制（docker 与 podman 的规则交集）：
+// 首字符字母/数字，其余字母/数字/下划线/点/连字符，长度 1-128。
+var containerNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 func validateContainerName(name string) error {
-	if len(name) > maxContainerNameLen {
-		return fmt.Errorf("容器名过长（最多 %d 个字符）", maxContainerNameLen)
-	}
 	if !containerNameRe.MatchString(name) {
-		return errors.New("容器名只能包含字母、数字以及 _ . -，且必须以字母或数字开头")
+		return ErrInvalidContainerName
 	}
 	return nil
 }

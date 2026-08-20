@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -109,14 +108,14 @@ func isWebClient(clientType string) bool {
 }
 
 func (h *AuthHandler) Login(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Username       string `json:"username" binding:"required"`
 		Password       string `json:"password" binding:"required"`
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Verify Cloudflare Turnstile challenge if enabled for login.
@@ -130,7 +129,7 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 	// Use LoginWithInfo to log activity
 	user, err := h.authService.LoginWithInfo(c.Request.Context(), req.Username, req.Password, ip, userAgent)
 	if err != nil {
-		return nil, errx.Unauthorized("%s", err.Error())
+		return nil, err
 	}
 
 	// Check if TOTP is enabled for this user
@@ -238,13 +237,13 @@ func (h *AuthHandler) GetProfile(c *gin.Context) (any, error) {
 func (h *AuthHandler) ChangePassword(c *gin.Context) (any, error) {
 	userID := c.GetInt64("user_id")
 
-	var req ChangePasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[ChangePasswordRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := h.authService.ChangePassword(c.Request.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
-		return nil, errx.BadRequest("%s", err.Error())
+		return nil, err
 	}
 
 	// 改密码后删除该用户所有 session，旧 token 立即失效（吊销只靠 session 表）。
@@ -261,13 +260,13 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) (any, error) {
 func (h *AuthHandler) ChangeUsername(c *gin.Context) (any, error) {
 	userID := c.GetInt64("user_id")
 
-	var req ChangeUsernameRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[ChangeUsernameRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := h.authService.ChangeUsername(c.Request.Context(), userID, req.NewUsername, req.Password); err != nil {
-		return nil, errx.BadRequest("%s", err.Error())
+		return nil, err
 	}
 
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
@@ -328,13 +327,13 @@ type TOTPDisableRequest struct {
 
 // VerifyTOTP handles TOTP verification during login (step 2)
 func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		TOTPVerifyRequest
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	if h.cfg.Server.Turnstile.EnableLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
@@ -411,13 +410,13 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 
 // VerifyBackupCode handles backup code verification during login (step 2)
 func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		BackupCodeVerifyRequest
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	if h.cfg.Server.Turnstile.EnableLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
@@ -524,9 +523,9 @@ func (h *AuthHandler) SetupTOTP(c *gin.Context) (any, error) {
 func (h *AuthHandler) EnableTOTP(c *gin.Context) (any, error) {
 	userID := c.GetInt64("user_id")
 
-	var req TOTPEnableRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[TOTPEnableRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get the pending secret from setup step
@@ -552,9 +551,9 @@ func (h *AuthHandler) EnableTOTP(c *gin.Context) (any, error) {
 func (h *AuthHandler) DisableTOTP(c *gin.Context) (any, error) {
 	userID := c.GetInt64("user_id")
 
-	var req TOTPDisableRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[TOTPDisableRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Disable TOTP
@@ -631,11 +630,11 @@ func (h *AuthHandler) KickSession(c *gin.Context) (any, error) {
 		}
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Token string `json:"token" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Prevent kicking yourself (req.Token is the raw token from GetSessions).
@@ -711,9 +710,9 @@ func (h *QRLoginHandler) CreateQRSession(c *gin.Context) (any, error) {
 // Uses POST + body so the qr_token (a secret that redeems a web JWT) never
 // lands in URL/access logs/Referer the way a query string would.
 func (h *QRLoginHandler) GetQRStatus(c *gin.Context) (any, error) {
-	var req auth.QRLoginConfirmRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[auth.QRLoginConfirmRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	if req.QRToken == "" {
 		return nil, errx.BadRequest("缺少 qr_token")
@@ -735,12 +734,12 @@ func (h *QRLoginHandler) GetQRStatus(c *gin.Context) (any, error) {
 // mobile's JWT (validated by middleware) authorizes issuing a web session for
 // the same admin user. Creates a coexisting session (mobile stays logged in).
 func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		auth.QRLoginConfirmRequest
 		TurnstileToken string `json:"turnstile_token"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	if h.cfg.Server.Turnstile.EnableQRLogin && !infra.Default.Verify(c.Request.Context(), h.cfg.Server.Turnstile.SecretKey, req.TurnstileToken, c.ClientIP()) {
@@ -763,12 +762,7 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 	if err := h.qrService.Confirm(c.Request.Context(), req.QRToken, user, ip, userAgent); err != nil {
-		switch {
-		case errors.Is(err, auth.ErrQRNotPending), errors.Is(err, auth.ErrQRExpired):
-			return nil, errx.BadRequest("%s", err.Error())
-		default:
-			return nil, errx.Internal("%w", err)
-		}
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "扫码登录授权 (IP: "+ip+")")
@@ -777,8 +771,10 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 
 // CancelQRLogin dismisses a pending QR session.
 func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) (any, error) {
-	var req auth.QRLoginConfirmRequest
-	_ = c.ShouldBindJSON(&req)
+	req, err := httpx.BindJSON[auth.QRLoginConfirmRequest](c)
+	if err != nil {
+		return nil, err
+	}
 	if req.QRToken == "" {
 		return nil, errx.BadRequest("缺少 qr_token")
 	}
