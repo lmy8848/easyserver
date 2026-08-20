@@ -44,7 +44,7 @@ type Service struct {
 }
 
 // NewService creates a database Service over the given Repository and container
-// runtime. Production passes NewCLIContainerRuntime(exec); tests pass a fake
+// runtime. Production passes NewSocketContainerRuntime(); tests pass a fake
 // DatabaseRuntime. Sweeps orphaned backup rows (running → failed) from a
 // previous crashed process.
 func NewService(repo Repository, runtime DatabaseRuntime) *Service {
@@ -216,8 +216,8 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	}
 	if _, err := s.taskMgr.StartWithLog(ctx, containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
-		if cli, ok := rt.(*CLIContainerRuntime); ok {
-			cli.SetOutputHook(func(line string) { log.Append(line) })
+		if sockRt, ok := rt.(*SocketContainerRuntime); ok {
+			sockRt.SetOutputHook(func(line string) { log.Append(line) })
 		}
 		// Detach from the request context: the install outlives the HTTP request
 		// (which is canceled once CreateInstance responds), so it must not inherit

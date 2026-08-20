@@ -56,12 +56,8 @@ type DatabaseRuntime interface {
 // SocketContainerRuntime implements DatabaseRuntime using Docker/Podman Unix Socket REST API.
 type SocketContainerRuntime struct {
 	client     infracontainer.EngineClient
-	lastSpec   ContainerSpec
 	outputHook func(string)
 }
-
-// CLIContainerRuntime is an alias for SocketContainerRuntime for backward compatibility.
-type CLIContainerRuntime = SocketContainerRuntime
 
 // NewSocketContainerRuntime creates a new SocketContainerRuntime.
 func NewSocketContainerRuntime(client ...infracontainer.EngineClient) *SocketContainerRuntime {
@@ -70,11 +66,6 @@ func NewSocketContainerRuntime(client ...infracontainer.EngineClient) *SocketCon
 		c = client[0]
 	}
 	return &SocketContainerRuntime{client: c}
-}
-
-// NewCLIContainerRuntime provides backward compatibility for NewCLIContainerRuntime callers.
-func NewCLIContainerRuntime(_ ...any) *SocketContainerRuntime {
-	return NewSocketContainerRuntime()
 }
 
 func (r *SocketContainerRuntime) getClient() infracontainer.EngineClient {
@@ -108,38 +99,46 @@ func (r *SocketContainerRuntime) Create(ctx context.Context, spec ContainerSpec)
 	}
 	spec.Labels["com.easyserver.managed"] = "true"
 	spec.Labels["com.easyserver.kind"] = "database"
-	r.lastSpec = spec
 
 	eng := toEngine(spec.ContainerEngine)
 
-	// If outputHook is attached (installer stream), pull the image and stream events
-	if r.outputHook != nil {
-		if rc, err := r.getClient().ImagePull(ctx, eng, spec.Image, ""); err == nil && rc != nil {
-			defer rc.Close()
-			dec := json.NewDecoder(rc)
-			for {
-				var ev struct {
-					Status   string `json:"status"`
-					Progress string `json:"progress"`
-					ID       string `json:"id"`
-					Error    string `json:"error"`
-				}
-				if err := dec.Decode(&ev); err != nil {
+	// Always pull the image before container creation and stream progress
+	rc, err := r.getClient().ImagePull(ctx, eng, spec.Image, "")
+	if err != nil {
+		return fmt.Errorf("pull image %s: %w", spec.Image, err)
+	}
+	if rc != nil {
+		defer rc.Close()
+		dec := json.NewDecoder(rc)
+		for {
+			var ev struct {
+				Status   string `json:"status"`
+				Progress string `json:"progress"`
+				ID       string `json:"id"`
+				Error    string `json:"error"`
+			}
+			if err := dec.Decode(&ev); err != nil {
+				if errors.Is(err, io.EOF) {
 					break
 				}
-				if ev.Error != "" {
+				return fmt.Errorf("decode pull image response: %w", err)
+			}
+			if ev.Error != "" {
+				if r.outputHook != nil {
 					r.outputHook("Error: " + ev.Error)
-				} else {
-					line := ev.Status
-					if ev.ID != "" {
-						line = ev.ID + ": " + line
-					}
-					if ev.Progress != "" {
-						line += " " + ev.Progress
-					}
-					if line != "" {
-						r.outputHook(line)
-					}
+				}
+				return fmt.Errorf("pull image %s: %s", spec.Image, ev.Error)
+			}
+			if r.outputHook != nil {
+				line := ev.Status
+				if ev.ID != "" {
+					line = ev.ID + ": " + line
+				}
+				if ev.Progress != "" {
+					line += " " + ev.Progress
+				}
+				if line != "" {
+					r.outputHook(line)
 				}
 			}
 		}
