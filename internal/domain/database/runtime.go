@@ -49,8 +49,6 @@ type DatabaseRuntime interface {
 	Status(ctx context.Context, runtime, name string) (ContainerStatus, error)
 	Logs(ctx context.Context, runtime, name string, lines int) (string, error)
 	Exec(ctx context.Context, runtime, name string, args ...string) (string, error)
-	CopyFrom(ctx context.Context, runtime, name, source, destination string) error
-	CopyTo(ctx context.Context, runtime, name, source, destination string) error
 	Exists(ctx context.Context, runtime, name string) (bool, error)
 }
 
@@ -353,16 +351,6 @@ func (r *CLIContainerRuntime) Exec(ctx context.Context, runtime, name string, ar
 		return "", errors.New("container name and command are required")
 	}
 	return r.execCommand(ctx, runtime, name, args...)
-}
-
-func (r *CLIContainerRuntime) CopyFrom(ctx context.Context, runtime, name, source, destination string) error {
-	_, err := r.command(ctx, runtime, "cp", name+":"+source, destination)
-	return err
-}
-
-func (r *CLIContainerRuntime) CopyTo(ctx context.Context, runtime, name, source, destination string) error {
-	_, err := r.command(ctx, runtime, "cp", source, name+":"+destination)
-	return err
 }
 
 // Exists reports whether a container with the given name already exists in the

@@ -128,8 +128,6 @@ func (f *fakeDBRuntime) Logs(context.Context, string, string, int) (string, erro
 func (f *fakeDBRuntime) Exec(context.Context, string, string, ...string) (string, error) {
 	return "", nil
 }
-func (f *fakeDBRuntime) CopyFrom(context.Context, string, string, string, string) error { return nil }
-func (f *fakeDBRuntime) CopyTo(context.Context, string, string, string, string) error   { return nil }
 func (f *fakeDBRuntime) Exists(context.Context, string, string) (bool, error) {
 	return f.exists, nil
 }

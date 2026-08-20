@@ -365,10 +365,11 @@ func (s *Service) restoreMySQL(ctx context.Context, backup *DBBackup) error {
 	if err != nil || instance == nil {
 		return errx.NotFound("database instance not found")
 	}
-	target := "/tmp/easyserver-restore.sql"
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
-		return fmt.Errorf("copy backup into container: %w", err)
+	rel, err := filepath.Rel(instance.VolumeName, backup.FilePath)
+	if err != nil {
+		return fmt.Errorf("rel backup path: %w", err)
 	}
+	target := filepath.Join("/var/lib/mysql", rel)
 	// `--execute="source ..."` 会把 source 当 SQL 语句解析（1064）——source 是客户端
 	// 命令。改为容器内 sh 重定向：mysql db < 文件 从 stdin 喂 SQL。这里不走
 	// runInContainer：withAdminCredentials 会给任意命令追加 -uroot，sh 不认该选项
@@ -387,10 +388,11 @@ func (s *Service) restorePostgreSQL(ctx context.Context, backup *DBBackup) error
 	if err != nil || instance == nil {
 		return errx.NotFound("database instance not found")
 	}
-	target := "/tmp/easyserver-restore.dump"
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, target); err != nil {
-		return fmt.Errorf("copy backup into container: %w", err)
+	rel, err := filepath.Rel(instance.VolumeName, backup.FilePath)
+	if err != nil {
+		return fmt.Errorf("rel backup path: %w", err)
 	}
+	target := filepath.Join(pgDataDir(instance.Image), rel)
 	// --single-transaction：整个恢复包在一个事务，中途失败自动 ROLLBACK，
 	// 数据库回到恢复前状态——消除"半恢复"。
 	if _, err := s.runInContainer(ctx, instance, "pg_restore", "--single-transaction", "--if-exists", "-c", "-d", backup.DatabaseName, target); err != nil {
@@ -408,17 +410,28 @@ func (s *Service) restoreRedis(ctx context.Context, backup *DBBackup) error {
 	if aof, err := s.redisFor().ConfigGet(ctx, instance, "appendonly"); err == nil && aof == "yes" {
 		return errors.New("redis 已开启 AOF（appendonly=yes），RDB 恢复会被忽略；请先在配置中关闭 AOF 再恢复")
 	}
-	// 覆盖前先留底原 dump.rdb，恢复失败能回滚。
+	// 宿主机挂载目录下 dump.rdb 直见，覆盖前先留底原 dump.rdb，恢复失败能回滚。
+	rdbHostPath := filepath.Join(instance.VolumeName, "dump.rdb")
 	rollback := backup.FilePath + ".pre-restore"
-	if err := s.runtime.CopyFrom(ctx, instance.ContainerEngine, instance.ContainerName, "/data/dump.rdb", rollback); err != nil {
-		log.Printf("backup existing dump.rdb for rollback failed (continuing): %v", err)
+	if original, err := os.ReadFile(rdbHostPath); err == nil {
+		if err := os.WriteFile(rollback, original, 0644); err != nil {
+			log.Printf("backup existing dump.rdb for rollback failed (continuing): %v", err)
+		}
 	}
 	if err := s.runtime.Stop(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("stop Redis failed: %w", err)
 	}
-	if err := s.runtime.CopyTo(ctx, instance.ContainerEngine, instance.ContainerName, backup.FilePath, "/data/dump.rdb"); err != nil {
+	data, err := os.ReadFile(backup.FilePath)
+	if err != nil {
 		_ = s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName)
-		return fmt.Errorf("copy Redis backup: %w", err)
+		return fmt.Errorf("read Redis backup: %w", err)
+	}
+	if err := os.WriteFile(rdbHostPath, data, 0644); err != nil {
+		_ = s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName)
+		return fmt.Errorf("write Redis backup: %w", err)
+	}
+	if os.Geteuid() == 0 {
+		_ = os.Chown(rdbHostPath, containerUID, containerUID)
 	}
 	if err := s.runtime.Start(ctx, instance.ContainerEngine, instance.ContainerName); err != nil {
 		return fmt.Errorf("start Redis failed: %w", err)
