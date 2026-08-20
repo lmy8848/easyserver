@@ -13,20 +13,33 @@ describe('LogViewer Component', () => {
     expect(screen.getByText('暂无日志输出')).toBeDefined();
   });
 
-  it('should render direct string data via logs prop with line numbers', () => {
-    render(<LogViewer logs={'Line 1: Server started\nLine 2: Ready for connections'} />);
+  it('should render direct lines array via lines prop with line numbers', () => {
+    render(<LogViewer lines={['Line 1: Server started', 'Line 2: Ready for connections']} />);
     expect(screen.getByText('Line 1: Server started')).toBeDefined();
     expect(screen.getByText('Line 2: Ready for connections')).toBeDefined();
+    expect(screen.getByText('1')).toBeDefined();
+    expect(screen.getByText('2')).toBeDefined();
   });
 
-  it('should render direct lines array via lines prop', () => {
-    render(<LogViewer lines={['Array line 1', 'Array line 2']} />);
-    expect(screen.getByText('Array line 1')).toBeDefined();
-    expect(screen.getByText('Array line 2')).toBeDefined();
+  it('should render structured entries array with timestamp and level', () => {
+    render(
+      <LogViewer
+        entries={[
+          { text: 'Critical error', time: '14:00:01', level: 'stderr' },
+          { text: 'Standard info', time: '14:00:02', level: 'stdout' },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Critical error')).toBeDefined();
+    expect(screen.getByText('14:00:01')).toBeDefined();
+    expect(screen.getByText('stderr')).toBeDefined();
+    expect(screen.getByText('Standard info')).toBeDefined();
+    expect(screen.getByText('stdout')).toBeDefined();
   });
 
   it('should filter logs with search input and highlight', () => {
-    render(<LogViewer logs={'INFO starting\nERROR connection failed\nINFO retry'} />);
+    render(<LogViewer lines={['INFO starting', 'ERROR connection failed', 'INFO retry']} />);
     const searchInput = screen.getByPlaceholderText('搜索日志...');
     fireEvent.change(searchInput, { target: { value: 'ERROR' } });
     expect(screen.getByText('ERROR')).toBeDefined();
@@ -35,7 +48,12 @@ describe('LogViewer Component', () => {
   });
 
   it('should render status tag for completed state', () => {
-    render(<LogViewer logs="Build finished" status="completed" />);
+    render(<LogViewer lines={['Build finished']} status="completed" />);
     expect(screen.getByText('已完成')).toBeDefined();
+  });
+
+  it('should render exit code tag', () => {
+    render(<LogViewer lines={['Process exited']} status="failed" exitCode={1} />);
+    expect(screen.getByText('退出码 1')).toBeDefined();
   });
 });

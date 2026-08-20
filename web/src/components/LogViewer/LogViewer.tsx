@@ -41,11 +41,7 @@ import './LogViewer.css';
 
 export interface LogViewerProps {
   // ==================== 接入方式一：直接传入数据模式 ====================
-  /** 直接传入纯文本或 ANSI 字符串（自动按换行切分） */
-  logs?: string;
-  /** 兼容别名：直接传入文本 */
-  rawLogs?: string;
-  /** 直接传入字符串行数组 */
+  /** 直接传入字符串行数组（支持多行文本与 ANSI 颜色，自动分行规整） */
   lines?: string[];
   /** 直接传入结构化日志对象数组 */
   entries?: LogEntry[];
@@ -160,8 +156,6 @@ function renderAnsiSpans(rawText: string, keyword: string) {
 }
 
 export function LogViewer({
-  logs,
-  rawLogs,
   lines,
   entries: externalEntries,
   streamUrl,
@@ -209,19 +203,15 @@ export function LogViewer({
     onMessage: onStreamMessage,
   });
 
-  // Direct data integration (logs / rawLogs / lines / entries)
-  const directText = logs !== undefined ? logs : rawLogs;
+  // Direct data integration (lines / entries)
   useEffect(() => {
     if (externalEntries) {
       bufferRef.current.setEntries(externalEntries);
     } else if (lines) {
       bufferRef.current.clear();
       bufferRef.current.appendLines(lines);
-    } else if (directText !== undefined) {
-      bufferRef.current.clear();
-      bufferRef.current.appendLine(directText);
     }
-  }, [externalEntries, lines, directText]);
+  }, [externalEntries, lines]);
 
   const [follow, setFollow] = useState<boolean>(true);
   const [wrap, setWrap] = useState<boolean>(true);
