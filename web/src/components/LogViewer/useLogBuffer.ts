@@ -69,7 +69,6 @@ export function useLogBuffer(options: UseLogBufferOptions = {}): UseLogBufferRet
 
   const clear = useCallback(() => {
     setEntriesState([]);
-    setSearchKeyword('');
   }, []);
 
   const totalCount = entries.length;

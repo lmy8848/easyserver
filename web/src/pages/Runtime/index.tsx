@@ -58,6 +58,9 @@ export default function Runtime() {
         if (prev.status === 'installed' || prev.status === 'uninstalled') return prev;
         return { ...prev, status: prev.status === 'uninstalling' ? 'uninstall_failed' : 'failed' };
       }
+      if (result.status === 'stopped') {
+        return prev;
+      }
       return { ...prev, status: prev.status === 'uninstalling' ? 'uninstalled' : 'installed' };
     });
     fetchEnvironments();

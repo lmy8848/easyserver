@@ -84,15 +84,21 @@ describe('useLogBuffer Hook', () => {
     expect(result.current.getPlainText()).toBe('Error: disk full\nSuccess');
   });
 
-  it('should clear all entries', () => {
+  it('should clear entries without wiping searchKeyword', () => {
     const { result } = renderHook(() => useLogBuffer());
 
     act(() => {
       result.current.appendLine('Line 1');
+      result.current.setSearchKeyword('test keyword');
+    });
+    expect(result.current.searchKeyword).toBe('test keyword');
+
+    act(() => {
       result.current.clear();
     });
 
     expect(result.current.entries).toHaveLength(0);
     expect(result.current.totalCount).toBe(0);
+    expect(result.current.searchKeyword).toBe('test keyword');
   });
 });

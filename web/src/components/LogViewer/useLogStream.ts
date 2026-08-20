@@ -12,7 +12,7 @@ export interface UseLogStreamOptions {
   autoReconnect?: boolean;
   /** Custom transform handler. Return true or 'done' if stream reached terminal state. */
   onMessage?: (data: unknown, helpers: { buffer?: UseLogBufferReturn; close: () => void }) => boolean | void;
-  /** Callback fired when stream reaches a completed or failed terminal state */
+  /** Callback fired when stream reaches a completed, failed or stopped terminal state */
   onDone?: (result: { status: 'completed' | 'failed' | 'stopped'; error?: string; exitCode?: number }) => void;
 }
 
@@ -37,6 +37,7 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
   const timerRef = useRef<number | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const disposedRef = useRef<boolean>(false);
+  const terminatedRef = useRef<boolean>(false);
 
   // Stable callback refs
   const onMessageRef = useRef(onMessage);
@@ -64,18 +65,37 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
     }, 100);
   }, [stopTimer]);
 
+  const handleTerminalDone = useCallback(
+    (finalStatus: 'completed' | 'failed' | 'stopped', errMsg?: string, code?: number) => {
+      if (terminatedRef.current) return;
+      terminatedRef.current = true;
+
+      stopTimer();
+      if (startTimeRef.current > 0) {
+        setElapsedMs(Date.now() - startTimeRef.current);
+      }
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+
+      setStatus(finalStatus);
+      if (errMsg) setError(errMsg);
+      if (code !== undefined) setExitCode(code);
+
+      onDoneRef.current?.({
+        status: finalStatus,
+        error: errMsg,
+        exitCode: code,
+      });
+    },
+    [stopTimer]
+  );
+
   const close = useCallback(() => {
     disposedRef.current = true;
-    stopTimer();
-    if (startTimeRef.current > 0) {
-      setElapsedMs(Date.now() - startTimeRef.current);
-    }
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-    setStatus((prev) => (prev === 'streaming' || prev === 'connecting' ? 'stopped' : prev));
-  }, [stopTimer]);
+    handleTerminalDone('stopped');
+  }, [handleTerminalDone]);
 
   const connect = useCallback(() => {
     if (!enabled || !path) {
@@ -84,6 +104,7 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
     }
 
     disposedRef.current = false;
+    terminatedRef.current = false;
     setStatus('connecting');
     setError(null);
     setExitCode(null);
@@ -97,31 +118,13 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
     const es = new EventSource(path);
     esRef.current = es;
 
-    const handleTerminalDone = (isFailed: boolean, errMsg?: string, code?: number) => {
-      stopTimer();
-      setElapsedMs(Date.now() - startTimeRef.current);
-      es.close();
-      esRef.current = null;
-
-      const finalStatus: LogStreamStatus = isFailed ? 'failed' : 'completed';
-      setStatus(finalStatus);
-      if (errMsg) setError(errMsg);
-      if (code !== undefined) setExitCode(code);
-
-      onDoneRef.current?.({
-        status: finalStatus,
-        error: errMsg,
-        exitCode: code,
-      });
-    };
-
     es.onopen = () => {
-      if (disposedRef.current) return;
+      if (disposedRef.current || terminatedRef.current) return;
       setStatus('streaming');
     };
 
     es.onmessage = (e) => {
-      if (disposedRef.current) return;
+      if (disposedRef.current || terminatedRef.current) return;
       setStatus('streaming');
 
       let parsed: unknown;
@@ -135,10 +138,10 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
       if (onMessageRef.current) {
         const isDone = onMessageRef.current(parsed, {
           buffer: bufferRef.current,
-          close: () => handleTerminalDone(false),
+          close: () => handleTerminalDone('stopped'),
         });
         if (isDone) {
-          handleTerminalDone(false);
+          handleTerminalDone('completed');
           return;
         }
       }
@@ -153,7 +156,7 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
           bufferRef.current?.appendLine(msg['text'] as string);
         } else if (msgType === 'done') {
           const errMsg = typeof msg['error'] === 'string' ? (msg['error'] as string) : undefined;
-          handleTerminalDone(!!errMsg, errMsg);
+          handleTerminalDone(errMsg ? 'failed' : 'completed', errMsg);
           return;
         }
 
@@ -171,11 +174,11 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
           }
         } else if (msgType === 'exit') {
           const code = typeof msg['code'] === 'number' ? (msg['code'] as number) : 0;
-          handleTerminalDone(code !== 0, code !== 0 ? `Exit code ${code}` : undefined, code);
+          handleTerminalDone(code !== 0 ? 'failed' : 'completed', code !== 0 ? `Exit code ${code}` : undefined, code);
           return;
         } else if (msgType === 'error') {
           const errMsg = typeof msg['error'] === 'string' ? (msg['error'] as string) : 'Execution error';
-          handleTerminalDone(true, errMsg, -1);
+          handleTerminalDone('failed', errMsg, -1);
           return;
         }
       } else if (typeof parsed === 'string') {
@@ -184,18 +187,13 @@ export function useLogStream(options: UseLogStreamOptions): UseLogStreamReturn {
     };
 
     es.onerror = () => {
-      if (disposedRef.current) return;
+      if (disposedRef.current || terminatedRef.current) return;
       if (!autoReconnect) {
-        // Stop on error / server disconnect
-        stopTimer();
-        setElapsedMs(Date.now() - startTimeRef.current);
-        es.close();
-        esRef.current = null;
-        setStatus('completed');
-        onDoneRef.current?.({ status: 'completed' });
+        // Stop on error / server disconnect - report failed, not completed!
+        handleTerminalDone('failed', '连接失败或已断开');
       }
     };
-  }, [enabled, path, autoReconnect, startTimer, stopTimer]);
+  }, [enabled, path, autoReconnect, startTimer, handleTerminalDone]);
 
   useEffect(() => {
     connect();

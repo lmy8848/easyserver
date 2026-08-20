@@ -122,6 +122,88 @@ describe('useLogStream Hook', () => {
     });
   });
 
+  it('should handle connection error with failed status and not completed', () => {
+    const onDone = vi.fn();
+    const { result } = renderHook(() => {
+      const buffer = useLogBuffer();
+      const stream = useLogStream({
+        path: '/api/logs/task',
+        buffer,
+        onDone,
+      });
+      return { buffer, stream };
+    });
+
+    const es = MockEventSource.instances[0]!;
+
+    act(() => {
+      es.emitError();
+    });
+
+    expect(result.current.stream.status).toBe('failed');
+    expect(onDone).toHaveBeenCalledWith({
+      status: 'failed',
+      error: '连接失败或已断开',
+      exitCode: undefined,
+    });
+  });
+
+  it('should report stopped status and trigger onDone once on close', () => {
+    const onDone = vi.fn();
+    const { result } = renderHook(() => {
+      const buffer = useLogBuffer();
+      const stream = useLogStream({
+        path: '/api/logs/task',
+        buffer,
+        onDone,
+      });
+      return { buffer, stream };
+    });
+
+    act(() => {
+      result.current.stream.close();
+    });
+
+    expect(result.current.stream.status).toBe('stopped');
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledWith({
+      status: 'stopped',
+      error: undefined,
+      exitCode: undefined,
+    });
+  });
+
+  it('should guard against duplicate terminal triggers', () => {
+    const onDone = vi.fn();
+    renderHook(() => {
+      const buffer = useLogBuffer();
+      return useLogStream({
+        path: '/api/logs/custom',
+        buffer,
+        onDone,
+        onMessage: (_data, helpers) => {
+          helpers.close();
+          return true; // returns true after calling close
+        },
+      });
+    });
+
+    const es = MockEventSource.instances[0]!;
+
+    act(() => {
+      es.emitOpen();
+      es.emitMessage(JSON.stringify({ text: 'sample' }));
+    });
+
+    // onDone should only be triggered once
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledWith({
+      status: 'stopped',
+      error: undefined,
+      exitCode: undefined,
+    });
+  });
+
   it('should handle cron script log format with exit code', () => {
     const onDone = vi.fn();
     const { result } = renderHook(() => {

@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
+import { forwardRef, useImperativeHandle, useState, useEffect, useMemo } from 'react';
 import {
   Button, Space, Tag, Modal, Input, message, Spin, Row, Col,
 } from 'antd';
@@ -35,6 +35,11 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
     const [svcLogContent, setSvcLogContent] = useState('');
     const [svcLogLoading, setSvcLogLoading] = useState(false);
 
+    const svcLogLines = useMemo(
+      () => (svcLogContent ? svcLogContent.split('\n') : []),
+      [svcLogContent]
+    );
+
     // Expose methods via ref
     useImperativeHandle(ref, () => ({
       showConfig: async () => {
@@ -57,7 +62,9 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
           const res = await webServerApi.getServiceLogs(selectedServer.id, 200);
           setSvcLogContent(res.data.data?.logs || '(empty)');
         } catch (error: unknown) {
-          setSvcLogContent('Failed: ' + ((error instanceof Error ? error.message : 'unknown')));
+          const errMsg = error instanceof Error ? error.message : 'unknown';
+          setSvcLogContent('Failed: ' + errMsg);
+          message.error('获取服务日志失败: ' + errMsg);
         } finally {
           setSvcLogLoading(false);
         }
@@ -171,7 +178,7 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
           styles={{ body: { padding: 0 } }}
         >
           <LogViewer
-            lines={svcLogContent ? svcLogContent.split('\n') : []}
+            lines={svcLogLines}
             downloadFileName={`webserver_${selectedServer.name}_log`}
             height={500}
             headerExtra={
@@ -184,7 +191,9 @@ const ConfigEditor = forwardRef<ConfigEditorRef, ConfigEditorProps>(
                     const res = await webServerApi.getServiceLogs(selectedServer.id, 200);
                     setSvcLogContent(res.data.data?.logs || '(empty)');
                   } catch (e: unknown) {
-                    setSvcLogContent('Failed: ' + (e instanceof Error ? e.message : 'unknown'));
+                    const errMsg = e instanceof Error ? e.message : 'unknown';
+                    setSvcLogContent('Failed: ' + errMsg);
+                    message.error('获取服务日志失败: ' + errMsg);
                   } finally {
                     setSvcLogLoading(false);
                   }

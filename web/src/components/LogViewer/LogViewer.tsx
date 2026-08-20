@@ -15,6 +15,7 @@ import {
   Space,
   Checkbox,
   Spin,
+  message,
   theme,
 } from 'antd';
 import {
@@ -27,7 +28,7 @@ import {
   ArrowDownOutlined,
   CloseCircleOutlined,
 } from '@ant-design/icons';
-import { parseAnsi } from './ansi';
+import { parseAnsi, splitLinesWithCr } from './ansi';
 import { useLogBuffer } from './useLogBuffer';
 import { useLogStream } from './useLogStream';
 import { copyToClipboard } from '../../utils/clipboard';
@@ -203,15 +204,27 @@ export function LogViewer({
     onMessage: onStreamMessage,
   });
 
+  // Convert lines array to LogEntry[] (single-pass, memoized)
+  const parsedLineEntries = useMemo(() => {
+    if (!lines) return null;
+    const result: LogEntry[] = [];
+    lines.forEach((line) => {
+      const subLines = splitLinesWithCr(line);
+      subLines.forEach((text) => {
+        result.push({ text });
+      });
+    });
+    return result;
+  }, [lines]);
+
   // Direct data integration (lines / entries)
   useEffect(() => {
     if (externalEntries) {
       bufferRef.current.setEntries(externalEntries);
-    } else if (lines) {
-      bufferRef.current.clear();
-      bufferRef.current.appendLines(lines);
+    } else if (parsedLineEntries) {
+      bufferRef.current.setEntries(parsedLineEntries);
     }
-  }, [externalEntries, lines]);
+  }, [externalEntries, parsedLineEntries]);
 
   const [follow, setFollow] = useState<boolean>(true);
   const [wrap, setWrap] = useState<boolean>(true);
@@ -254,13 +267,17 @@ export function LogViewer({
 
   const handleCopy = useCallback(() => {
     const text = buffer.getPlainText();
+    if (!text) {
+      message.info('日志内容为空');
+      return;
+    }
     copyToClipboard(text, '日志已复制到剪贴板');
   }, [buffer]);
 
   const handleDownload = useCallback(() => {
     const text = buffer.getPlainText();
     if (!text) {
-      copyToClipboard('', '日志为空');
+      message.info('日志内容为空');
       return;
     }
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });

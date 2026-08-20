@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Card, Button, Space, Select, Popconfirm, message, InputNumber, Modal,
   Form, Input, List, Tag, Spin, Pagination, Empty,
@@ -110,7 +110,11 @@ export default function InstanceHeader({
         const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
         if (active) setLogContent(res.data?.data?.logs || '(empty)');
       } catch (error) {
-        if (active) setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error)));
+        if (active) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          setLogContent('Failed: ' + errMsg);
+          message.error('获取服务日志失败: ' + errMsg);
+        }
       } finally {
         if (active) setLogLoading(false);
       }
@@ -119,6 +123,8 @@ export default function InstanceHeader({
     const timer = setInterval(refresh, 5000);
     return () => { active = false; clearInterval(timer); };
   }, [logVersion]);
+
+  const logLines = useMemo(() => (logContent ? logContent.split('\n') : []), [logContent]);
 
   // ===== Docker Hub pager helpers (install modal) =====
   const openDockerTags = async () => {
@@ -390,7 +396,7 @@ export default function InstanceHeader({
         styles={{ body: { padding: 0 } }}
       >
         <LogViewer
-          lines={logContent ? logContent.split('\n') : []}
+          lines={logLines}
           downloadFileName={`db_${server.db_type}_${logVersion?.version || 'instance'}_log`}
           height={500}
           headerExtra={
@@ -404,7 +410,9 @@ export default function InstanceHeader({
                   const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
                   setLogContent(res.data?.data?.logs || '(empty)');
                 } catch (error) {
-                  setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error)));
+                  const errMsg = error instanceof Error ? error.message : String(error);
+                  setLogContent('Failed: ' + errMsg);
+                  message.error('获取服务日志失败: ' + errMsg);
                 } finally {
                   setLogLoading(false);
                 }

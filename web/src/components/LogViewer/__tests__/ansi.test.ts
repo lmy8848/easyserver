@@ -21,6 +21,19 @@ describe('ANSI Parser & Utilities', () => {
       const styled = '\x1b[1mBold\x1b[22m \x1b[2mDim\x1b[0m';
       expect(stripAnsi(styled)).toBe('Bold Dim');
     });
+
+    it('should strip OSC title sequences with BEL and ST terminators', () => {
+      const oscBel = '\x1b]0;npm install\x07Running build';
+      expect(stripAnsi(oscBel)).toBe('Running build');
+
+      const oscSt = '\x1b]2;node process\x1b\\Output ready';
+      expect(stripAnsi(oscSt)).toBe('Output ready');
+    });
+
+    it('should strip CSI private modes like cursor hide/show and screen modes', () => {
+      const privateCsi = '\x1b[?25lLoading...\x1b[?25h Done\x1b[?7h';
+      expect(stripAnsi(privateCsi)).toBe('Loading... Done');
+    });
   });
 
   describe('splitLinesWithCr', () => {
@@ -78,6 +91,13 @@ describe('ANSI Parser & Utilities', () => {
       const spans = parseAnsi('\x1b[38;2;100;150;200mRGB Text\x1b[0m');
       expect(spans[0]?.text).toBe('RGB Text');
       expect(spans[0]?.color).toBe('rgb(100,150,200)');
+    });
+
+    it('should ignore OSC sequences and private CSI sequences without displaying garbage', () => {
+      const spans = parseAnsi('\x1b]0;Title\x07\x1b[?25l\x1b[32mSuccess\x1b[0m\x1b[?25h');
+      expect(spans).toEqual([
+        { text: 'Success', color: '#52c41a' },
+      ]);
     });
   });
 });

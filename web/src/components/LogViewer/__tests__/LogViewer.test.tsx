@@ -47,6 +47,18 @@ describe('LogViewer Component', () => {
     expect(screen.queryByText('INFO starting')).toBeNull();
   });
 
+  it('should preserve search input value on re-render with new lines array reference', () => {
+    const { rerender } = render(<LogViewer lines={['INFO starting', 'ERROR test']} />);
+    const searchInput = screen.getByPlaceholderText('搜索日志...') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'ERROR' } });
+    expect(searchInput.value).toBe('ERROR');
+
+    // Re-render with new array reference
+    rerender(<LogViewer lines={['INFO starting', 'ERROR test', 'ERROR second']} />);
+    expect(searchInput.value).toBe('ERROR');
+    expect(screen.getByText(/second/)).toBeDefined();
+  });
+
   it('should render status tag for completed state', () => {
     render(<LogViewer lines={['Build finished']} status="completed" />);
     expect(screen.getByText('已完成')).toBeDefined();

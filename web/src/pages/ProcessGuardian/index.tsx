@@ -180,6 +180,57 @@ export default function ProcessGuardian() {
 }
 
 // ============================================================
+// 通用日志 Drawer
+// ============================================================
+
+interface ServiceLogDrawerProps {
+  serviceName: string | null;
+  logs: Array<{ time: string; message: string; priority: string }>;
+  loading: boolean;
+  onRefresh: (name: string) => void;
+  onClose: () => void;
+}
+
+function ServiceLogDrawer({
+  serviceName,
+  logs,
+  loading,
+  onRefresh,
+  onClose,
+}: ServiceLogDrawerProps) {
+  const entries = useMemo(
+    () => logs.map((l) => ({ text: l.message, time: l.time, level: l.priority })),
+    [logs]
+  );
+
+  return (
+    <Drawer
+      title={<Space><FileTextOutlined />{serviceName} 日志</Space>}
+      open={!!serviceName}
+      onClose={onClose}
+      width={800}
+      destroyOnHidden
+      styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+    >
+      <LogViewer
+        entries={entries}
+        downloadFileName={`service_${serviceName}_log`}
+        headerExtra={
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loading}
+            onClick={() => serviceName && onRefresh(serviceName)}
+          >
+            刷新
+          </Button>
+        }
+        style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
+      />
+    </Drawer>
+  );
+}
+
+// ============================================================
 // 面板托管 Tab
 // ============================================================
 
@@ -344,8 +395,9 @@ function ManagedTab() {
     try {
       const res = await serviceApi.getLogs(name, 200);
       setLogs(res.data?.data?.lines || []);
-    } catch {
+    } catch (error: unknown) {
       setLogs([]);
+      message.error('获取服务日志失败: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLogLoading(false);
     }
@@ -425,29 +477,13 @@ function ManagedTab() {
       />
 
       {/* 日志 Drawer */}
-      <Drawer
-        title={<Space><FileTextOutlined />{logService} 日志</Space>}
-        open={!!logService}
+      <ServiceLogDrawer
+        serviceName={logService}
+        logs={logs}
+        loading={logLoading}
+        onRefresh={fetchLogs}
         onClose={() => setLogService(null)}
-        width={800}
-        destroyOnHidden
-        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
-      >
-        <LogViewer
-          entries={logs.map((l) => ({ text: l.message, time: l.time, level: l.priority }))}
-          downloadFileName={`service_${logService}_log`}
-          headerExtra={
-            <Button
-              icon={<ReloadOutlined />}
-              loading={logLoading}
-              onClick={() => logService && fetchLogs(logService)}
-            >
-              刷新
-            </Button>
-          }
-          style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
-        />
-      </Drawer>
+      />
 
       {/* 详情 Drawer */}
       <Drawer
@@ -636,8 +672,9 @@ function SystemTab() {
     try {
       const res = await serviceApi.getLogs(name, 200);
       setLogs(res.data?.data?.lines || []);
-    } catch {
+    } catch (error: unknown) {
       setLogs([]);
+      message.error('获取服务日志失败: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLogLoading(false);
     }
@@ -723,29 +760,13 @@ function SystemTab() {
       </Card>
 
       {/* 日志 Drawer */}
-      <Drawer
-        title={<Space><FileTextOutlined />{logService} 日志</Space>}
-        open={!!logService}
+      <ServiceLogDrawer
+        serviceName={logService}
+        logs={logs}
+        loading={logLoading}
+        onRefresh={fetchLogs}
         onClose={() => setLogService(null)}
-        width={800}
-        destroyOnHidden
-        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
-      >
-        <LogViewer
-          entries={logs.map((l) => ({ text: l.message, time: l.time, level: l.priority }))}
-          downloadFileName={`service_${logService}_log`}
-          headerExtra={
-            <Button
-              icon={<ReloadOutlined />}
-              loading={logLoading}
-              onClick={() => logService && fetchLogs(logService)}
-            >
-              刷新
-            </Button>
-          }
-          style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
-        />
-      </Drawer>
+      />
 
       {/* 详情 Drawer */}
       <Drawer

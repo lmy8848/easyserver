@@ -70,12 +70,17 @@ function get256Color(n: number): string {
   return `rgb(${toRgb(r)},${toRgb(g)},${toRgb(b)})`;
 }
 
-// Regex to match ANSI escape sequences (CSI sequences)
+/**
+ * Comprehensive ANSI escape sequence regex:
+ * 1. OSC sequences: \x1b\] ... (\x07|\x1b\\)
+ * 2. CSI sequences (including private modes with ?/=/</>): \x1b\[ ... [a-zA-Z]
+ * 3. 2-byte escape sequences: \x1b[@-Z\\-_]
+ */
 // eslint-disable-next-line no-control-regex
-const ANSI_REGEX = /\x1b\[([0-9;]*)([a-zA-Z])/g;
+export const ANSI_REGEX = /\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[([?>=<]?)([0-9;]*)([a-zA-Z])|[@-Z\\-_])/g;
 
 /**
- * Strips all ANSI escape codes from string for clean copy/download.
+ * Strips all ANSI, OSC, and terminal control codes from string for clean copy/download.
  */
 export function stripAnsi(str: string): string {
   if (!str) return '';
@@ -153,12 +158,13 @@ export function parseAnsi(input: string): AnsiSpan[] {
       );
     }
 
-    const paramsStr = match[1] ?? '';
-    const command = match[2];
+    const prefix = match[1];
+    const paramsStr = match[2] ?? '';
+    const command = match[3];
     lastIndex = ANSI_REGEX.lastIndex;
 
-    // We only care about SGR (Select Graphic Rendition) 'm' command
-    if (command === 'm') {
+    // We only process standard SGR (Select Graphic Rendition) 'm' commands without private prefix
+    if (command === 'm' && !prefix) {
       const codes = paramsStr.length === 0 ? [0] : paramsStr.split(';').map(Number);
       let i = 0;
       while (i < codes.length) {
