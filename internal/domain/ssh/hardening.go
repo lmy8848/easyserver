@@ -79,8 +79,16 @@ func (s *Service) Harden(ctx context.Context, opts HardenOptions) (*Config, erro
 	// Validate before reload; restore on failure.
 	if out, err := s.TestConfig(ctx); err != nil {
 		// Rollback on test failure.
-		_ = s.restoreBackup()
-		_ = s.ReloadSSH(ctx)
+		var rollbackErrs []string
+		if rErr := s.restoreBackup(); rErr != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Sprintf("恢复备份失败: %v", rErr))
+		}
+		if reloadErr := s.ReloadSSH(ctx); reloadErr != nil {
+			rollbackErrs = append(rollbackErrs, fmt.Sprintf("重载服务失败: %v", reloadErr))
+		}
+		if len(rollbackErrs) > 0 {
+			return nil, errx.BadRequest("加固配置校验未通过（%s），且自动回滚异常：%s", out, strings.Join(rollbackErrs, "; "))
+		}
 		return nil, errx.BadRequest("加固配置校验未通过，已自动回滚：%s", out)
 	}
 	if err := s.ReloadSSH(ctx); err != nil {

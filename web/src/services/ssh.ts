@@ -12,6 +12,13 @@ export interface SSHLoginRecord {
   tty: string;
 }
 
+export interface AuthorizedKey {
+  comment: string;
+  type: string;
+  key: string;
+  fingerprint: string;
+}
+
 export const sshApi = {
   getStatus: () =>
     api.get<ApiResponse<{ available: boolean; reason?: string; installed: boolean; running: boolean }>>('/ssh/status'),
@@ -30,7 +37,7 @@ export const sshApi = {
   getLogins: (limit?: number) =>
     api.get<ApiResponse<{ records: SSHLoginRecord[] }>>('/ssh/logins', { params: { limit } }),
   listAuthorizedKeys: (page = 1, pageSize = 20) =>
-    api.get<ApiResponse<Page<{ comment: string; type: string; key: string }>>>('/ssh/authorized-keys', {
+    api.get<ApiResponse<Page<AuthorizedKey>>>('/ssh/authorized-keys', {
       params: { page, page_size: pageSize },
     }),
   addAuthorizedKey: (data: { key: string }) =>

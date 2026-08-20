@@ -120,8 +120,14 @@ func TestAddAndRemoveAuthorizedKey(t *testing.T) {
 	}
 
 	// Add second key
-	pub2, _, _ := ed25519.GenerateKey(rand.Reader)
-	sshPub2, _ := ssh.NewPublicKey(pub2)
+	pub2, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ed25519 2: %v", err)
+	}
+	sshPub2, err := ssh.NewPublicKey(pub2)
+	if err != nil {
+		t.Fatalf("new public key 2: %v", err)
+	}
 	pubLine2 := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub2))) + " user2@example.com"
 	if err := s.AddAuthorizedKey(pubLine2); err != nil {
 		t.Fatalf("AddAuthorizedKey 2 failed: %v", err)
@@ -159,5 +165,26 @@ func TestAddAndRemoveAuthorizedKey(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("Expected 0600 permissions, got %o", info.Mode().Perm())
+	}
+}
+
+func TestKillSessionValidation(t *testing.T) {
+	s := NewService()
+	ctx := context.Background()
+
+	// PID <= 1
+	if err := s.KillSession(ctx, 0); err == nil {
+		t.Fatal("Expected error for PID 0")
+	}
+	if err := s.KillSession(ctx, 1); err == nil {
+		t.Fatal("Expected error for PID 1")
+	}
+	// Self PID
+	if err := s.KillSession(ctx, os.Getpid()); err == nil {
+		t.Fatal("Expected error for self PID")
+	}
+	// Random non-SSH PID
+	if err := s.KillSession(ctx, 999999); err == nil {
+		t.Fatal("Expected error for nonexistent/non-SSH PID")
 	}
 }
