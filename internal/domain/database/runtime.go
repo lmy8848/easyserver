@@ -111,11 +111,11 @@ func (r *SocketContainerRuntime) Create(ctx context.Context, spec ContainerSpec)
 	if spec.HostPort < 1 || spec.HostPort > 65535 || spec.ContainerPort < 1 || spec.ContainerPort > 65535 {
 		return errors.New("invalid container port")
 	}
-	if spec.Labels == nil {
-		spec.Labels = map[string]string{}
-	}
-	spec.Labels["com.easyserver.managed"] = "true"
-	spec.Labels["com.easyserver.kind"] = "database"
+	labels := make(map[string]string, len(spec.Labels)+2)
+	maps.Copy(labels, spec.Labels)
+	labels["com.easyserver.managed"] = "true"
+	labels["com.easyserver.kind"] = "database"
+	spec.Labels = labels
 
 	eng := toEngine(spec.ContainerEngine)
 
@@ -160,9 +160,6 @@ func (r *SocketContainerRuntime) Create(ctx context.Context, spec ContainerSpec)
 			}
 		}
 	}
-
-	labels := make(map[string]string, len(spec.Labels))
-	maps.Copy(labels, spec.Labels)
 
 	var env []string
 	for _, k := range sortedKeys(spec.Environment) {
