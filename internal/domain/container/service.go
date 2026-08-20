@@ -955,7 +955,8 @@ func (s *Service) installPodman(ctx context.Context) error {
 
 	log.Println("podman: package installation completed, enabling and starting podman.socket...")
 	if err := s.EnableSocket(ctx, EnginePodman); err != nil {
-		log.Printf("podman: warning enabling socket: %v", err)
+		log.Printf("podman: failed enabling socket: %v", err)
+		return fmt.Errorf("启用并启动 podman.socket 失败: %w", err)
 	}
 
 	log.Println("podman: installation completed successfully")
