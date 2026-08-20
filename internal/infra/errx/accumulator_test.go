@@ -9,11 +9,14 @@ import (
 type failWriter struct {
 	limit int
 	wrote int
+	calls int
+	err   error
 }
 
 func (f *failWriter) Write(p []byte) (int, error) {
+	f.calls++
 	if f.wrote+len(p) > f.limit {
-		return 0, errors.New("write limit exceeded")
+		return 0, f.err
 	}
 	f.wrote += len(p)
 	return len(p), nil
@@ -64,8 +67,12 @@ func TestErrWriter(t *testing.T) {
 	t.Run("successful writes", func(t *testing.T) {
 		var buf bytes.Buffer
 		ew := NewErrWriter(&buf)
-		_, _ = ew.WriteString("hello ")
-		_, _ = ew.Write([]byte("world"))
+		if _, err := ew.WriteString("hello "); err != nil {
+			t.Fatalf("WriteString() error = %v", err)
+		}
+		if _, err := ew.Write([]byte("world")); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
 		if err := ew.Err(); err != nil {
 			t.Fatalf("expected nil, got %v", err)
 		}
@@ -74,15 +81,24 @@ func TestErrWriter(t *testing.T) {
 		}
 	})
 
-	t.Run("write error accumulates", func(t *testing.T) {
-		fw := &failWriter{limit: 5}
+	t.Run("write error accumulates and subsequent writes become no-ops", func(t *testing.T) {
+		errTarget := errors.New("write limit exceeded")
+		fw := &failWriter{limit: 5, err: errTarget}
 		ew := NewErrWriter(fw)
-		_, _ = ew.WriteString("12345")
-		_, _ = ew.WriteString("67890") // should fail and accumulate
-		_, _ = ew.WriteString("abcde") // should be no-op
-
-		if err := ew.Err(); err == nil {
-			t.Fatal("expected error, got nil")
+		if _, err := ew.WriteString("12345"); err != nil {
+			t.Fatalf("first write error = %v", err)
+		}
+		if _, err := ew.WriteString("67890"); !errors.Is(err, errTarget) {
+			t.Fatalf("second write error = %v, want %v", err, errTarget)
+		}
+		if _, err := ew.WriteString("abcde"); !errors.Is(err, errTarget) {
+			t.Fatalf("third write error = %v, want %v", err, errTarget)
+		}
+		if fw.calls != 2 {
+			t.Fatalf("underlying writer calls = %d, want 2", fw.calls)
+		}
+		if !errors.Is(ew.Err(), errTarget) {
+			t.Fatalf("ew.Err() = %v, want %v", ew.Err(), errTarget)
 		}
 	})
 }

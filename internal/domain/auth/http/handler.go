@@ -771,7 +771,10 @@ func (h *QRLoginHandler) ConfirmQRLogin(c *gin.Context) (any, error) {
 
 // CancelQRLogin dismisses a pending QR session.
 func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) (any, error) {
-	req, _ := httpx.BindJSON[auth.QRLoginConfirmRequest](c)
+	req, err := httpx.BindJSON[auth.QRLoginConfirmRequest](c)
+	if err != nil {
+		return nil, err
+	}
 	if req.QRToken == "" {
 		return nil, errx.BadRequest("缺少 qr_token")
 	}

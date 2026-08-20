@@ -870,9 +870,12 @@ func (h *SettingsHandler) CheckUpdate(c *gin.Context) (any, error) {
 func (h *SettingsHandler) RestartPanel(c *gin.Context) (any, error) {
 	middleware.AuditSummary(c, "重启面板")
 
-	req, _ := httpx.BindJSON[struct {
+	req, err := httpx.BindOptionalJSON[struct {
 		Force *bool `json:"force"`
-	}](c) // optional body, ignore parse errors
+	}](c)
+	if err != nil {
+		return nil, err
+	}
 	force := req.Force != nil && *req.Force
 
 	// Return success first, then restart.

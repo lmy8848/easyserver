@@ -234,10 +234,13 @@ func (h *SSHHandler) RemoveAuthorizedKey(c *gin.Context) (any, error) {
 
 // GenerateKeyPair generates a new key pair, returns private key, auto-authorizes public key.
 func (h *SSHHandler) GenerateKeyPair(c *gin.Context) (any, error) {
-	req, _ := httpx.BindJSON[struct {
+	req, err := httpx.BindOptionalJSON[struct {
 		Name    string `json:"name"`
 		KeyType string `json:"key_type"`
 	}](c)
+	if err != nil {
+		return nil, err
+	}
 	priv, err := h.sshService.GenerateKeyPair(c.Request.Context(), req.Name, req.KeyType)
 	if err != nil {
 		return nil, err
