@@ -311,7 +311,10 @@ func buildSocketInodePIDMap() map[string]int {
 			if strings.HasPrefix(link, "socket:[") && strings.HasSuffix(link, "]") {
 				inode := link[8 : len(link)-1]
 				if inode != "" {
-					inodeMap[inode] = pid
+					// When multiple processes share a socket (e.g. master and workers), keep the lowest PID.
+					if existing, ok := inodeMap[inode]; !ok || pid < existing {
+						inodeMap[inode] = pid
+					}
 				}
 			}
 		}
