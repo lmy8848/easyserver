@@ -102,12 +102,17 @@ export default function CronLogs({
                 onClick={() => setSelected(r.invocation_id)}
                 style={{
                   cursor: 'pointer',
+                  borderRadius: token.borderRadiusSM,
                   padding: '8px 12px',
-                  fontWeight: selected === r.invocation_id ? 600 : 'normal',
+                  backgroundColor: selected === r.invocation_id ? token.controlItemBgActive : 'transparent',
+                  color: selected === r.invocation_id ? token.colorPrimary : undefined,
+                  transition: 'background-color 0.2s ease, color 0.2s ease',
                 }}
               >
                 <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: 12 }}>{r.started_at}</span>
+                  <span style={{ fontSize: 12, fontWeight: selected === r.invocation_id ? 500 : 400 }}>
+                    {r.started_at}
+                  </span>
                   {statusTag(r.status)}
                 </Space>
               </List.Item>
