@@ -14,7 +14,6 @@ import {
   Tooltip,
   Space,
   Checkbox,
-  Spin,
   message,
   theme,
 } from 'antd';
@@ -28,8 +27,8 @@ import {
   ArrowDownOutlined,
   CloseCircleOutlined,
 } from '@ant-design/icons';
-import { parseAnsi, splitLinesWithCr } from './ansi';
-import { useLogBuffer } from './useLogBuffer';
+import { parseAnsi, splitLinesWithCrInfo } from './ansi';
+import { useLogBuffer, processLogEntries } from './useLogBuffer';
 import { useLogStream } from './useLogStream';
 import { copyToClipboard } from '../../utils/clipboard';
 import type {
@@ -208,14 +207,14 @@ export function LogViewer({
   // Convert lines array to LogEntry[] (single-pass, memoized)
   const parsedLineEntries = useMemo(() => {
     if (!lines) return null;
-    const result: LogEntry[] = [];
+    const rawList: LogEntry[] = [];
     lines.forEach((line) => {
-      const subLines = splitLinesWithCr(line);
-      subLines.forEach((text) => {
-        result.push({ text });
+      const subLines = splitLinesWithCrInfo(line);
+      subLines.forEach(({ text, endsInCr }) => {
+        rawList.push({ text, meta: endsInCr ? { endsInCr: true } : undefined });
       });
     });
-    return result;
+    return processLogEntries([], rawList);
   }, [lines]);
 
   // Direct data integration (lines / entries)
@@ -264,7 +263,7 @@ export function LogViewer({
     if (follow && !isScrolledUp && viewportRef.current) {
       viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
     }
-  }, [buffer.filteredEntries.length, follow, isScrolledUp]);
+  }, [buffer.filteredEntries, follow, isScrolledUp]);
 
   const handleCopy = useCallback(() => {
     const text = buffer.getPlainText();
@@ -297,11 +296,7 @@ export function LogViewer({
     switch (status) {
       case 'connecting':
       case 'streaming':
-        return (
-          <Tag color="processing" icon={<Spin style={{ marginRight: 4 }} />}>
-            运行中
-          </Tag>
-        );
+        return <Tag color="processing">运行中</Tag>;
       case 'completed':
         return <Tag color="success">已完成</Tag>;
       case 'failed':
@@ -422,45 +417,47 @@ export function LogViewer({
         </Space>
       </div>
 
-      {/* 日志输出视口 */}
-      <div
-        ref={viewportRef}
-        onScroll={handleScroll}
-        className={`log-viewer-viewport ${wrap ? 'wrap' : 'no-wrap'}`}
-      >
-        {buffer.filteredEntries.length === 0 ? (
-          <div className="log-viewer-empty">
-            {emptyText ||
-              (status === 'streaming' || status === 'connecting'
-                ? '等待日志输出…'
-                : '暂无日志输出')}
-          </div>
-        ) : (
-          buffer.filteredEntries.map((entry, index) => (
-            <div key={entry.id ?? index} className="log-viewer-line">
-              {showLineNumbers && (
-                <span className="log-viewer-line-num">{index + 1}</span>
-              )}
-              {showTimestamps && entry.time && (
-                <span className="log-viewer-time">{entry.time}</span>
-              )}
-              {entry.level && (
-                <span
-                  className={`log-viewer-level log-viewer-level-${String(
-                    entry.level
-                  ).toLowerCase()}`}
-                >
-                  {entry.level}
-                </span>
-              )}
-              <span className="log-viewer-line-text">
-                {renderAnsiSpans(entry.text, buffer.searchKeyword)}
-              </span>
+      {/* 日志内容主体容器 */}
+      <div className="log-viewer-body">
+        <div
+          ref={viewportRef}
+          onScroll={handleScroll}
+          className={`log-viewer-viewport ${wrap ? 'wrap' : 'no-wrap'}`}
+        >
+          {buffer.filteredEntries.length === 0 ? (
+            <div className="log-viewer-empty">
+              {emptyText ||
+                (status === 'streaming' || status === 'connecting'
+                  ? '等待日志输出…'
+                  : '暂无日志输出')}
             </div>
-          ))
-        )}
+          ) : (
+            buffer.filteredEntries.map((entry, index) => (
+              <div key={entry.id ?? index} className="log-viewer-line">
+                {showLineNumbers && (
+                  <span className="log-viewer-line-num">{index + 1}</span>
+                )}
+                {showTimestamps && entry.time && (
+                  <span className="log-viewer-time">{entry.time}</span>
+                )}
+                {entry.level && (
+                  <span
+                    className={`log-viewer-level log-viewer-level-${String(
+                      entry.level
+                    ).toLowerCase()}`}
+                  >
+                    {entry.level}
+                  </span>
+                )}
+                <span className="log-viewer-line-text">
+                  {renderAnsiSpans(entry.text, buffer.searchKeyword)}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
 
-        {/* 浮动吸底按钮 */}
+        {/* 浮动吸底按钮：挂载在 non-scrolling body 容器右下角 */}
         {isScrolledUp && (
           <Button
             type="primary"
@@ -483,3 +480,4 @@ export function LogViewer({
     </div>
   );
 }
+

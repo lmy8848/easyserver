@@ -127,6 +127,8 @@ func (r *SocketContainerRuntime) Create(ctx context.Context, spec ContainerSpec)
 	if rc != nil {
 		defer rc.Close()
 		dec := json.NewDecoder(rc)
+		layerOrder := make([]string, 0)
+		layerIdx := make(map[string]int)
 		for {
 			var ev struct {
 				Status   string `json:"status"`
@@ -147,15 +149,27 @@ func (r *SocketContainerRuntime) Create(ctx context.Context, spec ContainerSpec)
 				return fmt.Errorf("pull image %s: %s", spec.Image, ev.Error)
 			}
 			if r.outputHook != nil {
-				line := ev.Status
+				text := ev.Status
 				if ev.ID != "" {
-					line = ev.ID + ": " + line
+					text = ev.ID + ": " + text
 				}
 				if ev.Progress != "" {
-					line += " " + ev.Progress
+					text += " " + ev.Progress
 				}
-				if line != "" {
-					r.outputHook(line)
+				if text != "" {
+					if ev.ID != "" {
+						if idx, ok := layerIdx[ev.ID]; ok {
+							// Move cursor up to layer line, clear line, write new text, restore cursor
+							up := len(layerOrder) - idx
+							r.outputHook(fmt.Sprintf("\x1b[%dA\x1b[2K%s\x1b[%dB", up, text, up))
+						} else {
+							layerIdx[ev.ID] = len(layerOrder)
+							layerOrder = append(layerOrder, ev.ID)
+							r.outputHook(text)
+						}
+					} else {
+						r.outputHook(text)
+					}
 				}
 			}
 		}

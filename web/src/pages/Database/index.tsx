@@ -424,8 +424,10 @@ export default function DatabasePage() {
       onOk: async () => {
         setOperating(`cancel-install-${v.id}`);
         try {
-          await dbServerApi.cancelInstall(v.container_name);
+          await dbServerApi.cancelInstall(v.id);
           message.success('已取消安装');
+          setVersions(prev => prev.filter(item => item.id !== v.id));
+          setSelectedVersion(prev => (prev?.id === v.id ? null : prev));
           fetchInstances(server.db_type);
         } catch (error: unknown) { message.error((error instanceof Error ? error.message : '取消失败')); }
         finally { setOperating(''); }
@@ -811,7 +813,7 @@ export default function DatabasePage() {
 
     // Action buttons live in the inner tab bar's extra area — they follow the
     return (
-      <div>
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         {/* key remounts the header on database-type switch — its internal selection
             and notify-dedup state (lastNotifiedKey is `id:status`, and ids repeat
             across types since they share one table) must start fresh, or a new
@@ -867,7 +869,7 @@ export default function DatabasePage() {
           // so the new install's log shows instead of the stale failed one.
           <InstallLogPanel
             key={selectedVersion.id}
-            containerName={selectedVersion.container_name}
+            instanceId={selectedVersion.id}
             version={selectedVersion.version}
             onDone={() => fetchInstances(activeDbType)}
           />
@@ -985,7 +987,7 @@ export default function DatabasePage() {
   };
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 96px)' }}>
       <Tabs
         activeKey={activeDbType}
         onChange={changeDBType}

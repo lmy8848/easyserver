@@ -20,10 +20,10 @@ export const dbServerApi = {
     api.get<ApiResponse<Page<DBInstance>>>(`/db/instances`, { params: { dbtype, page, page_size: pageSize } }),
 
   createInstance: (dbtype: string, data: { version: string; image?: string; port?: number; container_engine?: string; bind_address?: string; container_name?: string }) =>
-    api.post<ApiResponse<{ install_id: string; version: string; image: string; port: number; status: string }>>(`/db/instances`, { ...data, dbtype }),
+    api.post<ApiResponse<{ instance_id: number; version: string; image: string; port: number; status: string }>>(`/db/instances`, { ...data, dbtype }),
 
   // Cancel an in-flight install (image pull or provisioning).
-  cancelInstall: (iid: string) =>
+  cancelInstall: (iid: number) =>
     api.post<ApiResponse<null>>(`/db/installs/${iid}/cancel`),
 
   // Published Docker Hub tags for an engine's official image ("更多版本" flow),

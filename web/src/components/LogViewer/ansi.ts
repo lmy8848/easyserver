@@ -88,19 +88,37 @@ export function stripAnsi(str: string): string {
   return str.replace(ANSI_REGEX, '');
 }
 
+export interface RawParsedLine {
+  text: string;
+  endsInCr?: boolean;
+}
+
+/**
+ * Splits multiline string and handles carriage return \r progress updates with metadata.
+ */
+export function splitLinesWithCrInfo(text: string): RawParsedLine[] {
+  if (!text) return [];
+  const normalized = text.replace(/\r\n/g, '\n');
+  const clean = normalized.endsWith('\n') ? normalized.slice(0, -1) : normalized;
+  const rawLines = clean.split('\n');
+
+  return rawLines.map((line, idx): RawParsedLine => {
+    const isLast = idx === rawLines.length - 1;
+    const endsInCr = (isLast && text.endsWith('\r')) || line.endsWith('\r');
+    if (line.includes('\r')) {
+      const parts = line.split('\r').filter(Boolean);
+      const textChunk = parts.length > 0 ? (parts[parts.length - 1] ?? '') : '';
+      return { text: textChunk, endsInCr };
+    }
+    return { text: line, endsInCr };
+  });
+}
+
 /**
  * Splits multiline string and handles carriage return \r progress updates.
  */
 export function splitLinesWithCr(text: string): string[] {
-  if (!text) return [];
-  const rawLines = text.replace(/\r\n/g, '\n').split('\n');
-  return rawLines.map((line): string => {
-    if (line.includes('\r')) {
-      const parts = line.split('\r').filter(Boolean);
-      return parts.length > 0 ? (parts[parts.length - 1] ?? '') : '';
-    }
-    return line;
-  });
+  return splitLinesWithCrInfo(text).map((l) => l.text);
 }
 
 function createSpan(

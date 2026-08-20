@@ -29,8 +29,6 @@ func RegisterRoutes(protected *gin.RouterGroup, svc *database.Service) {
 	protected.GET("/db/instances", httpx.H(instanceHandler.ListInstances))
 	protected.POST("/db/instances", httpx.H(instanceHandler.CreateInstance))
 	protected.GET("/db/docker-tags", httpx.H(instanceHandler.ListDockerTags))
-	// Installs run without a database row until they finish; the install id is
-	// the container id. The log endpoint streams one install's log via SSE.
 	protected.GET("/db/installs/:iid/log", httpx.H(instanceHandler.InstallLogStream))
 	protected.POST("/db/installs/:iid/cancel", httpx.H(instanceHandler.CancelInstall))
 	protected.DELETE("/db/instances/:iid", httpx.H(instanceHandler.UninstallInstance))
@@ -144,9 +142,9 @@ func (h *InstanceHandler) ListDockerTags(c *gin.Context) (any, error) {
 
 // InstallLogStream streams installation progress for a pending/failed install via SSE.
 func (h *InstanceHandler) InstallLogStream(c *gin.Context) (any, error) {
-	installID := c.Param("iid")
-	if installID == "" {
-		return nil, errx.BadRequest("无效的安装ID")
+	iid, err := strconv.ParseInt(c.Param("iid"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的实例ID")
 	}
 	// SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -168,7 +166,7 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) (any, error) {
 	// succeeded task is cleaned up on completion (its log already flushed to the
 	// client). If it's gone entirely, the server restarted mid-install and the
 	// in-memory log is lost.
-	tk, ok := h.svc.InstallTask(installID)
+	tk, ok := h.svc.InstallTask(iid)
 	if !ok {
 		send(map[string]string{"type": "done", "error": "安装日志已丢失（服务可能已重启或安装已完成），无法查看"})
 		return nil, nil
@@ -209,9 +207,9 @@ func (h *InstanceHandler) InstallLogStream(c *gin.Context) (any, error) {
 
 // CancelInstall aborts an in-flight install (image pull or provisioning).
 func (h *InstanceHandler) CancelInstall(c *gin.Context) (any, error) {
-	iid := c.Param("iid")
-	if iid == "" {
-		return nil, errx.BadRequest("无效的安装ID")
+	iid, err := strconv.ParseInt(c.Param("iid"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的实例ID")
 	}
 	if err := h.svc.CancelInstall(iid); err != nil {
 		return nil, err

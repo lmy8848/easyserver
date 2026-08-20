@@ -68,4 +68,32 @@ describe('LogViewer Component', () => {
     render(<LogViewer lines={['Process exited']} status="failed" exitCode={1} />);
     expect(screen.getByText('退出码 1')).toBeDefined();
   });
+
+  it('should collapse progress lines in LogViewer when ANSI cursor up codes are used', () => {
+    const { container } = render(
+      <LogViewer
+        lines={[
+          'Starting build...',
+          'Compiling module A...',
+          '\x1b[1A\x1b[2KCompiling module A... Done',
+          'Build complete',
+        ]}
+      />
+    );
+
+    expect(screen.getByText('Starting build...')).toBeDefined();
+    expect(screen.getByText('Compiling module A... Done')).toBeDefined();
+    expect(screen.getByText('Build complete')).toBeDefined();
+    const lines = container.querySelectorAll('.log-viewer-line');
+    expect(lines.length).toBe(3);
+  });
+
+  it('should render log-viewer-body and viewport structure for fixed floating button anchoring', () => {
+    const { container } = render(<LogViewer lines={['Line 1']} />);
+    const body = container.querySelector('.log-viewer-body');
+    const viewport = container.querySelector('.log-viewer-viewport');
+    expect(body).toBeDefined();
+    expect(viewport).toBeDefined();
+    expect(body?.contains(viewport)).toBe(true);
+  });
 });

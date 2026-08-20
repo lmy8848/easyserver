@@ -98,11 +98,15 @@ type fakeDBRuntime struct {
 	exists      bool // 预检 Exists 的返回值（默认 false）
 	// createErr / startErr 让安装管线在指定步骤失败，模拟真实故障。
 	createErr error
+	createFn  func(ctx context.Context, spec ContainerSpec) error
 	startErr  error
 }
 
-func (f *fakeDBRuntime) Create(_ context.Context, spec ContainerSpec) error {
+func (f *fakeDBRuntime) Create(ctx context.Context, spec ContainerSpec) error {
 	f.createSpecs = append(f.createSpecs, spec)
+	if f.createFn != nil {
+		return f.createFn(ctx, spec)
+	}
 	return f.createErr
 }
 func (f *fakeDBRuntime) Start(_ context.Context, _, name string) error {
@@ -226,7 +230,7 @@ func TestCreateInstanceHealthy(t *testing.T) {
 	// The row exists from submit time (status "installing"); the install
 	// goroutine flips it to "running". What matters here is no "stopped"
 	// instance ever appears.
-	if err := svc.WaitForInstall(res.InstallID); err != nil {
+	if err := svc.WaitForInstall(res.InstanceID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
 	got := findInstanceByStatus(t, repo, "running")
@@ -254,7 +258,7 @@ func TestCreateInstanceHealthFailKeepsContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(res.InstallID); err == nil {
+	if err := svc.WaitForInstall(res.InstanceID); err == nil {
 		t.Fatal("expected install to fail when container never becomes healthy")
 	}
 	if len(rt.removed) != 0 {
@@ -282,7 +286,7 @@ func TestUninstallPurgeRemovesHostDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(res.InstallID); err != nil {
+	if err := svc.WaitForInstall(res.InstanceID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
 	got := findInstanceByStatus(t, repo, "running")
@@ -318,7 +322,7 @@ func TestUninstallKeepsHostDataDirWithoutPurge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(res.InstallID); err != nil {
+	if err := svc.WaitForInstall(res.InstanceID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
 	got := findInstanceByStatus(t, repo, "running")
@@ -382,7 +386,7 @@ func TestCreateBackupWritesToDataESBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(res.InstallID); err != nil {
+	if err := svc.WaitForInstall(res.InstanceID); err != nil {
 		t.Fatalf("install wait: %v", err)
 	}
 	got := findInstanceByStatus(t, repo, "running")
@@ -513,7 +517,7 @@ func TestInstallFailureSendsNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(res.InstallID); err == nil {
+	if err := svc.WaitForInstall(res.InstanceID); err == nil {
 		t.Fatal("expected install to fail when container start fails")
 	}
 	if len(sink.created) != 1 {
@@ -545,11 +549,50 @@ func TestInstallCancelDoesNotSendNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("install: %v", err)
 	}
-	if err := svc.WaitForInstall(res.InstallID); err == nil {
+	if err := svc.WaitForInstall(res.InstanceID); err == nil {
 		t.Fatal("expected cancel to be observable as an error from WaitForInstall")
 	}
 	// 取消路径走 canceled() 分支删行、不发通知——由 installInstance 语义保证。
 	if len(sink.created) != 0 {
 		t.Fatalf("cancel must not send notification, got %d: %+v", len(sink.created), sink.created)
+	}
+}
+
+func TestCancelInstallSynchronousCleanup(t *testing.T) {
+	withTempHostBase(t)
+	repo := newFakeRepo()
+	rt := &fakeDBRuntime{
+		createFn: func(ctx context.Context, spec ContainerSpec) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	svc := NewService(repo, rt)
+
+	res, err := svc.CreateInstance(context.Background(), DBTypeMySQL, &CreateDBInstanceRequest{
+		Version: "8.0", Port: 3306, Image: "mysql:8.0",
+	})
+	if err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+
+	// 确认实例行已写入
+	inst, err := repo.GetInstance(context.Background(), res.InstanceID)
+	if err != nil || inst == nil {
+		t.Fatalf("expected instance row to exist during install: %v", err)
+	}
+
+	// 同步调用取消
+	if err := svc.CancelInstall(res.InstanceID); err != nil {
+		t.Fatalf("CancelInstall failed: %v", err)
+	}
+
+	// 取消调用返回后，实例行必须已经同步删除
+	instAfter, err := repo.GetInstance(context.Background(), res.InstanceID)
+	if err != nil {
+		t.Fatalf("query after cancel: %v", err)
+	}
+	if instAfter != nil {
+		t.Fatalf("expected instance row to be synchronously deleted, but found: %+v", instAfter)
 	}
 }

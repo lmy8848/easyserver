@@ -101,4 +101,68 @@ describe('useLogBuffer Hook', () => {
     expect(result.current.totalCount).toBe(0);
     expect(result.current.searchKeyword).toBe('test keyword');
   });
+
+  it('should support ANSI multi-line cursor up escape codes to rewrite lines in place', () => {
+    const { result } = renderHook(() => useLogBuffer());
+
+    act(() => {
+      result.current.appendLine('Task 1: pending');
+      result.current.appendLine('Task 2: pending');
+      // Update Task 1 (2 lines up)
+      result.current.appendLine('\x1b[2A\x1b[2KTask 1: running (50%)\x1b[2B');
+      // Update Task 2 (1 line up)
+      result.current.appendLine('\x1b[1A\x1b[2KTask 2: running (80%)\x1b[1B');
+      // Complete Task 1
+      result.current.appendLine('\x1b[2A\x1b[2KTask 1: completed\x1b[2B');
+      // Complete Task 2
+      result.current.appendLine('\x1b[1A\x1b[2KTask 2: completed\x1b[1B');
+      result.current.appendLine('All tasks finished');
+    });
+
+    expect(result.current.entries).toHaveLength(3);
+    expect(result.current.entries[0]?.text).toBe('Task 1: completed');
+    expect(result.current.entries[1]?.text).toBe('Task 2: completed');
+    expect(result.current.entries[2]?.text).toBe('All tasks finished');
+  });
+
+  it('should update in-place across streaming chunks with carriage return \\r', () => {
+    const { result } = renderHook(() => useLogBuffer());
+
+    act(() => {
+      result.current.appendLine('Download: 10%\r');
+    });
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0]?.text).toBe('Download: 10%');
+
+    act(() => {
+      result.current.appendLine('Download: 50%\r');
+    });
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0]?.text).toBe('Download: 50%');
+
+    act(() => {
+      result.current.appendLine('Download: 100%\n');
+    });
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0]?.text).toBe('Download: 100%');
+
+    act(() => {
+      result.current.appendLine('Completed successfully');
+    });
+    expect(result.current.entries).toHaveLength(2);
+    expect(result.current.entries[0]?.text).toBe('Download: 100%');
+    expect(result.current.entries[1]?.text).toBe('Completed successfully');
+  });
+
+  it('should support ANSI cursor up escape codes to rewrite lines', () => {
+    const { result } = renderHook(() => useLogBuffer());
+
+    act(() => {
+      result.current.appendLine('Building frontend...');
+      result.current.appendLine('\x1b[1A\x1b[2KBuilding frontend... Done');
+    });
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0]?.text).toBe('Building frontend... Done');
+  });
 });

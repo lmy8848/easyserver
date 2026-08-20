@@ -42,4 +42,13 @@ func TestSQLiteRepositoryUsesDatabaseInstanceSchema(t *testing.T) {
 	if err != nil || instance == nil || instance.ContainerEngine != "docker" || instance.DBType != DBTypeMySQL {
 		t.Fatalf("get instance: %v %#v", err, instance)
 	}
+
+	if err := repo.DeleteInstance(ctx, id); err != nil {
+		t.Fatalf("delete instance: %v", err)
+	}
+
+	afterDelete, err := repo.GetInstance(ctx, id)
+	if err != nil || afterDelete != nil {
+		t.Fatalf("expected nil after delete, got %v %#v", err, afterDelete)
+	}
 }

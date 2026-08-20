@@ -6,16 +6,34 @@ import { LogViewer } from '../../components/LogViewer';
 // Self-contained: owns the SSE stream and follow-scroll via LogViewer.
 // The log area is capped so the whole panel stays within one viewport below the header card.
 export default function InstallLogPanel({
-  containerName,
+  instanceId,
   version,
   onDone,
 }: {
-  containerName: string;
+  instanceId: number;
   version: string;
   onDone?: () => void; // install finished (success / failure / cancel)
 }) {
   return (
-    <Card styles={{ body: { padding: 0 } }} style={{ overflow: 'hidden' }}>
+    <Card
+      styles={{
+        body: {
+          padding: 0,
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+        },
+      }}
+      style={{
+        overflow: 'hidden',
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+      }}
+    >
       <LogViewer
         title={
           <span>
@@ -23,12 +41,11 @@ export default function InstallLogPanel({
             {version} 安装日志
           </span>
         }
-        streamUrl={`/api/db/installs/${containerName}/log`}
+        streamUrl={`/api/db/installs/${instanceId}/log`}
         onDone={() => onDone?.()}
-        maxHeight="calc(100vh - 220px)"
-        height="calc(100vh - 220px)"
-        downloadFileName={`db_${containerName}_install`}
-        style={{ border: 'none', borderRadius: 0 }}
+        height="100%"
+        downloadFileName={`db_instance_${instanceId}_install`}
+        style={{ border: 'none', borderRadius: 0, flex: 1, minHeight: 0 }}
       />
     </Card>
   );

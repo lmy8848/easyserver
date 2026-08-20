@@ -112,11 +112,13 @@ func (s *Service) GetInstance(ctx context.Context, id int64) (*DBInstance, error
 	return s.repo.GetInstance(ctx, id)
 }
 
+func installTaskKey(instanceID int64) string {
+	return fmt.Sprintf("db:install:%d", instanceID)
+}
+
 // CreateInstanceResult is what CreateInstance returns. The instance row exists
-// from the start (status "installing"), so the caller gets both the install id
-// (to stream the log) and the instance id.
+// from the start (status "installing"), so the caller gets the instance id.
 type CreateInstanceResult struct {
-	InstallID  string `json:"install_id"`
 	InstanceID int64  `json:"instance_id"`
 	Version    string `json:"version"`
 	Image      string `json:"image"`
@@ -214,7 +216,8 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if err != nil {
 		return nil, fmt.Errorf("write instance record: %w", err)
 	}
-	if _, err := s.taskMgr.StartWithLog(ctx, containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
+	key := installTaskKey(id)
+	if _, err := s.taskMgr.StartWithLog(ctx, key, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
 		if sockRt, ok := rt.(*SocketContainerRuntime); ok {
 			dedicatedRt := NewSocketContainerRuntime(sockRt.client)
@@ -241,7 +244,7 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 		_ = s.repo.DeleteInstance(ctx, id)
 		return nil, err
 	}
-	return &CreateInstanceResult{InstallID: containerName, InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
+	return &CreateInstanceResult{InstanceID: id, Version: req.Version, Image: req.Image, Port: port, Status: "installing"}, nil
 }
 
 // notifyInstallFailed 向站内通知投递安装失败。sink 未接线（nil）时静默跳过；
@@ -267,23 +270,16 @@ func (s *Service) notifyInstallFailed(title, message string) {
 // removes it entirely when the user cancels. ctx is the per-task cancel context
 // from the task executor.
 func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
-	canceled := func() bool { return ctx.Err() != nil }
-	// removeInstance is the cancel cleanup: drop the container and the instance
-	// row — the user aborted, so nothing lingers (a failed install keeps its row
-	// for inspection; a canceled one does not).
-	removeInstance := func() {
-		_ = rt.Remove(ctx, engineName, containerName)
-		_ = s.repo.DeleteInstance(ctx, id)
-	}
-	fail := func(msg string, err error) error {
-		if canceled() {
-			removeInstance()
+	fail := func(ctx context.Context, msg string, err error) error {
+		if ctx.Err() != nil {
 			log.Append("❌ 安装已取消")
 			return ErrInstallCancelled
 		}
 		// 失败时保留容器，便于排查失败现场（容器日志还在）。重新安装走
 		// "卸载+安装"两步，卸载会先删掉这个残留容器，所以不会被占用卡住。
-		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = s.repo.UpdateInstanceStatus(cleanupCtx, id, "failed")
 		log.Append("❌ " + msg + ": " + err.Error())
 		return err
 	}
@@ -293,30 +289,20 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	// mysqld/redis 无法写数据目录（Redis 的 CONFIG REWRITE 也是这个原因才从命名卷
 	// 迁到宿主路径）。Redis 同时预置空 redis.conf（配置文件必须存在，见函数注释）。
 	if err := prepareHostDirs(spec); err != nil {
-		return fail("准备宿主数据目录失败", err)
+		return fail(ctx, "准备宿主数据目录失败", err)
 	}
 	if err := rt.Create(ctx, spec); err != nil {
-		if canceled() {
-			removeInstance()
-			log.Append("❌ 安装已取消")
-			return ErrInstallCancelled
-		}
-		// No container was created — still flip the row to "failed" so the
-		// instance doesn't sit at "installing" forever (the log panel surfaces
-		// the error and offers reinstall).
-		_ = s.repo.UpdateInstanceStatus(ctx, id, "failed")
-		log.Append("❌ 创建容器失败: " + err.Error())
-		return err
+		return fail(ctx, "创建容器失败", err)
 	}
 	log.Append("容器已创建，启动服务...")
 
 	if err := rt.Start(ctx, engineName, containerName); err != nil {
-		return fail("启动容器失败", err)
+		return fail(ctx, "启动容器失败", err)
 	}
 	// 等待就绪不设超时：数据库初始化（尤其首次拉镜像后）没有固定时长，卡住时
 	// 由容器退出（exited 快失败）或用户取消来终止，而不是倒计时误杀。
 	if _, err := waitForHealthy(ctx, rt, engineName, containerName, 0); err != nil {
-		return fail("数据库未就绪", err)
+		return fail(ctx, "数据库未就绪", err)
 	}
 	log.Append("✅ 安装完成，数据库已就绪")
 	if err := s.repo.UpdateInstanceStatus(ctx, id, "running"); err != nil {
@@ -325,14 +311,29 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	return nil
 }
 
-// CancelInstall aborts an in-flight install. The goroutine observes the cancel
-// at its next command boundary (image pull, create, start, health poll) and
-// removes the container and the instance row before finishing — a canceled
-// install leaves no row behind, unlike a failed one.
-func (s *Service) CancelInstall(installID string) error {
-	if !s.taskMgr.Cancel(installID) {
-		return errx.NotFound("安装已结束或不存在")
+// CancelInstall aborts an in-flight install synchronously. It cancels the background
+// task, removes the container, and deletes the instance record from the database
+// immediately so that the response guarantees clean state without relying on async timeouts.
+func (s *Service) CancelInstall(instanceID int64) error {
+	// 1. Cancel background task if active
+	_ = s.taskMgr.Cancel(installTaskKey(instanceID))
+
+	// 2. Synchronously look up the instance record by id
+	inst, err := s.repo.GetInstance(context.Background(), instanceID)
+	if err != nil {
+		return fmt.Errorf("query instance for cancel: %w", err)
 	}
+
+	// 3. Synchronously delete instance row from SQLite
+	if err := s.repo.DeleteInstance(context.Background(), instanceID); err != nil {
+		return fmt.Errorf("delete instance record: %w", err)
+	}
+
+	// 4. Synchronously remove the container if created/partially created
+	if inst != nil {
+		_ = s.runtime.Remove(context.Background(), inst.ContainerEngine, inst.ContainerName)
+	}
+
 	return nil
 }
 
@@ -445,16 +446,16 @@ func versionLike(tag string) bool {
 }
 
 // InstallTask exposes an in-flight install's log and completion to the SSE
-// handler. Returns false when no task exists for the install id (successful
+// handler. Returns false when no task exists for the instance id (successful
 // installs are cleaned up on completion, so this is only live/failed/canceled).
-func (s *Service) InstallTask(installID string) (*task.Task, bool) {
-	return s.taskMgr.Get(installID)
+func (s *Service) InstallTask(instanceID int64) (*task.Task, bool) {
+	return s.taskMgr.Get(installTaskKey(instanceID))
 }
 
 // WaitForInstall blocks until the install finishes and returns its error. Used
 // by tests (and a handy end-of-stream sync for future callers).
-func (s *Service) WaitForInstall(installID string) error {
-	t, ok := s.taskMgr.Get(installID)
+func (s *Service) WaitForInstall(instanceID int64) error {
+	t, ok := s.taskMgr.Get(installTaskKey(instanceID))
 	if !ok {
 		return nil
 	}
