@@ -87,9 +87,26 @@ func toEngine(runtime string) infracontainer.Engine {
 	return infracontainer.EngineDocker
 }
 
+func isValidImageName(image string) bool {
+	if image == "" || len(image) > 255 {
+		return false
+	}
+	for _, r := range image {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-' || r == '/' || r == ':' || r == '@' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (r *SocketContainerRuntime) Create(ctx context.Context, spec ContainerSpec) error {
 	if spec.Name == "" || spec.Image == "" || spec.Volume == "" || spec.DataDir == "" {
 		return errors.New("container name, image, volume and data directory are required")
+	}
+	if !isValidImageName(spec.Image) {
+		return errors.New("invalid container image name")
 	}
 	if spec.HostPort < 1 || spec.HostPort > 65535 || spec.ContainerPort < 1 || spec.ContainerPort > 65535 {
 		return errors.New("invalid container port")

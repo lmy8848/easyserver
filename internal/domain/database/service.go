@@ -217,7 +217,9 @@ func (s *Service) CreateInstance(ctx context.Context, dbType DBType, req *Create
 	if _, err := s.taskMgr.StartWithLog(ctx, containerName, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
 		rt := s.runtimeFactory()
 		if sockRt, ok := rt.(*SocketContainerRuntime); ok {
-			sockRt.SetOutputHook(func(line string) { log.Append(line) })
+			dedicatedRt := NewSocketContainerRuntime(sockRt.client)
+			dedicatedRt.SetOutputHook(func(line string) { log.Append(line) })
+			rt = dedicatedRt
 		}
 		// Detach from the request context: the install outlives the HTTP request
 		// (which is canceled once CreateInstance responds), so it must not inherit
