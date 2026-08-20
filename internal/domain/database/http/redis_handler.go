@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"easyserver/internal/domain/database"
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/errx"
 
@@ -110,9 +111,9 @@ func (h *RedisHandler) SetValue(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req setRedisValueRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[setRedisValueRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	typ := req.Type
 	if typ == "" {
@@ -169,9 +170,9 @@ func (h *RedisHandler) DelKeys(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req delRedisKeysRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[delRedisKeysRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "删除 Redis key "+strconv.Itoa(len(req.Keys))+" 个")
 	n, err := h.svc.DeleteRedisKeys(c.Request.Context(), iid, req.DB, req.Keys)
@@ -193,9 +194,9 @@ func (h *RedisHandler) Expire(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req expireRedisKeyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[expireRedisKeyRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	// EXPIRE with ttl 0 deletes the key — refuse; -1 (永久) goes through persist.
 	if req.TTL <= 0 {
@@ -219,9 +220,9 @@ func (h *RedisHandler) Persist(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req persistRedisKeyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[persistRedisKeyRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	if err := h.svc.PersistRedisKey(c.Request.Context(), iid, req.DB, req.Key); err != nil {
 		return nil, err
@@ -239,9 +240,9 @@ func (h *RedisHandler) FlushDB(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var req flushRedisDBRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[flushRedisDBRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "清空 Redis DB "+strconv.Itoa(req.DB))
 	if err := h.svc.FlushRedisDB(c.Request.Context(), iid, req.DB); err != nil {

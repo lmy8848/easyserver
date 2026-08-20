@@ -139,11 +139,11 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 
 // UpdateFeaturesConfig updates optional feature toggles.
 func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		FIM *bool `json:"fim"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "更新功能开关")
 	h.store.Update(func(cfg *config.Config) {
@@ -159,7 +159,7 @@ func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
 
 // UpdateServerConfig updates server configuration
 func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Port               *int      `json:"port"`
 		Host               *string   `json:"host"`
 		Domain             *string   `json:"domain"`
@@ -175,9 +175,9 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 			EnableQRLogin     *bool   `json:"enable_qr_login"`
 			EnablePublicShare *bool   `json:"enable_public_share"`
 		} `json:"turnstile"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新服务器配置")
@@ -305,13 +305,13 @@ type tlsCertInfo struct {
 // Accepts PEM-encoded cert/key content, validates the pair, writes to disk,
 // and updates the config file. Requires restart to take effect.
 func (h *SettingsHandler) UpdateTLSConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Enabled     *bool   `json:"enabled"`
 		CertContent *string `json:"cert_content"`
 		KeyContent  *string `json:"key_content"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新 TLS 配置")
@@ -434,7 +434,7 @@ func certInfoFromConfig(cfg *config.Config) *tlsCertInfo {
 
 // UpdateAuthConfig updates authentication configuration
 func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		SessionTimeout         *int      `json:"session_timeout"`
 		IdleTimeout            *int      `json:"idle_timeout"`
 		MaxLoginAttempts       *int      `json:"max_login_attempts"`
@@ -446,9 +446,9 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 		AllowMultiSession      *bool     `json:"allow_multi_session"`
 		IPWhitelist            *[]string `json:"ip_whitelist"`
 		SessionCleanupInterval *int      `json:"session_cleanup_interval"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新认证配置")
@@ -565,12 +565,12 @@ func (h *SettingsHandler) UpdateAuthConfig(c *gin.Context) (any, error) {
 
 // UpdateMonitorConfig updates monitor configuration
 func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		HistoryRetention *int `json:"history_retention"`
 		CollectInterval  *int `json:"collect_interval"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新监控配置")
@@ -613,11 +613,11 @@ func (h *SettingsHandler) UpdateMonitorConfig(c *gin.Context) (any, error) {
 
 // UpdateAuditConfig updates audit configuration
 func (h *SettingsHandler) UpdateAuditConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		RetentionDays *int `json:"retention_days"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if req.RetentionDays != nil && (*req.RetentionDays < 1 || *req.RetentionDays > 3650) {
 		return nil, errx.BadRequest("保留天数必须在 1 到 3650 天之间")
@@ -668,12 +668,12 @@ func validateWebhookURL(rawURL string) error {
 
 // UpdateNotifyConfig updates notification configuration
 func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Enabled    *bool   `json:"enabled"`
 		WebhookURL *string `json:"webhook_url"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新通知配置")
@@ -724,14 +724,14 @@ func (h *SettingsHandler) TestWebhook(c *gin.Context) (any, error) {
 // UpdateLogsConfig updates the global log configuration (level/format/rotation).
 // 等级通过 logger.SetLevel 运行时立即生效，其余字段持久化到 config.toml，重启后生效。
 func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Level     *string `json:"level"`
 		Format    *string `json:"format"`
 		MaxSizeMB *int    `json:"max_size_mb"`
 		MaxFiles  *int    `json:"max_files"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新日志配置")
@@ -787,11 +787,11 @@ func (h *SettingsHandler) GetAlertRules(c *gin.Context) (any, error) {
 
 // UpdateAlertRules updates the alert rules configuration
 func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Rules []config.AlertRuleConfig `json:"rules"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "更新告警规则")
@@ -870,10 +870,9 @@ func (h *SettingsHandler) CheckUpdate(c *gin.Context) (any, error) {
 func (h *SettingsHandler) RestartPanel(c *gin.Context) (any, error) {
 	middleware.AuditSummary(c, "重启面板")
 
-	var req struct {
+	req, _ := httpx.BindJSON[struct {
 		Force *bool `json:"force"`
-	}
-	_ = c.ShouldBindJSON(&req) // optional body, ignore parse errors
+	}](c) // optional body, ignore parse errors
 	force := req.Force != nil && *req.Force
 
 	// Return success first, then restart.

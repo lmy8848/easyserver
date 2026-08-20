@@ -71,10 +71,10 @@ func (h *ServiceHandler) List(c *gin.Context) (any, error) {
 
 // GetDetails returns detailed info (PID, memory, enabled) for specific services
 func (h *ServiceHandler) GetDetails(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Names []string `json:"names"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || len(req.Names) == 0 {
+	}](c)
+	if err != nil || len(req.Names) == 0 {
 		return nil, errx.BadRequest("缺少服务名称参数")
 	}
 
@@ -355,9 +355,9 @@ func (h *ServiceHandler) HandleLogsSSE(c *gin.Context) (any, error) {
 // Create 创建托管服务（生成 unit + 按需 enable/start）。
 // 只生成 easyserver-svc-<name>.service，不支持创建系统服务的 unit。
 func (h *ServiceHandler) Create(c *gin.Context) (any, error) {
-	var spec systemd.ManagedUnitSpec
-	if err := c.ShouldBindJSON(&spec); err != nil {
-		return nil, errx.BadRequest("参数错误: %w", err)
+	spec, err := httpx.BindJSON[systemd.ManagedUnitSpec](c)
+	if err != nil {
+		return nil, err
 	}
 	spec.Name = strings.TrimPrefix(strings.TrimSpace(spec.Name), "easyserver-svc-")
 	middleware.AuditSummary(c, "创建托管服务 "+spec.Name)
@@ -375,9 +375,9 @@ func (h *ServiceHandler) Update(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var spec systemd.ManagedUnitSpec
-	if err := c.ShouldBindJSON(&spec); err != nil {
-		return nil, errx.BadRequest("参数错误: %w", err)
+	spec, err := httpx.BindJSON[systemd.ManagedUnitSpec](c)
+	if err != nil {
+		return nil, err
 	}
 	spec.Name = shortName
 	middleware.AuditSummary(c, "更新托管服务 "+shortName)

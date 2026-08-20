@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -83,16 +82,16 @@ func parseExpiresAt(s string) (string, error) {
 		return time.Now().Add(duration).Format(util.TimeLayout), nil
 	}
 	if _, err := time.Parse(util.TimeLayout, s); err != nil {
-		return "", errors.New("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
+		return "", errx.BadRequest("过期时间格式无效，支持 30m、1h、7d 或 2026-07-01 12:00:00")
 	}
 	return s, nil
 }
 
 // CreateShare creates a new file share link
 func (h *FileShareHandler) CreateShare(c *gin.Context) (any, error) {
-	var req filemanager.CreateShareRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[filemanager.CreateShareRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	// Validate file path
@@ -222,9 +221,9 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的ID")
 	}
 
-	var req filemanager.UpdateShareRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[filemanager.UpdateShareRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	userID, _ := c.Get("user_id")
@@ -380,10 +379,9 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("缺少分享令牌")
 	}
 
-	var req TicketRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		// 绑定失败（空 body 或非 JSON）直接返回 400；无密码分享时前端发送 {} 空对象即可
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[TicketRequest](c)
+	if err != nil {
+		return nil, err
 	}
 
 	share, err := h.shareRepo.GetByToken(c.Request.Context(), token)
@@ -459,14 +457,14 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) (any, error) {
 func (h *FileShareHandler) validateTicket(share *filemanager.FileShare, ticket string) error {
 	parts := strings.Split(ticket, ".")
 	if len(parts) != 3 {
-		return errors.New("凭证无效")
+		return filemanager.ErrInvalidTicket
 	}
 	if parts[0] != strconv.FormatInt(share.ID, 10) {
-		return errors.New("凭证无效")
+		return filemanager.ErrInvalidTicket
 	}
 	exp, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || time.Now().Unix() > exp {
-		return errors.New("凭证已过期")
+		return filemanager.ErrTicketExpired
 	}
 
 	msg := parts[0] + "." + parts[1]
@@ -474,7 +472,7 @@ func (h *FileShareHandler) validateTicket(share *filemanager.FileShare, ticket s
 	mac.Write([]byte(msg))
 	expectedSig := hex.EncodeToString(mac.Sum(nil))
 	if subtle.ConstantTimeCompare([]byte(parts[2]), []byte(expectedSig)) != 1 {
-		return errors.New("凭证无效")
+		return filemanager.ErrInvalidTicket
 	}
 	return nil
 }

@@ -587,11 +587,11 @@ func (m *Manager) Chmod(path string, mode os.FileMode) error {
 	}
 
 	if mode&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
-		return errors.New("setuid/setgid/sticky bits are not allowed")
+		return ErrInvalidPermissionBits
 	}
 
 	if mode.Perm()&0002 != 0 {
-		return errors.New("world-writable permissions (o+w) are not allowed")
+		return ErrInvalidPermissionBits
 	}
 
 	return os.Chmod(validPath, mode)

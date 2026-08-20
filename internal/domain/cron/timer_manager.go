@@ -626,7 +626,7 @@ func writeTaskCommand(name, command string) error {
 	}
 	path := taskCommandPath(name)
 	if path == "" {
-		return errors.New("invalid task name")
+		return ErrInvalidTaskName
 	}
 	tmp, err := os.CreateTemp(taskCommandDir, name+".*.tmp")
 	if err != nil {
@@ -657,7 +657,7 @@ func writeTaskCommand(name, command string) error {
 func removeTaskCommand(name string) error {
 	p := taskCommandPath(name)
 	if p == "" {
-		return errors.New("invalid task name")
+		return ErrInvalidTaskName
 	}
 	return os.Remove(p) // 文件不存在时返回 os.ErrNotExist，调用方按需忽略
 }
@@ -666,7 +666,7 @@ func removeTaskCommand(name string) error {
 func readTaskCommand(name string) (string, error) {
 	p := taskCommandPath(name)
 	if p == "" {
-		return "", errors.New("invalid task name")
+		return "", ErrInvalidTaskName
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {

@@ -38,7 +38,7 @@ func (h *SSHHandler) CheckStatus(c *gin.Context) (any, error) {
 
 // SaveConfig saves the SSH configuration
 func (h *SSHHandler) SaveConfig(c *gin.Context) (any, error) {
-	var config struct {
+	config, err := httpx.BindJSON[struct {
 		Port                   int    `json:"port"`
 		PermitRootLogin        string `json:"permit_root_login"`
 		PasswordAuthentication string `json:"password_auth"`
@@ -49,10 +49,9 @@ func (h *SSHHandler) SaveConfig(c *gin.Context) (any, error) {
 		ClientAliveCountMax    int    `json:"client_alive_count_max"`
 		AllowUsers             string `json:"allow_users"`
 		DenyUsers              string `json:"deny_users"`
-	}
-
-	if err := c.ShouldBindJSON(&config); err != nil {
-		return nil, errx.BadRequest("无效的请求: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 
 	middleware.AuditSummary(c, "保存 SSH 配置")
@@ -187,8 +186,8 @@ func (h *SSHHandler) GetLoginHistory(c *gin.Context) (any, error) {
 
 // Harden applies SSH hardening options (backup + test + reload, rollback on failure).
 func (h *SSHHandler) Harden(c *gin.Context) (any, error) {
-	var req ssh.HardenOptions
-	if err := c.ShouldBindJSON(&req); err != nil {
+	req, err := httpx.BindJSON[ssh.HardenOptions](c)
+	if err != nil {
 		return nil, err
 	}
 	cfg, err := h.sshService.Harden(c.Request.Context(), req)
@@ -209,10 +208,10 @@ func (h *SSHHandler) ListAuthorizedKeys(c *gin.Context) (any, error) {
 
 // AddAuthorizedKey appends a public key.
 func (h *SSHHandler) AddAuthorizedKey(c *gin.Context) (any, error) {
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Key string `json:"key" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	}](c)
+	if err != nil {
 		return nil, err
 	}
 	if err := h.sshService.AddAuthorizedKey(req.Key); err != nil {
@@ -235,11 +234,10 @@ func (h *SSHHandler) RemoveAuthorizedKey(c *gin.Context) (any, error) {
 
 // GenerateKeyPair generates a new key pair, returns private key, auto-authorizes public key.
 func (h *SSHHandler) GenerateKeyPair(c *gin.Context) (any, error) {
-	var req struct {
+	req, _ := httpx.BindJSON[struct {
 		Name    string `json:"name"`
 		KeyType string `json:"key_type"`
-	}
-	_ = c.ShouldBindJSON(&req)
+	}](c)
 	priv, err := h.sshService.GenerateKeyPair(c.Request.Context(), req.Name, req.KeyType)
 	if err != nil {
 		return nil, err

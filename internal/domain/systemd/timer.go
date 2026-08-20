@@ -91,17 +91,11 @@ func UnitDir() string {
 
 // ValidateCronName 校验定时任务 <name> 是否合法（复用进程守护的命名规则）。
 func ValidateCronName(name string) error {
-	if name == "" {
-		return errors.New("name 不能为空")
-	}
-	if len(name) > 60 {
-		return errors.New("name 过长（最多 60 字符）")
-	}
 	if strings.HasPrefix(name, CronTimerPrefix) {
 		return fmt.Errorf("name 不能以 %s 前缀开头", CronTimerPrefix)
 	}
 	if !unitNameRegex.MatchString(name) {
-		return errors.New("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
+		return ErrInvalidUnitName
 	}
 	return nil
 }

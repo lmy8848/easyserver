@@ -17,22 +17,19 @@ import (
 )
 
 var (
-	validPkgName    = regexp.MustCompile(`^(@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.-]+$`)
-	validPkgVersion = regexp.MustCompile(`^[a-zA-Z0-9_.\-+^~>=<*]+$`)
+	validPkgName    = regexp.MustCompile(`^(@[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.][a-zA-Z0-9_.-]*$`)
+	validPkgVersion = regexp.MustCompile(`^[a-zA-Z0-9_.+^~>=<*][a-zA-Z0-9_.\-+^~>=<*]*$`)
 )
 
 func validatePackageName(name string) error {
-	if name == "" || strings.HasPrefix(name, "-") || !validPkgName.MatchString(name) {
+	if !validPkgName.MatchString(name) {
 		return errx.BadRequest("invalid package name: %s", name)
 	}
 	return nil
 }
 
 func validatePackageVersion(version string) error {
-	if version == "" {
-		return nil
-	}
-	if strings.HasPrefix(version, "-") || !validPkgVersion.MatchString(version) {
+	if version != "" && !validPkgVersion.MatchString(version) {
 		return errx.BadRequest("invalid package version: %s", version)
 	}
 	return nil

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -504,18 +503,7 @@ func (s *WebsiteService) UploadSSL(ctx context.Context, webServerID, id int64, c
 
 // validateDomain validates that a domain name is safe to use in file paths
 func validateDomain(domain string) error {
-	if domain == "" {
-		return errx.BadRequest("域名不能为空")
-	}
-	// Only allow alphanumeric, hyphens, dots
-	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$`)
-	if !domainRegex.MatchString(domain) {
-		return errx.BadRequest("无效的域名：%s", domain)
-	}
-	if len(domain) > 253 {
-		return errx.BadRequest("域名过长：%d 字符", len(domain))
-	}
-	return nil
+	return ValidateDomainName(domain)
 }
 
 func validateRootPath(p string) error {

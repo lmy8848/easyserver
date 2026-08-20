@@ -440,9 +440,11 @@ func TestValidateContainerName(t *testing.T) {
 			t.Errorf("validateContainerName(%q) = nil, want error", name)
 		}
 	}
-	tooLong := strings.Repeat("a", maxContainerNameLen+1)
+	tooLong := strings.Repeat("a", 129)
 	if err := validateContainerName(tooLong); err == nil {
 		t.Error("expected over-length name rejected")
+	} else if !errors.Is(err, ErrInvalidContainerName) {
+		t.Errorf("error = %v, want ErrInvalidContainerName", err)
 	}
 }
 

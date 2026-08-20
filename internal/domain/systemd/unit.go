@@ -24,9 +24,9 @@ const (
 	managedMarkerValue = "easyserver"
 )
 
-// unitNameRegex 限制托管 unit 的 <name> 部分：小写字母/数字/连字符。
+// unitNameRegex 限制托管 unit 的 <name> 部分：小写字母/数字/连字符，长度 1-60。
 // 防止用户输入注入到文件名或 unit 指令里。
-var unitNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$`)
+var unitNameRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$`)
 
 // envKeyRegex 限制 env 变量名格式，防止 key 含换行注入 unit 指令。
 // 标准 POSIX 环境变量名：字母/数字/下划线，不以数字开头。
@@ -65,17 +65,11 @@ func UnitName(unitFileName string) string {
 
 // ValidateManagedName 校验 <name> 是否合法。
 func ValidateManagedName(name string) error {
-	if name == "" {
-		return errors.New("name 不能为空")
-	}
-	if len(name) > 60 {
-		return errors.New("name 过长（最多 60 字符）")
-	}
 	if strings.HasPrefix(name, managedUnitPrefix) {
 		return fmt.Errorf("name 不能以 %s 前缀开头", managedUnitPrefix)
 	}
 	if !unitNameRegex.MatchString(name) {
-		return errors.New("name 只能包含小写字母、数字、连字符，且不能以连字符开头/结尾")
+		return ErrInvalidUnitName
 	}
 	return nil
 }

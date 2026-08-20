@@ -49,7 +49,7 @@ func (h *SecurityHandler) UpdateConfig(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, errx.BadRequest("无效的网站ID")
 	}
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		RateLimitEnabled    bool `json:"rate_limit_enabled"`
 		RateLimitRate       int  `json:"rate_limit_rate"`
 		RateLimitBurst      int  `json:"rate_limit_burst"`
@@ -58,9 +58,9 @@ func (h *SecurityHandler) UpdateConfig(c *gin.Context) (any, error) {
 		AutoBanThreshold    int  `json:"auto_ban_threshold"`
 		AutoBan404Threshold int  `json:"auto_ban_404_threshold"`
 		AutoBanDuration     int  `json:"auto_ban_duration"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	cfg, err := h.svc.UpdateConfig(c.Request.Context(), websiteID, func(cfg *security.SecurityConfig) {
 		cfg.RateLimitEnabled = req.RateLimitEnabled
@@ -97,13 +97,13 @@ func (h *SecurityHandler) BanIP(c *gin.Context) (any, error) {
 	if err != nil {
 		return nil, errx.BadRequest("无效的网站ID")
 	}
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		IP       string `json:"ip" binding:"required"`
 		Reason   string `json:"reason"`
 		Duration int    `json:"duration"` // seconds, 0 = permanent
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	if req.Reason == "" {
 		req.Reason = "手动封禁"

@@ -58,15 +58,15 @@ func (h *WebServerHandler) Get(c *gin.Context) (any, error) {
 		return nil, err
 	}
 	if server == nil {
-		return nil, errx.NotFound("Web 服务器不存在")
+		return nil, web.ErrServerNotFound
 	}
 	return server, nil
 }
 
 func (h *WebServerHandler) Create(c *gin.Context) (any, error) {
-	var req web.CreateWebServerRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[web.CreateWebServerRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建 Web服务 "+req.Name)
 
@@ -241,11 +241,11 @@ func (h *WebServerHandler) SaveConfig(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Content string `json:"content"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "保存 Web服务配置 #"+strconv.FormatInt(id, 10))
 
@@ -279,11 +279,11 @@ func (h *WebServerHandler) SetAutoStart(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Enabled bool `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "设置 Web服务自启 #"+strconv.FormatInt(id, 10))
 
@@ -336,7 +336,7 @@ func (h *WebServerHandler) GetWebsite(c *gin.Context) (any, error) {
 		return nil, err
 	}
 	if site == nil {
-		return nil, errx.NotFound("网站不存在")
+		return nil, web.ErrWebsiteNotFound
 	}
 	return site, nil
 }
@@ -347,9 +347,9 @@ func (h *WebServerHandler) CreateWebsite(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的服务器ID")
 	}
 
-	var req web.CreateWebsiteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[web.CreateWebsiteRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建网站 "+req.Domain)
 
@@ -375,9 +375,9 @@ func (h *WebServerHandler) UpdateWebsite(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req web.UpdateWebsiteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	req, err := httpx.BindJSON[web.UpdateWebsiteRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "更新网站 #"+strconv.FormatInt(id, 10))
 
@@ -474,11 +474,11 @@ func (h *WebServerHandler) ApplyWebsiteSSL(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		Email string `json:"email"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "应用网站SSL证书 #"+strconv.FormatInt(id, 10))
 
@@ -499,12 +499,12 @@ func (h *WebServerHandler) UploadWebsiteSSL(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的 ID")
 	}
 
-	var req struct {
+	req, err := httpx.BindJSON[struct {
 		CertContent string `json:"cert_content" binding:"required"`
 		KeyContent  string `json:"key_content" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("invalid request: %w", err)
+	}](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "上传网站SSL证书 #"+strconv.FormatInt(id, 10))
 
@@ -512,7 +512,7 @@ func (h *WebServerHandler) UploadWebsiteSSL(c *gin.Context) (any, error) {
 	certPEM := []byte(strings.TrimSpace(req.CertContent))
 	keyPEM := []byte(strings.TrimSpace(req.KeyContent))
 	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
-		return nil, errx.BadRequest("证书与私钥不匹配或格式错误: %w", err)
+		return nil, web.ErrCertMismatch
 	}
 
 	sslDir := "/etc/nginx/ssl"

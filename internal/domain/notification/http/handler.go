@@ -53,9 +53,9 @@ func (h *NotificationHandler) CountUnread(c *gin.Context) (any, error) {
 
 // Create adds a new notification (admin only)
 func (h *NotificationHandler) Create(c *gin.Context) (any, error) {
-	var req notification.CreateNotificationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		return nil, errx.BadRequest("无效的请求参数")
+	req, err := httpx.BindJSON[notification.CreateNotificationRequest](c)
+	if err != nil {
+		return nil, err
 	}
 	middleware.AuditSummary(c, "创建通知")
 	if _, err := h.ns.Create(req); err != nil {

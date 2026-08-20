@@ -434,7 +434,7 @@ func (b *SQLBuilder) BuildCreateTable(tableName string, columns []TableColumn, c
 		}
 		return fmt.Sprintf("CREATE TABLE \"%s\" (%s);", tableName, strings.Join(parts, ", ")), nil
 	default:
-		return "", errors.New("不支持的数据库类型")
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -493,7 +493,7 @@ func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
 	case DBTypePostgreSQL:
 		return fmt.Sprintf("DROP TABLE \"%s\";", tableName), nil
 	default:
-		return "", errors.New("不支持的数据库类型")
+		return "", ErrUnsupportedDBType
 	}
 }
 
@@ -501,7 +501,7 @@ func (b *SQLBuilder) BuildDropTable(tableName string) (string, error) {
 // and charset).
 func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, error) {
 	if !isValidDBName(name) {
-		return "", errors.New("invalid database name")
+		return "", ErrInvalidDBName
 	}
 	if charset == "" {
 		charset = defaultCharset
@@ -526,7 +526,7 @@ func (b *SQLBuilder) BuildCreateDatabase(name string, charset string) (string, e
 // BuildDropDatabase generates a DROP DATABASE statement (validated name).
 func (b *SQLBuilder) BuildDropDatabase(name string) (string, error) {
 	if !isValidDBName(name) {
-		return "", errors.New("invalid database name")
+		return "", ErrInvalidDBName
 	}
 	switch b.dbType {
 	case DBTypeMySQL:
