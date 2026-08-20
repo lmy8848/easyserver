@@ -93,16 +93,6 @@ func (h *ContainerHandler) EnableSocket(c *gin.Context) (any, error) {
 	return gin.H{"message": "Socket 已启用"}, nil
 }
 
-// DisableSocket disables a engine's API socket unit.
-func (h *ContainerHandler) DisableSocket(c *gin.Context) (any, error) {
-	engine := h.engineName(c)
-	middleware.AuditSummary(c, "禁用 "+string(engine)+" Socket")
-	if err := h.containerService.DisableSocket(c.Request.Context(), engine); err != nil {
-		return nil, err
-	}
-	return gin.H{"message": "Socket 已禁用"}, nil
-}
-
 // GetEngineInfo returns a engine's system info
 func (h *ContainerHandler) GetEngineInfo(c *gin.Context) (any, error) {
 	info, err := h.containerService.GetInfo(c.Request.Context(), h.engineName(c))
@@ -595,7 +585,6 @@ func RegisterRoutes(protected *gin.RouterGroup, containerService *container.Serv
 	protected.POST("/container/registry/login", httpx.H(handler.RegistryLogin))
 	protected.POST("/container/registry/logout", httpx.H(handler.RegistryLogout))
 	protected.POST("/container/socket/enable", httpx.H(handler.EnableSocket))
-	protected.POST("/container/socket/disable", httpx.H(handler.DisableSocket))
 
 	// Container instances
 	protected.GET("/container/instances", httpx.H(handler.ListContainers))

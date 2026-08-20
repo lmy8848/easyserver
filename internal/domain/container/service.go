@@ -741,7 +741,7 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 	status.OS = s.detectOS(ctx)
 
 	if isPodmanEngine(engine) {
-		// Podman is self-contained (no daemon): CLI present = usable.
+		// Podman: "Installed" means binary exists. "Running" means podman.socket is accessible.
 		stdout, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
 		if err != nil {
 			status.Installed = false
@@ -749,7 +749,8 @@ func (s *Service) Detect(ctx context.Context, engine Engine) (*DockerStatus, err
 		}
 		status.Installed = true
 		status.Version = extractVersion(string(stdout))
-		status.Running = true
+		_, pingErr := infracontainer.DefaultClient().Ping(ctx, infracontainer.EnginePodman)
+		status.Running = (pingErr == nil)
 		status.SocketEnabled = s.socketEnabled(ctx)
 	} else {
 		// Docker: CLI and engine (docker.service) are separate packages.
@@ -952,6 +953,11 @@ func (s *Service) installPodman(ctx context.Context) error {
 		return fmt.Errorf("podman 安装失败: %s", truncateOutput(string(output), 500))
 	}
 
+	log.Println("podman: package installation completed, enabling and starting podman.socket...")
+	if err := s.EnableSocket(ctx, EnginePodman); err != nil {
+		log.Printf("podman: warning enabling socket: %v", err)
+	}
+
 	log.Println("podman: installation completed successfully")
 	return nil
 }
@@ -965,14 +971,14 @@ func serviceUnit(engine Engine) string {
 }
 
 // engineControlSupported reports whether the engine has a daemon/service that
-// can be started/stopped. Podman has no daemon (CLI talks directly), so its
-// engine-level start/stop is unsupported.
-func engineControlSupported(engine Engine) bool { return !isPodmanEngine(engine) }
+// can be started/stopped. Both Docker (docker.service) and Podman (podman.socket)
+// are supported.
+func engineControlSupported(_ Engine) bool { return true }
 
 // StartEngine starts the engine's systemd service.
 func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
-		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
+		return errx.Unavailable("%s 不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
 	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, unit, "replace"); err != nil {
@@ -984,7 +990,7 @@ func (s *Service) StartEngine(ctx context.Context, engine Engine) error {
 // StopEngine stops the engine's systemd service.
 func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
-		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
+		return errx.Unavailable("%s 不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
 	if _, err := infrasystemd.DefaultClient().StopUnitContext(ctx, unit, "replace"); err != nil {
@@ -996,7 +1002,7 @@ func (s *Service) StopEngine(ctx context.Context, engine Engine) error {
 // RestartEngine restarts the engine's systemd service.
 func (s *Service) RestartEngine(ctx context.Context, engine Engine) error {
 	if !engineControlSupported(engine) {
-		return errx.Unavailable("%s 无守护进程，不支持启停", engine)
+		return errx.Unavailable("%s 不支持启停", engine)
 	}
 	unit := serviceUnit(engine)
 	if _, err := infrasystemd.DefaultClient().RestartUnitContext(ctx, unit, "replace"); err != nil {
@@ -1014,7 +1020,7 @@ func (s *Service) socketEnabled(ctx context.Context) bool {
 	return util.SystemdUnitEnabled(ctx, enableSocketUnit)
 }
 
-// EnableSocket enables Podman's API socket unit at boot.
+// EnableSocket enables and starts Podman's API socket unit.
 func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if !isPodmanEngine(engine) {
 		return errors.New("socket 操作仅支持 Podman")
@@ -1022,16 +1028,8 @@ func (s *Service) EnableSocket(ctx context.Context, engine Engine) error {
 	if _, _, err := infrasystemd.DefaultClient().EnableUnitFilesContext(ctx, []string{enableSocketUnit}, false, false); err != nil {
 		return fmt.Errorf("failed to enable %s socket: %w", engine, err)
 	}
-	return nil
-}
-
-// DisableSocket disables Podman's API socket unit.
-func (s *Service) DisableSocket(ctx context.Context, engine Engine) error {
-	if !isPodmanEngine(engine) {
-		return errors.New("socket 操作仅支持 Podman")
-	}
-	if _, err := infrasystemd.DefaultClient().DisableUnitFilesContext(ctx, []string{enableSocketUnit}, false); err != nil {
-		return fmt.Errorf("failed to disable %s socket: %w", engine, err)
+	if _, err := infrasystemd.DefaultClient().StartUnitContext(ctx, enableSocketUnit, "replace"); err != nil {
+		return fmt.Errorf("failed to start %s socket: %w", engine, err)
 	}
 	return nil
 }

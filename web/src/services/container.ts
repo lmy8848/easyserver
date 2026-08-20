@@ -19,8 +19,8 @@ export const containerApi = {
     api.post<ApiResponse>('/container/install', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
   start: (engine?: string) =>
     api.post<ApiResponse>('/container/start', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
-  controlSocket: (action: string, engine?: string) =>
-    api.post<ApiResponse>(`/container/socket/${action}`, null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
+  enableSocket: (engine?: string) =>
+    api.post<ApiResponse>('/container/socket/enable', null, { params: { engine: engine === 'podman' ? 'podman' : undefined } }),
 
   listContainers: (engine?: string, all = true, page = 1, pageSize = 50) =>
     api.get<ApiResponse<Page<Container>>>('/container/instances', {
