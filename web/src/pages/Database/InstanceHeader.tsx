@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Card, Button, Space, Select, Popconfirm, message, InputNumber, Modal,
-  Form, Input, List, Tag, Spin, Pagination, Empty, Switch,
+  Form, Input, List, Tag, Spin, Pagination, Empty,
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import { SiMysql, SiPostgresql, SiRedis } from '@icons-pack/react-simple-icons';
 import { dbServerApi } from '../../services/database';
-import STYLES from './styles';
+import { LogViewer } from '../../components/LogViewer';
 import type { InstanceHeaderProps, DBInstance } from './types';
 
 // Type brand logo + color (simple-icons). Falls back to a neutral accent for
@@ -50,8 +50,6 @@ export default function InstanceHeader({
   const [logVersion, setLogVersion] = useState<DBInstance | null>(null);
   const [logContent, setLogContent] = useState('');
   const [logLoading, setLogLoading] = useState(false);
-  const [logFollow, setLogFollow] = useState(true);
-  const logRef = useRef<HTMLDivElement>(null);
 
   // Docker Hub "更多版本" pager state (install modal).
   const DOCKER_PAGE_SIZE = 10;
@@ -112,7 +110,11 @@ export default function InstanceHeader({
         const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
         if (active) setLogContent(res.data?.data?.logs || '(empty)');
       } catch (error) {
-        if (active) setLogContent('Failed: ' + (error instanceof Error ? error.message : String(error)));
+        if (active) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          setLogContent('Failed: ' + errMsg);
+          message.error('获取服务日志失败: ' + errMsg);
+        }
       } finally {
         if (active) setLogLoading(false);
       }
@@ -122,11 +124,7 @@ export default function InstanceHeader({
     return () => { active = false; clearInterval(timer); };
   }, [logVersion]);
 
-  useEffect(() => {
-    if (logFollow && logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [logContent, logFollow]);
+  const logLines = useMemo(() => (logContent ? logContent.split('\n') : []), [logContent]);
 
   // ===== Docker Hub pager helpers (install modal) =====
   const openDockerTags = async () => {
@@ -389,28 +387,42 @@ export default function InstanceHeader({
 
       {/* ===== Service log modal (self-contained) ===== */}
       <Modal
-        title={<Space><FileTextOutlined /><span>{logVersion ? `${server.display_name} ${logVersion.version}` : ''} - 服务日志</span>{logLoading && <Spin size="small" />}</Space>}
+        title={<Space><FileTextOutlined /><span>{logVersion ? `${server.display_name} ${logVersion.version}` : ''} - 服务日志</span></Space>}
         open={!!logVersion}
         onCancel={() => setLogVersion(null)}
-        footer={
-          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Space size="small">
-              <Switch checked={logFollow} onChange={setLogFollow} />
-              <span style={{ color: '#8c8c8c', fontSize: 12 }}>自动滚动</span>
-              <span style={{ color: '#8c8c8c', fontSize: 12 }}>每 5 秒自动刷新</span>
-            </Space>
-            <Button size="small" onClick={() => setLogVersion(null)}>关闭</Button>
-          </Space>
-        }
-        width="90vw" style={{ maxWidth: 960 }}>
-        <div ref={logRef} style={{ ...STYLES.logContainer }}>
-          {logContent.split('\n').map((line, i) => (
-            <div key={i} style={STYLES.logLine}>
-              <span style={STYLES.logLineNumber}>{i + 1}</span>
-              <span style={STYLES.logLineText}>{line || ' '}</span>
-            </div>
-          ))}
-        </div>
+        footer={null}
+        width={1000}
+        destroyOnHidden
+        styles={{ body: { padding: 0 } }}
+      >
+        <LogViewer
+          lines={logLines}
+          downloadFileName={`db_${server.db_type}_${logVersion?.version || 'instance'}_log`}
+          height={500}
+          headerExtra={
+            <Button
+              icon={<ReloadOutlined />}
+              loading={logLoading}
+              onClick={async () => {
+                if (!logVersion) return;
+                setLogLoading(true);
+                try {
+                  const res = await dbServerApi.getInstanceLogs(logVersion.id, 200);
+                  setLogContent(res.data?.data?.logs || '(empty)');
+                } catch (error) {
+                  const errMsg = error instanceof Error ? error.message : String(error);
+                  setLogContent('Failed: ' + errMsg);
+                  message.error('获取服务日志失败: ' + errMsg);
+                } finally {
+                  setLogLoading(false);
+                }
+              }}
+            >
+              刷新
+            </Button>
+          }
+          style={{ border: 'none', borderRadius: 0 }}
+        />
       </Modal>
     </>
   );

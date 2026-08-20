@@ -11,7 +11,6 @@ import {
 import type { CronTask, Script } from '../../types';
 import { cronApi } from '../../services/cron';
 import { buildOnCalendar, describeSchedule, computeNextRun, describeOnCalendar, type ScheduleForm } from './schedule';
-import { STYLES } from './types';
 import RuntimeVersionSelect from '../../components/RuntimeVersionSelect';
 
 interface CronTasksProps {
@@ -394,7 +393,7 @@ export default function CronTasks({
         okText={editingTask ? '保存' : '创建'}
         confirmLoading={submitting}
         cancelText="取消"
-        style={STYLES.modal}
+        style={{ top: 40 }}
         destroyOnHidden
         zIndex={1000}
         styles={{ body: { maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingRight: 8 } }}
@@ -420,7 +419,7 @@ export default function CronTasks({
           {mode === 'preset' ? (
             <>
               <RowForm frequency={frequency} setFrequency={(f) => { setFrequency(f); form.setFieldsValue({ frequency: f }); }} onShowHelp={onShowHelp} />
-              <div style={{ ...STYLES.description, marginTop: 0, marginBottom: 16 }}>
+              <div style={{ color: '#8c8c8c', fontSize: 12, marginBottom: 16, minHeight: 18 }}>
                 {descLoading ? <Spin size="small" /> : (formDesc || <span style={{ color: '#8c8c8c' }}>选择调度频率后，将自动生成对应的执行计划</span>)}
                 <Button type="link" size="small" icon={<EyeOutlined />} onClick={handlePreview} loading={previewLoading}>预览下次执行</Button>
               </div>

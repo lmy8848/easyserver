@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, Modal, Form, Input,
   message, Popconfirm, Table, Empty, Tooltip, Collapse,
-  Drawer, Tag, Spin, Checkbox, Select,
+  Select, Tag, Drawer,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
@@ -12,7 +12,7 @@ import {
 import type { Script, ScriptLogLine } from '../types';
 import { cronApi } from '../services/cron';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
-import { useSSE } from '../hooks/useSSE';
+import { LogViewer, useLogBuffer } from '../components/LogViewer';
 
 // 历史日志可选条数
 const HISTORY_LIMITS = [50, 200, 500];
@@ -30,44 +30,10 @@ export default function ScriptPage() {
 
   // ── 日志 Drawer（实时 + 历史 合一）──
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [stream, setStream] = useState(false); // 是否连 WS 实时（执行/运行中脚本才连）
+  const [stream, setStream] = useState(false); // 是否连 SSE 实时（执行/运行中脚本才连）
   const [drawerScript, setDrawerScript] = useState<Script | null>(null);
-  const [logs, setLogs] = useState<ScriptLogLine[]>([]);
-  const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'exited' | 'stopped'>('idle');
-  const [exitCode, setExitCode] = useState<number | null>(null);
   const [historyLimit, setHistoryLimit] = useState(200);
-  const [follow, setFollow] = useState(true); // 跟踪（自动滚到底）
-  const startTimeRef = useRef<number>(0);
-  const [elapsed, setElapsed] = useState(0);
-  const logEndRef = useRef<HTMLDivElement>(null);
-
-  const ssePath = drawerScript ? cronApi.scriptLogsStreamPath(drawerScript.id) : '';
-  const { close } = useSSE({
-    path: ssePath,
-    enabled: drawerVisible && !!drawerScript && stream,
-    autoReconnect: false,
-    onMessage: (msg: { type?: string; data?: ScriptLogLine; code?: number }) => {
-      if (msg.type === 'log' && msg.data) {
-        setLogs((prev) => [...prev, msg.data as ScriptLogLine]);
-      } else if (msg.type === 'exit') {
-        setRunStatus('exited');
-        setExitCode(msg.code ?? -1);
-        setElapsed(Date.now() - startTimeRef.current);
-        setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
-      } else if (msg.type === 'error') {
-        setRunStatus('exited');
-        setExitCode(-1);
-        setElapsed(Date.now() - startTimeRef.current);
-        setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
-      }
-    },
-    onClose: () => {
-      if (runStatus === 'running') {
-        setRunStatus('stopped');
-        setElapsed(Date.now() - startTimeRef.current);
-      }
-    },
-  });
+  const logBuffer = useLogBuffer();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -191,13 +157,20 @@ export default function ScriptPage() {
   const fetchHistory = useCallback(async (script: Script, limit: number) => {
     try {
       const res = await cronApi.getScriptLogs(script.id, limit);
-      setLogs(res.data?.data || []);
+      const items: ScriptLogLine[] = res.data?.data || [];
+      logBuffer.setEntries(
+        items.map((l) => ({
+          text: l.message,
+          time: l.time,
+          level: l.stream === 'stderr' ? 'stderr' : 'stdout',
+        }))
+      );
     } catch (error: unknown) {
-      message.error((error instanceof Error ? error.message : '加载历史日志失败'));
+      message.error(error instanceof Error ? error.message : '加载历史日志失败');
     }
-  }, []);
+  }, [logBuffer]);
 
-  // ── 执行脚本：先经 REST 启动，再打开 Drawer 连 WS 订阅实时输出（两步解耦）──
+  // ── 执行脚本：先经 REST 启动，再打开 Drawer 连 SSE 订阅实时输出（两步解耦）──
   const handleRun = async (script: Script) => {
     try {
       await cronApi.runScript(script.id); // 独立启动步骤
@@ -205,27 +178,20 @@ export default function ScriptPage() {
       message.error(error instanceof Error ? error.message : '启动脚本失败');
       return;
     }
+    logBuffer.clear();
     setDrawerScript(script);
-    setLogs([]);
-    setRunStatus('running');
-    setExitCode(null);
-    setElapsed(0);
-    startTimeRef.current = Date.now();
-    setFollow(true);
     setStream(true); // 订阅实时输出（脚本已由上述 REST 启动）
     setDrawerVisible(true);
     // 乐观标记运行中：无论新启动还是复用已运行实例，执行后脚本都在跑。
     setRunningIds((ids) => (ids.includes(script.id) ? ids : [...ids, script.id]));
   };
 
-  // ── 查看日志（打开同一 Drawer：运行中连 WS 实时续看，否则只看历史）──
+  // ── 查看日志（打开同一 Drawer：运行中连 SSE 实时续看，否则只看历史）──
   const handleViewLogs = (script: Script) => {
+    logBuffer.clear();
     setDrawerScript(script);
-    setLogs([]);
-    setRunStatus('idle');
-    setExitCode(null);
-    startTimeRef.current = Date.now(); // 计时起点：避免退出分支用 Date.now()-0 算出时间戳级耗时
-    setStream(runningIds.includes(script.id)); // 仅运行中才连 WS
+    const isRunning = runningIds.includes(script.id);
+    setStream(isRunning); // 仅运行中才连 SSE
     setDrawerVisible(true);
     fetchHistory(script, historyLimit);
   };
@@ -238,21 +204,11 @@ export default function ScriptPage() {
   };
 
   const handleDrawerClose = () => {
-    close();
     setDrawerVisible(false);
     setDrawerScript(null);
-    setLogs([]);
-    setRunStatus('idle');
+    logBuffer.clear();
     setStream(false);
-    setFollow(true);
   };
-
-  // 自动滚到底（仅实时流且跟踪开启时）
-  useEffect(() => {
-    if (follow && stream) {
-      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [logs, follow, stream]);
 
   const columns = [
     {
@@ -443,76 +399,52 @@ export default function ScriptPage() {
         )}
       </Modal>
 
-      {/* 日志 Drawer：实时 + 历史 合一（按运行状态决定是否连 WS） */}
+      {/* 日志 Drawer：实时 + 历史 合一（按运行状态决定是否连 SSE） */}
       <Drawer
+        open={drawerVisible}
         title={
           <Space>
             <HistoryOutlined />
             <span>日志：{drawerScript?.name}</span>
           </Space>
         }
-        open={drawerVisible}
         onClose={handleDrawerClose}
-        size={720}
+        width={800}
+        destroyOnHidden
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
       >
-        {/* 顶部控制栏 */}
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Space>
-            {runStatus === 'running' && <><Spin size="small" /> <span>运行中…</span></>}
-            {runStatus === 'exited' && (
-              <Tag color={exitCode === 0 ? 'green' : 'red'}>退出码 {exitCode}</Tag>
-            )}
-            {runStatus === 'stopped' && <Tag color="orange">已停止</Tag>}
-            {(runStatus === 'exited' || runStatus === 'stopped') && elapsed > 0 && (
-              <span style={{ color: '#999', fontSize: 12 }}>耗时 {(elapsed / 1000).toFixed(1)}s</span>
-            )}
-            <span style={{ color: '#999', fontSize: 12 }}>共 {logs.length} 条</span>
-          </Space>
-          <Space>
-            <Select
-              size="small"
-              value={historyLimit}
-              onChange={(v) => { setHistoryLimit(v); if (drawerScript) fetchHistory(drawerScript, v); }}
-              options={HISTORY_LIMITS.map((n) => ({ value: n, label: `最近 ${n} 条` }))}
-              style={{ width: 110 }}
-            />
-            <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>跟踪</Checkbox>
-            {runStatus === 'running' && (
-              <Button danger size="small" icon={<StopOutlined />} onClick={handleStop}>停止</Button>
-            )}
-          </Space>
-        </div>
-
-        {/* 日志输出区 */}
-        <div
-          style={{
-            flex: 1, overflowY: 'auto', background: '#1e1e1e',
-            padding: '12px 16px', fontFamily: 'monospace', fontSize: 13,
-            lineHeight: 1.6,
+        <LogViewer
+          buffer={logBuffer}
+          streamUrl={
+            drawerVisible && drawerScript && stream
+              ? cronApi.scriptLogsStreamPath(drawerScript.id)
+              : undefined
+          }
+          streamEnabled={drawerVisible && !!drawerScript && stream}
+          downloadFileName={drawerScript ? `script_${drawerScript.name}` : 'script_log'}
+          onDone={() => {
+            setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
           }}
-        >
-          {logs.length === 0 && runStatus === 'running' ? (
-            <span style={{ color: '#aaa' }}>等待输出…</span>
-          ) : logs.length === 0 ? (
-            <span style={{ color: '#aaa' }}>暂无日志</span>
-          ) : (
-            logs.map((log, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8 }}>
-                <span style={{ color: '#666', flexShrink: 0 }}>{log.time}</span>
-                <span
-                  style={{
-                    color: log.stream === 'stderr' ? '#f48771' : '#d4d4d4',
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                  }}
-                >
-                  {log.message}
-                </span>
-              </div>
-            ))
-          )}
-          <div ref={logEndRef} />
-        </div>
+          headerExtra={
+            <Space style={{ marginLeft: 8 }}>
+              <Select
+                value={historyLimit}
+                onChange={(v) => {
+                  setHistoryLimit(v);
+                  if (drawerScript) fetchHistory(drawerScript, v);
+                }}
+                options={HISTORY_LIMITS.map((n) => ({ value: n, label: `最近 ${n} 条` }))}
+                style={{ width: 120 }}
+              />
+              {drawerScript && runningIds.includes(drawerScript.id) && (
+                <Button danger icon={<StopOutlined />} onClick={handleStop}>
+                  停止
+                </Button>
+              )}
+            </Space>
+          }
+          style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
+        />
       </Drawer>
     </div>
   );

@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
   message, Popconfirm, Tooltip, Row, Col,
-  Table, Tabs, Empty,
+  Table, Tabs, Empty, theme,
 } from 'antd';
 import {
   GlobalOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
@@ -20,6 +20,7 @@ import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './
 import { StatusTag } from '../../utils/status';
 import { formatBytes } from '../../utils/format';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
+import { LogViewer } from '../../components/LogViewer';
 
 function renderServerIcon(name: string, size = 32) {
   const s = (name || '').toLowerCase();
@@ -76,11 +77,17 @@ export default function WebsiteList({
   const [form] = Form.useForm();
 
   // Log modal
+  const { token } = theme.useToken();
   const [logVisible, setLogVisible] = useState(false);
   const [logSite, setLogSite] = useState<Website | null>(null);
   const [logContent, setLogContent] = useState('');
   const [logType, setLogType] = useState('access');
   const [logLoading, setLogLoading] = useState(false);
+
+  const logLines = useMemo(
+    () => (logLoading ? [] : logContent ? logContent.split('\n') : []),
+    [logLoading, logContent]
+  );
 
   // SSL modal
   const [sslVisible, setSslVisible] = useState(false);
@@ -664,22 +671,28 @@ export default function WebsiteList({
         open={logVisible}
         onCancel={() => setLogVisible(false)}
         footer={null}
-        width={900}
+        width={920}
+        destroyOnHidden
+        styles={{ body: { padding: 0 } }}
       >
-        <Tabs
-          activeKey={logType}
-          onChange={(key) => { setLogType(key); if (logSite) showLogs(logSite, key); }}
-          items={[
-            { key: 'access', label: '访问日志' },
-            { key: 'error', label: '错误日志' },
-            { key: 'app', label: '应用日志' },
-          ]}
-        />
-        <Input.TextArea
-          value={logLoading ? 'Loading...' : logContent}
-          readOnly
-          rows={20}
-          style={{ fontFamily: 'monospace', fontSize: 12 }}
+        <div style={{ padding: '0 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+          <Tabs
+            activeKey={logType}
+            onChange={(key) => { setLogType(key); if (logSite) showLogs(logSite, key); }}
+            items={[
+              { key: 'access', label: '访问日志' },
+              { key: 'error', label: '错误日志' },
+              { key: 'app', label: '应用日志' },
+            ]}
+            style={{ marginBottom: 0 }}
+          />
+        </div>
+        <LogViewer
+          lines={logLines}
+          downloadFileName={`${logSite?.domain}_${logType}_log`}
+          emptyText={logLoading ? '加载日志中…' : '暂无日志'}
+          height={480}
+          style={{ border: 'none', borderRadius: 0 }}
         />
       </Modal>
 
