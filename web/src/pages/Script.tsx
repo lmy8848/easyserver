@@ -428,17 +428,16 @@ export default function ScriptPage() {
           headerExtra={
             <Space style={{ marginLeft: 8 }}>
               <Select
-                size="small"
                 value={historyLimit}
                 onChange={(v) => {
                   setHistoryLimit(v);
                   if (drawerScript) fetchHistory(drawerScript, v);
                 }}
                 options={HISTORY_LIMITS.map((n) => ({ value: n, label: `最近 ${n} 条` }))}
-                style={{ width: 110 }}
+                style={{ width: 120 }}
               />
               {drawerScript && runningIds.includes(drawerScript.id) && (
-                <Button danger size="small" icon={<StopOutlined />} onClick={handleStop}>
+                <Button danger icon={<StopOutlined />} onClick={handleStop}>
                   停止
                 </Button>
               )}

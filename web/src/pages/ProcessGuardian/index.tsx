@@ -438,7 +438,6 @@ function ManagedTab() {
           downloadFileName={`service_${logService}_log`}
           headerExtra={
             <Button
-              size="small"
               icon={<ReloadOutlined />}
               loading={logLoading}
               onClick={() => logService && fetchLogs(logService)}
@@ -737,7 +736,6 @@ function SystemTab() {
           downloadFileName={`service_${logService}_log`}
           headerExtra={
             <Button
-              size="small"
               icon={<ReloadOutlined />}
               loading={logLoading}
               onClick={() => logService && fetchLogs(logService)}

@@ -10,10 +10,12 @@ import {
 import {
   Button,
   Input,
-  Space,
   Tag,
-  Switch,
   Tooltip,
+  Space,
+  Checkbox,
+  Spin,
+  theme,
 } from 'antd';
 import {
   SearchOutlined,
@@ -23,10 +25,7 @@ import {
   FullscreenOutlined,
   FullscreenExitOutlined,
   ArrowDownOutlined,
-  LoadingOutlined,
-  CheckCircleOutlined,
   CloseCircleOutlined,
-  StopOutlined,
 } from '@ant-design/icons';
 import { parseAnsi } from './ansi';
 import { useLogBuffer } from './useLogBuffer';
@@ -186,6 +185,7 @@ export function LogViewer({
   className = '',
   style = {},
 }: LogViewerProps) {
+  const { token } = theme.useToken();
   const internalBuffer = useLogBuffer();
   const buffer = externalBuffer || internalBuffer;
 
@@ -279,13 +279,17 @@ export function LogViewer({
     switch (status) {
       case 'connecting':
       case 'streaming':
-        return <Tag icon={<LoadingOutlined />} color="processing">运行中</Tag>;
+        return (
+          <Tag color="processing" icon={<Spin style={{ marginRight: 4 }} />}>
+            运行中
+          </Tag>
+        );
       case 'completed':
-        return <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>;
+        return <Tag color="success">已完成</Tag>;
       case 'failed':
-        return <Tag icon={<CloseCircleOutlined />} color="error">失败</Tag>;
+        return <Tag color="error">失败</Tag>;
       case 'stopped':
-        return <Tag icon={<StopOutlined />} color="warning">已停止</Tag>;
+        return <Tag color="warning">已停止</Tag>;
       default:
         return null;
     }
@@ -294,6 +298,8 @@ export function LogViewer({
   const containerStyle: CSSProperties = {
     height: isFullscreen ? '100vh' : height,
     maxHeight: isFullscreen ? '100vh' : maxHeight,
+    border: `1px solid ${token.colorBorderSecondary}`,
+    backgroundColor: token.colorBgContainer,
     ...style,
   };
 
@@ -302,116 +308,103 @@ export function LogViewer({
       className={`log-viewer-wrapper ${isFullscreen ? 'fullscreen' : ''} ${className}`}
       style={containerStyle}
     >
-      {/* Toolbar */}
-      <div className="log-viewer-toolbar">
-        <div className="log-viewer-toolbar-left">
-          {title && <span className="log-viewer-title">{title}</span>}
+      {/* 顶部原生控制栏（默认尺寸） */}
+      <div
+        style={{
+          padding: '10px 16px',
+          background: token.colorFillAlter,
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
+        <Space size="middle" wrap>
+          {title && (
+            <span style={{ fontWeight: 600, color: token.colorText, fontSize: 14 }}>
+              {title}
+            </span>
+          )}
           {renderedStatusTag}
           {exitCode !== null && exitCode !== undefined && (
             <Tag color={exitCode === 0 ? 'green' : 'red'}>退出码 {exitCode}</Tag>
           )}
           {elapsedMs > 0 && (
-            <span className="log-viewer-meta">
-              {(elapsedMs / 1000).toFixed(1)}s
+            <span style={{ color: token.colorTextTertiary, fontSize: 13 }}>
+              耗时 {(elapsedMs / 1000).toFixed(1)}s
             </span>
           )}
-          <span className="log-viewer-meta">共 {buffer.totalCount} 行</span>
+          <span style={{ color: token.colorTextTertiary, fontSize: 13 }}>
+            共 {buffer.totalCount} 条
+          </span>
           {headerExtra}
-        </div>
+        </Space>
 
-        <div className="log-viewer-toolbar-right">
+        <Space size="middle" wrap>
           {showSearch && (
             <Input
-              size="small"
               placeholder="搜索日志..."
-              prefix={<SearchOutlined style={{ color: '#8c8c8c' }} />}
+              prefix={<SearchOutlined style={{ color: token.colorTextTertiary }} />}
               value={buffer.searchKeyword}
               onChange={(e) => buffer.setSearchKeyword(e.target.value)}
               allowClear
-              style={{ width: 160 }}
+              style={{ width: 180 }}
               suffix={
-                buffer.searchKeyword && (
-                  <span style={{ fontSize: 11, color: '#8c8c8c' }}>
+                buffer.searchKeyword ? (
+                  <span style={{ fontSize: 12, color: token.colorPrimary }}>
                     {buffer.matchCount} 项
                   </span>
-                )
+                ) : null
               }
             />
           )}
 
           {showWrapToggle && (
-            <Tooltip title="自动换行">
-              <Space size={4}>
-                <Switch size="small" checked={wrap} onChange={setWrap} />
-                <span className="log-viewer-meta">换行</span>
-              </Space>
-            </Tooltip>
+            <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>
+              换行
+            </Checkbox>
           )}
 
           {showFollowToggle && (
-            <Tooltip title="自动滚动到底部">
-              <Space size={4}>
-                <Switch size="small" checked={follow} onChange={setFollow} />
-                <span className="log-viewer-meta">跟踪</span>
-              </Space>
-            </Tooltip>
+            <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>
+              跟踪
+            </Checkbox>
           )}
 
           {showCopy && (
-            <Tooltip title="复制全部日志">
-              <Button
-                size="small"
-                type="text"
-                icon={<CopyOutlined style={{ color: '#d4d4d4' }} />}
-                onClick={handleCopy}
-              />
-            </Tooltip>
+            <Button icon={<CopyOutlined />} onClick={handleCopy}>
+              复制
+            </Button>
           )}
 
           {showDownload && (
-            <Tooltip title="导出为 .log 文件">
-              <Button
-                size="small"
-                type="text"
-                icon={<DownloadOutlined style={{ color: '#d4d4d4' }} />}
-                onClick={handleDownload}
-              />
-            </Tooltip>
+            <Button icon={<DownloadOutlined />} onClick={handleDownload}>
+              下载
+            </Button>
           )}
 
           {showClear && (
-            <Tooltip title="清空日志">
-              <Button
-                size="small"
-                type="text"
-                icon={<ClearOutlined style={{ color: '#d4d4d4' }} />}
-                onClick={buffer.clear}
-              />
-            </Tooltip>
+            <Button icon={<ClearOutlined />} onClick={buffer.clear}>
+              清空
+            </Button>
           )}
 
           {allowFullscreen && (
             <Tooltip title={isFullscreen ? '退出全屏' : '全屏显示'}>
               <Button
-                size="small"
-                type="text"
-                icon={
-                  isFullscreen ? (
-                    <FullscreenExitOutlined style={{ color: '#d4d4d4' }} />
-                  ) : (
-                    <FullscreenOutlined style={{ color: '#d4d4d4' }} />
-                  )
-                }
+                icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
                 onClick={() => setIsFullscreen((prev) => !prev)}
               />
             </Tooltip>
           )}
 
           {extraActions}
-        </div>
+        </Space>
       </div>
 
-      {/* Viewport */}
+      {/* 日志输出视口 */}
       <div
         ref={viewportRef}
         onScroll={handleScroll}
@@ -449,10 +442,9 @@ export function LogViewer({
           ))
         )}
 
-        {/* Floating resume auto-scroll button when scrolled up */}
+        {/* 浮动吸底按钮 */}
         {isScrolledUp && (
           <Button
-            size="small"
             type="primary"
             icon={<ArrowDownOutlined />}
             onClick={scrollToBottom}
@@ -463,7 +455,7 @@ export function LogViewer({
         )}
       </div>
 
-      {/* Error Banner */}
+      {/* 错误提示栏 */}
       {error && (
         <div className="log-viewer-error-banner">
           <CloseCircleOutlined />
