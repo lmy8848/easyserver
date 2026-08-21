@@ -49,7 +49,7 @@ To install a specific version:
 curl -fsSL https://raw.githubusercontent.com/lmy8848/easyserver/master/scripts/install.sh | bash -s v0.1.2
 ```
 
-The script installs the binary to `/usr/local/bin/easyserver`, creates `/opt/easyserver` (data dir + minimal `config.toml`), registers and starts the `easyserver` systemd service, then prints the access URLs and the randomly generated admin password (first launch only).
+The script installs the binary to `/usr/local/bin/easyserver`, creates `/opt/easyserver` (data dir + minimal `config.toml`), registers and starts the `easyserver` systemd service, then prints the access URLs and the randomly generated admin credentials (first launch only).
 
 Secrets and unset options are auto-generated on first start and written back to `config.toml` — see [config.toml.example](config.toml.example) for all options. Prefer a plain foreground run? Download the binary from [Releases](https://github.com/lmy8848/easyserver/releases) and start it directly (see `easyserver --help`).
 

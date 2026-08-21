@@ -269,7 +269,16 @@ func (s *Service) notifyInstallFailed(title, message string) {
 // CreateInstance); this flips it to "running" on success / "failed" on error, or
 // removes it entirely when the user cancels. ctx is the per-task cancel context
 // from the task executor.
-func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) error {
+func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, version, image, engineName, containerName, password string, spec ContainerSpec, rt DatabaseRuntime, log *task.TaskLog) (err error) {
+	var succeeded bool
+	defer func() {
+		if !succeeded && ctx.Err() == nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			_ = s.repo.UpdateInstanceStatus(cleanupCtx, id, "failed")
+		}
+	}()
+
 	fail := func(ctx context.Context, msg string, err error) error {
 		if ctx.Err() != nil {
 			log.Append("❌ 安装已取消")
@@ -308,6 +317,7 @@ func (s *Service) installInstance(ctx context.Context, id int64, dbType DBType, 
 	if err := s.repo.UpdateInstanceStatus(ctx, id, "running"); err != nil {
 		return err
 	}
+	succeeded = true
 	return nil
 }
 

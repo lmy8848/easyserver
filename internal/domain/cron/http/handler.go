@@ -23,14 +23,12 @@ import (
 // CronHandler handles cron task API requests
 type CronHandler struct {
 	cronService *cron.Service
-	runner      *cron.ScriptRunner
 }
 
 // NewCronHandler creates a new CronHandler
 func NewCronHandler(cronService *cron.Service) *CronHandler {
 	return &CronHandler{
 		cronService: cronService,
-		runner:      cron.NewScriptRunner(),
 	}
 }
 
@@ -307,7 +305,7 @@ func (h *CronHandler) ScriptLogs(c *gin.Context) (any, error) {
 }
 
 // GetScriptLogs 返回脚本的历史执行日志（journald，identifier=easyserver-script-<name>）。
-// 日志按脚本存（跨多次执行），返回最近 limit 条，供刷新后回看。
+// 日志按脚本存（跨多次执行），全量返回，供刷新后回看。
 func (h *CronHandler) GetScriptLogs(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -318,19 +316,17 @@ func (h *CronHandler) GetScriptLogs(c *gin.Context) (any, error) {
 		return nil, errx.NotFound("脚本不存在")
 	}
 
-	limit := 200
-	if l := c.Query("limit"); l != "" {
-		if parsed, aErr := strconv.Atoi(l); aErr == nil && parsed > 0 && parsed <= 1000 {
-			limit = parsed
-		}
-	}
-
 	args := []string{
 		"--identifier=" + "easyserver-script-" + script.Name,
 		"--no-pager",
 		"--output=json",
-		"-n", strconv.Itoa(limit),
 	}
+	if l := c.Query("limit"); l != "" {
+		if parsed, aErr := strconv.Atoi(l); aErr == nil && parsed > 0 {
+			args = append(args, "-n", strconv.Itoa(parsed))
+		}
+	}
+
 	stdout, err := exec.CommandContext(c.Request.Context(), "journalctl", args...).Output()
 	if err != nil {
 		return nil, errx.Internal("读取历史日志失败: %s", string(stdout))
@@ -491,8 +487,8 @@ func (h *CronHandler) DeleteScript(c *gin.Context) (any, error) {
 	return gin.H{"message": "脚本已删除"}, nil
 }
 
-// RunScriptSSE 通过 Server-Sent Events 单向推送脚本实时输出。
-// 客户端 fetch /cron/scripts/:id/logs?stream=1 建立长连接，服务端按行 push。
+// RunScriptSSE 通过 Server-Sent Events 单向推送脚本实时输出（基于 task.Manager TaskLog 游标机制）。
+// 客户端 fetch /cron/scripts/:id/logs?stream=1 建立长连接，服务端先回放已产生日志，并持续 push 实时输出。
 // 仅订阅当前正在运行的脚本输出；若脚本未在运行，返回 404 让前端回落到历史日志。
 func (h *CronHandler) RunScriptSSE(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -502,7 +498,7 @@ func (h *CronHandler) RunScriptSSE(c *gin.Context) (any, error) {
 	if _, err := h.cronService.GetScript(c.Request.Context(), id); err != nil {
 		return nil, errx.NotFound("脚本不存在")
 	}
-	rs, ok := h.runner.Get(id)
+	tk, ok := h.cronService.ScriptTask(id)
 	if !ok {
 		return nil, errx.NotFound("脚本未在运行")
 	}
@@ -519,49 +515,50 @@ func (h *CronHandler) RunScriptSSE(c *gin.Context) (any, error) {
 	fmt.Fprint(c.Writer, ": connected\n\n")
 	flusher.Flush()
 
-	sub, cancel := rs.Subscribe()
-	defer cancel() // 只注销订阅，不 Kill 进程
+	send := func(payload any) {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", b)
+		flusher.Flush()
+	}
 
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	doneCh := rs.Done()
+	log := tk.Log()
+	cursor := 0
 	for {
 		select {
-		case msg := <-sub:
-			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", msg); err != nil {
-				return nil, nil
-			}
-			flusher.Flush()
-		case <-doneCh:
-			// 脚本已退出，发退出码。
-			exitCode := 0
-			if cmd := rs.Cmd(); cmd != nil && cmd.ProcessState != nil {
-				exitCode = cmd.ProcessState.ExitCode()
-			}
-			exitMsg, _ := json.Marshal(map[string]any{
-				"type": "exit",
-				"code": exitCode,
-			})
-			if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", exitMsg); err != nil {
-				return nil, nil
-			}
-			flusher.Flush()
-			return nil, nil
-		case <-ticker.C:
-			// 心跳注释行，避免连接被中间层空闲断开。
-			if _, err := fmt.Fprint(c.Writer, ": ping\n\n"); err != nil {
-				return nil, nil
-			}
-			flusher.Flush()
 		case <-c.Request.Context().Done():
-			// 客户端断开（fetch abort）时取消 request context。
+			// 客户端断开（fetch abort）时取消
 			return nil, nil
+		default:
+		}
+
+		lines, next := log.Tail(cursor)
+		for _, line := range lines {
+			send(map[string]string{"type": "line", "text": line})
+		}
+		cursor = next
+
+		select {
+		case <-tk.Done():
+			if lines, _ := log.Tail(cursor); len(lines) > 0 {
+				for _, line := range lines {
+					send(map[string]string{"type": "line", "text": line})
+				}
+			}
+			errMsg := ""
+			if tk.Err() != nil {
+				errMsg = tk.Err().Error()
+			}
+			send(map[string]string{"type": "done", "error": errMsg})
+			return nil, nil
+		case <-time.After(300 * time.Millisecond):
 		}
 	}
 }
 
-// RunScript 启动一个脚本执行（独立于 WS 订阅）。单实例：已运行则复用，不重复启动。
+// RunScript 启动一个脚本执行（独立于 WS/HTTP 连接）。单实例：已运行则复用，不重复启动。
 func (h *CronHandler) RunScript(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -572,7 +569,7 @@ func (h *CronHandler) RunScript(c *gin.Context) (any, error) {
 		return nil, errx.NotFound("脚本不存在")
 	}
 	middleware.AuditSummary(c, "执行脚本 "+script.Name)
-	if _, err := h.runner.Start(script); err != nil {
+	if err := h.cronService.RunScript(c.Request.Context(), script); err != nil {
 		return nil, errx.Internal("启动脚本失败: %w", err)
 	}
 	return gin.H{"message": "已启动"}, nil
@@ -580,7 +577,7 @@ func (h *CronHandler) RunScript(c *gin.Context) (any, error) {
 
 // GetRunningScripts 返回运行中脚本 id 列表，供前端显示「运行中」标记。
 func (h *CronHandler) GetRunningScripts(c *gin.Context) (any, error) {
-	return h.runner.RunningIDs(), nil
+	return h.cronService.GetRunningScriptIDs(), nil
 }
 
 // StopScript 停止一个正在运行的脚本（列表上的「停止」按钮调用）。
@@ -592,11 +589,10 @@ func (h *CronHandler) StopScript(c *gin.Context) (any, error) {
 	if _, err := h.cronService.GetScript(c.Request.Context(), id); err != nil {
 		return nil, errx.NotFound("脚本不存在")
 	}
-	if _, ok := h.runner.Get(id); !ok {
+	if !h.cronService.StopScript(id) {
 		return nil, errx.NotFound("脚本未在运行")
 	}
 	middleware.AuditSummary(c, "停止脚本执行")
-	h.runner.Stop(id)
 	return gin.H{"message": "已停止"}, nil
 }
 
@@ -649,7 +645,7 @@ func validateOnCalendar(expr string) error {
 	return nil
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, cronService *cron.Service) {
+func RegisterRoutes(protected *gin.RouterGroup, cronService *cron.Service) {
 	handler := NewCronHandler(cronService)
 
 	protected.GET("/cron/tasks", httpx.H(handler.ListTasks))

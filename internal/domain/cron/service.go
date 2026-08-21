@@ -2,14 +2,20 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"os/exec"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"easyserver/internal/domain/notification"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/infra/task"
 )
 
 // cronWatchInterval 是定时任务失败巡检间隔。
@@ -29,6 +35,7 @@ type Service struct {
 	repo Repository
 	tm   *TimerManager
 
+	taskMgr   *task.Manager
 	mu        sync.Mutex
 	lastSeen  map[string]string // task name → LastResult，翻转检测基线
 	notifSink notification.Sink
@@ -45,6 +52,7 @@ func NewServiceWithSink(repo Repository, provider mise.Provider, runtime Runtime
 	return &Service{
 		repo:      repo,
 		tm:        NewTimerManager(provider, runtime),
+		taskMgr:   task.NewManager(16),
 		lastSeen:  make(map[string]string),
 		notifSink: sink,
 	}
@@ -135,6 +143,105 @@ func (s *Service) DeleteScript(ctx context.Context, id int64) error {
 		return err
 	}
 	return s.repo.DeleteScriptFile(id)
+}
+
+func scriptTaskKey(scriptID int64) string {
+	return fmt.Sprintf("cron:script:%d", scriptID)
+}
+
+// RunScript 启动脚本异步执行（接入 task.Manager）。同 ID 去重，若已在运行则复用已有任务。
+func (s *Service) RunScript(ctx context.Context, script *Script) error {
+	key := scriptTaskKey(script.ID)
+	// 如果已在运行，直接返回 nil（单实例复用）
+	if tk, ok := s.taskMgr.Get(key); ok && tk.Status() == task.StatusRunning {
+		return nil
+	}
+
+	_, err := s.taskMgr.StartWithLog(ctx, key, task.Options{}, func(ctx context.Context, log *task.TaskLog) error {
+		cmd := exec.CommandContext(ctx, script.Path)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+		// 启动 systemd-cat 进程（用于将日志落盘到 journald，identifier=easyserver-script-<name>）
+		var catCmd *exec.Cmd
+		var catStdin io.WriteCloser
+		if c := exec.CommandContext(ctx, "systemd-cat", "-t", "easyserver-script-"+script.Name); c != nil {
+			c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if w, wErr := c.StdinPipe(); wErr == nil {
+				if err := c.Start(); err == nil {
+					catCmd = c
+					catStdin = w
+				}
+			}
+		}
+
+		defer func() {
+			if catStdin != nil {
+				_ = catStdin.Close()
+			}
+			if catCmd != nil && catCmd.Process != nil {
+				_ = catCmd.Process.Kill()
+				_ = catCmd.Wait()
+			}
+		}()
+
+		var mw io.Writer
+		if catStdin != nil {
+			mw = io.MultiWriter(log, catStdin)
+		} else {
+			mw = log
+		}
+		cmd.Stdout = mw
+		cmd.Stderr = mw
+
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+
+		// 监听 ctx 取消（例如用户主动停止脚本），杀死整个进程组
+		cancelDone := make(chan struct{})
+		defer close(cancelDone)
+		go func() {
+			select {
+			case <-ctx.Done():
+				if cmd.Process != nil {
+					// 终止整个进程组（负 PID）
+					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
+			case <-cancelDone:
+			}
+		}()
+
+		return cmd.Wait()
+	})
+	if err != nil && errors.Is(err, task.ErrKeyBusy) {
+		return nil
+	}
+	return err
+}
+
+// StopScript 停止正在运行的脚本。
+func (s *Service) StopScript(scriptID int64) bool {
+	return s.taskMgr.Cancel(scriptTaskKey(scriptID))
+}
+
+// GetRunningScriptIDs 返回当前正在运行中的脚本 ID 列表。
+func (s *Service) GetRunningScriptIDs() []int64 {
+	tasks := s.taskMgr.Tasks()
+	var ids []int64
+	for key, status := range tasks {
+		if status == task.StatusRunning && strings.HasPrefix(key, "cron:script:") {
+			var id int64
+			if _, err := fmt.Sscanf(key, "cron:script:%d", &id); err == nil {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+// ScriptTask 获取脚本对应的后台任务（用于 SSE 流式拉取日志和检测状态）。
+func (s *Service) ScriptTask(scriptID int64) (*task.Task, bool) {
+	return s.taskMgr.Get(scriptTaskKey(scriptID))
 }
 
 // --- 失败巡检 ---

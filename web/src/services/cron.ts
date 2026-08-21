@@ -62,7 +62,7 @@ export const cronApi = {
 
   // 脚本的历史执行日志（journald，刷新后回看）
   getScriptLogs: (id: number, limit?: number) =>
-    api.get<ApiResponse<ScriptLogLine[]>>(`/cron/scripts/${id}/logs`, { params: { limit: limit || 200 } }),
+    api.get<ApiResponse<ScriptLogLine[]>>(`/cron/scripts/${id}/logs`, limit ? { params: { limit } } : undefined),
 
   // 脚本实时日志走 SSE（EventSource，HttpOnly cookie 同源鉴权），返回 SSE 相对路径
   scriptLogsStreamPath: (id: number) => `/api/cron/scripts/${id}/logs?stream=1`,

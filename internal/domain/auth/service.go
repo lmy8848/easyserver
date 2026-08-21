@@ -81,13 +81,14 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 		return err
 	}
 	if total == 0 {
+		username := generateRandomUsername(8)
 		password := generateRandomPassword(16)
 		hash, err := hashPassword(password)
 		if err != nil {
 			return err
 		}
 		if err := s.userRepo.Create(ctx, &User{
-			Username:       "admin",
+			Username:       username,
 			PasswordHash:   hash,
 			Role:           RoleAdmin,
 			MustChangePass: true,
@@ -97,7 +98,7 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 		_, _ = os.Stdout.WriteString("=================================================\n")
 		_, _ = os.Stdout.WriteString("EasyServer 初次启动 - 管理员账号信息\n")
 		_, _ = os.Stdout.WriteString("=================================================\n")
-		_, _ = os.Stdout.WriteString("用户名: admin\n")
+		_, _ = os.Stdout.WriteString("用户名: " + username + "\n")
 		_, _ = os.Stdout.WriteString("密码:   " + password + "\n")
 		_, _ = os.Stdout.WriteString("=================================================\n")
 		_, _ = os.Stdout.WriteString("请登录后立即修改密码！\n")
@@ -107,12 +108,11 @@ func (s *AuthService) InitDefaultAdmin(ctx context.Context) error {
 	return nil
 }
 
-func generateRandomPassword(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+func generateRandomString(charset string, length int) string {
 	charsetLen := byte(len(charset))
 	limit := 256 - (256 % int(charsetLen))
-	password := make([]byte, length)
-	for i := range password {
+	result := make([]byte, length)
+	for i := range result {
 		for {
 			b := make([]byte, 1)
 			if _, err := rand.Read(b); err != nil {
@@ -121,11 +121,25 @@ func generateRandomPassword(length int) string {
 			if int(b[0]) >= limit {
 				continue
 			}
-			password[i] = charset[int(b[0])%int(charsetLen)]
+			result[i] = charset[int(b[0])%int(charsetLen)]
 			break
 		}
 	}
-	return string(password)
+	return string(result)
+}
+
+func generateRandomUsername(length int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+	const alphanum = "abcdefghijklmnopqrstuvwxyz0123456789"
+	if length <= 1 {
+		return generateRandomString(letters, 1)
+	}
+	return generateRandomString(letters, 1) + generateRandomString(alphanum, length-1)
+}
+
+func generateRandomPassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	return generateRandomString(charset, length)
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (*User, error) {

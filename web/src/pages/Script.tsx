@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Card, Button, Space, Modal, Form, Input,
   message, Popconfirm, Table, Empty, Tooltip, Collapse,
-  Select, Tag, Drawer,
+  Tag, Drawer,
 } from 'antd';
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
@@ -13,9 +13,6 @@ import type { Script, ScriptLogLine } from '../types';
 import { cronApi } from '../services/cron';
 import { SCRIPT_TEMPLATES, type ScriptTemplate } from '../constants/templates';
 import { LogViewer, useLogBuffer } from '../components/LogViewer';
-
-// 历史日志可选条数
-const HISTORY_LIMITS = [50, 200, 500];
 
 export default function ScriptPage() {
   const [scripts, setScripts] = useState<Script[]>([]);
@@ -32,7 +29,6 @@ export default function ScriptPage() {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [stream, setStream] = useState(false); // 是否连 SSE 实时（执行/运行中脚本才连）
   const [drawerScript, setDrawerScript] = useState<Script | null>(null);
-  const [historyLimit, setHistoryLimit] = useState(200);
   const logBuffer = useLogBuffer();
 
   const [page, setPage] = useState(1);
@@ -154,9 +150,9 @@ export default function ScriptPage() {
   };
 
   // ── 历史日志拉取（Drawer 打开时作为底，运行中续看时补历史）──
-  const fetchHistory = useCallback(async (script: Script, limit: number) => {
+  const fetchHistory = useCallback(async (script: Script) => {
     try {
-      const res = await cronApi.getScriptLogs(script.id, limit);
+      const res = await cronApi.getScriptLogs(script.id);
       const items: ScriptLogLine[] = res.data?.data || [];
       logBuffer.setEntries(
         items.map((l) => ({
@@ -193,7 +189,7 @@ export default function ScriptPage() {
     const isRunning = runningIds.includes(script.id);
     setStream(isRunning); // 仅运行中才连 SSE
     setDrawerVisible(true);
-    fetchHistory(script, historyLimit);
+    fetchHistory(script);
   };
 
   const handleStop = () => {
@@ -426,22 +422,11 @@ export default function ScriptPage() {
             setRunningIds((ids) => ids.filter((i) => i !== drawerScript?.id));
           }}
           headerExtra={
-            <Space style={{ marginLeft: 8 }}>
-              <Select
-                value={historyLimit}
-                onChange={(v) => {
-                  setHistoryLimit(v);
-                  if (drawerScript) fetchHistory(drawerScript, v);
-                }}
-                options={HISTORY_LIMITS.map((n) => ({ value: n, label: `最近 ${n} 条` }))}
-                style={{ width: 120 }}
-              />
-              {drawerScript && runningIds.includes(drawerScript.id) && (
-                <Button danger icon={<StopOutlined />} onClick={handleStop}>
-                  停止
-                </Button>
-              )}
-            </Space>
+            drawerScript && runningIds.includes(drawerScript.id) ? (
+              <Button danger icon={<StopOutlined />} onClick={handleStop}>
+                停止
+              </Button>
+            ) : undefined
           }
           style={{ flex: 1, border: 'none', borderRadius: 0, height: '100%' }}
         />

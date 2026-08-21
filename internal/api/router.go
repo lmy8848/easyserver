@@ -191,7 +191,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)
 	databasehttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbService)
-	cronhttp.RegisterRoutes(g.Protected, g.WS, cronService)
+	cronhttp.RegisterRoutes(g.Protected, cronService)
 	firewallhttp.RegisterRoutes(g.Protected, firewallService, cfg.Server.Port)
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)

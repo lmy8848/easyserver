@@ -67,7 +67,7 @@ export function StatusTag({ status }: { status: string }) {
     : status === 'installing' ? '安装中'
     : status === 'inactive' ? '已停止'
     : status === 'stopped' ? '已停止'
-    : status === 'failed' ? '异常'
+    : status === 'failed' ? '安装失败'
     : status === 'installed' ? '已安装'
     : status === 'not_installed' ? '未安装'
     : status === 'partial' ? '部分运行'

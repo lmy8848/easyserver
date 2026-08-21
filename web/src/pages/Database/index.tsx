@@ -118,7 +118,16 @@ export default function DatabasePage() {
 
   const fetchInstances = async (dbtype: string) => {
     setVersionsLoading(true);
-    try { const res = await dbServerApi.listInstances(dbtype, 1, 1000); setVersions(res.data?.data?.items ?? []); }
+    try {
+      const res = await dbServerApi.listInstances(dbtype, 1, 1000);
+      const items = res.data?.data?.items ?? [];
+      setVersions(items);
+      setSelectedVersion(prev => {
+        if (!prev) return null;
+        const fresh = items.find(v => v.id === prev.id);
+        return fresh ?? prev;
+      });
+    }
     catch (error) { console.error('Failed to fetch instances:', error); message.error('加载实例列表失败'); } finally { setVersionsLoading(false); }
   };
 

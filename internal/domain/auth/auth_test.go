@@ -405,3 +405,60 @@ func TestChangeUsername_InvalidFormat(t *testing.T) {
 		t.Errorf("error = %v, want ErrInvalidUsername", err)
 	}
 }
+
+func TestGenerateRandomUsername(t *testing.T) {
+	for range 50 {
+		u := generateRandomUsername(8)
+		if len(u) != 8 {
+			t.Fatalf("expected username length 8, got %d (%s)", len(u), u)
+		}
+		if !usernameRegex.MatchString(u) {
+			t.Fatalf("username %q failed regex validation", u)
+		}
+		if u[0] < 'a' || u[0] > 'z' {
+			t.Fatalf("username %q does not start with a lowercase letter", u)
+		}
+	}
+}
+
+func TestInitDefaultAdmin_RandomUsername(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	svc := newTestAuthService(db)
+
+	ctx := context.Background()
+	if err := svc.InitDefaultAdmin(ctx); err != nil {
+		t.Fatalf("InitDefaultAdmin failed: %v", err)
+	}
+
+	users, total, err := svc.userRepo.List(ctx, 0, 10)
+	if err != nil {
+		t.Fatalf("List users failed: %v", err)
+	}
+	if total != 1 || len(users) != 1 {
+		t.Fatalf("expected 1 user, got total=%d, len=%d", total, len(users))
+	}
+
+	user := users[0]
+	if len(user.Username) != 8 {
+		t.Errorf("expected 8-char random username, got %q", user.Username)
+	}
+	if !usernameRegex.MatchString(user.Username) {
+		t.Errorf("username %q failed regex validation", user.Username)
+	}
+	if user.Role != RoleAdmin {
+		t.Errorf("expected RoleAdmin, got %q", user.Role)
+	}
+	if !user.MustChangePass {
+		t.Error("expected MustChangePass to be true")
+	}
+
+	// Calling InitDefaultAdmin again should be a no-op
+	if err := svc.InitDefaultAdmin(ctx); err != nil {
+		t.Fatalf("second InitDefaultAdmin call failed: %v", err)
+	}
+	_, total2, _ := svc.userRepo.List(ctx, 0, 10)
+	if total2 != 1 {
+		t.Errorf("expected total still 1, got %d", total2)
+	}
+}

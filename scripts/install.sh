@@ -76,13 +76,17 @@ EOF
 systemctl daemon-reload
 systemctl enable --now easyserver
 
-# --- 等待首次启动并抓取随机生成的管理员密码 ---
-# 首次安装时程序会在启动日志打印随机密码;已初始化过的实例无此行,超时后跳过
+# --- 等待首次启动并抓取随机生成的管理员账号与密码 ---
+# 首次安装时程序会在启动日志打印随机账号与密码;已初始化过的实例无此行,超时后跳过
+ADMIN_USERNAME=""
 ADMIN_PASSWORD=""
 for i in $(seq 1 30); do
-    ADMIN_PASSWORD=$(journalctl -u easyserver --no-pager -n 300 2>/dev/null \
-        | grep -A3 管理员账号 | sed -n 's/^密码: *//p' | head -1)
-    [ -n "$ADMIN_PASSWORD" ] && break
+    ADMIN_INFO=$(journalctl -u easyserver --no-pager -n 300 2>/dev/null | grep -A4 管理员账号 || true)
+    if [ -n "$ADMIN_INFO" ]; then
+        ADMIN_USERNAME=$(echo "$ADMIN_INFO" | sed -n 's/^用户名: *//p' | head -1)
+        ADMIN_PASSWORD=$(echo "$ADMIN_INFO" | sed -n 's/^密码: *//p' | head -1)
+        [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ] && break
+    fi
     sleep 1
 done
 
@@ -97,14 +101,14 @@ WAN_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
 if [ -n "$WAN_IP" ]; then
     echo "  外网: http://${WAN_IP}:8080"
 fi
-if [ -n "$ADMIN_PASSWORD" ]; then
+if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
     echo "管理员账号:"
-    echo "  用户名: admin"
+    echo "  用户名: ${ADMIN_USERNAME}"
     echo "  密码:   ${ADMIN_PASSWORD}"
     echo "  请登录后立即修改密码!"
 else
-    echo "管理员账号: admin(首次安装密码见启动日志,查看:)"
-    echo "  journalctl -u easyserver --no-pager | grep -A3 管理员账号"
+    echo "管理员账号: (首次安装信息见启动日志,查看:)"
+    echo "  journalctl -u easyserver --no-pager | grep -A4 管理员账号"
 fi
 echo "配置文件: ${INSTALL_DIR}/config.toml"
 echo "数据目录: ${INSTALL_DIR}/data/"

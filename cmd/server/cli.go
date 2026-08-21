@@ -106,19 +106,19 @@ func readInput(prompt string) string {
 }
 
 func getTargetUser(ctx context.Context, authSvc *auth.AuthService) *auth.User {
-	username := readInput("Username (default: admin): ")
-	if username == "" {
-		username = "admin"
+	adminUser, err := authSvc.GetUserByID(ctx, 1)
+	defaultName := "admin"
+	if err == nil && adminUser != nil && adminUser.Username != "" {
+		defaultName = adminUser.Username
 	}
-	// For CLI we need a way to get user by username which isn't directly exposed in AuthService,
-	// but we can just use Login which might fail if locked, so let's add GetUserByUsername to AuthService if needed,
-	// or just let's cheat by authenticating? No, we don't have the password.
-	// Wait, AuthService doesn't expose GetUserByUsername. Let's just assume ID 1 or add it.
-	// Let's modify AuthService slightly in another edit.
-	// For now, assume ID 1.
-	user, err := authSvc.GetUserByID(ctx, 1)
-	if err != nil || user.Username != username {
-		log.Fatalf("user %q not found or not ID 1", username)
+
+	username := readInput(fmt.Sprintf("Username (default: %s): ", defaultName))
+	if username == "" {
+		username = defaultName
+	}
+	user, err := authSvc.GetUserByUsername(ctx, username)
+	if err != nil || user == nil {
+		log.Fatalf("user %q not found", username)
 	}
 	return user
 }
