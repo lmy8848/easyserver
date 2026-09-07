@@ -1,6 +1,6 @@
 module easyserver
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
@@ -13,7 +13,7 @@ require (
 	github.com/pquerna/otp v1.5.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	modernc.org/sqlite v1.56.0
 )
 
