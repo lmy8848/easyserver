@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -13,6 +14,18 @@ var (
 	// ErrSystemdUnavailable indicates that systemd D-Bus is not reachable on this system.
 	ErrSystemdUnavailable = errors.New("systemd D-Bus is unavailable on this host")
 )
+
+// normalizeUnit 把裸服务名（如 "nginx"）补成 systemd 完整 unit 名（"nginx.service"）。
+// go-systemd 的 D-Bus API 要求完整 unit 名；systemctl CLI 会对裸名隐式补 .service，
+// 但 D-Bus 层不会做这个补全（老代码走 systemctl 所以没暴露）。
+// 已带类型后缀（docker.service / podman.socket / cron.timer）或通配符（nginx*）
+// 的名字原样返回，不误伤。
+func normalizeUnit(name string) string {
+	if name != "" && !strings.ContainsAny(name, ".*") {
+		return name + ".service"
+	}
+	return name
+}
 
 // SystemdClient abstracts all D-Bus IPC operations with systemd.
 type SystemdClient interface {
@@ -141,7 +154,11 @@ func (c *realClient) ListUnitsByPatternsContext(ctx context.Context, states []st
 	if err != nil {
 		return nil, err
 	}
-	return conn.ListUnitsByPatternsContext(ctx, states, patterns)
+	norm := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		norm = append(norm, normalizeUnit(p))
+	}
+	return conn.ListUnitsByPatternsContext(ctx, states, norm)
 }
 
 func (c *realClient) GetUnitPropertiesContext(ctx context.Context, unit string) (map[string]any, error) {
@@ -149,7 +166,7 @@ func (c *realClient) GetUnitPropertiesContext(ctx context.Context, unit string) 
 	if err != nil {
 		return nil, err
 	}
-	return conn.GetUnitPropertiesContext(ctx, unit)
+	return conn.GetUnitPropertiesContext(ctx, normalizeUnit(unit))
 }
 
 func (c *realClient) GetUnitPropertyContext(ctx context.Context, unit string, propertyName string) (*dbus.Property, error) {
@@ -157,7 +174,7 @@ func (c *realClient) GetUnitPropertyContext(ctx context.Context, unit string, pr
 	if err != nil {
 		return nil, err
 	}
-	return conn.GetUnitPropertyContext(ctx, unit, propertyName)
+	return conn.GetUnitPropertyContext(ctx, normalizeUnit(unit), propertyName)
 }
 
 func (c *realClient) GetUnitTypePropertiesContext(ctx context.Context, unit string, dbusInterface string) (map[string]any, error) {
@@ -165,7 +182,7 @@ func (c *realClient) GetUnitTypePropertiesContext(ctx context.Context, unit stri
 	if err != nil {
 		return nil, err
 	}
-	return conn.GetUnitTypePropertiesContext(ctx, unit, dbusInterface)
+	return conn.GetUnitTypePropertiesContext(ctx, normalizeUnit(unit), dbusInterface)
 }
 
 // waitJob runs a unit action and waits for the job result channel.
@@ -193,6 +210,7 @@ func (c *realClient) StartUnitContext(ctx context.Context, name string, mode str
 	if mode == "" {
 		mode = "replace"
 	}
+	name = normalizeUnit(name)
 	return c.waitJob(ctx, "start", name, func(conn *dbus.Conn, ch chan<- string) (int, error) {
 		return conn.StartUnitContext(ctx, name, mode, ch)
 	})
@@ -202,6 +220,7 @@ func (c *realClient) StopUnitContext(ctx context.Context, name string, mode stri
 	if mode == "" {
 		mode = "replace"
 	}
+	name = normalizeUnit(name)
 	return c.waitJob(ctx, "stop", name, func(conn *dbus.Conn, ch chan<- string) (int, error) {
 		return conn.StopUnitContext(ctx, name, mode, ch)
 	})
@@ -211,6 +230,7 @@ func (c *realClient) RestartUnitContext(ctx context.Context, name string, mode s
 	if mode == "" {
 		mode = "replace"
 	}
+	name = normalizeUnit(name)
 	return c.waitJob(ctx, "restart", name, func(conn *dbus.Conn, ch chan<- string) (int, error) {
 		return conn.RestartUnitContext(ctx, name, mode, ch)
 	})
@@ -220,6 +240,7 @@ func (c *realClient) ReloadUnitContext(ctx context.Context, name string, mode st
 	if mode == "" {
 		mode = "replace"
 	}
+	name = normalizeUnit(name)
 	return c.waitJob(ctx, "reload", name, func(conn *dbus.Conn, ch chan<- string) (int, error) {
 		return conn.ReloadUnitContext(ctx, name, mode, ch)
 	})
@@ -233,12 +254,20 @@ func (c *realClient) ReloadContext(ctx context.Context) error {
 	return conn.ReloadContext(ctx)
 }
 
+func normalizeFiles(files []string) []string {
+	norm := make([]string, 0, len(files))
+	for _, f := range files {
+		norm = append(norm, normalizeUnit(f))
+	}
+	return norm
+}
+
 func (c *realClient) EnableUnitFilesContext(ctx context.Context, files []string, runtime bool, force bool) (bool, []dbus.EnableUnitFileChange, error) {
 	conn, err := c.getConn(ctx)
 	if err != nil {
 		return false, nil, err
 	}
-	return conn.EnableUnitFilesContext(ctx, files, runtime, force)
+	return conn.EnableUnitFilesContext(ctx, normalizeFiles(files), runtime, force)
 }
 
 func (c *realClient) DisableUnitFilesContext(ctx context.Context, files []string, runtime bool) ([]dbus.DisableUnitFileChange, error) {
@@ -246,7 +275,7 @@ func (c *realClient) DisableUnitFilesContext(ctx context.Context, files []string
 	if err != nil {
 		return nil, err
 	}
-	return conn.DisableUnitFilesContext(ctx, files, runtime)
+	return conn.DisableUnitFilesContext(ctx, normalizeFiles(files), runtime)
 }
 
 func (c *realClient) ResetFailedUnitContext(ctx context.Context, name string) error {
@@ -254,7 +283,7 @@ func (c *realClient) ResetFailedUnitContext(ctx context.Context, name string) er
 	if err != nil {
 		return err
 	}
-	return conn.ResetFailedUnitContext(ctx, name)
+	return conn.ResetFailedUnitContext(ctx, normalizeUnit(name))
 }
 
 func (c *realClient) MaskUnitFilesContext(ctx context.Context, files []string, runtime bool, force bool) ([]dbus.MaskUnitFileChange, error) {
@@ -262,7 +291,7 @@ func (c *realClient) MaskUnitFilesContext(ctx context.Context, files []string, r
 	if err != nil {
 		return nil, err
 	}
-	return conn.MaskUnitFilesContext(ctx, files, runtime, force)
+	return conn.MaskUnitFilesContext(ctx, normalizeFiles(files), runtime, force)
 }
 
 func (c *realClient) UnmaskUnitFilesContext(ctx context.Context, files []string, runtime bool) ([]dbus.UnmaskUnitFileChange, error) {
@@ -270,7 +299,7 @@ func (c *realClient) UnmaskUnitFilesContext(ctx context.Context, files []string,
 	if err != nil {
 		return nil, err
 	}
-	return conn.UnmaskUnitFilesContext(ctx, files, runtime)
+	return conn.UnmaskUnitFilesContext(ctx, normalizeFiles(files), runtime)
 }
 
 func (c *realClient) Close() {
