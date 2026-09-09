@@ -46,7 +46,7 @@ jobs:
       - name: Build (production, CGO disabled)
         run: |
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
-          CGO_ENABLED=0 go build -ldflags "-X easyserver/internal/infra/version.Version=${VERSION}" -o easyserver ./cmd/server
+          CGO_ENABLED=0 go build -ldflags "-X easyserver/internal/infra.Version=${VERSION}" -o easyserver ./cmd/server
 
   frontend:
     name: Build Frontend
