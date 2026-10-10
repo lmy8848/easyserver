@@ -265,7 +265,8 @@ func newEngine(cfg *config.Config) *gin.Engine {
 	ipWhitelist := middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)
 	middleware.RegisterIPWhitelist(ipWhitelist)
 
-	e.Use(gin.Logger(), gin.Recovery(),
+	e.Use(middleware.RequestIDMiddleware(),
+		gin.Logger(), gin.Recovery(),
 		middleware.ErrorHandler(),
 		middleware.DomainRedirectMiddleware(cfg.Server.Domain, cfg.Server.ForceDomain),
 		middleware.SecurityMiddleware(cspNonce, cfg.Server.AllowedOrigins, cfg.Server.DevMode),
