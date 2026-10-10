@@ -18,7 +18,7 @@ func TestSQLiteRepositoryUsesDatabaseInstanceSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := database.Migrate(db, "../../../migrations"); err != nil {
+	if err := database.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	repo := NewSQLiteRepository(db)

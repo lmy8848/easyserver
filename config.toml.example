@@ -52,7 +52,9 @@ collect_interval = "3s"
 retention_days = 90
 
 [filemanager]
-base_path = "/opt/easyserver/data" # 文件管理器根目录；留空 = 整个文件系统（/）
+# 文件管理器根目录；留空 = 整个文件系统（/，推荐默认）。
+# 如需限制可填绝对路径（支持 ~/ 展开），改后需重启面板生效。
+base_path = ""
 
 [notify]
 enabled = false
