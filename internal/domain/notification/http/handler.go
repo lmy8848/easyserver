@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"easyserver/internal/domain/notification"
 	"easyserver/internal/httpx"
@@ -12,6 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// sseKeepAliveInterval 周期性发送 SSE 注释行保活。反向代理/CDN（如 Cloudflare）
+// 对空闲连接有 ~100s 的读超时，通知可能长时间无事件，必须主动保活防断流。
+const sseKeepAliveInterval = 30 * time.Second
 
 // NotificationHandler handles notification API requests
 type NotificationHandler struct {
@@ -85,10 +90,18 @@ func (h *NotificationHandler) HandleSSE(c *gin.Context) (any, error) {
 	defer h.ns.Hub().Unregister(client)
 
 	ctx := c.Request.Context()
+	keepAlive := time.NewTicker(sseKeepAliveInterval)
+	defer keepAlive.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, nil
+		case <-keepAlive.C:
+			// SSE 注释行（冒号开头），浏览器 EventSource 会忽略，仅保活链路。
+			if _, err := fmt.Fprint(c.Writer, ": keepalive\n\n"); err != nil {
+				return nil, nil
+			}
+			flusher.Flush()
 		case msg, ok := <-client.Send:
 			if !ok {
 				return nil, nil
