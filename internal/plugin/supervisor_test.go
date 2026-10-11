@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,6 +85,15 @@ func setupFakePlugin(t *testing.T, pluginsDir, socket string) Manifest {
 	return m
 }
 
+// cleanupFake 测试结束清理 fake 插件进程（防泄漏到宿主，污染面板进程列表）。
+func cleanupFake(t *testing.T, pluginsDir string) {
+	t.Helper()
+	t.Cleanup(func() {
+		// 按插件目录唯一名精确清理，绝不误杀其它进程
+		_ = exec.CommandContext(context.Background(), "pkill", "-f", filepath.Join(pluginsDir, "fake-")).Run()
+	})
+}
+
 // registerFake 预注册插件行（PluginManager 扫描的等价物）；
 // SetPluginStatus 是 UPDATE 语义，无行时静默空转，测试需先注册。
 func registerFake(t *testing.T, repo PluginRepository, m Manifest, pluginsDir string) {
@@ -114,6 +124,7 @@ func TestSupervisorStartStop(t *testing.T) {
 	m := setupFakePlugin(t, pluginsDir, "fake-plugin.sock")
 	t.Setenv("FAKE_SOCK", filepath.Join(socketDir, "fake-plugin.sock"))
 	registerFake(t, repo, m, pluginsDir)
+	cleanupFake(t, pluginsDir)
 
 	if err := sup.EnsureRunning(ctx, &m, "token-abc"); err != nil {
 		t.Fatalf("拉起失败: %v", err)
@@ -162,6 +173,7 @@ func TestSupervisorStartupExit(t *testing.T) {
 	m := setupFakePlugin(t, pluginsDir, "crash.sock")
 	t.Setenv("FAKE_SOCK", filepath.Join(socketDir, "crash.sock"))
 	registerFake(t, repo, m, pluginsDir)
+	cleanupFake(t, pluginsDir)
 
 	if err := sup.EnsureRunning(ctx, &m, "token"); err == nil {
 		t.Fatal("启动即退出的插件应返回错误")
@@ -192,6 +204,7 @@ func TestSupervisorUnhealthyRejected(t *testing.T) {
 	m := setupFakePlugin(t, pluginsDir, "unhealthy.sock")
 	t.Setenv("FAKE_SOCK", filepath.Join(socketDir, "unhealthy.sock"))
 	registerFake(t, repo, m, pluginsDir)
+	cleanupFake(t, pluginsDir)
 
 	err := sup.EnsureRunning(ctx, &m, "token")
 	t.Logf("EnsureRunning err: %v", err)
