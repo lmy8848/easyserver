@@ -187,6 +187,34 @@ export interface PortForwardRule {
   bytes: number;
 }
 
+// 插件系统
+export interface PluginRecord {
+  id: number;
+  name: string;
+  version: string;
+  api_version: number;
+  manifest_path: string;
+  enabled: boolean;
+  status: string;
+  pid: number;
+  permissions_approved: string[];
+  restart_count: number;
+  last_error: string;
+  last_seen: string;
+  socket_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginMenuItem {
+  plugin: string;
+  id: string;
+  title: string;
+  icon: string;
+  path: string;
+  order: number;
+}
+
 // Website types
 export interface Website {
   id: number;

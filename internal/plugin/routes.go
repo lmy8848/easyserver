@@ -52,6 +52,32 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "插件已卸载"})
 	})
+	// 聚合菜单下发：前端动态侧边栏消费（启用插件的 menus contribution）
+	protected.GET("/plugins/menus", func(c *gin.Context) {
+		list, err := m.List(c.Request.Context())
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		items := []gin.H{}
+		for _, rec := range list {
+			if !rec.Enabled {
+				continue
+			}
+			mft, err := m.GetManifest(c.Request.Context(), rec.Name)
+			if err != nil {
+				continue
+			}
+			for _, menu := range mft.Contributions.Menus {
+				items = append(items, gin.H{
+					"plugin": rec.Name, "id": menu.ID, "title": menu.Title,
+					"icon": menu.Icon, "path": menu.Path, "order": menu.Order,
+				})
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
 	protected.GET("/plugins/:id/manifest", func(c *gin.Context) {
 		mft, err := m.GetManifest(c.Request.Context(), c.Param("id"))
 		if err != nil {

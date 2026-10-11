@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
 import { notificationApi } from '../services/notification';
 import { settingsApi } from '../services/settings';
+import { pluginsApi } from '../services/plugins';
 import type { Notification } from '../types';
 import CommandPalette from './CommandPalette';
 import { COLORS } from '../utils/theme';
@@ -63,6 +64,7 @@ const ICONS: Record<string, string> = {
   folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
   rocket: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
   api: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  puzzle: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><path d="M13 13h3v3h-3zM17 17h3v3h-3z"/>',
   control: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   global: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
   database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
@@ -120,6 +122,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/vulnerabilities': '漏洞扫描',
   '/fim': '文件完整性',
   '/notifications': '站内通知',
+  '/plugins': '插件管理',
 };
 
 const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {
@@ -130,6 +133,7 @@ const NOTIFICATION_LEVEL_COLORS: Record<string, string> = {
 
 export default function Layout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [pluginMenus, setPluginMenus] = useState<{ key: string; icon: string; label: string }[]>([]);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -150,6 +154,19 @@ export default function Layout() {
     let mounted = true;
     settingsApi.get().then((res: { data?: { data?: { features?: { fim: boolean } } } }) => {
       if (mounted && res.data?.data?.features) setFeatures(res.data.data.features);
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  // 插件动态菜单：聚合启用插件的 menus contribution
+  useEffect(() => {
+    let mounted = true;
+    pluginsApi.getMenus().then((res: { data?: { data?: { items?: { plugin: string; id: string; title: string; icon: string; path: string; order: number }[] } } }) => {
+      if (!mounted) return;
+      const items = (res.data?.data?.items || [])
+        .sort((a, b) => a.order - b.order)
+        .map((m) => ({ key: m.path, icon: m.icon || 'puzzle', label: m.title }));
+      setPluginMenus(items);
     }).catch(() => {});
     return () => { mounted = false; };
   }, []);
@@ -279,6 +296,22 @@ export default function Layout() {
             </div>
             );
           })}
+          {pluginMenus.length > 0 && (
+            <div className="nav-group">
+              {!collapsed && <div className="nav-group-label">插件</div>}
+              {pluginMenus.map(item => (
+                <div
+                  key={item.key}
+                  className={`nav-item ${location.pathname === item.key ? 'active' : ''}`}
+                  onClick={() => navigate(item.key)}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <Icon name={item.icon} size={18} />
+                  {!collapsed && <span>{item.label}</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </nav>
         <div className="sidebar-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
           <Button

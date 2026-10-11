@@ -32,6 +32,8 @@ const SystemMonitor = lazy(() => import('./pages/SystemMonitor'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const FileShares = lazy(() => import('./pages/FileShares'));
 const ShareDownload = lazy(() => import('./pages/ShareDownload'));
+const Plugins = lazy(() => import('./pages/Plugins'));
+const PluginFrame = lazy(() => import('./pages/Plugins/PluginFrame'));
 
 const PageLoading = memo(function PageLoading() {
   return (
@@ -157,6 +159,8 @@ function App() {
                 <Route path="system-monitor" element={<SystemMonitor />} />
                 <Route path="notifications" element={<Notifications />} />
                 <Route path="file-shares" element={<FileShares />} />
+                <Route path="plugins" element={<Plugins />} />
+                <Route path="plugins/:id" element={<PluginFrame />} />
               </Route>
               <Route path="/404" element={<NotFound />} />
               <Route path="*" element={<NotFound />} />
