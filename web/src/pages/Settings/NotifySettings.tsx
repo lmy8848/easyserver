@@ -39,6 +39,23 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
     }
   };
 
+  const [sending, setSending] = useState(false);
+  const [notifyForm] = Form.useForm();
+
+  const handleSendNotify = async () => {
+    try {
+      const values = await notifyForm.validateFields();
+      setSending(true);
+      const res = await settingsApi.sendNotify({ title: values.title, content: values.content });
+      message.success(res.data.data?.message || '通知已发送，请检查 Webhook');
+      notifyForm.setFieldsValue({ title: '', content: '' });
+    } catch (error: unknown) {
+      message.error((error instanceof Error ? error.message : '发送失败'));
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleTestWebhook = async () => {
     try {
       const values = await form.validateFields();
@@ -93,6 +110,27 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
           </Space>
         </Form.Item>
       </Form>
+
+      <Card
+        type="inner"
+        title="发送自定义通知"
+        style={{ marginTop: 16 }}
+        extra={<Button type="primary" onClick={handleSendNotify} loading={sending} disabled={!settings?.notify?.webhook_url}>发送</Button>}
+      >
+        <Form form={notifyForm} layout="vertical">
+          <Form.Item name="title" label="标题（可选）" extra="留空时使用默认标题 EasyServer 通知">
+            <Input placeholder="例如：维护公告" maxLength={100} />
+          </Form.Item>
+          <Form.Item
+            name="content"
+            label="内容（必填）"
+            rules={[{ required: true, message: '请输入通知内容' }]}
+            extra="发送到上方配置的 Webhook，按渠道（钉钉/飞书/企微/通用）自动适配格式"
+          >
+            <Input.TextArea rows={4} placeholder="支持 Markdown 语法" maxLength={4000} showCount />
+          </Form.Item>
+        </Form>
+      </Card>
 
       <Alert
         title="支持的 Webhook 类型"
