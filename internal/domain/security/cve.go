@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"easyserver/internal/infra/errx"
@@ -26,11 +30,30 @@ func NewService(db *sql.DB, configPath string) *Service {
 	return &Service{db: db, fimPaths: defaultFIMPaths(configPath)}
 }
 
+// debianEcosystem 从 /etc/os-release 读取 VERSION_ID，返回如 "Debian:12"；
+// 读取失败回退为 "Debian"（旧行为）。
+var debianEcosystem = sync.OnceValue(func() string {
+	data, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return "Debian"
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "VERSION_ID="); ok {
+			return "Debian:" + strings.Trim(strings.TrimSpace(v), `"`)
+		}
+	}
+	return "Debian"
+})
+
 // Vulnerability is one installed package with known CVEs.
+// Upgradable 表示 apt 源中已有修复版本（Candidate 高于当前版本）；为 false
+// 时该包的修复尚未进入当前 Debian 发行版源，点击升级不会有实际效果。
 type Vulnerability struct {
-	Package string   `json:"package"`
-	Version string   `json:"version"`
-	VulnIDs []string `json:"vuln_ids"`
+	Package    string   `json:"package"`
+	Version    string   `json:"version"`
+	VulnIDs    []string `json:"vuln_ids"`
+	Candidate  string   `json:"candidate,omitempty"`
+	Upgradable bool     `json:"upgradable"`
 }
 
 type installedPackage struct {
@@ -68,7 +91,57 @@ func (s *Service) Scan(ctx context.Context) ([]Vulnerability, error) {
 			})
 		}
 	}
+	// 标注可修复状态：osv.dev 记录的是上游修复信息，修复是否已进入
+	// 当前发行版源要问 apt，二者缺一不可，否则用户会点一个注定无效的升级
+	names := make([]string, 0, len(vulns))
+	for _, v := range vulns {
+		names = append(names, v.Package)
+	}
+	installed, candidate := aptPolicy(ctx, names)
+	for i := range vulns {
+		vulns[i].Candidate = candidate[vulns[i].Package]
+		vulns[i].Upgradable = vulns[i].Candidate != "" &&
+			vulns[i].Candidate != "(none)" &&
+			vulns[i].Candidate != installed[vulns[i].Package]
+	}
 	return vulns, nil
+}
+
+// aptPolicy 批量查询包的 Installed/Candidate 版本；查询失败时返回空表
+// （调用方据此退化为"全部视为不可升级"，不会误标可修复）。
+func aptPolicy(ctx context.Context, packages []string) (installed, candidate map[string]string) {
+	installed = map[string]string{}
+	candidate = map[string]string{}
+	if len(packages) == 0 {
+		return installed, candidate
+	}
+	// 可变参数槽只能整体由展开填充，不能混用显式参数：
+	// CommandContext(ctx, "apt-cache", "policy", pkgs...) 是编译错误
+	args := append([]string{"policy"}, packages...)
+	out, err := exec.CommandContext(ctx, "apt-cache", args...).CombinedOutput()
+	if err != nil {
+		return installed, candidate
+	}
+	cur := ""
+	for line := range strings.SplitSeq(string(out), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, " ") && strings.HasSuffix(trimmed, ":") {
+			cur = strings.TrimSuffix(trimmed, ":")
+			continue
+		}
+		if cur == "" {
+			continue
+		}
+		if v, ok := strings.CutPrefix(trimmed, "Installed: "); ok {
+			installed[cur] = strings.TrimSpace(v)
+		} else if v, ok := strings.CutPrefix(trimmed, "Candidate: "); ok {
+			candidate[cur] = strings.TrimSpace(v)
+		}
+	}
+	return installed, candidate
 }
 
 // listInstalled parses `apt list --installed` output.
@@ -124,7 +197,10 @@ func (s *Service) queryOSVBatch(ctx context.Context, pkgs []installedPackage) ([
 	queries := make([]osvQuery, len(pkgs))
 	for i, p := range pkgs {
 		queries[i].Package.Name = p.Name
-		queries[i].Package.Ecosystem = "Debian"
+		// 必须按本机实际发行版版本查询（Debian:12），裸 "Debian" 指向最新
+		// 稳定版的数据——拿 13 的漏洞记录对照 12 的包会大量误报"有漏洞"
+		// 且源里根本不存在修复版本
+		queries[i].Package.Ecosystem = debianEcosystem()
 		queries[i].Version = p.Version
 	}
 	body, _ := json.Marshal(map[string]any{"queries": queries})
@@ -151,24 +227,65 @@ func (s *Service) queryOSVBatch(ctx context.Context, pkgs []installedPackage) ([
 // packages with --only-upgrade. 返回值第二个 string 是面向用户的结果消息：
 // apt 在索引过期时会以退出码 0 结束且什么都不升（"0 upgraded, 0 newly
 // installed"），必须如实区分"升级成功"与"源里没有更新"。
-func (s *Service) Upgrade(ctx context.Context, packages []string) (string, string, error) {
+// Upgrade 先用 apt-cache policy 把请求的包分成"源里有修复版本"与"暂无
+// 修复"两类，只对前者执行升级；返回面向用户的消息、暂无修复包清单和
+// 原始输出。此前对含无修复版本的整批包执行 --only-upgrade 会以
+// "0 upgraded" 退出码 0 结束，前端却提示升级成功。
+func (s *Service) Upgrade(ctx context.Context, packages []string) (string, []string, string, error) {
 	if len(packages) == 0 {
-		return "", "", errx.BadRequest("未指定升级的包")
+		return "", nil, "", errx.BadRequest("未指定升级的包")
+	}
+
+	upgradable, noFix := classifyUpgradable(ctx, packages)
+	if len(upgradable) == 0 {
+		return "软件源中没有可用的更新版本（索引已刷新）", noFix, "", nil
 	}
 
 	if out, err := exec.CommandContext(ctx, "apt-get", "update", "-q").CombinedOutput(); err != nil {
-		return "", string(out), errx.Internal("刷新软件源失败: %w", err)
+		return "", noFix, string(out), errx.Internal("刷新软件源失败: %w", err)
 	}
 
-	args := append([]string{"install", "--only-upgrade", "-y"}, packages...)
+	args := append([]string{"install", "--only-upgrade", "-y"}, upgradable...)
 	out, err := exec.CommandContext(ctx, "apt-get", args...).CombinedOutput()
 	if err != nil {
-		return "", string(out), errx.Internal("升级失败: %w", err)
+		return "", noFix, string(out), errx.Internal("升级失败: %w", err)
 	}
-	if strings.Contains(string(out), "0 upgraded, 0 newly installed") {
-		return "软件源中没有可用的更新版本（索引已刷新）", string(out), nil
+
+	upgraded := 0
+	if m := upgradeCountRe.FindStringSubmatch(string(out)); m != nil {
+		upgraded, _ = strconv.Atoi(m[1])
 	}
-	return "升级完成", string(out), nil
+	var msg string
+	switch {
+	case len(noFix) == 0:
+		msg = fmt.Sprintf("已升级 %d 个包", upgraded)
+	case upgraded == 0:
+		msg = "软件源中没有可用的更新版本（索引已刷新）"
+	default:
+		msg = fmt.Sprintf("已升级 %d 个包；%d 个包 Debian 源中暂无修复版本", upgraded, len(noFix))
+	}
+	return msg, noFix, string(out), nil
+}
+
+// upgradeCountRe 匹配 apt-get 汇总行的升级数量。
+var upgradeCountRe = regexp.MustCompile(`(\d+) upgraded`)
+
+// classifyUpgradable 按 apt-cache policy 区分有修复版本的包与暂无修复的
+// 包；查询失败时退回旧行为（全部尝试升级）。
+func classifyUpgradable(ctx context.Context, packages []string) (upgradable, noFix []string) {
+	installed, candidate := aptPolicy(ctx, packages)
+	if len(candidate) == 0 {
+		return packages, nil
+	}
+	for _, p := range packages {
+		c := candidate[p]
+		if c != "" && c != "(none)" && c != installed[p] {
+			upgradable = append(upgradable, p)
+		} else {
+			noFix = append(noFix, p)
+		}
+	}
+	return upgradable, noFix
 }
 
 // KernelStatus reports the running kernel vs the latest installed kernel.
