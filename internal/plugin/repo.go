@@ -6,21 +6,21 @@ import (
 
 // PluginRecord 是 plugins 表的行结构（注册状态与运行时元数据）。
 type PluginRecord struct {
-	ID                  int64   `json:"id"`
-	Name                string  `json:"name"`
-	Version             string  `json:"version"`
-	APIVersion          int     `json:"api_version"`
-	ManifestPath        string  `json:"manifest_path"`
-	Enabled             bool    `json:"enabled"`
-	Status              string  `json:"status"`
-	PID                 int     `json:"pid"`
+	ID                  int64    `json:"id"`
+	Name                string   `json:"name"`
+	Version             string   `json:"version"`
+	APIVersion          int      `json:"api_version"`
+	ManifestPath        string   `json:"manifest_path"`
+	Enabled             bool     `json:"enabled"`
+	Status              string   `json:"status"`
+	PID                 int      `json:"pid"`
 	PermissionsApproved []string `json:"permissions_approved"`
-	RestartCount        int     `json:"restart_count"`
-	LastError           string  `json:"last_error"`
-	LastSeen            string  `json:"last_seen"`
-	SocketPath          string  `json:"socket_path"`
-	CreatedAt           string  `json:"created_at"`
-	UpdatedAt           string  `json:"updated_at"`
+	RestartCount        int      `json:"restart_count"`
+	LastError           string   `json:"last_error"`
+	LastSeen            string   `json:"last_seen"`
+	SocketPath          string   `json:"socket_path"`
+	CreatedAt           string   `json:"created_at"`
+	UpdatedAt           string   `json:"updated_at"`
 }
 
 // PluginRepository 持久化插件注册状态、配置 KV 与密钥。

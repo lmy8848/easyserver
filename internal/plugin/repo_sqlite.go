@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"log"
 	"strings"
 
@@ -20,8 +20,8 @@ import (
 // 密钥说明：plugin_secrets 以 AES-256-GCM 加密，密钥由构造方传入
 // （当前从面板 JWT 密钥 SHA-256 派生；换取专用密钥只需改 router 接线）。
 type sqliteRepo struct {
-	db      *sql.DB
-	aead    cipher.AEAD
+	db   *sql.DB
+	aead cipher.AEAD
 }
 
 // NewSQLiteRepository 创建仓储；secretKey 为密钥加密的根密钥（任意长度）。
@@ -139,7 +139,7 @@ func (r *sqliteRepo) DeletePlugin(ctx context.Context, name string) error {
 func (r *sqliteRepo) GetConfig(ctx context.Context, plugin, key string) (string, error) {
 	var v sql.NullString
 	err := r.db.QueryRowContext(ctx, "SELECT value FROM plugin_config WHERE plugin_name = ? AND key = ?", plugin, key).Scan(&v)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", errx.NotFound("配置项不存在: %s/%s", plugin, key)
 	}
 	if err != nil {
@@ -196,7 +196,7 @@ func (r *sqliteRepo) SetSecret(ctx context.Context, plugin, key, plaintext strin
 func (r *sqliteRepo) GetSecret(ctx context.Context, plugin, key string) (string, error) {
 	var enc string
 	err := r.db.QueryRowContext(ctx, "SELECT encrypted_value FROM plugin_secrets WHERE plugin_name = ? AND key = ?", plugin, key).Scan(&enc)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", errx.NotFound("密钥不存在: %s/%s", plugin, key)
 	}
 	if err != nil {
@@ -208,7 +208,7 @@ func (r *sqliteRepo) GetSecret(ctx context.Context, plugin, key string) (string,
 	}
 	ns := r.aead.NonceSize()
 	if len(sealed) < ns {
-		return "", fmt.Errorf("密文长度异常")
+		return "", errors.New("密文长度异常")
 	}
 	plain, err := r.aead.Open(nil, sealed[:ns], sealed[ns:], []byte(plugin+"/"+key))
 	if err != nil {

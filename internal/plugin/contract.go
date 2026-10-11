@@ -13,10 +13,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"easyserver/internal/infra/errx"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,16 +30,16 @@ const (
 
 // Permission 常量：Host API 能力（文档 §7.2），默认拒绝、按需声明。
 const (
-	PermAuditWrite      = "audit.write"
-	PermConfigRead      = "config.read"
-	PermConfigReadWrite = "config.readwrite"
-	PermLogWrite        = "log.write"
-	PermEventPublish    = "event.publish"
-	PermEventSubscribe  = "event.subscribe"
-	PermExecRestricted  = "exec.restricted" // 等同授予 root shell，文档明示
-	PermNotifySend      = "notify.send"
-	PermPanelAPIProxy   = "panel.api.proxy"
-	PermStorageReadWrite= "storage.readwrite"
+	PermAuditWrite       = "audit.write"
+	PermConfigRead       = "config.read"
+	PermConfigReadWrite  = "config.readwrite"
+	PermLogWrite         = "log.write"
+	PermEventPublish     = "event.publish"
+	PermEventSubscribe   = "event.subscribe"
+	PermExecRestricted   = "exec.restricted" // 等同授予 root shell，文档明示
+	PermNotifySend       = "notify.send"
+	PermPanelAPIProxy    = "panel.api.proxy"
+	PermStorageReadWrite = "storage.readwrite"
 )
 
 // KnownPermissions 是全部已知能力（manifest 声明白名单之外一律拒绝加载）。
@@ -93,29 +95,29 @@ type HealthConfig struct {
 
 // Manifest 是插件清单（plugin.yaml 加载后的结构）。
 type Manifest struct {
-	APIVersion            int               `yaml:"api_version" json:"api_version"`
-	ManifestSchemaVersion int               `yaml:"manifest_schema_version" json:"manifest_schema_version"`
-	Name                  string            `yaml:"name" json:"name"`
-	Version               string            `yaml:"version" json:"version"`
-	Author                string            `yaml:"author" json:"author"`
-	Description           string            `yaml:"description" json:"description"`
-	Runtime               Runtime           `yaml:"runtime" json:"runtime"`
-	Health                HealthConfig      `yaml:"health" json:"health"`
-	Permissions           []string          `yaml:"permissions" json:"permissions"`
-	Contributions         Contributions     `yaml:"contributions" json:"contributions"`
+	APIVersion            int           `yaml:"api_version" json:"api_version"`
+	ManifestSchemaVersion int           `yaml:"manifest_schema_version" json:"manifest_schema_version"`
+	Name                  string        `yaml:"name" json:"name"`
+	Version               string        `yaml:"version" json:"version"`
+	Author                string        `yaml:"author" json:"author"`
+	Description           string        `yaml:"description" json:"description"`
+	Runtime               Runtime       `yaml:"runtime" json:"runtime"`
+	Health                HealthConfig  `yaml:"health" json:"health"`
+	Permissions           []string      `yaml:"permissions" json:"permissions"`
+	Contributions         Contributions `yaml:"contributions" json:"contributions"`
 }
 
 // Contributions 是插件向各扩展点贡献的内容（v1 八种，文档 §5）。
 // 未知字段由 yaml 解码自然忽略（向前兼容）。
 type Contributions struct {
-	Menus      []MenuContribution      `yaml:"menus" json:"menus,omitempty"`
-	Pages      []PageContribution      `yaml:"pages" json:"pages,omitempty"`
-	Routes     []RouteContribution     `yaml:"routes" json:"routes,omitempty"`
-	Widgets    []WidgetContribution    `yaml:"widgets" json:"widgets,omitempty"`
-	Settings   []SettingsContribution  `yaml:"settings" json:"settings,omitempty"`
-	Services   []ServiceContribution   `yaml:"services" json:"services,omitempty"`
-	EventSubs  []EventSubContribution  `yaml:"eventsubs" json:"eventsubs,omitempty"`
-	EventPubs  []EventPubContribution  `yaml:"eventpubs" json:"eventpubs,omitempty"`
+	Menus     []MenuContribution     `yaml:"menus" json:"menus,omitempty"`
+	Pages     []PageContribution     `yaml:"pages" json:"pages,omitempty"`
+	Routes    []RouteContribution    `yaml:"routes" json:"routes,omitempty"`
+	Widgets   []WidgetContribution   `yaml:"widgets" json:"widgets,omitempty"`
+	Settings  []SettingsContribution `yaml:"settings" json:"settings,omitempty"`
+	Services  []ServiceContribution  `yaml:"services" json:"services,omitempty"`
+	EventSubs []EventSubContribution `yaml:"eventsubs" json:"eventsubs,omitempty"`
+	EventPubs []EventPubContribution `yaml:"eventpubs" json:"eventpubs,omitempty"`
 }
 
 type MenuContribution struct {
@@ -145,15 +147,15 @@ type WidgetContribution struct {
 }
 
 type SettingsContribution struct {
-	ID           string          `yaml:"id" json:"id"`
-	Title        string          `yaml:"title" json:"title"`
-	ConfigSchema jsonRawMessage  `yaml:"config_schema" json:"config_schema"`
+	ID           string         `yaml:"id" json:"id"`
+	Title        string         `yaml:"title" json:"title"`
+	ConfigSchema jsonRawMessage `yaml:"config_schema" json:"config_schema"`
 }
 
 type ServiceContribution struct {
-	ID      string `yaml:"id" json:"id"`
+	ID       string `yaml:"id" json:"id"`
 	Schedule string `yaml:"schedule" json:"schedule"`
-	Command string `yaml:"command" json:"command"`
+	Command  string `yaml:"command" json:"command"`
 }
 
 type EventSubContribution struct {
@@ -257,12 +259,7 @@ func (m *Manifest) validateContributions() error {
 
 // HasPermission 报告清单是否声明了某能力。
 func (m *Manifest) HasPermission(perm string) bool {
-	for _, p := range m.Permissions {
-		if p == perm {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.Permissions, perm)
 }
 
 // LoadManifest 从插件目录加载 plugin.yaml：解码 → 默认值 → 校验。
