@@ -38,11 +38,11 @@ func (h *Handler) Upgrade(c *gin.Context) (any, error) {
 		return nil, err
 	}
 	middleware.AuditSummary(c, "CVE 漏洞升级 "+strconv.Itoa(len(req.Packages))+" 个包")
-	msg, out, err := h.svc.Upgrade(c.Request.Context(), req.Packages)
+	msg, noFix, out, err := h.svc.Upgrade(c.Request.Context(), req.Packages)
 	if err != nil {
 		return nil, err
 	}
-	return gin.H{"message": msg, "output": out}, nil
+	return gin.H{"message": msg, "no_fix": noFix, "output": out}, nil
 }
 
 // Kernel returns running vs latest installed kernel.

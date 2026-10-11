@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Card, Button, Table, Tag, Space, message, Alert, Descriptions } from 'antd';
+import { Card, Button, Table, Tag, Space, message, Alert, Descriptions, Modal, Tooltip } from 'antd';
 import { SafetyOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import api from '../../services/client';
 
-interface Vuln { package: string; version: string; vuln_ids: string[]; }
+interface Vuln { package: string; version: string; vuln_ids: string[]; candidate?: string; upgradable?: boolean; }
 interface KernelStatus { current: string; latest: string; needs_reboot: boolean; }
 
 export default function Vulnerabilities() {
@@ -32,12 +32,30 @@ export default function Vulnerabilities() {
     }
   };
 
+  const showNoFix = (noFix: string[]) => {
+    if (!noFix?.length) return;
+    Modal.info({
+      title: `以下 ${noFix.length} 个包 Debian 源中暂无修复版本`,
+      width: 520,
+      content: (
+        <ul style={{ margin: '12px 0 0', paddingLeft: 20, maxHeight: 300, overflow: 'auto' }}>
+          {noFix.map((p) => <li key={p}>{p}</li>)}
+        </ul>
+      ),
+    });
+  };
+
   const upgradeAll = async () => {
-    if (vulns.length === 0) return;
+    const fixable = vulns.filter((v) => v.upgradable);
+    if (fixable.length === 0) {
+      message.warning('所有漏洞包在 Debian 源中均暂无修复版本，无法通过升级清除');
+      return;
+    }
     setUpgrading(true);
     try {
-      const res = await api.post('/security/cve/upgrade', { packages: vulns.map((v) => v.package) });
+      const res = await api.post('/security/cve/upgrade', { packages: fixable.map((v) => v.package) });
       message.success(res.data.data?.message || '升级完成');
+      showNoFix(res.data.data?.no_fix || []);
       scan();
     } catch (e: unknown) {
       message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '升级失败');
@@ -50,6 +68,7 @@ export default function Vulnerabilities() {
     try {
       const res = await api.post('/security/cve/upgrade', { packages: [pkg] });
       message.success(`${pkg}: ${res.data.data?.message || '升级完成'}`);
+      showNoFix(res.data.data?.no_fix || []);
       scan();
     } catch (e: unknown) {
       message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '升级失败');
@@ -84,7 +103,12 @@ export default function Vulnerabilities() {
               { title: '当前版本', dataIndex: 'version', key: 'version' },
               { title: 'CVE 数', key: 'count', width: 80, render: (_: unknown, r: Vuln) => <Tag color="red">{r.vuln_ids.length}</Tag> },
               { title: 'CVE', key: 'vulns', ellipsis: true, render: (_: unknown, r: Vuln) => <Space wrap>{r.vuln_ids.map((id) => <Tag key={id}>{id}</Tag>)}</Space> },
-              { title: '操作', key: 'action', width: 80, render: (_: unknown, r: Vuln) => <Button size="small" type="link" onClick={() => upgradeOne(r.package)}>升级</Button> },
+              { title: '可修复', key: 'fixable', width: 90, render: (_: unknown, r: Vuln) => r.upgradable
+                ? <Tag color="green" style={{ margin: 0 }}>可升级</Tag>
+                : <Tooltip title={`Debian 源中暂无修复版本${r.candidate ? `（候选 ${r.candidate}）` : ''}`}><Tag color="default" style={{ margin: 0 }}>暂无修复</Tag></Tooltip> },
+              { title: '操作', key: 'action', width: 80, render: (_: unknown, r: Vuln) => r.upgradable
+                ? <Button size="small" type="link" onClick={() => upgradeOne(r.package)}>升级</Button>
+                : <Tooltip title="Debian 源中暂无修复版本"><Button size="small" type="link" disabled>升级</Button></Tooltip> },
             ]}
           />
         </Card>

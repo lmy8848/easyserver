@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -114,7 +115,10 @@ func aptPolicy(ctx context.Context, packages []string) (installed, candidate map
 	if len(packages) == 0 {
 		return installed, candidate
 	}
-	out, err := exec.CommandContext(ctx, "apt-cache", "policy", packages...).CombinedOutput()
+	// 可变参数槽只能整体由展开填充，不能混用显式参数：
+	// CommandContext(ctx, "apt-cache", "policy", pkgs...) 是编译错误
+	args := append([]string{"policy"}, packages...)
+	out, err := exec.CommandContext(ctx, "apt-cache", args...).CombinedOutput()
 	if err != nil {
 		return installed, candidate
 	}
@@ -260,7 +264,7 @@ func (s *Service) Upgrade(ctx context.Context, packages []string) (string, []str
 	default:
 		msg = fmt.Sprintf("已升级 %d 个包；%d 个包 Debian 源中暂无修复版本", upgraded, len(noFix))
 	}
-	return msg, noFix, out, nil
+	return msg, noFix, string(out), nil
 }
 
 // upgradeCountRe 匹配 apt-get 汇总行的升级数量。
