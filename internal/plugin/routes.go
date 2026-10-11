@@ -82,6 +82,32 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "插件已卸载"})
 	})
+	// 聚合小部件下发：仪表盘消费（启用插件的 widgets contribution）
+	protected.GET("/plugins/widgets", func(c *gin.Context) {
+		list, err := m.List(c.Request.Context())
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		items := []gin.H{}
+		for _, rec := range list {
+			if !rec.Enabled {
+				continue
+			}
+			mft, err := m.GetManifest(c.Request.Context(), rec.Name)
+			if err != nil {
+				continue
+			}
+			for _, w := range mft.Contributions.Widgets {
+				items = append(items, gin.H{
+					"plugin": rec.Name, "id": w.ID, "title": w.Title,
+					"slot": w.Slot, "path": w.Path, "size": w.Size,
+				})
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
 	// 聚合菜单下发：前端动态侧边栏消费（启用插件的 menus contribution）
 	protected.GET("/plugins/menus", func(c *gin.Context) {
 		list, err := m.List(c.Request.Context())
@@ -106,6 +132,28 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
+	// 插件配置读写（面板前端经 config_schema 渲染表单后保存）
+	protected.GET("/plugins/:id/config", func(c *gin.Context) {
+		cfg, err := m.ConfigList(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"config": cfg})
+	})
+	protected.PUT("/plugins/:id/config", func(c *gin.Context) {
+		var body map[string]string
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "请求体无效"})
+			return
+		}
+		if err := m.ConfigSet(c.Request.Context(), c.Param("id"), body); err != nil {
+			c.Error(err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "配置已保存"})
 	})
 
 	protected.GET("/plugins/:id/manifest", func(c *gin.Context) {

@@ -3,17 +3,19 @@ import {
   Card, Button, Table, Tag, Space, message, Popconfirm, Tooltip, Badge, Tabs, Upload, Alert,
 } from 'antd';
 import {
-  ReloadOutlined, PoweroffOutlined, PlayCircleOutlined, DeleteOutlined, ImportOutlined, BookOutlined,
+  ReloadOutlined, PoweroffOutlined, PlayCircleOutlined, DeleteOutlined, ImportOutlined, BookOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { pluginsApi } from '../../services/plugins';
 import type { PluginRecord } from '../../types';
 import PluginManual from './PluginManual';
+import PluginConfigModal from './PluginConfigModal';
 
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [operating, setOperating] = useState('');
   const [installing, setInstalling] = useState(false);
+  const [configTarget, setConfigTarget] = useState<PluginRecord | null>(null);
 
   const fetchPlugins = useCallback(async () => {
     setLoading(true);
@@ -91,9 +93,15 @@ export default function Plugins() {
             render: (v: string) => v || '-',
           },
           {
-            title: '操作', key: 'action', width: 150,
+            title: '操作', key: 'action', width: 190,
             render: (_: unknown, r: PluginRecord) => (
               <Space size="small">
+                <Tooltip title="配置">
+                  <Button
+                    type="link" size="small" icon={<SettingOutlined />}
+                    onClick={() => setConfigTarget(r)}
+                  />
+                </Tooltip>
                 <Tooltip title={r.enabled ? '启动进程' : '启用并启动'}>
                   <Button
                     type="link" size="small" icon={<PlayCircleOutlined />}
@@ -149,6 +157,7 @@ export default function Plugins() {
           { key: 'manual', label: <span><BookOutlined /> 插件开发手册</span>, children: <PluginManual /> },
         ]}
       />
+      <PluginConfigModal plugin={configTarget!} open={!!configTarget} onClose={() => setConfigTarget(null)} />
     </Card>
   );
 }

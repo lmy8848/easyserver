@@ -45,6 +45,7 @@ type pfProcess struct {
 
 	stopOnce sync.Once   // StopPlugin 主动停止标记
 	stopped  atomic.Bool // true 时退出监视跳过状态写库（避免覆盖 disabled）
+	started  atomic.Bool // true 时已进入 running（此后崩溃才走退避重启）
 	restarts atomic.Int32
 
 	stateMu sync.Mutex
@@ -209,6 +210,12 @@ func (s *Supervisor) EnsureRunning(ctx context.Context, m *Manifest, token strin
 		if p.stopped.Load() || s.isStopping() {
 			return
 		}
+		if !p.started.Load() {
+			// 启动期退出（未进入 running）：标记 error 且不重启，避免
+			// 配置错误导致无限退避重启
+			s.setState(context.Background(), p, StateError, fmt.Sprintf("启动即退出: %v", err), 0)
+			return
+		}
 		s.setState(context.Background(), p, StateDegraded, fmt.Sprintf("exited: %v", err), 0)
 		s.restartWithBackoff(p)
 	}()
@@ -225,6 +232,7 @@ func (s *Supervisor) EnsureRunning(ctx context.Context, m *Manifest, token strin
 		}
 		if _, err := os.Stat(sockPath); err == nil {
 			if err := s.healthOK(ctx, p); err == nil {
+				p.started.Store(true)
 				s.setState(ctx, p, StateRunning, "", cmd.Process.Pid)
 				go s.healthLoop(p)
 				return nil

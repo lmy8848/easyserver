@@ -15,6 +15,8 @@ import (
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/errx"
 
+	"easyserver/internal/plugin"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -372,6 +374,7 @@ func (h *FirewallRuleHandler) CreateRule(c *gin.Context) (any, error) {
 	}
 
 	middleware.AuditSummary(c, "创建防火墙规则 "+req.Port)
+	plugin.PublishBusinessEvent(plugin.EventFirewallChanged, "firewall", map[string]string{"action": "create", "port": req.Port, "chain": req.Chain})
 	// Validate chain
 	validChains := map[string]bool{"INPUT": true, "OUTPUT": true, "FORWARD": true}
 	if !validChains[strings.ToUpper(req.Chain)] {
@@ -533,6 +536,7 @@ func (h *FirewallRuleHandler) DeleteRule(c *gin.Context) (any, error) {
 	if err := h.firewallService.DeleteRule(c.Request.Context(), id); err != nil {
 		return nil, err
 	}
+	plugin.PublishBusinessEvent(plugin.EventFirewallChanged, "firewall", map[string]string{"action": "delete", "port": rule.Port})
 	return gin.H{"message": "规则已删除"}, nil
 }
 
@@ -558,6 +562,7 @@ func (h *FirewallRuleHandler) EnableRule(c *gin.Context) (any, error) {
 		return nil, errx.NotFound("规则不存在")
 	}
 	middleware.AuditSummary(c, "启用防火墙规则 (端口: "+rule.Port+")")
+	plugin.PublishBusinessEvent(plugin.EventFirewallChanged, "firewall", map[string]string{"action": "enable", "port": rule.Port})
 
 	// Check if enabling this rule would block a protected port
 	if rule.Action != "ACCEPT" && rule.Port != "" && h.isProtectedPort(c, rule.Port) {
@@ -585,6 +590,7 @@ func (h *FirewallRuleHandler) DisableRule(c *gin.Context) (any, error) {
 	if err := h.firewallService.DisableRule(c.Request.Context(), id); err != nil {
 		return nil, err
 	}
+	plugin.PublishBusinessEvent(plugin.EventFirewallChanged, "firewall", map[string]string{"action": "disable", "port": rule.Port})
 	return gin.H{"message": "规则已禁用"}, nil
 }
 

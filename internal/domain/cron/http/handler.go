@@ -17,6 +17,8 @@ import (
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/util"
 
+	"easyserver/internal/plugin"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -256,6 +258,7 @@ func (h *CronHandler) RunTask(c *gin.Context) (any, error) {
 	if err := h.cronService.RunNow(c.Request.Context(), name); err != nil {
 		return nil, err
 	}
+	plugin.PublishBusinessEvent(plugin.EventCronExecuted, "cron", map[string]string{"task": name, "trigger": "manual"})
 	return gin.H{"message": "任务已触发"}, nil
 }
 
