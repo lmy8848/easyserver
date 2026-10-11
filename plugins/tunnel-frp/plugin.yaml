@@ -1,0 +1,34 @@
+api_version: 1
+manifest_schema_version: 1
+name: tunnel-frp
+version: 0.1.0
+author: EasyServer
+description: 基于 frp 的内网穿透（家庭网络服务对外暴露，支持 TCP/UDP）
+
+runtime:
+  exec: tunnel-frp
+  socket: tunnel-frp.sock
+  startup_timeout: 15s
+  request_timeout: 30s
+
+health:
+  path: /health
+  interval: 30s
+  fail_threshold: 3
+
+permissions:
+  - config.readwrite
+  - exec.restricted
+  - log.write
+  - notify.send
+  - audit.write
+
+contributions:
+  menus:
+    - { id: main, title: 内网穿透, icon: rocket, path: /plugins/tunnel-frp, order: 150 }
+  pages:
+    - { id: main, path: /plugins/tunnel-frp }
+  routes:
+    - { id: api, prefix: /api/plugins/tunnel-frp }
+  settings:
+    - { id: default, title: 内网穿透设置, config_schema: { type: object, properties: { bind_port: { type: string, title: frps 控制端口 }, server_addr: { type: string, title: 对外地址 } } } }
