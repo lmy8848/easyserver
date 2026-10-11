@@ -3,6 +3,10 @@ package plugin
 import (
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"easyserver/internal/httpx/middleware"
 
@@ -132,6 +136,50 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
+	// 插件日志（面板侧 /var/log/easyserver/plugins/<id>.log，tail 查看）
+	protected.GET("/plugins/:id/logs", func(c *gin.Context) {
+		name := c.Param("id")
+		lines := 200
+		if v := c.Query("lines"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+				lines = n
+			}
+		}
+		path := filepath.Join("/var/log/easyserver/plugins", name+".log")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"log": ""})
+			return
+		}
+		// 取尾部 lines 行
+		all := string(data)
+		parts := strings.Split(all, "\n")
+		if len(parts) > lines {
+			parts = parts[len(parts)-lines:]
+		}
+		c.JSON(http.StatusOK, gin.H{"log": strings.Join(parts, "\n")})
+	})
+
+	// 插件详情（manifest + 贡献点清单，供管理页展示）
+	protected.GET("/plugins/:id/detail", func(c *gin.Context) {
+		name := c.Param("id")
+		rec, err := m.repo.GetPlugin(c.Request.Context(), name)
+		if err != nil || rec == nil {
+			c.JSON(http.StatusNotFound, gin.H{"message": "插件不存在"})
+			return
+		}
+		mft, err := m.GetManifest(c.Request.Context(), name)
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"record":        rec,
+			"manifest":      mft,
+			"contributions": mft.Contributions,
+		})
 	})
 
 	// 插件配置读写（面板前端经 config_schema 渲染表单后保存）

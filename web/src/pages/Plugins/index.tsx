@@ -9,6 +9,7 @@ import { pluginsApi } from '../../services/plugins';
 import type { PluginRecord } from '../../types';
 import PluginManual from './PluginManual';
 import PluginConfigModal from './PluginConfigModal';
+import PluginDetailDrawer from './PluginDetailDrawer';
 
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
@@ -16,6 +17,7 @@ export default function Plugins() {
   const [operating, setOperating] = useState('');
   const [installing, setInstalling] = useState(false);
   const [configTarget, setConfigTarget] = useState<PluginRecord | null>(null);
+  const [detailTarget, setDetailTarget] = useState<PluginRecord | null>(null);
 
   const fetchPlugins = useCallback(async () => {
     setLoading(true);
@@ -93,9 +95,12 @@ export default function Plugins() {
             render: (v: string) => v || '-',
           },
           {
-            title: '操作', key: 'action', width: 190,
+            title: '操作', key: 'action', width: 220,
             render: (_: unknown, r: PluginRecord) => (
               <Space size="small">
+                <Tooltip title="详情">
+                  <Button type="link" size="small" onClick={() => setDetailTarget(r)}>详情</Button>
+                </Tooltip>
                 <Tooltip title="配置">
                   <Button
                     type="link" size="small" icon={<SettingOutlined />}
@@ -158,6 +163,7 @@ export default function Plugins() {
         ]}
       />
       <PluginConfigModal plugin={configTarget!} open={!!configTarget} onClose={() => setConfigTarget(null)} />
+      <PluginDetailDrawer plugin={detailTarget!} open={!!detailTarget} onClose={() => setDetailTarget(null)} />
     </Card>
   );
 }
