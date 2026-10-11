@@ -221,6 +221,14 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		},
 	})
 	plugin.RegisterRoutes(g.Protected, pluginMgr)
+	// 插件业务代理：NoRoute 兜底 + JWT 认证（与 protected 组同策略）
+	plugin.SetProxyHandler(func(c *gin.Context) {
+		middleware.JWTMiddleware(cfg.Auth.JWTSecret, g.sessionValidator)(c)
+		if c.IsAborted() {
+			return
+		}
+		plugin.NewProxyHandler(pluginMgr)(c)
+	})
 	pluginHost := plugin.NewHostAPI(plugin.HostSocketPath, pluginMgr)
 	if err := pluginHost.Start(ctx); err != nil {
 		log.Printf("plugin: Host API 启动失败: %v", err)

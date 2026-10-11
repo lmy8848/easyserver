@@ -7,11 +7,47 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
 )
+
+// proxyHandler 由 router 注入（已带 JWT 认证）；embed 的 NoRoute 兜底对
+// /api/plugins/<id>/* 路径优先调用。插件业务路径无法作为 Gin 路由注册
+// （catch-all 与 /plugins/:id/* 静态管理路由在同一节点冲突），故走 NoRoute。
+var proxyHandler atomic.Pointer[gin.HandlerFunc]
+
+// SetProxyHandler 注入插件代理处理器（router 接线，含认证）。
+func SetProxyHandler(h gin.HandlerFunc) { proxyHandler.Store(&h) }
+
+// ProxyHandler 返回已注入的插件代理处理器；nil 表示未接线。
+func ProxyHandler() gin.HandlerFunc {
+	if p := proxyHandler.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// NewProxyHandler 构造插件业务代理处理器：/api/plugins/<id>/* → 插件 socket
+// （剥离前缀，认证由外层中间件保证）。
+func NewProxyHandler(m *Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rest := strings.TrimPrefix(c.Request.URL.Path, "/api/plugins/")
+		name, _, _ := strings.Cut(rest, "/")
+		if name == "" {
+			c.JSON(http.StatusNotFound, gin.H{"code": 40400, "message": "页面未找到"})
+			return
+		}
+		sockPath, timeout, ok := m.sup.RunningEndpoint(name)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "插件未运行"})
+			return
+		}
+		newPluginProxy(sockPath, timeout, "/api/plugins/"+name).ServeHTTP(c.Writer, c.Request)
+	}
+}
 
 // RegisterRoutes 注册插件管理 API 与插件反向代理入口（面板 Protected 组）。
 func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
@@ -211,17 +247,6 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			return
 		}
 		c.JSON(http.StatusOK, mft)
-	})
-
-	// 插件业务 API 反向代理：/api/plugins/<id>/ 前缀 → 插件 socket
-	protected.Any("/api/plugins/:id/*rest", func(c *gin.Context) {
-		name := c.Param("id")
-		sockPath, timeout, ok := m.sup.RunningEndpoint(name)
-		if !ok {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "插件未运行"})
-			return
-		}
-		newPluginProxy(sockPath, timeout).ServeHTTP(c.Writer, c.Request)
 	})
 
 	// 前端动态菜单下发（menus contribution）

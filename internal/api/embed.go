@@ -14,6 +14,8 @@ import (
 	"easyserver/internal/infra/errx"
 	"easyserver/internal/util"
 
+	"easyserver/internal/plugin"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -117,6 +119,12 @@ func ServeWeb(e *gin.Engine) {
 	e.HEAD("/favicon.svg", faviconHandler)
 
 	e.NoRoute(func(c *gin.Context) {
+		// 插件业务代理：/api/plugins/<id>/* 优先（未命中 Gin 路由时）
+		if ph := plugin.ProxyHandler(); ph != nil && strings.HasPrefix(c.Request.URL.Path, "/api/plugins/") {
+			ph(c)
+			return
+		}
+
 		path := c.Request.URL.Path
 
 		// Try to serve the file directly
