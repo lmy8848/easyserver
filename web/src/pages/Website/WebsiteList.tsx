@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
-  message, Popconfirm, Tooltip, Row, Col, Upload,
+  message, Popconfirm, Tooltip, Row, Col,
   Table, Tabs, Empty, theme,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
   PlayCircleOutlined, PauseCircleOutlined, SafetyOutlined,
-  FileTextOutlined, ArrowLeftOutlined, PictureOutlined,
+  FileTextOutlined, ArrowLeftOutlined,
   StopOutlined, ReloadOutlined, DownloadOutlined,
   UndoOutlined, CodeOutlined, ToolOutlined,
   CheckCircleOutlined, CloseCircleOutlined, FolderOutlined, ProfileOutlined,
@@ -147,28 +147,6 @@ export default function WebsiteList({
       setSitesLoading(false);
     }
   }, [selectedServer.id, page, pageSize]);
-
-  const handleUploadIcon = (site: Website, opt: { file: unknown; onSuccess?: () => void; onError?: (e: unknown) => void }) => {
-    const fd = new FormData();
-    fd.append('file', opt.file as File);
-    websiteApi.uploadIcon(site.web_server_id, site.id, fd).then(() => {
-      opt.onSuccess?.();
-      message.success('图标已更新');
-      fetchWebsites();
-    }).catch((e: unknown) => {
-      opt.onError?.(e);
-      message.error((e instanceof Error ? e.message : '图标更新失败'));
-    });
-  };
-
-  const handleResetIcon = (site: Website) => {
-    websiteApi.deleteIcon(site.web_server_id, site.id).then(() => {
-      message.success('已恢复默认图标');
-      fetchWebsites();
-    }).catch((e: unknown) => {
-      message.error((e instanceof Error ? e.message : '操作失败'));
-    });
-  };
 
   const fetchProjectTypes = async () => {
     try {
@@ -441,20 +419,6 @@ export default function WebsiteList({
           <Tooltip title="SSL 证书">
             <Button type="link" size="small" icon={<SafetyOutlined />} onClick={() => showSSL(record)} />
           </Tooltip>
-          <Upload
-            accept=".ico,.png,.svg,.jpg"
-            showUploadList={false}
-            customRequest={(opt: any) => handleUploadIcon(record, opt)}
-          >
-            <Tooltip title="更换图标">
-              <Button type="link" size="small" icon={<PictureOutlined />} />
-            </Tooltip>
-          </Upload>
-          <Popconfirm title="恢复站点默认图标？" onConfirm={() => handleResetIcon(record)}>
-            <Tooltip title="恢复默认图标">
-              <Button type="link" size="small" icon={<UndoOutlined />} />
-            </Tooltip>
-          </Popconfirm>
           <Popconfirm title="确定删除此网站？" onConfirm={() => handleDeleteSite(record.id)}>
             <Tooltip title="删除">
               <Button type="link" size="small" danger icon={<DeleteOutlined />} />
