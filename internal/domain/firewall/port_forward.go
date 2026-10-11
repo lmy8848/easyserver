@@ -378,7 +378,8 @@ func (s *PortForwardService) applyForward(ctx context.Context, rule *PortForward
 	if rule.SourceCIDR != "" {
 		args = append(args, "ip", "saddr", rule.SourceCIDR)
 	}
-	args = append(args, proto, "dport", rule.ListenPort, "dnat", "to", dnatTarget(rule), "comment", comment)
+	// inet 族表中 dnat 的族关键词位于 dnat 与 to 之间（dnat ip to A.B.C.D:P）
+	args = append(args, proto, "dport", rule.ListenPort, "dnat", "ip", "to", dnatTarget(rule), "comment", comment)
 	if out, err := execNft(ctx, args...); err != nil {
 		return fmt.Errorf("nft dnat error: %s", out)
 	}
