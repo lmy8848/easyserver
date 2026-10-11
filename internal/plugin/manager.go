@@ -250,6 +250,22 @@ func (m *Manager) Notify(ctx context.Context, plugin, title, content string) err
 	return m.notifyFn(ctx, title, content)
 }
 
+// ConfigList 返回插件配置（面板前端经 /plugins/:id/config 消费）。
+func (m *Manager) ConfigList(ctx context.Context, name string) (map[string]string, error) {
+	return m.repo.ListConfig(ctx, name)
+}
+
+// ConfigSet 批量写插件配置。
+func (m *Manager) ConfigSet(ctx context.Context, name string, kv map[string]string) error {
+	for k, v := range kv {
+		if err := m.repo.SetConfig(ctx, name, k, v); err != nil {
+			return err
+		}
+	}
+	m.bus.Publish("easyserver.plugin.config_changed", "plugin:"+name, map[string]string{"plugin": name})
+	return nil
+}
+
 // Storage 返回插件私有文件区访问器。
 func (m *Manager) Storage() *PluginStorage { return m.storage }
 

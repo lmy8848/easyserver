@@ -15,6 +15,7 @@ import (
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/plugin"
 	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -140,6 +141,9 @@ func (h *FileManagerHandler) Upload(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("upload failed: %w", err)
 	}
 
+	plugin.PublishBusinessEvent(plugin.EventFileUpload, "filemanager", map[string]any{
+		"path": path, "name": header.Filename, "size": size,
+	})
 	return gin.H{
 		"name": header.Filename,
 		"path": path,
@@ -284,6 +288,7 @@ func (h *FileManagerHandler) Delete(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
+	plugin.PublishBusinessEvent(plugin.EventFileDelete, "filemanager", map[string]string{"path": path})
 	return nil, nil
 }
 
@@ -353,6 +358,7 @@ func (h *FileManagerHandler) SaveContent(c *gin.Context) (any, error) {
 		return nil, err
 	}
 
+	plugin.PublishBusinessEvent(plugin.EventFileUpload, "filemanager", map[string]string{"path": req.Path, "action": "save"})
 	return nil, nil
 }
 

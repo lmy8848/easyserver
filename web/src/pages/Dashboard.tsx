@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import ReactECharts from 'echarts-for-react';
 import { monitorApi } from '../services/monitor';
+import { pluginsApi, type PluginWidgetItem } from '../services/plugins';
 import type { MonitorSnapshot, HistoryPoint } from '../types';
 import { formatBytes, formatUptime, formatDateTime } from '../utils/format';
 import { getPercentColor } from '../utils/status';
@@ -20,6 +21,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<MonitorSnapshot | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pluginWidgets, setPluginWidgets] = useState<PluginWidgetItem[]>([]);
   const [timeRange, setTimeRange] = useState<string>('1h');
 
   const appendToHistory = useCallback((point: HistoryPoint) => {
@@ -36,6 +38,10 @@ export default function Dashboard() {
   // History (monitor/history) scans a large table and can take hundreds of
   // ms on a high-latency link; rendering immediately from stats + live
   // WebSocket keeps the post-login Dashboard feeling instant.
+  useEffect(() => {
+    pluginsApi.getWidgets().then((res) => setPluginWidgets(res.data.data?.items || [])).catch(() => {});
+  }, []);
+
   useEffect(() => {
     // Stats: fast, blocks initial render so cards show real data immediately.
     monitorApi.getStats()
@@ -268,6 +274,23 @@ export default function Dashboard() {
 
   return (
     <div>
+      {/* 插件小部件（slot: dashboard） */}
+      {pluginWidgets.length > 0 && (
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          {pluginWidgets.map((w) => (
+            <Col key={`${w.plugin}-${w.id}`} xs={24} sm={12} lg={8}>
+              <Card size="small" title={w.title} styles={{ body: { padding: 8 } }}>
+                <iframe
+                  src={`/api/plugins/${w.plugin}${w.path}`}
+                  title={`${w.plugin}-${w.id}`}
+                  style={{ width: '100%', height: 160, border: 'none' }}
+                  sandbox="allow-scripts allow-forms allow-same-origin"
+                />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
       {/* 指标卡片 */}
       <Row gutter={[16, 16]}>
         <Col style={{ flex: '1 1 180px', minWidth: 0 }}>

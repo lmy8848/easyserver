@@ -187,6 +187,8 @@ const (
 	EventWebsiteCreated      = "easyserver.website.created"
 	EventWebsiteDeleted      = "easyserver.website.deleted"
 	EventCronExecuted        = "easyserver.cron.executed"
+	EventCronTaskCreated     = "easyserver.cron.task_created"
+	EventCronTaskDeleted     = "easyserver.cron.task_deleted"
 	EventServiceStart        = "easyserver.service.start"
 	EventServiceStop         = "easyserver.service.stop"
 	EventFirewallChanged     = "easyserver.firewall.changed"
