@@ -132,12 +132,28 @@ func execCommand(ctx context.Context, cmd string, args ...string) (string, error
 	return string(out), nil
 }
 
-// requirePermission 校验插件声明了某能力。
+// hasPermission 校验插件是否声明了某能力（不写响应，由调用方统一处理）。
+func (h *HostAPI) hasPermission(r *http.Request, perm string) bool {
+	return h.mgr.HasPermission(r.Context(), tokenOf(r), perm)
+}
+
+// requirePermission 校验并在缺失时写 403；返回是否放行。
 func (h *HostAPI) requirePermission(w http.ResponseWriter, r *http.Request, perm string) bool {
-	if h.mgr.HasPermission(r.Context(), tokenOf(r), perm) {
+	if h.hasPermission(r, perm) {
 		return true
 	}
 	forbidden(w, "缺少能力: "+perm)
+	return false
+}
+
+// requireAnyPermission 校验插件声明了任一能力（OR 语义），缺失时写 403。
+func (h *HostAPI) requireAnyPermission(w http.ResponseWriter, r *http.Request, perms ...string) bool {
+	for _, p := range perms {
+		if h.hasPermission(r, p) {
+			return true
+		}
+	}
+	forbidden(w, "缺少能力: "+strings.Join(perms, " 或 "))
 	return false
 }
 
@@ -159,7 +175,7 @@ func (h *HostAPI) handleAudit(w http.ResponseWriter, r *http.Request, name strin
 }
 
 func (h *HostAPI) handleConfigGet(w http.ResponseWriter, r *http.Request, name string) {
-	if !h.requirePermission(w, r, PermConfigRead) && !h.requirePermission(w, r, PermConfigReadWrite) {
+	if !h.requireAnyPermission(w, r, PermConfigRead, PermConfigReadWrite) {
 		return
 	}
 	all, err := h.mgr.repo.ListConfig(r.Context(), name)
@@ -171,7 +187,7 @@ func (h *HostAPI) handleConfigGet(w http.ResponseWriter, r *http.Request, name s
 }
 
 func (h *HostAPI) handleConfigGetOne(w http.ResponseWriter, r *http.Request, name, key string) {
-	if !h.requirePermission(w, r, PermConfigRead) && !h.requirePermission(w, r, PermConfigReadWrite) {
+	if !h.requireAnyPermission(w, r, PermConfigRead, PermConfigReadWrite) {
 		return
 	}
 	v, err := h.mgr.repo.GetConfig(r.Context(), name, key)
