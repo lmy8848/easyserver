@@ -16,7 +16,7 @@ interface SSLCertInfo {
   enabled: boolean; subject: string; issuer: string; not_before: string; not_after: string;
   days_remaining: number; serial: string; dns_names: string[]; sig_algo: string; cert_path: string; key_path: string;
 }
-interface LogEntry { time: string; ip: string; method: string; path: string; status: string; bytes: string; ua: string; raw?: string; }
+interface LogEntry { time: string; ip: string; method: string; path: string; status: string; bytes: string; ua: string; level?: string; message?: string; raw?: string; }
 interface WebsiteStats { total_requests: number; total_bytes: number; status_2xx: number; status_3xx: number; status_4xx: number; status_5xx: number; top_ips: { key: string; value: number }[]; top_paths: { key: string; value: number }[]; window: string; }
 interface HealthResult { ok: boolean; status_code: number; latency_ms: number; error?: string; checked_at: string; }
 interface ProcessStatus { status: string; pid: number; uptime: number; cpu_percent: number; memory_mb: number; restarts: number; last_start: string; last_error: string; managed: boolean; }
@@ -88,16 +88,23 @@ function LogsTab({ base, type }: { base: string; type: string }) {
     const res = await api.get(`${base}/logs/parse`, { params: { type, lines: 500 } });
     return (res.data.data?.entries || []) as LogEntry[];
   }, [type]);
+  // 错误日志与访问日志格式不同，分型渲染，避免无法结构化的行显示为整行空白
+  const columns = type === 'error' ? [
+    { title: '时间', dataIndex: 'time', key: 'time', width: 170 },
+    { title: '级别', dataIndex: 'level', key: 'level', width: 80, render: (l: string) => l ? <Tag color={l === 'error' ? 'red' : l === 'warn' ? 'orange' : 'default'}>{l}</Tag> : '-' },
+    { title: '消息', dataIndex: 'message', key: 'message', render: (m: string, r: LogEntry) => m ? <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{m}</span> : (r.raw || '-') },
+  ] : [
+    { title: '时间', dataIndex: 'time', key: 'time', width: 180, ellipsis: true },
+    { title: 'IP', dataIndex: 'ip', key: 'ip', width: 130 },
+    { title: '方法', dataIndex: 'method', key: 'method', width: 70 },
+    { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 70, render: (s: string) => s ? <Tag color={s[0] === '2' ? 'green' : s[0] === '4' ? 'orange' : s[0] === '5' ? 'red' : 'default'}>{s}</Tag> : '-' },
+    { title: '字节', dataIndex: 'bytes', key: 'bytes', width: 80 },
+    { title: '原始', dataIndex: 'raw', key: 'raw', ellipsis: true, render: (raw: string) => raw || '-' },
+  ];
   return (
-    <Table size="small" loading={loading} dataSource={data || []} rowKey={(r, i) => `${r.ip}-${i}`} pagination={{ pageSize: 20 }}
-      columns={[
-        { title: '时间', dataIndex: 'time', key: 'time', width: 180, ellipsis: true },
-        { title: 'IP', dataIndex: 'ip', key: 'ip', width: 130 },
-        { title: '方法', dataIndex: 'method', key: 'method', width: 70 },
-        { title: '路径', dataIndex: 'path', key: 'path', ellipsis: true },
-        { title: '状态', dataIndex: 'status', key: 'status', width: 70, render: (s: string) => s ? <Tag color={s[0] === '2' ? 'green' : s[0] === '4' ? 'orange' : s[0] === '5' ? 'red' : 'default'}>{s}</Tag> : '-' },
-        { title: '字节', dataIndex: 'bytes', key: 'bytes', width: 80 },
-      ]}
+    <Table size="small" loading={loading} dataSource={data || []} rowKey={(r, i) => `${r.ip}-${r.time}-${i}`} pagination={{ pageSize: 20 }}
+      columns={columns as never}
       locale={{ emptyText: '暂无日志' }}
     />
   );
