@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card, Button, Space, Tag, Modal, Form, Input, InputNumber, Select, Switch,
-  message, Popconfirm, Tooltip, Row, Col,
+  message, Popconfirm, Tooltip, Row, Col, Upload,
   Table, Tabs, Empty, theme,
 } from 'antd';
 import {
   GlobalOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   PlayCircleOutlined, PauseCircleOutlined, SafetyOutlined,
-  FileTextOutlined, ArrowLeftOutlined,
+  FileTextOutlined, ArrowLeftOutlined, PictureOutlined,
   StopOutlined, ReloadOutlined, DownloadOutlined,
   UndoOutlined, CodeOutlined, ToolOutlined,
   CheckCircleOutlined, CloseCircleOutlined, FolderOutlined, ProfileOutlined,
@@ -21,6 +21,34 @@ import { StatusTag } from '../../utils/status';
 import { formatBytes } from '../../utils/format';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
 import { LogViewer } from '../../components/LogViewer';
+
+// SiteIcon 依次尝试：自定义图标（面板上传）→ 站点自身 favicon → 默认图标。
+// 面板为 HTTPS 时浏览器会拦截 http:// 的图片，故 favicon 回退只尝试 https。
+function SiteIcon({ site }: { site: Website }) {
+  const [stage, setStage] = useState(0);
+  const v = encodeURIComponent(site.updated_at || '');
+  if (stage === 0) {
+    return (
+      <img
+        src={`/web-servers/${site.web_server_id}/websites/${site.id}/icon?v=${v}`}
+        width={16} height={16} alt=""
+        style={{ verticalAlign: -3, borderRadius: 3, objectFit: 'contain' }}
+        onError={() => setStage(1)}
+      />
+    );
+  }
+  if (stage === 1) {
+    return (
+      <img
+        src={`https://${site.domain}/favicon.ico`}
+        width={16} height={16} alt=""
+        style={{ verticalAlign: -3 }}
+        onError={() => setStage(2)}
+      />
+    );
+  }
+  return <GlobalOutlined />;
+}
 
 function renderServerIcon(name: string, size = 32) {
   const s = (name || '').toLowerCase();
@@ -146,6 +174,28 @@ export default function WebsiteList({
       setSitesLoading(false);
     }
   }, [selectedServer.id, page, pageSize]);
+
+  const handleUploadIcon = (site: Website, opt: { file: unknown; onSuccess?: () => void; onError?: (e: unknown) => void }) => {
+    const fd = new FormData();
+    fd.append('file', opt.file as File);
+    websiteApi.uploadIcon(site.web_server_id, site.id, fd).then(() => {
+      opt.onSuccess?.();
+      message.success('图标已更新');
+      fetchWebsites();
+    }).catch((e: unknown) => {
+      opt.onError?.(e);
+      message.error((e instanceof Error ? e.message : '图标更新失败'));
+    });
+  };
+
+  const handleResetIcon = (site: Website) => {
+    websiteApi.deleteIcon(site.web_server_id, site.id).then(() => {
+      message.success('已恢复默认图标');
+      fetchWebsites();
+    }).catch((e: unknown) => {
+      message.error((e instanceof Error ? e.message : '操作失败'));
+    });
+  };
 
   const fetchProjectTypes = async () => {
     try {
@@ -360,7 +410,7 @@ export default function WebsiteList({
       title: '域名', dataIndex: 'domain', key: 'domain',
       render: (text: string, record: Website) => (
         <a href={`http://${text}:${record.port}`} target="_blank" rel="noreferrer">
-          <GlobalOutlined /> {text}
+          <SiteIcon site={record} /> {text}
         </a>
       ),
     },
@@ -418,6 +468,20 @@ export default function WebsiteList({
           <Tooltip title="SSL 证书">
             <Button type="link" size="small" icon={<SafetyOutlined />} onClick={() => showSSL(record)} />
           </Tooltip>
+          <Upload
+            accept=".ico,.png,.svg,.jpg"
+            showUploadList={false}
+            customRequest={(opt: any) => handleUploadIcon(record, opt)}
+          >
+            <Tooltip title="更换图标">
+              <Button type="link" size="small" icon={<PictureOutlined />} />
+            </Tooltip>
+          </Upload>
+          <Popconfirm title="恢复站点默认图标？" onConfirm={() => handleResetIcon(record)}>
+            <Tooltip title="恢复默认图标">
+              <Button type="link" size="small" icon={<UndoOutlined />} />
+            </Tooltip>
+          </Popconfirm>
           <Popconfirm title="确定删除此网站？" onConfirm={() => handleDeleteSite(record.id)}>
             <Tooltip title="删除">
               <Button type="link" size="small" danger icon={<DeleteOutlined />} />

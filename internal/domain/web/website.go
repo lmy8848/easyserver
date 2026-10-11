@@ -716,7 +716,7 @@ server {
     server_name %s;
     root %s;
     index index.html index.htm;
-%s%s
+%s%s%s
     location / {
         try_files $uri $uri/ /index.html;
     }
@@ -725,7 +725,7 @@ server {
     include /etc/nginx/conf.d/banned_ips.conf;
     error_log %s;
 }
-`, sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), sslBlock, gzipBlock, accessLogLine, sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), sslBlock, gzipBlock, nginxFaviconBlock(w.Domain), accessLogLine, sanitizeNginxValue(w.ErrorLog))
 }
 
 func nginxProxyTemplate(w *Website, rateLimitBlock string) string {
@@ -758,7 +758,7 @@ func nginxProxyTemplate(w *Website, rateLimitBlock string) string {
 server {
     listen %d%s;
     server_name %s;
-%s%s%s
+%s%s%s%s
     location / {
         proxy_pass %s;
         proxy_http_version 1.1;
@@ -772,7 +772,7 @@ server {
     %s
     error_log %s;
 }
-`, sanitizeNginxValue(w.ProjectType), sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sslBlock, gzipBlock, httpsRedirect, sanitizeNginxValue(w.ProxyPass), wsHeaders, accessLogLine, sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.ProjectType), sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, listenSuffix, sanitizeNginxValue(w.Domain), sslBlock, gzipBlock, httpsRedirect, nginxFaviconBlock(w.Domain), sanitizeNginxValue(w.ProxyPass), wsHeaders, accessLogLine, sanitizeNginxValue(w.ErrorLog))
 }
 
 func nginxPHPTemplate(w *Website, rateLimitBlock string) string {
@@ -783,7 +783,7 @@ server {
     server_name %s;
     root %s;
     index index.php index.html index.htm;
-
+%s
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
@@ -803,5 +803,5 @@ server {
     include /etc/nginx/conf.d/banned_ips.conf;
     error_log %s;
 }
-`, sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), w.AppPort, sanitizeNginxValue(w.AccessLog), sanitizeNginxValue(w.ErrorLog))
+`, sanitizeNginxValue(w.Name), rateLimitBlock, w.Port, sanitizeNginxValue(w.Domain), sanitizeNginxValue(w.RootPath), nginxFaviconBlock(w.Domain), w.AppPort, sanitizeNginxValue(w.AccessLog), sanitizeNginxValue(w.ErrorLog))
 }

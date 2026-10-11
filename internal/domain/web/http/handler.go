@@ -809,6 +809,72 @@ func detectProjectType(dir string) string {
 	return ""
 }
 
+// GetWebsiteIcon serves the site's custom icon file; 404 when none set.
+func (h *WebServerHandler) GetWebsiteIcon(c *gin.Context) (any, error) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的服务器ID")
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的 ID")
+	}
+	path, ok, err := h.websiteService.IconFile(c.Request.Context(), sid, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errx.NotFound("未设置自定义图标")
+	}
+	c.Header("Cache-Control", "private, max-age=60")
+	c.File(path)
+	return nil, nil
+}
+
+// UploadWebsiteIcon replaces the site's custom icon (multipart field "file").
+func (h *WebServerHandler) UploadWebsiteIcon(c *gin.Context) (any, error) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的服务器ID")
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的 ID")
+	}
+	fh, err := c.FormFile("file")
+	if err != nil {
+		return nil, errx.BadRequest("缺少图标文件字段 file")
+	}
+	f, err := fh.Open()
+	if err != nil {
+		return nil, errx.Internal("读取上传文件失败: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	middleware.AuditSummary(c, "上传网站图标 "+fh.Filename)
+	if err := h.websiteService.UploadIcon(c.Request.Context(), sid, id, f); err != nil {
+		return nil, err
+	}
+	return gin.H{"message": "图标已更新"}, nil
+}
+
+// DeleteWebsiteIcon removes the site's custom icon (restore default favicon).
+func (h *WebServerHandler) DeleteWebsiteIcon(c *gin.Context) (any, error) {
+	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的服务器ID")
+	}
+	id, err := strconv.ParseInt(c.Param("wid"), 10, 64)
+	if err != nil {
+		return nil, errx.BadRequest("无效的 ID")
+	}
+	middleware.AuditSummary(c, "删除网站图标")
+	if err := h.websiteService.DeleteIcon(c.Request.Context(), sid, id); err != nil {
+		return nil, err
+	}
+	return gin.H{"message": "已恢复默认图标"}, nil
+}
+
 // GetWebsiteSSL returns parsed SSL certificate detail.
 func (h *WebServerHandler) GetWebsiteSSL(c *gin.Context) (any, error) {
 	sid, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -947,6 +1013,9 @@ func RegisterRoutes(protected *gin.RouterGroup, webServerService *web.Service, w
 	protected.GET("/web-servers/:id/websites/:wid/ssl", httpx.H(handler.GetWebsiteSSL))
 	protected.GET("/web-servers/:id/websites/:wid/config", httpx.H(handler.GetWebsiteConfig))
 	protected.GET("/web-servers/:id/websites/:wid/logs/parse", httpx.H(handler.GetWebsiteParsedLogs))
+	protected.GET("/web-servers/:id/websites/:wid/icon", httpx.H(handler.GetWebsiteIcon))
+	protected.POST("/web-servers/:id/websites/:wid/icon", httpx.H(handler.UploadWebsiteIcon))
+	protected.DELETE("/web-servers/:id/websites/:wid/icon", httpx.H(handler.DeleteWebsiteIcon))
 	protected.GET("/web-servers/:id/websites/:wid/stats", httpx.H(handler.GetWebsiteStats))
 	protected.POST("/web-servers/:id/websites/:wid/health/probe", httpx.H(handler.ProbeWebsiteHealth))
 }

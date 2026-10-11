@@ -116,4 +116,10 @@ export const websiteApi = {
 
   build: (serverId: number, id: number) =>
     api.post<ApiResponse<{ success: boolean; output: string }>>(`/web-servers/${serverId}/websites/${id}/build`),
+
+  uploadIcon: (serverId: number, id: number, fd: FormData) =>
+    api.post<ApiResponse<{ message: string }>>(`/web-servers/${serverId}/websites/${id}/icon`, fd),
+
+  deleteIcon: (serverId: number, id: number) =>
+    api.delete<ApiResponse>(`/web-servers/${serverId}/websites/${id}/icon`),
 };
