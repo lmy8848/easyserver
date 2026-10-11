@@ -1,0 +1,144 @@
+/* 漏洞扫描页动效：雷达脉冲、扫描进度条、入场动画。纯 CSS，无新增依赖。 */
+
+/* —— 扫描中：雷达 + 阶段文案 —— */
+.scan-anim {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: linear-gradient(120deg, rgba(22, 119, 255, 0.06), rgba(22, 119, 255, 0.02));
+  border: 1px solid rgba(22, 119, 255, 0.15);
+  animation: scan-fade-in 0.4s ease both;
+}
+
+.scan-radar {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+
+.scan-radar-icon {
+  position: relative;
+  z-index: 1;
+  font-size: 22px;
+  color: #1677ff;
+  animation: scan-icon-pulse 1.6s ease-in-out infinite;
+}
+
+.scan-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(22, 119, 255, 0.55);
+  animation: scan-ring 1.8s ease-out infinite;
+  pointer-events: none;
+}
+
+.scan-ring-delay {
+  animation-delay: 0.9s;
+}
+
+.scan-anim-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scan-stage {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.scan-elapsed {
+  font-size: 12px;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.scan-dots {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.scan-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #1677ff;
+  animation: scan-dot 1.2s ease-in-out infinite;
+}
+
+.scan-dots i:nth-child(2) { animation-delay: 0.2s; }
+.scan-dots i:nth-child(3) { animation-delay: 0.4s; }
+
+/* —— 不定进度条（扫描/升级共用）—— */
+.scan-bar {
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(22, 119, 255, 0.12);
+  margin-top: 12px;
+}
+
+.scan-bar i {
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #1677ff, transparent);
+  animation: scan-slide 1.2s linear infinite;
+}
+
+/* —— 结果入场 —— */
+.fade-in-up {
+  animation: scan-fade-up 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.vuln-row {
+  animation: scan-fade-up 0.4s ease both;
+  animation-delay: calc(var(--row-i, 0) * 35ms);
+}
+
+@keyframes scan-ring {
+  0% { transform: scale(0.4); opacity: 0.9; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+@keyframes scan-icon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+@keyframes scan-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+
+@keyframes scan-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+@keyframes scan-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scan-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 尊重系统减弱动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .scan-anim, .fade-in-up, .vuln-row,
+  .scan-radar-icon, .scan-ring, .scan-dots i, .scan-bar i {
+    animation: none !important;
+  }
+}

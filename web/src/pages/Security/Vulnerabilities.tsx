@@ -1,10 +1,43 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, Button, Table, Tag, Space, message, Alert, Descriptions, Modal, Tooltip } from 'antd';
 import { SafetyOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import api from '../../services/client';
+import './Vulnerabilities.css';
 
 interface Vuln { package: string; version: string; vuln_ids: string[]; candidate?: string; upgradable?: boolean; }
 interface KernelStatus { current: string; latest: string; needs_reboot: boolean; }
+
+// 扫描期间的耗时计数（秒）
+function useElapsed(active: boolean) {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    setSec(0);
+    const t = setInterval(() => setSec((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return sec;
+}
+
+// 数字滚动：目标值变化时以缓出曲线滚到目标
+function useCountUp(target: number, duration = 600) {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    if (target === 0) { setVal(0); return; }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / duration);
+      setVal(Math.round(target * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return val;
+}
+
+const SCAN_STAGES = ['读取已安装软件包…', '正在查询 osv.dev 漏洞库（在线）…', '汇总分析扫描结果…'];
 
 export default function Vulnerabilities() {
   const [vulns, setVulns] = useState<Vuln[]>([]);
@@ -12,6 +45,11 @@ export default function Vulnerabilities() {
   const [kernel, setKernel] = useState<KernelStatus | null>(null);
   const [upgradable, setUpgradable] = useState<number | null>(null);
   const [upgrading, setUpgrading] = useState(false);
+  const [scanSeq, setScanSeq] = useState(0); // 触发结果区入场动画
+
+  const elapsed = useElapsed(scanning);
+  const vulnCount = useCountUp(vulns.length);
+  const stage = elapsed < 4 ? SCAN_STAGES[0] : elapsed < 30 ? SCAN_STAGES[1] : SCAN_STAGES[2];
 
   const scan = async () => {
     setScanning(true);
@@ -24,6 +62,7 @@ export default function Vulnerabilities() {
       setVulns(vRes.data.data?.vulnerabilities || []);
       setKernel(kRes.data.data);
       setUpgradable(uRes.data.data?.count ?? 0);
+      setScanSeq((n) => n + 1);
       message.success(`扫描完成，发现 ${vRes.data.data?.count || 0} 个有漏洞的包`);
     } catch (e: unknown) {
       message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '扫描失败');
@@ -86,18 +125,40 @@ export default function Vulnerabilities() {
             <Descriptions.Item label="需重启">{kernel.needs_reboot ? <Tag color="red">是</Tag> : <Tag color="green">否</Tag>}</Descriptions.Item>
           </Descriptions>
         )}
+        {upgrading && <div className="scan-bar"><i /></div>}
         {upgradable !== null && (
           <Alert
-            message={`${upgradable} 个包可升级${vulns.length > 0 ? `，其中 ${vulns.length} 个有漏洞` : ''}`}
-            type={upgradable > 0 ? 'warning' : 'success'} showIcon style={{ marginBottom: 16 }}
+            message={`${upgradable} 个包可升级${vulns.length > 0 ? `，其中 ${vulnCount} 个有漏洞` : ''}`}
+            type={upgradable > 0 ? 'warning' : 'success'} showIcon style={{ marginBottom: 0 }}
             action={vulns.length > 0 ? <Button size="small" onClick={upgradeAll} loading={upgrading}>一键升级漏洞包</Button> : undefined}
           />
         )}
       </Card>
 
+      {scanning && (
+        <div className="scan-anim">
+          <span className="scan-radar">
+            <i className="scan-ring" />
+            <i className="scan-ring scan-ring-delay" />
+            <SafetyOutlined className="scan-radar-icon" />
+          </span>
+          <div className="scan-anim-text">
+            <span className="scan-stage">{stage}<span className="scan-dots"><i /><i /><i /></span></span>
+            <span className="scan-elapsed">已耗时 {elapsed} 秒</span>
+          </div>
+          <div className="scan-bar" style={{ flex: 1, marginTop: 0 }}><i /></div>
+        </div>
+      )}
+
       {vulns.length > 0 && (
-        <Card title={`有漏洞的包 (${vulns.length})`}>
+        <Card
+          key={scanSeq}
+          className="fade-in-up"
+          title={`有漏洞的包 (${vulnCount})`}
+        >
           <Table size="small" dataSource={vulns} rowKey="package" pagination={{ pageSize: 20 }}
+            rowClassName={() => 'vuln-row'}
+            onRow={(_, i) => ({ style: { '--row-i': i } as React.CSSProperties })}
             columns={[
               { title: '包名', dataIndex: 'package', key: 'package' },
               { title: '当前版本', dataIndex: 'version', key: 'version' },
