@@ -30,6 +30,7 @@ const (
 	EnvPluginToken = "EASYSERVER_PLUGIN_TOKEN"
 	EnvHostSocket  = "EASYSERVER_HOST_SOCKET"
 	EnvPluginID    = "EASYSERVER_PLUGIN_ID"
+	EnvPluginSocket = "EASYSERVER_PLUGIN_SOCKET"
 )
 
 // Event 是面板投递的事件（文档 §8：带 event_id 供去重，插件需幂等）。
@@ -118,7 +119,12 @@ func (s *Server) OnEvent(h func(ctx context.Context, e *Event) error) {
 }
 
 // Serve 监听并服务（阻塞）。返回前清理旧 socket，监听后 chmod 0600。
+// 面板注入的 EASYSERVER_PLUGIN_SOCKET 绝对路径优先（Supervisor 探测的是
+// /run/easyserver/plugins/ 下的路径），Config.SocketPath 作为本地运行回退。
 func (s *Server) Serve() error {
+	if abs := os.Getenv(EnvPluginSocket); abs != "" {
+		s.socketPath = abs
+	}
 	_ = os.Remove(s.socketPath)
 	if err := os.MkdirAll(filepath.Dir(s.socketPath), 0700); err != nil {
 		return err

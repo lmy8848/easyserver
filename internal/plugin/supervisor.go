@@ -185,6 +185,7 @@ func (s *Supervisor) EnsureRunning(ctx context.Context, m *Manifest, token strin
 		"EASYSERVER_PLUGIN_TOKEN="+token,
 		"EASYSERVER_HOST_SOCKET="+s.hostSocket,
 		"EASYSERVER_PLUGIN_ID="+m.Name,
+		"EASYSERVER_PLUGIN_SOCKET="+sockPath, // 插件监听绝对路径（文档 §6.1 runtime.socket 相对 /run/easyserver/plugins/）
 	)
 	for k, v := range m.Runtime.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
