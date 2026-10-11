@@ -36,7 +36,7 @@
     "react-router-dom": "^7.17.0",
     "remark-gfm": "^4.0.1",
     "tslib": "^2.8.1",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
