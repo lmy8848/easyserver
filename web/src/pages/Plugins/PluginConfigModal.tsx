@@ -67,6 +67,9 @@ export default function PluginConfigModal({ plugin, open, onClose }: { plugin: P
     }
   };
 
+  // 关闭动画期间 plugin 可能已被置 null：hooks 之后短路，避免 title/保存崩溃
+  if (!plugin) return null;
+
   const props = schema.properties || {};
   const hasProps = Object.keys(props).length > 0;
 

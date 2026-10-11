@@ -30,6 +30,9 @@ export default function PluginDetailDrawer({ plugin, open, onClose }: { plugin: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, plugin]);
 
+  // 关闭动画期间 plugin 可能已被置 null：所有 hooks 之后短路，避免裸访问崩溃
+  if (!plugin) return null;
+
   const c = detail?.contributions;
   const perms = detail?.manifest?.permissions || plugin.permissions_approved || [];
   const record = detail?.record || plugin;
