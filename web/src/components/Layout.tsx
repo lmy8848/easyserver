@@ -51,6 +51,7 @@ const MENU_GROUPS = [
       { key: '/settings', icon: 'tool', label: '面板设置' },
       { key: '/vulnerabilities', icon: 'alert', label: '漏洞扫描' },
       { key: '/fim', icon: 'check', label: '文件完整性' },
+      { key: '/plugins', icon: 'puzzle', label: '插件管理' },
     ],
   },
 ];
