@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -155,6 +156,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
+		log.Printf("plugin[debug]: menus list=%d", len(list))
 		items := []gin.H{}
 		for _, rec := range list {
 			if !rec.Enabled {
@@ -171,6 +173,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 				})
 			}
 		}
+		log.Printf("plugin[debug]: menus items=%d", len(items))
 		c.JSON(http.StatusOK, gin.H{"items": items})
 	})
 
