@@ -721,6 +721,37 @@ func (h *SettingsHandler) TestWebhook(c *gin.Context) (any, error) {
 	return gin.H{"message": "测试通知已发送"}, nil
 }
 
+// SendCustomNotification sends an admin-authored notification (title +
+// markdown content) to the configured webhook, channel-adapted.
+func (h *SettingsHandler) SendCustomNotification(c *gin.Context) (any, error) {
+	req, err := httpx.BindJSON[struct {
+		Title   string `json:"title"`
+		Content string `json:"content" binding:"required"`
+	}](c)
+	if err != nil {
+		return nil, err
+	}
+	if len([]rune(req.Content)) > 4000 {
+		return nil, errx.BadRequest("通知内容过长（最多 4000 字符）")
+	}
+
+	middleware.AuditSummary(c, "发送自定义通知")
+	cfg := h.store.Get()
+	if cfg.Notify.WebhookURL == "" {
+		return nil, errx.BadRequest("请先配置 Webhook URL")
+	}
+	if err := validateWebhookURL(cfg.Notify.WebhookURL); err != nil {
+		return nil, err
+	}
+
+	notifyService := notify.NewService(h.store)
+	if err := notifyService.SendCustom(c.Request.Context(), req.Title, req.Content); err != nil {
+		return nil, errx.Internal("发送通知失败: %w", err)
+	}
+
+	return gin.H{"message": "通知已发送"}, nil
+}
+
 // UpdateLogsConfig updates the global log configuration (level/format/rotation).
 // 等级通过 logger.SetLevel 运行时立即生效，其余字段持久化到 config.toml，重启后生效。
 func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
@@ -906,6 +937,7 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertServic
 	protected.PUT("/settings/features", httpx.H(handler.UpdateFeaturesConfig))
 	protected.PUT("/settings/logs", httpx.H(handler.UpdateLogsConfig))
 	protected.POST("/settings/notify/test", httpx.H(handler.TestWebhook))
+	protected.POST("/settings/notify/send", httpx.H(handler.SendCustomNotification))
 	protected.GET("/alerts/rules", httpx.H(handler.GetAlertRules))
 	protected.PUT("/alerts/rules", httpx.H(handler.UpdateAlertRules))
 	protected.POST("/settings/restart", httpx.H(handler.RestartPanel))

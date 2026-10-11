@@ -36,8 +36,8 @@ export default function Vulnerabilities() {
     if (vulns.length === 0) return;
     setUpgrading(true);
     try {
-      await api.post('/security/cve/upgrade', { packages: vulns.map((v) => v.package) });
-      message.success('升级完成');
+      const res = await api.post('/security/cve/upgrade', { packages: vulns.map((v) => v.package) });
+      message.success(res.data.data?.message || '升级完成');
       scan();
     } catch (e: unknown) {
       message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '升级失败');
@@ -48,8 +48,8 @@ export default function Vulnerabilities() {
 
   const upgradeOne = async (pkg: string) => {
     try {
-      await api.post('/security/cve/upgrade', { packages: [pkg] });
-      message.success(`${pkg} 升级完成`);
+      const res = await api.post('/security/cve/upgrade', { packages: [pkg] });
+      message.success(`${pkg}: ${res.data.data?.message || '升级完成'}`);
       scan();
     } catch (e: unknown) {
       message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '升级失败');

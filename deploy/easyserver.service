@@ -1,0 +1,27 @@
+[Unit]
+Description=EasyServer Management Panel
+Documentation=https://github.com/lmy8848/easyserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+# SECURITY NOTE: 以 root 运行是系统管理功能(服务控制/防火墙/包管理)所必需的;
+# 高安全环境可改为专用用户并配置相应 sudo 权限
+WorkingDirectory=/opt/easyserver
+ExecStart=/usr/local/bin/easyserver -config /opt/easyserver/config.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 资源限制
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

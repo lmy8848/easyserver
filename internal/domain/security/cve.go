@@ -147,16 +147,28 @@ func (s *Service) queryOSVBatch(ctx context.Context, pkgs []installedPackage) ([
 }
 
 // Upgrade runs apt-get install --only-upgrade for the given packages.
-func (s *Service) Upgrade(ctx context.Context, packages []string) (string, error) {
+// Upgrade refreshes the apt index before upgrading, then installs the given
+// packages with --only-upgrade. 返回值第二个 string 是面向用户的结果消息：
+// apt 在索引过期时会以退出码 0 结束且什么都不升（"0 upgraded, 0 newly
+// installed"），必须如实区分"升级成功"与"源里没有更新"。
+func (s *Service) Upgrade(ctx context.Context, packages []string) (string, string, error) {
 	if len(packages) == 0 {
-		return "", errx.BadRequest("未指定升级的包")
+		return "", "", errx.BadRequest("未指定升级的包")
 	}
+
+	if out, err := exec.CommandContext(ctx, "apt-get", "update", "-q").CombinedOutput(); err != nil {
+		return "", string(out), errx.Internal("刷新软件源失败: %w", err)
+	}
+
 	args := append([]string{"install", "--only-upgrade", "-y"}, packages...)
 	out, err := exec.CommandContext(ctx, "apt-get", args...).CombinedOutput()
 	if err != nil {
-		return string(out), errx.Internal("升级失败: %w", err)
+		return "", string(out), errx.Internal("升级失败: %w", err)
 	}
-	return string(out), nil
+	if strings.Contains(string(out), "0 upgraded, 0 newly installed") {
+		return "软件源中没有可用的更新版本（索引已刷新）", string(out), nil
+	}
+	return "升级完成", string(out), nil
 }
 
 // KernelStatus reports the running kernel vs the latest installed kernel.

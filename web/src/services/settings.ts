@@ -50,6 +50,9 @@ export const settingsApi = {
   testWebhook: () =>
     api.post<ApiResponse>('/settings/notify/test'),
 
+  sendNotify: (data: { title?: string; content: string }) =>
+    api.post<ApiResponse<{ message: string }>>('/settings/notify/send', data),
+
   getAlertRules: () =>
     api.get<ApiResponse<{ rules: Array<{ name: string; metric: string; threshold: number; duration: number; enabled: boolean }> }>>('/alerts/rules'),
 

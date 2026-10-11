@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -62,7 +63,7 @@ func (s *Service) TestWebhook() error {
 	}
 
 	msg := s.formatMessage(event)
-	payload := s.buildPayload(msg)
+	payload := s.buildPayload("EasyServer 登录通知", msg)
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -84,6 +85,42 @@ func (s *Service) TestWebhook() error {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
 
+	return nil
+}
+
+// SendCustom sends an admin-authored notification (title + markdown content)
+// to the configured webhook, synchronously returning any error. 渠道适配与
+// 登录/告警通知一致（钉钉/飞书/企微/通用）。
+func (s *Service) SendCustom(ctx context.Context, title, content string) error {
+	url, _ := s.webhookConfig()
+	if url == "" {
+		return errors.New("webhook url is empty")
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "EasyServer 通知"
+	}
+	msg := fmt.Sprintf("**%s**\n\n%s", title, content)
+
+	payload := s.buildPayload(title, msg)
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -118,7 +155,7 @@ func (s *Service) NotifyAlert(event AlertEvent) {
 func (s *Service) sendWebhook(event LoginEvent) error {
 	url, _ := s.webhookConfig()
 	msg := s.formatMessage(event)
-	payload := s.buildPayload(msg)
+	payload := s.buildPayload("EasyServer 登录通知", msg)
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -163,14 +200,14 @@ func (s *Service) formatMessage(event LoginEvent) string {
 	)
 }
 
-func (s *Service) buildPayload(msg string) map[string]any {
+func (s *Service) buildPayload(title, msg string) map[string]any {
 	url, _ := s.webhookConfig()
 	switch {
 	case strings.Contains(url, "dingtalk.com"):
 		return map[string]any{
 			"msgtype": "markdown",
 			"markdown": map[string]string{
-				"title": "EasyServer 登录通知",
+				"title": title,
 				"text":  msg,
 			},
 		}
@@ -211,7 +248,7 @@ func (s *Service) sendAlertWebhook(event AlertEvent) error {
 		event.Timestamp,
 	)
 
-	payload := s.buildPayload(msg)
+	payload := s.buildPayload("EasyServer 监控告警", msg)
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
