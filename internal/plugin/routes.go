@@ -1,7 +1,10 @@
 package plugin
 
 import (
+	"io"
 	"net/http"
+
+	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -9,6 +12,33 @@ import (
 // RegisterRoutes 注册插件管理 API 与插件反向代理入口（面板 Protected 组）。
 func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 	// 插件管理
+	// 上传安装插件（zip 包）
+	protected.POST("/plugins/upload", func(c *gin.Context) {
+		fh, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": "缺少插件包文件字段 file"})
+			return
+		}
+		f, err := fh.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "读取插件包失败"})
+			return
+		}
+		defer func() { _ = f.Close() }()
+		data, err := io.ReadAll(io.LimitReader(f, maxPluginArchiveSize+1))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "读取插件包失败"})
+			return
+		}
+		mft, err := m.InstallFromZip(c.Request.Context(), data)
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		middleware.AuditSummary(c, "安装插件 "+mft.Name+"@"+mft.Version)
+		c.JSON(http.StatusOK, gin.H{"message": "插件已安装", "plugin": mft.Name, "version": mft.Version})
+	})
+
 	protected.GET("/plugins", func(c *gin.Context) {
 		list, err := m.List(c.Request.Context())
 		if err != nil {
