@@ -18,4 +18,6 @@ export const pluginsApi = {
   getManifest: (name: string) => api.get<ApiResponse<Record<string, unknown>>>(`/plugins/${name}/manifest`),
 
   getMenus: () => api.get<ApiResponse<{ items: PluginMenuItem[] }>>('/plugins/menus'),
+
+  upload: (fd: FormData) => api.post<ApiResponse<{ plugin: string; version: string }>>('/plugins/upload', fd),
 };

@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Card, Button, Table, Tag, Space, message, Popconfirm, Tooltip, Badge,
+  Card, Button, Table, Tag, Space, message, Popconfirm, Tooltip, Badge, Tabs, Upload, Alert,
 } from 'antd';
-import { ReloadOutlined, PoweroffOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  ReloadOutlined, PoweroffOutlined, PlayCircleOutlined, DeleteOutlined, ImportOutlined, BookOutlined,
+} from '@ant-design/icons';
 import { pluginsApi } from '../../services/plugins';
 import type { PluginRecord } from '../../types';
+import PluginManual from './PluginManual';
 
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [operating, setOperating] = useState('');
+  const [installing, setInstalling] = useState(false);
 
   const fetchPlugins = useCallback(async () => {
     setLoading(true);
@@ -38,22 +42,33 @@ export default function Plugins() {
     }
   };
 
-  return (
-    <Card
-      title="插件管理"
-      extra={
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={fetchPlugins} loading={loading}>刷新</Button>
-        </Space>
-      }
-    >
+  const handleInstall = (opt: { file: unknown }) => {
+    const fd = new FormData();
+    fd.append('file', opt.file as File);
+    setInstalling(true);
+    pluginsApi.upload(fd).then((res) => {
+      message.success(`插件 ${res.data.data?.plugin}@${res.data.data?.version} 已安装`);
+      setInstalling(false);
+      void fetchPlugins();
+    }).catch((e: unknown) => {
+      setInstalling(false);
+      message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '安装失败');
+    });
+  };
+
+  const listTab = (
+    <>
+      <Alert
+        message="导入安装：上传插件 zip 包（含 plugin.yaml 与可执行文件），校验通过后自动安装到 /opt/easyserver/plugins/ 并注册。安装后需在列表中「启用」才会启动进程。"
+        type="info" showIcon style={{ marginBottom: 16 }}
+      />
       <Table
         size="small"
         loading={loading}
         dataSource={plugins}
         rowKey="name"
         pagination={false}
-        locale={{ emptyText: '暂无插件。将插件目录（含 plugin.yaml）放入 /opt/easyserver/plugins/ 后重启面板即可注册。' }}
+        locale={{ emptyText: '暂无插件。点击右上角「导入插件」上传 zip 包，或将插件目录放入 /opt/easyserver/plugins/ 后重启面板。' }}
         columns={[
           { title: '名称', dataIndex: 'name', key: 'name', render: (n: string) => <strong>{n}</strong> },
           { title: '版本', dataIndex: 'version', key: 'version', width: 90 },
@@ -108,6 +123,32 @@ export default function Plugins() {
         插件以独立进程运行（崩溃自动重启，不影响面板）；启用即表示批准其声明的全部权限。
         若插件贡献了菜单页面，会在侧边栏「插件」分组出现。
       </div>
+    </>
+  );
+
+  return (
+    <Card
+      title="插件管理"
+      extra={
+        <Space>
+          <Upload
+            accept=".zip"
+            showUploadList={false}
+            disabled={installing}
+            customRequest={handleInstall}
+          >
+            <Button icon={<ImportOutlined />} loading={installing}>导入插件</Button>
+          </Upload>
+          <Button icon={<ReloadOutlined />} onClick={fetchPlugins} loading={loading}>刷新</Button>
+        </Space>
+      }
+    >
+      <Tabs
+        items={[
+          { key: 'list', label: '插件列表', children: listTab },
+          { key: 'manual', label: <span><BookOutlined /> 插件开发手册</span>, children: <PluginManual /> },
+        ]}
+      />
     </Card>
   );
 }
