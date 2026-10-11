@@ -17,6 +17,8 @@ import (
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/errx"
 
+	"easyserver/internal/plugin"
+
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
@@ -44,11 +46,12 @@ const (
 )
 
 type AuthService struct {
-	store       *config.Store
-	userRepo    UserRepo
-	loginLogger LoginEventLogger
-	totpRepo    TOTPRepo
-	notifier    LoginNotifier
+	store        *config.Store
+	userRepo     UserRepo
+	loginLogger  LoginEventLogger
+	totpRepo     TOTPRepo
+	notifier     LoginNotifier
+	eventPublish func(name, source string, payload any) // 插件事件总线（可选，router 接线）
 	// ponytail: TOTP 设置期的待启用密钥放进程内存，重启即弃（本就不应跨重启保留）。
 	pendingSecrets sync.Map // userID(int64) -> secret(string)
 }
@@ -64,6 +67,22 @@ func NewAuthService(ctx context.Context, wg *sync.WaitGroup, store *config.Store
 		notifier:    notifier,
 	}
 	return s
+}
+
+// SetEventPublisher 接线插件事件发布（auth → plugin 单向，无循环依赖）。
+func (s *AuthService) SetEventPublisher(fn func(name, source string, payload any)) {
+	s.eventPublish = fn
+}
+
+func (s *AuthService) publishAuthEvent(success bool, username, reason, ip string) {
+	if s.eventPublish == nil {
+		return
+	}
+	payload := map[string]any{"username": username, "success": success, "ip": ip}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	s.eventPublish(plugin.EventAuthLogin, "auth", payload)
 }
 
 // NotifyLogin exposes the login notifier so handlers can emit login events
@@ -158,6 +177,7 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		if s.notifier != nil {
 			s.notifier.NotifyLogin(evt)
 		}
+		s.publishAuthEvent(false, username, evt.Reason, ip)
 		return nil, ErrInvalidCredentials
 	}
 
@@ -181,6 +201,7 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 		if s.notifier != nil {
 			s.notifier.NotifyLogin(evt)
 		}
+		s.publishAuthEvent(false, username, evt.Reason, ip)
 		return nil, ErrInvalidCredentials
 	}
 
@@ -189,6 +210,7 @@ func (s *AuthService) LoginWithInfo(ctx context.Context, username, password, ip,
 	}
 
 	evt := LoginEvent{Action: "LOGIN_SUCCESS", Username: username, IP: ip, UserAgent: userAgent, Success: true, Time: now}
+	s.publishAuthEvent(true, username, "", ip)
 	if s.notifier != nil {
 		s.notifier.NotifyLogin(evt)
 	}

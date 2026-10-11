@@ -14,6 +14,7 @@ import (
 	"easyserver/internal/domain/web/security"
 	"easyserver/internal/infra/errx"
 	infrasystemd "easyserver/internal/infra/systemd"
+	"easyserver/internal/plugin"
 	"easyserver/internal/util"
 )
 
@@ -160,6 +161,7 @@ func (s *WebsiteService) Create(ctx context.Context, webServerID int64, req *Cre
 	if err := s.writeConfigForServer(ctx, webServerID, w); err != nil {
 		log.Printf("website: failed to write config for %s: %v", w.Domain, err)
 	}
+	plugin.PublishBusinessEvent(plugin.EventWebsiteCreated, "web", map[string]string{"domain": w.Domain})
 
 	// Create symlink for Nginx/Apache style
 	if ws.SitesAvailable != "" && ws.SitesEnabled != "" {
@@ -335,7 +337,11 @@ func (s *WebsiteService) Delete(ctx context.Context, webServerID, id int64) erro
 	}
 
 	s.removeConfigForServer(ctx, webServerID, w.Domain)
-	return s.repo.Delete(ctx, webServerID, id)
+	if err := s.repo.Delete(ctx, webServerID, id); err != nil {
+		return err
+	}
+	plugin.PublishBusinessEvent(plugin.EventWebsiteDeleted, "web", map[string]string{"domain": w.Domain})
+	return nil
 }
 
 // Enable enables a website
