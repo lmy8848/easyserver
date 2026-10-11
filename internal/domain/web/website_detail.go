@@ -31,16 +31,19 @@ type SSLCertInfo struct {
 	KeyPath       string   `json:"key_path"`
 }
 
-// LogEntry is one parsed nginx access-log line.
+// LogEntry is one parsed nginx log line. 访问日志行填充 IP/Method/Path 等，
+// 错误日志行填充 Time/Level/Message，无法结构化的行保留 Raw 原文。
 type LogEntry struct {
-	Time   string `json:"time"`
-	IP     string `json:"ip"`
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Status string `json:"status"`
-	Bytes  string `json:"bytes"`
-	UA     string `json:"ua"`
-	Raw    string `json:"raw,omitempty"`
+	Time    string `json:"time"`
+	IP      string `json:"ip"`
+	Method  string `json:"method"`
+	Path    string `json:"path"`
+	Status  string `json:"status"`
+	Bytes   string `json:"bytes"`
+	UA      string `json:"ua"`
+	Level   string `json:"level,omitempty"`
+	Message string `json:"message,omitempty"`
+	Raw     string `json:"raw,omitempty"`
 }
 
 // KV is a count bucket (top IPs / paths).
@@ -135,7 +138,7 @@ func (s *WebsiteService) GetParsedLogs(ctx context.Context, webServerID, id int6
 	if err != nil {
 		return nil, err
 	}
-	return parseNginxLogs(raw), nil
+	return parseNginxLogs(raw, logType == "error"), nil
 }
 
 // GetStats aggregates access-log statistics from the last N lines.
@@ -187,18 +190,42 @@ func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64,
 }
 
 // nginxLogRe matches the nginx combined log format.
+// nginxErrorRe matches the nginx error-log line format; 多行续行不匹配。
+var nginxErrorRe = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(\w+)\] (.*)$`)
 var nginxLogRe = regexp.MustCompile(`^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) [^"]*" (\d+) (\S+) "[^"]*" "([^"]*)"`)
 
-func parseNginxLogs(raw string) []LogEntry {
+func parseNginxLogs(raw string, errorType bool) []LogEntry {
 	var entries []LogEntry
 	for line := range strings.SplitSeq(raw, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "日志文件尚不存在") || strings.HasPrefix(line, "(读取日志失败") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "日志文件尚不存在") || strings.HasPrefix(line, "(读取日志失败") {
 			continue
 		}
+		if errorType {
+			if m := nginxErrorRe.FindStringSubmatch(line); m != nil {
+				entries = append(entries, LogEntry{Time: m[1], Level: m[2], Message: m[3]})
+				continue
+			}
+			// 多行续行（异常堆栈等）并入上一条，而不是变成空白记录
+			if len(entries) > 0 && entries[len(entries)-1].Message != "" {
+				entries[len(entries)-1].Message += "\n" + line
+				continue
+			}
+			entries = append(entries, LogEntry{Raw: line})
+			continue
+		}
+
 		m := nginxLogRe.FindStringSubmatch(line)
 		if m == nil {
-			entries = append(entries, LogEntry{Raw: line})
+			// 无法结构化的行（畸形请求、二进制残留等）：尽量保留时间戳并
+			// 保留原文，避免表格出现整行空白
+			e := LogEntry{Raw: line}
+			if i := strings.Index(line, "["); i >= 0 {
+				if j := strings.Index(line[i:], "]"); j > 0 {
+					e.Time = line[i+1 : i+j]
+				}
+			}
+			entries = append(entries, e)
 			continue
 		}
 		entries = append(entries, LogEntry{
@@ -218,7 +245,7 @@ func computeStats(raw string) *WebsiteStats {
 	st := &WebsiteStats{Window: "最近 5000 行"}
 	ipCount := map[string]int{}
 	pathCount := map[string]int{}
-	for _, e := range parseNginxLogs(raw) {
+	for _, e := range parseNginxLogs(raw, false) {
 		if e.Status == "" {
 			continue
 		}
