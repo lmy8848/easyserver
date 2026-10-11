@@ -147,9 +147,11 @@ type WidgetContribution struct {
 }
 
 type SettingsContribution struct {
-	ID           string         `yaml:"id" json:"id"`
-	Title        string         `yaml:"title" json:"title"`
-	ConfigSchema jsonRawMessage `yaml:"config_schema" json:"config_schema"`
+	ID    string `yaml:"id" json:"id"`
+	Title string `yaml:"title" json:"title"`
+	// ConfigSchema 用 any 承载（YAML flow map 或 JSON 对象），输出时经
+	// encoding/json 转为 JSON；[]byte 无法直接承接 YAML 嵌套 map。
+	ConfigSchema any `yaml:"config_schema" json:"config_schema,omitempty"`
 }
 
 type ServiceContribution struct {
@@ -163,12 +165,9 @@ type EventSubContribution struct {
 }
 
 type EventPubContribution struct {
-	Event  string         `yaml:"event" json:"event"`
-	Schema jsonRawMessage `yaml:"schema" json:"schema"`
+	Event  string `yaml:"event" json:"event"`
+	Schema any    `yaml:"schema" json:"schema,omitempty"`
 }
-
-// jsonRawMessage 兼容 yaml 中的内联 JSON Schema。
-type jsonRawMessage = []byte
 
 // ManifestDefaults 填充可省略字段的标准值。
 func (m *Manifest) ManifestDefaults() {
