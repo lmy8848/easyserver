@@ -150,6 +150,8 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	firewallRepo := firewall.NewSQLiteRepository(db)
 	firewallService := firewall.NewService(firewallRepo, cfg.Server.Port)
+	portForwardRepo := firewall.NewPortForwardSQLiteRepository(db)
+	portForwardService := firewall.NewPortForwardService(portForwardRepo, firewallService)
 
 	sshConfigService := ssh.NewService()
 
@@ -193,6 +195,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	databasehttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), dbService)
 	cronhttp.RegisterRoutes(g.Protected, cronService)
 	firewallhttp.RegisterRoutes(g.Protected, firewallService, cfg.Server.Port)
+	firewallhttp.RegisterPortForwardRoutes(g.Protected, portForwardService)
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)
 	notificationhttp.RegisterRoutes(g.Protected, notificationService)
@@ -207,6 +210,12 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	// Static frontend (in dev mode, ServeWeb is a no-op via embed_dev.go)
 	e.Use(middleware.RateLimitMiddleware("assets", cfg.Server.AssetsRateLimit, cfg.Server.AssetsRateInterval.Duration()))
 	ServeWeb(e)
+
+	// ── 面板启动：端口转发规则重放（内核态与数据库对齐） ──
+	if err := portForwardService.ReapplyAll(context.Background()); err != nil {
+		log.Printf("firewall: 端口转发规则重放失败: %v", err)
+	}
+	portForwardService.WarnBackendOnce(context.Background())
 
 	// ── Background watchers ──
 	watcherStop := make(chan struct{})

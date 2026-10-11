@@ -6,10 +6,29 @@ import type {
   FirewallRuleTemplate,
   FirewallStatus,
   Page,
+  PortForwardRule,
 } from '../types';
 
 // Firewall management
 export const firewallApi = {
+  listPortForwards: () =>
+    api.get<ApiResponse<{ items: PortForwardRule[] }>>('/firewall/port-forwards'),
+
+  createPortForward: (data: { protocol: string; listen_port: string; dest_ip: string; dest_port?: string; source_cidr?: string; interface?: string; remark?: string }) =>
+    api.post<ApiResponse<{ message: string }>>('/firewall/port-forwards', data),
+
+  updatePortForward: (id: number, data: { protocol?: string; listen_port?: string; dest_ip?: string; dest_port?: string; source_cidr?: string; interface?: string; remark?: string }) =>
+    api.put<ApiResponse<{ message: string }>>(`/firewall/port-forwards/${id}`, data),
+
+  deletePortForward: (id: number) =>
+    api.delete<ApiResponse>(`/firewall/port-forwards/${id}`),
+
+  enablePortForward: (id: number) =>
+    api.post<ApiResponse>(`/firewall/port-forwards/${id}/enable`),
+
+  disablePortForward: (id: number) =>
+    api.post<ApiResponse>(`/firewall/port-forwards/${id}/disable`),
+
   getStatus: () =>
     api.get<ApiResponse<FirewallStatus>>('/firewall/status'),
 

@@ -52,7 +52,8 @@
 
 ### 6. 防火墙与网络
 
-- **Firewall** — 系统防火墙抽象（支持 iptables / ufw / firewalld / nftables 后端）。管理端口放行/阻止规则、默认策略与端口转发规则。
+- **Firewall** — 系统防火墙抽象（支持 iptables / ufw / nftables 后端）。管理端口放行/阻止规则与默认策略。
+- **Port Forward（端口转发）** — 基于 nftables nat（独立表 `inet easyserver_nat`）的 DNAT 转发：监听端口 → 目标 IP:端口，支持 TCP/UDP、来源 CIDR 与入站网卡限制、目标为内网地址时自动 hairpin 伪装；规则存 SQLite（权威），面板启动时自动重放，nft 侧带 `easyserver-pf-*` 注释标签精确清理。
 
 ### 7. 运行时
 
