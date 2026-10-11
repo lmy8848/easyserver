@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Drawer, Tabs, Table, Descriptions, Button, Space, Tag, message, Spin,
-  Alert, Statistic, Row, Col, Typography, Empty, InputNumber,
+  Alert, Statistic, Row, Col, Typography, Empty, InputNumber, Popconfirm,
 } from 'antd';
 import {
-  ReloadOutlined, ThunderboltOutlined, SafetyOutlined, CloudServerOutlined,
+  ReloadOutlined, ThunderboltOutlined, SafetyOutlined, PictureOutlined,
 } from '@ant-design/icons';
 import api from '../../services/client';
 import type { Website } from '../../types';
 import SecurityTab from './SecurityTab';
+import SiteIcon from './SiteIcon';
+import IconEditor from './IconEditor';
+import { websiteApi } from '../../services/web';
 
 const { Paragraph } = Typography;
 
@@ -21,21 +24,39 @@ interface WebsiteStats { total_requests: number; total_bytes: number; status_2xx
 interface HealthResult { ok: boolean; status_code: number; latency_ms: number; error?: string; checked_at: string; }
 interface ProcessStatus { status: string; pid: number; uptime: number; cpu_percent: number; memory_mb: number; restarts: number; last_start: string; last_error: string; managed: boolean; }
 
-interface Props { webServerId: number; website: Website | null; open: boolean; onClose: () => void; }
+interface Props { webServerId: number; website: Website | null; open: boolean; onClose: () => void; onChanged?: () => void; }
 
-export default function DetailDrawer({ webServerId, website, open, onClose }: Props) {
+export default function DetailDrawer({ webServerId, website, open, onClose, onChanged }: Props) {
   const [tab, setTab] = useState('overview');
+  const [iconOpen, setIconOpen] = useState(false);
   if (!website) return null;
   const wid = website.id;
   const base = `/web-servers/${webServerId}/websites/${wid}`;
+
+  const handleResetIcon = async () => {
+    try {
+      await websiteApi.deleteIcon(webServerId, wid);
+      message.success('已恢复默认图标');
+      onChanged?.();
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : '操作失败');
+    }
+  };
 
   return (
     <Drawer
       width="70%"
       open={open}
       onClose={onClose}
-      title={<Space><CloudServerOutlined /> {website.name} <Tag>{website.domain}</Tag>
-        <Tag color={website.status === 'active' ? 'green' : 'red'}>{website.status === 'active' ? '启用' : '禁用'}</Tag></Space>}
+      title={<Space>
+        <SiteIcon site={website} size={20} />
+        {website.name} <Tag>{website.domain}</Tag>
+        <Tag color={website.status === 'active' ? 'green' : 'red'}>{website.status === 'active' ? '启用' : '禁用'}</Tag>
+        <Button size="small" icon={<PictureOutlined />} onClick={() => setIconOpen(true)}>自定义图标</Button>
+        <Popconfirm title="恢复站点默认图标？" onConfirm={handleResetIcon}>
+          <Button size="small">恢复默认</Button>
+        </Popconfirm>
+      </Space>}
     >
       <Tabs activeKey={tab} onChange={setTab} items={[
         { key: 'overview', label: '概览', children: <OverviewTab website={website} /> },
@@ -48,6 +69,7 @@ export default function DetailDrawer({ webServerId, website, open, onClose }: Pr
         { key: 'health', label: '健康探活', children: tab === 'health' && <HealthTab base={base} defaultPort={website.port} /> },
         { key: 'security', label: '安全', children: tab === 'security' && <SecurityTab websiteId={wid} /> },
       ]} />
+      <IconEditor site={website} open={iconOpen} onClose={() => setIconOpen(false)} onSaved={() => onChanged?.()} />
     </Drawer>
   );
 }

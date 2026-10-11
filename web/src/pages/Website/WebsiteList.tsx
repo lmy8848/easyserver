@@ -5,7 +5,7 @@ import {
   Table, Tabs, Empty, theme,
 } from 'antd';
 import {
-  GlobalOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
+  PlusOutlined, EditOutlined, DeleteOutlined,
   PlayCircleOutlined, PauseCircleOutlined, SafetyOutlined,
   FileTextOutlined, ArrowLeftOutlined, PictureOutlined,
   StopOutlined, ReloadOutlined, DownloadOutlined,
@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons';
 import { webServerApi, websiteApi } from '../../services/web';
 import DetailDrawer from './DetailDrawer';
+import SiteIcon from './SiteIcon';
 import { usePortCheck } from '../../hooks/usePortCheck';
 import type { WebServer, Website } from '../../types';
 import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './types';
@@ -21,34 +22,6 @@ import { StatusTag } from '../../utils/status';
 import { formatBytes } from '../../utils/format';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
 import { LogViewer } from '../../components/LogViewer';
-
-// SiteIcon 依次尝试：自定义图标（面板上传）→ 站点自身 favicon → 默认图标。
-// 面板为 HTTPS 时浏览器会拦截 http:// 的图片，故 favicon 回退只尝试 https。
-function SiteIcon({ site }: { site: Website }) {
-  const [stage, setStage] = useState(0);
-  const v = encodeURIComponent(site.updated_at || '');
-  if (stage === 0) {
-    return (
-      <img
-        src={`/web-servers/${site.web_server_id}/websites/${site.id}/icon?v=${v}`}
-        width={16} height={16} alt=""
-        style={{ verticalAlign: -3, borderRadius: 3, objectFit: 'contain' }}
-        onError={() => setStage(1)}
-      />
-    );
-  }
-  if (stage === 1) {
-    return (
-      <img
-        src={`https://${site.domain}/favicon.ico`}
-        width={16} height={16} alt=""
-        style={{ verticalAlign: -3 }}
-        onError={() => setStage(2)}
-      />
-    );
-  }
-  return <GlobalOutlined />;
-}
 
 function renderServerIcon(name: string, size = 32) {
   const s = (name || '').toLowerCase();
@@ -944,7 +917,7 @@ export default function WebsiteList({
           )}
         </div>
       </Modal>
-      <DetailDrawer webServerId={selectedServer.id} website={detailSite} open={!!detailSite} onClose={() => setDetailSite(null)} />
+      <DetailDrawer webServerId={selectedServer.id} website={detailSite} open={!!detailSite} onClose={() => setDetailSite(null)} onChanged={fetchWebsites} />
     </div>
   );
 }

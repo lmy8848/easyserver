@@ -118,6 +118,20 @@ export default function Vulnerabilities() {
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Card title={<span><SafetyOutlined /> 系统漏洞扫描</span>} extra={<Button type="primary" icon={<ThunderboltOutlined />} onClick={scan} loading={scanning}>立即扫描</Button>}>
         <Alert message="扫描已安装的 apt 软件包，通过 osv.dev 查询已知 CVE 漏洞（在线查询，可能耗时 1-2 分钟）" type="info" showIcon style={{ marginBottom: 16 }} />
+        {scanning && (
+          <div className="scan-anim" style={{ marginBottom: 16 }}>
+            <span className="scan-radar">
+              <i className="scan-ring" />
+              <i className="scan-ring scan-ring-delay" />
+              <SafetyOutlined className="scan-radar-icon" />
+            </span>
+            <div className="scan-anim-text">
+              <span className="scan-stage">{stage}<span className="scan-dots"><i /><i /><i /></span></span>
+              <span className="scan-elapsed">已耗时 {elapsed} 秒</span>
+            </div>
+            <div className="scan-bar" style={{ flex: 1, marginTop: 0 }}><i /></div>
+          </div>
+        )}
         {kernel && (
           <Descriptions size="small" column={3} bordered style={{ marginBottom: 16 }}>
             <Descriptions.Item label="当前内核">{kernel.current}</Descriptions.Item>
@@ -134,21 +148,6 @@ export default function Vulnerabilities() {
           />
         )}
       </Card>
-
-      {scanning && (
-        <div className="scan-anim">
-          <span className="scan-radar">
-            <i className="scan-ring" />
-            <i className="scan-ring scan-ring-delay" />
-            <SafetyOutlined className="scan-radar-icon" />
-          </span>
-          <div className="scan-anim-text">
-            <span className="scan-stage">{stage}<span className="scan-dots"><i /><i /><i /></span></span>
-            <span className="scan-elapsed">已耗时 {elapsed} 秒</span>
-          </div>
-          <div className="scan-bar" style={{ flex: 1, marginTop: 0 }}><i /></div>
-        </div>
-      )}
 
       {vulns.length > 0 && (
         <Card
