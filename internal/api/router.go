@@ -49,6 +49,7 @@ import (
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/plugin"
 
 	"github.com/gin-gonic/gin"
 )
@@ -108,6 +109,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	totpRepo := auth.NewTOTPRepository(db)
 
 	authSvc := auth.NewAuthService(ctx, &wg, store, userRepo, auditSvc, totpRepo, notifyService)
+	authSvc.SetEventPublisher(plugin.PublishBusinessEvent) // 登录事件 → 插件总线
 	if err := authSvc.InitDefaultAdmin(ctx); err != nil {
 		log.Fatalf("init default admin: %v", err)
 	}
@@ -196,6 +198,36 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	cronhttp.RegisterRoutes(g.Protected, cronService)
 	firewallhttp.RegisterRoutes(g.Protected, firewallService, cfg.Server.Port)
 	firewallhttp.RegisterPortForwardRoutes(g.Protected, portForwardService)
+
+	// ── 插件系统基座（文档 docs/plugin-system.md 终稿 v1.0）──
+	pluginRepo, err := plugin.NewSQLiteRepository(db, cfg.Auth.JWTSecret)
+	if err != nil {
+		log.Fatalf("plugin: 密钥加密初始化失败: %v", err)
+	}
+	pluginSup := plugin.NewSupervisor(pluginRepo, plugin.HostSocketPath, plugin.SocketDir, plugin.PluginsDir)
+	pluginBus := plugin.NewEventBus()
+	plugin.SetDefaultBus(pluginBus)
+	pluginMgr := plugin.NewManager(plugin.ManagerOptions{
+		Repo:       pluginRepo,
+		Supervisor: pluginSup,
+		Bus:        pluginBus,
+		Storage:    plugin.NewPluginStorage(config.DataRoot + "/data/plugin-storage"),
+		PluginsDir: plugin.PluginsDir,
+		AuditFn: func(ctx context.Context, pluginName, summary string) {
+			auditSvc.LogSecurityEvent(ctx, "plugin:"+pluginName, summary)
+		},
+		NotifyFn: func(ctx context.Context, title, content string) error {
+			return notify.NewService(store).SendCustom(ctx, title, content)
+		},
+	})
+	plugin.RegisterRoutes(g.Protected, pluginMgr)
+	pluginHost := plugin.NewHostAPI(plugin.HostSocketPath, pluginMgr)
+	if err := pluginHost.Start(ctx); err != nil {
+		log.Printf("plugin: Host API 启动失败: %v", err)
+	}
+	if err := pluginMgr.ScanPlugins(ctx); err != nil {
+		log.Printf("plugin: 插件扫描失败: %v", err)
+	}
 	sshhttp.RegisterRoutes(g.Protected, sshConfigService)
 	containerhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), containerService)
 	notificationhttp.RegisterRoutes(g.Protected, notificationService)
@@ -223,6 +255,8 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	// ── Shutdown function ──
 	shutdown := func() {
+		pluginSup.StopAll(context.Background())
+		_ = pluginHost.Stop(context.Background())
 		auditSvc.Close()
 		close(watcherStop)
 		cancel()

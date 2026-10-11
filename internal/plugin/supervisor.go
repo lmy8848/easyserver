@@ -326,6 +326,26 @@ func (s *Supervisor) healthLoop(p *pfProcess) {
 	}
 }
 
+// RunningEndpoint 返回运行中插件的 socket 路径与请求超时；ok=false 表示未运行。
+func (s *Supervisor) RunningEndpoint(name string) (socketPath string, timeout time.Duration, ok bool) {
+	s.mu.Lock()
+	p, exists := s.procs[name]
+	s.mu.Unlock()
+	if !exists || p.stopped.Load() {
+		return "", 0, false
+	}
+	select {
+	case <-p.exited:
+		return "", 0, false
+	default:
+	}
+	t := p.manifest.Runtime.RequestTimeout
+	if t <= 0 {
+		t = 30 * time.Second
+	}
+	return filepath.Join(s.socketDir, p.manifest.Runtime.Socket), t, true
+}
+
 // StopPlugin 停止插件进程（SIGINT 10s grace → Kill）并等待完全退出。
 func (s *Supervisor) StopPlugin(ctx context.Context, name string) error {
 	s.mu.Lock()
