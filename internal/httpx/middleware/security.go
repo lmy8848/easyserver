@@ -144,8 +144,10 @@ func SecurityMiddleware(nonce string, allowedOrigins []string, devMode bool) gin
 				"form-action 'self';",
 		)
 
-		// Strict Transport Security (only for HTTPS)
-		if c.Request.TLS != nil {
+		// Strict Transport Security — 本机 TLS 或反代（X-Forwarded-Proto）两种
+		// HTTPS 形态都下发。明文响应里浏览器会忽略 HSTS 头，因此信任该头
+		// 不构成风险；而面板自身不开 TLS、由代理终结 HTTPS 是常见部署。
+		if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
 			c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 

@@ -52,6 +52,13 @@ func NewFileManagerHandler(fm *filemanager.Manager, maxUploadSize int64) *FileMa
 	}
 }
 
+// GetBase returns the file manager sandbox base path. Empty or "/" means the
+// whole filesystem. The frontend uses it for display only — all API paths are
+// sandbox-relative ("/"-rooted).
+func (h *FileManagerHandler) GetBase(c *gin.Context) (any, error) {
+	return gin.H{"base_path": h.fileManager.BasePath()}, nil
+}
+
 // List returns files in a directory
 func (h *FileManagerHandler) List(c *gin.Context) (any, error) {
 	path := c.Query("path")
@@ -527,6 +534,7 @@ func (h *FileManagerHandler) GetMimeType(c *gin.Context) (any, error) {
 func RegisterRoutes(protected *gin.RouterGroup, fileRoutesWithLargeBody *gin.RouterGroup, fileManager *filemanager.Manager, maxUploadSize int64) {
 	handler := NewFileManagerHandler(fileManager, maxUploadSize)
 	protected.GET("/files", httpx.H(handler.List))
+	protected.GET("/files/base", httpx.H(handler.GetBase))
 	protected.GET("/files/download", httpx.H(handler.Download))
 	protected.GET("/files/content", httpx.H(handler.GetContent))
 	protected.GET("/files/search", httpx.H(handler.Search))

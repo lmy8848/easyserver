@@ -103,8 +103,12 @@ export default function FileManager() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   useEffect(() => {
-    // 直接使用 "/" 作为根目录，不请求服务器
-    setBasePath('/');
+    // 服务端 basePath 仅用于展示真实沙箱根（受限 base_path 部署下显示与
+    // 实际位置一致）；路径计算始终使用 "/" 相对语义，失败时退回 '/'。
+    fileApi
+      .getBase()
+      .then(res => setBasePath(res.data.data?.base_path || '/'))
+      .catch(() => setBasePath('/'));
     setCurrentPath('/');
   }, []);
 

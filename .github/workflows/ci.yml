@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.26.9' # GO-2026-6617 stdlib 修复在 go1.26.9（'1.26' 曾解析到未修补的 1.26.8）
           cache: true # caches both GOMODCACHE and GOCACHE
 
       - name: Download dependencies
@@ -40,8 +40,15 @@ jobs:
           # goimports 已作为 formatter 配置在 .golangci.yml，由本 step 统一检查。
           version: v2.12.2
 
+      # 固定 govulncheck 版本：action 内部 @latest 已要求 go>=1.26，
+      # 与 CI 的 1.25 工具链不兼容；且固定版本符合本文件可复现原则。
+      - name: Vulnerability scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
+
       - name: Test
-        run: go test -race ./...
+        run: go test -race -tags dev ./...
 
       - name: Build (production, CGO disabled)
         run: |

@@ -3,16 +3,33 @@ package database
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
+	"io/fs"
 	"log"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
 
-// Migrate runs all pending database migrations
-func Migrate(db *sql.DB, migrationsDir string) error {
+//go:embed all:migrations
+var migrationsFS embed.FS
+
+// Migrate runs all pending migrations from the schema embedded in the binary.
+// The schema must travel with the binary: official install/upgrade flows ship
+// only the executable, and an exe-adjacent migrations dir silently degrades to
+// "no migrations found" on a fresh install.
+func Migrate(db *sql.DB) error {
+	sub, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("resolve embedded migrations: %w", err)
+	}
+	return migrateFS(db, sub)
+}
+
+// migrateFS applies every *.up.sql in fsys (sorted by name) that is not yet
+// recorded in schema_migrations. Each file runs in a transaction together with
+// its version record, so a failed migration leaves no partial state.
+func migrateFS(db *sql.DB, fsys fs.FS) error {
 	ctx := context.Background()
 
 	// Create migrations tracking table
@@ -32,34 +49,53 @@ func Migrate(db *sql.DB, migrationsDir string) error {
 		return fmt.Errorf("get applied migrations: %w", err)
 	}
 
-	// Read migration files
-	files, err := os.ReadDir(migrationsDir)
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("migrate: no migrations directory found, skipping")
-			return nil
-		}
-		return fmt.Errorf("read migrations dir: %w", err)
+		return fmt.Errorf("read migrations: %w", err)
 	}
 
-	// Filter and sort .up.sql files
-	var upFiles []string
-	for _, f := range files {
-		if strings.HasSuffix(f.Name(), ".up.sql") {
-			upFiles = append(upFiles, f.Name())
+	var names []string
+	maxFileVersion := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		names = append(names, name)
+		if v := extractVersion(name); v > maxFileVersion {
+			maxFileVersion = v
 		}
 	}
-	sort.Strings(upFiles)
+	sort.Strings(names)
+
+	// 历史安装（迁移链被压缩重排前）的 schema_migrations 里可能记录着高于
+	// 当前嵌入链的版本号；该形态下同名新迁移会因版本号碰撞被静默跳过。
+	// 出现即大声提示运维核对 schema，绝不静默继续。
+	maxApplied := 0
+	for v := range applied {
+		if v > maxApplied {
+			maxApplied = v
+		}
+	}
+	if maxApplied > maxFileVersion {
+		log.Printf("migrate: WARNING: schema_migrations max version %d exceeds highest embedded migration %d — "+
+			"legacy pre-squash install, newer migrations numbered <= %d were skipped. Verify schema consistency manually.",
+			maxApplied, maxFileVersion, maxFileVersion)
+	}
 
 	// Run pending migrations
-	for _, name := range upFiles {
+	for _, name := range names {
 		version := extractVersion(name)
 		if applied[version] {
 			continue
 		}
 
 		log.Printf("migrate: running migration %s", name)
-		if err := runMigration(db, filepath.Join(migrationsDir, name), version, name); err != nil {
+		content, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+		if err := runMigration(db, string(content), version, name); err != nil {
 			return fmt.Errorf("run migration %s: %w", name, err)
 		}
 		log.Printf("migrate: applied %s", name)
@@ -113,16 +149,12 @@ func stripLeadingComments(stmt string) string {
 	return ""
 }
 
-// runMigration executes a single migration file
-func runMigration(db *sql.DB, path string, version int, name string) error {
+// runMigration executes a single migration's SQL statements and records its version.
+func runMigration(db *sql.DB, content string, version int, name string) error {
 	ctx := context.Background()
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
 
 	// Split by semicolons and execute each statement
-	statements := splitStatements(string(content))
+	statements := splitStatements(content)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

@@ -15,6 +15,8 @@ const UPLOAD_TIMEOUT = 10 * 60 * 1000; // 10 minutes for large files
 const UPLOAD_MAX_RETRIES = 2;
 
 export const fileApi = {
+  getBase: () => api.get<ApiResponse<{ base_path: string }>>('/files/base'),
+
   list: (path: string) =>
     api.get<ApiResponse<{ path: string; parent: string; entries: FileEntry[] }>>('/files', { params: { path } }),
 

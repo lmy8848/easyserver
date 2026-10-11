@@ -53,14 +53,8 @@ func Init() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
-	// Try migration-based initialization first
-	// Resolve migrations directory relative to the executable
-	exePath, err := os.Executable()
-	migrationsDir := "migrations"
-	if err == nil {
-		migrationsDir = filepath.Join(filepath.Dir(exePath), "migrations")
-	}
-	if err := Migrate(db, migrationsDir); err != nil {
+	// Initialize schema from the migrations embedded in the binary
+	if err := Migrate(db); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 

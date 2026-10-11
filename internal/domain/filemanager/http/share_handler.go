@@ -25,7 +25,34 @@ import (
 	"easyserver/internal/util"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// sharePasswordMaxLen 是提取密码长度上限：bcrypt 只取前 72 字节，超长部分
+// 会被静默截断导致有效密码变短，因此直接拒绝而不是截断。
+const sharePasswordMaxLen = 72
+
+// hashSharePassword 将提取密码转为 bcrypt 哈希；空密码原样返回（表示不设密码）。
+func hashSharePassword(pw string) (string, error) {
+	if pw == "" {
+		return "", nil
+	}
+	b, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// verifySharePassword 校验提取密码。历史记录为明文存储，做常量时间比较；
+// bcrypt 哈希形态（"$2" 前缀）走 bcrypt 比较。创建/更新入口已统一写哈希，
+// 明文分支仅服务于存量数据。
+func verifySharePassword(stored, provided string) bool {
+	if strings.HasPrefix(stored, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(provided)) == nil
+	}
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(provided)) == 1
+}
 
 type FileShareHandler struct {
 	shareRepo   filemanager.ShareRepository
@@ -130,12 +157,20 @@ func (h *FileShareHandler) CreateShare(c *gin.Context) (any, error) {
 		return nil, errx.Internal("生成令牌失败: %w", err)
 	}
 
+	if len(req.Password) > sharePasswordMaxLen {
+		return nil, errx.BadRequest("提取密码过长（最多 72 字符）")
+	}
+	hashedPassword, err := hashSharePassword(req.Password)
+	if err != nil {
+		return nil, errx.Internal("处理提取密码失败: %w", err)
+	}
+
 	share := &filemanager.FileShare{
 		FilePath:      req.FilePath,
 		FileName:      info.Name(),
 		FileSize:      info.Size(),
 		Token:         token,
-		Password:      req.Password,
+		Password:      hashedPassword,
 		ExpiresAt:     expiresAt,
 		MaxDownloads:  req.MaxDownloads,
 		DownloadCount: 0,
@@ -249,6 +284,18 @@ func (h *FileShareHandler) UpdateShare(c *gin.Context) (any, error) {
 			return nil, errx.BadRequest("%w", perr)
 		}
 		req.ExpiresAt = parsed
+	}
+
+	// 哈希提取密码后落库（nil = 不修改；空串 = 清除密码，存空值）。
+	if req.Password != nil && *req.Password != "" {
+		if len(*req.Password) > sharePasswordMaxLen {
+			return nil, errx.BadRequest("提取密码过长（最多 72 字符）")
+		}
+		hashed, err := hashSharePassword(*req.Password)
+		if err != nil {
+			return nil, errx.Internal("处理提取密码失败: %w", err)
+		}
+		req.Password = &hashed
 	}
 
 	if err := h.shareRepo.Update(c.Request.Context(), id, &req); err != nil {
@@ -397,7 +444,7 @@ func (h *FileShareHandler) GetTicket(c *gin.Context) (any, error) {
 		if req.Password == "" {
 			return nil, errx.Forbidden("需要输入密码")
 		}
-		if subtle.ConstantTimeCompare([]byte(req.Password), []byte(share.Password)) != 1 {
+		if !verifySharePassword(share.Password, req.Password) {
 			return nil, errx.Forbidden("密码错误")
 		}
 	}
