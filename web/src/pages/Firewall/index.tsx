@@ -11,6 +11,7 @@ import FirewallStatusCard from './FirewallStatus';
 import FirewallRules from './FirewallRules';
 import FirewallTemplates from './FirewallTemplates';
 import FirewallLogs from './FirewallLogs';
+import PortForwards from './PortForwards';
 
 export default function FirewallPage() {
   const [status, setStatus] = useState<FirewallStatus | null>(null);
@@ -540,6 +541,8 @@ export default function FirewallPage() {
         onAutoRefreshChange={setAutoRefreshLogs}
         onRefresh={fetchLogs}
       />
+
+      <PortForwards />
 
       {/* Create/Edit Modal */}
       <Modal

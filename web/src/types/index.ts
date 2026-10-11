@@ -170,6 +170,23 @@ export interface WebServer {
   created_at: string;
 }
 
+// Port forwarding (nftables DNAT)
+export interface PortForwardRule {
+  id: number;
+  protocol: string;
+  listen_port: string;
+  dest_ip: string;
+  dest_port: string;
+  source_cidr: string;
+  interface: string;
+  enabled: boolean;
+  remark: string;
+  created_at: string;
+  updated_at: string;
+  packets: number;
+  bytes: number;
+}
+
 // Website types
 export interface Website {
   id: number;
