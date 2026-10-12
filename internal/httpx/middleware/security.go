@@ -109,8 +109,17 @@ func trustedOrigin(origin, selfOrigin string, allowedOrigins []string) bool {
 func SecurityMiddleware(nonce string, allowedOrigins []string, devMode bool) gin.HandlerFunc {
 	csrf := csrfOriginVerify(allowedOrigins, devMode)
 	return func(c *gin.Context) {
+		// 插件业务页面经 /api/plugins/<id>/* 由面板自身 iframe 承载：需允许
+		// 同源嵌入、并放行插件自绘的内联脚本/事件；面板自身页面保持最强
+		// 防点击劫持策略。
+		pluginProxy := strings.HasPrefix(c.Request.URL.Path, "/api/plugins/")
+
 		// Prevent clickjacking
-		c.Header("X-Frame-Options", "DENY")
+		if pluginProxy {
+			c.Header("X-Frame-Options", "SAMEORIGIN")
+		} else {
+			c.Header("X-Frame-Options", "DENY")
+		}
 
 		// Prevent MIME sniffing
 		c.Header("X-Content-Type-Options", "nosniff")
@@ -124,12 +133,19 @@ func SecurityMiddleware(nonce string, allowedOrigins []string, devMode bool) gin
 		// - style-src uses unsafe-inline because Ant Design CSS-in-JS requires inline styles
 		// - frame-src + worker-src allow Turnstile's challenge iframe and web worker.
 		scriptSrc := "'self' https://challenges.cloudflare.com"
-		if nonce != "" {
+		if pluginProxy {
+			// 插件页面内容与内联脚本由插件自身控制，面板 nonce 不适用
+			scriptSrc += " 'unsafe-inline'"
+		} else if nonce != "" {
 			scriptSrc += " 'nonce-" + nonce + "'"
 		}
 		// Turnstile's challenge engine requires eval(); allow it only from the
 		// Cloudflare origin (not from 'self' which would weaken the nonce).
 		scriptSrc += " 'unsafe-eval'"
+		frameAncestors := "'none'"
+		if pluginProxy {
+			frameAncestors = "'self'"
+		}
 		c.Header("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src "+scriptSrc+"; "+
@@ -139,7 +155,7 @@ func SecurityMiddleware(nonce string, allowedOrigins []string, devMode bool) gin
 				"connect-src 'self' ws: wss: https://challenges.cloudflare.com; "+
 				"worker-src 'self' blob: https://challenges.cloudflare.com; "+
 				"frame-src 'self' blob: https://challenges.cloudflare.com; "+
-				"frame-ancestors 'none'; "+
+				"frame-ancestors "+frameAncestors+"; "+
 				"base-uri 'self'; "+
 				"form-action 'self';",
 		)
