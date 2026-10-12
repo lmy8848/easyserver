@@ -180,7 +180,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
             onClick={() => setEditing(prev => ({ ...prev, [m.env_key]: v }))}
             title="点击编辑"
           >
-            {v || <span style={{ color: '#999' }}>（点击设置）</span>}
+            {v || <span style={{ color: 'var(--text-muted, #999)' }}>（点击设置）</span>}
           </span>
         );
       },
@@ -245,7 +245,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
         }}
         columns={columns}
       />
-      <div style={{ marginTop: 12, color: '#999', fontSize: 12 }}>
+      <div style={{ marginTop: 12, color: 'var(--text-muted, #999)', fontSize: 12 }}>
         修改后立即生效
       </div>
     </Modal>
@@ -290,7 +290,7 @@ export default function MirrorPanel({ visible, onClose, catalog }: MirrorPanelPr
         </Form.Item>
         {candidateOptions.length > 0 && (
           <div style={{ marginBottom: 16 }}>
-            <span style={{ color: '#999', fontSize: 12, marginRight: 8 }}>候选镜像：</span>
+            <span style={{ color: 'var(--text-muted, #999)', fontSize: 12, marginRight: 8 }}>候选镜像：</span>
             {candidateOptions.map(url => (
               <Tag
                 key={url}

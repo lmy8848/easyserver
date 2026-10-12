@@ -290,7 +290,7 @@ export default function FirewallPage() {
           <p>确定要应用以下模板吗？</p>
           <p><b>{template.name}</b></p>
           <p>协议: {template.protocol.toUpperCase()} | 端口: {template.port} | 动作: {template.action}</p>
-          <p style={{ color: '#8c8c8c' }}>{template.remark}</p>
+          <p style={{ color: 'var(--text-muted, #8c8c8c)' }}>{template.remark}</p>
         </div>
       ),
       okText: '应用',

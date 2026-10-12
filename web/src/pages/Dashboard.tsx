@@ -303,7 +303,7 @@ export default function Dashboard() {
               prefix={<Cpu size={20} />}
               styles={{ content: { color: getPercentColor(stats?.cpu.usage_percent || 0) } }}
             />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: 'var(--text-secondary, #666)', fontSize: 12 }}>
               负载: {stats?.cpu.load_1m?.toFixed(2) || '-'} / {stats?.cpu.load_5m?.toFixed(2) || '-'} / {stats?.cpu.load_15m?.toFixed(2) || '-'}
             </div>
           </Card>
@@ -319,7 +319,7 @@ export default function Dashboard() {
               prefix={<MemoryStick size={20} />}
               styles={{ content: { color: getPercentColor(stats?.memory.usage_percent || 0) } }}
             />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: 'var(--text-secondary, #666)', fontSize: 12 }}>
               {formatBytes(stats?.memory.used_bytes || 0)} / {formatBytes(stats?.memory.total_bytes || 0)}
             </div>
           </Card>
@@ -335,7 +335,7 @@ export default function Dashboard() {
               prefix={<ArrowRightLeft size={20} />}
               styles={{ content: { color: getPercentColor(swap?.usage_percent || 0) } }}
             />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: 'var(--text-secondary, #666)', fontSize: 12 }}>
               {(!swap || swap.total_bytes === 0)
                 ? '未配置 Swap'
                 : `${formatBytes(swap.used_bytes || 0)} / ${formatBytes(swap.total_bytes || 0)}`}
@@ -353,7 +353,7 @@ export default function Dashboard() {
               prefix={<HardDrive size={20} />}
               styles={{ content: { color: getPercentColor(stats?.disk?.usage_percent || 0) } }}
             />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: 'var(--text-secondary, #666)', fontSize: 12 }}>
               已用: {formatBytes(stats?.disk?.used_bytes || 0)} / {formatBytes(stats?.disk?.total_bytes || 0)}
             </div>
           </Card>
@@ -366,7 +366,7 @@ export default function Dashboard() {
               value={formatBytes((stats?.network.bytes_sent || 0) + (stats?.network.bytes_recv || 0))}
               prefix={<ArrowDownUp size={20} />}
             />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: 'var(--text-secondary, #666)', fontSize: 12 }}>
               ↑ {formatBytes(stats?.network.bytes_sent || 0)} / ↓ {formatBytes(stats?.network.bytes_recv || 0)}
             </div>
           </Card>

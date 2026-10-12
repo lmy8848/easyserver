@@ -384,7 +384,7 @@ export default function ScriptPage() {
                     >
                       <Space orientation="vertical" style={{ width: '100%' }}>
                         <span style={{ fontWeight: 500 }}>{template.name}</span>
-                        <div style={{ color: '#666', fontSize: 13 }}>{template.description}</div>
+                        <div style={{ color: 'var(--text-secondary, #666)', fontSize: 13 }}>{template.description}</div>
                       </Space>
                     </Card>
                   ))}

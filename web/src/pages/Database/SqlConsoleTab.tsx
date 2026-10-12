@@ -94,7 +94,7 @@ export default function SqlConsoleTab({
                 fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
                 fontSize: 13,
                 lineHeight: 1.5,
-                background: '#fafafa',
+                background: 'var(--bg-secondary, #fafafa)',
                 border: '1px solid #d9d9d9',
                 borderRadius: 6,
                 padding: 16,

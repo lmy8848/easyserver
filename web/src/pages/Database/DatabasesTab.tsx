@@ -442,12 +442,12 @@ export function TableExplorerView({
             })}
           </Form>
         ) : (
-          <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>
+          <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted, #999)' }}>
             请先选择一个表并等待数据加载完成
           </div>
         )}
         {editingRecord && (
-          <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: -8 }}>
+          <div style={{ color: 'var(--text-muted, #8c8c8c)', fontSize: 12, marginTop: -8 }}>
             主键: {tableInfo?.primaryKey || tableData?.headers?.[0]} = {editingRecord[tableInfo?.primaryKey || tableData?.headers?.[0] || '']}
           </div>
         )}

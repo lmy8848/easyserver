@@ -292,7 +292,7 @@ export default function InstanceHeader({
             >
               {versionTemplates.map(t => (
                 <Select.Option key={t.version} value={t.version}>
-                  <strong>{t.version}</strong><span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{t.description}</span>
+                  <strong>{t.version}</strong><span style={{ color: 'var(--text-muted, #999)', marginLeft: 8, fontSize: 12 }}>{t.description}</span>
                 </Select.Option>
               ))}
               <Select.Option value={MORE_VERSIONS}>
@@ -350,7 +350,7 @@ export default function InstanceHeader({
                 <List.Item onClick={() => pickDockerTag(tag)} style={{ cursor: 'pointer' }}>
                   <Space>
                     <Tag>docker.io/{server.base_image}:{tag}</Tag>
-                    <span style={{ color: '#999', fontSize: 12 }}>点击选择此版本</span>
+                    <span style={{ color: 'var(--text-muted, #999)', fontSize: 12 }}>点击选择此版本</span>
                   </Space>
                 </List.Item>
               )}
@@ -379,7 +379,7 @@ export default function InstanceHeader({
       >
         {infoRows.map(row => (
           <div key={row.key} style={{ display: 'flex', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
-            <span style={{ width: 140, color: '#8c8c8c' }}>{row.label}</span>
+            <span style={{ width: 140, color: 'var(--text-muted, #8c8c8c)' }}>{row.label}</span>
             <span>{row.value}</span>
           </div>
         ))}

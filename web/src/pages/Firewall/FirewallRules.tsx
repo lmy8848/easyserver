@@ -107,7 +107,7 @@ export default function FirewallRules({
       dataIndex: 'port',
       key: 'port',
       width: 100,
-      render: (port: string) => port || <span style={{ color: '#8c8c8c' }}>所有</span>,
+      render: (port: string) => port || <span style={{ color: 'var(--text-muted, #8c8c8c)' }}>所有</span>,
     },
     {
       title: '动作',
@@ -120,7 +120,7 @@ export default function FirewallRules({
       title: '来源',
       dataIndex: 'source',
       key: 'source',
-      render: (source: string) => source || <span style={{ color: '#8c8c8c' }}>所有</span>,
+      render: (source: string) => source || <span style={{ color: 'var(--text-muted, #8c8c8c)' }}>所有</span>,
     },
     {
       title: '备注',
@@ -290,9 +290,9 @@ export default function FirewallRules({
             columns={[
               { title: '链', dataIndex: 'chain', key: 'chain', width: 80, render: (chain: string) => <Tag>{chain}</Tag> },
               { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 80, render: (p: string) => p?.toUpperCase() || '-' },
-              { title: '端口', dataIndex: 'port', key: 'port', width: 100, render: (port: string) => port || <span style={{ color: '#8c8c8c' }}>所有</span> },
+              { title: '端口', dataIndex: 'port', key: 'port', width: 100, render: (port: string) => port || <span style={{ color: 'var(--text-muted, #8c8c8c)' }}>所有</span> },
               { title: '动作', dataIndex: 'action', key: 'action', width: 100, render: (action: string) => <Tag color={actionColor(action)}>{action}</Tag> },
-              { title: '来源', dataIndex: 'source', key: 'source', render: (source: string) => source || <span style={{ color: '#8c8c8c' }}>所有</span> },
+              { title: '来源', dataIndex: 'source', key: 'source', render: (source: string) => source || <span style={{ color: 'var(--text-muted, #8c8c8c)' }}>所有</span> },
             ]}
             dataSource={systemRules}
             rowKey={(r) => `${r.chain}-${r.protocol}-${r.port}-${r.action}-${r.source}`}

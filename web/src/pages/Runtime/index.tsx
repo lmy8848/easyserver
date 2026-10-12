@@ -522,8 +522,8 @@ export default function Runtime() {
               </Tag>
             </div>
 
-            <div style={{ marginTop: 16, padding: 12, background: '#fff7e6', borderRadius: 4 }}>
-              <strong style={{ color: '#fa8c16' }}>注意：</strong>
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--bg-warning, #fff7e6)', borderRadius: 4 }}>
+              <strong style={{ color: 'var(--text-warning, #fa8c16)' }}>注意：</strong>
               <span> 此操作将删除运行环境及其关联的配置，卸载后需要重新安装。</span>
             </div>
           </div>

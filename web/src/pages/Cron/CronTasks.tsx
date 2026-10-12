@@ -241,7 +241,7 @@ export default function CronTasks({
     switch (status) {
       case 'active': return <PlayCircleOutlined style={{ color: '#52c41a' }} />;
       case 'failed': return <ClockCircleOutlined style={{ color: '#ff4d4f' }} />;
-      default: return <ClockCircleOutlined style={{ color: '#8c8c8c' }} />;
+      default: return <ClockCircleOutlined style={{ color: 'var(--text-muted, #8c8c8c)' }} />;
     }
   };
 
@@ -419,8 +419,8 @@ export default function CronTasks({
           {mode === 'preset' ? (
             <>
               <RowForm frequency={frequency} setFrequency={(f) => { setFrequency(f); form.setFieldsValue({ frequency: f }); }} onShowHelp={onShowHelp} />
-              <div style={{ color: '#8c8c8c', fontSize: 12, marginBottom: 16, minHeight: 18 }}>
-                {descLoading ? <Spin size="small" /> : (formDesc || <span style={{ color: '#8c8c8c' }}>选择调度频率后，将自动生成对应的执行计划</span>)}
+              <div style={{ color: 'var(--text-muted, #8c8c8c)', fontSize: 12, marginBottom: 16, minHeight: 18 }}>
+                {descLoading ? <Spin size="small" /> : (formDesc || <span style={{ color: 'var(--text-muted, #8c8c8c)' }}>选择调度频率后，将自动生成对应的执行计划</span>)}
                 <Button type="link" size="small" icon={<EyeOutlined />} onClick={handlePreview} loading={previewLoading}>预览下次执行</Button>
               </div>
             </>
@@ -515,7 +515,7 @@ export default function CronTasks({
                       <Form.Item {...field} name={[field.name, 'key']} rules={[{ required: true, whitespace: true, message: '请填写变量名' }]} noStyle>
                         <Input placeholder="KEY" style={{ fontFamily: 'monospace', flex: 1, minWidth: 0 }} />
                       </Form.Item>
-                      <span style={{ color: '#999', lineHeight: '32px' }}>=</span>
+                      <span style={{ color: 'var(--text-muted, #999)', lineHeight: '32px' }}>=</span>
                       <Form.Item {...field} name={[field.name, 'value']} noStyle>
                         <Input placeholder="VALUE" style={{ fontFamily: 'monospace', flex: 1, minWidth: 0 }} />
                       </Form.Item>

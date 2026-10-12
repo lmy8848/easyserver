@@ -125,7 +125,7 @@ export default function FileManagerTable({
           <span style={{ color: record.is_dir ? '#1890ff' : undefined }}>
             {record.name}
           </span>
-          {record.is_symlink && <span style={{ color: '#999' }}>&rarr;</span>}
+          {record.is_symlink && <span style={{ color: 'var(--text-muted, #999)' }}>&rarr;</span>}
         </Space>
       ),
     },

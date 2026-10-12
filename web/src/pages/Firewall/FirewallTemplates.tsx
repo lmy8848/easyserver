@@ -34,7 +34,7 @@ export default function FirewallTemplates({
       width={600}
       style={{ top: 20 }}
     >
-      <p style={{ color: '#8c8c8c', marginBottom: 16 }}>选择一个预设模板快速创建防火墙规则（默认应用于 INPUT 链）</p>
+      <p style={{ color: 'var(--text-muted, #8c8c8c)', marginBottom: 16 }}>选择一个预设模板快速创建防火墙规则（默认应用于 INPUT 链）</p>
       <Table
         dataSource={templates}
         rowKey="name"

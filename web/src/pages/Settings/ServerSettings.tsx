@@ -268,7 +268,7 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
 
           <Divider />
           <Typography.Title level={5} style={{ margin: 0 }}>Cloudflare Turnstile</Typography.Title>
-          <Paragraph style={{ color: '#8c8c8c', fontSize: 12, marginBottom: 8 }}>
+          <Paragraph style={{ color: 'var(--text-muted, #8c8c8c)', fontSize: 12, marginBottom: 8 }}>
             配置 Cloudflare Turnstile 人机验证，在登录/扫码/外链下载前要求用户完成验证。
             需在 <a href="https://dash.cloudflare.com/" target="_blank" rel="noreferrer">Cloudflare Dashboard</a> 创建 Turnstile 站点。
           </Paragraph>
@@ -442,7 +442,7 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
             )}
 
             {updateInfo.release_notes ? (
-              <Card size="small" style={{ maxHeight: 240, overflowY: 'auto', background: '#fafafa' }}>
+              <Card size="small" style={{ maxHeight: 240, overflowY: 'auto', background: 'var(--bg-secondary, #fafafa)' }}>
                 <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 13 }}>
                   {updateInfo.release_notes}
                 </pre>

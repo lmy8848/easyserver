@@ -130,7 +130,7 @@ export default function Container() {
           options={ENGINES.map(r => ({ value: r, label: engineOptionLabel(r) }))}
         />
         {status && (
-          <span style={{ marginLeft: 12, display: 'inline-flex', alignItems: 'center', gap: 6, color: '#666' }}>
+          <span style={{ marginLeft: 12, display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary, #666)' }}>
             <Badge status={ready ? 'success' : 'error'} />
             <span>
               {!status.installed ? '未安装' : (ready ? '运行中' : '已停止')}

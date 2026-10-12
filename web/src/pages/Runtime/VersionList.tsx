@@ -88,7 +88,7 @@ export default function VersionList({
         </Button>
         {currentMajors.length > 0 && (
           <div>
-            <span style={{ fontSize: 12, color: '#999' }}>快速选择主版本（自动取最新子版本）: </span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted, #999)' }}>快速选择主版本（自动取最新子版本）: </span>
             <Space size={4} wrap>
               {currentMajors.map(major => {
                 let enabled = true;

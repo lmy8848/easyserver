@@ -446,7 +446,7 @@ export default function WebsiteList({
                     : statusTag(selectedServer.status)
                   }
                 </Space>
-                <div style={{ color: '#999', fontSize: 12, marginTop: 4 }}>{selectedServer.description}</div>
+                <div style={{ color: 'var(--text-muted, #999)', fontSize: 12, marginTop: 4 }}>{selectedServer.description}</div>
               </div>
             </Space>
           </Col>
@@ -501,7 +501,7 @@ export default function WebsiteList({
               </Col>
               <Col>
                 <Space>
-                  <span style={{ color: '#999', fontSize: 12 }}>每 10 秒自动刷新</span>
+                  <span style={{ color: 'var(--text-muted, #999)', fontSize: 12 }}>每 10 秒自动刷新</span>
                   <Button icon={<ReloadOutlined />} onClick={() => onRefreshServer(selectedServer.id)}>
                     刷新
                   </Button>
@@ -603,7 +603,7 @@ export default function WebsiteList({
                 <Select.Option key={pt.name} value={pt.name}>
                   <div>
                     <strong>{pt.label}</strong>
-                    <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{pt.description}</span>
+                    <span style={{ color: 'var(--text-muted, #999)', marginLeft: 8, fontSize: 12 }}>{pt.description}</span>
                   </div>
                 </Select.Option>
               ))}
@@ -779,7 +779,7 @@ export default function WebsiteList({
         onCancel={() => setDirBrowserVisible(false)}
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#8c8c8c', fontSize: 12, fontFamily: 'monospace' }}>
+            <span style={{ color: 'var(--text-muted, #8c8c8c)', fontSize: 12, fontFamily: 'monospace' }}>
               {dirBrowserPath}
             </span>
             <Space>
@@ -804,7 +804,7 @@ export default function WebsiteList({
             <Button type="primary" onClick={() => { if (dirJumpPath.trim()) browseTo(dirJumpPath.trim()); }}>跳转</Button>
           </div>
           <div style={{ marginTop: 6, fontSize: 12 }}>
-            <span style={{ color: '#8c8c8c', marginRight: 4 }}>快捷:</span>
+            <span style={{ color: 'var(--text-muted, #8c8c8c)', marginRight: 4 }}>快捷:</span>
             {['/var/www', '/opt', '/home', '/srv'].map(p => (
               <Button key={p} size="small" type="link" style={{ padding: '0 4px' }} onClick={() => { setDirJumpPath(p); browseTo(p); }}>{p}</Button>
             ))}
@@ -812,12 +812,12 @@ export default function WebsiteList({
         </div>
 
         {/* Breadcrumb */}
-        <div style={{ marginBottom: 12, padding: '6px 12px', background: '#f5f5f5', borderRadius: 4, fontSize: 13, fontFamily: 'monospace' }}>
+        <div style={{ marginBottom: 12, padding: '6px 12px', background: 'var(--bg-secondary, #f5f5f5)', borderRadius: 4, fontSize: 13, fontFamily: 'monospace' }}>
           {dirBrowserPath.split('/').filter(Boolean).map((seg, i, arr) => {
             const path = '/' + arr.slice(0, i + 1).join('/');
             return (
               <span key={path}>
-                {i > 0 && <span style={{ color: '#bfbfbf', margin: '0 4px' }}>/</span>}
+                {i > 0 && <span style={{ color: 'var(--text-disabled, #bfbfbf)', margin: '0 4px' }}>/</span>}
                 <span
                   style={{ color: '#1890ff', cursor: 'pointer' }}
                   onClick={() => browseTo(path)}
@@ -836,7 +836,7 @@ export default function WebsiteList({
               加载中...
             </div>
           ) : dirEntries.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted, #999)' }}>
               空目录
             </div>
           ) : (

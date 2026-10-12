@@ -126,7 +126,7 @@ export default function PluginDetailDrawer({ plugin, open, onClose }: { plugin: 
   );
 
   const manifestTab = (
-    <pre style={{ background: 'rgba(0,0,0,0.04)', padding: 12, borderRadius: 6, maxHeight: 480, overflow: 'auto', fontSize: 12 }}>
+    <pre style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 12, borderRadius: 6, maxHeight: 480, overflow: 'auto', fontSize: 12 }}>
       {detail?.manifest ? JSON.stringify(detail.manifest, null, 2) : '加载中…'}
     </pre>
   );

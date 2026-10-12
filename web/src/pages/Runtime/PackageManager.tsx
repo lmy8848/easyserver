@@ -110,7 +110,7 @@ export default function PackageManager({
             </Space>
           </div>
 
-          <div style={{ marginBottom: 16, padding: 16, background: '#f5f5f5', borderRadius: 4 }}>
+          <div style={{ marginBottom: 16, padding: 16, background: 'var(--bg-secondary, #f5f5f5)', borderRadius: 4 }}>
             <div style={{ marginBottom: 8, fontWeight: 'bold' }}>安装新包</div>
             <Form form={packageForm} onFinish={onInstallPackage} layout="inline" initialValues={{ manager: 'npm' }}>
               {selectedRuntime?.name === 'node' && (
@@ -147,7 +147,7 @@ export default function PackageManager({
                     zIndex: 1000,
                   }}>
                     {packageSearchLoading ? (
-                      <div style={{ padding: 12, textAlign: 'center', color: '#999' }}>
+                      <div style={{ padding: 12, textAlign: 'center', color: 'var(--text-muted, #999)' }}>
                         <Spin size="small" /> <span style={{ marginLeft: 8 }}>搜索中...</span>
                       </div>
                     ) : (
@@ -162,7 +162,7 @@ export default function PackageManager({
                           onClick={() => handleSelectPackage(pkg.name)}
                         >
                           <div style={{ fontWeight: 'bold' }}>{pkg.name}</div>
-                          <div style={{ fontSize: 12, color: '#999' }}>{pkg.description}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted, #999)' }}>{pkg.description}</div>
                         </div>
                       ))
                     )}
@@ -203,7 +203,7 @@ export default function PackageManager({
           </div>
 
           {packageData.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted, #999)' }}>
               暂无已安装的包，点击"刷新"获取最新列表
             </div>
           ) : (

@@ -582,7 +582,7 @@ export default function TerminalPage() {
             </span>
           )}
           <CloseOutlined
-            style={{ fontSize: 10, color: '#999', marginLeft: 2 }}
+            style={{ fontSize: 10, color: 'var(--text-muted, #999)', marginLeft: 2 }}
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
               if (editingKey === tab.key) setEditingKey(null);
@@ -611,7 +611,7 @@ export default function TerminalPage() {
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        background: '#ffffff',
+        background: 'var(--bg-card, #ffffff)',
       } : { display: 'flex', flexDirection: 'column', height: '100%' }}
     >
       <Card
@@ -647,7 +647,7 @@ export default function TerminalPage() {
                       disabled={!currentTab || currentTab.fontSize <= MIN_FONT_SIZE}
                     />
                   </Tooltip>
-                  <span style={{ fontSize: 16, color: '#666', minWidth: 24, textAlign: 'center' }}>
+                  <span style={{ fontSize: 16, color: 'var(--text-secondary, #666)', minWidth: 24, textAlign: 'center' }}>
                     {currentTab?.fontSize || DEFAULT_FONT_SIZE}
                   </span>
                   <Tooltip title="放大字体">
@@ -701,7 +701,7 @@ export default function TerminalPage() {
             ))}
           </>
         ) : (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#999', gap: 16 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted, #999)', gap: 16 }}>
             <div>暂无活动终端</div>
             <Button
               type="primary"

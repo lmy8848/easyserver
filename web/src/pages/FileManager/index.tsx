@@ -668,7 +668,7 @@ export default function FileManager() {
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 1010,
-          background: '#fff',
+          background: 'var(--bg-card, #fff)',
           borderRadius: 8,
           boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
           padding: '12px 20px',
@@ -711,7 +711,7 @@ export default function FileManager() {
             </div>
           ))}
           {uploadQueue.length > 8 && (
-            <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted, #999)', marginTop: 4 }}>
               ...还有 {uploadQueue.length - 8} 个文件
             </div>
           )}
@@ -894,13 +894,13 @@ export default function FileManager() {
           </Button>,
         ]}
       >
-        <p style={{ marginBottom: 8, color: '#666' }}>
+        <p style={{ marginBottom: 8, color: 'var(--text-secondary, #666)' }}>
           以下 {overwriteConflicts.length} 个文件已存在，是否覆盖？
         </p>
         <div style={{
           maxHeight: 200,
           overflowY: 'auto',
-          background: '#fafafa',
+          background: 'var(--bg-secondary, #fafafa)',
           borderRadius: 4,
           padding: '8px 12px',
           fontSize: 13,

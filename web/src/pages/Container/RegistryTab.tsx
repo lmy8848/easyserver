@@ -162,7 +162,7 @@ export default function RegistryTab({ engine }: { engine: string }) {
               ]}
             >
               <Tag color="green">{reg.server}</Tag>
-              {reg.username && <span style={{ color: '#666', marginLeft: 8 }}>{reg.username}</span>}
+              {reg.username && <span style={{ color: 'var(--text-secondary, #666)', marginLeft: 8 }}>{reg.username}</span>}
             </List.Item>
           )}
         />

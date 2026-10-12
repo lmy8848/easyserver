@@ -123,7 +123,7 @@ export default function WebServerList({
                       </Space>
                     }
                     description={
-                      <p style={{ margin: '8px 0', color: '#666', lineHeight: 1.5 }}>{desc}</p>
+                      <p style={{ margin: '8px 0', color: 'var(--text-secondary, #666)', lineHeight: 1.5 }}>{desc}</p>
                     }
                   />
                 </div>

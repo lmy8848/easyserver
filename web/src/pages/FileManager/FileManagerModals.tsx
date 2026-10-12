@@ -188,7 +188,7 @@ export function ChmodModal({ visible, path, mode, onClose, onOk, onModeChange }:
           onChange={(e) => onModeChange(e.target.value)}
         />
       </Space.Compact>
-      <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+      <div style={{ marginTop: 8, color: 'var(--text-secondary, #666)', fontSize: 12 }}>
         常用权限：755 (rwxr-xr-x) | 644 (rw-r--r--) | 700 (rwx------)
       </div>
     </Modal>

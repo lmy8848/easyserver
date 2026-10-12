@@ -226,7 +226,7 @@ export default function ContainerTab({ engine }: { engine: string }) {
                       <Card.Meta
                         title={img.name}
                         description={<>
-                          <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{img.description}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary, #666)', marginBottom: 4 }}>{img.description}</div>
                           <Tag>{img.image}</Tag>
                         </>}
                       />

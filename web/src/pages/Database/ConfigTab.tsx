@@ -157,7 +157,7 @@ export default function ConfigTab({
             onChange={(val) => onUpdateDBParam(param.key, val == null ? '' : String(val))}
             style={{ width: '100%' }}
             rootClassName="config-unit-input"
-            addonAfter={<span style={{ color: '#666' }}>{param.unit}</span>}
+            addonAfter={<span style={{ color: 'var(--text-secondary, #666)' }}>{param.unit}</span>}
           />
         );
       }
@@ -218,9 +218,9 @@ export default function ConfigTab({
           <Col key={param.key} xs={24} sm={12} lg={isMultiline(param.key) ? 24 : 6}>
             <div style={{ marginBottom: 4 }}>
               <strong>{param.label}</strong>
-              <span style={{ color: '#8c8c8c', marginLeft: 8, fontSize: 12 }}>{param.key}</span>
+              <span style={{ color: 'var(--text-muted, #8c8c8c)', marginLeft: 8, fontSize: 12 }}>{param.key}</span>
             </div>
-            <div style={{ color: '#666', fontSize: 12, marginBottom: 4 }}>{param.description}</div>
+            <div style={{ color: 'var(--text-secondary, #666)', fontSize: 12, marginBottom: 4 }}>{param.description}</div>
             {renderInput(param)}
           </Col>
         ))}

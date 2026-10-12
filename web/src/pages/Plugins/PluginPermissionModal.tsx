@@ -66,7 +66,7 @@ export default function PluginPermissionModal({ plugin, open, onClose }: {
         onChange={(v) => setChecked(v as string[])}
         options={declared.map((p) => ({ label: <code>{p}</code>, value: p }))}
       />
-      {loading && <div style={{ marginTop: 8, color: '#999' }}>加载权限清单…</div>}
+      {loading && <div style={{ marginTop: 8, color: 'var(--text-muted, #999)' }}>加载权限清单…</div>}
     </Modal>
   );
 }

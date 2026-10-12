@@ -28,9 +28,9 @@ export default function PluginSystemLogs() {
     <div>
       <Space style={{ marginBottom: 12 }}>
         <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchLog}>刷新</Button>
-        <span style={{ color: '#999', fontSize: 12 }}>面板侧插件管理动作日志（含插件启动/停止/重启/健康检查/异常）</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>面板侧插件管理动作日志（含插件启动/停止/重启/健康检查/异常）</span>
       </Space>
-      <pre style={{ background: '#f6f6f6', padding: 12, borderRadius: 6, maxHeight: 480, overflow: 'auto', fontSize: 12 }}>
+      <pre style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', padding: 12, borderRadius: 6, maxHeight: 480, overflow: 'auto', fontSize: 12 }}>
         {log || '暂无日志'}
       </pre>
     </div>

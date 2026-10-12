@@ -619,7 +619,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
             />
             <div
               style={{
-                background: '#fafafa',
+                background: 'var(--bg-secondary, #fafafa)',
                 border: '1px solid #f0f0f0',
                 borderRadius: 8,
                 padding: 12,
@@ -631,7 +631,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
                   <Col span={12} key={idx}>
                     <div
                       style={{
-                        background: '#fff',
+                        background: 'var(--bg-card, #fff)',
                         border: '1px solid #e8e8e8',
                         borderRadius: 6,
                         padding: '8px 0',

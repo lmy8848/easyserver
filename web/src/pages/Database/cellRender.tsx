@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 // times); the CLI fallback returns plain strings, which render as-is. A string
 // literally equal to "NULL" is treated as NULL for display.
 export function renderCell(v: any, type?: string): ReactNode {
-  if (v === null || v === undefined) return <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>NULL</span>;
+  if (v === null || v === undefined) return <span style={{ color: 'var(--text-disabled, #bfbfbf)', fontStyle: 'italic' }}>NULL</span>;
   const cat = type || (typeof v === 'number' ? 'number' : 'string');
   if (cat === 'blob') {
     const bytes = typeof v === 'string' ? hexToBytes(v) : Array.isArray(v) ? Uint8Array.from(v) : null;
@@ -23,7 +23,7 @@ export function renderCell(v: any, type?: string): ReactNode {
     const t = formatCellTime(v);
     return t;
   }
-  if (typeof v === 'string' && v === 'NULL') return <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>NULL</span>;
+  if (typeof v === 'string' && v === 'NULL') return <span style={{ color: 'var(--text-disabled, #bfbfbf)', fontStyle: 'italic' }}>NULL</span>;
   return String(v);
 }
 

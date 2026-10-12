@@ -19,7 +19,7 @@ const { Text } = Typography;
 
 // 样式常量
 const RAW_DATA_STYLE: React.CSSProperties = {
-  background: '#f5f5f5',
+  background: 'var(--bg-secondary, #f5f5f5)',
   padding: 12,
   borderRadius: 4,
   fontSize: 12,

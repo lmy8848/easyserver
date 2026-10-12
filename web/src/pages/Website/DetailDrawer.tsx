@@ -194,7 +194,7 @@ function ConfigTab({ base }: { base: string }) {
     return res.data.data?.config as string;
   }, []);
   if (loading) return <Spin />;
-  return <Paragraph><pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, maxHeight: 500, overflow: 'auto', fontSize: 12 }}>{data || '（配置文件不存在）'}</pre></Paragraph>;
+  return <Paragraph><pre style={{ background: 'var(--bg-secondary, #f5f5f5)', padding: 12, borderRadius: 4, maxHeight: 500, overflow: 'auto', fontSize: 12 }}>{data || '（配置文件不存在）'}</pre></Paragraph>;
 }
 
 function StatsTab({ base }: { base: string }) {
