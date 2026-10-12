@@ -82,9 +82,16 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
-  // 相对路径请求：代理会剥离 /api/plugins/<id> 前缀，页面不依赖自身插件名。
+  // API 基址从 location.pathname 推导：页面经面板代理挂载，URL 可能带或不带
+  // 尾斜杠（CF/nginx 会剥离）。补 '/' 后拼接，既不依赖插件名、也不依赖
+  // 尾斜杠，避免 './api/' 在无尾斜杠时解析到 /api/plugins/ 层。
+  function apiBase() {
+    var p = window.location.pathname || '/';
+    return p.charAt(p.length - 1) === '/' ? p : p + '/';
+  }
+
   function api(path, opts) {
-    return fetch('./api/' + path, opts).then(function (r) {
+    return fetch(apiBase() + path, opts).then(function (r) {
       if (!r.ok) {
         return r.json().then(function (d) { throw new Error(d.error || 'HTTP ' + r.status); }, function () { throw new Error('HTTP ' + r.status); });
       }
@@ -94,7 +101,7 @@
 
   // frpc-config 返回纯文本 TOML，单独走文本解析。
   function raw(path, opts) {
-    return fetch('./api/' + path, opts).then(function (r) {
+    return fetch(apiBase() + path, opts).then(function (r) {
       if (!r.ok) {
         return r.json().then(function (d) { throw new Error(d.error || 'HTTP ' + r.status); }, function () { throw new Error('HTTP ' + r.status); });
       }
