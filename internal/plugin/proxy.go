@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -19,7 +18,9 @@ import (
 // /api/plugins/<id>/api/status 访问——否则插件收到带前缀的路径全部 404。
 func newPluginProxy(socketPath string, requestTimeout time.Duration, stripPrefix string) http.Handler {
 	target := &url.URL{Scheme: "http", Host: "plugin"} // host 仅占位，拨号走 socket
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	// 用裸 ReverseProxy + Rewrite：NewSingleHostReverseProxy 自带 Director，
+	// 与 Rewrite 冲突（ReverseProxy 要求二选一），会导致代理报错不走 transport
+	proxy := &httputil.ReverseProxy{}
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		pr.SetURL(target)
 		path := strings.TrimPrefix(pr.In.URL.Path, stripPrefix)
@@ -37,7 +38,6 @@ func newPluginProxy(socketPath string, requestTimeout time.Duration, stripPrefix
 		},
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
-		log.Printf("plugin[proxy]: 插件代理失败: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"message":"插件不可达"}`))
