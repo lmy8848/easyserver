@@ -25,8 +25,17 @@ type Manager struct {
 	auditFn   func(ctx context.Context, plugin, summary string)
 	notifyFn  func(ctx context.Context, title, content string) error
 	portExp   PortExposer // 暴露端口访问控制（router 注入防火墙 PortACLService 适配）
+	panelAPI  PanelAPIConfig
 
 	svc *serviceScheduler // 定时任务调度（manifest.services 贡献点）
+}
+
+// PanelAPIConfig 是面板服务级 API 代理配置（权限 panel.api.proxy）。
+// 插件经 Host API panel.api 自请求面板业务 API（只读白名单），非用户态。
+type PanelAPIConfig struct {
+	BaseURL string // 面板自身地址（自请求用），如 http://127.0.0.1:8080
+	Token   string // 面板服务 token（自请求鉴权头，启动时随机生成）
+	Domain  string // 规范域名（自请求 Host 头，避免域名重定向）
 }
 
 // ManagerOptions 是 Manager 的构造依赖。
@@ -42,6 +51,8 @@ type ManagerOptions struct {
 	NotifyFn func(ctx context.Context, title, content string) error
 	// PortExposer 暴露端口访问控制（面板防火墙 PortACL，权限 firewall.manage）
 	PortExposer PortExposer
+	// PanelAPI 面板服务级 API 代理（权限 panel.api.proxy，只读白名单）
+	PanelAPI PanelAPIConfig
 }
 
 // NewManager 创建插件管理器。
@@ -60,6 +71,7 @@ func NewManager(o ManagerOptions) *Manager {
 		auditFn:    o.AuditFn,
 		notifyFn:   o.NotifyFn,
 		portExp:    o.PortExposer,
+		panelAPI:   o.PanelAPI,
 		svc:        newServiceScheduler(),
 	}
 	m.svc.start()

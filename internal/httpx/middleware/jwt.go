@@ -32,6 +32,12 @@ type SessionValidator func(token string) (bool, error)
 
 func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 服务级调用（插件经 panel.api.proxy 自请求）已由 ServiceTokenMiddleware
+		// 认证，跳过用户 JWT（非用户态，username=panel-api-proxy）
+		if _, ok := c.Get("service_authenticated"); ok {
+			c.Next()
+			return
+		}
 		// Extract token from the Authorization header (preferred, mobile),
 		// or the HttpOnly cookie (web).
 		var tokenString string

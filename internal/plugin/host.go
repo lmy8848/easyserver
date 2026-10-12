@@ -2,16 +2,21 @@ package plugin
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"easyserver/internal/httpx/middleware"
 )
 
 // HostAPI 是面板向插件供给能力的 Host Socket 服务（文档 §7）。
@@ -108,6 +113,8 @@ func (h *HostAPI) serve(w http.ResponseWriter, r *http.Request) {
 		h.handlePortRevoke(w, r, name)
 	case sub == "port/list" && r.Method == http.MethodGet:
 		h.handlePortList(w, r, name)
+	case sub == "panel/api" && r.Method == http.MethodPost:
+		h.handlePanelAPI(w, r, name)
 	default:
 		notFound(w)
 	}
@@ -428,6 +435,82 @@ func (h *HostAPI) handlePortList(w http.ResponseWriter, r *http.Request, name st
 		return
 	}
 	writeJSON(w, items)
+}
+
+// ---- 面板服务级 API 代理（权限 panel.api.proxy，只读白名单）----
+
+// panelAPIReadAllowlist 是 panel.api.proxy v1 可代理的面板只读路径前缀
+// （监控 / 审计 / 告警 / 安全）。插件只能调用白名单内的 GET，杜绝写入与
+// 敏感操作面。
+var panelAPIReadAllowlist = []string{
+	"/api/monitor/",
+	"/api/audit-logs",
+	"/api/alerts/",
+	"/api/security/",
+}
+
+func panelAPIAllowed(path string) bool {
+	for _, p := range panelAPIReadAllowlist {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// handlePanelAPI 代理插件对面板业务 API 的只读调用（非用户态服务级）：
+// 校验 panel.api.proxy 权限 + 方法 GET + 路径白名单，再带面板服务 token
+// 自请求面板自身，转发响应并审计。
+func (h *HostAPI) handlePanelAPI(w http.ResponseWriter, r *http.Request, name string) {
+	if !h.requirePermission(w, r, PermPanelAPIProxy) {
+		return
+	}
+	var req struct {
+		Method string          `json:"method"`
+		Path   string          `json:"path"`
+		Body   json.RawMessage `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体无效")
+		return
+	}
+	if req.Method != http.MethodGet {
+		forbidden(w, "panel.api.proxy v1 仅支持只读 GET")
+		return
+	}
+	if !panelAPIAllowed(req.Path) {
+		forbidden(w, "该路径不在 panel.api.proxy 只读白名单内")
+		return
+	}
+	cfg := h.mgr.panelAPI
+	if cfg.BaseURL == "" || cfg.Token == "" {
+		internalError(w, "面板服务 API 代理未接线")
+		return
+	}
+	// 自请求面板自身（服务级，带服务 token + 规范域名 Host 避免重定向）
+	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.BaseURL+req.Path, nil)
+	if err != nil {
+		internalError(w, err.Error())
+		return
+	}
+	if cfg.Domain != "" {
+		httpReq.Header.Set("Host", cfg.Domain)
+	}
+	httpReq.Header.Set(middleware.ServiceTokenHeader, cfg.Token)
+	httpReq.Header.Set("X-Panel-Plugin", name)
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // loopback 自请求
+	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		internalError(w, "面板 API 代理请求失败: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	_ = h.mgr.AuditWrite(r.Context(), name, "panel.api GET "+req.Path+" -> "+strconv.Itoa(resp.StatusCode))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(data)
 }
 
 // ---- 小工具（避免依赖 httpx/gin 包，host socket 是独立 HTTP 栈）----
