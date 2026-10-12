@@ -10,6 +10,7 @@ import type { PluginRecord } from '../../types';
 import PluginManual from './PluginManual';
 import PluginConfigModal from './PluginConfigModal';
 import PluginDetailDrawer from './PluginDetailDrawer';
+import PluginPermissionModal from './PluginPermissionModal';
 
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
@@ -18,6 +19,7 @@ export default function Plugins() {
   const [installing, setInstalling] = useState(false);
   const [configTarget, setConfigTarget] = useState<PluginRecord | null>(null);
   const [detailTarget, setDetailTarget] = useState<PluginRecord | null>(null);
+  const [permTarget, setPermTarget] = useState<PluginRecord | null>(null);
 
   const fetchPlugins = useCallback(async () => {
     setLoading(true);
@@ -107,11 +109,13 @@ export default function Plugins() {
                     onClick={() => setConfigTarget(r)}
                   />
                 </Tooltip>
-                <Tooltip title={r.enabled ? '启动进程' : '启用并启动'}>
+                <Tooltip title={r.enabled ? '启动进程' : '启用并审批权限'}>
                   <Button
                     type="link" size="small" icon={<PlayCircleOutlined />}
                     loading={operating === `start-${r.name}`}
-                    onClick={() => act(`start-${r.name}`, () => (r.enabled ? pluginsApi.start(r.name) : pluginsApi.enable(r.name)), '已启动')}
+                    onClick={() => (r.enabled
+                      ? act(`start-${r.name}`, () => pluginsApi.start(r.name), '已启动')
+                      : setPermTarget(r))}
                   />
                 </Tooltip>
                 <Tooltip title="停止进程">
@@ -164,6 +168,11 @@ export default function Plugins() {
       />
       <PluginConfigModal plugin={configTarget!} open={!!configTarget} onClose={() => setConfigTarget(null)} />
       <PluginDetailDrawer plugin={detailTarget!} open={!!detailTarget} onClose={() => setDetailTarget(null)} />
+      <PluginPermissionModal
+        plugin={permTarget!}
+        open={!!permTarget}
+        onClose={() => { setPermTarget(null); void fetchPlugins(); }}
+      />
     </Card>
   );
 }
