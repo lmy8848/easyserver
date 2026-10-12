@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,7 +125,7 @@ func (b *EventBus) Publish(name, source string, payload any) {
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("plugin: 事件 %s payload 序列化失败: %v", name, err)
+		logManagerf(" 事件 %s payload 序列化失败: %v", name, err)
 		return
 	}
 	evt := &Event{ID: GenerateEventID(), Name: name, Source: source, Payload: raw, Time: time.Now().Format(time.RFC3339)}
@@ -146,7 +145,7 @@ func (b *EventBus) Publish(name, source string, payload any) {
 			case sub.queue <- evt:
 			default:
 			}
-			log.Printf("plugin: 事件 %s 订阅者 %s 队列溢出，已丢弃最旧", name, sub.id)
+			logManagerf(" 事件 %s 订阅者 %s 队列溢出，已丢弃最旧", name, sub.id)
 		}
 	}
 }
@@ -172,9 +171,9 @@ func deliverWithRetry(sub *eventSubscription, evt *Event) {
 		if err == nil {
 			return
 		}
-		log.Printf("plugin: 事件 %s 投递到 %s 失败（第 %d 次）: %v", evt.Name, sub.id, attempt, err)
+		logManagerf(" 事件 %s 投递到 %s 失败（第 %d 次）: %v", evt.Name, sub.id, attempt, err)
 		if attempt == eventMaxAttempts {
-			log.Printf("plugin: 事件 %s 投递到 %s 超过重试上限，放弃", evt.Name, sub.id)
+			logManagerf(" 事件 %s 投递到 %s 超过重试上限，放弃", evt.Name, sub.id)
 			return
 		}
 		select {

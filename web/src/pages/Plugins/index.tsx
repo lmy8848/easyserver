@@ -11,6 +11,7 @@ import PluginManual from './PluginManual';
 import PluginConfigModal from './PluginConfigModal';
 import PluginDetailDrawer from './PluginDetailDrawer';
 import PluginPermissionModal from './PluginPermissionModal';
+import PluginSystemLogs from './PluginSystemLogs';
 
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
@@ -163,6 +164,7 @@ export default function Plugins() {
       <Tabs
         items={[
           { key: 'list', label: '插件列表', children: listTab },
+          { key: 'system-logs', label: '系统日志', children: <PluginSystemLogs /> },
           { key: 'manual', label: <span><BookOutlined /> 插件开发手册</span>, children: <PluginManual /> },
         ]}
       />

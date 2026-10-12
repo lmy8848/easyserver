@@ -214,6 +214,27 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		httpx.Success(c, gin.H{"log": strings.Join(parts, "\n")})
 	})
 
+	// 插件管理子系统全局日志（面板侧管理动作，见 manager_log.go）
+	protected.GET("/plugins/system-logs", func(c *gin.Context) {
+		lines := 200
+		if v := c.Query("lines"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 2000 {
+				lines = n
+			}
+		}
+		data, err := os.ReadFile(ManagerLogPath)
+		if err != nil {
+			httpx.Success(c, gin.H{"log": ""})
+			return
+		}
+		all := string(data)
+		parts := strings.Split(all, "\n")
+		if len(parts) > lines {
+			parts = parts[len(parts)-lines:]
+		}
+		httpx.Success(c, gin.H{"log": strings.Join(parts, "\n")})
+	})
+
 	// 插件详情（manifest + 贡献点清单，供管理页展示）
 	protected.GET("/plugins/:id/detail", func(c *gin.Context) {
 		name := c.Param("id")

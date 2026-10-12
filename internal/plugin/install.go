@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"context"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,7 +116,7 @@ func (m *Manager) InstallFromZip(ctx context.Context, data []byte) (*Manifest, e
 	m.manifests[mft.Name] = mft
 	m.mu.Unlock()
 
-	log.Printf("plugin: 已安装插件 %s（%s）", mft.Name, mft.Version)
+	logManagerf(" 已安装插件 %s（%s）", mft.Name, mft.Version)
 	return mft, nil
 }
 

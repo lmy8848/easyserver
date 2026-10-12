@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -39,7 +38,7 @@ func newPluginProxy(socketPath string, requestTimeout time.Duration, stripPrefix
 		},
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
-		log.Printf("plugin: 代理 %s 失败: %v", socketPath, err)
+		logManagerf(" 代理 %s 失败: %v", socketPath, err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"code":50200,"message":"插件不可达","data":null}`))

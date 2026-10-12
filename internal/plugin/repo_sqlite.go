@@ -9,7 +9,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
-	"log"
 	"strings"
 
 	"easyserver/internal/infra/errx"
@@ -72,7 +71,7 @@ func (r *sqliteRepo) ListPlugins(ctx context.Context) ([]PluginRecord, error) {
 	for rows.Next() {
 		rec, err := scanPlugin(rows.Scan)
 		if err != nil {
-			log.Printf("plugin: scan row error: %v", err)
+			logManagerf(" scan row error: %v", err)
 			continue
 		}
 		out = append(out, *rec)

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -96,7 +95,7 @@ func (s *Supervisor) CleanupOrphans(ctx context.Context) {
 			if strings.HasSuffix(e.Name(), ".sock") {
 				p := filepath.Join(s.socketDir, e.Name())
 				if err := os.Remove(p); err == nil {
-					log.Printf("plugin: 清理残留 socket %s", p)
+					logManagerf(" 清理残留 socket %s", p)
 				}
 			}
 		}
@@ -123,7 +122,7 @@ func killOrphansByCmdline(pluginsDir string) {
 			pid, _ := strconv.Atoi(e.Name())
 			if p, err := os.FindProcess(pid); err == nil {
 				_ = p.Kill()
-				log.Printf("plugin: 清理孤儿进程 pid=%d path=%s", pid, argv0)
+				logManagerf(" 清理孤儿进程 pid=%d path=%s", pid, argv0)
 			}
 		}
 	}
@@ -263,20 +262,20 @@ func (s *Supervisor) restartWithBackoff(p *pfProcess) {
 	n := p.restarts.Add(1)
 	if n > 5 {
 		s.setState(context.Background(), p, StateDisabled, "10 分钟窗口内失败超过 5 次，已停止重启", 0)
-		log.Printf("plugin: %s 连续失败超过 5 次，停止重启", p.manifest.Name)
+		logManagerf(" %s 连续失败超过 5 次，停止重启", p.manifest.Name)
 		return
 	}
 	delay := time.Second
 	for i := 1; i < int(n) && delay < 60*time.Second; i++ {
 		delay *= 2
 	}
-	log.Printf("plugin: %s 退出（%v），%s 后第 %d 次重启", p.manifest.Name, p.exitErr, delay, n)
+	logManagerf(" %s 退出（%v），%s 后第 %d 次重启", p.manifest.Name, p.exitErr, delay, n)
 	time.AfterFunc(delay, func() {
 		if s.isStopping() || p.stopped.Load() {
 			return
 		}
 		if err := s.EnsureRunning(context.Background(), p.manifest, p.token); err != nil {
-			log.Printf("plugin: %s 重启失败: %v", p.manifest.Name, err)
+			logManagerf(" %s 重启失败: %v", p.manifest.Name, err)
 		}
 	})
 }
@@ -328,7 +327,7 @@ func (s *Supervisor) healthLoop(p *pfProcess) {
 		}
 		fails++
 		if fails >= p.manifest.Health.FailThreshold {
-			log.Printf("plugin: %s 健康检查连续失败 %d 次，重启", p.manifest.Name, fails)
+			logManagerf(" %s 健康检查连续失败 %d 次，重启", p.manifest.Name, fails)
 			p.cancel() // 退出监视器会走退避重启
 			return
 		}

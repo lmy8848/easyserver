@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -55,10 +54,10 @@ func (h *HostAPI) Start(ctx context.Context) error {
 	h.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := h.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Printf("plugin: host socket 服务异常退出: %v", err)
+			logManagerf(" host socket 服务异常退出: %v", err)
 		}
 	}()
-	log.Printf("plugin: Host API 已监听 %s", h.socketPath)
+	logManagerf(" Host API 已监听 %s", h.socketPath)
 	return nil
 }
 

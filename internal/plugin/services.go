@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -43,14 +42,14 @@ func (s *serviceScheduler) schedule(m *Manager, name string, mft *Manifest) {
 	for _, svc := range mft.Contributions.Services {
 		cmd := strings.TrimSpace(svc.Command)
 		if cmd == "" {
-			log.Printf("plugin: %s 服务 %s 命令为空，跳过", name, svc.ID)
+			logManagerf(" %s 服务 %s 命令为空，跳过", name, svc.ID)
 			continue
 		}
 		id, err := s.cron.AddFunc(svc.Schedule, func() {
 			runServiceCommand(m, name, cmd)
 		})
 		if err != nil {
-			log.Printf("plugin: %s 服务 %s 调度表达式无效: %v", name, svc.ID, err)
+			logManagerf(" %s 服务 %s 调度表达式无效: %v", name, svc.ID, err)
 			continue
 		}
 		s.jobs[name] = append(s.jobs[name], id)
@@ -74,9 +73,9 @@ func runServiceCommand(m *Manager, pluginName, command string) {
 	_ = m.AuditWrite(ctx, pluginName, "service: "+command)
 	out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
 	if err != nil {
-		log.Printf("plugin: %s 服务命令执行失败: %v", pluginName, err)
+		logManagerf(" %s 服务命令执行失败: %v", pluginName, err)
 	}
 	if s := strings.TrimSpace(string(out)); s != "" {
-		log.Printf("plugin: %s 服务输出: %s", pluginName, s)
+		logManagerf(" %s 服务输出: %s", pluginName, s)
 	}
 }

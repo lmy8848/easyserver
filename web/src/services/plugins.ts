@@ -62,6 +62,9 @@ export const pluginsApi = {
 
   getLogs: (name: string, lines = 500) => api.get<ApiResponse<{ log: string }>>(`/plugins/${name}/logs`, { params: { lines } }),
 
+  // 插件管理子系统全局日志（面板侧管理动作）
+  getSystemLogs: (lines = 500) => api.get<ApiResponse<{ log: string }>>('/plugins/system-logs', { params: { lines } }),
+
   getDetail: (name: string) => api.get<ApiResponse<PluginDetail>>(`/plugins/${name}/detail`),
 
   getWidgets: () => api.get<ApiResponse<{ items: PluginWidgetItem[] }>>('/plugins/widgets'),

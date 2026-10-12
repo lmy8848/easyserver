@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -93,7 +92,7 @@ func (m *Manager) ScanPlugins(ctx context.Context) error {
 		if err != nil {
 			// 无效插件：记录 error 不启动，不影响其他插件（文档 §3.3）
 			_ = m.repo.SetPluginStatus(ctx, name, StateError, 0, err.Error())
-			log.Printf("plugin: 插件 %s 加载失败: %v", name, err)
+			logManagerf(" 插件 %s 加载失败: %v", name, err)
 			continue
 		}
 		m.mu.Lock()
@@ -115,7 +114,7 @@ func (m *Manager) ScanPlugins(ctx context.Context) error {
 		}
 		if enabled {
 			if err := m.Start(ctx, mft.Name); err != nil {
-				log.Printf("plugin: 启用插件 %s 启动失败: %v", mft.Name, err)
+				logManagerf(" 启用插件 %s 启动失败: %v", mft.Name, err)
 			}
 		}
 	}
