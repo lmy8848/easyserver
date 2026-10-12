@@ -154,6 +154,8 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	firewallService := firewall.NewService(firewallRepo, cfg.Server.Port)
 	portForwardRepo := firewall.NewPortForwardSQLiteRepository(db)
 	portForwardService := firewall.NewPortForwardService(portForwardRepo, firewallService)
+	portACLRepo := firewall.NewPortACLSQLiteRepository(db)
+	portACLService := firewall.NewPortACLService(portACLRepo)
 
 	sshConfigService := ssh.NewService()
 
@@ -219,6 +221,8 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		NotifyFn: func(ctx context.Context, title, content string) error {
 			return notify.NewService(store).SendCustom(ctx, title, content)
 		},
+		// 暴露端口访问控制：插件经 Host API port.expose/revoke 落到防火墙 PortACL
+		PortExposer: portACLExposerAdapter{svc: portACLService},
 	})
 	plugin.RegisterRoutes(g.Protected, pluginMgr)
 	// 插件业务代理：NoRoute 兜底 + JWT 认证（与 protected 组同策略）
@@ -256,6 +260,10 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		log.Printf("firewall: 端口转发规则重放失败: %v", err)
 	}
 	portForwardService.WarnBackendOnce(context.Background())
+	// 暴露端口访问控制重放（插件暴露端口的授权源白名单）
+	if err := portACLService.ReapplyAll(context.Background()); err != nil {
+		log.Printf("firewall: 暴露端口访问控制重放失败: %v", err)
+	}
 
 	// ── Background watchers ──
 	watcherStop := make(chan struct{})
@@ -384,4 +392,32 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 		maxUploadSize:    maxUploadSize,
 		sessionValidator: sessionValidator,
 	}
+}
+
+// portACLExposerAdapter 把防火墙 PortACLService 适配为插件可用的
+// plugin.PortExposer（Host API port.expose / port.revoke / port.list 落点）。
+type portACLExposerAdapter struct {
+	svc *firewall.PortACLService
+}
+
+func (a portACLExposerAdapter) Expose(ctx context.Context, port int, protocol string, cidrs []string, remark string) error {
+	return a.svc.Expose(ctx, port, protocol, cidrs, remark)
+}
+
+func (a portACLExposerAdapter) Revoke(ctx context.Context, port int, protocol string) error {
+	return a.svc.Revoke(ctx, port, protocol)
+}
+
+func (a portACLExposerAdapter) List(ctx context.Context) ([]plugin.PortACLInfo, error) {
+	items, err := a.svc.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]plugin.PortACLInfo, 0, len(items))
+	for _, it := range items {
+		out = append(out, plugin.PortACLInfo{
+			Port: it.Port, Protocol: it.Protocol, CIDRs: it.CIDRs, Remark: it.Remark,
+		})
+	}
+	return out, nil
 }
