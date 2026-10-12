@@ -264,6 +264,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	// ── Shutdown function ──
 	shutdown := func() {
 		pluginSup.StopAll(context.Background())
+		pluginMgr.Close()
 		_ = pluginHost.Stop(context.Background())
 		auditSvc.Close()
 		close(watcherStop)
