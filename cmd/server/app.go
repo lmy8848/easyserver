@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"context"
 	"errors"
 	"fmt"
@@ -44,6 +45,10 @@ func NewApp(store *config.Store, devMode bool) *App {
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 			IdleTimeout:  60 * time.Second,
+			// 禁用 HTTP/2：Cloudflare 边缘到源站的 HTTP/2 连接在 SSE 长连接与
+			// 长请求下不稳定（曾触发 ERR_HTTP2_PROTOCOL_ERROR 与 CF 502 页），
+			// 强制 HTTP/1.1 后 CF 走回源更稳定
+			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 		},
 	}
 	return a
