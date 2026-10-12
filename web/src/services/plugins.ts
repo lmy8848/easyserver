@@ -45,6 +45,9 @@ export const pluginsApi = {
 
   enable: (name: string) => api.post<ApiResponse>(`/plugins/${name}/enable`),
 
+  // 启用时权限审批：批准声明权限的子集后启动（§11，不可超声明）
+  approve: (name: string, permissions: string[]) => api.post<ApiResponse>(`/plugins/${name}/approve`, { permissions }),
+
   disable: (name: string) => api.post<ApiResponse>(`/plugins/${name}/disable`),
 
   remove: (name: string) => api.delete<ApiResponse>(`/plugins/${name}`),

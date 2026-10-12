@@ -116,6 +116,21 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		}
 		httpx.Success(c, gin.H{"message": "插件已禁用"})
 	})
+	// 启用时的权限审批：批准声明权限的子集后启动（§11，不可超声明）
+	protected.POST("/plugins/:id/approve", func(c *gin.Context) {
+		var body struct {
+			Permissions []string `json:"permissions"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.Error(errx.BadRequest("请求体无效"))
+			return
+		}
+		if err := m.Approve(c.Request.Context(), c.Param("id"), body.Permissions); err != nil {
+			c.Error(err)
+			return
+		}
+		httpx.Success(c, gin.H{"message": "权限已批准并启动插件"})
+	})
 	protected.DELETE("/plugins/:id", func(c *gin.Context) {
 		if err := m.Remove(c.Request.Context(), c.Param("id")); err != nil {
 			c.Error(err)

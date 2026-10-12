@@ -68,11 +68,23 @@ func GenerateEventID() string {
 }
 
 // Subscribe 注册订阅者。handler 在订阅者的独立 goroutine 中串行调用，
-// 返回错误触发重试。重复 Subscribe 同 (id, event) 覆盖旧订阅。
+// 返回错误触发重试。重复 Subscribe 同 (id, event) 覆盖旧订阅，并关闭旧
+// 订阅的消费 goroutine（避免重启/重订时泄漏）。
 func (b *EventBus) Subscribe(id string, events []string, handler func(ctx context.Context, e *Event) error) {
 	b.mu.Lock()
 	if b.subs == nil {
 		b.subs = map[string]map[string]*eventSubscription{}
+	}
+	// 找到同 id 旧订阅并关闭其消费 goroutine
+	var old *eventSubscription
+	for _, e := range events {
+		if s, ok := b.subs[e][id]; ok {
+			old = s
+			break
+		}
+	}
+	if old != nil {
+		old.once.Do(func() { close(old.closed) })
 	}
 	sub := &eventSubscription{
 		id:      id,

@@ -21,6 +21,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/robfig/cron/v3 v3.0.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

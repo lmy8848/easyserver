@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"easyserver/internal/infra/errx"
@@ -24,6 +25,8 @@ type Manager struct {
 	tokens    map[string]string    // token → name（Host API 鉴权）
 	auditFn   func(ctx context.Context, plugin, summary string)
 	notifyFn  func(ctx context.Context, title, content string) error
+
+	svc *serviceScheduler // 定时任务调度（manifest.services 贡献点）
 }
 
 // ManagerOptions 是 Manager 的构造依赖。
@@ -44,7 +47,7 @@ func NewManager(o ManagerOptions) *Manager {
 	if o.Bus == nil {
 		o.Bus = NewEventBus()
 	}
-	return &Manager{
+	m := &Manager{
 		repo:       o.Repo,
 		sup:        o.Supervisor,
 		bus:        o.Bus,
@@ -54,6 +57,16 @@ func NewManager(o ManagerOptions) *Manager {
 		tokens:     map[string]string{},
 		auditFn:    o.AuditFn,
 		notifyFn:   o.NotifyFn,
+		svc:        newServiceScheduler(),
+	}
+	m.svc.start()
+	return m
+}
+
+// Close 释放管理器持有的资源（定时任务调度），面板关停时调用。
+func (m *Manager) Close() {
+	if m.svc != nil {
+		m.svc.stop()
 	}
 }
 
@@ -124,13 +137,21 @@ func (m *Manager) GetManifest(_ context.Context, name string) (*Manifest, error)
 	return nil, errx.NotFound("插件 %s 未加载", name)
 }
 
-// Start 启用并启动插件（等价管理员批准全部声明权限；审批 UI 在基座 PR-3）。
+// Start 启用并启动插件（批准全部声明权限；按需收缩见 Approve）。
 func (m *Manager) Start(ctx context.Context, name string) error {
+	return m.StartWithApproved(ctx, name, nil)
+}
+
+// StartWithApproved 启用并启动插件，按给定权限子集批准（空/nil = 全部声明）。
+func (m *Manager) StartWithApproved(ctx context.Context, name string, approved []string) error {
 	m.mu.Lock()
 	mft, ok := m.manifests[name]
 	m.mu.Unlock()
 	if !ok {
 		return errx.NotFound("插件 %s 未加载", name)
+	}
+	if len(approved) == 0 {
+		approved = mft.Permissions
 	}
 	token, err := GenerateToken()
 	if err != nil {
@@ -147,11 +168,39 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 		m.mu.Unlock()
 		return err
 	}
-	if err := m.repo.SetPluginEnabled(ctx, name, true, mft.Permissions); err != nil {
+	if err := m.repo.SetPluginEnabled(ctx, name, true, approved); err != nil {
 		return err
 	}
+	m.startEventDelivery(name, mft) //nolint:contextcheck // 事件投递运行在总线独立 goroutine，用总线自有 context
+	m.svc.schedule(m, name, mft)    //nolint:contextcheck // 定时任务独立于请求上下文，调度器内部自建 context
 	m.bus.Publish(EventServiceStart, "plugin:"+name, map[string]string{"plugin": name})
 	return nil
+}
+
+// Approve 校验并批准权限子集（不可超声明）后启用启动插件（§11 权限模型）。
+func (m *Manager) Approve(ctx context.Context, name string, approved []string) error {
+	m.mu.Lock()
+	mft, ok := m.manifests[name]
+	m.mu.Unlock()
+	if !ok {
+		return errx.NotFound("插件 %s 未加载", name)
+	}
+	valid := make(map[string]bool, len(mft.Permissions))
+	for _, p := range mft.Permissions {
+		valid[p] = true
+	}
+	clean := make([]string, 0, len(approved))
+	seen := make(map[string]bool)
+	for _, p := range approved {
+		if !valid[p] {
+			return errx.BadRequest("权限 %s 未在插件声明中", p)
+		}
+		if !seen[p] {
+			seen[p] = true
+			clean = append(clean, p)
+		}
+	}
+	return m.StartWithApproved(ctx, name, clean)
 }
 
 // Stop 停止插件进程（保持注册与启用状态）。
@@ -159,6 +208,8 @@ func (m *Manager) Stop(ctx context.Context, name string) error {
 	if err := m.sup.StopPlugin(ctx, name); err != nil {
 		return err
 	}
+	m.stopEventDelivery(name)
+	m.svc.unschedule(name)
 	m.bus.Publish(EventServiceStop, "plugin:"+name, map[string]string{"plugin": name})
 	return nil
 }
@@ -215,13 +266,21 @@ func (m *Manager) ManifestByToken(ctx context.Context, token string) (*Manifest,
 	return m.GetManifest(ctx, name)
 }
 
-// HasPermission 报告 token 对应插件是否声明了某能力（默认拒绝）。
+// HasPermission 报告 token 对应插件是否被授予某能力（默认拒绝）。
+// 校验的是启用时管理员批准的子集（§11 权限模型），而非 manifest 声明全集。
 func (m *Manager) HasPermission(ctx context.Context, token, perm string) bool {
 	mft, err := m.ManifestByToken(ctx, token)
 	if err != nil {
 		return false
 	}
-	return mft.HasPermission(perm)
+	if !mft.HasPermission(perm) {
+		return false // 未声明，必未批准
+	}
+	rec, err := m.repo.GetPlugin(ctx, mft.Name)
+	if err != nil || rec == nil {
+		return false
+	}
+	return slices.Contains(rec.PermissionsApproved, perm)
 }
 
 // PluginNameByToken 返回 token 对应插件名。
