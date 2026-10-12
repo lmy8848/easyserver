@@ -143,6 +143,12 @@ func startFRPS(ctx context.Context) error {
 		BindPort: s.bindPort,
 	}
 	cfg.Auth.Token = s.token
+	// Complete() 补全默认值：尤其把 Auth.Method 默认为 "token"——若不调用，
+	// NewAuthVerifier 会因 Method 为空返回 nil，服务器拒绝一切 frpc 登录
+	// （现象为 "EOF"/"broken pipe"）。
+	if err := cfg.Complete(); err != nil {
+		return fmt.Errorf("frps 配置补全失败: %w", err)
+	}
 	// frps 生命周期由管理器自有 context 管理，不随请求 ctx 结束
 	return mgr.Start(cfg) //nolint:contextcheck
 }

@@ -34,8 +34,20 @@ func (m *FRPSManager) Running() bool {
 }
 
 // Start 启动 frps；已有实例则原子替换（停旧启新，改配置即重启）。
+// 必须先停旧实例再创建新实例：frp 的 NewService 会立即 bind 监听端口，
+// 若旧实例仍占用端口会报 address already in use。
 // 服务本体运行在管理器自有生命周期上，不随调用方 context 结束。
 func (m *FRPSManager) Start(cfg v1.ServerConfig) error {
+	m.mu.Lock()
+	oldSvc, oldCancel := m.service, m.cancel
+	m.mu.Unlock()
+	if oldCancel != nil {
+		oldCancel()
+	}
+	if oldSvc != nil {
+		_ = oldSvc.Close()
+	}
+
 	svc, err := server.NewService(&cfg)
 	if err != nil {
 		return fmt.Errorf("frps 初始化失败: %w", err)
@@ -43,20 +55,11 @@ func (m *FRPSManager) Start(cfg v1.ServerConfig) error {
 	runCtx, cancel := context.WithCancel(context.Background())
 
 	m.mu.Lock()
-	oldSvc, oldCancel := m.service, m.cancel
 	m.service = svc
 	m.cancel = cancel
 	m.cfg = cfg
 	m.running = true
 	m.mu.Unlock()
-
-	// 替换：先停旧实例，释放端口后再由新实例接管
-	if oldCancel != nil {
-		oldCancel()
-	}
-	if oldSvc != nil {
-		_ = oldSvc.Close()
-	}
 
 	go func() {
 		svc.Run(runCtx)
