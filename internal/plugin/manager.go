@@ -141,6 +141,9 @@ func (m *Manager) Start(ctx context.Context, name string) error {
 	m.mu.Unlock()
 
 	if err := m.sup.EnsureRunning(ctx, mft, token); err != nil {
+		// 启动失败回滚刚签发的 token（锁已在上方释放，勿 Unlock）
+		m.mu.Lock()
+		delete(m.tokens, token)
 		m.mu.Unlock()
 		return err
 	}

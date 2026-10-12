@@ -1,9 +1,7 @@
 package plugin
 
 import (
-	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +10,7 @@ import (
 
 	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
+	"easyserver/internal/infra/errx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,13 +38,12 @@ func NewProxyHandler(m *Manager) gin.HandlerFunc {
 		rest := strings.TrimPrefix(c.Request.URL.Path, "/api/plugins/")
 		name, _, _ := strings.Cut(rest, "/")
 		if name == "" {
-			c.JSON(http.StatusNotFound, gin.H{"code": 40400, "message": "页面未找到"})
+			c.Error(errx.NotFound("页面未找到"))
 			return
 		}
 		sockPath, timeout, ok := m.sup.RunningEndpoint(name)
-		fmt.Fprintf(os.Stderr, "plugin[proxy-debug]: path=%s name=%s sock=%q ok=%v\n", c.Request.URL.Path, name, sockPath, ok)
 		if !ok {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "插件未运行"})
+			c.Error(errx.Unavailable("插件未运行"))
 			return
 		}
 		newPluginProxy(sockPath, timeout, "/api/plugins/"+name).ServeHTTP(c.Writer, c.Request)
@@ -59,18 +57,18 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 	protected.POST("/plugins/upload", func(c *gin.Context) {
 		fh, err := c.FormFile("file")
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "缺少插件包文件字段 file"})
+			c.Error(errx.BadRequest("缺少插件包文件字段 file"))
 			return
 		}
 		f, err := fh.Open()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "读取插件包失败"})
+			c.Error(errx.Internal("读取插件包失败"))
 			return
 		}
 		defer func() { _ = f.Close() }()
 		data, err := io.ReadAll(io.LimitReader(f, maxPluginArchiveSize+1))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"message": "读取插件包失败"})
+			c.Error(errx.Internal("读取插件包失败"))
 			return
 		}
 		mft, err := m.InstallFromZip(c.Request.Context(), data)
@@ -206,7 +204,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		name := c.Param("id")
 		rec, err := m.repo.GetPlugin(c.Request.Context(), name)
 		if err != nil || rec == nil {
-			c.JSON(http.StatusNotFound, gin.H{"message": "插件不存在"})
+			c.Error(errx.NotFound("插件不存在"))
 			return
 		}
 		mft, err := m.GetManifest(c.Request.Context(), name)
@@ -233,7 +231,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 	protected.PUT("/plugins/:id/config", func(c *gin.Context) {
 		var body map[string]string
 		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"message": "请求体无效"})
+			c.Error(errx.BadRequest("请求体无效"))
 			return
 		}
 		if err := m.ConfigSet(c.Request.Context(), c.Param("id"), body); err != nil {
@@ -250,15 +248,5 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			return
 		}
 		httpx.Success(c, mft)
-	})
-
-	// 前端动态菜单下发（menus contribution）
-	protected.GET("/plugins/:id/menus", func(c *gin.Context) {
-		mft, err := m.GetManifest(c.Request.Context(), c.Param("id"))
-		if err != nil {
-			c.Error(err)
-			return
-		}
-		httpx.Success(c, gin.H{"items": mft.Contributions.Menus})
 	})
 }

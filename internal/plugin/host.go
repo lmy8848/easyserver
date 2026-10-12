@@ -328,12 +328,16 @@ func (h *HostAPI) handleStorage(w http.ResponseWriter, r *http.Request, name, su
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(data)
 	case http.MethodPut:
-		data := make([]byte, 0)
+		var data []byte
 		buf := make([]byte, 4096)
 		for {
 			n, err := r.Body.Read(buf)
 			data = append(data, buf[:n]...)
-			if err != nil || len(data) > 64<<20 {
+			if len(data) > 64<<20 {
+				payloadTooLarge(w, "文件超过 64MB 限制")
+				return
+			}
+			if err != nil {
 				break
 			}
 		}
@@ -396,5 +400,11 @@ func notFound(w http.ResponseWriter) {
 func internalError(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(respMap{"message": msg})
+}
+
+func payloadTooLarge(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusRequestEntityTooLarge)
 	_ = json.NewEncoder(w).Encode(respMap{"message": msg})
 }
