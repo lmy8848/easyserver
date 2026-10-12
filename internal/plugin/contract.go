@@ -119,6 +119,7 @@ type Contributions struct {
 	Services  []ServiceContribution  `yaml:"services" json:"services,omitempty"`
 	EventSubs []EventSubContribution `yaml:"eventsubs" json:"eventsubs,omitempty"`
 	EventPubs []EventPubContribution `yaml:"eventpubs" json:"eventpubs,omitempty"`
+	Styles    []StyleContribution    `yaml:"styles" json:"styles,omitempty"`
 }
 
 type MenuContribution struct {
@@ -168,6 +169,13 @@ type EventSubContribution struct {
 type EventPubContribution struct {
 	Event  string `yaml:"event" json:"event"`
 	Schema any    `yaml:"schema" json:"schema,omitempty"`
+}
+
+// StyleContribution 是面板前端样式自定义贡献点：插件提供 CSS 资源，
+// 面板在自身样式之后注入 <link>，用于品牌定制/换肤等（随插件启停生效）。
+type StyleContribution struct {
+	ID   string `yaml:"id" json:"id"`
+	Path string `yaml:"path" json:"path"` // 插件内相对路径（不含前导 /），经插件代理提供
 }
 
 // ManifestDefaults 填充可省略字段的标准值。
@@ -251,6 +259,11 @@ func (m *Manifest) validateContributions() error {
 	for _, c := range m.Contributions.Widgets {
 		if !strings.HasPrefix(c.Path, prefix+"/") {
 			return errx.BadRequest("小部件路径 %s 必须以 %s 开头", c.Path, prefix)
+		}
+	}
+	for _, c := range m.Contributions.Styles {
+		if c.Path == "" || strings.HasPrefix(c.Path, "/") || strings.Contains(c.Path, "..") {
+			return errx.BadRequest("样式路径 %q 必须是插件内的相对路径", c.Path)
 		}
 	}
 	// settings/services 的 schedule 与 schema 深度校验在渲染/调度侧执行（PR-2）
