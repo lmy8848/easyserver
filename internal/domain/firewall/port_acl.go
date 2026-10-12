@@ -147,7 +147,8 @@ func (s *PortACLService) remove(ctx context.Context, id int64) {
 			continue
 		}
 		if m := handleRe.FindStringSubmatch(line); m != nil {
-			_, _ = execNft(ctx, "delete", "rule", "inet", "filter", "INPUT", m[1])
+			// nft delete rule 必须带 handle 关键字，否则语法错误
+			_, _ = execNft(ctx, "delete", "rule", "inet", "filter", "INPUT", "handle", m[1])
 		}
 	}
 }
