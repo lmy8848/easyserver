@@ -72,7 +72,9 @@ func (h *NotificationHandler) Create(c *gin.Context) (any, error) {
 // HandleSSE handles notification SSE stream requests
 func (h *NotificationHandler) HandleSSE(c *gin.Context) (any, error) {
 	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
+	// no-transform 阻止 Cloudflare 等中间层对 SSE 流做压缩/缓冲改造，
+	// 后者在 HTTP/2 下会触发 ERR_HTTP2_PROTOCOL_ERROR
+	c.Header("Cache-Control", "no-cache, no-transform")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 	flusher, ok := c.Writer.(http.Flusher)
