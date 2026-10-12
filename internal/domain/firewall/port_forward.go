@@ -418,9 +418,12 @@ func destIsPrivate(ipStr string) bool {
 }
 
 // removeForward 按注释标签定位并删除该规则的全部内核规则。
-// 标签形如 easyserver-pf-<id>"（nft 注释字面量含引号），避免 -1 误伤 -12。
+// 一条转发有三条规则，注释分别为 easyserver-pf-<id>（prerouting）、
+// easyserver-pf-fwd-<id>（FORWARD）、easyserver-pf-masq-<id>（postrouting），
+// 需一并匹配清理，避免残留。
 func (s *PortForwardService) removeForward(ctx context.Context, id int64) {
-	tag := pfCommentPrefix + "-" + strconv.FormatInt(id, 10) + "\""
+	idStr := strconv.FormatInt(id, 10)
+	tagRe := regexp.MustCompile(pfCommentPrefix + `-(fwd-|masq-)?` + idStr + `"`)
 	type chainRef struct{ family, table, chain string }
 	chains := []chainRef{
 		{pfNatFamily, pfNatTable, pfPrerouting},
@@ -434,7 +437,7 @@ func (s *PortForwardService) removeForward(ctx context.Context, id int64) {
 			continue // 链/表不存在即无需清理
 		}
 		for line := range strings.SplitSeq(out, "\n") {
-			if !strings.Contains(line, tag) {
+			if !tagRe.MatchString(line) {
 				continue
 			}
 			if m := handleRe.FindStringSubmatch(line); m != nil {
