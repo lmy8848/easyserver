@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>内网穿透</title>
+<script src="/host-sdk.js"></script>
+<style>
+  :root { --border: #d9d9d9; --label: #595959; --pre-bg: #f5f5f5; --muted: #8c8c8c; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #222; }
+  h2 { margin: 0 0 16px; font-size: 20px; }
+  .card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 15px; }
+  label { display: block; margin: 8px 0 4px; font-size: 13px; color: var(--label); }
+  input, select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; }
+  button { padding: 6px 14px; border: 1px solid #1677ff; background: #1677ff; color: #fff; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  button.secondary { background: #fff; color: #1677ff; }
+  button:hover { opacity: .88; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  pre { background: var(--pre-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+  .ok { color: #16a34a; } .bad { color: #dc2626; }
+  .muted { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+</style>
+</head>
+<body>
+<h2>内网穿透（frp）</h2>
+
+<div class="card">
+  <h3>服务状态</h3>
+  <div id="status">加载中…</div>
+  <button id="btn-restart" class="secondary" onclick="restart()" style="margin-top:12px">重启 frps</button>
+</div>
+
+<div class="card">
+  <h3>服务端设置</h3>
+  <label for="bind_port">frps 控制端口</label>
+  <input id="bind_port" placeholder="7000">
+  <label for="server_addr">对外地址（生成客户端配置用）</label>
+  <input id="server_addr" placeholder="服务器的公网 IP 或域名">
+  <button onclick="save()" style="margin-top:12px">保存并重启</button>
+  <p class="muted">保存后 frps 会立即用新配置重启；端口修改需保证未被占用。</p>
+</div>
+
+<div class="card">
+  <h3>家庭电脑（frpc）配置生成</h3>
+  <div class="row">
+    <div>
+      <label for="p_name">代理名称</label>
+      <input id="p_name" value="mc">
+    </div>
+    <div>
+      <label for="p_type">协议</label>
+      <select id="p_type"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="p_local">家庭电脑服务端口</label>
+      <input id="p_local" value="25565">
+    </div>
+    <div>
+      <label for="p_remote">服务器对外端口</label>
+      <input id="p_remote" value="25565">
+    </div>
+  </div>
+  <button onclick="downloadCfg()" style="margin-top:12px">下载 frpc.toml</button>
+  <p class="muted">在家庭电脑上运行：<code>frpc -c frpc.toml</code></p>
+  <pre id="cfg">填写上方参数后点击下载</pre>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (!window.EasyServerPlugin) {
+    document.body.innerHTML = '<p>Host SDK 未加载（请通过面板访问）</p>';
+    return;
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 相对路径请求：代理会剥离 /api/plugins/<id> 前缀，页面不依赖自身插件名。
+  function api(path, opts) {
+    return fetch('./api/' + path, opts).then(function (r) {
+      if (!r.ok) {
+        return r.json().then(function (d) { throw new Error(d.error || 'HTTP ' + r.status); }, function () { throw new Error('HTTP ' + r.status); });
+      }
+      return r.json();
+    });
+  }
+
+  // frpc-config 返回纯文本 TOML，单独走文本解析。
+  function raw(path, opts) {
+    return fetch('./api/' + path, opts).then(function (r) {
+      if (!r.ok) {
+        return r.json().then(function (d) { throw new Error(d.error || 'HTTP ' + r.status); }, function () { throw new Error('HTTP ' + r.status); });
+      }
+      return r.text();
+    });
+  }
+
+  function setStatus(html) { $('status').innerHTML = html; }
+
+  function loadStatus() {
+    api('status').then(function (d) {
+      setStatus(d.running
+        ? '<span class="ok">frps 运行中，控制端口 ' + d.bind_port + '</span>'
+        : '<span class="bad">frps 未运行</span>');
+      $('bind_port').value = d.bind_port || '';
+      $('server_addr').value = d.server_addr || '';
+    }).catch(function (e) {
+      setStatus('<span class="bad">加载失败: ' + e.message + '</span>');
+    });
+  }
+
+  function save() {
+    api('settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bind_port: $('bind_port').value.trim(),
+        server_addr: $('server_addr').value.trim()
+      })
+    }).then(function (d) {
+      alert(d.message || '已保存');
+      loadStatus();
+    }).catch(function (e) {
+      alert('保存失败: ' + (e.message || e));
+    });
+  }
+
+  function restart() {
+    api('restart', { method: 'POST' }).then(function (d) {
+      alert(d.message || d.error || '已重启');
+      loadStatus();
+    }).catch(function (e) {
+      alert('重启失败: ' + (e.message || e));
+    });
+  }
+
+  function downloadCfg() {
+    var q = new URLSearchParams({
+      name: $('p_name').value.trim(),
+      type: $('p_type').value,
+      local_port: $('p_local').value.trim(),
+      remote_port: $('p_remote').value.trim()
+    });
+    raw('frpc-config?' + q.toString()).then(function (t) {
+      $('cfg').textContent = t;
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([t], { type: 'text/plain;charset=utf-8' }));
+      a.download = 'frpc.toml';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    }).catch(function (e) {
+      $('cfg').textContent = '获取失败: ' + (e.message || e);
+    });
+  }
+
+  window.save = save;
+  window.restart = restart;
+  window.downloadCfg = downloadCfg;
+  loadStatus();
+})();
+</script>
+</body>
+</html>
