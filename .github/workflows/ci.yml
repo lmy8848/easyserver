@@ -55,6 +55,16 @@ jobs:
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
           CGO_ENABLED=0 go build -ldflags "-X easyserver/internal/infra.Version=${VERSION}" -o easyserver ./cmd/server
 
+      # 插件是独立 Go module（plugins/*/），不入主模块 go test ./... 范围，
+      # 单独构建保证插件代码每次 push 都被编译验证。
+      - name: Build plugins (独立 module)
+        run: |
+          for p in plugins/*/; do
+            [ -f "$p/go.mod" ] || continue
+            echo "==> building $p"
+            (cd "$p" && go build ./...)
+          done
+
   frontend:
     name: Build Frontend
     runs-on: ubuntu-latest

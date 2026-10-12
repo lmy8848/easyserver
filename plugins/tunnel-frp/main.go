@@ -5,107 +5,144 @@
 // 端口后由 frps 转发进隧道。TCP/UDP 均支持。
 //
 // 配置经 Host API KV 持久化：bind_port（frps 控制端口，默认 7000）、
-// server_addr（生成 frpc 配置时对外展示的地址）。
+// server_addr（生成 frpc 配置时对外展示的地址）、auth_token（首次自动生成）。
 package main
 
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/lmy8848/easyserver-plugin-sdk-go"
 
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 )
 
+//go:embed web
+var webFS embed.FS
+
 const (
 	cfgBindPort  = "bind_port"
 	cfgServerArg = "server_addr"
-	defaultPort  = "7000"
+	defaultPort  = 7000
 )
 
 var (
-	mgr    = NewFRPSManager()
-	host   = sdk.NewHostClient()
-	plugin string
+	mgr      = NewFRPSManager()
+	host     = sdk.NewHostClient()
+	cfgCache = &settingsCache{}
 )
-
-func main() {
-	plugin = os.Getenv(sdk.EnvPluginID)
-	if plugin == "" {
-		plugin = "tunnel-frp"
-	}
-
-	srv := sdk.NewServer(sdk.Config{SocketPath: "tunnel-frp.sock"})
-	registerRoutes(srv)
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	// 启动即拉起 frps（配置缺失时用默认值）
-	if err := startFRPS(ctx); err != nil {
-		host.Log(ctx, "frps 启动失败: "+err.Error())
-	}
-
-	go func() {
-		<-ctx.Done()
-		mgr.Stop()
-		_ = srv.Close()
-	}()
-
-	if err := srv.Serve(); err != nil {
-		host.Log(context.Background(), "插件服务退出: "+err.Error())
-		os.Exit(1)
-	}
-}
 
 // ---- 配置 ----
 
-func getSettings(ctx context.Context) (bindPort, serverAddr, token string, err error) {
+// settingsCache 缓存面板 KV 配置（短 TTL），避免每个请求都经 Host API 全量拉取；
+// 插件自身写入后调用 invalidate 主动失效。
+type settingsCache struct {
+	mu   sync.Mutex
+	at   time.Time
+	data map[string]string
+}
+
+func (c *settingsCache) load(ctx context.Context) (map[string]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.data != nil && time.Since(c.at) < 5*time.Second {
+		return c.data, nil
+	}
 	all, err := host.ConfigAll(ctx)
 	if err != nil {
-		return "", "", "", err
+		return nil, err
 	}
-	bindPort = all[cfgBindPort]
-	if bindPort == "" {
-		bindPort = defaultPort
-	}
-	serverAddr = all[cfgServerArg]
-	token = all["auth_token"]
-	if token == "" {
-		token = generateToken()
-		_ = host.ConfigSet(ctx, "auth_token", token)
-	}
-	return bindPort, serverAddr, token, nil
+	c.data = all
+	c.at = time.Now()
+	return all, nil
 }
 
-func generateToken() string {
+func (c *settingsCache) invalidate() {
+	c.mu.Lock()
+	c.data = nil
+	c.mu.Unlock()
+}
+
+// settings 是插件运行配置的解析结果。
+type settings struct {
+	bindPort   int    // frps 控制端口
+	serverAddr string // 生成 frpc 配置时的对外地址
+	token      string // frp 认证 token（自动生成并持久化）
+}
+
+// getSettings 读取并解析配置；auth_token 缺失时生成并持久化（fail-fast，失败即报错）。
+func getSettings(ctx context.Context) (*settings, error) {
+	all, err := cfgCache.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s := &settings{serverAddr: all[cfgServerArg], token: all["auth_token"]}
+	if raw := strings.TrimSpace(all[cfgBindPort]); raw != "" {
+		n, err := parsePort(raw)
+		if err != nil {
+			return nil, fmt.Errorf("bind_port 无效: %v", err)
+		}
+		s.bindPort = n
+	} else {
+		s.bindPort = defaultPort
+	}
+	if s.token == "" {
+		t, err := generateToken()
+		if err != nil {
+			return nil, fmt.Errorf("生成 auth_token 失败: %w", err)
+		}
+		if err := host.ConfigSet(ctx, "auth_token", t); err != nil {
+			return nil, fmt.Errorf("持久化 auth_token 失败: %w", err)
+		}
+		s.token = t
+		cfgCache.invalidate()
+	}
+	return s, nil
+}
+
+// generateToken 生成 24 字节随机 hex token；随机源失败直接报错，不用兜底字符串。
+func generateToken() (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
-		return "easyserver-frp-token"
+		return "", err
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
-// startFRPS 以当前配置启动嵌入 frps。
+// parsePort 解析 1-65535 的端口。
+func parsePort(s string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 1 || n > 65535 {
+		return 0, fmt.Errorf("端口 %q 无效（需 1-65535 的整数）", s)
+	}
+	return n, nil
+}
+
+// startFRPS 以当前配置启动（或重启）嵌入 frps。
 func startFRPS(ctx context.Context) error {
-	bindPort, _, token, err := getSettings(ctx)
+	s, err := getSettings(ctx)
 	if err != nil {
 		return err
 	}
-	port := 0
-	_, _ = fmt.Sscanf(bindPort, "%d", &port)
 	cfg := v1.ServerConfig{
 		BindAddr: "0.0.0.0",
-		BindPort: port,
+		BindPort: s.bindPort,
 	}
-	cfg.Auth.Token = token
+	cfg.Auth.Token = s.token
 	return mgr.Start(ctx, cfg)
 }
 
@@ -127,24 +164,17 @@ func writeJSON(w http.ResponseWriter, code int, body any) {
 
 func statusHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	bindPort, serverAddr, token, err := getSettings(ctx)
+	s, err := getSettings(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"running":     mgr.Running(),
-		"bind_port":   bindPort,
-		"server_addr": serverAddr,
-		"token_masked": mask(token),
+		"running":      mgr.Running(),
+		"bind_port":    s.bindPort,
+		"server_addr":  s.serverAddr,
+		"token_masked": mask(s.token),
 	})
-}
-
-func mask(s string) string {
-	if len(s) <= 8 {
-		return "****"
-	}
-	return s[:4] + "****" + s[len(s)-4:]
 }
 
 func settingsHandler(w http.ResponseWriter, r *http.Request) {
@@ -160,18 +190,23 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体无效"})
 		return
 	}
-	if req.BindPort != "" {
-		if err := host.ConfigSet(r.Context(), cfgBindPort, req.BindPort); err != nil {
+	if v := strings.TrimSpace(req.BindPort); v != "" {
+		if _, err := parsePort(v); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := host.ConfigSet(r.Context(), cfgBindPort, v); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 	}
-	if req.ServerAddr != "" {
-		if err := host.ConfigSet(r.Context(), cfgServerArg, req.ServerAddr); err != nil {
+	if v := strings.TrimSpace(req.ServerAddr); v != "" {
+		if err := host.ConfigSet(r.Context(), cfgServerArg, v); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 	}
+	cfgCache.invalidate()
 	if err := startFRPS(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -180,47 +215,66 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "配置已保存，frps 已重启"})
 }
 
+var proxyNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
+
+// validateFrpcParams 校验并解析 frpc 配置生成参数，非法输入一律拒绝。
+func validateFrpcParams(q url.Values) (name, proto string, localPort, remotePort int, err error) {
+	name = q.Get("name")
+	if name == "" {
+		name = "mc"
+	}
+	if !proxyNameRe.MatchString(name) {
+		return "", "", 0, 0, fmt.Errorf("代理名称无效：仅字母/数字/下划线/横线，≤32 字符")
+	}
+	proto = q.Get("type")
+	if proto == "" {
+		proto = "tcp"
+	}
+	if proto != "tcp" && proto != "udp" {
+		return "", "", 0, 0, fmt.Errorf("协议 %q 无效（仅支持 tcp/udp）", proto)
+	}
+	remotePort, err = parsePort(q.Get("remote_port"))
+	if err != nil {
+		return "", "", 0, 0, fmt.Errorf("对外端口无效: %v", err)
+	}
+	if q.Get("local_port") == "" {
+		localPort = remotePort
+	} else if localPort, err = parsePort(q.Get("local_port")); err != nil {
+		return "", "", 0, 0, fmt.Errorf("本地端口无效: %v", err)
+	}
+	return name, proto, localPort, remotePort, nil
+}
+
 func frpcConfigHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	bindPort, serverAddr, token, err := getSettings(ctx)
+	s, err := getSettings(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if serverAddr == "" {
+	if s.serverAddr == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请先在设置中填写对外地址（服务器公网 IP 或域名）"})
 		return
 	}
-	remotePort := r.URL.Query().Get("remote_port")
-	if remotePort == "" {
-		remotePort = "25565"
-	}
-	name := r.URL.Query().Get("name")
-	if name == "" {
-		name = "mc"
-	}
-	localPort := r.URL.Query().Get("local_port")
-	if localPort == "" {
-		localPort = remotePort
-	}
-	proto := r.URL.Query().Get("type")
-	if proto == "" {
-		proto = "tcp"
+	name, proto, localPort, remotePort, err := validateFrpcParams(r.URL.Query())
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
 	cfg := fmt.Sprintf(`# EasyServer 内网穿透客户端配置（tunnel-frp 插件生成）
 # 在家庭电脑运行： frpc -c frpc.toml
 serverAddr = "%s"
-serverPort = %s
+serverPort = %d
 auth.token = "%s"
 
 [[proxies]]
 name = "%s"
 type = "%s"
 localIP = "127.0.0.1"
-localPort = %s
-remotePort = %s
-`, serverAddr, bindPort, token, name, proto, localPort, remotePort)
+localPort = %d
+remotePort = %d
+`, s.serverAddr, s.bindPort, s.token, name, proto, localPort, remotePort)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="frpc.toml"`)
@@ -241,92 +295,42 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func uiHandler(w http.ResponseWriter, _ *http.Request) {
-	const page = `<!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<title>内网穿透</title>
-<script src="/host-sdk.js"></script>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #222; }
-  .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-  h2 { margin-top: 0; }
-  input { width: 100%; padding: 6px; margin: 4px 0 12px; box-sizing: border-box; }
-  button { padding: 8px 16px; cursor: pointer; }
-  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; }
-  .ok { color: #16a34a; } .bad { color: #dc2626; }
-</style>
-</head>
-<body>
-<h2>内网穿透（frp）</h2>
-<div class="card">
-  <h3>服务状态</h3>
-  <div id="status">加载中…</div>
-  <button onclick="doRestart()">重启 frps</button>
-</div>
-<div class="card">
-  <h3>服务端设置</h3>
-  <label>frps 控制端口</label><input id="bind_port">
-  <label>对外地址（生成客户端配置用）</label><input id="server_addr" placeholder="服务器的公网 IP 或域名">
-  <button onclick="doSave()">保存并重启</button>
-</div>
-<div class="card">
-  <h3>家庭电脑（frpc）配置生成</h3>
-  <label>代理名称</label><input id="p_name" value="mc">
-  <label>协议</label>
-  <select id="p_type"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
-  <label>家庭电脑服务端口</label><input id="p_local" value="25565">
-  <label>服务器对外端口</label><input id="p_remote" value="25565">
-  <button onclick="downloadCfg()">下载 frpc.toml</button>
-  <pre id="cfg">填写上方参数后点击下载</pre>
-</div>
-<script>
-if (window.EasyServerPlugin) {
-  var s = window.EasyServerPlugin;
-  function loadStatus() {
-    fetch('/api/plugins/tunnel-frp/api/status').then(function (r) { return r.json(); }).then(function (d) {
-      if (!d) return;
-      document.getElementById('status').innerHTML = d.running
-        ? '<span class="ok">frps 运行中，控制端口 ' + d.bind_port + '</span>'
-        : '<span class="bad">frps 未运行</span>';
-      document.getElementById('bind_port').value = d.bind_port || '';
-      document.getElementById('server_addr').value = d.server_addr || '';
-    }).catch(function (e) { document.getElementById('status').textContent = '加载失败: ' + e.message; });
-  }
-  function doSave() {
-    var b = document.getElementById('bind_port').value;
-    var a = document.getElementById('server_addr').value;
-    fetch('/api/plugins/tunnel-frp/api/settings', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bind_port: b, server_addr: a })
-    }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.error) throw new Error(d.error);
-      loadStatus(); alert(d.message || '已保存');
-    }).catch(function (e) { alert('保存失败: ' + (e.message || e)); });
-  }
-  function doRestart() {
-    fetch('/api/plugins/tunnel-frp/api/restart', { method: 'POST' })
-      .then(function (r) { return r.json(); })
-      .then(function (d) { alert(d.message || d.error); loadStatus(); });
-  }
-  function downloadCfg() {
-    var n = document.getElementById('p_name').value;
-    var t = document.getElementById('p_type').value;
-    var lp = document.getElementById('p_local').value;
-    var rp = document.getElementById('p_remote').value;
-    fetch('/api/plugins/tunnel-frp/api/frpc-config?name=' + encodeURIComponent(n) +
-      '&type=' + t + '&local_port=' + lp + '&remote_port=' + rp)
-      .then(function (r) { return r.text(); })
-      .then(function (t2) { document.getElementById('cfg').textContent = t2; });
-  }
-  window.doSave = doSave; window.doRestart = doRestart; window.downloadCfg = downloadCfg;
-  loadStatus();
-} else {
-  document.body.innerHTML = '<p>Host SDK 未加载（请通过面板访问）</p>';
-}
-</script>
-</body>
-</html>`
+	data, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		http.Error(w, "页面资源缺失", http.StatusNotFound)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(page))
+	_, _ = w.Write(data)
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// 启动即拉起 frps（配置缺失时用默认值）
+	if err := startFRPS(ctx); err != nil {
+		_ = host.Log(ctx, "frps 启动失败: "+err.Error())
+	}
+
+	srv := sdk.NewServer(sdk.Config{SocketPath: "tunnel-frp.sock"})
+	registerRoutes(srv)
+
+	go func() {
+		<-ctx.Done()
+		mgr.Stop()
+		_ = srv.Close()
+	}()
+
+	if err := srv.Serve(); err != nil {
+		_ = host.Log(context.Background(), "插件服务退出: "+err.Error())
+		os.Exit(1)
+	}
+}
+
+func mask(s string) string {
+	if len(s) <= 8 {
+		return "****"
+	}
+	return s[:4] + "****" + s[len(s)-4:]
 }

@@ -12,11 +12,16 @@ import (
 
 // FRPSManager 管理嵌入的 frps 服务实例（文档：插件作为独立进程，
 // frps 作为其内部组件随插件生命周期启停）。
+//
+// 生命周期由管理器自有 context 驱动，不继承调用方（如 HTTP 请求）的
+// context——否则"保存并重启"这类经面板代理发起的请求一旦结束，服务会
+// 随请求 ctx 被误杀。
 type FRPSManager struct {
 	mu      sync.Mutex
 	service *server.Service
-	running bool
+	cancel  context.CancelFunc
 	cfg     v1.ServerConfig
+	running bool
 }
 
 func NewFRPSManager() *FRPSManager { return &FRPSManager{} }
@@ -28,47 +33,59 @@ func (m *FRPSManager) Running() bool {
 	return m.running
 }
 
-// Start 以给定配置启动嵌入 frps（已在运行则先停止）。
-func (m *FRPSManager) Start(ctx context.Context, cfg v1.ServerConfig) error {
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return fmt.Errorf("frps 已在运行")
-	}
-	m.cfg = cfg
-	m.mu.Unlock()
-
+// Start 启动 frps；已有实例则原子替换（停旧启新，改配置即重启）。
+// ctx 仅用于调用方等待，服务本体运行在管理器自有生命周期上。
+func (m *FRPSManager) Start(_ context.Context, cfg v1.ServerConfig) error {
 	svc, err := server.NewService(&cfg)
 	if err != nil {
 		return fmt.Errorf("frps 初始化失败: %w", err)
 	}
+	runCtx, cancel := context.WithCancel(context.Background())
+
 	m.mu.Lock()
+	oldSvc, oldCancel := m.service, m.cancel
 	m.service = svc
+	m.cancel = cancel
+	m.cfg = cfg
 	m.running = true
 	m.mu.Unlock()
 
+	// 替换：先停旧实例，释放端口后再由新实例接管
+	if oldCancel != nil {
+		oldCancel()
+	}
+	if oldSvc != nil {
+		_ = oldSvc.Close()
+	}
+
 	go func() {
-		defer m.markStopped()
-		svc.Run(ctx)
-		log.Printf("tunnel-frp: frps 退出")
+		svc.Run(runCtx)
+		m.mu.Lock()
+		current := m.service == svc // 仅最新实例的退出才更新状态
+		if current {
+			m.service = nil
+			m.cancel = nil
+			m.running = false
+		}
+		m.mu.Unlock()
+		if current {
+			log.Printf("tunnel-frp: frps 已停止")
+		}
 	}()
 	return nil
-}
-
-func (m *FRPSManager) markStopped() {
-	m.mu.Lock()
-	m.running = false
-	m.service = nil
-	m.mu.Unlock()
 }
 
 // Stop 停止 frps。
 func (m *FRPSManager) Stop() {
 	m.mu.Lock()
-	svc := m.service
-	m.running = false
+	svc, cancel := m.service, m.cancel
 	m.service = nil
+	m.cancel = nil
+	m.running = false
 	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if svc != nil {
 		_ = svc.Close()
 	}

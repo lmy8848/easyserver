@@ -18,9 +18,7 @@ health:
 
 permissions:
   - config.readwrite
-  - exec.restricted
   - log.write
-  - notify.send
   - audit.write
 
 contributions:
@@ -30,5 +28,3 @@ contributions:
     - { id: main, path: /plugins/tunnel-frp }
   routes:
     - { id: api, prefix: /api/plugins/tunnel-frp }
-  settings:
-    - { id: default, title: 内网穿透设置, config_schema: { type: object, properties: { bind_port: { type: string, title: frps 控制端口 }, server_addr: { type: string, title: 对外地址 } } } }
