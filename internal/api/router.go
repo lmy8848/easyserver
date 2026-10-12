@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -64,6 +67,16 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	// 启动快照：一次性初始化参数（数据库路径、base_path、密钥等）从此取。
 	cfg := store.Get()
+
+	// 面板服务 token（panel.api.proxy 自请求用）：进程内随机生成、不持久化，
+	// 仅 Host API 自请求时携带，对外不暴露。
+	panelServiceToken := generateServiceToken()
+	// 面板自身地址（插件 Host API 自请求用）：loopback + 实际监听端口
+	panelScheme := "http"
+	if cfg.Server.TLS.Enabled {
+		panelScheme = "https"
+	}
+	panelBaseURL := fmt.Sprintf("%s://127.0.0.1:%d", panelScheme, cfg.Server.Port)
 
 	// ── Infrastructure ──
 
@@ -183,7 +196,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	// ── HTTP Engine + Routes ──
 
 	e := newEngine(cfg)
-	g := newGroups(e, cfg, authSvc, sessionSvc, auditSvc)
+	g := newGroups(e, cfg, authSvc, sessionSvc, auditSvc, panelServiceToken)
 
 	// Domain route registration
 	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout.Duration(), cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval.Duration(), cfg)
@@ -223,6 +236,12 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		},
 		// 暴露端口访问控制：插件经 Host API port.expose/revoke 落到防火墙 PortACL
 		PortExposer: portACLExposerAdapter{svc: portACLService},
+		// 面板服务级 API 代理（panel.api.proxy 只读白名单）
+		PanelAPI: plugin.PanelAPIConfig{
+			BaseURL: panelBaseURL,
+			Token:   panelServiceToken,
+			Domain:  cfg.Server.Domain,
+		},
 	})
 	plugin.RegisterRoutes(g.Protected, pluginMgr)
 	// 插件业务代理：NoRoute 兜底 + JWT 认证（与 protected 组同策略）
@@ -346,7 +365,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 }
 
 // newGroups creates the authenticated route groups.
-func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, sessionSvc *auth.SessionService, auditSvc *audit.Service) *routeGroups {
+func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, sessionSvc *auth.SessionService, auditSvc *audit.Service, serviceToken string) *routeGroups {
 	maxUploadSize := cfg.Server.MaxUploadSize
 	if maxUploadSize <= 0 {
 		maxUploadSize = 512 << 20
@@ -364,6 +383,8 @@ func newGroups(e *gin.Engine, cfg *config.Config, authSvc *auth.AuthService, ses
 
 	protected := api.Group("")
 	protected.Use(
+		// 服务级调用（panel.api.proxy 自请求）优先：命中服务 token 则跳过用户 JWT
+		middleware.ServiceTokenMiddleware(serviceToken),
 		middleware.JWTMiddleware(cfg.Auth.JWTSecret, sessionValidator),
 		middleware.SessionHeartbeatMiddleware(sessionSvc.UpdateActivity, cfg.Auth.SessionTimeout.Duration()),
 		middleware.AuditMiddleware(auditSvc),
@@ -420,4 +441,14 @@ func (a portACLExposerAdapter) List(ctx context.Context) ([]plugin.PortACLInfo, 
 		})
 	}
 	return out, nil
+}
+
+// generateServiceToken 生成面板服务 token（32 字节随机 hex），
+// 供插件 Host API panel.api.proxy 自请求面板业务 API 时鉴权。
+func generateServiceToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("generate service token: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
