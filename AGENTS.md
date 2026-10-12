@@ -62,18 +62,3 @@ Issues 与 PRD 存于 GitHub Issues，用 `gh` CLI 操作。See `docs/agents/iss
 ### Domain docs
 
 单上下文：根目录一份 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
-
-### Frontend theming
-
-前端亮/暗双主题规范：CSS 变量 + antd token，**禁止内联硬编码颜色**破坏任一主题对比度。
-改界面、写新组件前必读。See `docs/agents/frontend-theming.md`.
-
-### Plugin development
-
-插件开发规范：独立 Go module、最小权限、iframe UI 的 API 基址约定（location.pathname）、
-日志约定、统一 API 响应格式。改插件基座或开发新插件前必读。See `docs/agents/plugin-dev.md`.
-
-### Deployment
-
-部署流程规范：git archive → staging 构建 → 替换二进制，go1.26.9，前端本地构建、
-后端/插件服务器构建。See `docs/agents/deployment.md`.
