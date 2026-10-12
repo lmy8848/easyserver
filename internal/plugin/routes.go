@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"easyserver/internal/httpx"
 	"easyserver/internal/httpx/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -76,7 +77,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			return
 		}
 		middleware.AuditSummary(c, "安装插件 "+mft.Name+"@"+mft.Version)
-		c.JSON(http.StatusOK, gin.H{"message": "插件已安装", "plugin": mft.Name, "version": mft.Version})
+		httpx.Success(c, gin.H{"message": "插件已安装", "plugin": mft.Name, "version": mft.Version})
 	})
 
 	protected.GET("/plugins", func(c *gin.Context) {
@@ -85,42 +86,42 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": list})
+		httpx.Success(c, gin.H{"items": list})
 	})
 	protected.POST("/plugins/:id/start", func(c *gin.Context) {
 		if err := m.Start(c.Request.Context(), c.Param("id")); err != nil {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "插件已启动"})
+		httpx.Success(c, gin.H{"message": "插件已启动"})
 	})
 	protected.POST("/plugins/:id/stop", func(c *gin.Context) {
 		if err := m.Stop(c.Request.Context(), c.Param("id")); err != nil {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "插件已停止"})
+		httpx.Success(c, gin.H{"message": "插件已停止"})
 	})
 	protected.POST("/plugins/:id/enable", func(c *gin.Context) {
 		if err := m.Start(c.Request.Context(), c.Param("id")); err != nil {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "插件已启用"})
+		httpx.Success(c, gin.H{"message": "插件已启用"})
 	})
 	protected.POST("/plugins/:id/disable", func(c *gin.Context) {
 		if err := m.Disable(c.Request.Context(), c.Param("id")); err != nil {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "插件已禁用"})
+		httpx.Success(c, gin.H{"message": "插件已禁用"})
 	})
 	protected.DELETE("/plugins/:id", func(c *gin.Context) {
 		if err := m.Remove(c.Request.Context(), c.Param("id")); err != nil {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "插件已卸载"})
+		httpx.Success(c, gin.H{"message": "插件已卸载"})
 	})
 	// 聚合小部件下发：仪表盘消费（启用插件的 widgets contribution）
 	protected.GET("/plugins/widgets", func(c *gin.Context) {
@@ -145,7 +146,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 				})
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		httpx.Success(c, gin.H{"items": items})
 	})
 
 	// 聚合菜单下发：前端动态侧边栏消费（启用插件的 menus contribution）
@@ -171,7 +172,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 				})
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		httpx.Success(c, gin.H{"items": items})
 	})
 
 	// 插件日志（面板侧 /var/log/easyserver/plugins/<id>.log，tail 查看）
@@ -186,7 +187,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		path := filepath.Join("/var/log/easyserver/plugins", name+".log")
 		data, err := os.ReadFile(path)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{"log": ""})
+			httpx.Success(c, gin.H{"log": ""})
 			return
 		}
 		// 取尾部 lines 行
@@ -195,7 +196,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		if len(parts) > lines {
 			parts = parts[len(parts)-lines:]
 		}
-		c.JSON(http.StatusOK, gin.H{"log": strings.Join(parts, "\n")})
+		httpx.Success(c, gin.H{"log": strings.Join(parts, "\n")})
 	})
 
 	// 插件详情（manifest + 贡献点清单，供管理页展示）
@@ -211,7 +212,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
+		httpx.Success(c, gin.H{
 			"record":        rec,
 			"manifest":      mft,
 			"contributions": mft.Contributions,
@@ -225,7 +226,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"config": cfg})
+		httpx.Success(c, gin.H{"config": cfg})
 	})
 	protected.PUT("/plugins/:id/config", func(c *gin.Context) {
 		var body map[string]string
@@ -237,7 +238,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "配置已保存"})
+		httpx.Success(c, gin.H{"message": "配置已保存"})
 	})
 
 	protected.GET("/plugins/:id/manifest", func(c *gin.Context) {
@@ -246,7 +247,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, mft)
+		httpx.Success(c, mft)
 	})
 
 	// 前端动态菜单下发（menus contribution）
@@ -256,6 +257,6 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": mft.Contributions.Menus})
+		httpx.Success(c, gin.H{"items": mft.Contributions.Menus})
 	})
 }
