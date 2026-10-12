@@ -263,7 +263,9 @@ export default function Layout() {
     }
   };
 
-  const currentTitle = PAGE_TITLES[location.pathname] || '未知页面';
+  // 插件动态页面：/plugins/:id 不在精确映射里，显示"插件页面"
+  const currentTitle = PAGE_TITLES[location.pathname]
+    || (location.pathname.startsWith('/plugins/') ? '插件页面' : '未知页面');
 
   return (
     <div className="app-layout">
