@@ -300,6 +300,10 @@ type routeGroups struct {
 func newEngine(cfg *config.Config) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
+	// 禁用尾斜杠 301 重定向：插件代理路径 /api/plugins/<id>/（带尾斜杠）若被
+	// redirect 到无尾斜杠，会在 CF 下触发二次连接导致 CF 502；NoRoute 兜底
+	// 已能处理两种形态（代理内剥前缀）
+	e.RedirectTrailingSlash = false
 	e.MaxMultipartMemory = 64 << 20
 
 	trustedProxies := cfg.Server.TrustedProxies

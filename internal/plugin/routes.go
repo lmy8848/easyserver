@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,7 +42,6 @@ func NewProxyHandler(m *Manager) gin.HandlerFunc {
 			return
 		}
 		sockPath, timeout, ok := m.sup.RunningEndpoint(name)
-		log.Printf("plugin[proxy]: path=%s name=%s sock=%s ok=%v timeout=%s", c.Request.URL.Path, name, sockPath, ok, timeout)
 		if !ok {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "插件未运行"})
 			return
