@@ -91,7 +91,7 @@
   }
 
   function api(path, opts) {
-    return fetch(apiBase() + path, opts).then(function (r) {
+    return fetch(apiBase() + 'api/' + path, opts).then(function (r) {
       if (!r.ok) {
         return r.json().then(function (d) { throw new Error(d.error || 'HTTP ' + r.status); }, function () { throw new Error('HTTP ' + r.status); });
       }
@@ -101,7 +101,7 @@
 
   // frpc-config 返回纯文本 TOML，单独走文本解析。
   function raw(path, opts) {
-    return fetch(apiBase() + path, opts).then(function (r) {
+    return fetch(apiBase() + 'api/' + path, opts).then(function (r) {
       if (!r.ok) {
         return r.json().then(function (d) { throw new Error(d.error || 'HTTP ' + r.status); }, function () { throw new Error('HTTP ' + r.status); });
       }
