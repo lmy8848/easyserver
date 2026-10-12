@@ -29,7 +29,8 @@ import (
 // ============================================================================
 
 const (
-	pfNatTable      = "inet easyserver_nat"
+	pfNatFamily     = "inet"
+	pfNatTable      = "easyserver_nat"
 	pfPrerouting    = "prerouting"
 	pfPostrouting   = "postrouting"
 	pfCommentPrefix = "easyserver-pf"
@@ -318,13 +319,13 @@ func (s *PortForwardService) ReapplyAll(ctx context.Context) error {
 
 // ensureNatTable 确保 nat 表与 prerouting/postrouting 链存在。
 func (s *PortForwardService) ensureNatTable(ctx context.Context) error {
-	if _, err := execNft(ctx, "list", "table", pfNatTable); err == nil {
+	if _, err := execNft(ctx, "list", "table", pfNatFamily, pfNatTable); err == nil {
 		return nil
 	}
 	cmds := [][]string{
-		{"add", "table", pfNatTable},
-		{"add", "chain", pfNatTable, pfPrerouting, "{", "type", "nat", "hook", "prerouting", "priority", "dstnat", ";", "}"},
-		{"add", "chain", pfNatTable, pfPostrouting, "{", "type", "nat", "hook", "postrouting", "priority", "srcnat", ";", "}"},
+		{"add", "table", pfNatFamily, pfNatTable},
+		{"add", "chain", pfNatFamily, pfNatTable, pfPrerouting, "{", "type", "nat", "hook", "prerouting", "priority", "dstnat", ";", "}"},
+		{"add", "chain", pfNatFamily, pfNatTable, pfPostrouting, "{", "type", "nat", "hook", "postrouting", "priority", "srcnat", ";", "}"},
 	}
 	for _, args := range cmds {
 		if out, err := execNft(ctx, args...); err != nil {
@@ -371,7 +372,7 @@ func (s *PortForwardService) applyForward(ctx context.Context, rule *PortForward
 	comment := "\"" + pfCommentPrefix + "-" + strconv.FormatInt(rule.ID, 10) + "\""
 
 	// 1) prerouting DNAT
-	args := []string{"add", "rule", pfNatTable, pfPrerouting}
+	args := []string{"add", "rule", pfNatFamily, pfNatTable, pfPrerouting}
 	if rule.Interface != "" {
 		args = append(args, "iifname", rule.Interface)
 	}
@@ -394,7 +395,7 @@ func (s *PortForwardService) applyForward(ctx context.Context, rule *PortForward
 	// 3) postrouting masquerade（仅目标是内网地址：内网客户端经公网 IP 访问的回程）
 	if destIsPrivate(rule.DestIP) {
 		masqComment := "\"" + pfCommentPrefix + "-masq-" + strconv.FormatInt(rule.ID, 10) + "\""
-		args = []string{"add", "rule", pfNatTable, pfPostrouting, "ip", "daddr", rule.DestIP, proto, "dport", rule.DestPortOrListen(), "masquerade", "comment", masqComment}
+		args = []string{"add", "rule", pfNatFamily, pfNatTable, pfPostrouting, "ip", "daddr", rule.DestIP, proto, "dport", rule.DestPortOrListen(), "masquerade", "comment", masqComment}
 		if out, err := execNft(ctx, args...); err != nil {
 			return fmt.Errorf("nft masquerade error: %s", out)
 		}
@@ -420,15 +421,15 @@ func destIsPrivate(ipStr string) bool {
 // 标签形如 easyserver-pf-<id>"（nft 注释字面量含引号），避免 -1 误伤 -12。
 func (s *PortForwardService) removeForward(ctx context.Context, id int64) {
 	tag := pfCommentPrefix + "-" + strconv.FormatInt(id, 10) + "\""
-	type chainRef struct{ table, chain string }
+	type chainRef struct{ family, table, chain string }
 	chains := []chainRef{
-		{pfNatTable, pfPrerouting},
-		{pfNatTable, pfPostrouting},
-		{"inet filter", "FORWARD"},
+		{pfNatFamily, pfNatTable, pfPrerouting},
+		{pfNatFamily, pfNatTable, pfPostrouting},
+		{"inet", "filter", "FORWARD"},
 	}
 	handleRe := regexp.MustCompile(`# handle (\d+)`)
 	for _, c := range chains {
-		out, err := execNft(ctx, "-a", "list", "chain", c.table, c.chain)
+		out, err := execNft(ctx, "-a", "list", "chain", c.family, c.table, c.chain)
 		if err != nil {
 			continue // 链/表不存在即无需清理
 		}
@@ -437,7 +438,8 @@ func (s *PortForwardService) removeForward(ctx context.Context, id int64) {
 				continue
 			}
 			if m := handleRe.FindStringSubmatch(line); m != nil {
-				_, _ = execNft(ctx, "delete", "rule", c.table, c.chain, m[1])
+				// nft delete rule 必须带 handle 关键字
+				_, _ = execNft(ctx, "delete", "rule", c.family, c.table, c.chain, "handle", m[1])
 			}
 		}
 	}
@@ -446,7 +448,7 @@ func (s *PortForwardService) removeForward(ctx context.Context, id int64) {
 // nftCounters 从 prerouting 规则中提取每条转发的命中计数。
 func (s *PortForwardService) nftCounters(ctx context.Context) map[int64]pfCounter {
 	counters := map[int64]pfCounter{}
-	out, err := execNft(ctx, "-a", "list", "chain", pfNatTable, pfPrerouting)
+	out, err := execNft(ctx, "-a", "list", "chain", pfNatFamily, pfNatTable, pfPrerouting)
 	if err != nil {
 		return counters
 	}
