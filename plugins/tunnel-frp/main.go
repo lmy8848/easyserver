@@ -14,6 +14,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -26,9 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/lmy8848/easyserver-plugin-sdk-go"
-
 	v1 "github.com/fatedier/frp/pkg/config/v1"
+	sdk "github.com/lmy8848/easyserver-plugin-sdk-go"
 )
 
 //go:embed web
@@ -94,7 +94,7 @@ func getSettings(ctx context.Context) (*settings, error) {
 	if raw := strings.TrimSpace(all[cfgBindPort]); raw != "" {
 		n, err := parsePort(raw)
 		if err != nil {
-			return nil, fmt.Errorf("bind_port 无效: %v", err)
+			return nil, fmt.Errorf("bind_port 无效: %w", err)
 		}
 		s.bindPort = n
 	} else {
@@ -143,7 +143,8 @@ func startFRPS(ctx context.Context) error {
 		BindPort: s.bindPort,
 	}
 	cfg.Auth.Token = s.token
-	return mgr.Start(ctx, cfg)
+	// frps 生命周期由管理器自有 context 管理，不随请求 ctx 结束
+	return mgr.Start(cfg) //nolint:contextcheck
 }
 
 // ---- 路由 ----
@@ -212,6 +213,7 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = host.Audit(r.Context(), "frps 配置已更新并重启")
+	_ = host.Log(r.Context(), "frps 配置已更新并重启")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "配置已保存，frps 已重启"})
 }
 
@@ -224,7 +226,7 @@ func validateFrpcParams(q url.Values) (name, proto string, localPort, remotePort
 		name = "mc"
 	}
 	if !proxyNameRe.MatchString(name) {
-		return "", "", 0, 0, fmt.Errorf("代理名称无效：仅字母/数字/下划线/横线，≤32 字符")
+		return "", "", 0, 0, errors.New("代理名称无效：仅字母/数字/下划线/横线，≤32 字符")
 	}
 	proto = q.Get("type")
 	if proto == "" {
@@ -235,12 +237,12 @@ func validateFrpcParams(q url.Values) (name, proto string, localPort, remotePort
 	}
 	remotePort, err = parsePort(q.Get("remote_port"))
 	if err != nil {
-		return "", "", 0, 0, fmt.Errorf("对外端口无效: %v", err)
+		return "", "", 0, 0, fmt.Errorf("对外端口无效: %w", err)
 	}
 	if q.Get("local_port") == "" {
 		localPort = remotePort
 	} else if localPort, err = parsePort(q.Get("local_port")); err != nil {
-		return "", "", 0, 0, fmt.Errorf("本地端口无效: %v", err)
+		return "", "", 0, 0, fmt.Errorf("本地端口无效: %w", err)
 	}
 	return name, proto, localPort, remotePort, nil
 }
@@ -291,6 +293,7 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = host.Audit(r.Context(), "frps 已手动重启")
+	_ = host.Log(r.Context(), "frps 已手动重启")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 已重启"})
 }
 
@@ -311,6 +314,8 @@ func main() {
 	// 启动即拉起 frps（配置缺失时用默认值）
 	if err := startFRPS(ctx); err != nil {
 		_ = host.Log(ctx, "frps 启动失败: "+err.Error())
+	} else if s, e := getSettings(ctx); e == nil {
+		_ = host.Log(ctx, fmt.Sprintf("frps 已启动，控制端口 %d", s.bindPort))
 	}
 
 	srv := sdk.NewServer(sdk.Config{SocketPath: "tunnel-frp.sock"})

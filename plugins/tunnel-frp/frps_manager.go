@@ -34,8 +34,8 @@ func (m *FRPSManager) Running() bool {
 }
 
 // Start 启动 frps；已有实例则原子替换（停旧启新，改配置即重启）。
-// ctx 仅用于调用方等待，服务本体运行在管理器自有生命周期上。
-func (m *FRPSManager) Start(_ context.Context, cfg v1.ServerConfig) error {
+// 服务本体运行在管理器自有生命周期上，不随调用方 context 结束。
+func (m *FRPSManager) Start(cfg v1.ServerConfig) error {
 	svc, err := server.NewService(&cfg)
 	if err != nil {
 		return fmt.Errorf("frps 初始化失败: %w", err)
