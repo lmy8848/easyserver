@@ -102,6 +102,12 @@ func (h *HostAPI) serve(w http.ResponseWriter, r *http.Request) {
 		h.handleNotify(w, r, name)
 	case strings.HasPrefix(sub, "storage/"):
 		h.handleStorage(w, r, name, sub)
+	case sub == "port/expose" && r.Method == http.MethodPost:
+		h.handlePortExpose(w, r, name)
+	case sub == "port/revoke" && r.Method == http.MethodPost:
+		h.handlePortRevoke(w, r, name)
+	case sub == "port/list" && r.Method == http.MethodGet:
+		h.handlePortList(w, r, name)
 	default:
 		notFound(w)
 	}
@@ -354,6 +360,74 @@ func (h *HostAPI) handleStorage(w http.ResponseWriter, r *http.Request, name, su
 	default:
 		notFound(w)
 	}
+}
+
+// ---- 暴露端口访问控制（权限 firewall.manage，面板 PortACL）----
+
+func (h *HostAPI) handlePortExpose(w http.ResponseWriter, r *http.Request, name string) {
+	if !h.requirePermission(w, r, PermFirewallManage) {
+		return
+	}
+	var req struct {
+		Port     int      `json:"port"`
+		Protocol string   `json:"protocol"`
+		CIDRs    []string `json:"cidrs"`
+		Remark   string   `json:"remark"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体无效")
+		return
+	}
+	if h.mgr.portExp == nil {
+		internalError(w, "暴露端口访问控制未接线")
+		return
+	}
+	if err := h.mgr.portExp.Expose(r.Context(), req.Port, req.Protocol, req.CIDRs, req.Remark); err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	_ = h.mgr.AuditWrite(r.Context(), name, fmt.Sprintf("port.expose %d/%s cidrs=%v", req.Port, req.Protocol, req.CIDRs))
+	writeOK(w, respMap{"message": "端口白名单已应用"})
+}
+
+func (h *HostAPI) handlePortRevoke(w http.ResponseWriter, r *http.Request, name string) {
+	if !h.requirePermission(w, r, PermFirewallManage) {
+		return
+	}
+	var req struct {
+		Port     int    `json:"port"`
+		Protocol string `json:"protocol"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体无效")
+		return
+	}
+	if h.mgr.portExp == nil {
+		internalError(w, "暴露端口访问控制未接线")
+		return
+	}
+	if err := h.mgr.portExp.Revoke(r.Context(), req.Port, req.Protocol); err != nil {
+		internalError(w, err.Error())
+		return
+	}
+	_ = h.mgr.AuditWrite(r.Context(), name, fmt.Sprintf("port.revoke %d/%s", req.Port, req.Protocol))
+	writeOK(w, respMap{"message": "端口白名单已移除"})
+}
+
+func (h *HostAPI) handlePortList(w http.ResponseWriter, r *http.Request, name string) {
+	if !h.requirePermission(w, r, PermFirewallManage) {
+		return
+	}
+	if h.mgr.portExp == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	items, err := h.mgr.portExp.List(r.Context())
+	if err != nil {
+		internalError(w, err.Error())
+		return
+	}
+	writeJSON(w, items)
 }
 
 // ---- 小工具（避免依赖 httpx/gin 包，host socket 是独立 HTTP 栈）----

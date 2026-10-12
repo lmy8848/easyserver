@@ -24,6 +24,7 @@ type Manager struct {
 	tokens    map[string]string    // token → name（Host API 鉴权）
 	auditFn   func(ctx context.Context, plugin, summary string)
 	notifyFn  func(ctx context.Context, title, content string) error
+	portExp   PortExposer // 暴露端口访问控制（router 注入防火墙 PortACLService 适配）
 
 	svc *serviceScheduler // 定时任务调度（manifest.services 贡献点）
 }
@@ -39,6 +40,8 @@ type ManagerOptions struct {
 	AuditFn func(ctx context.Context, plugin, summary string)
 	// NotifyFn 插件通知写入口（复用面板 Webhook 通道）
 	NotifyFn func(ctx context.Context, title, content string) error
+	// PortExposer 暴露端口访问控制（面板防火墙 PortACL，权限 firewall.manage）
+	PortExposer PortExposer
 }
 
 // NewManager 创建插件管理器。
@@ -56,6 +59,7 @@ func NewManager(o ManagerOptions) *Manager {
 		tokens:     map[string]string{},
 		auditFn:    o.AuditFn,
 		notifyFn:   o.NotifyFn,
+		portExp:    o.PortExposer,
 		svc:        newServiceScheduler(),
 	}
 	m.svc.start()
