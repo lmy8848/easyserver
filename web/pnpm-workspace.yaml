@@ -1,0 +1,9 @@
+# pnpm 设置（pnpm v10+ 起 settings 从 package.json.pnpm 迁移至此）
+# 安全依赖覆盖：将带 CVE 的传递依赖钉到已修复版本（见 GitHub dependabot 告警）。
+# 注意：brace-expansion 不能全局 override（minimatch@10 依赖其 5.x API），
+# 用 `pnpm update brace-expansion` 单独把 2.x 升到已修复的 2.1.7。
+overrides:
+  undici: ^8.10.2
+  source-map-js: ^1.2.2
+  browserslist: ^4.29.0
+  baseline-browser-mapping: ^2.11.0
