@@ -269,3 +269,37 @@ func (h *HostClient) StorageDelete(ctx context.Context, path string) error {
 	}
 	return nil
 }
+
+// ---- 暴露端口访问控制（需 manifest 声明 firewall.manage 权限）----
+
+// PortACL 是暴露端口的访问控制条目（面板 PortACL）。
+type PortACL struct {
+	Port     int      `json:"port"`
+	Protocol string   `json:"protocol"`
+	CIDRs    []string `json:"cidrs"`
+	Remark   string   `json:"remark"`
+}
+
+// ExposePort 为暴露端口应用访问控制白名单：仅列出的授权源 IP/CIDR 可访问，
+// 其余来源由面板防火墙 DROP。用于确保暴露端口只对管理员授权的人开放。
+func (h *HostClient) ExposePort(ctx context.Context, port int, protocol string, cidrs []string, remark string) error {
+	return h.do(ctx, http.MethodPost, "port/expose", map[string]any{
+		"port": port, "protocol": protocol, "cidrs": cidrs, "remark": remark,
+	}, nil)
+}
+
+// RevokePort 移除暴露端口的访问控制（撤销白名单后端口不再受面板管控）。
+func (h *HostClient) RevokePort(ctx context.Context, port int, protocol string) error {
+	return h.do(ctx, http.MethodPost, "port/revoke", map[string]any{
+		"port": port, "protocol": protocol,
+	}, nil)
+}
+
+// ListPorts 列出当前受面板管控的暴露端口及授权源。
+func (h *HostClient) ListPorts(ctx context.Context) ([]PortACL, error) {
+	var out []PortACL
+	if err := h.do(ctx, http.MethodGet, "port/list", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

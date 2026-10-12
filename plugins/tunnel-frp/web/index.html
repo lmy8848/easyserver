@@ -8,7 +8,7 @@
 <style>
   :root { --border: #d9d9d9; --label: #595959; --pre-bg: #f5f5f5; --muted: #8c8c8c; }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #222; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #222; }
   h2 { margin: 0 0 16px; font-size: 20px; }
   .card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
   .card h3 { margin: 0 0 12px; font-size: 15px; }
@@ -16,6 +16,7 @@
   input, select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 14px; }
   button { padding: 6px 14px; border: 1px solid #1677ff; background: #1677ff; color: #fff; border-radius: 4px; cursor: pointer; font-size: 14px; }
   button.secondary { background: #fff; color: #1677ff; }
+  button.danger { background: #fff; color: #dc2626; border-color: #dc2626; }
   button:hover { opacity: .88; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   pre { background: var(--pre-bg); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
@@ -23,6 +24,9 @@
   .muted { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
   .row { display: flex; gap: 12px; }
   .row > div { flex: 1; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -36,12 +40,39 @@
 
 <div class="card">
   <h3>服务端设置</h3>
-  <label for="bind_port">frps 控制端口</label>
-  <input id="bind_port" placeholder="7000">
-  <label for="server_addr">对外地址（生成客户端配置用）</label>
-  <input id="server_addr" placeholder="服务器的公网 IP 或域名">
+  <div class="row">
+    <div>
+      <label for="bind_port">frps 控制端口</label>
+      <input id="bind_port" placeholder="7000">
+    </div>
+    <div>
+      <label for="server_addr">对外地址（生成客户端配置用）</label>
+      <input id="server_addr" placeholder="服务器的公网 IP 或域名">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="vhost_http_port">HTTP 域名路由端口（http 隧道用）</label>
+      <input id="vhost_http_port" placeholder="8081">
+    </div>
+    <div>
+      <label for="subdomain_host">HTTP 子域父域名</label>
+      <input id="subdomain_host" placeholder="tunnel.0xdead.icu">
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="allow_ports_start">TCP/UDP 暴露端口段（起）</label>
+      <input id="allow_ports_start" placeholder="40000">
+    </div>
+    <div>
+      <label for="allow_ports_end">TCP/UDP 暴露端口段（止）</label>
+      <input id="allow_ports_end" placeholder="50000">
+    </div>
+  </div>
   <button onclick="save()" style="margin-top:12px">保存并重启</button>
-  <p class="muted">保存后 frps 会立即用新配置重启；端口修改需保证未被占用。</p>
+  <p class="muted">HTTP 隧道经 vhost 端口 + 子域路由（需在 CF 为该子域配 DNS/SSL）；
+    TCP/UDP 隧道从暴露端口段取值，可配访问白名单。</p>
 </div>
 
 <div class="card">
@@ -53,7 +84,7 @@
     </div>
     <div>
       <label for="p_type">协议</label>
-      <select id="p_type"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+      <select id="p_type"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="http">HTTP</option></select>
     </div>
   </div>
   <div class="row">
@@ -61,14 +92,55 @@
       <label for="p_local">家庭电脑服务端口</label>
       <input id="p_local" value="25565">
     </div>
-    <div>
-      <label for="p_remote">服务器对外端口</label>
+    <div id="p_remote_field">
+      <label for="p_remote">服务器对外端口（TCP/UDP）</label>
       <input id="p_remote" value="25565">
     </div>
+    <div id="p_domain_field" style="display:none">
+      <label for="p_domain">自定义域名（HTTP）</label>
+      <input id="p_domain" placeholder="web.tunnel.0xdead.icu">
+    </div>
   </div>
-  <button onclick="downloadCfg()" style="margin-top:12px">下载 frpc.toml</button>
+  <div id="p_http_fields" style="display:none">
+    <div class="row">
+      <div>
+        <label for="p_http_user">访问账号（basicAuth，可选）</label>
+        <input id="p_http_user" placeholder="admin">
+      </div>
+      <div>
+        <label for="p_http_pass">访问密码</label>
+        <input id="p_http_pass" type="password" placeholder="••••••">
+      </div>
+    </div>
+    <p class="muted">设置账号密码后，访问该域名必须通过凭据校验（外来者无法访问）。</p>
+  </div>
+  <button class="secondary" onclick="randomPort()" style="margin-top:8px">随机高位端口（TCP/UDP）</button>
+  <button onclick="downloadCfg()" style="margin-top:12px; margin-left:8px">下载 frpc.toml</button>
   <p class="muted">在家庭电脑上运行：<code>frpc -c frpc.toml</code></p>
   <pre id="cfg">填写上方参数后点击下载</pre>
+</div>
+
+<div class="card">
+  <h3>暴露端口访问控制（只对授权源开放）</h3>
+  <div class="row">
+    <div>
+      <label for="e_port">端口</label>
+      <input id="e_port" placeholder="如 40000-50000 段内">
+    </div>
+    <div>
+      <label for="e_protocol">协议</label>
+      <select id="e_protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+    </div>
+  </div>
+  <label for="e_cidrs">授权源 IP/CIDR（逗号分隔，仅这些来源可访问）</label>
+  <input id="e_cidrs" placeholder="如 1.2.3.4, 10.0.0.0/8">
+  <button onclick="doExpose()" style="margin-top:12px">应用白名单</button>
+  <p class="muted">应用后，面板防火墙会只放行授权源访问该端口，其余来源 DROP。
+    适合把内网服务（后台/文件/数据库等）安全暴露给固定 IP 的家人/同事。</p>
+  <table style="margin-top:12px">
+    <thead><tr><th>端口</th><th>协议</th><th>授权源</th><th></th></tr></thead>
+    <tbody id="ports_body"><tr><td colspan="4">加载中…</td></tr></tbody>
+  </table>
 </div>
 
 <script>
@@ -83,8 +155,7 @@
   var $ = function (id) { return document.getElementById(id); };
 
   // API 基址从 location.pathname 推导：页面经面板代理挂载，URL 可能带或不带
-  // 尾斜杠（CF/nginx 会剥离）。补 '/' 后拼接，既不依赖插件名、也不依赖
-  // 尾斜杠，避免 './api/' 在无尾斜杠时解析到 /api/plugins/ 层。
+  // 尾斜杠（CF/nginx 会剥离）。补 '/' 后拼接，既不依赖插件名、也不依赖尾斜杠。
   function apiBase() {
     var p = window.location.pathname || '/';
     return p.charAt(p.length - 1) === '/' ? p : p + '/';
@@ -99,7 +170,6 @@
     });
   }
 
-  // frpc-config 返回纯文本 TOML，单独走文本解析。
   function raw(path, opts) {
     return fetch(apiBase() + 'api/' + path, opts).then(function (r) {
       if (!r.ok) {
@@ -118,6 +188,12 @@
         : '<span class="bad">frps 未运行</span>');
       $('bind_port').value = d.bind_port || '';
       $('server_addr').value = d.server_addr || '';
+      $('vhost_http_port').value = d.vhost_http_port || '';
+      $('subdomain_host').value = d.subdomain_host || '';
+      if (d.allow_ports && d.allow_ports.length === 2) {
+        $('allow_ports_start').value = d.allow_ports[0];
+        $('allow_ports_end').value = d.allow_ports[1];
+      }
     }).catch(function (e) {
       setStatus('<span class="bad">加载失败: ' + e.message + '</span>');
     });
@@ -129,7 +205,11 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         bind_port: $('bind_port').value.trim(),
-        server_addr: $('server_addr').value.trim()
+        server_addr: $('server_addr').value.trim(),
+        vhost_http_port: $('vhost_http_port').value.trim(),
+        subdomain_host: $('subdomain_host').value.trim(),
+        allow_ports_start: $('allow_ports_start').value.trim(),
+        allow_ports_end: $('allow_ports_end').value.trim()
       })
     }).then(function (d) {
       alert(d.message || '已保存');
@@ -148,13 +228,36 @@
     });
   }
 
+  // 协议切换：http 显示域名/账号，tcp/udp 显示对外端口
+  function syncProtoFields() {
+    var httpMode = $('p_type').value === 'http';
+    $('p_http_fields').style.display = httpMode ? '' : 'none';
+    $('p_domain_field').style.display = httpMode ? '' : 'none';
+    $('p_remote_field').style.display = httpMode ? 'none' : '';
+  }
+
+  // 随机高位端口（按设置段生成，仅前端提示，实际以 frps AllowPorts 为准）
+  function randomPort() {
+    var s = parseInt($('allow_ports_start').value, 10) || 40000;
+    var e = parseInt($('allow_ports_end').value, 10) || 50000;
+    if (e < s) { e = s; }
+    $('p_remote').value = s + Math.floor(Math.random() * (e - s + 1));
+  }
+
   function downloadCfg() {
     var q = new URLSearchParams({
       name: $('p_name').value.trim(),
-      type: $('p_type').value,
-      local_port: $('p_local').value.trim(),
-      remote_port: $('p_remote').value.trim()
+      type: $('p_type').value
     });
+    if ($('p_type').value === 'http') {
+      q.set('local_port', $('p_local').value.trim());
+      q.set('domain', $('p_domain').value.trim());
+      q.set('http_user', $('p_http_user').value.trim());
+      q.set('http_pass', $('p_http_pass').value);
+    } else {
+      q.set('local_port', $('p_local').value.trim());
+      q.set('remote_port', $('p_remote').value.trim());
+    }
     raw('frpc-config?' + q.toString()).then(function (t) {
       $('cfg').textContent = t;
       var a = document.createElement('a');
@@ -169,10 +272,69 @@
     });
   }
 
+  // ---- 暴露端口访问控制 ----
+
+  function loadPorts() {
+    api('ports').then(function (items) {
+      var body = $('ports_body');
+      if (!items || items.length === 0) {
+        body.innerHTML = '<tr><td colspan="4">暂无受管控的暴露端口</td></tr>';
+        return;
+      }
+      body.innerHTML = items.map(function (it) {
+        return '<tr><td>' + it.port + '</td><td>' + it.protocol + '</td><td>' +
+          (it.cidrs || []).join(', ') + '</td><td>' +
+          '<button class="danger" onclick="revokePort(' + it.port + ',\'' + it.protocol + '\')">移除</button></td></tr>';
+      }).join('');
+    }).catch(function (e) {
+      $('ports_body').innerHTML = '<tr><td colspan="4">加载失败: ' + e.message + '</td></tr>';
+    });
+  }
+
+  function doExpose() {
+    var cidrs = $('e_cidrs').value.split(/[,，\s]+/).filter(Boolean);
+    if (!cidrs.length) { alert('请填写至少一个授权源 IP/CIDR'); return; }
+    api('expose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        port: parseInt($('e_port').value, 10) || 0,
+        protocol: $('e_protocol').value,
+        cidrs: cidrs,
+        remark: ''
+      })
+    }).then(function (d) {
+      alert(d.message || '已应用');
+      loadPorts();
+    }).catch(function (e) {
+      alert('应用失败: ' + (e.message || e));
+    });
+  }
+
+  function revokePort(port, protocol) {
+    api('revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port: port, protocol: protocol })
+    }).then(function (d) {
+      alert(d.message || '已移除');
+      loadPorts();
+    }).catch(function (e) {
+      alert('移除失败: ' + (e.message || e));
+    });
+  }
+
   window.save = save;
   window.restart = restart;
   window.downloadCfg = downloadCfg;
+  window.randomPort = randomPort;
+  window.doExpose = doExpose;
+  window.revokePort = revokePort;
+
+  $('p_type').addEventListener('change', syncProtoFields);
+  syncProtoFields();
   loadStatus();
+  loadPorts();
 })();
 </script>
 </body>

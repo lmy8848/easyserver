@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/rand"
 	"embed"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	frptypes "github.com/fatedier/frp/pkg/config/types"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	sdk "github.com/lmy8848/easyserver-plugin-sdk-go"
 )
@@ -35,9 +37,16 @@ import (
 var webFS embed.FS
 
 const (
-	cfgBindPort  = "bind_port"
-	cfgServerArg = "server_addr"
-	defaultPort  = 7000
+	cfgBindPort        = "bind_port"
+	cfgServerArg       = "server_addr"
+	cfgVhostHTTPPort   = "vhost_http_port"
+	cfgSubdomainHost   = "subdomain_host"
+	cfgAllowPortsStart = "allow_ports_start"
+	cfgAllowPortsEnd   = "allow_ports_end"
+	defaultPort        = 7000
+	defaultVhostPort   = 8081
+	defaultAllowStart  = 40000
+	defaultAllowEnd    = 50000
 )
 
 var (
@@ -79,9 +88,13 @@ func (c *settingsCache) invalidate() {
 
 // settings 是插件运行配置的解析结果。
 type settings struct {
-	bindPort   int    // frps 控制端口
-	serverAddr string // 生成 frpc 配置时的对外地址
-	token      string // frp 认证 token（自动生成并持久化）
+	bindPort        int    // frps 控制端口
+	serverAddr      string // 生成 frpc 配置时的对外地址
+	token           string // frp 认证 token（自动生成并持久化）
+	vhostHTTPPort   int    // HTTP vhost 端口（域名路由，0=不启用）
+	subdomainHost   string // HTTP 子域父域名（如 tunnel.0xdead.icu）
+	allowPortsStart int    // TCP/UDP 暴露端口段（frps AllowPorts 白名单）
+	allowPortsEnd   int
 }
 
 // getSettings 读取并解析配置；auth_token 缺失时生成并持久化（fail-fast，失败即报错）。
@@ -90,7 +103,14 @@ func getSettings(ctx context.Context) (*settings, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &settings{serverAddr: all[cfgServerArg], token: all["auth_token"]}
+	s := &settings{
+		serverAddr:      all[cfgServerArg],
+		token:           all["auth_token"],
+		subdomainHost:   all[cfgSubdomainHost],
+		vhostHTTPPort:   defaultVhostPort,
+		allowPortsStart: defaultAllowStart,
+		allowPortsEnd:   defaultAllowEnd,
+	}
 	if raw := strings.TrimSpace(all[cfgBindPort]); raw != "" {
 		n, err := parsePort(raw)
 		if err != nil {
@@ -99,6 +119,21 @@ func getSettings(ctx context.Context) (*settings, error) {
 		s.bindPort = n
 	} else {
 		s.bindPort = defaultPort
+	}
+	if raw := strings.TrimSpace(all[cfgVhostHTTPPort]); raw != "" {
+		if n, err := parsePort(raw); err == nil {
+			s.vhostHTTPPort = n
+		}
+	}
+	if raw := strings.TrimSpace(all[cfgAllowPortsStart]); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n < 65535 {
+			s.allowPortsStart = n
+		}
+	}
+	if raw := strings.TrimSpace(all[cfgAllowPortsEnd]); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > s.allowPortsStart && n <= 65535 {
+			s.allowPortsEnd = n
+		}
 	}
 	if s.token == "" {
 		t, err := generateToken()
@@ -143,6 +178,14 @@ func startFRPS(ctx context.Context) error {
 		BindPort: s.bindPort,
 	}
 	cfg.Auth.Token = s.token
+	if s.vhostHTTPPort > 0 {
+		cfg.VhostHTTPPort = s.vhostHTTPPort // HTTP 域名路由端口（http 类型隧道）
+	}
+	cfg.SubDomainHost = s.subdomainHost
+	if s.allowPortsStart > 0 && s.allowPortsEnd >= s.allowPortsStart {
+		// 限制 frpc 只能申请高位段端口，降低暴露端口可预测性
+		cfg.AllowPorts = []frptypes.PortsRange{{Start: s.allowPortsStart, End: s.allowPortsEnd}}
+	}
 	// Complete() 补全默认值：尤其把 Auth.Method 默认为 "token"——若不调用，
 	// NewAuthVerifier 会因 Method 为空返回 nil，服务器拒绝一切 frpc 登录
 	// （现象为 "EOF"/"broken pipe"）。
@@ -161,6 +204,9 @@ func registerRoutes(srv *sdk.Server) {
 	srv.HandleFunc("/api/settings", settingsHandler)
 	srv.HandleFunc("/api/frpc-config", frpcConfigHandler)
 	srv.HandleFunc("/api/restart", restartHandler)
+	srv.HandleFunc("/api/expose", exposeHandler)
+	srv.HandleFunc("/api/revoke", revokeHandler)
+	srv.HandleFunc("/api/ports", portsHandler)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
@@ -177,10 +223,13 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"running":      mgr.Running(),
-		"bind_port":    s.bindPort,
-		"server_addr":  s.serverAddr,
-		"token_masked": mask(s.token),
+		"running":         mgr.Running(),
+		"bind_port":       s.bindPort,
+		"server_addr":     s.serverAddr,
+		"vhost_http_port": s.vhostHTTPPort,
+		"subdomain_host":  s.subdomainHost,
+		"allow_ports":     []int{s.allowPortsStart, s.allowPortsEnd},
+		"token_masked":    mask(s.token),
 	})
 }
 
@@ -190,8 +239,12 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		BindPort   string `json:"bind_port"`
-		ServerAddr string `json:"server_addr"`
+		BindPort        string `json:"bind_port"`
+		ServerAddr      string `json:"server_addr"`
+		VhostHTTPPort   string `json:"vhost_http_port"`
+		SubdomainHost   string `json:"subdomain_host"`
+		AllowPortsStart string `json:"allow_ports_start"`
+		AllowPortsEnd   string `json:"allow_ports_end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体无效"})
@@ -213,6 +266,34 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if v := strings.TrimSpace(req.VhostHTTPPort); v != "" {
+		if _, err := parsePort(v); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "vhost_http_port " + err.Error()})
+			return
+		}
+		if err := host.ConfigSet(r.Context(), cfgVhostHTTPPort, v); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if v := strings.TrimSpace(req.SubdomainHost); v != "" {
+		if err := host.ConfigSet(r.Context(), cfgSubdomainHost, v); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if v := strings.TrimSpace(req.AllowPortsStart); v != "" {
+		if err := host.ConfigSet(r.Context(), cfgAllowPortsStart, v); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	if v := strings.TrimSpace(req.AllowPortsEnd); v != "" {
+		if err := host.ConfigSet(r.Context(), cfgAllowPortsEnd, v); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	cfgCache.invalidate()
 	if err := startFRPS(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -225,32 +306,101 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 
 var proxyNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 
+// frpcParams 是 frpc 配置生成参数的解析结果。
+type frpcParams struct {
+	name       string
+	proto      string // tcp | udp | http
+	localPort  int
+	remotePort int    // tcp/udp 对外端口；http 为 0
+	domain     string // http 自定义域名
+	httpUser   string // http basicAuth 账号
+	httpPass   string
+}
+
 // validateFrpcParams 校验并解析 frpc 配置生成参数，非法输入一律拒绝。
-func validateFrpcParams(q url.Values) (name, proto string, localPort, remotePort int, err error) {
-	name = q.Get("name")
-	if name == "" {
-		name = "mc"
+// tcp/udp 未指定 remote_port 时从允许段随机选高位端口。
+func validateFrpcParams(q url.Values, allowStart, allowEnd int) (*frpcParams, error) {
+	p := &frpcParams{name: q.Get("name")}
+	if p.name == "" {
+		p.name = "mc"
 	}
-	if !proxyNameRe.MatchString(name) {
-		return "", "", 0, 0, errors.New("代理名称无效：仅字母/数字/下划线/横线，≤32 字符")
+	if !proxyNameRe.MatchString(p.name) {
+		return nil, errors.New("代理名称无效：仅字母/数字/下划线/横线，≤32 字符")
 	}
-	proto = q.Get("type")
-	if proto == "" {
-		proto = "tcp"
+	p.proto = q.Get("type")
+	if p.proto == "" {
+		p.proto = "tcp"
 	}
-	if proto != "tcp" && proto != "udp" {
-		return "", "", 0, 0, fmt.Errorf("协议 %q 无效（仅支持 tcp/udp）", proto)
+	var err error
+	switch p.proto {
+	case "tcp", "udp":
+		if q.Get("remote_port") == "" {
+			if p.remotePort, err = randomPortInRange(allowStart, allowEnd); err != nil {
+				return nil, fmt.Errorf("随机对外端口失败: %w", err)
+			}
+		} else if p.remotePort, err = parsePort(q.Get("remote_port")); err != nil {
+			return nil, fmt.Errorf("对外端口无效: %w", err)
+		}
+		if q.Get("local_port") == "" {
+			p.localPort = p.remotePort
+		} else if p.localPort, err = parsePort(q.Get("local_port")); err != nil {
+			return nil, fmt.Errorf("本地端口无效: %w", err)
+		}
+	case "http":
+		p.domain = strings.TrimSpace(q.Get("domain"))
+		if p.domain == "" {
+			return nil, errors.New("http 隧道需填写自定义域名（custom domain）")
+		}
+		if p.localPort, err = parsePort(q.Get("local_port")); err != nil {
+			return nil, fmt.Errorf("本地端口无效: %w", err)
+		}
+		p.httpUser = strings.TrimSpace(q.Get("http_user"))
+		p.httpPass = q.Get("http_pass")
+		if (p.httpUser == "") != (p.httpPass == "") {
+			return nil, errors.New("HTTP 访问账号与密码需同时填写（basicAuth）")
+		}
+	default:
+		return nil, fmt.Errorf("协议 %q 无效（仅支持 tcp/udp/http）", p.proto)
 	}
-	remotePort, err = parsePort(q.Get("remote_port"))
-	if err != nil {
-		return "", "", 0, 0, fmt.Errorf("对外端口无效: %w", err)
+	return p, nil
+}
+
+// randomPortInRange 在 [start,end] 内生成随机高位端口。
+func randomPortInRange(start, end int) (int, error) {
+	span := end - start + 1
+	if span <= 0 || span > 65535 || start < 1 || end > 65535 {
+		return 0, errors.New("端口段配置无效")
 	}
-	if q.Get("local_port") == "" {
-		localPort = remotePort
-	} else if localPort, err = parsePort(q.Get("local_port")); err != nil {
-		return "", "", 0, 0, fmt.Errorf("本地端口无效: %w", err)
+	var b [2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return 0, err
 	}
-	return name, proto, localPort, remotePort, nil
+	return start + int(binary.BigEndian.Uint16(b[:]))%span, nil
+}
+
+// buildFrpcConfig 按协议生成 frpc.toml 文本。
+func buildFrpcConfig(s *settings, p *frpcParams) string {
+	out := fmt.Sprintf(`# EasyServer 内网穿透客户端配置（tunnel-frp 插件生成）
+# 在家庭电脑运行： frpc -c frpc.toml
+serverAddr = "%s"
+serverPort = %d
+auth.token = "%s"
+
+[[proxies]]
+name = "%s"
+type = "%s"
+localIP = "127.0.0.1"
+localPort = %d
+`, s.serverAddr, s.bindPort, s.token, p.name, p.proto, p.localPort)
+	if p.proto == "http" {
+		out += fmt.Sprintf("customDomains = [\"%s\"]\n", p.domain)
+		if p.httpUser != "" {
+			out += fmt.Sprintf("httpUser = \"%s\"\nhttpPassword = \"%s\"\n", p.httpUser, p.httpPass)
+		}
+	} else {
+		out += fmt.Sprintf("remotePort = %d\n", p.remotePort)
+	}
+	return out
 }
 
 func frpcConfigHandler(w http.ResponseWriter, r *http.Request) {
@@ -264,25 +414,12 @@ func frpcConfigHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请先在设置中填写对外地址（服务器公网 IP 或域名）"})
 		return
 	}
-	name, proto, localPort, remotePort, err := validateFrpcParams(r.URL.Query())
+	p, err := validateFrpcParams(r.URL.Query(), s.allowPortsStart, s.allowPortsEnd)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-
-	cfg := fmt.Sprintf(`# EasyServer 内网穿透客户端配置（tunnel-frp 插件生成）
-# 在家庭电脑运行： frpc -c frpc.toml
-serverAddr = "%s"
-serverPort = %d
-auth.token = "%s"
-
-[[proxies]]
-name = "%s"
-type = "%s"
-localIP = "127.0.0.1"
-localPort = %d
-remotePort = %d
-`, s.serverAddr, s.bindPort, s.token, name, proto, localPort, remotePort)
+	cfg := buildFrpcConfig(s, p)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="frpc.toml"`)
@@ -301,6 +438,65 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 	_ = host.Audit(r.Context(), "frps 已手动重启")
 	_ = host.Log(r.Context(), "frps 已手动重启")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 已重启"})
+}
+
+// ---- 暴露端口访问控制（经面板 Host API，需 firewall.manage 权限）----
+
+// exposeHandler 为暴露的 TCP/UDP 端口应用访问控制白名单：
+// 仅列出的授权源 IP/CIDR 可访问，其余来源由面板防火墙 DROP。
+func exposeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Port     int      `json:"port"`
+		Protocol string   `json:"protocol"`
+		CIDRs    []string `json:"cidrs"`
+		Remark   string   `json:"remark"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体无效"})
+		return
+	}
+	if err := host.ExposePort(r.Context(), req.Port, req.Protocol, req.CIDRs, req.Remark); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	_ = host.Audit(r.Context(), fmt.Sprintf("暴露端口 %d/%s 白名单已应用", req.Port, req.Protocol))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "端口白名单已应用"})
+}
+
+// revokeHandler 移除暴露端口的访问控制。
+func revokeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req struct {
+		Port     int    `json:"port"`
+		Protocol string `json:"protocol"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求体无效"})
+		return
+	}
+	if err := host.RevokePort(r.Context(), req.Port, req.Protocol); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	_ = host.Audit(r.Context(), fmt.Sprintf("移除暴露端口 %d/%s 白名单", req.Port, req.Protocol))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "端口白名单已移除"})
+}
+
+// portsHandler 列出当前受面板管控的暴露端口。
+func portsHandler(w http.ResponseWriter, r *http.Request) {
+	items, err := host.ListPorts(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func uiHandler(w http.ResponseWriter, _ *http.Request) {

@@ -40,6 +40,7 @@ const (
 	PermNotifySend       = "notify.send"
 	PermPanelAPIProxy    = "panel.api.proxy"
 	PermStorageReadWrite = "storage.readwrite"
+	PermFirewallManage   = "firewall.manage" // 暴露端口访问控制（PortACL：授权源白名单）
 )
 
 // KnownPermissions 是全部已知能力（manifest 声明白名单之外一律拒绝加载）。
@@ -47,7 +48,7 @@ var KnownPermissions = map[string]bool{
 	PermAuditWrite: true, PermConfigRead: true, PermConfigReadWrite: true,
 	PermLogWrite: true, PermEventPublish: true, PermEventSubscribe: true,
 	PermExecRestricted: true, PermNotifySend: true, PermPanelAPIProxy: true,
-	PermStorageReadWrite: true,
+	PermStorageReadWrite: true, PermFirewallManage: true,
 }
 
 // 插件生命周期状态（文档 §12.1）。
