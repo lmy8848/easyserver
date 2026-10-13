@@ -29,3 +29,5 @@ contributions:
     - { id: main, path: /plugins/tunnel-frp }
   routes:
     - { id: api, prefix: /api/plugins/tunnel-frp }
+  styles:
+    - { id: panel-theme, path: styles/panel-theme.css }

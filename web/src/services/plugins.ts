@@ -60,6 +60,9 @@ export const pluginsApi = {
 
   getMenus: () => api.get<ApiResponse<{ items: PluginMenuItem[] }>>('/plugins/menus'),
 
+  // 插件样式贡献（前端注入 <link>，面板自身样式之后生效）
+  getStyles: () => api.get<ApiResponse<{ items: Array<{ plugin: string; id: string; url: string }> }>>('/plugins/styles'),
+
   getLogs: (name: string, lines = 500) => api.get<ApiResponse<{ log: string }>>(`/plugins/${name}/logs`, { params: { lines } }),
 
   // 插件管理子系统全局日志（面板侧管理动作）

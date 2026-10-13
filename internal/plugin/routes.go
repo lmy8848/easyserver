@@ -164,6 +164,33 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		httpx.Success(c, gin.H{"items": items})
 	})
 
+	// 聚合样式下发：前端样式注入消费（启用插件的 styles contribution）
+	protected.GET("/plugins/styles", func(c *gin.Context) {
+		list, err := m.List(c.Request.Context())
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		items := []gin.H{}
+		for _, rec := range list {
+			if !rec.Enabled {
+				continue
+			}
+			mft, err := m.GetManifest(c.Request.Context(), rec.Name)
+			if err != nil {
+				continue
+			}
+			for _, s := range mft.Contributions.Styles {
+				items = append(items, gin.H{
+					"plugin": rec.Name, "id": s.ID,
+					// 样式经插件代理提供：/api/plugins/<id>/<path>
+					"url": "/api/plugins/" + rec.Name + "/" + s.Path,
+				})
+			}
+		}
+		httpx.Success(c, gin.H{"items": items})
+	})
+
 	// 聚合菜单下发：前端动态侧边栏消费（启用插件的 menus contribution）
 	protected.GET("/plugins/menus", func(c *gin.Context) {
 		list, err := m.List(c.Request.Context())

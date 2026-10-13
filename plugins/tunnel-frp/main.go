@@ -207,6 +207,25 @@ func registerRoutes(srv *sdk.Server) {
 	srv.HandleFunc("/api/expose", exposeHandler)
 	srv.HandleFunc("/api/revoke", revokeHandler)
 	srv.HandleFunc("/api/ports", portsHandler)
+	// 前端样式贡献（styles 贡献点）：提供 web/styles/ 下的 CSS 供面板注入
+	srv.HandleFunc("/styles/", stylesHandler)
+}
+
+// stylesHandler 提供插件声明的前端样式资源（styles 贡献点）。
+// 面板经 /api/plugins/<id>/styles/<file> 代理获取后注入 <link>。
+func stylesHandler(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/styles/")
+	if name == "" || strings.Contains(name, "..") {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	data, err := webFS.ReadFile("web/styles/" + name)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	_, _ = w.Write(data)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

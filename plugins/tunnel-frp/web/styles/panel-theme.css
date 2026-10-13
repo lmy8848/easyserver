@@ -1,0 +1,18 @@
+/* tunnel-frp 插件样式贡献示例（styles 贡献点）
+ * 面板在自身样式之后注入此文件，可覆盖默认外观（品牌定制/换肤）。
+ * 这里仅做轻微无害的演示：自定义滚动条，证明插件样式已生效。
+ */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 120, 0.4);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 120, 0.6);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
