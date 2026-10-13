@@ -758,7 +758,8 @@ func (h *SettingsHandler) SendCustomNotification(c *gin.Context) (any, error) {
 }
 
 // UpdateLogsConfig updates the global log configuration (level/format/rotation).
-// 等级通过 logger.SetLevel 运行时立即生效，其余字段持久化到 config.toml，重启后生效。
+// 先完整校验所有输入，再持久化到 config.toml，最后才应用运行时等级——
+// 保证"持久化成功才运行时生效"，避免保存失败导致运行时与配置不一致（重启回滚）。
 func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
 	req, err := httpx.BindJSON[struct {
 		Level     *string `json:"level"`
@@ -772,15 +773,14 @@ func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
 
 	middleware.AuditSummary(c, "更新日志配置")
 
+	// 1. 校验全部输入（不应用运行时，避免校验后失败留下半改状态）
 	if req.Level != nil {
-		if err := logger.SetLevel(*req.Level); err != nil {
+		if _, err := logger.ParseLevel(*req.Level); err != nil {
 			return nil, errx.BadRequest("%v", err)
 		}
 	}
-	if req.Format != nil {
-		if *req.Format != "text" && *req.Format != "json" {
-			return nil, errx.BadRequest("无效的日志格式 %q，可选 text|json", *req.Format)
-		}
+	if req.Format != nil && *req.Format != "text" && *req.Format != "json" {
+		return nil, errx.BadRequest("无效的日志格式 %q，可选 text|json", *req.Format)
 	}
 	if req.MaxSizeMB != nil && (*req.MaxSizeMB < 1 || *req.MaxSizeMB > 1024) {
 		return nil, errx.BadRequest("max_size_mb 必须在 1 到 1024 之间")
@@ -789,6 +789,7 @@ func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("max_files 必须在 1 到 10 之间")
 	}
 
+	// 2. 持久化（内存 store → 写回配置文件）
 	h.store.Update(func(cfg *config.Config) {
 		if req.Level != nil {
 			cfg.Logs.Level = *req.Level
@@ -803,9 +804,13 @@ func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
 			cfg.Logs.MaxFiles = *req.MaxFiles
 		}
 	})
-
 	if err := h.saveConfig(); err != nil {
 		return nil, errx.Internal("保存配置失败: %w", err)
+	}
+
+	// 3. 持久化成功后才应用运行时等级（与磁盘配置一致，重启后不回滚）
+	if req.Level != nil {
+		_ = logger.SetLevel(*req.Level)
 	}
 
 	return gin.H{"message": "日志配置已更新", "level": logger.GetLevel()}, nil

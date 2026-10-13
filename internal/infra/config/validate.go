@@ -99,7 +99,42 @@ func Validate(cfg *Config, devMode bool) error {
 		}
 	}
 
+	// 日志配置：非法等级/格式直接拒绝（避免静默回退使实际等级与配置不符）。
+	if err := validateLogConfig(cfg); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// validateLogConfig 校验日志等级与格式；非法值返回描述性错误。
+func validateLogConfig(cfg *Config) error {
+	if !validLogLevel(cfg.Logs.Level) {
+		return fmt.Errorf("logs.level 无效: %q（可选 debug|info|warn|error）", cfg.Logs.Level)
+	}
+	if !validLogFormat(cfg.Logs.Format) {
+		return fmt.Errorf("logs.format 无效: %q（可选 text|json）", cfg.Logs.Format)
+	}
+	return nil
+}
+
+// validLogLevel 校验日志等级枚举（与 internal/infra/logger.parseLevel 保持一致，
+// 避免非法等级被静默回退导致实际等级与配置不符）。
+func validLogLevel(s string) bool {
+	switch s {
+	case "debug", "info", "warn", "warning", "error", "":
+		return true
+	}
+	return false
+}
+
+// validLogFormat 校验日志格式枚举。
+func validLogFormat(s string) bool {
+	switch s {
+	case "text", "json", "":
+		return true
+	}
+	return false
 }
 
 // ValidateTLSCert loads and validates a TLS certificate/key pair:

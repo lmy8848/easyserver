@@ -100,6 +100,12 @@ func Init(cfg config.LogsConfig) (io.Closer, error) {
 // LogPath 返回 Init 解析出的实际日志文件路径；未 Init 时返回空串。
 func LogPath() string { return defaultPath }
 
+// ParseLevel 校验并解析日志等级名（debug|info|warn|error），供面板设置
+// 在持久化前做输入校验（不改变运行时等级）。非法值返回 error。
+func ParseLevel(name string) (slog.Level, error) {
+	return parseLevel(name)
+}
+
 // SetLevel 运行时切换日志等级（面板设置页调用），非法值返回 error 不生效。
 func SetLevel(name string) error {
 	lv, err := parseLevel(name)
