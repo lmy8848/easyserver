@@ -226,6 +226,8 @@ func registerRoutes(srv *sdk.Server) {
 	srv.HandleFunc("/styles/", stylesHandler)
 	// 可被调用的命令（commands 贡献点）：其他插件经面板 command/invoke 调用
 	srv.HandleFunc("/api/commands/restart", commandRestartHandler)
+	// 数据源（datasources 贡献点）：面板经 /api/plugins/<id>/datasources/<id> 聚合代理
+	srv.HandleFunc("/datasources/status", datasourceStatusHandler)
 }
 
 // commandRestartHandler 是插件声明的 restart 命令：重启 frps。
@@ -238,6 +240,24 @@ func commandRestartHandler(w http.ResponseWriter, r *http.Request) {
 	_ = host.Audit(r.Context(), "command.invoke: 重启 frps")
 	requestRestart() // 进程级重启
 	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 将重启（插件进程）"})
+}
+
+// datasourceStatusHandler 是插件声明的 status 数据源（datasources 贡献点，
+// kind=json）：对外暴露 frps 运行状态，供面板/其他插件聚合消费。
+// 面板经 /api/plugins/tunnel-frp/datasources/status 代理获取。
+func datasourceStatusHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	out := map[string]any{
+		"running":   mgr.Running(),
+		"bind_port": 0,
+	}
+	if s, err := getSettings(ctx); err == nil {
+		out["bind_port"] = s.bindPort
+		out["vhost_http_port"] = s.vhostHTTPPort
+		out["subdomain_host"] = s.subdomainHost
+		out["allow_ports"] = []int{s.allowPortsStart, s.allowPortsEnd}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // stylesHandler 提供插件声明的前端样式资源（styles 贡献点）。
