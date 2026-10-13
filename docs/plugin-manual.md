@@ -293,7 +293,44 @@ cd my-plugin && zip -r ../my-plugin.zip .   # 顶层含 plugin.yaml
 # 安装后点「启用」启动进程
 ```
 
-## 十、安全模型
+## 十、插件源（市场入口）
+
+面板「插件管理 → 插件源」提供**插件安装源**入口：配置插件源 → 拉取插件清单 → 从源一键安装。
+插件源是一个暴露 `index.json` 的 HTTP 端点（协议如下），为后期插件源市场打基础。
+
+### 源协议（index.json）
+
+插件源需在根路径提供 `GET /index.json`，返回：
+
+```json
+{
+  "name": "EasyServer 官方插件源",
+  "plugins": [
+    {
+      "name": "tunnel-frp",
+      "version": "0.1.0",
+      "description": "基于 frp 的内网穿透",
+      "download_url": "https://plugins.example.com/tunnel-frp.zip"
+    }
+  ]
+}
+```
+
+### 面板操作
+
+1. **添加源**：插件管理 → 插件源 → 填写源名称与 `http(s)://` 地址（如 `https://plugins.example.com`）。
+2. **拉取清单**：点击源的「拉取清单」，面板请求 `GET {源地址}/index.json` 展示插件列表。
+3. **安装**：点击插件「安装」，面板下载 `download_url` 的 zip 并复用面板的完整安全校验
+   （zip slip 路径穿越 / 单文件解压 bomb / 大小 50MB 上限 / manifest 校验），成功后注册到插件列表。
+
+### 安全
+
+- 源地址与下载地址仅允许 `http(s)`，且下载有 50MB 上限、30s 超时。
+- 安装全程复用 `InstallFromZip` 的防护（路径穿越、zip bomb、manifest 校验、权限声明），
+  从源安装与手动上传等价，不会绕过任何校验。
+- 插件源数据存 `plugin_sources` 表（迁移 000015）。
+
+## 十一、安全模型
 
 - **独立进程隔离**：插件崩溃/慢/泄漏不拖垮主面板；进程级重启规避 frp 等进程内端口泄漏。
 - **权限默认拒绝**：manifest 声明、管理员批准、token 绑定 scope；未声明能力一律 403。

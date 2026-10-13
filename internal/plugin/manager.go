@@ -28,6 +28,7 @@ type Manager struct {
 	panelAPI  PanelAPIConfig
 
 	svc *serviceScheduler // 定时任务调度（manifest.services 贡献点）
+	src *SourceService    // 插件源（市场入口）
 }
 
 // PanelAPIConfig 是面板服务级 API 代理配置（权限 panel.api.proxy）。
@@ -53,6 +54,8 @@ type ManagerOptions struct {
 	PortExposer PortExposer
 	// PanelAPI 面板服务级 API 代理（权限 panel.api.proxy，只读白名单）
 	PanelAPI PanelAPIConfig
+	// Sources 插件源仓储（可选；提供后启用插件源/市场入口）
+	Sources SourceRepository
 }
 
 // NewManager 创建插件管理器。
@@ -74,8 +77,16 @@ func NewManager(o ManagerOptions) *Manager {
 		panelAPI:   o.PanelAPI,
 		svc:        newServiceScheduler(),
 	}
+	if o.Sources != nil {
+		m.src = NewSourceService(o.Sources, m)
+	}
 	m.svc.start()
 	return m
+}
+
+// SourceService 返回插件源服务（未接线时为 nil）。
+func (m *Manager) SourceService() *SourceService {
+	return m.src
 }
 
 // Close 释放管理器持有的资源（定时任务调度），面板关停时调用。

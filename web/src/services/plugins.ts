@@ -1,5 +1,5 @@
 import api from './client';
-import type { ApiResponse, PluginRecord, PluginMenuItem } from '../types';
+import type { ApiResponse, PluginRecord, PluginMenuItem, PluginSource, PluginSourceCatalog } from '../types';
 
 // 插件详情（含贡献点与 manifest）
 export interface PluginDetail {
@@ -71,6 +71,13 @@ export const pluginsApi = {
   getDetail: (name: string) => api.get<ApiResponse<PluginDetail>>(`/plugins/${name}/detail`),
 
   getWidgets: () => api.get<ApiResponse<{ items: PluginWidgetItem[] }>>('/plugins/widgets'),
+
+  // 插件源（市场入口）
+  listSources: () => api.get<ApiResponse<{ items: PluginSource[] }>>('/plugins/sources'),
+  addSource: (data: { name: string; url: string }) => api.post<ApiResponse>('/plugins/sources', data),
+  deleteSource: (id: number) => api.delete<ApiResponse>(`/plugins/sources/${id}`),
+  fetchSourceCatalog: (id: number) => api.post<ApiResponse<{ source: PluginSource; catalog: PluginSourceCatalog }>>(`/plugins/sources/${id}/fetch`),
+  installFromSource: (data: { url: string }) => api.post<ApiResponse<{ plugin: string; version: string }>>('/plugins/sources/install', data),
 
   upload: (fd: FormData) => api.post<ApiResponse<{ plugin: string; version: string }>>('/plugins/upload', fd),
 };
