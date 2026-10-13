@@ -112,17 +112,28 @@ type Manifest struct {
 // Contributions 是插件向各扩展点贡献的内容（v1 八种，文档 §5）。
 // 未知字段由 yaml 解码自然忽略（向前兼容）。
 type Contributions struct {
-	Menus      []MenuContribution      `yaml:"menus" json:"menus,omitempty"`
-	Pages      []PageContribution      `yaml:"pages" json:"pages,omitempty"`
-	Routes     []RouteContribution     `yaml:"routes" json:"routes,omitempty"`
-	Widgets    []WidgetContribution    `yaml:"widgets" json:"widgets,omitempty"`
-	Settings   []SettingsContribution  `yaml:"settings" json:"settings,omitempty"`
-	Services   []ServiceContribution   `yaml:"services" json:"services,omitempty"`
-	EventSubs  []EventSubContribution  `yaml:"eventsubs" json:"eventsubs,omitempty"`
-	EventPubs  []EventPubContribution  `yaml:"eventpubs" json:"eventpubs,omitempty"`
-	Styles     []StyleContribution     `yaml:"styles" json:"styles,omitempty"`
-	WebServers []WebServerContribution `yaml:"web_servers" json:"web_servers,omitempty"`
-	Commands   []CommandContribution   `yaml:"commands" json:"commands,omitempty"`
+	Menus       []MenuContribution       `yaml:"menus" json:"menus,omitempty"`
+	Pages       []PageContribution       `yaml:"pages" json:"pages,omitempty"`
+	Routes      []RouteContribution      `yaml:"routes" json:"routes,omitempty"`
+	Widgets     []WidgetContribution     `yaml:"widgets" json:"widgets,omitempty"`
+	Settings    []SettingsContribution   `yaml:"settings" json:"settings,omitempty"`
+	Services    []ServiceContribution    `yaml:"services" json:"services,omitempty"`
+	EventSubs   []EventSubContribution   `yaml:"eventsubs" json:"eventsubs,omitempty"`
+	EventPubs   []EventPubContribution   `yaml:"eventpubs" json:"eventpubs,omitempty"`
+	Styles      []StyleContribution      `yaml:"styles" json:"styles,omitempty"`
+	WebServers  []WebServerContribution  `yaml:"web_servers" json:"web_servers,omitempty"`
+	Commands    []CommandContribution    `yaml:"commands" json:"commands,omitempty"`
+	Datasources []DatasourceContribution `yaml:"datasources" json:"datasources,omitempty"`
+}
+
+// DatasourceContribution 是数据源贡献点（文档 §5 datasources，v2）：
+// 插件声明可供面板/前端消费的数据源（如监控指标、状态快照），
+// 经插件 socket 在 /api/datasources/<id> 提供 JSON 数据。属功能补充，
+// 不开放面板核心数据采集。
+type DatasourceContribution struct {
+	ID    string `yaml:"id" json:"id"`
+	Title string `yaml:"title" json:"title"`
+	Kind  string `yaml:"kind" json:"kind"` // 数据形态：json / text / metrics
 }
 
 // CommandContribution 是可被调用的动作贡献点（文档 §5 commands，v2）：
@@ -312,6 +323,17 @@ func (m *Manifest) validateContributions() error {
 	for _, c := range m.Contributions.Commands {
 		if c.ID == "" || !nameRe.MatchString(c.ID) {
 			return errx.BadRequest("命令 id %q 无效（仅小写字母/数字/横线）", c.ID)
+		}
+	}
+	for _, c := range m.Contributions.Datasources {
+		if c.ID == "" || !nameRe.MatchString(c.ID) {
+			return errx.BadRequest("数据源 id %q 无效（仅小写字母/数字/横线）", c.ID)
+		}
+		if strings.TrimSpace(c.Title) == "" {
+			return errx.BadRequest("数据源 %q 需提供 title", c.ID)
+		}
+		if c.Kind != "json" && c.Kind != "text" && c.Kind != "metrics" {
+			return errx.BadRequest("数据源 %q 的 kind %q 无效（仅支持 json/text/metrics）", c.ID, c.Kind)
 		}
 	}
 	// settings/services 的 schedule 与 schema 深度校验在渲染/调度侧执行（PR-2）

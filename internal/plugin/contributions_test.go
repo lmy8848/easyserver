@@ -59,3 +59,23 @@ func TestContributionCommandsValidation(t *testing.T) {
 		t.Error("非法命令 id 应被拒绝")
 	}
 }
+
+func TestContributionDatasourcesValidation(t *testing.T) {
+	m := validManifest()
+	m.Contributions.Datasources = []DatasourceContribution{{ID: "status", Title: "隧道状态", Kind: "json"}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("合法 datasources 应通过: %v", err)
+	}
+	cases := []DatasourceContribution{
+		{ID: "Bad ID", Title: "x", Kind: "json"}, // 非法 id
+		{ID: "ok", Title: "", Kind: "json"},      // 缺 title
+		{ID: "ok", Title: "x", Kind: "xml"},      // 非法 kind
+	}
+	for _, c := range cases {
+		m2 := validManifest()
+		m2.Contributions.Datasources = []DatasourceContribution{c}
+		if err := m2.Validate(); err == nil {
+			t.Errorf("datasources %+v 应被拒绝", c)
+		}
+	}
+}
