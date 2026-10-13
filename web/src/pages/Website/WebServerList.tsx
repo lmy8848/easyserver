@@ -4,6 +4,7 @@ import {
   ReloadOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
+import { Server as ServerIcon } from 'lucide-react';
 import type { WebServer } from '../../types';
 import { getStatusColor, StatusTag } from '../../utils/status';
 
@@ -40,7 +41,7 @@ function renderServerIcon(name: string, size = 36) {
     case 'caddy':
       return <SiCaddy size={size} color="#00D7B2" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
     default:
-      return <SiNginx size={size} color="#1890FF" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+      return <ServerIcon size={size} color="#1890FF" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
   }
 }
 

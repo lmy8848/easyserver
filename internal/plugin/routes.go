@@ -191,6 +191,32 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		httpx.Success(c, gin.H{"items": items})
 	})
 
+	// 聚合 web 服务器类型下发：面板网站管理并入插件注册的类型（web_servers 贡献点）
+	protected.GET("/plugins/web-servers", func(c *gin.Context) {
+		list, err := m.List(c.Request.Context())
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		items := []gin.H{}
+		for _, rec := range list {
+			if !rec.Enabled {
+				continue
+			}
+			mft, err := m.GetManifest(c.Request.Context(), rec.Name)
+			if err != nil {
+				continue
+			}
+			for _, w := range mft.Contributions.WebServers {
+				items = append(items, gin.H{
+					"plugin": rec.Name, "name": w.Name, "display_name": w.DisplayName,
+					"description": w.Description, "default_port": w.DefaultPort,
+				})
+			}
+		}
+		httpx.Success(c, gin.H{"items": items})
+	})
+
 	// 聚合菜单下发：前端动态侧边栏消费（启用插件的 menus contribution）
 	protected.GET("/plugins/menus", func(c *gin.Context) {
 		list, err := m.List(c.Request.Context())

@@ -21,6 +21,7 @@ import type { ProjectType, DirEntry, PathValidation, ConfigTestResult } from './
 import { StatusTag } from '../../utils/status';
 import { formatBytes } from '../../utils/format';
 import { SiNginx, SiApache, SiApachetomcat, SiCaddy } from '@icons-pack/react-simple-icons';
+import { Server as ServerIcon } from 'lucide-react';
 import { LogViewer } from '../../components/LogViewer';
 
 function renderServerIcon(name: string, size = 32) {
@@ -32,7 +33,7 @@ function renderServerIcon(name: string, size = 32) {
     case 'tomcat':
     case 'tomcat9': return <SiApachetomcat size={size} color="#F89820" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
     case 'caddy': return <SiCaddy size={size} color="#00D7B2" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
-    default: return <SiNginx size={size} color="#1890FF" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
+    default: return <ServerIcon size={size} color="#1890FF" style={{ flexShrink: 0, verticalAlign: 'middle' }} />;
   }
 }
 

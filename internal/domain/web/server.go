@@ -31,10 +31,47 @@ func sanitizePackageName(name string) string {
 // Service manages web server lifecycle (install, start/stop, config).
 type Service struct {
 	repo ServerRepository
+	// pluginWebServers 返回插件注册的 web 服务器类型（web_servers 贡献点），
+	// 由 router 注入插件 Manager 适配；nil 表示无插件类型。
+	pluginWebServers func() []WebServer
 }
 
 func NewService(repo ServerRepository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetPluginWebServers 注入插件注册的 web 服务器类型（功能补充扩展点）。
+func (s *Service) SetPluginWebServers(fn func() []WebServer) {
+	s.pluginWebServers = fn
+}
+
+// AllTypes 返回全部可用 web 服务器类型（预定义 + 插件注册）。
+func (s *Service) AllTypes() []WebServer {
+	all := PredefinedWebServers()
+	if s.pluginWebServers != nil {
+		all = append(all, s.pluginWebServers()...)
+	}
+	return all
+}
+
+// FindType 按名查找类型（预定义 + 插件注册）；未命中返回 nil。
+func (s *Service) FindType(name string) *WebServer {
+	for _, ws := range s.AllTypes() {
+		if ws.Name == name {
+			return &ws
+		}
+	}
+	return nil
+}
+
+// AllTypeNames 返回全部可用类型名（预定义 + 插件注册）。
+func (s *Service) AllTypeNames() []string {
+	all := s.AllTypes()
+	names := make([]string, len(all))
+	for i, ws := range all {
+		names[i] = ws.Name
+	}
+	return names
 }
 
 // SeedPredefinedWebServers inserts predefined web server entries if not exists.
@@ -95,7 +132,7 @@ func (s *Service) Install(ctx context.Context, id int64) error {
 	}
 
 	// Always use the predefined install command, never trust the database value
-	predef := FindPredefinedWebServer(ws.Name)
+	predef := s.FindType(ws.Name)
 	if predef == nil {
 		return errx.BadRequest("未知的服务器类型 '%s'", ws.Name)
 	}
@@ -152,7 +189,7 @@ func (s *Service) Uninstall(ctx context.Context, id int64) error {
 	}
 
 	// Always use the predefined uninstall command, never trust the database value
-	predef := FindPredefinedWebServer(ws.Name)
+	predef := s.FindType(ws.Name)
 	var uninstallCmd string
 	if predef != nil && predef.UninstallCmd != "" {
 		uninstallCmd = predef.UninstallCmd
@@ -260,6 +297,16 @@ func (s *Service) TestConfig(ctx context.Context, id int64) (bool, string) {
 		return false, "web server not found"
 	}
 
+	// 插件注册的类型走其声明的 test_cmd；预定义类型保留内置检测
+	if def := s.FindType(ws.Name); def != nil && def.TestCmd != "" {
+		parts := strings.Fields(def.TestCmd)
+		if len(parts) > 0 {
+			out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).CombinedOutput()
+			msg := strings.TrimSpace(string(out))
+			return err == nil, msg
+		}
+	}
+
 	switch ws.Name {
 	case "nginx":
 		out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput()
@@ -289,7 +336,8 @@ func (s *Service) TestConfig(ctx context.Context, id int64) (bool, string) {
 
 // validateConfigPath checks that a config file path is safe and within allowed directories.
 // This prevents path traversal or manipulation of ConfigFile stored in the database.
-func validateConfigPath(path string) error {
+// 允许目录 = 内置白名单 + 插件注册类型声明的 ConfigPath。
+func (s *Service) validateConfigPath(path string) error {
 	if path == "" {
 		return errx.BadRequest("配置文件路径为空")
 	}
@@ -306,6 +354,11 @@ func validateConfigPath(path string) error {
 		"/etc/caddy/",
 		"/etc/httpd/",
 		"/etc/lighttpd/",
+	}
+	for _, ws := range s.AllTypes() {
+		if ws.ConfigPath != "" {
+			allowedPrefixes = append(allowedPrefixes, strings.TrimRight(ws.ConfigPath, "/")+"/")
+		}
 	}
 	for _, prefix := range allowedPrefixes {
 		if strings.HasPrefix(cleaned, prefix) || cleaned == strings.TrimSuffix(prefix, "/") {
@@ -327,7 +380,7 @@ func (s *Service) GetConfig(ctx context.Context, id int64) (string, error) {
 	if ws.ConfigFile == "" {
 		return "", errx.BadRequest("未配置配置文件路径")
 	}
-	if err := validateConfigPath(ws.ConfigFile); err != nil {
+	if err := s.validateConfigPath(ws.ConfigFile); err != nil {
 		return "", err
 	}
 
@@ -350,7 +403,7 @@ func (s *Service) SaveConfig(ctx context.Context, id int64, content string) erro
 	if ws.ConfigFile == "" {
 		return errx.BadRequest("未配置配置文件路径")
 	}
-	if err := validateConfigPath(ws.ConfigFile); err != nil {
+	if err := s.validateConfigPath(ws.ConfigFile); err != nil {
 		return err
 	}
 
@@ -425,38 +478,50 @@ func (s *Service) RefreshStatus(ctx context.Context, id int64) error {
 	installed := false
 	version := ""
 
-	switch ws.Name {
-	case "nginx":
-		if _, err := exec.LookPath("nginx"); err == nil {
-			installed = true
-			out, _ := exec.CommandContext(ctx, "nginx", "-v").CombinedOutput()
-			version = strings.TrimSpace(string(out))
-		}
-	case "apache":
-		if _, err := exec.LookPath("apache2"); err == nil {
-			installed = true
-			out, _ := exec.CommandContext(ctx, "apache2", "-v").CombinedOutput()
-			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-			if len(lines) > 0 {
-				version = strings.TrimSpace(lines[0])
+	// 插件注册的类型走其声明的 version_cmd；预定义类型保留内置检测
+	if def := s.FindType(ws.Name); def != nil && def.VersionCmd != "" {
+		parts := strings.Fields(def.VersionCmd)
+		if len(parts) > 0 {
+			out, err := exec.CommandContext(ctx, parts[0], parts[1:]...).CombinedOutput()
+			if err == nil {
+				installed = true
+				version = strings.TrimSpace(string(out))
 			}
 		}
-	case "tomcat":
-		if _, err := os.Stat("/etc/tomcat9"); err == nil {
-			installed = true
-			version = "tomcat9"
-		}
-	case "caddy":
-		if _, err := exec.LookPath("caddy"); err == nil {
-			installed = true
-			out, _ := exec.CommandContext(ctx, "caddy", "version").CombinedOutput()
-			version = strings.TrimSpace(string(out))
-		}
-	default:
-		if ws.BinaryPath != "" {
-			if _, err := os.Stat(ws.BinaryPath); err == nil {
+	} else {
+		switch ws.Name {
+		case "nginx":
+			if _, err := exec.LookPath("nginx"); err == nil {
 				installed = true
-				version = "installed"
+				out, _ := exec.CommandContext(ctx, "nginx", "-v").CombinedOutput()
+				version = strings.TrimSpace(string(out))
+			}
+		case "apache":
+			if _, err := exec.LookPath("apache2"); err == nil {
+				installed = true
+				out, _ := exec.CommandContext(ctx, "apache2", "-v").CombinedOutput()
+				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+				if len(lines) > 0 {
+					version = strings.TrimSpace(lines[0])
+				}
+			}
+		case "tomcat":
+			if _, err := os.Stat("/etc/tomcat9"); err == nil {
+				installed = true
+				version = "tomcat9"
+			}
+		case "caddy":
+			if _, err := exec.LookPath("caddy"); err == nil {
+				installed = true
+				out, _ := exec.CommandContext(ctx, "caddy", "version").CombinedOutput()
+				version = strings.TrimSpace(string(out))
+			}
+		default:
+			if ws.BinaryPath != "" {
+				if _, err := os.Stat(ws.BinaryPath); err == nil {
+					installed = true
+					version = "installed"
+				}
 			}
 		}
 	}
