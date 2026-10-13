@@ -48,7 +48,18 @@ func (r *sourceRepo) AddSource(ctx context.Context, name, url string) (*PluginSo
 	if err != nil {
 		return nil, err
 	}
-	return &PluginSource{ID: id, Name: name, URL: url, Enabled: true}, nil
+	// 回读完整记录（含 DB 生成的时间戳），避免返回零值时间
+	var s PluginSource
+	var enabled int
+	err = r.db.QueryRowContext(ctx, `
+		SELECT id, name, url, enabled, created_at, updated_at
+		FROM plugin_sources WHERE id = ?`, id).
+		Scan(&s.ID, &s.Name, &s.URL, &enabled, &s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	s.Enabled = enabled == 1
+	return &s, nil
 }
 
 func (r *sourceRepo) DeleteSource(ctx context.Context, id int64) error {
