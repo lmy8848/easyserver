@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +117,8 @@ func (h *HostAPI) serve(w http.ResponseWriter, r *http.Request) {
 		h.handlePortList(w, r, name)
 	case sub == "panel/api" && r.Method == http.MethodPost:
 		h.handlePanelAPI(w, r, name)
+	case sub == "command/invoke" && r.Method == http.MethodPost:
+		h.handleCommandInvoke(w, r, name)
 	default:
 		notFound(w)
 	}
@@ -508,6 +512,95 @@ func (h *HostAPI) handlePanelAPI(w http.ResponseWriter, r *http.Request, name st
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	_ = h.mgr.AuditWrite(r.Context(), name, "panel.api GET "+req.Path+" -> "+strconv.Itoa(resp.StatusCode))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(data)
+}
+
+// ---- 跨插件命令调用（权限 command.invoke，文档 §7.2 /command/invoke）----
+
+const (
+	commandMaxDepth     = 3
+	commandDepthHeader  = "X-Panel-Command-Depth"
+	commandCallerHeader = "X-Panel-Command-Caller"
+)
+
+// handleCommandInvoke 代理插件调用另一插件的 command：校验权限 + 禁自调 +
+// 深度限制（防递归）+ 目标声明校验，再经目标插件 socket 转发
+// /api/commands/<id>，全程审计 + 超时。
+func (h *HostAPI) handleCommandInvoke(w http.ResponseWriter, r *http.Request, caller string) {
+	if !h.requirePermission(w, r, PermCommandInvoke) {
+		return
+	}
+	var req struct {
+		Plugin  string          `json:"plugin"`
+		Command string          `json:"command"`
+		Params  json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "请求体无效")
+		return
+	}
+	if req.Plugin == caller {
+		forbidden(w, "禁止插件调用自身命令")
+		return
+	}
+	depth := 1
+	if v := r.Header.Get(commandDepthHeader); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
+			depth = n
+		}
+	}
+	if depth > commandMaxDepth {
+		forbidden(w, "命令调用深度超过限制")
+		return
+	}
+	mft, err := h.mgr.GetManifest(r.Context(), req.Plugin)
+	if err != nil {
+		notFound(w)
+		return
+	}
+	declared := false
+	for _, c := range mft.Contributions.Commands {
+		if c.ID == req.Command {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		notFound(w)
+		return
+	}
+	sock, _, ok := h.mgr.sup.RunningEndpoint(req.Plugin)
+	if !ok {
+		internalError(w, "目标插件未运行")
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"params": req.Params})
+	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+		"http://plugin/api/commands/"+url.PathEscape(req.Command), bytes.NewReader(body))
+	if err != nil {
+		internalError(w, err.Error())
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(commandDepthHeader, strconv.Itoa(depth+1))
+	httpReq.Header.Set(commandCallerHeader, caller)
+	tr := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", sock)
+		},
+	}
+	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		internalError(w, "命令调用失败: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	_ = h.mgr.AuditWrite(r.Context(), caller, fmt.Sprintf("command.invoke %s/%s -> %d", req.Plugin, req.Command, resp.StatusCode))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(data)

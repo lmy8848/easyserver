@@ -41,6 +41,7 @@ const (
 	PermPanelAPIProxy    = "panel.api.proxy"
 	PermStorageReadWrite = "storage.readwrite"
 	PermFirewallManage   = "firewall.manage" // 暴露端口访问控制（PortACL：授权源白名单）
+	PermCommandInvoke    = "command.invoke"  // 调用其他插件声明的 command（跨插件协作）
 )
 
 // KnownPermissions 是全部已知能力（manifest 声明白名单之外一律拒绝加载）。
@@ -48,7 +49,7 @@ var KnownPermissions = map[string]bool{
 	PermAuditWrite: true, PermConfigRead: true, PermConfigReadWrite: true,
 	PermLogWrite: true, PermEventPublish: true, PermEventSubscribe: true,
 	PermExecRestricted: true, PermNotifySend: true, PermPanelAPIProxy: true,
-	PermStorageReadWrite: true, PermFirewallManage: true,
+	PermStorageReadWrite: true, PermFirewallManage: true, PermCommandInvoke: true,
 }
 
 // 插件生命周期状态（文档 §12.1）。
@@ -121,6 +122,15 @@ type Contributions struct {
 	EventPubs  []EventPubContribution  `yaml:"eventpubs" json:"eventpubs,omitempty"`
 	Styles     []StyleContribution     `yaml:"styles" json:"styles,omitempty"`
 	WebServers []WebServerContribution `yaml:"web_servers" json:"web_servers,omitempty"`
+	Commands   []CommandContribution   `yaml:"commands" json:"commands,omitempty"`
+}
+
+// CommandContribution 是可被调用的动作贡献点（文档 §5 commands，v2）：
+// 插件声明命令，面板或其他插件可经面板 Host API command/invoke 调用。
+// 插件需在自身 socket 提供 /commands/<id> 处理端点。
+type CommandContribution struct {
+	ID    string `yaml:"id" json:"id"`
+	Title string `yaml:"title" json:"title"`
 }
 
 type MenuContribution struct {
@@ -297,6 +307,11 @@ func (m *Manifest) validateContributions() error {
 		}
 		if strings.TrimSpace(c.ServiceName) == "" {
 			return errx.BadRequest("web 服务器类型 %q 需提供 service_name（systemd 单元名）", c.Name)
+		}
+	}
+	for _, c := range m.Contributions.Commands {
+		if c.ID == "" || !nameRe.MatchString(c.ID) {
+			return errx.BadRequest("命令 id %q 无效（仅小写字母/数字/横线）", c.ID)
 		}
 	}
 	// settings/services 的 schedule 与 schema 深度校验在渲染/调度侧执行（PR-2）
