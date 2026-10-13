@@ -1,7 +1,7 @@
 # EasyServer 插件开发手册
 
 > 面向插件开发者的官方文档。面板内「插件管理 → 插件开发手册」提供精简版并链接到本手册；
-> 宣传网站（www.0xdead.icu/plugin-manual）渲染同一份内容。
+> 宣传网站 [www.0xdead.icu/plugin-manual](https://www.0xdead.icu/plugin-manual) 渲染同一份内容。
 > 源码契约：`internal/plugin/contract.go`（manifest/权限/贡献点）、`internal/plugin/host.go`（Host API）、
 > `sdk/plugin-sdk-go/`（Go SDK）、`web/public/host-sdk.js`（前端 Host SDK）。
 
