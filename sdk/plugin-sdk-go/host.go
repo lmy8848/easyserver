@@ -303,3 +303,18 @@ func (h *HostClient) ListPorts(ctx context.Context) ([]PortACL, error) {
 	}
 	return out, nil
 }
+
+// ---- 面板服务级 API 代理（需 manifest 声明 panel.api.proxy 权限）----
+
+// PanelAPI 调用面板业务 API（非用户态服务级）。v1 仅支持只读 GET，
+// 且路径必须在面板白名单内（监控 / 审计 / 告警 / 安全）。
+func (h *HostClient) PanelAPI(ctx context.Context, method, path string, body, out any) error {
+	return h.do(ctx, http.MethodPost, "panel/api", map[string]any{
+		"method": method, "path": path, "body": body,
+	}, out)
+}
+
+// PanelGet 便捷方法：调用面板只读 API（白名单内 GET）。
+func (h *HostClient) PanelGet(ctx context.Context, path string, out any) error {
+	return h.PanelAPI(ctx, http.MethodGet, path, nil, out)
+}
