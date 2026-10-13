@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"time"
 
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/server"
@@ -35,7 +37,8 @@ func (m *FRPSManager) Running() bool {
 
 // Start 启动 frps；已有实例则原子替换（停旧启新，改配置即重启）。
 // 必须先停旧实例再创建新实例：frp 的 NewService 会立即 bind 监听端口，
-// 若旧实例仍占用端口会报 address already in use。
+// 若旧实例仍占用端口会报 address already in use。停旧后多监听器（控制端口 +
+// vhost HTTP 端口等）释放可能有短暂延迟，NewService 遇端口占用时重试数次。
 // 服务本体运行在管理器自有生命周期上，不随调用方 context 结束。
 func (m *FRPSManager) Start(cfg v1.ServerConfig) error {
 	m.mu.Lock()
@@ -48,9 +51,19 @@ func (m *FRPSManager) Start(cfg v1.ServerConfig) error {
 		_ = oldSvc.Close()
 	}
 
-	svc, err := server.NewService(&cfg)
-	if err != nil {
-		return fmt.Errorf("frps 初始化失败: %w", err)
+	var (
+		svc *server.Service
+		err error
+	)
+	for attempt := 0; ; attempt++ {
+		svc, err = server.NewService(&cfg)
+		if err == nil {
+			break
+		}
+		if attempt >= 4 || !strings.Contains(err.Error(), "address already in use") {
+			return fmt.Errorf("frps 初始化失败: %w", err)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 
