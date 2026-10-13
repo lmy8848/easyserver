@@ -36,9 +36,13 @@ func RequestLoggerMiddleware() gin.HandlerFunc {
 		}
 
 		// 4xx/5xx 用 warn/error 级别（更易在文件里筛出问题），其余 info。
+		// 401/404（未授权/未找到）是攻击者扫描探测的高频响应，降为 debug，
+		// 避免暴力探测刷屏 warn 级别（默认 info 等级下不落盘）。
 		switch {
 		case c.Writer.Status() >= 500:
 			logger.Error("http", attrs...)
+		case c.Writer.Status() == http.StatusUnauthorized || c.Writer.Status() == http.StatusNotFound:
+			logger.Debug("http", attrs...)
 		case c.Writer.Status() >= 400:
 			logger.Warn("http", attrs...)
 		default:

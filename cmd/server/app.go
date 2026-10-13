@@ -18,6 +18,7 @@ import (
 	"easyserver/internal/api"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/infra/logger"
 	"easyserver/internal/infra/mise"
 )
 
@@ -45,6 +46,9 @@ func NewApp(store *config.Store, devMode bool) *App {
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 			IdleTimeout:  60 * time.Second,
+			// TLS 握手错误/HTTP 服务内部错误经洪泛守卫限流（同类刷屏被抑制，
+			// 防攻击者扫描撑爆运行日志），放行的仍进全局日志（文件+stderr）。
+			ErrorLog: logger.ServerErrorLog(),
 			// 禁用 HTTP/2：Cloudflare 边缘到源站的 HTTP/2 连接在 SSE 长连接与
 			// 长请求下不稳定（曾触发 ERR_HTTP2_PROTOCOL_ERROR 与 CF 502 页），
 			// 强制 HTTP/1.1 后 CF 走回源更稳定

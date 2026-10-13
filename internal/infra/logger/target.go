@@ -75,7 +75,7 @@ func newFileTarget(path string, maxSize int64, maxFiles int) (*fileTarget, error
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("logger: 创建日志目录 %s: %w", dir, err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		return nil, fmt.Errorf("logger: 打开日志文件 %s: %w", path, err)
 	}
@@ -152,7 +152,7 @@ func (t *fileTarget) rotate() {
 	if err := os.Rename(t.path, rotateName(t.path, 1)); err != nil {
 		fmt.Fprintf(os.Stderr, "logger: 轮转重命名 %s→.1 失败: %v\n", t.path, err)
 	}
-	if f, err := os.OpenFile(t.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+	if f, err := os.OpenFile(t.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 		t.f = f
 		t.size = 0
 		return
@@ -162,7 +162,7 @@ func (t *fileTarget) rotate() {
 
 // reopen 写失败后尝试重开文件（如磁盘恢复、文件被外部删除），并重算实际大小。
 func (t *fileTarget) reopen() error {
-	f, err := os.OpenFile(t.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(t.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		return err
 	}
