@@ -34,3 +34,5 @@ contributions:
     - { id: panel-theme, path: styles/panel-theme.css }
   commands:
     - { id: restart, title: 重启 frps }
+  datasources:
+    - { id: status, title: frps 隧道状态, kind: json }
