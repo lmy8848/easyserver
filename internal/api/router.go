@@ -244,6 +244,23 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		},
 	})
 	plugin.RegisterRoutes(g.Protected, pluginMgr)
+	// 插件注册的 web 服务器类型（功能补充扩展点）：面板网站管理并入可选类型
+	webServerSvc.SetPluginWebServers(func() []web.WebServer {
+		contribs := pluginMgr.WebServers()
+		out := make([]web.WebServer, 0, len(contribs))
+		for _, c := range contribs {
+			out = append(out, web.WebServer{
+				Name: c.Name, DisplayName: c.DisplayName, Description: c.Description,
+				InstallCmd: c.InstallCmd, UninstallCmd: c.UninstallCmd,
+				ConfigPath: c.ConfigPath, ConfigFile: c.ConfigFile,
+				SitesAvailable: c.SitesAvailable, SitesEnabled: c.SitesEnabled,
+				ServiceName: c.ServiceName, BinaryPath: c.BinaryPath,
+				DefaultPort: c.DefaultPort, LogDir: c.LogDir,
+				TestCmd: c.TestCmd, VersionCmd: c.VersionCmd,
+			})
+		}
+		return out
+	})
 	// 插件业务代理：NoRoute 兜底 + JWT 认证（与 protected 组同策略）
 	plugin.SetProxyHandler(func(c *gin.Context) {
 		middleware.JWTMiddleware(cfg.Auth.JWTSecret, g.sessionValidator)(c)

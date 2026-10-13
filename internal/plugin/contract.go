@@ -111,15 +111,16 @@ type Manifest struct {
 // Contributions 是插件向各扩展点贡献的内容（v1 八种，文档 §5）。
 // 未知字段由 yaml 解码自然忽略（向前兼容）。
 type Contributions struct {
-	Menus     []MenuContribution     `yaml:"menus" json:"menus,omitempty"`
-	Pages     []PageContribution     `yaml:"pages" json:"pages,omitempty"`
-	Routes    []RouteContribution    `yaml:"routes" json:"routes,omitempty"`
-	Widgets   []WidgetContribution   `yaml:"widgets" json:"widgets,omitempty"`
-	Settings  []SettingsContribution `yaml:"settings" json:"settings,omitempty"`
-	Services  []ServiceContribution  `yaml:"services" json:"services,omitempty"`
-	EventSubs []EventSubContribution `yaml:"eventsubs" json:"eventsubs,omitempty"`
-	EventPubs []EventPubContribution `yaml:"eventpubs" json:"eventpubs,omitempty"`
-	Styles    []StyleContribution    `yaml:"styles" json:"styles,omitempty"`
+	Menus      []MenuContribution      `yaml:"menus" json:"menus,omitempty"`
+	Pages      []PageContribution      `yaml:"pages" json:"pages,omitempty"`
+	Routes     []RouteContribution     `yaml:"routes" json:"routes,omitempty"`
+	Widgets    []WidgetContribution    `yaml:"widgets" json:"widgets,omitempty"`
+	Settings   []SettingsContribution  `yaml:"settings" json:"settings,omitempty"`
+	Services   []ServiceContribution   `yaml:"services" json:"services,omitempty"`
+	EventSubs  []EventSubContribution  `yaml:"eventsubs" json:"eventsubs,omitempty"`
+	EventPubs  []EventPubContribution  `yaml:"eventpubs" json:"eventpubs,omitempty"`
+	Styles     []StyleContribution     `yaml:"styles" json:"styles,omitempty"`
+	WebServers []WebServerContribution `yaml:"web_servers" json:"web_servers,omitempty"`
 }
 
 type MenuContribution struct {
@@ -176,6 +177,27 @@ type EventPubContribution struct {
 type StyleContribution struct {
 	ID   string `yaml:"id" json:"id"`
 	Path string `yaml:"path" json:"path"` // 插件内相对路径（不含前导 /），经插件代理提供
+}
+
+// WebServerContribution 是 web 服务器类型扩展贡献点：插件注册新的服务器类型
+// （如 Lighttpd/Caddy 变体），面板网站管理把其并入可选类型并提供安装/卸载/
+// 配置管理。仅做功能补充，不开放核心网站托管操作。
+type WebServerContribution struct {
+	Name           string `yaml:"name" json:"name"`
+	DisplayName    string `yaml:"display_name" json:"display_name"`
+	Description    string `yaml:"description" json:"description"`
+	InstallCmd     string `yaml:"install_cmd" json:"install_cmd"`
+	UninstallCmd   string `yaml:"uninstall_cmd" json:"uninstall_cmd"`
+	ConfigPath     string `yaml:"config_path" json:"config_path"`
+	ConfigFile     string `yaml:"config_file" json:"config_file"`
+	SitesAvailable string `yaml:"sites_available" json:"sites_available"`
+	SitesEnabled   string `yaml:"sites_enabled" json:"sites_enabled"`
+	ServiceName    string `yaml:"service_name" json:"service_name"`
+	BinaryPath     string `yaml:"binary_path" json:"binary_path"`
+	DefaultPort    int    `yaml:"default_port" json:"default_port"`
+	LogDir         string `yaml:"log_dir" json:"log_dir"`
+	TestCmd        string `yaml:"test_cmd" json:"test_cmd"`       // 配置测试命令（可选）
+	VersionCmd     string `yaml:"version_cmd" json:"version_cmd"` // 版本/状态检测命令（可选）
 }
 
 // ManifestDefaults 填充可省略字段的标准值。
@@ -264,6 +286,17 @@ func (m *Manifest) validateContributions() error {
 	for _, c := range m.Contributions.Styles {
 		if c.Path == "" || strings.HasPrefix(c.Path, "/") || strings.Contains(c.Path, "..") {
 			return errx.BadRequest("样式路径 %q 必须是插件内的相对路径", c.Path)
+		}
+	}
+	for _, c := range m.Contributions.WebServers {
+		if !nameRe.MatchString(c.Name) {
+			return errx.BadRequest("web 服务器类型名 %q 无效（仅小写字母/数字/横线）", c.Name)
+		}
+		if strings.TrimSpace(c.DisplayName) == "" || strings.TrimSpace(c.InstallCmd) == "" {
+			return errx.BadRequest("web 服务器类型 %q 需提供 display_name 与 install_cmd", c.Name)
+		}
+		if strings.TrimSpace(c.ServiceName) == "" {
+			return errx.BadRequest("web 服务器类型 %q 需提供 service_name（systemd 单元名）", c.Name)
 		}
 	}
 	// settings/services 的 schedule 与 schema 深度校验在渲染/调度侧执行（PR-2）

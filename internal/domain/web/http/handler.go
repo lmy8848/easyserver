@@ -80,10 +80,10 @@ func (h *WebServerHandler) Create(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("显示名称不能为空白")
 	}
 
-	// Look up the predefined template — only predefined server types are allowed
-	predef := web.FindPredefinedWebServer(req.Name)
+	// Look up the type template — 预定义 + 插件注册类型均可
+	predef := h.webServerService.FindType(req.Name)
 	if predef == nil {
-		return nil, errx.BadRequest("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, web.GetPredefinedWebServerNames())
+		return nil, errx.BadRequest("未知的服务器类型 '%s'; 允许的类型: %v", req.Name, h.webServerService.AllTypeNames())
 	}
 
 	// Build the WebServer from the trusted template, with optional display overrides

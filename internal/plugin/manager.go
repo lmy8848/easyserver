@@ -354,6 +354,33 @@ func (m *Manager) PluginDir(name string) string {
 	return filepath.Join(m.pluginsDir, name)
 }
 
+// WebServers 返回全部启用插件声明的 web 服务器类型贡献（web_servers 贡献点），
+// 供面板网站管理并入可选类型（router 转换为 web.WebServer 注册）。
+func (m *Manager) WebServers() []WebServerContribution {
+	m.mu.Lock()
+	names := make([]string, 0, len(m.manifests))
+	for name, mft := range m.manifests {
+		if len(mft.Contributions.WebServers) > 0 {
+			names = append(names, name)
+		}
+	}
+	m.mu.Unlock()
+	var out []WebServerContribution
+	for _, name := range names {
+		rec, err := m.repo.GetPlugin(context.Background(), name)
+		if err != nil || rec == nil || !rec.Enabled {
+			continue
+		}
+		m.mu.Lock()
+		mft := m.manifests[name]
+		m.mu.Unlock()
+		if mft != nil {
+			out = append(out, mft.Contributions.WebServers...)
+		}
+	}
+	return out
+}
+
 // PublishBusinessEvent 业务点发布的包装（供 auth/web/cron 等域调用）。
 func PublishBusinessEvent(name, source string, payload any) {
 	if b := DefaultBus(); b != nil {

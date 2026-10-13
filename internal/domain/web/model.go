@@ -20,6 +20,9 @@ type WebServer struct {
 	BinaryPath     string `json:"binary_path"`     // /usr/sbin/nginx
 	DefaultPort    int    `json:"default_port"`    // 80, 8080
 	LogDir         string `json:"log_dir"`         // /var/log/nginx
+	// 类型驱动命令（插件注册的 web_servers 贡献点使用；预定义类型可留空走内置 switch）
+	TestCmd    string `json:"test_cmd"`    // 配置测试命令，如 lighttpd -t -f <config>
+	VersionCmd string `json:"version_cmd"` // 版本/状态检测命令，如 lighttpd -v
 	// Runtime state (populated by RefreshStatus)
 	Status      string `json:"status"` // not_installed, running, stopped
 	Version     string `json:"version"`
