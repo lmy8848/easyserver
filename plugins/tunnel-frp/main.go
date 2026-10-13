@@ -50,10 +50,25 @@ const (
 )
 
 var (
-	mgr      = NewFRPSManager()
-	host     = sdk.NewHostClient()
-	cfgCache = &settingsCache{}
+	mgr        = NewFRPSManager()
+	host       = sdk.NewHostClient()
+	cfgCache   = &settingsCache{}
+	mainCancel context.CancelFunc
 )
+
+// requestRestart 触发插件进程级重启：短暂延迟后取消主 context，插件优雅
+// 退出（释放全部端口），由 supervisor 按新配置重新拉起。
+// 采用进程级而非 frps 进程内重启：frp v0.71.0 的 Close 不释放 vhost HTTP
+// 端口监听器（NewService 里 net.Listen 后未跟踪），进程内重启会泄漏端口。
+func requestRestart() {
+	if mainCancel == nil {
+		return
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond) // 等当前响应刷出
+		mainCancel()
+	}()
+}
 
 // ---- 配置 ----
 
@@ -220,12 +235,9 @@ func commandRestartHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	if err := startFRPS(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
 	_ = host.Audit(r.Context(), "command.invoke: 重启 frps")
-	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 已重启"})
+	requestRestart() // 进程级重启
+	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 将重启（插件进程）"})
 }
 
 // stylesHandler 提供插件声明的前端样式资源（styles 贡献点）。
@@ -346,13 +358,10 @@ func settingsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cfgCache.invalidate()
-	if err := startFRPS(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	_ = host.Audit(r.Context(), "frps 配置已更新并重启")
-	_ = host.Log(r.Context(), "frps 配置已更新并重启")
-	writeJSON(w, http.StatusOK, map[string]string{"message": "配置已保存，frps 已重启"})
+	_ = host.Audit(r.Context(), "frps 配置已更新，插件将重启")
+	_ = host.Log(r.Context(), "frps 配置已更新，插件将重启")
+	requestRestart() // 进程级重启（frp vhost 端口泄漏无法进程内重启）
+	writeJSON(w, http.StatusOK, map[string]string{"message": "配置已保存，插件将重启"})
 }
 
 var proxyNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
@@ -482,13 +491,10 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	if err := startFRPS(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	_ = host.Audit(r.Context(), "frps 已手动重启")
-	_ = host.Log(r.Context(), "frps 已手动重启")
-	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 已重启"})
+	_ = host.Audit(r.Context(), "frps 手动重启（进程级）")
+	_ = host.Log(r.Context(), "frps 手动重启（进程级）")
+	requestRestart()
+	writeJSON(w, http.StatusOK, map[string]string{"message": "插件将重启"})
 }
 
 // ---- 暴露端口访问控制（经面板 Host API，需 firewall.manage 权限）----
@@ -563,6 +569,8 @@ func uiHandler(w http.ResponseWriter, _ *http.Request) {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	// requestRestart 通过取消此 context 触发进程级重启（由 supervisor 重新拉起）
+	ctx, mainCancel = context.WithCancel(ctx)
 
 	// 启动即拉起 frps（配置缺失时用默认值）
 	if err := startFRPS(ctx); err != nil {
