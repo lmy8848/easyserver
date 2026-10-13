@@ -209,6 +209,23 @@ func registerRoutes(srv *sdk.Server) {
 	srv.HandleFunc("/api/ports", portsHandler)
 	// 前端样式贡献（styles 贡献点）：提供 web/styles/ 下的 CSS 供面板注入
 	srv.HandleFunc("/styles/", stylesHandler)
+	// 可被调用的命令（commands 贡献点）：其他插件经面板 command/invoke 调用
+	srv.HandleFunc("/api/commands/restart", commandRestartHandler)
+}
+
+// commandRestartHandler 是插件声明的 restart 命令：重启 frps。
+// 经面板 Host API command/invoke 由其他插件调用（本插件自身不可调）。
+func commandRestartHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if err := startFRPS(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	_ = host.Audit(r.Context(), "command.invoke: 重启 frps")
+	writeJSON(w, http.StatusOK, map[string]string{"message": "frps 已重启"})
 }
 
 // stylesHandler 提供插件声明的前端样式资源（styles 贡献点）。

@@ -32,3 +32,5 @@ contributions:
     - { id: api, prefix: /api/plugins/tunnel-frp }
   styles:
     - { id: panel-theme, path: styles/panel-theme.css }
+  commands:
+    - { id: restart, title: 重启 frps }

@@ -318,3 +318,13 @@ func (h *HostClient) PanelAPI(ctx context.Context, method, path string, body, ou
 func (h *HostClient) PanelGet(ctx context.Context, path string, out any) error {
 	return h.PanelAPI(ctx, http.MethodGet, path, nil, out)
 }
+
+// ---- 跨插件命令调用（需 manifest 声明 command.invoke 权限）----
+
+// InvokeCommand 调用另一插件声明的 command（经面板 Host API /command/invoke，
+// 禁自调、深度限 3）。目标插件需在自身 socket 提供 /api/commands/<id> 端点。
+func (h *HostClient) InvokeCommand(ctx context.Context, pluginName, command string, params, out any) error {
+	return h.do(ctx, http.MethodPost, "command/invoke", map[string]any{
+		"plugin": pluginName, "command": command, "params": params,
+	}, out)
+}
