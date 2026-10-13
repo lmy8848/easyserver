@@ -236,15 +236,15 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		},
 		// 暴露端口访问控制：插件经 Host API port.expose/revoke 落到防火墙 PortACL
 		PortExposer: portACLExposerAdapter{svc: portACLService},
-			// 面板服务级 API 代理（panel.api.proxy 只读白名单）
-			PanelAPI: plugin.PanelAPIConfig{
-				BaseURL: panelBaseURL,
-				Token:   panelServiceToken,
-				Domain:  cfg.Server.Domain,
-			},
-			// 插件源（市场入口）
-			Sources: plugin.NewSourceRepository(db),
-		})
+		// 面板服务级 API 代理（panel.api.proxy 只读白名单）
+		PanelAPI: plugin.PanelAPIConfig{
+			BaseURL: panelBaseURL,
+			Token:   panelServiceToken,
+			Domain:  cfg.Server.Domain,
+		},
+		// 插件源（市场入口）
+		Sources: plugin.NewSourceRepository(db),
+	})
 	plugin.RegisterRoutes(g.Protected, pluginMgr)
 	// 插件注册的 web 服务器类型（功能补充扩展点）：面板网站管理并入可选类型
 	webServerSvc.SetPluginWebServers(func() []web.WebServer {
