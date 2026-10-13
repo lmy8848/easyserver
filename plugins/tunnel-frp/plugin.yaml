@@ -21,6 +21,7 @@ permissions:
   - log.write
   - audit.write
   - firewall.manage
+  - panel.api.proxy
 
 contributions:
   menus:

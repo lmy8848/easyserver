@@ -241,7 +241,7 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"running":         mgr.Running(),
 		"bind_port":       s.bindPort,
 		"server_addr":     s.serverAddr,
@@ -249,7 +249,22 @@ func statusHandler(w http.ResponseWriter, r *http.Request) {
 		"subdomain_host":  s.subdomainHost,
 		"allow_ports":     []int{s.allowPortsStart, s.allowPortsEnd},
 		"token_masked":    mask(s.token),
-	})
+	}
+	// 服务器负载（经 panel.api.proxy 只读代理面板监控，需声明并批准该权限）
+	var resp struct {
+		Data struct {
+			CPU struct {
+				UsagePercent float64 `json:"usage_percent"`
+			} `json:"cpu"`
+			Memory struct {
+				UsagePercent float64 `json:"usage_percent"`
+			} `json:"memory"`
+		} `json:"data"`
+	}
+	if err := host.PanelGet(ctx, "/api/monitor/stats", &resp); err == nil {
+		out["server_load"] = map[string]any{"cpu_percent": resp.Data.CPU.UsagePercent, "mem_percent": resp.Data.Memory.UsagePercent}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func settingsHandler(w http.ResponseWriter, r *http.Request) {
