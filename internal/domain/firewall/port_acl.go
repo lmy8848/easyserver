@@ -153,13 +153,14 @@ func (s *PortACLService) remove(ctx context.Context, id int64) {
 	}
 }
 
-// normalizeCIDRs 校验并规范化授权源列表：接受单 IP（补 /32）或 CIDR。
+// normalizeCIDRs 校验并规范化授权源列表：接受单 IP（补 /32）或 CIDR，
+// 按最终规范化形式去重。
 func normalizeCIDRs(cidrs []string) ([]string, error) {
 	clean := make([]string, 0, len(cidrs))
 	seen := map[string]bool{}
 	for _, c := range cidrs {
 		c = strings.TrimSpace(c)
-		if c == "" || seen[c] {
+		if c == "" {
 			continue
 		}
 		if _, _, err := net.ParseCIDR(c); err != nil {
@@ -167,6 +168,9 @@ func normalizeCIDRs(cidrs []string) ([]string, error) {
 				return nil, fmt.Errorf("授权源 %q 不是合法 IP/CIDR", c)
 			}
 			c += "/32"
+		}
+		if seen[c] {
+			continue
 		}
 		seen[c] = true
 		clean = append(clean, c)
