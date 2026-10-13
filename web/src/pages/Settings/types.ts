@@ -49,6 +49,7 @@ export interface Settings {
   };
   features: {
     fim: boolean;
+    show_plugin_manual: boolean;
   };
   logs: {
     level: string;

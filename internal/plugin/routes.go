@@ -57,22 +57,26 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 	protected.POST("/plugins/upload", func(c *gin.Context) {
 		fh, err := c.FormFile("file")
 		if err != nil {
+			logManagerf(" 安装插件失败: 缺少插件包文件字段 file")
 			c.Error(errx.BadRequest("缺少插件包文件字段 file"))
 			return
 		}
 		f, err := fh.Open()
 		if err != nil {
+			logManagerf(" 安装插件失败: 读取上传文件失败")
 			c.Error(errx.Internal("读取插件包失败"))
 			return
 		}
 		defer func() { _ = f.Close() }()
 		data, err := io.ReadAll(io.LimitReader(f, maxPluginArchiveSize+1))
 		if err != nil {
+			logManagerf(" 安装插件失败: 读取插件包失败")
 			c.Error(errx.Internal("读取插件包失败"))
 			return
 		}
 		mft, err := m.InstallFromZip(c.Request.Context(), data)
 		if err != nil {
+			logManagerf(" 安装插件失败: %v", err)
 			c.Error(err)
 			return
 		}
@@ -89,35 +93,52 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		httpx.Success(c, gin.H{"items": list})
 	})
 	protected.POST("/plugins/:id/start", func(c *gin.Context) {
-		if err := m.Start(c.Request.Context(), c.Param("id")); err != nil {
+		name := c.Param("id")
+		if err := m.Start(c.Request.Context(), name); err != nil {
+			logManagerf(" 启动插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 启动插件 %s", name)
+		middleware.AuditSummary(c, "启动插件 "+name)
 		httpx.Success(c, gin.H{"message": "插件已启动"})
 	})
 	protected.POST("/plugins/:id/stop", func(c *gin.Context) {
-		if err := m.Stop(c.Request.Context(), c.Param("id")); err != nil {
+		name := c.Param("id")
+		if err := m.Stop(c.Request.Context(), name); err != nil {
+			logManagerf(" 停止插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 停止插件 %s", name)
+		middleware.AuditSummary(c, "停止插件 "+name)
 		httpx.Success(c, gin.H{"message": "插件已停止"})
 	})
 	protected.POST("/plugins/:id/enable", func(c *gin.Context) {
-		if err := m.Start(c.Request.Context(), c.Param("id")); err != nil {
+		name := c.Param("id")
+		if err := m.Start(c.Request.Context(), name); err != nil {
+			logManagerf(" 启用插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 启用插件 %s", name)
+		middleware.AuditSummary(c, "启用插件 "+name)
 		httpx.Success(c, gin.H{"message": "插件已启用"})
 	})
 	protected.POST("/plugins/:id/disable", func(c *gin.Context) {
-		if err := m.Disable(c.Request.Context(), c.Param("id")); err != nil {
+		name := c.Param("id")
+		if err := m.Disable(c.Request.Context(), name); err != nil {
+			logManagerf(" 禁用插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 禁用插件 %s", name)
+		middleware.AuditSummary(c, "禁用插件 "+name)
 		httpx.Success(c, gin.H{"message": "插件已禁用"})
 	})
 	// 启用时的权限审批：批准声明权限的子集后启动（§11，不可超声明）
 	protected.POST("/plugins/:id/approve", func(c *gin.Context) {
+		name := c.Param("id")
 		var body struct {
 			Permissions []string `json:"permissions"`
 		}
@@ -125,17 +146,24 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(errx.BadRequest("请求体无效"))
 			return
 		}
-		if err := m.Approve(c.Request.Context(), c.Param("id"), body.Permissions); err != nil {
+		if err := m.Approve(c.Request.Context(), name, body.Permissions); err != nil {
+			logManagerf(" 审批插件 %s 权限并启动失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 审批插件 %s 权限并启动（%d 项）", name, len(body.Permissions))
+		middleware.AuditSummary(c, "审批插件 "+name+" 权限并启动")
 		httpx.Success(c, gin.H{"message": "权限已批准并启动插件"})
 	})
 	protected.DELETE("/plugins/:id", func(c *gin.Context) {
-		if err := m.Remove(c.Request.Context(), c.Param("id")); err != nil {
+		name := c.Param("id")
+		if err := m.Remove(c.Request.Context(), name); err != nil {
+			logManagerf(" 卸载插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 卸载插件 %s", name)
+		middleware.AuditSummary(c, "卸载插件 "+name)
 		httpx.Success(c, gin.H{"message": "插件已卸载"})
 	})
 	// 聚合小部件下发：仪表盘消费（启用插件的 widgets contribution）
@@ -269,6 +297,10 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		httpx.Success(c, gin.H{"items": items})
 	})
 
+	// 插件源（市场入口）：源管理 + 拉取清单 + 从源安装。
+	// 源是暴露 index.json 的 HTTP 端点；安装复用 InstallFromZip（zip slip/大小/校验防护）。
+	registerSourceRoutes(protected, m)
+
 	// 聚合菜单下发：前端动态侧边栏消费（启用插件的 menus contribution）
 	protected.GET("/plugins/menus", func(c *gin.Context) {
 		list, err := m.List(c.Request.Context())
@@ -370,15 +402,19 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 		httpx.Success(c, gin.H{"config": cfg})
 	})
 	protected.PUT("/plugins/:id/config", func(c *gin.Context) {
+		name := c.Param("id")
 		var body map[string]string
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.Error(errx.BadRequest("请求体无效"))
 			return
 		}
-		if err := m.ConfigSet(c.Request.Context(), c.Param("id"), body); err != nil {
+		if err := m.ConfigSet(c.Request.Context(), name, body); err != nil {
+			logManagerf(" 更新插件 %s 配置失败: %v", name, err)
 			c.Error(err)
 			return
 		}
+		logManagerf(" 更新插件 %s 配置（%d 项）", name, len(body))
+		middleware.AuditSummary(c, "更新插件 "+name+" 配置")
 		httpx.Success(c, gin.H{"message": "配置已保存"})
 	})
 

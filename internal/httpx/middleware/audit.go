@@ -40,6 +40,7 @@ const (
 	ResourceAudit        ResourceCategory = "审计"
 	ResourceSystem       ResourceCategory = "系统服务"
 	ResourceAuth         ResourceCategory = "认证"
+	ResourcePlugin       ResourceCategory = "插件"
 	ResourceOther        ResourceCategory = "其他"
 )
 
@@ -105,6 +106,7 @@ var categoryPrefixes = []struct {
 	{"/api/systemd", ResourceSystem},
 	{"/api/services", ResourceSystem},
 	{"/api/auth", ResourceAuth},
+	{"/api/plugins", ResourcePlugin},
 }
 
 // verbFor maps method + route template to one of six coarse verbs:

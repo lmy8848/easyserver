@@ -125,7 +125,8 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 			"webhook_url": webhookURL,
 		},
 		"features": gin.H{
-			"fim": cfg.Features.FIM,
+			"fim":                cfg.Features.FIM,
+			"show_plugin_manual": cfg.Features.ShowPluginManual,
 		},
 		"logs": gin.H{
 			"level":       cfg.Logs.Level,
@@ -140,7 +141,8 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 // UpdateFeaturesConfig updates optional feature toggles.
 func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
 	req, err := httpx.BindJSON[struct {
-		FIM *bool `json:"fim"`
+		FIM              *bool `json:"fim"`
+		ShowPluginManual *bool `json:"show_plugin_manual"`
 	}](c)
 	if err != nil {
 		return nil, err
@@ -149,6 +151,9 @@ func (h *SettingsHandler) UpdateFeaturesConfig(c *gin.Context) (any, error) {
 	h.store.Update(func(cfg *config.Config) {
 		if req.FIM != nil {
 			cfg.Features.FIM = *req.FIM
+		}
+		if req.ShowPluginManual != nil {
+			cfg.Features.ShowPluginManual = *req.ShowPluginManual
 		}
 	})
 	if err := h.saveConfig(); err != nil {

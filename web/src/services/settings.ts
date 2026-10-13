@@ -41,7 +41,7 @@ export const settingsApi = {
   updateNotify: (data: { enabled?: boolean; webhook_url?: string }) =>
     api.put<ApiResponse>('/settings/notify', data),
 
-  updateFeatures: (data: { fim?: boolean }) =>
+  updateFeatures: (data: { fim?: boolean; show_plugin_manual?: boolean }) =>
     api.put<ApiResponse>('/settings/features', data),
 
   updateLogs: (data: { level?: string; format?: string; max_size_mb?: number; max_files?: number }) =>

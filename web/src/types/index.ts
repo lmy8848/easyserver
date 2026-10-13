@@ -215,6 +215,27 @@ export interface PluginMenuItem {
   order: number;
 }
 
+export interface PluginSource {
+  id: number;
+  name: string;
+  url: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginSourceItem {
+  name: string;
+  version: string;
+  description: string;
+  download_url: string;
+}
+
+export interface PluginSourceCatalog {
+  name: string;
+  plugins: PluginSourceItem[];
+}
+
 // Website types
 export interface Website {
   id: number;
@@ -613,6 +634,6 @@ export interface AppSettings {
   monitor: { history_retention: number; collect_interval: number };
   audit: { retention_days: number };
   notify: { enabled: boolean; webhook_url: string };
-  features: { fim: boolean };
+  features: { fim: boolean; show_plugin_manual: boolean };
   logs: { level: string; path: string; format: string; max_size_mb: number; max_files: number };
 }

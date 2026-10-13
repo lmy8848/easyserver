@@ -6,12 +6,14 @@ import {
   ReloadOutlined, PoweroffOutlined, PlayCircleOutlined, DeleteOutlined, ImportOutlined, BookOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { pluginsApi } from '../../services/plugins';
+import { settingsApi } from '../../services/settings';
 import type { PluginRecord } from '../../types';
 import PluginManual from './PluginManual';
 import PluginConfigModal from './PluginConfigModal';
 import PluginDetailDrawer from './PluginDetailDrawer';
 import PluginPermissionModal from './PluginPermissionModal';
 import PluginSystemLogs from './PluginSystemLogs';
+import PluginSources from './PluginSources';
 
 export default function Plugins() {
   const [plugins, setPlugins] = useState<PluginRecord[]>([]);
@@ -21,6 +23,8 @@ export default function Plugins() {
   const [configTarget, setConfigTarget] = useState<PluginRecord | null>(null);
   const [detailTarget, setDetailTarget] = useState<PluginRecord | null>(null);
   const [permTarget, setPermTarget] = useState<PluginRecord | null>(null);
+  // 是否显示「插件开发手册」tab（面板设置 → 功能开关，默认显示）
+  const [showManual, setShowManual] = useState(true);
 
   const fetchPlugins = useCallback(async () => {
     setLoading(true);
@@ -35,6 +39,13 @@ export default function Plugins() {
   }, []);
 
   useEffect(() => { void fetchPlugins(); }, [fetchPlugins]);
+
+  // 读取功能开关，决定是否渲染「插件开发手册」tab
+  useEffect(() => {
+    settingsApi.get().then((res) => {
+      setShowManual(res.data.data?.features?.show_plugin_manual ?? true);
+    }).catch(() => { /* 读取失败时保持默认显示 */ });
+  }, []);
 
   const act = async (key: string, fn: () => Promise<unknown>, okMsg: string) => {
     setOperating(key);
@@ -164,8 +175,9 @@ export default function Plugins() {
       <Tabs
         items={[
           { key: 'list', label: '插件列表', children: listTab },
+          { key: 'sources', label: '插件源', children: <PluginSources onInstalled={fetchPlugins} /> },
           { key: 'system-logs', label: '系统日志', children: <PluginSystemLogs /> },
-          { key: 'manual', label: <span><BookOutlined /> 插件开发手册</span>, children: <PluginManual /> },
+          ...(showManual ? [{ key: 'manual', label: <span><BookOutlined /> 插件开发手册</span>, children: <PluginManual /> }] : []),
         ]}
       />
       <PluginConfigModal plugin={configTarget!} open={!!configTarget} onClose={() => setConfigTarget(null)} />

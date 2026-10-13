@@ -40,6 +40,9 @@ type Config struct {
 // resources; admin enables per-feature from the panel settings.
 type FeaturesConfig struct {
 	FIM bool `toml:"fim"` // file integrity monitoring
+
+	// ShowPluginManual 是否在插件管理页显示「插件开发手册」tab（默认显示）。
+	ShowPluginManual bool `toml:"show_plugin_manual"`
 }
 
 type NotifyConfig struct {
@@ -254,6 +257,10 @@ func generateRandomSecret(numBytes int) string {
 // sensitive secret was auto-generated.
 func (c *Config) mergeDefaults() bool {
 	generated := false
+	// 功能开关：插件手册默认显示（可通过面板设置关闭）。
+	if !c.Features.ShowPluginManual {
+		c.Features.ShowPluginManual = true
+	}
 	if c.Auth.JWTSecret == "" {
 		c.Auth.JWTSecret = generateRandomSecret(32)
 		generated = true

@@ -16,6 +16,7 @@ export default function FeatureSettings({ settings, onRefresh }: FeatureSettings
     if (settings?.features) {
       form.setFieldsValue({
         fim: settings.features.fim,
+        show_plugin_manual: settings.features.show_plugin_manual,
       });
     }
   }, [settings, form]);
@@ -39,6 +40,9 @@ export default function FeatureSettings({ settings, onRefresh }: FeatureSettings
     <Card title="功能开关">
       <Form form={form} layout="vertical">
         <Form.Item name="fim" label="文件完整性监控" valuePropName="checked" extra="关键文件 sha256 基线与变更检测。关闭后侧边栏隐藏「文件完整性」菜单。">
+          <Switch />
+        </Form.Item>
+        <Form.Item name="show_plugin_manual" label="插件开发手册" valuePropName="checked" extra="插件管理页显示「插件开发手册」tab。关闭后隐藏，可从在线手册访问完整内容。">
           <Switch />
         </Form.Item>
         <Form.Item>
