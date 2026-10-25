@@ -3,6 +3,7 @@ package sdk
 import (
 	"bytes"
 	"context"
+	"io"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -232,16 +233,13 @@ func (h *HostClient) StorageRead(ctx context.Context, path string) ([]byte, erro
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("storage read %s: %d", path, resp.StatusCode)
 	}
-	buf := make([]byte, 0, 4096)
-	tmp := make([]byte, 4096)
-	for {
-		n, err := resp.Body.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if err != nil {
-			break
-		}
+	// io.ReadAll：读错误如实返回（此前手写循环把非 EOF 错误吞掉，
+	// 半截数据当成功返回，掩盖传输中断）
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("storage read %s: %w", path, err)
 	}
-	return buf, nil
+	return data, nil
 }
 
 // StorageWrite 写插件私有文件（自动创建父目录）。

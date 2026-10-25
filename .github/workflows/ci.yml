@@ -65,6 +65,12 @@ jobs:
             (cd "$p" && go build ./...)
           done
 
+      # SDK 同为独立 module，此前测试从不被执行；race 检测并发修复。
+      - name: Test SDK (独立 module)
+        run: |
+          cd sdk/plugin-sdk-go
+          go test -race ./...
+
   frontend:
     name: Build Frontend
     runs-on: ubuntu-latest

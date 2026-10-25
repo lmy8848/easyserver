@@ -27,8 +27,8 @@ type Config struct {
 
 // Server 是插件的 HTTP 服务（监听 Unix socket）：
 //   - 自动提供 GET /health（可自定义）与 POST /events
-//   - 业务路由经 HandleFunc / Group 注册
-//   - 内建中间件（恢复、请求日志），可用 Use 追加
+//   - 业务路由经 HandleFunc / Group 注册；Recovery 等中间件需 Use 显式追加
+//     （中间件对 /health 与 /events 内建端点不生效）
 //   - 经 Graceful 支持优雅退出
 type Server struct {
 	socketPath   string
@@ -67,7 +67,10 @@ func NewServer(cfg Config) *Server {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if s.eventHandler == nil {
+		s.mu.Lock()
+		handler := s.eventHandler
+		s.mu.Unlock()
+		if handler == nil {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
@@ -79,7 +82,7 @@ func NewServer(cfg Config) *Server {
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 			}()
-			if err := s.eventHandler(r.Context(), &evt); err != nil {
+			if err := handler(r.Context(), &evt); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -91,6 +94,8 @@ func NewServer(cfg Config) *Server {
 
 // HandleFunc 注册业务路由（含 /health、/events 之外的自定义端点）。
 func (s *Server) HandleFunc(pattern string, h http.HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.mux.HandleFunc(pattern, s.wrap(h))
 }
 
@@ -112,7 +117,11 @@ func (g *Group) HandleFunc(pattern string, h http.HandlerFunc) {
 
 // Use 追加全局中间件（先注册的先执行）。中间件形如
 // func(next http.HandlerFunc) http.HandlerFunc。
+// 注意：应在 HandleFunc/Serve 之前调用——wrap 在注册时快照中间件，
+// 晚于 HandleFunc 注册的中间件对已注册路由不生效。
 func (s *Server) Use(mw func(http.HandlerFunc) http.HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.middlewares = append(s.middlewares, mw)
 }
 
@@ -127,11 +136,15 @@ func (s *Server) wrap(h http.HandlerFunc) http.HandlerFunc {
 // OnEvent 注册面板事件回调（必须在 Serve 前调用）。
 // 返回 error 表示处理失败，面板将按 at-least-once 语义重试。
 func (s *Server) OnEvent(h func(ctx context.Context, e *Event) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.eventHandler = h
 }
 
 // OnReady 注册 socket 监听成功后的回调（可用于输出就绪日志或预初始化）。
 func (s *Server) OnReady(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.readyFns = append(s.readyFns, fn)
 }
 
@@ -155,21 +168,26 @@ func (s *Server) Serve() error {
 	s.mu.Lock()
 	s.ln = ln
 	s.srv = &http.Server{Handler: s.mux, ReadHeaderTimeout: 5 * time.Second}
+	readyFns := append([]func(){}, s.readyFns...)
 	s.mu.Unlock()
 
-	for _, fn := range s.readyFns {
+	for _, fn := range readyFns {
 		fn()
 	}
 	return s.srv.Serve(ln)
 }
 
-// Close 关闭监听与连接。
+// Close 关闭监听与连接，并清理 socket 文件（避免残留导致下次 Serve
+// 误判端口占用/权限混乱）。
 func (s *Server) Close() error {
 	s.mu.Lock()
 	srv := s.srv
+	sockPath := s.socketPath
 	s.mu.Unlock()
 	if srv != nil {
-		return srv.Close()
+		err := srv.Close()
+		_ = os.Remove(sockPath)
+		return err
 	}
 	return nil
 }

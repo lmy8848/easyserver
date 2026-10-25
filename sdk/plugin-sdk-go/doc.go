@@ -13,10 +13,10 @@
 //	srv.HandleFunc("/api/hello", func(w http.ResponseWriter, r *http.Request) {
 //	    sdk.JSON(w, http.StatusOK, map[string]string{"msg": "hi"})
 //	})
-//	srv.OnEvent(func(ctx context.Context, e *sdk.Event) { /* 幂等处理 */ })
+//	srv.OnEvent(func(ctx context.Context, e *sdk.Event) error { /* 幂等处理 */ return nil })
 //	go srv.Serve()
 //	hc := sdk.NewHostClient()
-//	hc.Audit(ctx, "插件启动")
+//	_ = hc.Audit(ctx, "插件启动")
 //	srv.Graceful() // 阻塞至 SIGTERM/SIGINT，自动关闭
 package sdk
 
