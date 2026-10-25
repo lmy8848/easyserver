@@ -44,6 +44,8 @@ type SystemInfo struct {
 	Arch          string `json:"arch"`
 	CPUCores      int    `json:"cpu_cores"`
 	UptimeSeconds int64  `json:"uptime_seconds"`
+	LocalIP       string `json:"local_ip"`
+	PublicIP      string `json:"public_ip"`
 }
 
 // MonitorSnapshot is the API response format

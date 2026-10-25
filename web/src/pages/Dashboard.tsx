@@ -412,6 +412,8 @@ export default function Dashboard() {
             <Descriptions column={2} size="small">
               <Descriptions.Item label="主机名">{sys?.hostname || '-'}</Descriptions.Item>
               <Descriptions.Item label="操作系统">{sys?.os || '-'}</Descriptions.Item>
+              <Descriptions.Item label="内网 IP">{sys?.local_ip || '-'}</Descriptions.Item>
+              <Descriptions.Item label="公网 IP">{sys?.public_ip || '-'}</Descriptions.Item>
               <Descriptions.Item label="内核版本">{sys?.kernel || '-'}</Descriptions.Item>
               <Descriptions.Item label="系统架构">{sys?.arch || '-'}</Descriptions.Item>
               <Descriptions.Item label="CPU 核数">{sys?.cpu_cores || '-'} 核</Descriptions.Item>

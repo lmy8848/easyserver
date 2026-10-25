@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,6 +91,11 @@ type MonitorService struct {
 	lastDiskRead  uint64
 	lastDiskWrite uint64
 	lastCleanup   time.Time
+
+	// 公网出口 IP 缓存（外部查询有成本，10 分钟刷新一次）
+	publicIPMu  sync.Mutex
+	publicIPVal string
+	publicIPAt  time.Time
 
 	// 告警与审计评估
 	alertService    Evaluator
@@ -640,7 +648,71 @@ func (s *MonitorService) readSystemInfo() *SystemInfo {
 		}
 	}
 
+	info.LocalIP = detectLocalIP()
+	info.PublicIP = s.detectPublicIP()
+
 	return info
+}
+
+// detectLocalIP 返回默认路由出口接口的 IPv4（UDP dial 不实际发包，仅让内核选路）。
+func detectLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:53")
+	if err == nil {
+		defer conn.Close()
+		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP.To4() != nil {
+			return addr.IP.String()
+		}
+	}
+	// 回退：第一个非环回的 IPv4
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	return ""
+}
+
+// publicIPProviders 依次尝试的公网 IP 查询服务（HTTPS，响应体为裸 IP 文本）
+var publicIPProviders = []string{
+	"https://api.ipify.org",
+	"https://ipv4.icanhazip.com",
+}
+
+// detectPublicIP 返回公网出口 IP，带 10 分钟缓存。
+// 服务器管理面板显示公网 IP 是常规能力（对标宝塔等），通过 HTTPS 向
+// 公共回显服务查询；查询失败静默留空，不影响监控数据可用性。
+func (s *MonitorService) detectPublicIP() string {
+	s.publicIPMu.Lock()
+	defer s.publicIPMu.Unlock()
+	if s.publicIPAt.Add(10 * time.Minute).After(time.Now()) {
+		return s.publicIPVal
+	}
+
+	ip := ""
+	client := &http.Client{Timeout: 3 * time.Second}
+	for _, url := range publicIPProviders {
+		resp, err := client.Get(url)
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+		if candidate := net.ParseIP(strings.TrimSpace(string(data))); candidate != nil && candidate.To4() != nil {
+			ip = candidate.String()
+			break
+		}
+	}
+
+	s.publicIPVal = ip
+	s.publicIPAt = time.Now()
+	return ip
 }
 
 // readPartitions reads all physical/logical disk partitions using sysfs and /proc/mounts

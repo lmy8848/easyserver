@@ -38,6 +38,8 @@ export interface SystemInfo {
   arch: string;
   cpu_cores: number;
   uptime_seconds: number;
+  local_ip?: string;
+  public_ip?: string;
 }
 
 export interface SwapInfo {
