@@ -236,17 +236,32 @@ func (s *Service) Upgrade(ctx context.Context, packages []string) (string, []str
 		return "", nil, "", errx.BadRequest("未指定升级的包")
 	}
 
+	// apt 为分钟级操作：内部超时上限 5 分钟，防 debconf 交互/慢源把请求
+	// 无限挂起（外层路由 WriteTimeout 10 分钟兜底，但挂满对用户体验是灾难）。
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	upgradable, noFix := classifyUpgradable(ctx, packages)
 	if len(upgradable) == 0 {
 		return "软件源中没有可用的更新版本（索引已刷新）", noFix, "", nil
 	}
 
-	if out, err := exec.CommandContext(ctx, "apt-get", "update", "-q").CombinedOutput(); err != nil {
+	// 非交互环境：防 debconf 等待 stdin 输入把升级卡死为僵尸请求。
+	env := append(os.Environ(),
+		"DEBIAN_FRONTEND=noninteractive",
+		"APT_LISTCHANGES_FRONTEND=none",
+	)
+
+	updCmd := exec.CommandContext(ctx, "apt-get", "update", "-q") //nolint:gosec // 固定二进制 apt-get
+	updCmd.Env = env
+	if out, err := updCmd.CombinedOutput(); err != nil {
 		return "", noFix, string(out), errx.Internal("刷新软件源失败: %w", err)
 	}
 
 	args := append([]string{"install", "--only-upgrade", "-y"}, upgradable...)
-	out, err := exec.CommandContext(ctx, "apt-get", args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "apt-get", args...) //nolint:gosec // 包名经包管理器白名单处理
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", noFix, string(out), errx.Internal("升级失败: %w", err)
 	}

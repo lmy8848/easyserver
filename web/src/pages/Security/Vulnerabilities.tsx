@@ -39,12 +39,17 @@ function useCountUp(target: number, duration = 600) {
 
 const SCAN_STAGES = ['读取已安装软件包…', '正在查询 osv.dev 漏洞库（在线）…', '汇总分析扫描结果…'];
 
+// 扫描（osv.dev 在线查询）与升级（apt update+install）都是分钟级操作：
+// axios 实例默认 30s 超时对它们必然误杀，单独放宽到 5 分钟。
+const SLOW_OP_TIMEOUT = 300000;
+
 export default function Vulnerabilities() {
   const [vulns, setVulns] = useState<Vuln[]>([]);
   const [scanning, setScanning] = useState(false);
   const [kernel, setKernel] = useState<KernelStatus | null>(null);
   const [upgradable, setUpgradable] = useState<number | null>(null);
   const [upgrading, setUpgrading] = useState(false);
+  const [upgradingPkg, setUpgradingPkg] = useState(''); // 单包升级中的包名（按钮 loading）
   const [scanSeq, setScanSeq] = useState(0); // 触发结果区入场动画
 
   const elapsed = useElapsed(scanning);
@@ -55,7 +60,7 @@ export default function Vulnerabilities() {
     setScanning(true);
     try {
       const [vRes, kRes, uRes] = await Promise.all([
-        api.post('/security/cve/scan'),
+        api.post('/security/cve/scan', null, { timeout: SLOW_OP_TIMEOUT }),
         api.get('/security/cve/kernel'),
         api.get('/security/cve/upgradable'),
       ]);
@@ -91,26 +96,35 @@ export default function Vulnerabilities() {
       return;
     }
     setUpgrading(true);
+    const hide = message.loading('正在升级漏洞包（刷新源 + 安装，通常需要 30 秒至 2 分钟）…', 0);
     try {
-      const res = await api.post('/security/cve/upgrade', { packages: fixable.map((v) => v.package) });
+      const res = await api.post('/security/cve/upgrade', { packages: fixable.map((v) => v.package) }, { timeout: SLOW_OP_TIMEOUT });
+      hide();
       message.success(res.data.data?.message || '升级完成');
       showNoFix(res.data.data?.no_fix || []);
       scan();
     } catch (e: unknown) {
-      message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '升级失败');
+      hide();
+      message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || (e as Error)?.message || '升级失败');
     } finally {
       setUpgrading(false);
     }
   };
 
   const upgradeOne = async (pkg: string) => {
+    setUpgradingPkg(pkg);
+    const hide = message.loading(`正在升级 ${pkg}（通常需要 30 秒至 2 分钟）…`, 0);
     try {
-      const res = await api.post('/security/cve/upgrade', { packages: [pkg] });
+      const res = await api.post('/security/cve/upgrade', { packages: [pkg] }, { timeout: SLOW_OP_TIMEOUT });
+      hide();
       message.success(`${pkg}: ${res.data.data?.message || '升级完成'}`);
       showNoFix(res.data.data?.no_fix || []);
       scan();
     } catch (e: unknown) {
-      message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '升级失败');
+      hide();
+      message.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message || (e as Error)?.message || '升级失败');
+    } finally {
+      setUpgradingPkg('');
     }
   };
 
@@ -167,7 +181,7 @@ export default function Vulnerabilities() {
                 ? <Tag color="green" style={{ margin: 0 }}>可升级</Tag>
                 : <Tooltip title={`Debian 源中暂无修复版本${r.candidate ? `（候选 ${r.candidate}）` : ''}`}><Tag color="default" style={{ margin: 0 }}>暂无修复</Tag></Tooltip> },
               { title: '操作', key: 'action', width: 80, render: (_: unknown, r: Vuln) => r.upgradable
-                ? <Button size="small" type="link" onClick={() => upgradeOne(r.package)}>升级</Button>
+                ? <Button size="small" type="link" loading={upgradingPkg === r.package} disabled={!!upgradingPkg || upgrading} onClick={() => upgradeOne(r.package)}>升级</Button>
                 : <Tooltip title="Debian 源中暂无修复版本"><Button size="small" type="link" disabled>升级</Button></Tooltip> },
             ]}
           />
