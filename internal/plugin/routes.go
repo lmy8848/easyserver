@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -74,14 +75,19 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(errx.Internal("读取插件包失败"))
 			return
 		}
-		mft, err := m.InstallFromZip(c.Request.Context(), data)
+		mft, upgraded, err := m.InstallFromZip(context.Background(), data)
 		if err != nil {
-			logManagerf(" 安装插件失败: %v", err)
+			logManagerf(" 安装/升级插件失败: %v", err)
 			c.Error(err)
 			return
 		}
+		if upgraded {
+			middleware.AuditSummary(c, "升级插件 "+mft.Name+"@"+mft.Version)
+			httpx.Success(c, gin.H{"message": "插件已升级，若原已启用将自动重启", "plugin": mft.Name, "version": mft.Version, "upgraded": true})
+			return
+		}
 		middleware.AuditSummary(c, "安装插件 "+mft.Name+"@"+mft.Version)
-		httpx.Success(c, gin.H{"message": "插件已安装", "plugin": mft.Name, "version": mft.Version})
+		httpx.Success(c, gin.H{"message": "插件已安装", "plugin": mft.Name, "version": mft.Version, "upgraded": false})
 	})
 
 	protected.GET("/plugins", func(c *gin.Context) {
@@ -94,7 +100,9 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 	})
 	protected.POST("/plugins/:id/start", func(c *gin.Context) {
 		name := c.Param("id")
-		if err := m.Start(c.Request.Context(), name); err != nil {
+		// context.Background：插件进程生命周期独立于本次 HTTP 请求（请求 ctx 在
+		// handler 返回即取消，会经 CommandContext 杀掉刚拉起的插件）
+		if err := m.Start(context.Background(), name); err != nil {
 			logManagerf(" 启动插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
@@ -116,7 +124,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 	})
 	protected.POST("/plugins/:id/enable", func(c *gin.Context) {
 		name := c.Param("id")
-		if err := m.Start(c.Request.Context(), name); err != nil {
+		if err := m.Start(context.Background(), name); err != nil {
 			logManagerf(" 启用插件 %s 失败: %v", name, err)
 			c.Error(err)
 			return
@@ -146,7 +154,7 @@ func RegisterRoutes(protected *gin.RouterGroup, m *Manager) {
 			c.Error(errx.BadRequest("请求体无效"))
 			return
 		}
-		if err := m.Approve(c.Request.Context(), name, body.Permissions); err != nil {
+		if err := m.Approve(context.Background(), name, body.Permissions); err != nil {
 			logManagerf(" 审批插件 %s 权限并启动失败: %v", name, err)
 			c.Error(err)
 			return

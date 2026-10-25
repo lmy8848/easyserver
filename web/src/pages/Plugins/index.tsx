@@ -65,7 +65,12 @@ export default function Plugins() {
     fd.append('file', opt.file as File);
     setInstalling(true);
     pluginsApi.upload(fd).then((res) => {
-      message.success(`插件 ${res.data.data?.plugin}@${res.data.data?.version} 已安装`);
+      // 同名插件已存在时后端走升级路径（保留配置/权限，原启用则自动重启）
+      if (res.data.data?.upgraded) {
+        message.success(`插件 ${res.data.data?.plugin} 已升级到 ${res.data.data?.version}（配置与权限保留）`);
+      } else {
+        message.success(`插件 ${res.data.data?.plugin}@${res.data.data?.version} 已安装，请在列表中启用`);
+      }
       setInstalling(false);
       void fetchPlugins();
     }).catch((e: unknown) => {
@@ -166,7 +171,7 @@ export default function Plugins() {
             disabled={installing}
             customRequest={handleInstall}
           >
-            <Button icon={<ImportOutlined />} loading={installing}>导入插件</Button>
+            <Button icon={<ImportOutlined />} loading={installing}>导入 / 升级插件</Button>
           </Upload>
           <Button icon={<ReloadOutlined />} onClick={fetchPlugins} loading={loading}>刷新</Button>
         </Space>

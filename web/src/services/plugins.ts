@@ -79,5 +79,5 @@ export const pluginsApi = {
   fetchSourceCatalog: (id: number) => api.post<ApiResponse<{ source: PluginSource; catalog: PluginSourceCatalog }>>(`/plugins/sources/${id}/fetch`),
   installFromSource: (data: { url: string }) => api.post<ApiResponse<{ plugin: string; version: string }>>('/plugins/sources/install', data),
 
-  upload: (fd: FormData) => api.post<ApiResponse<{ plugin: string; version: string }>>('/plugins/upload', fd),
+  upload: (fd: FormData) => api.post<ApiResponse<{ plugin: string; version: string; upgraded: boolean }>>('/plugins/upload', fd),
 };

@@ -59,6 +59,7 @@ const (
 	StateStarting   = "starting"
 	StateRunning    = "running"
 	StateDegraded   = "degraded"
+	StateStopped    = "stopped" // 面板侧手动停止（enabled 保持，可再启动）
 	StateDisabled   = "disabled"
 	StateError      = "error"
 )

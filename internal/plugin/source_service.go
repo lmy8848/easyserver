@@ -122,6 +122,7 @@ func (s *SourceService) InstallFromURL(ctx context.Context, rawURL string) (*Man
 	if len(data) > maxPluginArchiveSize {
 		return nil, errors.New("插件包超过 50MB 限制")
 	}
-	// 复用 InstallFromZip：zip slip / 单文件 bomb / manifest 校验 / 原子安装/注册/日志 全部生效
-	return s.mgr.InstallFromZip(ctx, data)
+	// 复用 InstallFromZip：zip slip / bomb / manifest / 架构校验 / 安装与升级 全部生效
+	mft, _, err := s.mgr.InstallFromZip(ctx, data)
+	return mft, err
 }
