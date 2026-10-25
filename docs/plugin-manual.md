@@ -85,11 +85,15 @@ contributions:                # 向面板扩展点贡献的内容（全部可选
 
 ```
 registered → (启用) → starting → (健康检查通过) → running
-                                         ↘ (失败) → degraded / error → 自动重启
+                       ↘ (启动失败) → error（不自动重启）
+running → (崩溃) → degraded → 指数退避自动重启（恢复后回 running）
+running → (面板停止) → stopped（enabled 保持，可再启动）
+       → (崩溃 >5 次/10 分钟窗口) → disabled（熔断，需手动启动）
 ```
 
 - 面板扫描注册 `registered` → 启用后拉起进程 `starting` → 健康检查通过 `running`。
-- 进程崩溃自动退避重启（1s→60s，10 分钟窗口 >5 次转 `disabled`）；面板重启时对已启用插件自动重放。
+- 进程崩溃自动退避重启（1s→60s 指数递增，稳定运行即清零；10 分钟窗口内失败 >5 次熔断转 `disabled`）；面板重启时对已启用插件自动重放。
+- `stopped`：面板侧手动停止（enabled 保持，随时可再启动）；`disabled`：熔断或管理员禁用。
 - 面板注入环境变量：
 
   | 变量 | 说明 |
@@ -212,8 +216,9 @@ func main() {
   srv.HandleFunc("/api/hello", func(w http.ResponseWriter, r *http.Request) {
     w.Write([]byte("hello from plugin"))
   })
-  srv.OnEvent(func(ctx context.Context, e *sdk.Event) {
-    // e.Name / e.Payload —— 面板事件（处理需幂等）
+  srv.OnEvent(func(ctx context.Context, e *sdk.Event) error {
+    // e.Name / e.Payload —— 面板事件（处理需幂等；返回 error 触发面板重试）
+    return nil
   })
   go srv.Serve()
 
@@ -225,6 +230,14 @@ func main() {
   select {}
 }
 ```
+
+**SDK 可靠性保证**：
+
+- `OnEvent` / `Use` / `HandleFunc` 应在 `Serve` 之前调用（并发安全，但晚注册的
+  中间件对已注册路由不生效）。
+- 事件回调 panic 会被 SDK 捕获并按失败返回（面板按 at-least-once 重试），不会击垮插件。
+- `Close()` / `Graceful()` 关闭监听并清理 socket 文件，无残留。
+- HostClient 统一 30s 超时；传输错误如实返回（不吞错）。
 
 ## 七、Host API 能力清单与权限
 
@@ -284,14 +297,33 @@ iframe 使用 `sandbox="allow-scripts allow-forms allow-same-origin"`（不含 a
 
 ## 九、打包与安装
 
-把插件目录打成 zip（顶层直接是 plugin.yaml，不要套一层目录），面板「导入插件」上传即可；
+把插件目录打成 zip（顶层直接是 plugin.yaml，不要套一层目录），面板「导入 / 升级插件」上传即可；
 或手动放入插件目录后重启面板。
 
 ```bash
 cd my-plugin && zip -r ../my-plugin.zip .   # 顶层含 plugin.yaml
-# 面板 → 插件管理 → 导入插件 → 选 my-plugin.zip
+# 面板 → 插件管理 → 导入 / 升级插件 → 选 my-plugin.zip
 # 安装后点「启用」启动进程
 ```
+
+### 安全校验（安装时自动执行）
+
+- **路径穿越（zip slip）**：包内 `../` 等非法路径直接拒绝
+- **zip bomb**：单文件 50MB / 总解压量 150MB / entry 数 10000 上限
+- **架构校验**：ELF 二进制要求与面板系统架构一致（如 amd64），
+  上传 Windows/macOS 二进制在安装时即报错；`#!` 脚本类插件放行
+- **manifest 校验**：名称/版本/权限白名单/exec 存在性（LoadManifest 全量校验）
+- 解压权限按 zip 内权限位保留（可执行位 0755，其余 0644）
+
+### 升级安装（同名包覆盖）
+
+上传与已装插件**同名**的 zip 自动走升级路径（无需先卸载）：
+
+1. 停止旧进程 → 旧目录临时备份 → 新包原子移入
+2. **保留**：配置 KV、密钥、管理员已审批的权限、启用状态
+3. 原已启用的插件按原审批权限**自动重启**
+4. 任一步失败自动回滚到旧版本
+5. 系统日志记录「升级安装 x@old→new」，插件源安装同样支持升级
 
 ## 十、插件源（市场入口）
 
@@ -326,14 +358,21 @@ cd my-plugin && zip -r ../my-plugin.zip .   # 顶层含 plugin.yaml
 ### 安全
 
 - 源地址与下载地址仅允许 `http(s)`，且下载有 50MB 上限、30s 超时。
-- 安装全程复用 `InstallFromZip` 的防护（路径穿越、zip bomb、manifest 校验、权限声明），
-  从源安装与手动上传等价，不会绕过任何校验。
+- 安装全程复用 `InstallFromZip` 的防护（路径穿越、zip bomb、ELF 架构校验、
+  manifest 校验、权限声明），从源安装/升级与手动上传等价，不会绕过任何校验。
 - 插件源数据存 `plugin_sources` 表（迁移 000015）。
 
 ## 十一、安全模型
 
 - **独立进程隔离**：插件崩溃/慢/泄漏不拖垮主面板；进程级重启规避 frp 等进程内端口泄漏。
-- **权限默认拒绝**：manifest 声明、管理员批准、token 绑定 scope；未声明能力一律 403。
+- **权限默认拒绝**：manifest 声明、管理员批准、token 绑定 scope；未声明能力一律 403；
+  每次启动轮换 token（旧 token 即刻失效）。
+- **凭据不透传**：面板代理请求到插件时剥离 `Authorization`/`Cookie`——插件
+  无法获取面板用户凭据；插件前端（iframe）同样不持有面板 token。
+- **崩溃熔断**：指数退避重启（1s→60s，稳定运行清零）+ 10 分钟窗口 >5 次熔断，
+  崩溃循环不会拖垮面板或刷爆日志。
 - **路径穿越防护**：存储/配置/样式路径全部规范化 + 前缀校验。
+- **安装包防护**：zip slip / zip bomb（单文件 50MB、总量 150MB、entry 上限）/
+  ELF 架构校验 / 升级失败自动回滚。
 - **暴露端口访问控制**：`firewall.manage` 经 PortACL（nftables 授权源白名单）管控。
 - **只读面板代理**：`panel.api.proxy` 仅放行只读端点白名单。
