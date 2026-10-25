@@ -147,8 +147,8 @@ func TestSupervisorStartStop(t *testing.T) {
 	if got == nil {
 		t.Fatal("停止后插件行不应消失")
 	}
-	if got.Status != StateDisabled {
-		t.Fatalf("停止后状态应为 disabled: %+v", got)
+	if got.Status != StateStopped {
+		t.Fatalf("停止后状态应为 stopped: %+v", got)
 	}
 	if _, err := os.Stat(filepath.Join(socketDir, "fake-plugin.sock")); !os.IsNotExist(err) {
 		t.Fatal("停止后 socket 应被清理")
