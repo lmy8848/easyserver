@@ -121,16 +121,22 @@ func (r *sqliteRepo) IncRestartCount(ctx context.Context, name string) error {
 }
 
 func (r *sqliteRepo) DeletePlugin(ctx context.Context, name string) error {
+	// 单事务清理三张表：中途失败整体回滚，避免留下残余行（配置/密钥孤儿）
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }() //nolint:errcheck // 已提交时 Rollback 为 no-op
 	for _, q := range []string{
 		"DELETE FROM plugin_secrets WHERE plugin_name = ?",
 		"DELETE FROM plugin_config WHERE plugin_name = ?",
 		"DELETE FROM plugins WHERE name = ?",
 	} {
-		if _, err := r.db.ExecContext(ctx, q, name); err != nil {
+		if _, err := tx.ExecContext(ctx, q, name); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ---- 配置 KV ----

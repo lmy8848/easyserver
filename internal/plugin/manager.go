@@ -137,7 +137,9 @@ func (m *Manager) ScanPlugins(ctx context.Context) error {
 			Status:              StateRegistered,
 			PermissionsApproved: mft.Permissions,
 		}); err != nil {
-			return err
+			// 单个插件注册失败不中断其余插件扫描（此前 return 会挡住后面所有插件启动）
+			logManagerf(" 插件 %s 注册失败: %v", mft.Name, err)
+			continue
 		}
 		if enabled {
 			if err := m.Start(ctx, mft.Name); err != nil {
@@ -184,6 +186,12 @@ func (m *Manager) StartWithApproved(ctx context.Context, name string, approved [
 		return err
 	}
 	m.mu.Lock()
+	// 清同名旧 token 再挂新 token：反复 Stop/Start 否则只增不删，泄漏有效凭据
+	for t, n := range m.tokens {
+		if n == name {
+			delete(m.tokens, t)
+		}
+	}
 	m.tokens[token] = name
 	m.mu.Unlock()
 

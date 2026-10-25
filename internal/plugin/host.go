@@ -99,7 +99,7 @@ func (h *HostAPI) serve(w http.ResponseWriter, r *http.Request) {
 		h.handleConfigPut(w, r, name)
 	case strings.HasPrefix(sub, "config/") && r.Method == http.MethodGet:
 		h.handleConfigGetOne(w, r, name, strings.TrimPrefix(sub, "config/"))
-	case strings.HasPrefix(sub, "log") && r.Method == http.MethodPost:
+	case sub == "log" && r.Method == http.MethodPost:
 		h.handleLog(w, r, name)
 	case sub == "event/publish" && r.Method == http.MethodPost:
 		h.handleEventPublish(w, r, name)
@@ -586,13 +586,8 @@ func (h *HostAPI) handleCommandInvoke(w http.ResponseWriter, r *http.Request, ca
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set(commandDepthHeader, strconv.Itoa(depth+1))
 	httpReq.Header.Set(commandCallerHeader, caller)
-	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", sock)
-		},
-	}
-	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	// 复用按 socket 缓存的 Transport（连接池），避免每次调用新建连接泄漏
+	client := &http.Client{Transport: transportFor(sock), Timeout: 15 * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		internalError(w, "命令调用失败: "+err.Error())

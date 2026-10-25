@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 )
@@ -48,13 +47,8 @@ func postEvent(ctx context.Context, sockPath string, e *Event) error {
 	if err != nil {
 		return err
 	}
-	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "unix", sockPath)
-		},
-	}
-	client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
+	// 复用按 socket 缓存的 Transport（连接池），避免每次投递新建连接泄漏
+	client := &http.Client{Transport: transportFor(sockPath), Timeout: 10 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://plugin/events", bytes.NewReader(body))
 	if err != nil {
 		return err

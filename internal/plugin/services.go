@@ -22,7 +22,8 @@ type serviceScheduler struct {
 
 func newServiceScheduler() *serviceScheduler {
 	return &serviceScheduler{
-		cron: cron.New(),
+		// SkipIfStillRunning：长任务 + 短间隔时不叠跑（上一次未完成跳过本次）
+		cron: cron.New(cron.WithChain(cron.SkipIfStillRunning(cron.DefaultLogger))),
 		jobs: map[string][]cron.EntryID{},
 	}
 }

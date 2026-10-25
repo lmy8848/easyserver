@@ -151,15 +151,27 @@ func (b *EventBus) Publish(name, source string, payload any) {
 }
 
 // consume 订阅者的串行消费循环：出队 → 投递（失败退避重试 5 次）。
+// handler panic 被捕获并计为一次失败进入重试——否则一次 panic 就会杀死
+// 消费 goroutine，该订阅者此后所有事件静默丢弃。
 func (sub *eventSubscription) consume() {
 	for {
 		select {
 		case <-sub.closed:
 			return
 		case evt := <-sub.queue:
-			deliverWithRetry(sub, evt)
+			sub.safeDeliver(evt)
 		}
 	}
+}
+
+// safeDeliver 带 panic 恢复的单次投递（panic 等价于返回错误）。
+func (sub *eventSubscription) safeDeliver(evt *Event) {
+	defer func() {
+		if v := recover(); v != nil {
+			logManagerf(" 事件 %s 投递到 %s panic: %v", evt.Name, sub.id, v)
+		}
+	}()
+	deliverWithRetry(sub, evt)
 }
 
 func deliverWithRetry(sub *eventSubscription, evt *Event) {

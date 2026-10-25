@@ -31,6 +31,45 @@ type Supervisor struct {
 	mu       sync.Mutex
 	procs    map[string]*pfProcess
 	stopping bool
+
+	// backoff 按插件名持有退避状态：退避计数必须跨进程实例存活
+	// （每次重启都新建 pfProcess，挂在进程上的计数会永远归零，
+	// 导致退避与熔断失效、崩溃插件以 1s 间隔无限重启）。
+	backoffMu sync.Mutex
+	backoff   map[string]*backoffState
+}
+
+// backoffState 是单插件的崩溃退避统计（10 分钟滑动窗口）。
+type backoffState struct {
+	restarts int       // 窗口内重启次数
+	firstAt  time.Time // 窗口起点
+}
+
+// backoffFor 返回（必要时创建）插件名的退避状态；窗口过期自动重置。
+func (s *Supervisor) backoffFor(name string) *backoffState {
+	s.backoffMu.Lock()
+	defer s.backoffMu.Unlock()
+	if s.backoff == nil {
+		s.backoff = map[string]*backoffState{}
+	}
+	st, ok := s.backoff[name]
+	if !ok {
+		st = &backoffState{firstAt: time.Now()}
+		s.backoff[name] = st
+		return st
+	}
+	if time.Since(st.firstAt) > 10*time.Minute {
+		st.restarts = 0
+		st.firstAt = time.Now()
+	}
+	return st
+}
+
+// backoffReset 插件成功进入 running 后清零退避（稳定运行即视为恢复）。
+func (s *Supervisor) backoffReset(name string) {
+	s.backoffMu.Lock()
+	delete(s.backoff, name)
+	s.backoffMu.Unlock()
 }
 
 type pfProcess struct {
@@ -45,7 +84,6 @@ type pfProcess struct {
 	stopOnce sync.Once   // StopPlugin 主动停止标记
 	stopped  atomic.Bool // true 时退出监视跳过状态写库（避免覆盖 disabled）
 	started  atomic.Bool // true 时已进入 running（此后崩溃才走退避重启）
-	restarts atomic.Int32
 
 	stateMu sync.Mutex
 	state   string // 进程内状态缓存，避免并发写库互相覆盖
@@ -232,6 +270,7 @@ func (s *Supervisor) EnsureRunning(ctx context.Context, m *Manifest, token strin
 		if _, err := os.Stat(sockPath); err == nil {
 			if err := s.healthOK(ctx, p); err == nil {
 				p.started.Store(true)
+				s.backoffReset(m.Name) // 成功进入 running：清零退避计数
 				s.setState(ctx, p, StateRunning, "", cmd.Process.Pid)
 				go s.healthLoop(p)
 				return nil
@@ -253,21 +292,33 @@ func (s *Supervisor) EnsureRunning(ctx context.Context, m *Manifest, token strin
 	return errx.Internal("插件 %s 在 %s 内未就绪", m.Name, m.Runtime.StartupTimeout)
 }
 
-// restartWithBackoff 指数退避重启（1s 起步 60s 封顶；10 分钟窗口 >5 次停止）。
+// restartWithBackoff 指数退避重启（1s 起步 60s 封顶；10 分钟窗口 >5 次熔断）。
+// 退避状态挂在 Supervisor（按插件名），跨进程实例存活——每次重启新建的
+// pfProcess 不会清零计数。
 //
 //nolint:contextcheck // 重启生命周期独立于触发退出的请求上下文，必须用 Background
 func (s *Supervisor) restartWithBackoff(p *pfProcess) {
 	ctx := context.Background()
 	_ = s.repo.IncRestartCount(ctx, p.manifest.Name)
-	n := p.restarts.Add(1)
+
+	st := s.backoffFor(p.manifest.Name)
+	s.backoffMu.Lock()
+	st.restarts++
+	n := st.restarts
+	s.backoffMu.Unlock()
+
 	if n > 5 {
 		s.setState(context.Background(), p, StateDisabled, "10 分钟窗口内失败超过 5 次，已停止重启", 0)
 		logManagerf(" %s 连续失败超过 5 次，停止重启", p.manifest.Name)
 		return
 	}
 	delay := time.Second
-	for i := 1; i < int(n) && delay < 60*time.Second; i++ {
+	for range n - 1 {
 		delay *= 2
+		if delay >= 60*time.Second {
+			delay = 60 * time.Second
+			break
+		}
 	}
 	logManagerf(" %s 退出（%v），%s 后第 %d 次重启", p.manifest.Name, p.exitErr, delay, n)
 	time.AfterFunc(delay, func() {
@@ -379,7 +430,9 @@ func (s *Supervisor) StopPlugin(ctx context.Context, name string) error {
 			<-p.exited
 		}
 	}
-	s.setState(ctx, p, StateDisabled, "", 0)
+	// stopped：面板侧手动停止（enabled 保持，可再启动）；disabled 仅用于
+	// 熔断/管理员禁用——此前误写 disabled 与 enabled=true 矛盾。
+	s.setState(ctx, p, StateStopped, "", 0)
 	_ = os.Remove(filepath.Join(s.socketDir, p.manifest.Runtime.Socket))
 	return nil
 }
