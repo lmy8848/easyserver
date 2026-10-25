@@ -6835,3 +6835,75 @@ CORS 通过配置文件中的 `allowed_origins` 控制。在开发模式下，�
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
 - `X-XSS-Protection: 1; mode=block`
+
+## 27. 插件系统
+
+插件为独立进程（经 Unix socket 通信）。生命周期：`registered → starting → running`；
+崩溃退避重启（10 分钟窗口 >5 次熔断）；`stopped`（面板侧停止）/ `disabled`（禁用）。
+
+插件开发（manifest、贡献点、Host API、权限模型、插件源协议）见
+[插件开发手册](https://www.0xdead.icu/plugin-manual)。
+
+### 27.1 `GET /api/plugins`
+
+列出全部已注册插件（名称、版本、状态、启用、已审批权限、重启次数等）。
+
+### 27.2 `POST /api/plugins/upload`
+
+上传 zip 包安装；**同名插件已存在时自动走升级路径**（保留配置/密钥/已审批权限，
+原启用则自动重启，失败回滚）。
+
+- 请求：`multipart/form-data`，字段 `file`（顶层含 plugin.yaml，≤50MB）
+- 安全校验：zip slip / zip bomb（总量 150MB、entry ≤10000）/ ELF 架构匹配 / manifest 校验
+- 响应：`{"plugin": "tunnel-frp", "version": "0.2.0", "upgraded": true|false}`
+
+### 27.3 插件生命周期
+
+| 接口 | 说明 |
+|------|------|
+| `POST /api/plugins/:id/start` | 启动插件进程 |
+| `POST /api/plugins/:id/stop` | 停止（状态 stopped，enabled 保持） |
+| `POST /api/plugins/:id/enable` | 启用并启动 |
+| `POST /api/plugins/:id/disable` | 禁用（注销 token） |
+| `POST /api/plugins/:id/approve` | 权限审批后启动，body `{"permissions": [...]}`（声明权限子集） |
+| `DELETE /api/plugins/:id` | 卸载（删除注册/配置/密钥，目录文件保留） |
+
+### 27.4 插件详情与配置
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/plugins/:id/detail` | manifest + 贡献点 + 运行状态 |
+| `GET /api/plugins/:id/manifest` | manifest 原文 |
+| `GET /api/plugins/:id/config` | 配置 KV |
+| `PUT /api/plugins/:id/config` | 保存配置 KV（body：`{"key": "value"}`） |
+| `GET /api/plugins/:id/logs?lines=200` | 插件自身日志（tail） |
+| `GET /api/plugins/system-logs?lines=200` | 插件管理子系统全局日志（安装/启停/审批/卸载等动作） |
+
+### 27.5 贡献点聚合（启用插件）
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/plugins/menus` | 侧边栏菜单（前端动态导航） |
+| `GET /api/plugins/widgets` | 仪表盘小部件 |
+| `GET /api/plugins/styles` | 前端样式注入（`<link>` 地址） |
+| `GET /api/plugins/web-servers` | 注册的 Web 服务器类型（并入网站管理） |
+| `GET /api/plugins/commands` | 可调用命令清单 |
+| `GET /api/plugins/datasources` | 数据源清单（含代理 URL） |
+
+### 27.6 插件源（市场入口）
+
+插件源为暴露 `GET {url}/index.json` 的 HTTP 端点
+（`{"name": "...", "plugins": [{"name", "version", "description", "download_url"}]}`）。
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/plugins/sources` | 列出已配置源 |
+| `POST /api/plugins/sources` | 添加源，body `{"name": "official", "url": "https://..."}` |
+| `DELETE /api/plugins/sources/:id` | 删除源 |
+| `POST /api/plugins/sources/:id/fetch` | 拉取该源插件清单 |
+| `POST /api/plugins/sources/install` | 从源安装/升级，body `{"url": "<zip 下载地址>"}`（复用上传全部校验） |
+
+### 27.7 插件业务代理
+
+`ANY /api/plugins/:name/*` — 插件前端/业务端点经面板反向代理（JWT 认证；
+剥离用户凭据；超时由面板强制）。插件自身路由以 `/`（去掉前缀后）注册。
