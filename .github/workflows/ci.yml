@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.9' # GO-2026-6617 stdlib 修复在 go1.26.9（'1.26' 曾解析到未修补的 1.26.8）
+          go-version: '1.26.10' # stdlib 安全修复跟进（GO-2026-6809 x509 修复在 go1.26.10）
           cache: true # caches both GOMODCACHE and GOCACHE
 
       - name: Download dependencies
