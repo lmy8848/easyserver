@@ -111,6 +111,15 @@
 - **Audit Log（审计日志）** — 操作审计记录（记录操作人、模块、动作、目标对象、IP 地址、响应状态与时间戳）。
 - **Env Config（环境配置）** — 面板统一纳管的系统/应用通用环境变量与全局配置项（`env_configs` 表）。
 
+### 16. 插件系统
+
+- **Plugin（插件）** — 独立进程的可执行包（任意语言），经 Unix socket 与面板通信；崩溃不波及主面板（见 `internal/plugin`）。生命周期 `registered/starting/running/degraded/stopped/disabled/error`，崩溃指数退避重启 + 窗口熔断。
+- **Manifest（清单 plugin.yaml）** — 声明运行方式（exec/socket/健康检查）、权限（默认拒绝、管理员批准）与贡献点（menus/pages/routes/widgets/settings/services/eventsubs/eventpubs/styles/web_servers/commands/datasources）。
+- **Host API** — 面板暴露给插件的能力接口（socket `/run/easyserver/host.sock`），token 鉴权 + 权限逐端点校验；含 exec/notify/storage/port ACL/panel 只读代理/command 跨插件调用。
+- **Plugin Source（插件源）** — 插件安装源（暴露 `index.json` 的 HTTP 端点），面板据此浏览与安装插件（`plugin_sources` 表）。
+- **Install / Upgrade（安装与升级）** — zip 包上传（zip slip/bomb/ELF 架构校验）；同名包覆盖即升级（保留配置/密钥/已审批权限，原启用自动重启，失败回滚）。
+  _Avoid_: "disabled" 泛指停止——`stopped` 是面板侧手动停止（enabled 保持），`disabled` 是熔断/禁用。
+
 ---
 
 ## 已废弃与移除的领域概念 (Deprecated / Removed)
