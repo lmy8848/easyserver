@@ -182,7 +182,7 @@ export default function Vulnerabilities() {
                 : <Tooltip title={`Debian 源中暂无修复版本${r.candidate ? `（候选 ${r.candidate}）` : ''}`}><Tag color="default" style={{ margin: 0 }}>暂无修复</Tag></Tooltip> },
               { title: '操作', key: 'action', width: 80, render: (_: unknown, r: Vuln) => r.upgradable
                 ? <Button size="small" type="link" loading={upgradingPkg === r.package} disabled={!!upgradingPkg || upgrading} onClick={() => upgradeOne(r.package)}>升级</Button>
-                : <Tooltip title="Debian 源中暂无修复版本"><Button size="small" type="link" disabled>升级</Button></Tooltip> },
+                : <Tooltip title="Debian 源中暂无修复版本"><span><Button size="small" type="link" disabled>升级</Button></span></Tooltip> },
             ]}
           />
         </Card>
