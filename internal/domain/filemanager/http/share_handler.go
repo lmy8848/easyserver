@@ -225,9 +225,10 @@ func (h *FileShareHandler) ListShares(c *gin.Context) (any, error) {
 	return httpx.Paginate(items, p), nil
 }
 
-// GetShare returns a single share owned by the current user, including its
-// password so the frontend can reconstruct a full shareable link. Owner check
-// is enforced; non-owners get 404 (no existence leak).
+// GetShare returns a single share owned by the current user. Owner check
+// is enforced; non-owners get 404 (no existence leak). The stored password
+// is a bcrypt hash — it can neither be recovered nor used to build a share
+// link, so only a has_password flag is exposed.
 func (h *FileShareHandler) GetShare(c *gin.Context) (any, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -244,7 +245,12 @@ func (h *FileShareHandler) GetShare(c *gin.Context) (any, error) {
 	if share == nil || share.CreatedBy != uid {
 		return nil, errx.NotFound("外链不存在")
 	}
-	return share, nil
+	hasPwd := share.Password != ""
+	share.Password = ""
+	return gin.H{
+		"share":        share,
+		"has_password": hasPwd,
+	}, nil
 }
 
 // UpdateShare modifies a share's access-control fields (password / expiry /

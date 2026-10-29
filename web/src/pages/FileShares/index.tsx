@@ -19,6 +19,7 @@ export default function FileShares() {
   const [editForm] = Form.useForm();
   const [editLoading, setEditLoading] = useState(false);
   const [editClearExpiry, setEditClearExpiry] = useState(false);
+  const [editClearPwd, setEditClearPwd] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -95,24 +96,6 @@ export default function FileShares() {
     writeClipboard(link);
   };
 
-  // 复制带密码链接(直达下载，跳过下载页)。需先拉取完整 share 取到密码。
-  const copyShareLinkWithPassword = async (id: number, token: string) => {
-    try {
-      const res = await fileShareApi.get(id);
-      const share = res.data.data;
-      const pwd = share?.password || '';
-      if (!pwd) {
-        message.info('该外链未设置密码，已复制普通链接');
-        writeClipboard(`${window.location.origin}/share/${token}`);
-        return;
-      }
-      // 复制带有 password 参数的前端页面链接，前端页面会自动读取并填入密码
-      writeClipboard(`${window.location.origin}/share/${token}?password=${encodeURIComponent(pwd)}`);
-    } catch (error: unknown) {
-      message.error(error instanceof Error ? error.message : '获取外链信息失败');
-    }
-  };
-
   const writeClipboard = (text: string) => {
     copyToClipboard(text, '链接已复制');
   };
@@ -120,22 +103,13 @@ export default function FileShares() {
   const handleEdit = async (share: FileShare) => {
     setEditingShare(share);
     setEditClearExpiry(false);
+    setEditClearPwd(false);
     editForm.resetFields();
     editForm.setFieldsValue({
       max_downloads: share.max_downloads || 0,
       expires_at: share.expires_at || '',
     });
     setEditVisible(true);
-    
-    // Fetch full info to echo password
-    try {
-      const res = await fileShareApi.get(share.id);
-      editForm.setFieldsValue({
-        password: res.data.data?.password || '',
-      });
-    } catch (error) {
-      console.error('Failed to fetch share password', error);
-    }
   };
 
   const handleEditSubmit = async () => {
@@ -149,7 +123,14 @@ export default function FileShares() {
         expires_at?: string;
         max_downloads: number;
         clear_expiry?: boolean;
-      } = { max_downloads: v.max_downloads ?? 0, password: v.password || '' };
+      } = { max_downloads: v.max_downloads ?? 0 };
+      // 密码只写：勾选清除 -> 清空；输入新值 -> 替换；否则保持不变
+      // （后端只存 bcrypt 哈希，无法回显原密码）
+      if (editClearPwd) {
+        payload.password = '';
+      } else if (v.password) {
+        payload.password = v.password;
+      }
       
       // 过期时间：勾选永久 -> clear_expiry；输入新值 -> 替换；否则不传
       if (editClearExpiry) {
@@ -203,7 +184,7 @@ export default function FileShares() {
     {
       title: '密码', key: 'password', width: 70, align: 'center' as const,
       render: (_: unknown, record: FileShare) => record.has_password
-        ? <Tooltip title="已设置访问密码"><Tag color="orange" style={{ margin: 0 }}><LockOutlined /> 已设</Tag></Tooltip>
+        ? <Tooltip title="已设置访问密码（密码无法找回，请自行告知接收方）"><Tag color="orange" style={{ margin: 0 }}><LockOutlined /> 已设</Tag></Tooltip>
         : <Tag color="default" style={{ margin: 0 }}>无</Tag>,
     },
     {
@@ -223,13 +204,6 @@ export default function FileShares() {
               复制链接
             </Button>
           </Tooltip>
-          {record.has_password && (
-            <Tooltip title="复制带密码链接（直达下载）">
-              <Button type="link" size="small" icon={<LinkOutlined />} onClick={() => copyShareLinkWithPassword(record.id, record.token)}>
-                带密码
-              </Button>
-            </Tooltip>
-          )}
           <Tooltip title="编辑外链">
             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
           </Tooltip>
@@ -313,14 +287,15 @@ export default function FileShares() {
           <Form.Item label="文件路径">
             <Input value={editingShare?.file_path} disabled />
           </Form.Item>
-          <Form.Item name="password" label="访问密码" extra="留空可清除密码">
-            <Input.Password placeholder="未设置密码" />
+          <Form.Item name="password" label="重设访问密码（可选）" extra="留空保持当前密码不变">
+            <Input.Password placeholder="留空保持不变" />
           </Form.Item>
           <Form.Item name="expires_at" label="过期时间" extra="留空不修改；支持 30m, 1h, 7d 或 2026-07-01 12:00:00">
             <Input placeholder="留空不修改、30m、1h、7d 或 2026-07-01 12:00:00" disabled={editClearExpiry} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 16 }}>
             <Checkbox checked={editClearExpiry} onChange={(e) => setEditClearExpiry(e.target.checked)}>设为永久有效</Checkbox>
+            <Checkbox checked={editClearPwd} onChange={(e) => setEditClearPwd(e.target.checked)}>清除访问密码</Checkbox>
           </Form.Item>
           <Form.Item name="max_downloads" label="最大下载次数" extra="0 表示不限制">
             <InputNumber min={0} max={100000} style={{ width: '100%' }} />
