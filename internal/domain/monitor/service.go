@@ -368,7 +368,7 @@ func (s *MonitorService) GetCurrentStats(ctx context.Context) (*MonitorSnapshot,
 		}
 	}
 	snapshot := p.ToSnapshot()
-	snapshot.System = s.readSystemInfo()
+	snapshot.System = s.readSystemInfo(ctx)
 	snapshot.Partitions = s.readPartitions()
 	return snapshot, nil
 }
@@ -605,7 +605,7 @@ func deltaU64(cur, prev uint64) uint64 {
 	return cur - prev
 }
 
-func (s *MonitorService) readSystemInfo() *SystemInfo {
+func (s *MonitorService) readSystemInfo(ctx context.Context) *SystemInfo {
 	info := &SystemInfo{
 		Arch:     runtime.GOARCH,
 		CPUCores: runtime.NumCPU(),
@@ -648,16 +648,15 @@ func (s *MonitorService) readSystemInfo() *SystemInfo {
 		}
 	}
 
-	info.LocalIP = detectLocalIP()
-	info.PublicIP = s.detectPublicIP()
+	info.LocalIP = detectLocalIP(ctx)
+	info.PublicIP = s.detectPublicIP(ctx)
 
 	return info
 }
 
 // detectLocalIP 返回默认路由出口接口的 IPv4（UDP dial 不实际发包，仅让内核选路）。
-func detectLocalIP() string {
-	// UDP dial 仅做内核选路，近乎瞬时，Background 语义合适
-	conn, err := (&net.Dialer{}).DialContext(context.Background(), "udp", "8.8.8.8:53")
+func detectLocalIP(ctx context.Context) string {
+	conn, err := (&net.Dialer{}).DialContext(ctx, "udp", "8.8.8.8:53")
 	if err == nil {
 		defer conn.Close()
 		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP.To4() != nil {
@@ -686,7 +685,7 @@ var publicIPProviders = []string{
 // detectPublicIP 返回公网出口 IP，带 10 分钟缓存。
 // 服务器管理面板显示公网 IP 是常规能力（对标宝塔等），通过 HTTPS 向
 // 公共回显服务查询；查询失败静默留空，不影响监控数据可用性。
-func (s *MonitorService) detectPublicIP() string {
+func (s *MonitorService) detectPublicIP(ctx context.Context) string {
 	s.publicIPMu.Lock()
 	defer s.publicIPMu.Unlock()
 	if s.publicIPAt.Add(10 * time.Minute).After(time.Now()) {
@@ -696,7 +695,7 @@ func (s *MonitorService) detectPublicIP() string {
 	ip := ""
 	client := &http.Client{Timeout: 3 * time.Second}
 	for _, url := range publicIPProviders {
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			continue
 		}
