@@ -18,11 +18,12 @@ import (
 type AuditHandler struct {
 	db        *sql.DB
 	auditRepo audit.Repository
+	auditSvc  *audit.Service
 }
 
 // NewAuditHandlerWithRepo creates an AuditHandler with repository support
-func NewAuditHandlerWithRepo(db *sql.DB, auditRepo audit.Repository) *AuditHandler {
-	return &AuditHandler{db: db, auditRepo: auditRepo}
+func NewAuditHandlerWithRepo(db *sql.DB, auditRepo audit.Repository, auditSvc *audit.Service) *AuditHandler {
+	return &AuditHandler{db: db, auditRepo: auditRepo, auditSvc: auditSvc}
 }
 
 type AuditLogItem struct {
@@ -377,10 +378,11 @@ func (h *AuditHandler) GetCleanPolicy(c *gin.Context) (any, error) {
 	var count int
 	_ = h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
 
+	retentionDays, autoClean := h.auditSvc.CleanPolicy()
 	return gin.H{
-		"retention_days": 90,
+		"retention_days": retentionDays,
 		"total_records":  count,
-		"auto_clean":     true,
+		"auto_clean":     autoClean,
 	}, nil
 }
 
@@ -499,8 +501,8 @@ func (h *AuditHandler) Clean(c *gin.Context) (any, error) {
 }
 
 // RegisterRoutes wires audit routes onto the gin router group.
-func RegisterRoutes(protected *gin.RouterGroup, db *sql.DB, auditRepo audit.Repository) {
-	handler := NewAuditHandlerWithRepo(db, auditRepo)
+func RegisterRoutes(protected *gin.RouterGroup, db *sql.DB, auditRepo audit.Repository, auditSvc *audit.Service) {
+	handler := NewAuditHandlerWithRepo(db, auditRepo, auditSvc)
 	protected.GET("/audit-logs", httpx.H(handler.List))
 	protected.GET("/audit-logs/actions", httpx.H(handler.GetActions))
 	protected.GET("/audit-logs/stats", httpx.H(handler.Stats))

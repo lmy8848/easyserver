@@ -241,7 +241,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
-	audithttp.RegisterRoutes(g.Protected, db, auditRepo)
+	audithttp.RegisterRoutes(g.Protected, db, auditRepo, auditSvc)
 	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig, mdManager)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)

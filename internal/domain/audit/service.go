@@ -135,6 +135,11 @@ func (s *Service) retentionDays() int {
 	return d
 }
 
+// CleanPolicy 返回当前生效的清理策略（保留天数读配置，自动清理内置常开）。
+func (s *Service) CleanPolicy() (retentionDays int, autoClean bool) {
+	return s.retentionDays(), true
+}
+
 func (s *Service) Close() {
 	s.writer.close()
 }
