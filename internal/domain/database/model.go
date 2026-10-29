@@ -88,7 +88,7 @@ type DBUser struct {
 type DBBackup struct {
 	ID           int64  `json:"id"`
 	DBType       DBType `json:"db_type"`
-	DBInstanceID int64  `json:"db_version_id"`
+	DBInstanceID int64  `json:"db_instance_id"`
 	DatabaseName string `json:"database_name"`
 	BackupType   string `json:"backup_type"` // manual, scheduled
 	FilePath     string `json:"file_path"`

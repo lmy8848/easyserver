@@ -168,7 +168,6 @@ export interface WebServer {
   memory_bytes: number;
   uptime: string;
   auto_start: boolean;
-  config_ok: boolean;
   created_at: string;
 }
 
@@ -269,7 +268,7 @@ export interface Website {
 export interface DBBackup {
   id: number;
   db_type: string;
-  db_version_id: number;
+  db_instance_id: number;
   database_name: string;
   backup_type: string; // manual, scheduled
   file_path: string;
