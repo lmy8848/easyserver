@@ -656,7 +656,8 @@ func (s *MonitorService) readSystemInfo() *SystemInfo {
 
 // detectLocalIP 返回默认路由出口接口的 IPv4（UDP dial 不实际发包，仅让内核选路）。
 func detectLocalIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:53")
+	// UDP dial 仅做内核选路，近乎瞬时，Background 语义合适
+	conn, err := (&net.Dialer{}).DialContext(context.Background(), "udp", "8.8.8.8:53")
 	if err == nil {
 		defer conn.Close()
 		if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok && addr.IP.To4() != nil {
@@ -695,7 +696,11 @@ func (s *MonitorService) detectPublicIP() string {
 	ip := ""
 	client := &http.Client{Timeout: 3 * time.Second}
 	for _, url := range publicIPProviders {
-		resp, err := client.Get(url)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			continue
 		}
