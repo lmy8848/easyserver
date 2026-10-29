@@ -134,22 +134,3 @@ func (r *sqliteRepo) DeletePathEntry(ctx context.Context, id int64) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM path_entries WHERE id = ?", id)
 	return err
 }
-
-func (r *sqliteRepo) ReorderPathEntries(ctx context.Context, ids []int64) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	for i, id := range ids {
-		_, err := tx.ExecContext(ctx,
-			"UPDATE path_entries SET order_num = ? WHERE id = ?",
-			i+1, id,
-		)
-		if err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}

@@ -148,7 +148,7 @@ func (h *MonitorHandler) HandleSSE(c *gin.Context) (any, error) {
 }
 
 // RegisterRoutes registers monitor related routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) {
+func RegisterRoutes(protected *gin.RouterGroup, monitorService *monitor.MonitorService, jwtSecret string, allowedOrigins []string, devMode bool) {
 	handler := NewMonitorHandler(monitorService, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/monitor/stats", httpx.H(handler.HandleStats))
 	protected.GET("/monitor/history", httpx.H(handler.HandleHistory))

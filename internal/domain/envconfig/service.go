@@ -73,10 +73,6 @@ func (s *Service) DeletePathEntry(ctx context.Context, id int64) error {
 	return s.repo.DeletePathEntry(ctx, id)
 }
 
-func (s *Service) ReorderPathEntries(ctx context.Context, ids []int64) error {
-	return s.repo.ReorderPathEntries(ctx, ids)
-}
-
 func (s *Service) GenerateEnvScript(ctx context.Context) (string, error) {
 	var script strings.Builder
 

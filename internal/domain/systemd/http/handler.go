@@ -416,7 +416,7 @@ func requireManagedName(fullName string) (string, error) {
 }
 
 // RegisterRoutes registers service management routes
-func RegisterRoutes(protected *gin.RouterGroup, wsGroup *gin.RouterGroup, serviceManager *systemd.ServiceManager, jwtSecret string, allowedOrigins []string, devMode bool) {
+func RegisterRoutes(protected *gin.RouterGroup, serviceManager *systemd.ServiceManager, jwtSecret string, allowedOrigins []string, devMode bool) {
 	handler := NewServiceHandler(serviceManager, jwtSecret, allowedOrigins, devMode)
 	protected.GET("/services", httpx.H(handler.List))
 	protected.POST("/services", httpx.H(handler.Create))

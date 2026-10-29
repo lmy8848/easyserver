@@ -35,13 +35,3 @@ type LoginRecord struct {
 	Method string `json:"method"` // password, publickey
 	TTY    string `json:"tty"`
 }
-
-// Key represents an SSH public key.
-type Key struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	KeyType     string `json:"key_type"`
-	PublicKey   string `json:"public_key"`
-	Fingerprint string `json:"fingerprint"`
-	CreatedAt   string `json:"created_at"`
-}

@@ -16,5 +16,4 @@ type Repository interface {
 	CreatePathEntry(ctx context.Context, e *PathEntry) error
 	UpdatePathEntry(ctx context.Context, e *PathEntry) error
 	DeletePathEntry(ctx context.Context, id int64) error
-	ReorderPathEntries(ctx context.Context, ids []int64) error
 }

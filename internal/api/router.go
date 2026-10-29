@@ -237,8 +237,8 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	// Domain route registration
 	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, refreshSvc, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout.Duration(), cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval.Duration(), cfg)
-	monitorhttp.RegisterRoutes(g.Protected, g.WS, monitorSvc, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
-	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	monitorhttp.RegisterRoutes(g.Protected, monitorSvc, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
+	systemdhttp.RegisterRoutes(g.Protected, serviceManager, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo, auditSvc)
