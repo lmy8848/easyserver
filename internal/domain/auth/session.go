@@ -49,6 +49,9 @@ func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration
 	}
 }
 
+// ClientTypeMobileDirect 标识直连通道铸造的临时凭据会话（非登录会话）。
+const ClientTypeMobileDirect = "mobile-direct"
+
 func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, ip, userAgent, clientType string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -124,6 +127,11 @@ func (s *SessionService) GetUserSessions(ctx context.Context, userID int64) ([]S
 	var result []Session
 	for _, sess := range s.sessions {
 		if sess.UserID == userID && sess.ExpiresAt.After(now) {
+			// 直连通道的临时凭据会话（15 分钟滚动）不是登录会话，不进列表；
+			// 设备级的启停走「移动端直连」设置的吊销
+			if sess.ClientType == ClientTypeMobileDirect {
+				continue
+			}
 			result = append(result, *sess)
 		}
 	}
@@ -167,7 +175,8 @@ func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool
 	}
 	// 移动端会话由 refresh 链控制生命周期（90 天可吊销），不套用 Web 的空闲超时，
 	// 否则手机放半小时不用就被踢；Web 仍按 idle_timeout 生效。
-	if sess.ClientType != "mobile" {
+	// 直连临时会话同理，其生命周期由 15 分钟绝对过期控制。
+	if sess.ClientType != "mobile" && sess.ClientType != ClientTypeMobileDirect {
 		if idle := s.store.Get().Auth.IdleTimeout.Duration(); idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
 			return false, nil
 		}

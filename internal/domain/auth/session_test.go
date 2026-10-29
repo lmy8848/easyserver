@@ -60,3 +60,35 @@ func TestGetActiveSessions_IncludesIdleButValid(t *testing.T) {
 		t.Fatalf("idle-expired session must be excluded, got %d sessions", len(sessions))
 	}
 }
+
+// 回归：直连通道铸造的临时凭据会话（mobile-direct）不应出现在用户的
+// 会话列表中——它们不是登录会话，此前与真实移动端登录同标 "mobile"，
+// 导致会话管理里多出"移动端在线记录"。
+func TestGetUserSessions_ExcludesMobileDirect(t *testing.T) {
+	ctx := t.Context()
+	var wg sync.WaitGroup
+
+	store := config.NewStore(&config.Config{
+		Auth: config.AuthConfig{
+			SessionTimeout:         config.Duration(24 * time.Hour),
+			IdleTimeout:            config.Duration(30 * time.Minute),
+			SessionCleanupInterval: config.Duration(time.Hour),
+		},
+	})
+	svc := NewSessionService(ctx, &wg, store)
+
+	if err := svc.CreateSession(ctx, "login-token", 1, "192.0.2.1", "test-agent", "mobile", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CreateSession(ctx, "direct-token", 1, "mobile-direct", "device-signature", ClientTypeMobileDirect, time.Now().Add(15*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := svc.GetUserSessions(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].Token != "login-token" {
+		t.Fatalf("expected only the login session, got %d sessions", len(sessions))
+	}
+}

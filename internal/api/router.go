@@ -144,7 +144,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 			return "", time.Time{}, terr
 		}
 		expires := time.Now().Add(ttl)
-		if serr := sessionSvc.CreateSession(mctx, tok, userID, "mobile-direct", "device-signature", "mobile", expires); serr != nil {
+		if serr := sessionSvc.CreateSession(mctx, tok, userID, "mobile-direct", "device-signature", "mobile-direct", expires); serr != nil {
 			return "", time.Time{}, serr
 		}
 		return tok, expires, nil
