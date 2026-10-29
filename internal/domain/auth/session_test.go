@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -12,8 +11,7 @@ import (
 // 回归：会话列表应包含"有效但已静置超过 5 分钟"的设备。此前用 5 分钟活跃
 // 窗口过滤，静置设备会从"登录会话"列表消失、也无法被踢出。
 func TestGetActiveSessions_IncludesIdleButValid(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	var wg sync.WaitGroup
 
 	store := config.NewStore(&config.Config{

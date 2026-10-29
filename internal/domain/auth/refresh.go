@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -93,7 +94,7 @@ func (s *RefreshService) Rotate(ctx context.Context, oldToken, deviceID string) 
 		SELECT id, family_id, user_id, expires_at, rotated_at, revoked_at
 		FROM refresh_tokens WHERE token_hash = ?`, oldHash).
 		Scan(&id, &family, &userID, &exp, &rotatedAt, &revokedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errx.Unauthorized("refresh token 无效")
 	}
 	if err != nil {

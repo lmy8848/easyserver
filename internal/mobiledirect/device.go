@@ -10,7 +10,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -319,7 +319,7 @@ func bufferBodyForHash(req *http.Request) (string, error) {
 			return "", err
 		}
 		if len(data) > maxInlineBodyHash {
-			return "", fmt.Errorf("body too large for inline buffering")
+			return "", errors.New("body too large for inline buffering")
 		}
 		h.Write(data)
 		req.Body = io.NopCloser(strings.NewReader(string(data)))
@@ -339,7 +339,7 @@ func bufferBodyForHash(req *http.Request) (string, error) {
 	if n > maxDirectBodySize {
 		f.Close()
 		os.Remove(f.Name())
-		return "", fmt.Errorf("body too large")
+		return "", errors.New("body too large")
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		f.Close()

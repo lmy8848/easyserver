@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -112,7 +113,7 @@ func (m *Manager) srvCertPath() string {
 // 移动端通过证书指纹 pinning 校验；面板设置页展示指纹供核对）。
 func EnsureCert(cfg *config.MobileDirectConfig) error {
 	if cfg.CertFile == "" || cfg.KeyFile == "" {
-		return fmt.Errorf("cert_file/key_file 未配置")
+		return errors.New("cert_file/key_file 未配置")
 	}
 	if fileExists(cfg.CertFile) && fileExists(cfg.KeyFile) {
 		return nil
