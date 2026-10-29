@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 
 	"easyserver/internal/infra/errx"
@@ -53,15 +52,9 @@ func JWTMiddleware(secret string, sessionValidator SessionValidator) gin.Handler
 			tokenString = cookie
 		}
 
-		// Fallback: allow the token via the access_token query parameter, but
-		// only for safe methods (GET/HEAD). Browser media tags
-		// (<audio>/<video>/<img>/<iframe>) cannot send custom headers, so media
-		// preview/playback needs the token in the URL. Restricting to safe
-		// methods keeps state-changing endpoints (POST/PUT/DELETE) requiring
-		// the header, preserving CSRF protection.
-		if tokenString == "" && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
-			tokenString = c.Query("access_token")
-		}
+		// 不再接受 ?access_token= 传递会话 JWT：URL 会进入反向代理访问日志、
+		// 浏览器历史与聊天预览，等同于长期有效的会话令牌泄漏。Web 端媒体预览
+		// 走 HttpOnly Cookie（同源自动携带），移动端走 Authorization 头。
 
 		if tokenString == "" {
 			c.Error(errx.Unauthorized("missing authorization header"))

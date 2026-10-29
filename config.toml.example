@@ -69,3 +69,15 @@ max_files = 3         # 保留轮转文件数 (.1 .2 …)
 
 [alerts]
 rules = []
+
+# 移动端专用直连通道（可选）：独立 TLS 端口 + 设备签名，绕过 Cloudflare，
+# 适合 CF 回源慢导致的移动端超时。开放后请确保该端口只提供 /api/ 业务接口
+# （本实现已强制），并且手机端持有已注册的设备私钥。
+# 需要为直连地址（如 m.example.com，DNS only 记录）准备有效证书。
+[mobile_direct]
+enabled = false
+listen = "0.0.0.0:8443"
+hostname = "panel.example.com"   # 反代时的 Host 头（面板域名）
+cert_file = "/opt/easyserver/certs/mobile.crt"
+key_file = "/opt/easyserver/certs/mobile.key"
+clock_skew = "5m"

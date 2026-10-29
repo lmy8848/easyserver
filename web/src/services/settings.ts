@@ -2,6 +2,18 @@ import api from './client';
 import type { ApiResponse, AppSettings } from '../types';
 
 // Settings API
+export interface MobileDirectInfo {
+  enabled: boolean;
+  listen: string;
+  hostname: string;
+  cert_file: string;
+  key_file: string;
+  clock_skew: string;
+  running: boolean;
+  fingerprint: string;
+  last_error: string;
+}
+
 export const settingsApi = {
   get: () =>
     api.get<ApiResponse<AppSettings>>('/settings'),
@@ -34,6 +46,20 @@ export const settingsApi = {
 
   updateAudit: (data: { retention_days?: number }) =>
     api.put<ApiResponse>('/settings/audit', data),
+
+  getMobileDirect: () =>
+    api.get<ApiResponse<MobileDirectInfo>>('/settings/mobile-direct'),
+
+  updateMobileDirect: (data: {
+    enabled?: boolean;
+    listen?: string;
+    hostname?: string;
+    clock_skew?: string;
+    cert_file?: string;
+    key_file?: string;
+    regenerate_cert?: boolean;
+  }) =>
+    api.put<ApiResponse<MobileDirectInfo>>('/settings/mobile-direct', data),
 
   restart: (force?: boolean) =>
     api.post<ApiResponse>('/settings/restart', force ? { force: true } : undefined),

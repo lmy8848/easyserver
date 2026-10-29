@@ -731,7 +731,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
               render: (t: string) => t === 'mobile' ? <Tag color="blue">移动</Tag> : <Tag>Web</Tag> },
             { title: '设备', key: 'device', ellipsis: true,
               render: (_: unknown, r: Session) => r.user_agent || '-' },
-            { title: '登录时间', dataIndex: 'login_at', key: 'login_at', width: 180,
+            { title: '最近活动', dataIndex: 'login_at', key: 'login_at', width: 180,
               render: (t: string) => t ? formatDateTime(t) : '-' },
             { title: '过期时间', dataIndex: 'expires_at', key: 'expires_at', width: 180,
               render: (t: string) => t ? formatDateTime(t) : '-' },

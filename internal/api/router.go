@@ -52,6 +52,7 @@ import (
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
 	"easyserver/internal/infra/mise"
+	"easyserver/internal/mobiledirect"
 	"easyserver/internal/plugin"
 
 	"github.com/gin-gonic/gin"
@@ -129,6 +130,32 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 
 	sessionSvc := auth.NewSessionService(ctx, &wg, store)
 
+	// 移动端直连通道管理器：设备签名通过后铸造 15 分钟短期 JWT 并写入会话表，
+	// 由直连端以 Cookie 转发给主引擎，复用既有鉴权与审计。
+	mdStore := mobiledirect.NewStore(db)
+	mintMobileToken := func(mctx context.Context, userID int64) (string, time.Time, error) {
+		user, uerr := authSvc.GetUserByID(mctx, userID)
+		if uerr != nil {
+			return "", time.Time{}, uerr
+		}
+		ttl := 15 * time.Minute
+		tok, terr := auth.GenerateToken(cfg.Auth.JWTSecret, userID, user.Username, ttl)
+		if terr != nil {
+			return "", time.Time{}, terr
+		}
+		expires := time.Now().Add(ttl)
+		if serr := sessionSvc.CreateSession(mctx, tok, userID, "mobile-direct", "device-signature", "mobile", expires); serr != nil {
+			return "", time.Time{}, serr
+		}
+		return tok, expires, nil
+	}
+	panelSchemeM := "http"
+	if cfg.Server.TLS.Enabled {
+		panelSchemeM = "https"
+	}
+	refreshSvc := auth.NewRefreshService(db)
+	mdManager := mobiledirect.NewManager(mdStore, fmt.Sprintf("%s://127.0.0.1:%d", panelSchemeM, cfg.Server.Port), mintMobileToken)
+
 	qrLoginService := auth.NewQRLoginService(store, sessionSvc)
 
 	// ── Monitor ──
@@ -198,14 +225,24 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	e := newEngine(cfg)
 	g := newGroups(e, cfg, authSvc, sessionSvc, auditSvc, panelServiceToken)
 
+	// 移动端直连接口的设备公钥管理（注册/列表/吊销）走受保护路由（通常经 CF）。
+	// 直连端口只做签名校验与反向代理，见 internal/mobiledirect。
+	mobiledirect.RegisterDeviceRoutes(g.Protected, mdStore, refreshSvc)
+
+	// 移动端刷新令牌：POST /api/auth/refresh（公开，refresh 走请求体 + 设备绑定）
+	authhttp.RegisterRefreshRoute(g.API, refreshSvc, cfg.Auth.JWTSecret, sessionSvc,
+		int64(cfg.Auth.SessionTimeout.Duration().Seconds()),
+		cfg.Auth.LoginRateLimit,
+		int64(cfg.Auth.LoginRateInterval.Duration().Seconds()))
+
 	// Domain route registration
-	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout.Duration(), cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval.Duration(), cfg)
+	authhttp.RegisterRoutes(g.API, authSvc, auditSvc, sessionSvc, qrLoginService, refreshSvc, cfg.Auth.JWTSecret, g.sessionValidator, cfg.Auth.SessionTimeout.Duration(), cfg.Auth.LoginRateLimit, cfg.Auth.LoginRateInterval.Duration(), cfg)
 	monitorhttp.RegisterRoutes(g.Protected, g.WS, monitorSvc, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	systemdhttp.RegisterRoutes(g.Protected, g.WS, serviceManager, cfg.Auth.JWTSecret, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	terminalhttp.RegisterRoutes(g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo)
-	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig)
+	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig, mdManager)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
 	webhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), webServerSvc, websiteSvc)
@@ -307,6 +344,13 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	watcherStop := make(chan struct{})
 	cronService.StartWatcher(watcherStop)
 
+	// ── 移动端直连通道（可选，独立 TLS 端口，绕过 CF）──
+	if cfg.MobileDirect.Enabled {
+		if err := mdManager.Apply(cfg.MobileDirect); err != nil {
+			log.Printf("mobile direct: start failed: %v", err)
+		}
+	}
+
 	// ── Shutdown function ──
 	shutdown := func() {
 		pluginSup.StopAll(context.Background())
@@ -318,6 +362,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		wg.Wait()
 		middleware.StopRateLimiter()
 		middleware.StopSessionHeartbeatLimiter()
+		mdManager.Stop()
 		db.Close()
 	}
 

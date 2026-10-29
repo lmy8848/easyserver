@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,12 +30,23 @@ type MonitorUpdater interface {
 	SetRetention(retention time.Duration)
 }
 
+// MobileDirectManager 是移动端直连通道的生命周期接口（由 mobiledirect.Manager 实现）。
+type MobileDirectManager interface {
+	Apply(config.MobileDirectConfig) error
+	Status() (running bool, fingerprint, lastErr string)
+	RegenerateCert(cfg config.MobileDirectConfig) (fingerprint string, err error)
+}
+
 type SettingsHandler struct {
 	store          *config.Store
 	alertService   *alert.Service
 	monitorService MonitorUpdater
+	md             MobileDirectManager
 	sig            *infra.Signal
 }
+
+// SetMobileDirect 注入移动端直连通道管理器（可为 nil：表示未启用）。
+func (h *SettingsHandler) SetMobileDirect(m MobileDirectManager) { h.md = m }
 
 func NewSettingsHandler(store *config.Store, alertService *alert.Service, sig *infra.Signal) *SettingsHandler {
 	return &SettingsHandler{
@@ -816,6 +828,111 @@ func (h *SettingsHandler) UpdateLogsConfig(c *gin.Context) (any, error) {
 	return gin.H{"message": "日志配置已更新", "level": logger.GetLevel()}, nil
 }
 
+// GetMobileDirect 返回移动端直连通道的配置与运行状态（含证书指纹）。
+func (h *SettingsHandler) GetMobileDirect(c *gin.Context) (any, error) {
+	cfg := h.store.Get().MobileDirect
+	running, fingerprint, lastErr := false, "", ""
+	if h.md != nil {
+		running, fingerprint, lastErr = h.md.Status()
+	}
+	return gin.H{
+		"enabled":     cfg.Enabled,
+		"listen":      cfg.Listen,
+		"hostname":    cfg.Hostname,
+		"cert_file":   cfg.CertFile,
+		"key_file":    cfg.KeyFile,
+		"clock_skew":  cfg.ClockSkew.Duration().String(),
+		"running":     running,
+		"fingerprint": fingerprint,
+		"last_error":  lastErr,
+	}, nil
+}
+
+// UpdateMobileDirect 保存配置并热重启直连监听；证书缺失时自动生成自签证书
+// （没有域名的用户直接用 IP 连接，客户端按返回的指纹做 pinning）。
+func (h *SettingsHandler) UpdateMobileDirect(c *gin.Context) (any, error) {
+	req, err := httpx.BindJSON[struct {
+		Enabled    *bool   `json:"enabled"`
+		Listen     *string `json:"listen"`
+		Hostname   *string `json:"hostname"`
+		ClockSkew  *string `json:"clock_skew"`
+		CertFile   *string `json:"cert_file"`
+		KeyFile    *string `json:"key_file"`
+		Regenerate *bool   `json:"regenerate_cert"`
+	}](c)
+	if err != nil {
+		return nil, err
+	}
+
+	next := h.store.Get().MobileDirect
+	if req.Listen != nil {
+		next.Listen = strings.TrimSpace(*req.Listen)
+	}
+	if next.Listen == "" {
+		return nil, errx.BadRequest("监听地址不能为空")
+	}
+	if err := validateHostPort(next.Listen); err != nil {
+		return nil, err
+	}
+	if req.Hostname != nil {
+		next.Hostname = strings.TrimSpace(*req.Hostname)
+	}
+	if req.CertFile != nil {
+		next.CertFile = strings.TrimSpace(*req.CertFile)
+	}
+	if req.KeyFile != nil {
+		next.KeyFile = strings.TrimSpace(*req.KeyFile)
+	}
+	if next.CertFile == "" || next.KeyFile == "" {
+		return nil, errx.BadRequest("证书路径不能为空")
+	}
+	if req.ClockSkew != nil {
+		d, derr := time.ParseDuration(strings.TrimSpace(*req.ClockSkew))
+		if derr != nil || d < time.Minute || d > 30*time.Minute {
+			return nil, errx.BadRequest("clock_skew 需在 1m 到 30m 之间")
+		}
+		next.ClockSkew = config.Duration(d)
+	}
+	next.Enabled = req.Enabled != nil && *req.Enabled
+	if next.Hostname == "" {
+		next.Hostname = h.store.Get().Server.Domain
+	}
+
+	middleware.AuditSummary(c, "更新移动端直连配置")
+
+	h.store.Update(func(cfg *config.Config) { cfg.MobileDirect = next })
+	if err := h.saveConfig(); err != nil {
+		return nil, errx.Internal("保存配置失败: %w", err)
+	}
+	if h.md != nil {
+		if req.Regenerate != nil && *req.Regenerate {
+			if _, err := h.md.RegenerateCert(next); err != nil {
+				return nil, errx.Internal("生成证书失败: %w", err)
+			}
+		}
+		if err := h.md.Apply(next); err != nil {
+			return nil, errx.BadRequest("配置已保存，但监听启动失败: %v", err)
+		}
+	}
+	return h.GetMobileDirect(c)
+}
+
+// validateHostPort 校验 listen 形如 host:port。
+func validateHostPort(addr string) error {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return errx.BadRequest("监听地址需为 host:port 形式: %v", err)
+	}
+	if host == "" {
+		return errx.BadRequest("监听地址缺少主机部分")
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return errx.BadRequest("端口必须在 1 到 65535 之间")
+	}
+	return nil
+}
+
 // saveConfig saves the current config back to its source file (cfg.Path).
 func (h *SettingsHandler) saveConfig() error {
 	return config.Save(h.store.Get())
@@ -932,9 +1049,10 @@ func (h *SettingsHandler) RestartPanel(c *gin.Context) (any, error) {
 	return gin.H{"message": "面板正在重启..."}, nil
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertService *alert.Service, monitorSvc MonitorUpdater, sig *infra.Signal) {
+func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertService *alert.Service, monitorSvc MonitorUpdater, sig *infra.Signal, mdMobile MobileDirectManager) {
 	handler := NewSettingsHandler(store, alertService, sig)
 	handler.SetMonitorService(monitorSvc)
+	handler.SetMobileDirect(mdMobile)
 	protected.GET("/settings", httpx.H(handler.GetSettings))
 	protected.GET("/settings/system", httpx.H(handler.GetSystemInfo))
 	protected.GET("/settings/check-update", httpx.H(handler.CheckUpdate))
@@ -950,5 +1068,7 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertServic
 	protected.POST("/settings/notify/send", httpx.H(handler.SendCustomNotification))
 	protected.GET("/alerts/rules", httpx.H(handler.GetAlertRules))
 	protected.PUT("/alerts/rules", httpx.H(handler.UpdateAlertRules))
+	protected.GET("/settings/mobile-direct", httpx.H(handler.GetMobileDirect))
+	protected.PUT("/settings/mobile-direct", httpx.H(handler.UpdateMobileDirect))
 	protected.POST("/settings/restart", httpx.H(handler.RestartPanel))
 }

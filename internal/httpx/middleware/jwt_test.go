@@ -192,3 +192,24 @@ func TestJWTMiddleware_InvalidSession(t *testing.T) {
 
 	assert.NotEqual(t, http.StatusOK, w.Code)
 }
+
+// 回归：查询串里的 access_token 不再被接受。URL 会进入反向代理日志与浏览器
+// 历史，等同长期会话令牌泄漏；媒体预览改由同源 Cookie 携带。
+func TestJWTMiddleware_RejectsAccessTokenQuery(t *testing.T) {
+	secret := "test-secret-key-at-least-32-bytes-long"
+	token, err := generateTestToken(secret, 1, "testuser", time.Hour)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(ErrorHandler(), JWTMiddleware(secret, nil))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test?access_token="+token, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}

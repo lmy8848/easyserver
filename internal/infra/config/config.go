@@ -24,16 +24,30 @@ const DataRoot = "/opt/easyserver"
 // （写回 config.Save、推导配置目录、热重启传参、FIM 默认监视项）统一从
 // 它取，避免把 configPath 作为独立参数在调用链里层层传递。
 type Config struct {
-	Path        string            `toml:"-" json:"-"`
-	Server      ServerConfig      `toml:"server"`
-	Auth        AuthConfig        `toml:"auth"`
-	Monitor     MonitorConfig     `toml:"monitor"`
-	Alerts      AlertConfig       `toml:"alerts"`
-	Audit       AuditConfig       `toml:"audit"`
-	FileManager FileManagerConfig `toml:"filemanager"`
-	Notify      NotifyConfig      `toml:"notify"`
-	Logs        LogsConfig        `toml:"logs"`
-	Features    FeaturesConfig    `toml:"features"`
+	Path         string             `toml:"-" json:"-"`
+	Server       ServerConfig       `toml:"server"`
+	Auth         AuthConfig         `toml:"auth"`
+	Monitor      MonitorConfig      `toml:"monitor"`
+	Alerts       AlertConfig        `toml:"alerts"`
+	Audit        AuditConfig        `toml:"audit"`
+	FileManager  FileManagerConfig  `toml:"filemanager"`
+	Notify       NotifyConfig       `toml:"notify"`
+	Logs         LogsConfig         `toml:"logs"`
+	Features     FeaturesConfig     `toml:"features"`
+	MobileDirect MobileDirectConfig `toml:"mobile_direct"`
+}
+
+// MobileDirectConfig 是移动端专用直连通道：独立端口 + 设备签名认证，
+// 绕过 Cloudflare 直达源站（CF 握手/回源常达数秒，移动端请求容易超时）。
+// 该端口只代理 /api/ 业务接口，不提供面板页面；每个请求必须带设备签名。
+type MobileDirectConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Listen   string `toml:"listen"`   // 如 0.0.0.0:8443
+	Hostname string `toml:"hostname"` // 面板对外域名（代理时的 Host 头）
+	CertFile string `toml:"cert_file"`
+	KeyFile  string `toml:"key_file"`
+	// ClockSkew 是签名时间戳允许的偏差（默认 5 分钟）。
+	ClockSkew Duration `toml:"clock_skew"`
 }
 
 // FeaturesConfig holds optional feature toggles. Disabled by default to save
@@ -276,6 +290,15 @@ func (c *Config) mergeDefaults() bool {
 	}
 	if c.Server.AssetsRateInterval == 0 {
 		c.Server.AssetsRateInterval = Duration(time.Minute)
+	}
+	if c.MobileDirect.Listen == "" {
+		c.MobileDirect.Listen = "0.0.0.0:8443"
+	}
+	if c.MobileDirect.ClockSkew == 0 {
+		c.MobileDirect.ClockSkew = Duration(5 * time.Minute)
+	}
+	if c.MobileDirect.Hostname == "" {
+		c.MobileDirect.Hostname = c.Server.Domain
 	}
 	if c.Auth.SessionTimeout == 0 {
 		c.Auth.SessionTimeout = Duration(24 * time.Hour)

@@ -23,5 +23,10 @@ TimeoutStopSec=30
 LimitNOFILE=65536
 LimitNPROC=4096
 
+# 注意：不要设 UMask=0077。面板管理的静态站点目录（/opt/easyserver/data/<site>）
+# 由 nginx 的 www-data 读取，新文件若为 0600 会导致站点 500/403。
+# 敏感文件改为安装后显式 chmod 600（config.toml、SQLite 主文件）。
+UMask=0022
+
 [Install]
 WantedBy=multi-user.target

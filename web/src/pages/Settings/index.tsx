@@ -5,7 +5,7 @@ import {
 import {
   SettingOutlined, SafetyOutlined,
   MonitorOutlined, InfoCircleOutlined,
-  AlertOutlined,
+  AlertOutlined, MobileOutlined,
 } from '@ant-design/icons';
 import { settingsApi } from '../../services/settings';
 import { useTab } from '../../hooks/useTab';
@@ -18,6 +18,7 @@ import NotifySettings from './NotifySettings';
 import FeatureSettings from './FeatureSettings';
 import AlertRulesForm from './AlertRulesForm';
 import LogSettings from './LogSettings';
+import MobileDirectSettings from './MobileDirectSettings';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useTab('server');
@@ -73,6 +74,11 @@ export default function SettingsPage() {
                 onRefresh={fetchSettings}
               />
             ),
+          },
+          {
+            key: 'mobile',
+            label: <span><MobileOutlined /> 移动端直连</span>,
+            children: <MobileDirectSettings />,
           },
           {
             key: 'auth',

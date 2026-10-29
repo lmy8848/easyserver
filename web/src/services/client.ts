@@ -17,6 +17,12 @@ api.interceptors.request.use(
 );
 
 // Response interceptor - handle errors
+// 401 时是否应把用户送回登录页。抽成纯函数便于单测：
+// 登录页与外链分享页不应被重定向（分享页对匿名访客开放）。
+export function shouldRedirectToLogin(pathname: string): boolean {
+  return !pathname.startsWith('/login') && !pathname.startsWith('/share/');
+}
+
 api.interceptors.response.use(
   (response) => {
     return response;
@@ -26,8 +32,10 @@ api.interceptors.response.use(
       const { status, data } = error.response;
 
       if (status === 401) {
-        // Cookie 失效/未登录 - don't redirect if already on login page
-        if (!window.location.pathname.startsWith('/login')) {
+        // Cookie 失效/未登录：受保护页面回登录页。
+        // 例外：登录页本身不跳；外链分享页（/share/:token）对匿名访客开放，
+        // 启动时的 /auth/me 必然 401，不能把访客踢走，否则分享链接整页不可用。
+        if (shouldRedirectToLogin(window.location.pathname)) {
           localStorage.removeItem('user');
           window.location.href = '/login';
         }

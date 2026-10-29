@@ -165,8 +165,12 @@ func (s *SessionService) IsSessionValid(ctx context.Context, token string) (bool
 	if sess.ExpiresAt.Before(now) {
 		return false, nil
 	}
-	if idle := s.store.Get().Auth.IdleTimeout.Duration(); idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
-		return false, nil
+	// 移动端会话由 refresh 链控制生命周期（90 天可吊销），不套用 Web 的空闲超时，
+	// 否则手机放半小时不用就被踢；Web 仍按 idle_timeout 生效。
+	if sess.ClientType != "mobile" {
+		if idle := s.store.Get().Auth.IdleTimeout.Duration(); idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
+			return false, nil
+		}
 	}
 	return true, nil
 }
@@ -197,16 +201,24 @@ func (s *SessionService) IsSessionValidByToken(ctx context.Context, token string
 	return &cp, nil
 }
 
-// getActiveSessions returns all non-expired, recently-active sessions.
+// getActiveSessions 返回所有仍然有效的会话，供"登录会话"页面展示与踢出。
+// 有效性口径与 IsSessionValid 一致：未过绝对过期时间，且未超过空闲超时。
+// LoginAt 在每次请求时刷新，语义上是最近活动时间而非首次登录时间。
+// 此前用固定 5 分钟活跃窗口过滤，会让静置几分钟的设备从列表里消失、又无法踢出。
 func (s *SessionService) getActiveSessions() []Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	now := time.Now()
+	idle := s.store.Get().Auth.IdleTimeout.Duration()
 	var result []Session
 	for _, sess := range s.sessions {
-		if sess.ExpiresAt.After(now) && sess.LoginAt.After(now.Add(-5*time.Minute)) {
-			result = append(result, *sess)
+		if !sess.ExpiresAt.After(now) {
+			continue
 		}
+		if idle > 0 && sess.LoginAt.Before(now.Add(-idle)) {
+			continue
+		}
+		result = append(result, *sess)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].LoginAt.After(result[j].LoginAt)

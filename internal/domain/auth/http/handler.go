@@ -33,6 +33,7 @@ type AuthAuditLogger interface {
 
 type AuthHandler struct {
 	authService    *auth.AuthService
+	refreshSvc     *auth.RefreshService
 	auditLog       AuthAuditLogger
 	sessionService *auth.SessionService
 	jwtSecret      string
@@ -40,9 +41,10 @@ type AuthHandler struct {
 	cfg            *config.Config
 }
 
-func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditLog AuthAuditLogger, sessionService *auth.SessionService, sessionTimeout time.Duration, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditLog AuthAuditLogger, sessionService *auth.SessionService, sessionTimeout time.Duration, refreshSvc *auth.RefreshService, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
 		authService:    authService,
+		refreshSvc:     refreshSvc,
 		auditLog:       auditLog,
 		sessionService: sessionService,
 		jwtSecret:      jwtSecret,
@@ -113,6 +115,7 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 		Password       string `json:"password" binding:"required"`
 		TurnstileToken string `json:"turnstile_token"`
 		ClientType     string `json:"client_type"`
+		DeviceID       string `json:"device_id"`
 	}](c)
 	if err != nil {
 		return nil, err
@@ -152,7 +155,12 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 	}
 
 	// If TOTP is not enabled, proceed with normal login
-	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, h.sessionTimeout)
+	// 移动端 access 短命（15 分钟），长期登录态走 refresh；Web 维持会话时长
+	tokenTTL := h.sessionTimeout
+	if !isWebClient(req.ClientType) {
+		tokenTTL = 15 * time.Minute
+	}
+	token, err := auth.GenerateToken(h.jwtSecret, user.ID, user.Username, tokenTTL)
 	if err != nil {
 		return nil, errx.Internal("生成令牌失败")
 	}
@@ -192,13 +200,27 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 	// 无条件 Set-Cookie（移动端原生 App 忽略 cookie，用响应体 token）。
 	setAuthCookie(c, token, h.sessionTimeout)
 
+	// 移动端下发刷新令牌（90 天、设备绑定、可吊销）；Web 端也返回，便于以后
+	// 多端统一接入，但不写入 cookie。
+	var refreshToken string
+	var refreshExpires any
+	if h.refreshSvc != nil && req.DeviceID != "" {
+		if pair, rerr := h.refreshSvc.Issue(c.Request.Context(), user.ID, req.DeviceID); rerr == nil {
+			refreshToken = pair.Token
+			refreshExpires = pair.ExpiresAt
+		} else {
+			log.Printf("auth: issue refresh failed: %v", rerr)
+		}
+	}
+
 	// 响应体是否含 token 按客户端区分：web 不含（HttpOnly 防已登录 token 进 JS，
 	// 纵深防御为主——伪造 client_type 拿到的也只是登录者自己凭据的 token）；
 	// mobile 含（App 需 header token）。
 	if isWebClient(req.ClientType) {
+		// Web 端不返回 refresh（避免 XSS 可读）；登录态仍靠 HttpOnly Cookie
 		return gin.H{"user": user}, nil
 	}
-	return gin.H{"token": token, "user": user}, nil
+	return gin.H{"token": token, "user": user, "refresh_token": refreshToken, "refresh_expires_at": refreshExpires}, nil
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) (any, error) {
@@ -248,6 +270,9 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) (any, error) {
 
 	// 改密码后删除该用户所有 session，旧 token 立即失效（吊销只靠 session 表）。
 	if h.sessionService != nil {
+		if h.refreshSvc != nil {
+			_ = h.refreshSvc.RevokeFamily(c.Request.Context(), userID, "")
+		}
 		if err := h.sessionService.RemoveUserSessions(c.Request.Context(), userID); err != nil {
 			log.Printf("auth: failed to remove sessions after password change for user %d: %v", userID, err)
 		}
@@ -799,6 +824,7 @@ func RegisterRoutes(
 	auditLog AuthAuditLogger,
 	sessionService *auth.SessionService,
 	qrService *auth.QRLoginService,
+	refreshSvc *auth.RefreshService,
 	jwtSecret string,
 	sessionValidator func(string) (bool, error),
 	sessionTimeout time.Duration,
@@ -809,7 +835,7 @@ func RegisterRoutes(
 	// Public auth routes (no JWT required) — Tier 3: strict login limiter
 	authGroup := api.Group("/auth")
 	authGroup.Use(middleware.RateLimitMiddleware("login", loginRateLimit, loginRateInterval))
-	authHandler := NewAuthHandler(authService, jwtSecret, auditLog, sessionService, sessionTimeout, cfg)
+	authHandler := NewAuthHandler(authService, jwtSecret, auditLog, sessionService, sessionTimeout, refreshSvc, cfg)
 	{
 		authGroup.POST("/login", httpx.H(authHandler.Login))
 		authGroup.POST("/verify-totp", httpx.H(authHandler.VerifyTOTP))

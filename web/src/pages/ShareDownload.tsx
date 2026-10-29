@@ -42,7 +42,14 @@ export default function ShareDownload() {
   const [info, setInfo] = useState<ShareInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [password, setPassword] = useState(searchParams.get('password') || '');
+  // 密码可来自 #password（fragment 不发给服务端，避免进代理访问日志）
+  // 或旧的 ?password（兼容已发出的链接）
+  const hashPassword = (() => {
+    const h = window.location.hash;
+    const i = h.indexOf('password=');
+    return i >= 0 ? decodeURIComponent(h.slice(i + 'password='.length)) : '';
+  })();
+  const [password, setPassword] = useState(hashPassword || searchParams.get('password') || '');
 
   const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
