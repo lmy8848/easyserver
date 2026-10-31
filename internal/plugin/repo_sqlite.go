@@ -48,7 +48,7 @@ func (r *sqliteRepo) migrateFromLegacy(legacyRootKey string) error {
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Query("SELECT plugin_name, key, encrypted_value FROM plugin_secrets")
+	rows, err := r.db.QueryContext(ctx, "SELECT plugin_name, key, encrypted_value FROM plugin_secrets")
 	if err != nil {
 		return err
 	}

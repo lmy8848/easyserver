@@ -91,7 +91,7 @@ func TestConcurrencyLimitRejects(t *testing.T) {
 	}
 	close(release)
 	// 用 Start 返回的任务指针等待，而非完成后再 Get——任务完成后会从 map
-	// 移除，mustGet 与清理存在竞态（偶发 "task not found"）
+	// 移除——完成后再 Get 会与 map 清理竞态（偶发 "task not found"）
 	waitDone(t, tk1)
 	m.Cancel("k2")
 }
@@ -319,16 +319,6 @@ func TestSucceededCleanupDoesNotRemoveNewSameKeyTask(t *testing.T) {
 		t.Fatalf("Get after stress = %+v, ok=%v; want the running task", got, ok)
 	}
 	m.Cancel("k")
-}
-
-// mustGet 断言任务存在并返回。
-func mustGet(t *testing.T, m *Manager, key string) *Task {
-	t.Helper()
-	tk, ok := m.Get(key)
-	if !ok {
-		t.Fatalf("task %q not found", key)
-	}
-	return tk
 }
 
 // TestTaskLogWrite 验证 TaskLog 实现 io.Writer：按换行切行、无换行的尾部也立即
