@@ -110,8 +110,7 @@ func TestReplaceSession_InPlace(t *testing.T) {
 	if err := svc.CreateSession(ctx, "old-token", 1, "192.0.2.1", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	old, _ := svc.sessions["old-token"]
-	firstID := old.ID
+	firstID := svc.sessions["old-token"].ID
 
 	if err := svc.ReplaceSession(ctx, "old-token", "new-token", 1, "192.0.2.1", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
