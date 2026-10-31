@@ -81,6 +81,10 @@ type QRLoginSession struct {
 	WebToken  string    `json:"-"` // never serialize the issued web token
 	User      *User     `json:"-"` // 确认时的用户快照，web 领取时随状态返回
 	ExpiresAt time.Time `json:"expires_at"`
+	// 发起扫码的浏览器标识：扫码授权创建的 web 会话，使用者是这个浏览器，
+	// 会话行的 UA/IP 应记它而非确认时的手机
+	CreatorUA string
+	CreatorIP string
 }
 
 // CreateResult is returned when a web client requests a new QR session.

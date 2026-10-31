@@ -819,7 +819,7 @@ func NewQRLoginHandler(qrService *auth.QRLoginService, authService *auth.AuthSer
 // CreateQRSession starts a new pending scan-to-login session and returns the QR
 // token + base64 PNG for the web to render.
 func (h *QRLoginHandler) CreateQRSession(c *gin.Context) (any, error) {
-	res, err := h.qrService.CreateSession(c.Request.Context())
+	res, err := h.qrService.CreateSession(c.Request.Context(), c.Request.UserAgent(), c.ClientIP())
 	if err != nil {
 		return nil, errx.Internal("%w", err)
 	}

@@ -39,7 +39,7 @@ func NewQRLoginService(store *config.Store, sessionService *SessionService) *QRL
 
 // CreateSession generates a new pending QR session and returns the QR token
 // for the web to render as a QR code.
-func (s *QRLoginService) CreateSession(ctx context.Context) (*CreateResult, error) {
+func (s *QRLoginService) CreateSession(ctx context.Context, creatorUA, creatorIP string) (*CreateResult, error) {
 	s.cleanupExpiredLocked()
 
 	qrToken, err := util.RandomHex(qrTokenBytes)
@@ -52,6 +52,8 @@ func (s *QRLoginService) CreateSession(ctx context.Context) (*CreateResult, erro
 		QRToken:   qrToken,
 		Status:    QRStatusPending,
 		ExpiresAt: now.Add(pendingTTL),
+		CreatorUA: creatorUA,
+		CreatorIP: creatorIP,
 	}
 
 	s.mu.Lock()
@@ -105,7 +107,7 @@ func (s *QRLoginService) GetStatus(ctx context.Context, qrToken string) (*Status
 // Confirm is called by the authenticated mobile app after scanning. It validates
 // the QR session is pending+unexpired, issues a web JWT, creates a coexisting
 // session, and stores the token + user snapshot for the web to pick up.
-func (s *QRLoginService) Confirm(ctx context.Context, qrToken string, user *User, ip, userAgent string) error {
+func (s *QRLoginService) Confirm(ctx context.Context, qrToken string, user *User, confirmIP, userAgent string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -125,9 +127,18 @@ func (s *QRLoginService) Confirm(ctx context.Context, qrToken string, user *User
 	}
 
 	// Coexist: create the web session WITHOUT removing the mobile's session.
+	// 会话的 UA/IP 用发起扫码的浏览器（sess.Creator*）——它是这条会话的
+	// 真实使用者；确认请求来自手机，其 UA/IP 只进审计。
 	if s.sessionService != nil {
 		expiresAt := time.Now().Add(cur.Auth.SessionTimeout.Duration())
-		if err := s.sessionService.CreateSession(ctx, webToken, user.ID, ip, userAgent, "web", "", expiresAt); err != nil {
+		ua, ip := sess.CreatorUA, sess.CreatorIP
+		if ua == "" {
+			ua = userAgent // 兜底：重启前的旧内存会话无发起者信息
+		}
+		if ip == "" {
+			ip = confirmIP
+		}
+		if err := s.sessionService.CreateSession(ctx, webToken, user.ID, ip, ua, "web", "", expiresAt); err != nil {
 			return fmt.Errorf("create web session: %w", err)
 		}
 	}
