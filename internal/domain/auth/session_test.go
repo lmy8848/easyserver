@@ -61,10 +61,10 @@ func TestGetActiveSessions_IncludesIdleButValid(t *testing.T) {
 	}
 }
 
-// 直连会话（mobile-direct）出现在会话列表：按设备合并为一行后，作为该
-// 设备的在线标识展示（此前与真实登录同标 "mobile" 造成多条堆积，后来
-// 又因全部隐藏导致列表为空）。
-func TestGetUserSessions_IncludesMobileDirect(t *testing.T) {
+// 回归：直连临时凭据会话（mobile-direct）不进会话列表——它是通道凭据
+// 而非登录会话；其活动通过 TouchMobileSessions 续期真实登录会话，
+// 设备级断开走直连设置的吊销。
+func TestGetUserSessions_ExcludesMobileDirect(t *testing.T) {
 	ctx := t.Context()
 	var wg sync.WaitGroup
 
@@ -88,10 +88,10 @@ func TestGetUserSessions_IncludesMobileDirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 2 {
-		t.Fatalf("expected login + direct sessions, got %d", len(sessions))
+	if len(sessions) != 1 || sessions[0].Token != "login-token" {
+		t.Fatalf("expected only the login session, got %d sessions", len(sessions))
 	}
-	// 原位替换：直连会话续期不应新增行
+	// 直连续期（原位替换）不产生新行、也不让直连行进列表
 	if err := svc.ReplaceSession(ctx, "direct-token", "direct-token-2", 1, "mobile-direct", "device-signature", ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -99,13 +99,8 @@ func TestGetUserSessions_IncludesMobileDirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 2 {
-		t.Fatalf("expected replacement to keep 2 sessions, got %d", len(sessions))
-	}
-	for _, sess := range sessions {
-		if sess.Token == "direct-token" {
-			t.Fatal("old direct token should be replaced")
-		}
+	if len(sessions) != 1 || sessions[0].Token != "login-token" {
+		t.Fatalf("expected only the login session after remint, got %d", len(sessions))
 	}
 }
 

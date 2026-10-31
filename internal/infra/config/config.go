@@ -79,6 +79,10 @@ type ServerConfig struct {
 	DevMode        bool     `toml:"dev_mode"`
 	Domain         string   `toml:"domain"`
 	ForceDomain    bool     `toml:"force_domain"`
+	// TrustedPlatform 反代平台标识（当前支持 "cloudflare"）：设置后
+	// ClientIP 取平台头（如 CF-Connecting-IP），配合 trusted_proxies 包含
+	// 该平台网段，会话列表/审计里的 IP 才是真实来源而非边缘节点。
+	TrustedPlatform string `toml:"trusted_platform"`
 	// TrustedProxies is the list of trusted reverse-proxy CIDRs whose
 	// X-Forwarded-For is honored by c.ClientIP(). Default ["127.0.0.1"] (same-
 	// host nginx). Set to the CDN ranges (e.g. Cloudflare) when fronted by one.

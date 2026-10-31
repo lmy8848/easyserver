@@ -199,9 +199,11 @@ func (s *SessionService) GetUserSessions(ctx context.Context, userID int64) ([]S
 	var result []Session
 	for _, sess := range s.sessions {
 		if sess.UserID == userID && sess.ExpiresAt.After(now) {
-			// 直连会话按设备合并为一行（15 分钟滚动续期），作为该设备的
-			// 在线标识展示；踢出会被拒绝（会立即重铸），设备级控制走
-			// 「移动端直连」设置的吊销
+			// 直连临时凭据会话不进列表（15 分钟滚动、不可踢出），它只是
+			// 通道凭据；设备级断开走「移动端直连」设置的吊销
+			if sess.ClientType == ClientTypeMobileDirect {
+				continue
+			}
 			result = append(result, *sess)
 		}
 	}

@@ -410,6 +410,15 @@ func newEngine(cfg *config.Config) *gin.Engine {
 	e.MaxMultipartMemory = 64 << 20
 
 	trustedProxies := cfg.Server.TrustedProxies
+	// 反代平台标识（如 cloudflare）：ClientIP 取平台头（CF-Connecting-IP），
+	// 需与 trusted_proxies 包含该平台网段配合使用
+	switch cfg.Server.TrustedPlatform {
+	case "":
+	case "cloudflare":
+		e.TrustedPlatform = gin.PlatformCloudflare
+	default:
+		log.Printf("warning: unknown server.trusted_platform %q, ignored", cfg.Server.TrustedPlatform)
+	}
 	if trustedProxies == nil {
 		trustedProxies = []string{"127.0.0.1"}
 	}
