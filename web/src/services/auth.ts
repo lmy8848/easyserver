@@ -40,10 +40,10 @@ export const authApi = {
 
   // Session management
   getSessions: () =>
-    api.get<ApiResponse<Array<{ user_id: number; ip: string; user_agent: string; client_type: string; is_current: boolean; login_at: string; expires_at: string; token?: string }>>>('/auth/sessions'),
+    api.get<ApiResponse<Array<{ id: string; user_id: number; ip: string; user_agent: string; client_type: string; is_current: boolean; login_at: string; expires_at: string; token_hint?: string }>>>('/auth/sessions'),
 
-  kickSession: (token: string) =>
-    api.post<ApiResponse>('/auth/sessions/kick', { token }),
+  kickSession: (id: string) =>
+    api.post<ApiResponse>('/auth/sessions/kick', { id }),
 
   kickAllOtherSessions: () =>
     api.post<ApiResponse>('/auth/sessions/kick-all'),

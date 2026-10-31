@@ -19,6 +19,7 @@ import type { Settings } from './types';
 const { Text, Paragraph } = Typography;
 
 interface Session {
+  id: string;
   user_id: number;
   ip: string;
   user_agent: string;
@@ -26,7 +27,7 @@ interface Session {
   is_current: boolean;
   login_at: string;
   expires_at: string;
-  token?: string;
+  token_hint?: string;
 }
 
 export interface AuthSettingsProps {
@@ -737,10 +738,10 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
               render: (t: string) => t ? formatDateTime(t) : '-' },
             { title: '操作', key: 'action', width: 100,
               render: (_: unknown, record: Session) => (
-                record.token && !record.is_current ? (
+                record.id && !record.is_current ? (
                   <Popconfirm
                     title="确定要踢出此设备？"
-                    onConfirm={() => handleKickSession(record.token!)}
+                    onConfirm={() => handleKickSession(record.id!)}
                     okText="确定"
                     cancelText="取消"
                   >
@@ -753,7 +754,7 @@ export default function AuthSettings({ settings, onRefresh }: AuthSettingsProps)
             },
           ]}
           dataSource={sessions}
-          rowKey={(record) => record.token || record.ip + record.login_at}
+          rowKey={(record) => record.id || record.ip + record.login_at}
           loading={sessionsLoading}
           size="small"
           pagination={false}

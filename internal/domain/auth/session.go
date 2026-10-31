@@ -9,6 +9,7 @@ import (
 
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 )
 
 // SessionService manages login sessions in memory. Sessions do not survive
@@ -53,9 +54,14 @@ func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration
 const ClientTypeMobileDirect = "mobile-direct"
 
 func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, ip, userAgent, clientType string, expiresAt time.Time) error {
+	sid, err := util.RandomHex(8)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[token] = &Session{
+		ID:         sid,
 		UserID:     userID,
 		IP:         ip,
 		UserAgent:  userAgent,
@@ -91,6 +97,19 @@ func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) e
 	for token, sess := range s.sessions {
 		if sess.UserID == userID {
 			delete(s.sessions, token)
+		}
+	}
+	return nil
+}
+
+// RemoveSessionByID 按 ID 删除当前用户的会话（会话列表脱 JWT 后的踢出路径）。
+func (s *SessionService) RemoveSessionByID(ctx context.Context, userID int64, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, sess := range s.sessions {
+		if sess.ID == id && sess.UserID == userID {
+			delete(s.sessions, token)
+			return nil
 		}
 	}
 	return nil

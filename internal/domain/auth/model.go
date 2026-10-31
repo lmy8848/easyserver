@@ -36,13 +36,16 @@ type User struct {
 }
 
 type Session struct {
+	ID         string    `json:"id"` // 会话公共标识：列表展示与按 ID 踢出
 	UserID     int64     `json:"user_id"`
 	IP         string    `json:"ip"`
 	UserAgent  string    `json:"user_agent"`
 	ClientType string    `json:"client_type"`
 	LoginAt    time.Time `json:"login_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
-	Token      string    `json:"token,omitempty"`
+	// Token 为原始 JWT，绝不序列化下发——会话列表此前把 24h 有效期的
+	// 令牌原样返回，HttpOnly Cookie 的 XSS 纵深被破坏
+	Token string `json:"-"`
 }
 
 // LoginEvent represents a login event, used by both the audit logger
