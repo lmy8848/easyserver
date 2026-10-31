@@ -81,7 +81,7 @@ func (r *sqliteRepo) migrateFromLegacy(ctx context.Context, legacyRootKey string
 		if err != nil {
 			continue // 新密钥密文或损坏数据
 		}
-		if err := r.SetSecret(context.Background(), it.plugin, it.key, string(plain)); err != nil {
+		if err := r.SetSecret(ctx, it.plugin, it.key, string(plain)); err != nil {
 			return err
 		}
 		migrated++
