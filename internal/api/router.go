@@ -252,7 +252,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	firewallhttp.RegisterPortForwardRoutes(g.Protected, portForwardService)
 
 	// ── 插件系统基座（文档 docs/plugin-system.md 终稿 v1.0）──
-	pluginRepo, err := plugin.NewSQLiteRepository(db, cfg.Plugins.SecretsKey, cfg.Auth.JWTSecret)
+	pluginRepo, err := plugin.NewSQLiteRepository(context.Background(), db, cfg.Plugins.SecretsKey, cfg.Auth.JWTSecret)
 	if err != nil {
 		log.Fatalf("plugin: 密钥加密初始化失败: %v", err)
 	}

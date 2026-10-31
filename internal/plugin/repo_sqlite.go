@@ -27,14 +27,14 @@ type sqliteRepo struct {
 // NewSQLiteRepository 创建仓储；secretKey 为密钥加密根密钥（任意长度）。
 // legacyRootKey 非空且不同于 secretKey 时，把库内以旧根密钥（原从 JWT 密钥
 // 派生）加密的条目一次性重加密迁移到新根密钥——JWT 轮换不再殃及插件密钥。
-func NewSQLiteRepository(db *sql.DB, secretKey, legacyRootKey string) (PluginRepository, error) {
+func NewSQLiteRepository(ctx context.Context, db *sql.DB, secretKey, legacyRootKey string) (PluginRepository, error) {
 	aead, err := newAEAD(secretKey)
 	if err != nil {
 		return nil, err
 	}
 	r := &sqliteRepo{db: db, aead: aead}
 	if legacyRootKey != "" && legacyRootKey != secretKey {
-		if err := r.migrateFromLegacy(context.Background(), legacyRootKey); err != nil {
+		if err := r.migrateFromLegacy(ctx, legacyRootKey); err != nil {
 			return nil, fmt.Errorf("migrate plugin secrets: %w", err)
 		}
 	}
