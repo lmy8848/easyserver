@@ -177,6 +177,15 @@ func newReplayGuard(ttl time.Duration) *replayGuard {
 	return &replayGuard{seen: make(map[string]time.Time), ttl: ttl, limit: 20000}
 }
 
+// hasSeen 只读检查 nonce 是否在有效期内，不登记。
+// 用于在缓冲请求体之前快速拒绝已知重放，避免未认证请求消耗磁盘/IO。
+func (g *replayGuard) hasSeen(key string, now time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	exp, ok := g.seen[key]
+	return ok && now.Before(exp)
+}
+
 // seenBefore 返回 true 表示该 nonce 仍在有效期内（即重放）。
 func (g *replayGuard) seenBefore(key string, now time.Time) bool {
 	g.mu.Lock()
@@ -253,7 +262,25 @@ func (s *Server) deviceAuth(c *gin.Context) {
 		return
 	}
 
+	// 廉价前置检查全部先于读 body：设备存在且未吊销、nonce 未见过。
+	// 无有效设备头的未认证请求在此短路，不再缓冲 body（磁盘/IO DoS 面）。
+	device, err := s.store.GetByDeviceID(c.Request.Context(), deviceID)
+	if err != nil || device == nil || device.Revoked {
+		abortUnauthorized(c)
+		return
+	}
+	pub, err := base64.StdEncoding.DecodeString(device.PublicKey)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		abortUnauthorized(c)
+		return
+	}
+	if s.replay.hasSeen(deviceID+"\x00"+nonce, now) {
+		abortUnauthorized(c)
+		return
+	}
+
 	// 读取请求体计算摘要，随后还原 body 供代理转发（大请求落临时文件）。
+	// 只有通过了设备前置检查的请求才会走到这里。
 	bodyHash, err := bufferBodyForHash(c.Request)
 	if err != nil {
 		abortUnauthorized(c)
@@ -268,16 +295,6 @@ func (s *Server) deviceAuth(c *gin.Context) {
 		bodyHash,
 	}, "\n")
 
-	device, err := s.store.GetByDeviceID(c.Request.Context(), deviceID)
-	if err != nil || device == nil || device.Revoked {
-		abortUnauthorized(c)
-		return
-	}
-	pub, err := base64.StdEncoding.DecodeString(device.PublicKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		abortUnauthorized(c)
-		return
-	}
 	if !ed25519.Verify(pub, []byte(canonical), sig) {
 		abortUnauthorized(c)
 		return

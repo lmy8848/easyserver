@@ -85,6 +85,12 @@ func NewServer(cfg config.MobileDirectConfig, store *Store, upstreamBase string,
 func (s *Server) Start() error {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
+	// 直连端直面客户端，没有任何可信反代：不设信任列表即忽略 XFF，
+	// 否则 gin 默认信任所有代理并取 XFF 最左项，ClientIP 可被自报伪造，
+	// 按 IP 的限流与设备鉴权记录全部失真。
+	if err := e.SetTrustedProxies(nil); err != nil {
+		return fmt.Errorf("set trusted proxies: %w", err)
+	}
 	e.Use(gin.Recovery())
 	e.Use(s.pathGuard)
 	e.Use(middleware.RateLimitMiddleware("mobile_direct", 600, time.Minute))
@@ -94,8 +100,10 @@ func (s *Server) Start() error {
 	})
 
 	s.srv = &http.Server{
-		Addr:              s.cfg.Listen,
-		Handler:           e,
+		Addr:    s.cfg.Listen,
+		Handler: e,
+		// 慢速灌包有界：整个请求（含 body）读取上限，超时断连
+		ReadTimeout:       15 * time.Minute,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
