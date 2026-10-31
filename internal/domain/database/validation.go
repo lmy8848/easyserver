@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -156,7 +157,7 @@ func countStatements(sql string) error {
 		case c == '\\' && (inSingle || inDouble):
 			i++ // 跳过转义字符
 		case c == ';' && !inSingle && !inDouble && !inBacktick:
-			return fmt.Errorf("only a single SQL statement is allowed")
+			return errors.New("only a single SQL statement is allowed")
 		}
 	}
 	return nil

@@ -183,22 +183,6 @@ func (s *RefreshService) CleanupExpired(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-func (s *RefreshService) issueInFamily(ctx context.Context, family string, userID int64, deviceID string) (*RefreshPair, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	pair, err := s.issueInTx(ctx, tx, family, userID, deviceID, "")
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return pair, nil
-}
-
 func (s *RefreshService) issueInTx(ctx context.Context, tx *sql.Tx, family string, userID int64, deviceID, rotatedFrom string) (*RefreshPair, error) {
 	token, err := newOpaque(refreshTokenBytes)
 	if err != nil {
