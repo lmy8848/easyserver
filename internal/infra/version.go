@@ -35,10 +35,9 @@ var (
 var StartedAt = time.Now()
 
 var (
-	buildInfoOnce   sync.Once
-	vcsCommit       string
-	vcsTime         string
-	buildInfoLoaded bool
+	buildInfoOnce sync.Once
+	vcsCommit     string
+	vcsTime       string
 )
 
 // loadVCSStamp 从 debug.ReadBuildInfo 读 VCS 提交与构建时间（git 仓库内
