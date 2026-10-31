@@ -24,6 +24,17 @@ func RegisterRefreshRoute(public *gin.RouterGroup, refreshSvc *auth.RefreshServi
 	limited.POST("/refresh", httpx.H(h.Refresh))
 }
 
+// bearerToken 从 Authorization 头提取 Bearer 令牌（refresh 为公开路由，
+// JWT 中间件不在此运行，令牌由客户端拦截器自动附带）。
+func bearerToken(c *gin.Context) string {
+	h := c.GetHeader("Authorization")
+	const prefix = "Bearer "
+	if len(h) > len(prefix) && h[:len(prefix)] == prefix {
+		return h[len(prefix):]
+	}
+	return ""
+}
+
 type refreshHandler struct {
 	refresh  *auth.RefreshService
 	jwt      string
@@ -53,7 +64,18 @@ func (h *refreshHandler) Refresh(c *gin.Context) (any, error) {
 		return nil, errx.Internal("生成令牌失败")
 	}
 	if h.sessions != nil {
-		if serr := h.sessions.CreateSession(c.Request.Context(), access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", time.Now().Add(time.Duration(h.ttl)*time.Second)); serr != nil {
+		// 原位替换：请求自带旧 access（拦截器自动附加），替换其会话行——
+		// 一台设备始终一行；此前每次 refresh 新建行，旧行还要活满 24h，
+		// 会话列表随之堆积同设备的"在线设备"条目。旧令牌无效则退化为新建。
+		oldToken := bearerToken(c)
+		expires := time.Now().Add(time.Duration(h.ttl) * time.Second)
+		var serr error
+		if oldToken != "" {
+			serr = h.sessions.ReplaceSession(c.Request.Context(), oldToken, access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", expires)
+		} else {
+			serr = h.sessions.CreateSession(c.Request.Context(), access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", expires)
+		}
+		if serr != nil {
 			return nil, errx.Internal("创建会话失败")
 		}
 	}

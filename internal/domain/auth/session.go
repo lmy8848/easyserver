@@ -102,6 +102,39 @@ func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) e
 	return nil
 }
 
+// ReplaceSession 用新 access 原位替换旧 access 的会话行：一台设备始终一行，
+// 避免 refresh 每次新建行让会话列表堆积同设备的过期条目。旧令牌无对应会话
+// （已被清理/跨进程重启）或属主不符时退化为新建。ID 保留，LoginAt 为最近活动。
+func (s *SessionService) ReplaceSession(ctx context.Context, oldToken, newToken string, userID int64, ip, userAgent, clientType string, expiresAt time.Time) error {
+	sid, err := util.RandomHex(8)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old, ok := s.sessions[oldToken]; ok && old.UserID == userID {
+		delete(s.sessions, oldToken)
+		old.Token = newToken
+		old.IP = ip
+		old.UserAgent = userAgent
+		old.LoginAt = time.Now()
+		old.ExpiresAt = expiresAt
+		s.sessions[newToken] = old
+		return nil
+	}
+	s.sessions[newToken] = &Session{
+		ID:         sid,
+		UserID:     userID,
+		IP:         ip,
+		UserAgent:  userAgent,
+		ClientType: clientType,
+		LoginAt:    time.Now(),
+		ExpiresAt:  expiresAt,
+		Token:      newToken,
+	}
+	return nil
+}
+
 // RemoveSessionByID 按 ID 删除当前用户的会话（会话列表脱 JWT 后的踢出路径）。
 func (s *SessionService) RemoveSessionByID(ctx context.Context, userID int64, id string) error {
 	s.mu.Lock()

@@ -92,3 +92,52 @@ func TestGetUserSessions_ExcludesMobileDirect(t *testing.T) {
 		t.Fatalf("expected only the login session, got %d sessions", len(sessions))
 	}
 }
+
+// 回归：refresh 原位替换会话行——一台设备始终一行。此前每次 refresh
+// 新建行（旧行活满 24h），会话列表堆积同设备的"在线设备"条目。
+func TestReplaceSession_InPlace(t *testing.T) {
+	ctx := t.Context()
+	var wg sync.WaitGroup
+
+	store := config.NewStore(&config.Config{
+		Auth: config.AuthConfig{
+			SessionTimeout:         config.Duration(24 * time.Hour),
+			SessionCleanupInterval: config.Duration(time.Hour),
+		},
+	})
+	svc := NewSessionService(ctx, &wg, store)
+
+	if err := svc.CreateSession(ctx, "old-token", 1, "192.0.2.1", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := svc.sessions["old-token"]
+	firstID := old.ID
+
+	if err := svc.ReplaceSession(ctx, "old-token", "new-token", 1, "192.0.2.1", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := svc.sessions["old-token"]; ok {
+		t.Fatal("old session should be replaced")
+	}
+	replaced, ok := svc.sessions["new-token"]
+	if !ok {
+		t.Fatal("new session missing")
+	}
+	if replaced.ID != firstID {
+		t.Fatal("session ID should be preserved across replacement")
+	}
+	// 属主不符时不得替换他人会话，应退化为新建
+	if err := svc.CreateSession(ctx, "victim-token", 2, "192.0.2.2", "ua", "web", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ReplaceSession(ctx, "victim-token", "attacker-token", 1, "192.0.2.9", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := svc.sessions["victim-token"]; !ok || v.UserID != 2 {
+		t.Fatal("victim session must stay intact")
+	}
+	if a, ok := svc.sessions["attacker-token"]; !ok || a.UserID != 1 {
+		t.Fatal("mismatched owner should fall back to a new session")
+	}
+}
