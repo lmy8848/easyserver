@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"easyserver/internal/infra/errx"
+	"easyserver/internal/util"
 )
 
 // SSLCertInfo is the parsed SSL certificate detail for a website.
@@ -170,6 +171,10 @@ func (s *WebsiteService) ProbeHealth(ctx context.Context, webServerID, id int64,
 		scheme = "https"
 	}
 	url := fmt.Sprintf("%s://%s:%d", scheme, w.Domain, port)
+	// 拦云元数据/link-local：探活结果（状态码+延迟）可作内网探测 oracle
+	if err := util.GuardOutboundHost(w.Domain); err != nil {
+		return nil, errx.BadRequest("%w", err)
+	}
 	start := time.Now()
 	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

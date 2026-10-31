@@ -48,9 +48,10 @@ func NewHTTPVerifier() *HTTPVerifier {
 // a failure to verify (closed), callers may decide to hard- or soft-fail.
 func (v *HTTPVerifier) Verify(ctx context.Context, secret, token, remoteIP string) bool {
 	if secret == "" {
-		// No secret configured -> nothing to verify against; treat as valid so
-		// the panel still works when Turnstile is unconfigured.
-		return true
+		// Fail-closed：开关开启而秘钥缺失时必须拒绝，否则人机验证沦为
+		// 纯前端摆设（配置一致性由 config.Validate 与设置保存校验兜底，
+		// 正常配置下不会走到这里）。
+		return false
 	}
 	if token == "" {
 		return false

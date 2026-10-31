@@ -650,13 +650,34 @@ func (h *AuthHandler) GetSessions(c *gin.Context) (any, error) {
 		}
 	}
 
+	hint := func(tok string) string {
+		if len(tok) > 8 {
+			return tok[:8] + "…"
+		}
+		return tok
+	}
 	type sessionView struct {
-		auth.Session
-		IsCurrent bool `json:"is_current"`
+		ID         string    `json:"id"`
+		IP         string    `json:"ip"`
+		UserAgent  string    `json:"user_agent"`
+		ClientType string    `json:"client_type"`
+		LoginAt    time.Time `json:"login_at"`
+		ExpiresAt  time.Time `json:"expires_at"`
+		TokenHint  string    `json:"token_hint"`
+		IsCurrent  bool      `json:"is_current"`
 	}
 	views := make([]sessionView, 0, len(sessions))
 	for _, s := range sessions {
-		views = append(views, sessionView{Session: s, IsCurrent: currentToken != "" && s.Token == currentToken})
+		views = append(views, sessionView{
+			ID:         s.ID,
+			IP:         s.IP,
+			UserAgent:  s.UserAgent,
+			ClientType: s.ClientType,
+			LoginAt:    s.LoginAt,
+			ExpiresAt:  s.ExpiresAt,
+			TokenHint:  hint(s.Token),
+			IsCurrent:  currentToken != "" && s.Token == currentToken,
+		})
 	}
 	return views, nil
 }
@@ -672,13 +693,17 @@ func (h *AuthHandler) KickSession(c *gin.Context) (any, error) {
 	}
 
 	req, err := httpx.BindJSON[struct {
-		Token string `json:"token" binding:"required"`
+		ID    string `json:"id"`
+		Token string `json:"token"`
 	}](c)
 	if err != nil {
 		return nil, err
 	}
+	if req.ID == "" && req.Token == "" {
+		return nil, errx.BadRequest("缺少会话标识")
+	}
 
-	// Prevent kicking yourself (req.Token is the raw token from GetSessions).
+	// Prevent kicking yourself (旧客户端传 raw token，新客户端传 id)
 	if currentToken != "" && req.Token == currentToken {
 		return nil, errx.BadRequest("不能踢出自己的会话，请使用登出功能")
 	}
@@ -689,22 +714,21 @@ func (h *AuthHandler) KickSession(c *gin.Context) (any, error) {
 		return nil, errx.Internal("获取会话列表失败")
 	}
 
-	found := false
+	var targetID, targetToken string
 	for _, sess := range sessions {
-		if sess.Token == req.Token {
-			found = true
+		if (req.ID != "" && sess.ID == req.ID) || (req.Token != "" && sess.Token == req.Token) {
+			targetID, targetToken = sess.ID, sess.Token
 			break
 		}
 	}
-	if !found {
+	if targetID == "" {
 		return nil, errx.NotFound("会话不存在")
 	}
 
-	// Remove the session. req.Token is the stored hash (from GetSessions), so
-	// delete by it as-is - do NOT re-hash (that would never match).
-	if err := h.sessionService.RemoveSessionByStoredToken(c.Request.Context(), req.Token); err != nil {
+	if err := h.sessionService.RemoveSessionByID(c.Request.Context(), userID, targetID); err != nil {
 		return nil, errx.Internal("删除会话失败")
 	}
+	_ = targetToken
 
 	middleware.AuditSummary(c, "踢出会话")
 
@@ -827,9 +851,11 @@ func (h *QRLoginHandler) CancelQRLogin(c *gin.Context) (any, error) {
 // publicAuth is the rate-limited public group; authProtected requires a JWT.
 func registerQRLoginRoutes(publicAuth, authProtected *gin.RouterGroup, qrService *auth.QRLoginService, authService *auth.AuthService, cfg *config.Config) {
 	h := NewQRLoginHandler(qrService, authService, cfg)
-	publicAuth.POST("/qr/session", httpx.H(h.CreateQRSession))
-	publicAuth.POST("/qr/status", httpx.H(h.GetQRStatus))
-	publicAuth.POST("/qr/cancel", httpx.H(h.CancelQRLogin))
+	// qr 专用桶：钓鱼自动化（持续造会话、高频轮询）不应共享登录桶 60/min 配额
+	qrGroup := publicAuth.Group("", middleware.RateLimitMiddleware("qrlogin", 10, time.Minute))
+	qrGroup.POST("/qr/session", httpx.H(h.CreateQRSession))
+	qrGroup.POST("/qr/status", httpx.H(h.GetQRStatus))
+	qrGroup.POST("/qr/cancel", httpx.H(h.CancelQRLogin))
 	authProtected.POST("/qr/confirm", httpx.H(h.ConfirmQRLogin))
 }
 

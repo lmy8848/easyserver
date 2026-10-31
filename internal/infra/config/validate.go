@@ -48,6 +48,16 @@ func Validate(cfg *Config, devMode bool) error {
 		}
 	}
 
+	// Turnstile 一致性：开启任一开关就必须配置秘钥，否则验证组件照常渲染
+	// 而后端全放行（fail-closed 兜底下则表现为无提示的全量拒绝，无法登录）
+	turnstileOn := cfg.Server.Turnstile.EnableLogin ||
+		cfg.Server.Turnstile.EnableQRLogin ||
+		cfg.Server.Turnstile.EnablePublicShare
+	if err := rejectOrWarn(devMode, turnstileOn && cfg.Server.Turnstile.SecretKey == "",
+		"server.turnstile: switches are enabled but secret_key is empty - verification will fail"); err != nil {
+		return err
+	}
+
 	// Rate limit guards
 	if err := rejectOrWarn(devMode, cfg.Auth.RateLimit < 10 || cfg.Auth.RateLimit > 100000,
 		"auth.rate_limit must be between 10 and 100000"); err != nil {

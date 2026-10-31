@@ -8,13 +8,24 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"easyserver/internal/domain/auth"
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
+	"easyserver/internal/util"
 )
+
+// guardOutboundURL 阻断 webhook 出站到云元数据/link-local 网段。
+func guardOutboundURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse webhook url: %w", err)
+	}
+	return util.GuardOutboundHost(u.Hostname())
+}
 
 // LoginEvent is an alias for auth.LoginEvent.
 type LoginEvent = auth.LoginEvent
@@ -70,6 +81,9 @@ func (s *Service) TestWebhook() error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
+	if err := guardOutboundURL(url); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -107,6 +121,9 @@ func (s *Service) SendCustom(ctx context.Context, title, content string) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
+	if err := guardOutboundURL(url); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -162,6 +179,9 @@ func (s *Service) sendWebhook(event LoginEvent) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
+	if err := guardOutboundURL(url); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -255,6 +275,9 @@ func (s *Service) sendAlertWebhook(event AlertEvent) error {
 	}
 
 	url, _ := s.webhookConfig()
+	if err := guardOutboundURL(url); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)

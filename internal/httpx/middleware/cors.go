@@ -26,11 +26,17 @@ func CORSMiddleware(allowedOrigins []string, devMode bool) gin.HandlerFunc {
 		}
 
 		if allowed && origin != "" {
-			c.Header("Access-Control-Allow-Origin", origin)
-			// Credentials 仅在放行该源时声明，避免对非白名单源虚设。
-			// （Allow-Origin 缺失时浏览器本就拒绝发送，credentials 虚设无实际危害，
-			//  但语义上只对放行的源声明更精确。）
-			c.Header("Access-Control-Allow-Credentials", "true")
+			// 通配 + credentials 组合在浏览器规范下不成立（带凭据时 * 无效）。
+			// 此前对任意 Origin 反射 + credentials，等于把面板数据开放给
+			// 受害者浏览器访问的任意网站；生产模式回字面 *（浏览器自动拒绝
+			// 凭据请求），仅 devMode 保留反射便于本地联调。
+			if hasWildcard && !devMode {
+				c.Header("Access-Control-Allow-Origin", "*")
+			} else {
+				c.Header("Access-Control-Allow-Origin", origin)
+				// Credentials 仅在放行该源时声明，避免对非白名单源虚设。
+				c.Header("Access-Control-Allow-Credentials", "true")
+			}
 		}
 
 		c.Header("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")

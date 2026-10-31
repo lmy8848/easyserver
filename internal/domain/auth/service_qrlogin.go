@@ -76,11 +76,12 @@ func (s *QRLoginService) GetStatus(ctx context.Context, qrToken string) (*Status
 	if ok && sess.Status == QRStatusConfirmed {
 		// 原子领取：仅一个 poll 能抢到 confirmed 会话（置为 consumed）。
 		sess.Status = QRStatusConsumed
+		// User 快照不下发：qr_token 持有者（可能是钓鱼页轮询者）不该借确认
+		// 顺带拿到 username/last_login_ip 等；web 端领 cookie 后自行拉 /auth/me
 		res := &StatusResult{
 			Status:    "confirmed",
 			ExpiresAt: sess.ExpiresAt,
 			Token:     sess.WebToken,
-			User:      sess.User,
 		}
 		return res, nil
 	}

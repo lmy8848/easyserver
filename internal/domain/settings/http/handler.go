@@ -289,6 +289,12 @@ func (h *SettingsHandler) UpdateServerConfig(c *gin.Context) (any, error) {
 		}
 	})
 
+	// 一致性：开启任一开关但秘钥为空 → 人机验证纯摆设，直接拒绝保存。
+	// 基于 store.Update 合并后的当前生效配置判断。
+	if ts := h.store.Get().Server.Turnstile; (ts.EnableLogin || ts.EnableQRLogin || ts.EnablePublicShare) && ts.SecretKey == "" {
+		return nil, errx.BadRequest("开启人机验证前请先配置 secret_key")
+	}
+
 	// 重启类字段（端口/监听地址）变化时提示重启
 	requiresRestart := req.Port != nil || req.Host != nil
 
