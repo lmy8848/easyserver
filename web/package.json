@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@testing-library/react": "^16.3.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24.12.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.2.7",
