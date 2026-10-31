@@ -34,7 +34,7 @@ func NewSQLiteRepository(db *sql.DB, secretKey, legacyRootKey string) (PluginRep
 	}
 	r := &sqliteRepo{db: db, aead: aead}
 	if legacyRootKey != "" && legacyRootKey != secretKey {
-		if err := r.migrateFromLegacy(legacyRootKey); err != nil {
+		if err := r.migrateFromLegacy(context.Background(), legacyRootKey); err != nil {
 			return nil, fmt.Errorf("migrate plugin secrets: %w", err)
 		}
 	}
@@ -43,7 +43,7 @@ func NewSQLiteRepository(db *sql.DB, secretKey, legacyRootKey string) (PluginRep
 
 // migrateFromLegacy 把旧根密钥加密的条目重加密为新密钥。
 // 解不开的条目跳过（既非旧密钥也非新密钥密文，多半是损坏数据），不阻塞启动。
-func (r *sqliteRepo) migrateFromLegacy(legacyRootKey string) error {
+func (r *sqliteRepo) migrateFromLegacy(ctx context.Context, legacyRootKey string) error {
 	legacy, err := newAEAD(legacyRootKey)
 	if err != nil {
 		return err
