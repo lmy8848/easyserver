@@ -155,10 +155,14 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	// 会话管理列表据此展示"移动端直连"在线设备
 	mdManager.SetSessionHooks(
 		func(hctx context.Context, token string, huserID int64) error {
-			return sessionSvc.CreateSession(hctx, token, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, time.Now().Add(15*time.Minute))
+			// 直连活动 = 设备活跃：铸造的临时凭据行本身隐藏，同时给该设备
+			// 真实的 mobile 登录会话续期（否则 24h 过期后会话列表变空）
+			sessionSvc.TouchMobileSessions(hctx, huserID, cfg.Auth.SessionTimeout.Duration())
+			return sessionSvc.CreateSession(hctx, token, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute))
 		},
 		func(hctx context.Context, oldToken, newToken string, huserID int64) error {
-			return sessionSvc.ReplaceSession(hctx, oldToken, newToken, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, time.Now().Add(15*time.Minute))
+			sessionSvc.TouchMobileSessions(hctx, huserID, cfg.Auth.SessionTimeout.Duration())
+			return sessionSvc.ReplaceSession(hctx, oldToken, newToken, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute))
 		},
 	)
 

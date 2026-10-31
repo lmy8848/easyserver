@@ -71,9 +71,9 @@ func (h *refreshHandler) Refresh(c *gin.Context) (any, error) {
 		expires := time.Now().Add(time.Duration(h.ttl) * time.Second)
 		var serr error
 		if oldToken != "" {
-			serr = h.sessions.ReplaceSession(c.Request.Context(), oldToken, access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", expires)
+			serr = h.sessions.ReplaceSession(c.Request.Context(), oldToken, access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", req.DeviceID, expires)
 		} else {
-			serr = h.sessions.CreateSession(c.Request.Context(), access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", expires)
+			serr = h.sessions.CreateSession(c.Request.Context(), access, uid, c.ClientIP(), c.Request.UserAgent(), "mobile", req.DeviceID, expires)
 		}
 		if serr != nil {
 			return nil, errx.Internal("创建会话失败")

@@ -53,7 +53,7 @@ func (s *SessionService) cleanupLoop(ctx context.Context, interval time.Duration
 // ClientTypeMobileDirect 标识直连通道铸造的临时凭据会话（非登录会话）。
 const ClientTypeMobileDirect = "mobile-direct"
 
-func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, ip, userAgent, clientType string, expiresAt time.Time) error {
+func (s *SessionService) CreateSession(ctx context.Context, token string, userID int64, ip, userAgent, clientType, deviceID string, expiresAt time.Time) error {
 	sid, err := util.RandomHex(8)
 	if err != nil {
 		return err
@@ -66,6 +66,7 @@ func (s *SessionService) CreateSession(ctx context.Context, token string, userID
 		IP:         ip,
 		UserAgent:  userAgent,
 		ClientType: clientType,
+		DeviceID:   deviceID,
 		LoginAt:    time.Now(),
 		ExpiresAt:  expiresAt,
 		Token:      token,
@@ -105,7 +106,7 @@ func (s *SessionService) RemoveUserSessions(ctx context.Context, userID int64) e
 // ReplaceSession 用新 access 原位替换旧 access 的会话行：一台设备始终一行，
 // 避免 refresh 每次新建行让会话列表堆积同设备的过期条目。旧令牌无对应会话
 // （已被清理/跨进程重启）或属主不符时退化为新建。ID 保留，LoginAt 为最近活动。
-func (s *SessionService) ReplaceSession(ctx context.Context, oldToken, newToken string, userID int64, ip, userAgent, clientType string, expiresAt time.Time) error {
+func (s *SessionService) ReplaceSession(ctx context.Context, oldToken, newToken string, userID int64, ip, userAgent, clientType, deviceID string, expiresAt time.Time) error {
 	sid, err := util.RandomHex(8)
 	if err != nil {
 		return err
@@ -128,11 +129,30 @@ func (s *SessionService) ReplaceSession(ctx context.Context, oldToken, newToken 
 		IP:         ip,
 		UserAgent:  userAgent,
 		ClientType: clientType,
+		DeviceID:   deviceID,
 		LoginAt:    time.Now(),
 		ExpiresAt:  expiresAt,
 		Token:      newToken,
 	}
 	return nil
+}
+
+// TouchMobileSessions 直连通道活动时给该用户的移动端登录会话续期：
+// 设备活跃即登录态活跃。此前直连模式绕过 refresh 链，真实会话 24h 后
+// 过期，会话列表变空。没有 mobile 会话时不创建（被踢出的不复活）。
+func (s *SessionService) TouchMobileSessions(ctx context.Context, userID int64, ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for _, sess := range s.sessions {
+		if sess.UserID != userID || sess.ClientType != "mobile" || !sess.ExpiresAt.After(now) {
+			continue
+		}
+		sess.LoginAt = now
+		if exp := now.Add(ttl); exp.After(sess.ExpiresAt) {
+			sess.ExpiresAt = exp
+		}
+	}
 }
 
 // RemoveSessionByID 按 ID 删除当前用户的会话（会话列表脱 JWT 后的踢出路径）。

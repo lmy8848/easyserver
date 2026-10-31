@@ -46,6 +46,9 @@ type Session struct {
 	// Token 为原始 JWT，绝不序列化下发——会话列表此前把 24h 有效期的
 	// 令牌原样返回，HttpOnly Cookie 的 XSS 纵深被破坏
 	Token string `json:"-"`
+	// DeviceID 绑定的移动端设备号（web 会话为空）：踢出时连 refresh 链
+	// 一起吊销，否则 App 静默刷新会立刻建回会话，踢出形同虚设
+	DeviceID string `json:"-"`
 }
 
 // LoginEvent represents a login event, used by both the audit logger

@@ -23,7 +23,7 @@ func TestGetActiveSessions_IncludesIdleButValid(t *testing.T) {
 	})
 	svc := NewSessionService(ctx, &wg, store)
 
-	if err := svc.CreateSession(ctx, "idle-token", 1, "192.0.2.1", "test-agent", "mobile", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.CreateSession(ctx, "idle-token", 1, "192.0.2.1", "test-agent", "mobile", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	// 模拟静置 10 分钟
@@ -40,7 +40,7 @@ func TestGetActiveSessions_IncludesIdleButValid(t *testing.T) {
 	}
 
 	// 过期会话不应出现
-	if err := svc.CreateSession(ctx, "expired-token", 1, "192.0.2.2", "test-agent", "web", time.Now().Add(-time.Minute)); err != nil {
+	if err := svc.CreateSession(ctx, "expired-token", 1, "192.0.2.2", "test-agent", "web", "", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	sessions, _ = svc.GetActiveSessions(ctx)
@@ -49,7 +49,7 @@ func TestGetActiveSessions_IncludesIdleButValid(t *testing.T) {
 	}
 
 	// 超过空闲超时（30m）的会话已不可用，不应出现在列表里
-	if err := svc.CreateSession(ctx, "idle-dead-token", 1, "192.0.2.3", "test-agent", "web", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.CreateSession(ctx, "idle-dead-token", 1, "192.0.2.3", "test-agent", "web", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	svc.mu.Lock()
@@ -77,10 +77,10 @@ func TestGetUserSessions_IncludesMobileDirect(t *testing.T) {
 	})
 	svc := NewSessionService(ctx, &wg, store)
 
-	if err := svc.CreateSession(ctx, "login-token", 1, "192.0.2.1", "test-agent", "mobile", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.CreateSession(ctx, "login-token", 1, "192.0.2.1", "test-agent", "mobile", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.CreateSession(ctx, "direct-token", 1, "mobile-direct", "device-signature", ClientTypeMobileDirect, time.Now().Add(15*time.Minute)); err != nil {
+	if err := svc.CreateSession(ctx, "direct-token", 1, "mobile-direct", "device-signature", ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,7 +92,7 @@ func TestGetUserSessions_IncludesMobileDirect(t *testing.T) {
 		t.Fatalf("expected login + direct sessions, got %d", len(sessions))
 	}
 	// 原位替换：直连会话续期不应新增行
-	if err := svc.ReplaceSession(ctx, "direct-token", "direct-token-2", 1, "mobile-direct", "device-signature", ClientTypeMobileDirect, time.Now().Add(15*time.Minute)); err != nil {
+	if err := svc.ReplaceSession(ctx, "direct-token", "direct-token-2", 1, "mobile-direct", "device-signature", ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err = svc.GetUserSessions(ctx, 1)
@@ -123,12 +123,12 @@ func TestReplaceSession_InPlace(t *testing.T) {
 	})
 	svc := NewSessionService(ctx, &wg, store)
 
-	if err := svc.CreateSession(ctx, "old-token", 1, "192.0.2.1", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.CreateSession(ctx, "old-token", 1, "192.0.2.1", "ua", "mobile", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	firstID := svc.sessions["old-token"].ID
 
-	if err := svc.ReplaceSession(ctx, "old-token", "new-token", 1, "192.0.2.1", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.ReplaceSession(ctx, "old-token", "new-token", 1, "192.0.2.1", "ua", "mobile", "dev-1", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,10 +143,10 @@ func TestReplaceSession_InPlace(t *testing.T) {
 		t.Fatal("session ID should be preserved across replacement")
 	}
 	// 属主不符时不得替换他人会话，应退化为新建
-	if err := svc.CreateSession(ctx, "victim-token", 2, "192.0.2.2", "ua", "web", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.CreateSession(ctx, "victim-token", 2, "192.0.2.2", "ua", "web", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.ReplaceSession(ctx, "victim-token", "attacker-token", 1, "192.0.2.9", "ua", "mobile", time.Now().Add(time.Hour)); err != nil {
+	if err := svc.ReplaceSession(ctx, "victim-token", "attacker-token", 1, "192.0.2.9", "ua", "mobile", "", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if v, ok := svc.sessions["victim-token"]; !ok || v.UserID != 2 {

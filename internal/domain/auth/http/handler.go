@@ -186,6 +186,7 @@ func (h *AuthHandler) Login(c *gin.Context) (any, error) {
 			IP:         ip,
 			UserAgent:  userAgent,
 			ClientType: clientType,
+			DeviceID:   req.DeviceID,
 			ExpiresAt:  expiresAt,
 			Token:      token,
 		}
@@ -334,12 +335,14 @@ func (h *AuthHandler) ChangeUsername(c *gin.Context) (any, error) {
 type TOTPVerifyRequest struct {
 	TempToken string `json:"temp_token" binding:"required"`
 	Code      string `json:"code" binding:"required"`
+	DeviceID  string `json:"device_id"`
 }
 
 // Backup code verification request
 type BackupCodeVerifyRequest struct {
 	TempToken  string `json:"temp_token" binding:"required"`
 	BackupCode string `json:"backup_code" binding:"required"`
+	DeviceID   string `json:"device_id"`
 }
 
 // TOTP enable request
@@ -422,6 +425,7 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 			IP:         ip,
 			UserAgent:  userAgent,
 			ClientType: clientType,
+			DeviceID:   req.DeviceID,
 			ExpiresAt:  expiresAt,
 			Token:      token,
 		}
@@ -511,6 +515,7 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 			IP:         ip,
 			UserAgent:  userAgent,
 			ClientType: clientType,
+			DeviceID:   req.DeviceID,
 			ExpiresAt:  expiresAt,
 			Token:      token,
 		}
@@ -625,7 +630,7 @@ func (h *AuthHandler) createSessionWithBinding(c *gin.Context, sess *auth.Sessio
 	if h.sessionService == nil {
 		return nil
 	}
-	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.IP, sess.UserAgent, sess.ClientType, sess.ExpiresAt); err != nil {
+	if err := h.sessionService.CreateSession(c.Request.Context(), sess.Token, sess.UserID, sess.IP, sess.UserAgent, sess.ClientType, sess.DeviceID, sess.ExpiresAt); err != nil {
 		log.Printf("auth: create session for user %d: %v", sess.UserID, err)
 		return errx.Internal("创建会话失败")
 	}
@@ -732,6 +737,17 @@ func (h *AuthHandler) KickSession(c *gin.Context) (any, error) {
 
 	if err := h.sessionService.RemoveSessionByID(c.Request.Context(), userID, targetID); err != nil {
 		return nil, errx.Internal("删除会话失败")
+	}
+
+	// 移动端会话连带吊销 refresh 链：否则 App 静默刷新立即建回会话，踢出形同虚设
+	for _, sess := range sessions {
+		if sess.ID == targetID && sess.ClientType == "mobile" && sess.DeviceID != "" && h.refreshSvc != nil {
+			if err := h.refreshSvc.RevokeFamily(c.Request.Context(), userID, sess.DeviceID); err != nil {
+				log.Printf("auth: revoke refresh family on kick: %v", err)
+			}
+			middleware.AuditSummary(c, "踢出会话（含吊销刷新链）")
+			break
+		}
 	}
 	_ = targetToken
 
