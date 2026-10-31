@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// copyProgramRe 命中 PostgreSQL 的 COPY ... TO/FROM PROGRAM（以服务器权限
+// 执行任意 OS 命令，等效主机 RCE）
+var copyProgramRe = regexp.MustCompile(`\bCOPY\b.*\bPROGRAM\b`)
+
 // --- 名称/字符集校验 ---
 
 const (
@@ -111,6 +115,12 @@ func ValidateSQL(sql string) *ValidationResult {
 		return &ValidationResult{Valid: false, Message: "SQL cannot be empty"}
 	}
 
+	// 仅允许单条语句：多语句会绕过按前缀/首语句的所有限制
+	// （此前 MySQL DSN multiStatements=true 使 "SELECT 1; DELETE ..." 直接执行）
+	if err := countStatements(sql); err != nil {
+		return &ValidationResult{Valid: false, Message: err.Error()}
+	}
+
 	cleanedStmt := stripLeadingComments(sql)
 	if cleanedStmt == "" {
 		return &ValidationResult{Valid: false, Message: "SQL cannot be empty"}
@@ -120,6 +130,36 @@ func ValidateSQL(sql string) *ValidationResult {
 	}
 
 	return &ValidationResult{Valid: true, Message: "valid", SQL: sql}
+}
+
+// countStatements 检查输入是否只包含一条语句：统计字符串/标识符引用之外的
+// 分号数量（末尾分号在统计前剥离，属于常见书写习惯）。
+func countStatements(sql string) error {
+	trimmed := strings.TrimRight(strings.TrimSpace(sql), "; \t\r\n")
+	inSingle, inDouble, inBacktick := false, false, false
+	for i := 0; i < len(trimmed); i++ {
+		switch c := trimmed[i]; {
+		case c == '\'' && !inDouble && !inBacktick:
+			// MySQL 单引号内 '' 转义与 \' 转义
+			if inSingle && i+1 < len(trimmed) && trimmed[i+1] == '\'' {
+				i++
+				continue
+			}
+			if inSingle && i > 0 && trimmed[i-1] == '\\' {
+				continue
+			}
+			inSingle = !inSingle
+		case c == '"' && !inSingle && !inBacktick:
+			inDouble = !inDouble
+		case c == '`' && !inSingle && !inDouble:
+			inBacktick = !inBacktick
+		case c == '\\' && (inSingle || inDouble):
+			i++ // 跳过转义字符
+		case c == ';' && !inSingle && !inDouble && !inBacktick:
+			return fmt.Errorf("only a single SQL statement is allowed")
+		}
+	}
+	return nil
 }
 
 func stripLeadingComments(sql string) string {
@@ -159,8 +199,15 @@ func validateSingleStatement(sql string) *ValidationResult {
 		}
 	}
 
-	if strings.Contains(upper, "SET PASSWORD") || strings.Contains(upper, "IDENTIFIED BY") {
+	// IDENTIFIED WITH 覆盖 MySQL 8 的 ALTER USER ... IDENTIFIED WITH xxx BY '...'，
+	// 只拦 IDENTIFIED BY 会漏掉该写法
+	if strings.Contains(upper, "SET PASSWORD") || strings.Contains(upper, "IDENTIFIED BY") || strings.Contains(upper, "IDENTIFIED WITH") {
 		return &ValidationResult{Valid: false, Message: "password modification is not allowed"}
+	}
+
+	// PostgreSQL COPY ... TO/FROM PROGRAM 以服务器权限执行任意 OS 命令
+	if copyProgramRe.MatchString(upper) {
+		return &ValidationResult{Valid: false, Message: "COPY TO/FROM PROGRAM is not allowed"}
 	}
 
 	if strings.Contains(upper, "SLEEP(") || strings.Contains(upper, "BENCHMARK(") {
