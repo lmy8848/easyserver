@@ -70,7 +70,7 @@ func (s *Store) Register(ctx context.Context, userID int64, deviceID, name, publ
 		name = deviceID
 	}
 	// 幂等：同设备重复注册只更新公钥与名称；被吊销的设备重新注册即恢复。
-	_, err = s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO device_keys (device_id, user_id, public_key, name)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(device_id) DO UPDATE SET
@@ -81,6 +81,11 @@ func (s *Store) Register(ctx context.Context, userID int64, deviceID, name, publ
 		deviceID, userID, publicKeyB64, name)
 	if err != nil {
 		return nil, errx.Internal("保存设备公钥失败: %w", err)
+	}
+	// 属主冲突（device_id 被其他用户占用）时 UPDATE 静默零行——
+	// 显式报错而非继续查询返回他人记录（user_id/设备名/吊销态泄漏）
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, errx.Forbidden("设备 ID 已被其他账户占用")
 	}
 	return s.GetByDeviceID(ctx, deviceID)
 }

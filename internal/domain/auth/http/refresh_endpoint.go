@@ -19,7 +19,9 @@ func RegisterRefreshRoute(public *gin.RouterGroup, refreshSvc *auth.RefreshServi
 		sessions: sessionSvc,
 		ttl:      sessionTTL,
 	}
-	public.POST("/auth/refresh", httpx.H(h.Refresh))
+	// 挂 login 档限流：凭证端点不共享 api 档的宽松配额（参数此前被丢弃未用）
+	limited := public.Group("/auth", middleware.RateLimitMiddleware("login", rateLimit, time.Duration(rateInterval)*time.Second))
+	limited.POST("/refresh", httpx.H(h.Refresh))
 }
 
 type refreshHandler struct {

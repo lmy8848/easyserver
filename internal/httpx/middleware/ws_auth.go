@@ -13,8 +13,8 @@ import (
 // WSAuthMiddleware creates a middleware for WebSocket authentication
 // It supports token from:
 // 1. Sec-WebSocket-Protocol header (preferred)
-// 2. URL query parameter "token" (fallback, deprecated)
-// 3. HttpOnly cookie (web, same-origin handshake carries it automatically)
+// 2. HttpOnly cookie (web, same-origin handshake carries it automatically)
+// （?token= 查询参数回退已移除：令牌进 URL 会泄漏进访问日志/浏览器历史）
 func WSAuthMiddleware(secret string, sessionValidator SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenString string
