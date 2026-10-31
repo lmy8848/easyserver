@@ -329,6 +329,17 @@ func (h *FileShareHandler) DeleteShare(c *gin.Context) (any, error) {
 		return nil, errx.BadRequest("无效的ID")
 	}
 
+	// 属主校验，与 Get/Update 一致（404 不泄漏存在性）
+	userID, _ := c.Get("user_id")
+	uid, _ := userID.(int64)
+	existing, err := h.shareRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil || existing.CreatedBy != uid {
+		return nil, errx.NotFound("外链不存在")
+	}
+
 	middleware.AuditSummary(c, "撤销文件外链 #"+idStr)
 	if err := h.shareRepo.Delete(c.Request.Context(), id); err != nil {
 		return nil, err
@@ -343,6 +354,21 @@ func (h *FileShareHandler) CleanupExpired(c *gin.Context) (any, error) {
 		return nil, err
 	}
 	return gin.H{"deleted": count}, nil
+}
+
+// checkShareUsable 在 ticket 校验之外复查业务状态：分享是否已过期、
+// 下载是否已达上限。此前只在校取 ticket 时检查，6 小时有效期的 ticket
+// 窗口内可无限复用，过期/上限形同虚设。
+func (h *FileShareHandler) checkShareUsable(share *filemanager.FileShare) error {
+	if share.ExpiresAt != "" {
+		if exp, err := time.Parse(util.TimeLayout, share.ExpiresAt); err == nil && time.Now().After(exp) {
+			return errx.NotFound("分享链接已过期")
+		}
+	}
+	if share.MaxDownloads > 0 && share.DownloadCount >= share.MaxDownloads {
+		return errx.Forbidden("下载次数已达上限")
+	}
+	return nil
 }
 
 // ShareInfoResponse is the public metadata for a share link. It intentionally
@@ -552,6 +578,9 @@ func (h *FileShareHandler) PublicList(c *gin.Context) (any, error) {
 	if err := h.validateTicket(share, ticket); err != nil {
 		return nil, errx.Forbidden("%w", err)
 	}
+	if err := h.checkShareUsable(share); err != nil {
+		return nil, err
+	}
 
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
 	if err != nil {
@@ -615,6 +644,9 @@ func (h *FileShareHandler) PublicDownload(c *gin.Context) (any, error) {
 
 	if err := h.validateTicket(share, ticket); err != nil {
 		return nil, errx.Forbidden("%w", err)
+	}
+	if err := h.checkShareUsable(share); err != nil {
+		return nil, err
 	}
 
 	validPath, err := h.fileManager.ValidatePath(share.FilePath)
