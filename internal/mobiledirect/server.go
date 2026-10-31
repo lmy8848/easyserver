@@ -109,7 +109,8 @@ func (t *selfHealTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	t.srv.invalidateToken(deviceID)
 	tok, terr := t.srv.tokenForDevice(req.Context(), deviceID, userID)
 	if terr != nil {
-		return resp, nil // err 必为 nil（前置守卫已排除），返回原 401 响应
+		// 重铸失败属罕见内部故障：交给 ErrorHandler 返回 502
+		return nil, terr
 	}
 	retried := req.Clone(req.Context())
 	retried.Header.Set("Cookie", middleware.AuthCookieName+"="+tok)
