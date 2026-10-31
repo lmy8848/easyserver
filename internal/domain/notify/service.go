@@ -19,12 +19,12 @@ import (
 )
 
 // guardOutboundURL 阻断 webhook 出站到云元数据/link-local 网段。
-func guardOutboundURL(rawURL string) error {
+func guardOutboundURL(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("parse webhook url: %w", err)
 	}
-	return util.GuardOutboundHost(u.Hostname())
+	return util.GuardOutboundHost(ctx, u.Hostname())
 }
 
 // LoginEvent is an alias for auth.LoginEvent.
@@ -81,7 +81,7 @@ func (s *Service) TestWebhook() error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	if err := guardOutboundURL(url); err != nil {
+	if err := guardOutboundURL(context.Background(), url); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
@@ -121,7 +121,7 @@ func (s *Service) SendCustom(ctx context.Context, title, content string) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	if err := guardOutboundURL(url); err != nil {
+	if err := guardOutboundURL(ctx, url); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonData))
@@ -179,7 +179,7 @@ func (s *Service) sendWebhook(event LoginEvent) error {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
 
-	if err := guardOutboundURL(url); err != nil {
+	if err := guardOutboundURL(context.Background(), url); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
@@ -275,7 +275,7 @@ func (s *Service) sendAlertWebhook(event AlertEvent) error {
 	}
 
 	url, _ := s.webhookConfig()
-	if err := guardOutboundURL(url); err != nil {
+	if err := guardOutboundURL(context.Background(), url); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewBuffer(jsonData))
