@@ -45,7 +45,6 @@ var (
 // go build 自动注入；git archive 等无 .git 构建则无此信息）。
 func loadVCSStamp() {
 	buildInfoOnce.Do(func() {
-		buildInfoLoaded = true
 		bi, ok := debug.ReadBuildInfo()
 		if !ok {
 			return
