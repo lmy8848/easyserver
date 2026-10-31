@@ -209,6 +209,10 @@ func (g *replayGuard) seenBefore(key string, now time.Time) bool {
 	return false
 }
 
+// 请求上下文键：设备号/用户 ID（供自愈重试层取用）
+type ctxKeyDeviceID struct{}
+type ctxKeyUserID struct{}
+
 // cachedToken 是直连通道为设备铸造的短期会话令牌（15 分钟），按设备缓存，
 // 避免每个请求都写一条会话记录。
 type cachedToken struct {
@@ -238,11 +242,11 @@ func (s *Server) tokenForDevice(ctx context.Context, deviceID string, userID int
 	// 首次铸造或替换失败退化为新建
 	switch {
 	case s.replaceSession != nil && prev != "":
-		if err := s.replaceSession(ctx, prev, tok, userID); err != nil && s.createSession != nil {
-			_ = s.createSession(ctx, tok, userID)
+		if err := s.replaceSession(ctx, prev, tok, userID, deviceID); err != nil && s.createSession != nil {
+			_ = s.createSession(ctx, tok, userID, deviceID)
 		}
 	case s.createSession != nil:
-		_ = s.createSession(ctx, tok, userID)
+		_ = s.createSession(ctx, tok, userID, deviceID)
 	}
 	return tok, nil
 }
@@ -334,6 +338,10 @@ func (s *Server) deviceAuth(c *gin.Context) {
 	}
 	c.Request.Header.Set("Cookie", middleware.AuthCookieName+"="+tok)
 	c.Set("device_id", device.DeviceID)
+	// 注入请求上下文：上游 401 自愈重试时取设备号/用户重新铸令牌
+	hctx := context.WithValue(c.Request.Context(), ctxKeyDeviceID{}, device.DeviceID)
+	hctx = context.WithValue(hctx, ctxKeyUserID{}, device.UserID)
+	c.Request = c.Request.WithContext(hctx)
 	s.store.Touch(c.Request.Context(), device.DeviceID)
 	c.Next()
 }

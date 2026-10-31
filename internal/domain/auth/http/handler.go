@@ -761,9 +761,44 @@ func (h *AuthHandler) KickAllOtherSessions(c *gin.Context) (any, error) {
 	userID := c.GetInt64("user_id")
 	currentToken := c.GetString("token")
 
-	// Remove all other sessions
-	if err := h.sessionService.RemoveOtherSessions(c.Request.Context(), userID, currentToken); err != nil {
+	// 保留集合：当前请求的会话；若当前会话是直连临时凭据（从 8443 发起），
+	// 还要保留同设备号的真实登录会话——"自己"按设备界定而不是按凭据
+	sessions, err := h.sessionService.GetActiveSessionsWithToken(c.Request.Context())
+	if err != nil {
+		return nil, errx.Internal("获取会话失败")
+	}
+	var current *auth.Session
+	for i := range sessions {
+		if sessions[i].Token == currentToken {
+			current = &sessions[i]
+			break
+		}
+	}
+	keepTokens := map[string]struct{}{currentToken: {}}
+	if current != nil && current.ClientType == auth.ClientTypeMobileDirect && current.DeviceID != "" {
+		for _, sess := range sessions {
+			if sess.DeviceID == current.DeviceID {
+				keepTokens[sess.Token] = struct{}{}
+			}
+		}
+	}
+
+	// 删除其它会话；mobile 会话连带吊销对应设备的 refresh 链，否则 App
+	// 静默刷新立即建回会话
+	revokedDevices := map[string]struct{}{}
+	if err := h.sessionService.RemoveOtherSessionsFilter(c.Request.Context(), userID, keepTokens, func(sess auth.Session) {
+		if sess.ClientType == "mobile" && sess.DeviceID != "" {
+			revokedDevices[sess.DeviceID] = struct{}{}
+		}
+	}); err != nil {
 		return nil, errx.Internal("删除会话失败")
+	}
+	for deviceID := range revokedDevices {
+		if h.refreshSvc != nil {
+			if err := h.refreshSvc.RevokeFamily(c.Request.Context(), userID, deviceID); err != nil {
+				log.Printf("auth: kick-all revoke refresh family: %v", err)
+			}
+		}
 	}
 
 	middleware.AuditSummary(c, "下线其他设备")

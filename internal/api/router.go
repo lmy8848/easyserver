@@ -154,15 +154,16 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	// 直连会话落库：按设备合并为一行（replace 用上次铸造的令牌原位替换），
 	// 会话管理列表据此展示"移动端直连"在线设备
 	mdManager.SetSessionHooks(
-		func(hctx context.Context, token string, huserID int64) error {
-			// 直连活动 = 设备活跃：铸造的临时凭据行本身隐藏，同时给该设备
-			// 真实的 mobile 登录会话续期（否则 24h 过期后会话列表变空）
+		func(hctx context.Context, token string, huserID int64, deviceID string) error {
+			// 直连活动 = 设备活跃：铸造的临时凭据行本身隐藏（绑定设备号供
+			// kick-all 保留本设备），同时给真实的 mobile 登录会话续期
+			//（否则 24h 过期后会话列表变空）
 			sessionSvc.TouchMobileSessions(hctx, huserID, cfg.Auth.SessionTimeout.Duration())
-			return sessionSvc.CreateSession(hctx, token, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute))
+			return sessionSvc.CreateSession(hctx, token, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, deviceID, time.Now().Add(15*time.Minute))
 		},
-		func(hctx context.Context, oldToken, newToken string, huserID int64) error {
+		func(hctx context.Context, oldToken, newToken string, huserID int64, deviceID string) error {
 			sessionSvc.TouchMobileSessions(hctx, huserID, cfg.Auth.SessionTimeout.Duration())
-			return sessionSvc.ReplaceSession(hctx, oldToken, newToken, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, "", time.Now().Add(15*time.Minute))
+			return sessionSvc.ReplaceSession(hctx, oldToken, newToken, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, deviceID, time.Now().Add(15*time.Minute))
 		},
 	)
 

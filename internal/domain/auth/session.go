@@ -268,11 +268,26 @@ func (s *SessionService) GetActiveSessionsWithToken(ctx context.Context) ([]Sess
 }
 
 func (s *SessionService) RemoveOtherSessions(ctx context.Context, userID int64, currentToken string) error {
+	return s.RemoveOtherSessionsFilter(ctx, userID,
+		map[string]struct{}{currentToken: {}}, nil)
+}
+
+// RemoveOtherSessionsFilter 删除 userID 除 keepTokens 外的全部会话；
+// 每删一条调用 onDeleted（用于收集需连带吊销 refresh 链的设备号）。
+func (s *SessionService) RemoveOtherSessionsFilter(ctx context.Context, userID int64,
+	keepTokens map[string]struct{}, onDeleted func(sess Session)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for token, sess := range s.sessions {
-		if sess.UserID == userID && token != currentToken {
-			delete(s.sessions, token)
+		if sess.UserID != userID {
+			continue
+		}
+		if _, keep := keepTokens[token]; keep {
+			continue
+		}
+		delete(s.sessions, token)
+		if onDeleted != nil {
+			onDeleted(*sess)
 		}
 	}
 	return nil

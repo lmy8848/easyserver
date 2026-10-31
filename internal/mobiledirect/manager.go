@@ -33,8 +33,8 @@ type Manager struct {
 
 	// 会话落库钩子（可选）：铸造的短期 JWT 按设备合并写入会话表，
 	// 会话管理列表据此展示直连设备
-	createSession  func(ctx context.Context, token string, userID int64) error
-	replaceSession func(ctx context.Context, oldToken, newToken string, userID int64) error
+	createSession  func(ctx context.Context, token string, userID int64, deviceID string) error
+	replaceSession func(ctx context.Context, oldToken, newToken string, userID int64, deviceID string) error
 
 	mu      sync.Mutex
 	srv     *Server
@@ -47,8 +47,8 @@ func NewManager(store *Store, upstream string, mint MintFunc) *Manager {
 
 // SetSessionHooks 注入会话落库钩子（须在 Apply 之前调用）。
 func (m *Manager) SetSessionHooks(
-	create func(ctx context.Context, token string, userID int64) error,
-	replace func(ctx context.Context, oldToken, newToken string, userID int64) error,
+	create func(ctx context.Context, token string, userID int64, deviceID string) error,
+	replace func(ctx context.Context, oldToken, newToken string, userID int64, deviceID string) error,
 ) {
 	m.createSession = create
 	m.replaceSession = replace

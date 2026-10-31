@@ -28,8 +28,8 @@ type Server struct {
 	mint func(ctx context.Context, userID int64) (string, time.Time, error)
 	// 会话落库钩子（router 注入）：铸造的短期 JWT 按设备合并写入会话表
 	//（replace 用上一次铸造的令牌原位替换），会话管理列表据此展示直连设备
-	createSession  func(ctx context.Context, token string, userID int64) error
-	replaceSession func(ctx context.Context, oldToken, newToken string, userID int64) error
+	createSession  func(ctx context.Context, token string, userID int64, deviceID string) error
+	replaceSession func(ctx context.Context, oldToken, newToken string, userID int64, deviceID string) error
 	replay         *replayGuard
 	proxy          *httputil.ReverseProxy
 	srv            *http.Server
@@ -55,25 +55,27 @@ func NewServer(cfg config.MobileDirectConfig, store *Store, upstreamBase string,
 		tokens:   make(map[string]cachedToken),
 	}
 
-	proxy := &httputil.ReverseProxy{}
-	// Rewrite 取代已弃用的 Director（Go 1.26+，SA1019）：SetURL 承担
-	// 单目标改写，SetXForwarded 补回 Director 路径自带的 X-Forwarded-*。
-	proxy.Rewrite = func(req *httputil.ProxyRequest) {
-		req.SetURL(up)
-		if cfg.Hostname != "" {
-			req.Out.Host = cfg.Hostname
-		}
-		// 身份以中间件铸造的短期 JWT Cookie 传给主引擎；清除客户端自带凭据，
-		// 保证身份只来自设备签名。
-		req.Out.Header.Del("Authorization")
-		req.SetXForwarded()
-	}
-	// loopback 自请求，使用面板自己的自签/内部证书。
-	proxy.Transport = &http.Transport{
+	selfHeal := &selfHealTransport{srv: s, base: &http.Transport{
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:        32,
 		MaxIdleConnsPerHost: 16,
 		IdleConnTimeout:     90 * time.Second,
+	}}
+	// loopback 自请求，使用面板自己的自签/内部证书。
+	proxy := &httputil.ReverseProxy{
+		Transport: selfHeal,
+		// Rewrite 取代已弃用的 Director（Go 1.26+，SA1019）：SetURL 承担
+		// 单目标改写，SetXForwarded 补回 Director 路径自带的 X-Forwarded-*。
+		Rewrite: func(req *httputil.ProxyRequest) {
+			req.SetURL(up)
+			if cfg.Hostname != "" {
+				req.Out.Host = cfg.Hostname
+			}
+			// 身份以中间件铸造的短期 JWT Cookie 传给主引擎；清除客户端自带凭据，
+			// 保证身份只来自设备签名。
+			req.Out.Header.Del("Authorization")
+			req.SetXForwarded()
+		},
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		logger.Warn("mobile-direct", "proxy error", "path", r.URL.Path, "err", err)
@@ -85,10 +87,49 @@ func NewServer(cfg config.MobileDirectConfig, store *Store, upstreamBase string,
 	return s, nil
 }
 
+// selfHealTransport 自愈传输层：上游 401 说明当前铸造令牌的会话已被
+// 踢出/清理（kick-all、登录互踢等），换新铸令牌重试一次，避免设备通道
+// 在缓存过期前持续 401。
+type selfHealTransport struct {
+	srv  *Server
+	base http.RoundTripper
+}
+
+func (t *selfHealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	deviceID, ok := req.Context().Value(ctxKeyDeviceID{}).(string)
+	if !ok || deviceID == "" {
+		return resp, err
+	}
+	userID, _ := req.Context().Value(ctxKeyUserID{}).(int64)
+
+	t.srv.invalidateToken(deviceID)
+	tok, terr := t.srv.tokenForDevice(req.Context(), deviceID, userID)
+	if terr != nil {
+		return resp, nil // err 必为 nil（前置守卫已排除），返回原 401 响应
+	}
+	retried := req.Clone(req.Context())
+	retried.Header.Set("Cookie", middleware.AuthCookieName+"="+tok)
+	logger.Info("mobile-direct", "session invalidated upstream, reminted", "device", deviceID)
+	resp.Body.Close()
+	return t.base.RoundTrip(retried)
+}
+
+// invalidateToken 设备的缓存令牌失效（上游 401：会话已被踢出/清理），
+// 下次请求重新铸造并落新会话行。
+func (s *Server) invalidateToken(deviceID string) {
+	s.tokMu.Lock()
+	defer s.tokMu.Unlock()
+	delete(s.tokens, deviceID)
+}
+
 // SetSessionHooks 注入直连会话落库钩子（须在 Apply 之前调用）。
 func (s *Server) SetSessionHooks(
-	create func(ctx context.Context, token string, userID int64) error,
-	replace func(ctx context.Context, oldToken, newToken string, userID int64) error,
+	create func(ctx context.Context, token string, userID int64, deviceID string) error,
+	replace func(ctx context.Context, oldToken, newToken string, userID int64, deviceID string) error,
 ) {
 	s.createSession = create
 	s.replaceSession = replace
