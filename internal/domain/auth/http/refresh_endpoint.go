@@ -32,7 +32,7 @@ type refreshHandler struct {
 func (h *refreshHandler) Refresh(c *gin.Context) (any, error) {
 	req, err := httpx.BindJSON[struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`
-		DeviceID     string `json:"device_id"`
+		DeviceID     string `json:"device_id" binding:"required"`
 	}](c)
 	if err != nil {
 		return nil, err

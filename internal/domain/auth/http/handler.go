@@ -32,6 +32,7 @@ type AuthAuditLogger interface {
 }
 
 type AuthHandler struct {
+	verifyLimiter  *auth.VerifyAttemptLimiter
 	authService    *auth.AuthService
 	refreshSvc     *auth.RefreshService
 	auditLog       AuthAuditLogger
@@ -43,6 +44,7 @@ type AuthHandler struct {
 
 func NewAuthHandler(authService *auth.AuthService, jwtSecret string, auditLog AuthAuditLogger, sessionService *auth.SessionService, sessionTimeout time.Duration, refreshSvc *auth.RefreshService, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
+		verifyLimiter:  auth.NewVerifyAttemptLimiter(5, 15*time.Minute),
 		authService:    authService,
 		refreshSvc:     refreshSvc,
 		auditLog:       auditLog,
@@ -371,6 +373,11 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 		return nil, errx.Unauthorized("临时令牌无效或已过期")
 	}
 
+	// 账户级尝试限制：防已知密码在线穷举 6 位 TOTP（限流仅按精确 IP 可绕）
+	if !h.verifyLimiter.Allowed(userID) {
+		return nil, errx.Forbidden("尝试次数过多，请 15 分钟后再试")
+	}
+
 	// Get user's TOTP secret
 	secret, err := h.authService.GetTOTPSecret(c.Request.Context(), userID)
 	if err != nil {
@@ -379,8 +386,10 @@ func (h *AuthHandler) VerifyTOTP(c *gin.Context) (any, error) {
 
 	// Verify TOTP code
 	if !h.authService.VerifyTOTP(secret, req.Code) {
+		h.verifyLimiter.RecordFailure(userID)
 		return nil, errx.Unauthorized("TOTP 验证码无效")
 	}
+	h.verifyLimiter.Reset(userID)
 
 	// Get user info
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)
@@ -454,6 +463,11 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 		return nil, errx.Unauthorized("临时令牌无效或已过期")
 	}
 
+	// 账户级尝试限制，与 TOTP 共用同一计数（同一把 2FA 门）
+	if !h.verifyLimiter.Allowed(userID) {
+		return nil, errx.Forbidden("尝试次数过多，请 15 分钟后再试")
+	}
+
 	// Verify backup code
 	valid, err := h.authService.VerifyBackupCode(c.Request.Context(), userID, req.BackupCode)
 	if err != nil {
@@ -461,8 +475,10 @@ func (h *AuthHandler) VerifyBackupCode(c *gin.Context) (any, error) {
 	}
 	if !valid {
 		// Log failed backup code verification
+		h.verifyLimiter.RecordFailure(userID)
 		return nil, errx.Unauthorized("备用码无效")
 	}
+	h.verifyLimiter.Reset(userID)
 
 	// Get user info
 	user, err := h.authService.GetUserByID(c.Request.Context(), userID)

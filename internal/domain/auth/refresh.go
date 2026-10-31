@@ -112,20 +112,10 @@ func (s *RefreshService) Rotate(ctx context.Context, oldToken, deviceID string) 
 		return nil, errx.Unauthorized("refresh token 与设备不匹配")
 	}
 
-	// 已在宽限期内被轮换过：返回同一个 successor（客户端重试拿到同一对，避免误判重放）
-	if rotatedAt.Valid && rotatedAt.Time.Add(refreshGrace).After(time.Now()) {
-		var next string
-		if err := tx.QueryRowContext(ctx, `
-			SELECT token_hash FROM refresh_tokens
-			WHERE rotated_from = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP
-			ORDER BY id DESC LIMIT 1`, oldHash).Scan(&next); err != nil {
-			return nil, errx.Unauthorized("refresh token 已轮换")
-		}
-		_ = tx.Commit()
-		// successor 明文不存库，无法回放：宽限期内也改为签发新令牌，但保留旧记录
-		return s.issueInFamily(ctx, family, userID, boundDevice)
-	}
-	// 已被轮换且超过宽限：判定重放，吊销整链
+	// 已被轮换过（无论是否在宽限期内）：判定重放，吊销整链。
+	// 此前宽限期内重放会静默签发全新令牌链——攻击者窃取令牌后在宽限窗口内
+	// 用一次即可绕过重放检测，获得与受害者平行的 90 天链。
+	// 合法客户端的重试竞态由客户端单飞（同一时刻只发一次 refresh）保证。
 	if rotatedAt.Valid {
 		if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE family_id = ?`, family); err != nil {
 			return nil, err
