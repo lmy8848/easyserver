@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 
 	"easyserver/internal/infra/errx"
@@ -23,13 +24,69 @@ type sqliteRepo struct {
 	aead cipher.AEAD
 }
 
-// NewSQLiteRepository 创建仓储；secretKey 为密钥加密的根密钥（任意长度）。
-func NewSQLiteRepository(db *sql.DB, secretKey string) (PluginRepository, error) {
+// NewSQLiteRepository 创建仓储；secretKey 为密钥加密根密钥（任意长度）。
+// legacyRootKey 非空且不同于 secretKey 时，把库内以旧根密钥（原从 JWT 密钥
+// 派生）加密的条目一次性重加密迁移到新根密钥——JWT 轮换不再殃及插件密钥。
+func NewSQLiteRepository(db *sql.DB, secretKey, legacyRootKey string) (PluginRepository, error) {
 	aead, err := newAEAD(secretKey)
 	if err != nil {
 		return nil, err
 	}
-	return &sqliteRepo{db: db, aead: aead}, nil
+	r := &sqliteRepo{db: db, aead: aead}
+	if legacyRootKey != "" && legacyRootKey != secretKey {
+		if err := r.migrateFromLegacy(legacyRootKey); err != nil {
+			return nil, fmt.Errorf("migrate plugin secrets: %w", err)
+		}
+	}
+	return r, nil
+}
+
+// migrateFromLegacy 把旧根密钥加密的条目重加密为新密钥。
+// 解不开的条目跳过（既非旧密钥也非新密钥密文，多半是损坏数据），不阻塞启动。
+func (r *sqliteRepo) migrateFromLegacy(legacyRootKey string) error {
+	legacy, err := newAEAD(legacyRootKey)
+	if err != nil {
+		return err
+	}
+	rows, err := r.db.Query("SELECT plugin_name, key, encrypted_value FROM plugin_secrets")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type item struct{ plugin, key, enc string }
+	var pending []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.plugin, &it.key, &it.enc); err != nil {
+			return err
+		}
+		pending = append(pending, it)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	migrated := 0
+	for _, it := range pending {
+		sealed, err := base64.StdEncoding.DecodeString(it.enc)
+		if err != nil {
+			continue
+		}
+		ns := legacy.NonceSize()
+		if len(sealed) < ns {
+			continue
+		}
+		plain, err := legacy.Open(nil, sealed[:ns], sealed[ns:], []byte(it.plugin+"/"+it.key))
+		if err != nil {
+			continue // 新密钥密文或损坏数据
+		}
+		if err := r.SetSecret(context.Background(), it.plugin, it.key, string(plain)); err != nil {
+			return err
+		}
+		migrated++
+	}
+	return nil
 }
 
 func newAEAD(key string) (cipher.AEAD, error) {

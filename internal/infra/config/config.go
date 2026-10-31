@@ -35,6 +35,14 @@ type Config struct {
 	Logs         LogsConfig         `toml:"logs"`
 	Features     FeaturesConfig     `toml:"features"`
 	MobileDirect MobileDirectConfig `toml:"mobile_direct"`
+	Plugins      PluginConfig       `toml:"plugins"`
+}
+
+// PluginConfig 插件系统配置。SecretsKey 为插件密钥加密根密钥：
+// 独立于 jwt_secret（此前从 JWT 密钥派生，轮换 JWT 会让插件密钥全部
+// 静默失效）；空则首次启动自动生成并持久化。
+type PluginConfig struct {
+	SecretsKey string `toml:"secrets_key"`
 }
 
 // MobileDirectConfig 是移动端专用直连通道：独立端口 + 设备签名认证，
@@ -277,6 +285,10 @@ func (c *Config) mergeDefaults() bool {
 	}
 	if c.Auth.JWTSecret == "" {
 		c.Auth.JWTSecret = generateRandomSecret(32)
+		generated = true
+	}
+	if c.Plugins.SecretsKey == "" {
+		c.Plugins.SecretsKey = generateRandomSecret(32)
 		generated = true
 	}
 	if c.Server.Port == 0 {

@@ -75,7 +75,7 @@ func TestStartReturnsSyncErrorOnDuplicateKey(t *testing.T) {
 func TestConcurrencyLimitRejects(t *testing.T) {
 	m := NewManager(2)
 	release := make(chan struct{})
-	_, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error {
+	tk1, err := m.Start(context.Background(), "k1", Options{}, func(ctx context.Context) error {
 		<-release
 		return nil
 	})
@@ -90,7 +90,9 @@ func TestConcurrencyLimitRejects(t *testing.T) {
 		t.Fatal("expected concurrency limit rejection")
 	}
 	close(release)
-	waitDone(t, mustGet(t, m, "k1"))
+	// 用 Start 返回的任务指针等待，而非完成后再 Get——任务完成后会从 map
+	// 移除，mustGet 与清理存在竞态（偶发 "task not found"）
+	waitDone(t, tk1)
 	m.Cancel("k2")
 }
 

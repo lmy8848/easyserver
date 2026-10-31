@@ -54,6 +54,7 @@ type AuthService struct {
 	eventPublish func(name, source string, payload any) // 插件事件总线（可选，router 接线）
 	// ponytail: TOTP 设置期的待启用密钥放进程内存，重启即弃（本就不应跨重启保留）。
 	pendingSecrets sync.Map // userID(int64) -> secret(string)
+	backupCodeMu   sync.Map // userID(int64) -> *sync.Mutex，备用码消费串行化
 }
 
 // NewAuthService 构造认证服务。登录限制参数（最大尝试次数/锁定时长）运行时
@@ -434,7 +435,14 @@ func (s *AuthService) GenerateBackupCodes() ([]string, error) {
 }
 
 // VerifyBackupCode verifies and consumes a backup code.
+// 读-比对-摘除-写回包进 per-user 临界区：两个并发请求此前可同时通过
+// 同一枚码（一次性语义被 TOCTOU 双花打破）。
 func (s *AuthService) VerifyBackupCode(ctx context.Context, userID int64, code string) (bool, error) {
+	mu, _ := s.backupCodeMu.LoadOrStore(userID, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	defer m.Unlock()
+
 	backupCodesJSON, err := s.totpRepo.GetBackupCodes(ctx, userID)
 	if err != nil {
 		return false, err

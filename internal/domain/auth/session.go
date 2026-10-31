@@ -164,13 +164,22 @@ func (s *SessionService) CleanupExpiredSessions(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	inactiveCutoff := now.Add(-1 * time.Hour)
+	// 空闲清理用配置值（此前硬编码 1h，配置写 8h/24h 时管理员静置 1h 被强制
+	// 下线）；mobile/mobile-direct 豁免——其生命周期分别由 refresh 链与
+	// 15 分钟绝对过期控制，与 IsSessionValid 的口径一致
+	idle := s.store.Get().Auth.IdleTimeout.Duration()
+	var inactiveCutoff time.Time
+	idleCleanup := idle > 0
+	if idleCleanup {
+		inactiveCutoff = now.Add(-idle)
+	}
 	for token, sess := range s.sessions {
 		if sess.ExpiresAt.Before(now) {
 			delete(s.sessions, token)
 			continue
 		}
-		if sess.LoginAt.Before(inactiveCutoff) {
+		if idleCleanup && sess.ClientType != "mobile" && sess.ClientType != ClientTypeMobileDirect &&
+			sess.LoginAt.Before(inactiveCutoff) {
 			delete(s.sessions, token)
 		}
 	}

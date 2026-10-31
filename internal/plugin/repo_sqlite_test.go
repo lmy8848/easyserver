@@ -35,7 +35,7 @@ func testRepo(t *testing.T) (PluginRepository, *sql.DB) {
 			t.Fatal(err)
 		}
 	}
-	repo, err := NewSQLiteRepository(db, "test-root-key")
+	repo, err := NewSQLiteRepository(db, "test-root-key", "")
 	if err != nil {
 		t.Fatal(err)
 	}

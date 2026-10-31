@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"time"
 )
@@ -45,6 +46,25 @@ func Validate(cfg *Config, devMode bool) error {
 		if err := rejectOrWarn(devMode, true,
 			"JWT secret has no entropy (all same character)."); err != nil {
 			return err
+		}
+	}
+
+	if cfg.Plugins.SecretsKey == "" {
+		return errors.New("plugins.secrets_key is empty. It is auto-generated on first start - check file permissions")
+	}
+
+	// trusted_proxies：非法 CIDR 直接拒绝；显式信任所有代理（0.0.0.0/0、::/0）
+	// 等于把 ClientIP 交给客户端自报，限流/IP 白名单全部可绕，非 dev 拒绝启动
+	for _, p := range cfg.Server.TrustedProxies {
+		if p == "0.0.0.0/0" || p == "::/0" {
+			if err := rejectOrWarn(devMode, true,
+				"server.trusted_proxies trusts ALL proxies - IP-based rate limiting and IP whitelist can be bypassed by a spoofed X-Forwarded-For"); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, _, err := net.ParseCIDR(p); err != nil && net.ParseIP(p) == nil {
+			return fmt.Errorf("server.trusted_proxies entry %q is not a valid IP or CIDR", p)
 		}
 	}
 
