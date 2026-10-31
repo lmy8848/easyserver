@@ -462,7 +462,7 @@ func (h *AuditHandler) Export(c *gin.Context) (any, error) {
 			sanitizeCSVField(action),
 			sanitizeCSVField(auditType),
 			sanitizeCSVField(resource),
-			strings.ReplaceAll(detail, "\"", "\"\""),
+			sanitizeCSVField(strings.ReplaceAll(detail, "\"", "\"\"")),
 			sanitizeCSVField(ip),
 			createdAt)
 	}
