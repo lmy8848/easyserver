@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
-    "@codemirror/language": "^6.12.4",
+    "@codemirror/language": "^6.13.1",
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/theme-one-dark": "^6.1.3",
