@@ -17,6 +17,12 @@ export interface ServerSettingsProps {
   onRefresh: () => void;
 }
 
+function formatBuildTime(v?: string): string {
+  if (!v) return '-';
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? v : d.toLocaleString();
+}
+
 export default function ServerSettings({ settings, systemInfo, onRefresh }: ServerSettingsProps) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -394,6 +400,12 @@ export default function ServerSettings({ settings, systemInfo, onRefresh }: Serv
                 </Tag>
               )}
             </Space>
+          </Descriptions.Item>
+          <Descriptions.Item label="提交">{systemInfo?.commit || '-'}</Descriptions.Item>
+          <Descriptions.Item label="构建时间">{formatBuildTime(systemInfo?.build_time)}</Descriptions.Item>
+          <Descriptions.Item label="面板启动时间">{formatBuildTime(systemInfo?.started_at)}</Descriptions.Item>
+          <Descriptions.Item label="运行环境">
+            {systemInfo?.platform || '-'} · {systemInfo?.go_version || '-'}
           </Descriptions.Item>
         </Descriptions>
       </Card>

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -1014,8 +1015,13 @@ func (h *SettingsHandler) UpdateAlertRules(c *gin.Context) (any, error) {
 // GetSystemInfo returns system information
 func (h *SettingsHandler) GetSystemInfo(c *gin.Context) (any, error) {
 	return gin.H{
-		"version":  infra.DisplayVersion(),
-		"build_id": infra.BuildID,
+		"version":    infra.DisplayVersion(),
+		"build_id":   infra.BuildID,
+		"commit":     infra.CommitShort(),
+		"build_time": infra.BuildTimeUTC(),
+		"started_at": infra.StartedAt.Format(time.RFC3339),
+		"go_version": infra.GoVersion,
+		"platform":   runtime.GOOS + "/" + runtime.GOARCH,
 	}, nil
 }
 

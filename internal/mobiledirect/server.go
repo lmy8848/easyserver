@@ -25,10 +25,14 @@ type Server struct {
 	store    *Store
 	upstream *url.URL
 	// mint 为通过签名的设备铸造短期 JWT（由 api.Setup 注入，写入会话表）。
-	mint   func(ctx context.Context, userID int64) (string, time.Time, error)
-	replay *replayGuard
-	proxy  *httputil.ReverseProxy
-	srv    *http.Server
+	mint func(ctx context.Context, userID int64) (string, time.Time, error)
+	// 会话落库钩子（router 注入）：铸造的短期 JWT 按设备合并写入会话表
+	//（replace 用上一次铸造的令牌原位替换），会话管理列表据此展示直连设备
+	createSession  func(ctx context.Context, token string, userID int64) error
+	replaceSession func(ctx context.Context, oldToken, newToken string, userID int64) error
+	replay         *replayGuard
+	proxy          *httputil.ReverseProxy
+	srv            *http.Server
 
 	tokMu  sync.Mutex
 	tokens map[string]cachedToken
@@ -79,6 +83,15 @@ func NewServer(cfg config.MobileDirectConfig, store *Store, upstreamBase string,
 	}
 	s.proxy = proxy
 	return s, nil
+}
+
+// SetSessionHooks 注入直连会话落库钩子（须在 Apply 之前调用）。
+func (s *Server) SetSessionHooks(
+	create func(ctx context.Context, token string, userID int64) error,
+	replace func(ctx context.Context, oldToken, newToken string, userID int64) error,
+) {
+	s.createSession = create
+	s.replaceSession = replace
 }
 
 // Start 在独立端口上启动 TLS 监听。失败返回错误（由调用方决定是否禁用）。

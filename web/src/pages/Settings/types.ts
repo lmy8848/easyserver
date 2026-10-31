@@ -63,6 +63,11 @@ export interface Settings {
 export interface SystemInfo {
   version: string;
   build_id?: string;
+  commit?: string;
+  build_time?: string;
+  started_at?: string;
+  go_version?: string;
+  platform?: string;
 }
 
 export interface AlertRule {

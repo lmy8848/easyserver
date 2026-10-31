@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +22,66 @@ var Version = "dev"
 // Example: 0xd3a. Empty if not set (dev builds).
 // ldflags path: easyserver/internal/infra.BuildID
 var BuildID = ""
+
+// Commit 与 BuildTime 由构建注入（ldflags）；未注入时从 Go buildinfo 的
+// VCS 戳回退（go build 在 git 仓库内构建时自动携带），再缺则留空。
+// ldflags path: easyserver/internal/infra.Commit / .BuildTime
+var (
+	Commit    = ""
+	BuildTime = ""
+)
+
+// StartedAt 进程启动时间：判断"是不是刚部署重启过"最直接的依据。
+var StartedAt = time.Now()
+
+var (
+	buildInfoOnce   sync.Once
+	vcsCommit       string
+	vcsTime         string
+	buildInfoLoaded bool
+)
+
+// loadVCSStamp 从 debug.ReadBuildInfo 读 VCS 提交与构建时间（git 仓库内
+// go build 自动注入；git archive 等无 .git 构建则无此信息）。
+func loadVCSStamp() {
+	buildInfoOnce.Do(func() {
+		buildInfoLoaded = true
+		bi, ok := debug.ReadBuildInfo()
+		if !ok {
+			return
+		}
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				vcsCommit = s.Value
+			case "vcs.time":
+				vcsTime = s.Value
+			}
+		}
+	})
+}
+
+// CommitShort 返回短提交哈希（优先 ldflags，其次 VCS 戳）。
+func CommitShort() string {
+	loadVCSStamp()
+	c := Commit
+	if c == "" {
+		c = vcsCommit
+	}
+	if len(c) > 10 {
+		c = c[:10]
+	}
+	return c
+}
+
+// BuildTimeUTC 返回构建时间（优先 ldflags，其次 VCS 戳），RFC3339。
+func BuildTimeUTC() string {
+	loadVCSStamp()
+	if BuildTime != "" {
+		return BuildTime
+	}
+	return vcsTime
+}
 
 // GoVersion is the Go toolchain version used to build the binary.
 var GoVersion = runtime.Version()

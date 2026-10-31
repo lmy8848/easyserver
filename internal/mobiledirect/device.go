@@ -224,11 +224,26 @@ func (s *Server) tokenForDevice(ctx context.Context, deviceID string, userID int
 	if t, ok := s.tokens[deviceID]; ok && time.Now().Before(t.exp.Add(-2*time.Minute)) {
 		return t.token, nil
 	}
+	var prev string
+	if t, ok := s.tokens[deviceID]; ok {
+		prev = t.token
+	}
 	tok, exp, err := s.mint(ctx, userID)
 	if err != nil {
 		return "", err
 	}
 	s.tokens[deviceID] = cachedToken{token: tok, exp: exp}
+
+	// 按设备合并：同设备已有会话行则原位替换（列表里一台设备一行），
+	// 首次铸造或替换失败退化为新建
+	switch {
+	case s.replaceSession != nil && prev != "":
+		if err := s.replaceSession(ctx, prev, tok, userID); err != nil && s.createSession != nil {
+			_ = s.createSession(ctx, tok, userID)
+		}
+	case s.createSession != nil:
+		_ = s.createSession(ctx, tok, userID)
+	}
 	return tok, nil
 }
 

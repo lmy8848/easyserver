@@ -31,6 +31,11 @@ type Manager struct {
 	mint     MintFunc
 	upstream string
 
+	// 会话落库钩子（可选）：铸造的短期 JWT 按设备合并写入会话表，
+	// 会话管理列表据此展示直连设备
+	createSession  func(ctx context.Context, token string, userID int64) error
+	replaceSession func(ctx context.Context, oldToken, newToken string, userID int64) error
+
 	mu      sync.Mutex
 	srv     *Server
 	lastErr string
@@ -38,6 +43,15 @@ type Manager struct {
 
 func NewManager(store *Store, upstream string, mint MintFunc) *Manager {
 	return &Manager{store: store, upstream: upstream, mint: mint}
+}
+
+// SetSessionHooks 注入会话落库钩子（须在 Apply 之前调用）。
+func (m *Manager) SetSessionHooks(
+	create func(ctx context.Context, token string, userID int64) error,
+	replace func(ctx context.Context, oldToken, newToken string, userID int64) error,
+) {
+	m.createSession = create
+	m.replaceSession = replace
 }
 
 // Apply 按配置启动/重启/停止直连监听（配置变更后调用）。
@@ -60,6 +74,9 @@ func (m *Manager) Apply(cfg config.MobileDirectConfig) error {
 		return err
 	}
 	srv, err := NewServer(cfg, m.store, m.upstream, m.mint)
+	if m.createSession != nil || m.replaceSession != nil {
+		srv.SetSessionHooks(m.createSession, m.replaceSession)
+	}
 	if err != nil {
 		m.lastErr = err.Error()
 		return err

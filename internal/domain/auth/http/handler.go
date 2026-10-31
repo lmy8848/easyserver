@@ -724,6 +724,11 @@ func (h *AuthHandler) KickSession(c *gin.Context) (any, error) {
 	if targetID == "" {
 		return nil, errx.NotFound("会话不存在")
 	}
+	for _, sess := range sessions {
+		if sess.ID == targetID && sess.ClientType == auth.ClientTypeMobileDirect {
+			return nil, errx.BadRequest("直连会话由设备签名自动续期，请在「移动端直连」设置中吊销设备")
+		}
+	}
 
 	if err := h.sessionService.RemoveSessionByID(c.Request.Context(), userID, targetID); err != nil {
 		return nil, errx.Internal("删除会话失败")

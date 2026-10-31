@@ -143,11 +143,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 		if terr != nil {
 			return "", time.Time{}, terr
 		}
-		expires := time.Now().Add(ttl)
-		if serr := sessionSvc.CreateSession(mctx, tok, userID, "mobile-direct", "device-signature", "mobile-direct", expires); serr != nil {
-			return "", time.Time{}, serr
-		}
-		return tok, expires, nil
+		return tok, time.Now().Add(ttl), nil
 	}
 	panelSchemeM := "http"
 	if cfg.Server.TLS.Enabled {
@@ -155,6 +151,16 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	}
 	refreshSvc := auth.NewRefreshService(db)
 	mdManager := mobiledirect.NewManager(mdStore, fmt.Sprintf("%s://127.0.0.1:%d", panelSchemeM, cfg.Server.Port), mintMobileToken)
+	// 直连会话落库：按设备合并为一行（replace 用上次铸造的令牌原位替换），
+	// 会话管理列表据此展示"移动端直连"在线设备
+	mdManager.SetSessionHooks(
+		func(hctx context.Context, token string, huserID int64) error {
+			return sessionSvc.CreateSession(hctx, token, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, time.Now().Add(15*time.Minute))
+		},
+		func(hctx context.Context, oldToken, newToken string, huserID int64) error {
+			return sessionSvc.ReplaceSession(hctx, oldToken, newToken, huserID, "mobile-direct", "device-signature", auth.ClientTypeMobileDirect, time.Now().Add(15*time.Minute))
+		},
+	)
 
 	qrLoginService := auth.NewQRLoginService(store, sessionSvc)
 
