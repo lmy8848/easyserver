@@ -107,3 +107,40 @@ jobs:
         # pnpm build = `tsc --noEmit && vite build`，tsc 部分已在 Type check step 跑过，
         # 这里只做打包，避免重复类型检查拖慢 CI。
         run: pnpm exec vite build
+
+  revy-self-review:
+    name: revy self-review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Checkout revy
+        uses: actions/checkout@v7
+        with:
+          repository: lmy8848/revy
+          path: revy-tool
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+          cache-dependency-path: |
+            revy-tool/go.sum
+            go.sum
+
+      - name: Build revy
+        run: cd revy-tool && go build -o ../revy .
+
+      - name: Run self-review
+        run: ./revy run . --format json > revy-report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: revy-report
+          path: |
+            revy-report.json
+            .review/reports/*.html
+          retention-days: 14
