@@ -132,6 +132,12 @@ jobs:
       - name: Build revy
         run: cd revy-tool && go build -o ../revy .
 
+      # EasyServer 的 embed.go 需要 internal/api/web/dist；后端 job 的 stub
+      # 在别的 job 不共享，这里单独建（空目录 embed 仍报 no matching files，
+      # 必须放占位文件）
+      - name: Stub web/dist for revy
+        run: mkdir -p internal/api/web/dist && echo '<html></html>' > internal/api/web/dist/index.html
+
       - name: Run self-review
         run: ./revy run . --format json > revy-report.json
 
