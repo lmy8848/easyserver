@@ -166,7 +166,7 @@ type recorder struct {
 }
 
 func newRecorder(w io.Writer) *recorder { return &recorder{w: w, h: http.Header{}} }
-func (r *recorder) Header() http.Header  { return r.h }
+func (r *recorder) Header() http.Header { return r.h }
 func (r *recorder) Write(b []byte) (int, error) {
 	if r.code == 0 {
 		r.code = 200

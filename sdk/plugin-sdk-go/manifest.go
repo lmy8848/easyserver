@@ -17,8 +17,8 @@ type Manifest struct {
 	Author                string `yaml:"author"`
 	Description           string `yaml:"description"`
 	Runtime               struct {
-		Exec    string `yaml:"exec"`
-		Socket  string `yaml:"socket"`
+		Exec   string `yaml:"exec"`
+		Socket string `yaml:"socket"`
 	} `yaml:"runtime"`
 	Permissions []string `yaml:"permissions"`
 }

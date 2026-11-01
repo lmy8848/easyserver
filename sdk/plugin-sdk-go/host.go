@@ -3,9 +3,9 @@ package sdk
 import (
 	"bytes"
 	"context"
-	"io"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
