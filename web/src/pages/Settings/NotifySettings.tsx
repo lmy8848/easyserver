@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Card, Alert, Form, Input, Switch, Button, Space, message,
+  Card, Alert, Form, Input, InputNumber, Switch, Button, Space, message,
 } from 'antd';
 import { settingsApi } from '../../services/settings';
 import type { Settings } from './types';
@@ -14,14 +14,69 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
 
+  const [smtpForm] = Form.useForm();
+  const [smtpSaving, setSmtpSaving] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+
   useEffect(() => {
     if (settings?.notify) {
       form.setFieldsValue({
         enabled: settings.notify.enabled,
         webhook_url: settings.notify.webhook_url,
       });
+      smtpForm.setFieldsValue({
+        email_enabled: settings.notify.email_enabled,
+        smtp_host: settings.notify.smtp_host,
+        smtp_port: settings.notify.smtp_port || 587,
+        smtp_username: settings.notify.smtp_username,
+        smtp_from: settings.notify.smtp_from,
+        smtp_to: (settings.notify.smtp_to || []).join(', '),
+      });
     }
-  }, [settings, form]);
+  }, [settings, form, smtpForm]);
+
+  const smtpPayload = (values: Record<string, unknown>) => ({
+    email_enabled: !!values['email_enabled'],
+    smtp_host: String(values['smtp_host'] || ''),
+    smtp_port: Number(values['smtp_port'] || 587),
+    smtp_username: String(values['smtp_username'] || ''),
+    smtp_password: String(values['smtp_password'] || ''), // 留空=保持原密码
+    smtp_from: String(values['smtp_from'] || ''),
+    smtp_to: String(values['smtp_to'] || '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean),
+  });
+
+  const handleSaveSmtp = async () => {
+    try {
+      const values = await smtpForm.validateFields();
+      setSmtpSaving(true);
+      await settingsApi.updateNotify(smtpPayload(values));
+      // 保存成功后清空密码输入框，避免下次保存把旧密码重复提交
+      smtpForm.setFieldValue('smtp_password', '');
+      message.success('邮件通知配置已保存');
+      onRefresh();
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      setSmtpSaving(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    try {
+      const values = await smtpForm.validateFields();
+      setTestingEmail(true);
+      await settingsApi.updateNotify(smtpPayload(values));
+      await settingsApi.testEmail();
+      message.success('测试邮件已发送，请检查收件箱');
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '测试邮件发送失败');
+    } finally {
+      setTestingEmail(false);
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -111,6 +166,70 @@ export default function NotifySettings({ settings, onRefresh }: NotifySettingsPr
         </Form.Item>
       </Form>
 
+
+      <Card
+        type="inner"
+        title="邮件通知（SMTP）"
+        style={{ marginTop: 16 }}
+      >
+        <Form form={smtpForm} layout="vertical">
+          <Form.Item
+            name="email_enabled"
+            label="启用邮件通知"
+            extra="登录与告警同时发送到邮箱；与 Webhook 相互独立"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Space style={{ display: 'flex' }} align="start">
+            <Form.Item
+              name="smtp_host"
+              label="SMTP 主机"
+              rules={[{ required: false }]}
+              style={{ flex: 1, minWidth: 240 }}
+            >
+              <Input placeholder="smtp.example.com" />
+            </Form.Item>
+            <Form.Item name="smtp_port" label="端口" style={{ width: 140 }}>
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} placeholder="587" />
+            </Form.Item>
+          </Space>
+          <Space style={{ display: 'flex' }} align="start">
+            <Form.Item name="smtp_username" label="用户名" style={{ flex: 1 }}>
+              <Input placeholder="noreply@example.com" />
+            </Form.Item>
+            <Form.Item
+              name="smtp_password"
+              label="密码 / 授权码"
+              style={{ flex: 1 }}
+              extra={settings?.notify?.smtp_has_password ? '已配置，留空则保持不变' : undefined}
+            >
+              <Input.Password placeholder={settings?.notify?.smtp_has_password ? '••••••' : 'SMTP 密码或授权码'} />
+            </Form.Item>
+          </Space>
+          <Form.Item name="smtp_from" label="发件人" extra="留空则使用用户名">
+            <Input placeholder="EasyServer <noreply@example.com>" />
+          </Form.Item>
+          <Form.Item
+            name="smtp_to"
+            label="收件人"
+            extra="多个地址用英文逗号分隔"
+            rules={[{ required: false }]}
+          >
+            <Input placeholder="admin@example.com, ops@example.com" />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button type="primary" onClick={handleSaveSmtp} loading={smtpSaving}>
+                保存邮件配置
+              </Button>
+              <Button onClick={handleTestEmail} loading={testingEmail}>
+                测试邮件
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Card>
       <Card
         type="inner"
         title="发送自定义通知"

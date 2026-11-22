@@ -634,7 +634,17 @@ export interface AppSettings {
   auth: { session_timeout: number; idle_timeout: number; max_login_attempts: number; lockout_duration: number; rate_limit: number; rate_interval: number; login_rate_limit: number; login_rate_interval: number; allow_multi_session: boolean; ip_whitelist: string[]; session_cleanup_interval: number };
   monitor: { history_retention: number; collect_interval: number };
   audit: { retention_days: number };
-  notify: { enabled: boolean; webhook_url: string };
+  notify: {
+    enabled: boolean;
+    webhook_url: string;
+    email_enabled?: boolean;
+    smtp_host?: string;
+    smtp_port?: number;
+    smtp_username?: string;
+    smtp_from?: string;
+    smtp_to?: string[];
+    smtp_has_password?: boolean;
+  };
   features: { fim: boolean; show_plugin_manual: boolean };
   logs: { level: string; path: string; format: string; max_size_mb: number; max_files: number };
 }

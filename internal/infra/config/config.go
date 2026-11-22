@@ -70,6 +70,15 @@ type FeaturesConfig struct {
 type NotifyConfig struct {
 	WebhookURL string `toml:"webhook_url"` // 钉钉/飞书/企微 Webhook URL
 	Enabled    bool   `toml:"enabled"`
+
+	// SMTP 邮件渠道：与 webhook 独立开关，便于没有机器人的环境把告警落到邮箱。
+	EmailEnabled bool     `toml:"email_enabled"`
+	SMTPHost     string   `toml:"smtp_host"`
+	SMTPPort     int      `toml:"smtp_port"` // 465=隐式 TLS，其余走 STARTTLS
+	SMTPUsername string   `toml:"smtp_username"`
+	SMTPPassword string   `toml:"smtp_password"`
+	SMTPFrom     string   `toml:"smtp_from"`
+	SMTPTo       []string `toml:"smtp_to"`
 }
 
 type ServerConfig struct {
@@ -93,6 +102,9 @@ type ServerConfig struct {
 	AssetsRateLimit    int             `toml:"assets_rate_limit"`
 	AssetsRateInterval Duration        `toml:"assets_rate_interval"`
 	MaxUploadSize      int64           `toml:"max_upload_size"` // bytes, 0 = use default (512MB)
+	// MetricsToken 为空时 /metrics 仅允许本机 loopback 访问；设置后要求
+	// Authorization: Bearer <token>，便于外部 Prometheus 抓取。
+	MetricsToken string `toml:"metrics_token"`
 }
 
 // TurnstileConfig holds Cloudflare Turnstile settings.
@@ -401,5 +413,15 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cfg.Path, data, 0600)
+	// 先写临时文件再原子替换，并强制 0600：配置里有 jwt_secret / SMTP 密码，
+	// 默认 umask 会留下 0644，本机其他用户可读。
+	tmp := cfg.Path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, cfg.Path)
 }

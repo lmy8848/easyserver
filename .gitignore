@@ -67,3 +67,8 @@ tmp/
 
 .scratch/
 .qoder/
+# 本地自审工件与临时日志（不随代码提交）
+.review/
+*.log
+aqtinstall.log
+plugins/tunnel-frp/tunnel-frp

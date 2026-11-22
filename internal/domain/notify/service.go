@@ -141,32 +141,55 @@ func (s *Service) SendCustom(ctx context.Context, title, content string) error {
 	return nil
 }
 
-// NotifyLogin sends a login notification via webhook.
+// NotifyLogin sends a login notification via webhook and email (independent switches).
 func (s *Service) NotifyLogin(event LoginEvent) {
 	url, enabled := s.webhookConfig()
-	if !enabled || url == "" {
+	emailEnabled := s.emailConfig().EmailEnabled
+	if (!enabled || url == "") && !emailEnabled {
 		return
 	}
 
-	infra.Go(func() {
-		if err := s.sendWebhook(event); err != nil {
-			log.Printf("notify: failed to send login notification: %v", err)
-		}
-	})
+	msg := s.formatMessage(event)
+	if enabled && url != "" {
+		infra.Go(func() {
+			if err := s.sendWebhook(event); err != nil {
+				log.Printf("notify: failed to send login notification: %v", err)
+			}
+		})
+	}
+	if emailEnabled {
+		infra.Go(func() {
+			if err := s.SendEmail(context.Background(), "EasyServer login notification", msg); err != nil {
+				log.Printf("notify: failed to send login email: %v", err)
+			}
+		})
+	}
 }
 
-// NotifyAlert sends an alert notification via webhook.
+// NotifyAlert sends an alert notification via webhook and email (independent switches).
 func (s *Service) NotifyAlert(event AlertEvent) {
 	url, enabled := s.webhookConfig()
-	if !enabled || url == "" {
+	emailEnabled := s.emailConfig().EmailEnabled
+	if (!enabled || url == "") && !emailEnabled {
 		return
 	}
 
-	infra.Go(func() {
-		if err := s.sendAlertWebhook(event); err != nil {
-			log.Printf("notify: failed to send alert notification: %v", err)
-		}
-	})
+	alertMsg := fmt.Sprintf("EasyServer alert \nrule: %s\nmetric: %s\nvalue: %.1f%%\nthreshold: %.1f%%\nduration: %ds\ntime: %s",
+		event.RuleName, event.Metric, event.Value, event.Threshold, event.Duration, event.Timestamp)
+	if enabled && url != "" {
+		infra.Go(func() {
+			if err := s.sendAlertWebhook(event); err != nil {
+				log.Printf("notify: failed to send alert notification: %v", err)
+			}
+		})
+	}
+	if emailEnabled {
+		infra.Go(func() {
+			if err := s.SendEmail(context.Background(), "EasyServer monitoring alert", alertMsg); err != nil {
+				log.Printf("notify: failed to send alert email: %v", err)
+			}
+		})
+	}
 }
 
 func (s *Service) sendWebhook(event LoginEvent) error {

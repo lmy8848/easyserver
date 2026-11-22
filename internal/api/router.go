@@ -15,6 +15,7 @@ import (
 	audithttp "easyserver/internal/domain/audit/http"
 	"easyserver/internal/domain/auth"
 	authhttp "easyserver/internal/domain/auth/http"
+	backuphttp "easyserver/internal/domain/backup/http"
 	"easyserver/internal/domain/container"
 	containerhttp "easyserver/internal/domain/container/http"
 	"easyserver/internal/domain/cron"
@@ -51,6 +52,7 @@ import (
 	"easyserver/internal/infra"
 	"easyserver/internal/infra/config"
 	"easyserver/internal/infra/database"
+	"easyserver/internal/infra/metrics"
 	"easyserver/internal/infra/mise"
 	"easyserver/internal/mobiledirect"
 	"easyserver/internal/plugin"
@@ -149,6 +151,22 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	if cfg.Server.TLS.Enabled {
 		panelSchemeM = "https"
 	}
+	// 指标：活跃会话数（30s 刷新一次，代价可忽略）
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if sessions, err := sessionSvc.GetActiveSessions(ctx); err == nil {
+					metrics.Default.SetActiveSessions(int64(len(sessions)))
+				}
+			}
+		}
+	}()
+
 	refreshSvc := auth.NewRefreshService(db)
 	mdManager := mobiledirect.NewManager(mdStore, fmt.Sprintf("%s://127.0.0.1:%d", panelSchemeM, cfg.Server.Port), mintMobileToken)
 	// 直连会话落库：按设备合并为一行（replace 用上次铸造的令牌原位替换），
@@ -253,6 +271,8 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	terminalhttp.RegisterRoutes(g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo, auditSvc)
+	backuphttp.RegisterRoutes(g.Protected, store, db)
+
 	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig, mdManager)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)
 	envconfighttp.RegisterRoutes(g.Protected, envConfigService)
@@ -432,6 +452,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 	ipWhitelist := middleware.NewIPWhitelist(cfg.Auth.IPWhitelist)
 	middleware.RegisterIPWhitelist(ipWhitelist)
 
+	e.Use(metrics.Default.Middleware())
 	e.Use(middleware.RequestIDMiddleware(),
 		middleware.RequestLoggerMiddleware(), middleware.PanicRecovery(),
 		middleware.ErrorHandler(),
@@ -441,6 +462,7 @@ func newEngine(cfg *config.Config) *gin.Engine {
 		middleware.IPWhitelistMiddleware(ipWhitelist),
 	)
 
+	e.GET("/metrics", metrics.Default.Handler(cfg.Server.MetricsToken))
 	e.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
