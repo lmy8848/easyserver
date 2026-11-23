@@ -33,10 +33,11 @@ import (
 type Handler struct {
 	store *config.Store
 	db    *sql.DB
+	sig   *infra.Signal
 }
 
-func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, db *sql.DB) {
-	h := &Handler{store: store, db: db}
+func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, db *sql.DB, sig *infra.Signal) {
+	h := &Handler{store: store, db: db, sig: sig}
 	// 导出大包耗时远超默认 30s 读写超时，单独放宽。
 	slow := protected.Group("",
 		middleware.WriteTimeout(10*time.Minute),
@@ -44,6 +45,8 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, db *sql.DB)
 	)
 	slow.GET("/backup/export", httpx.H(h.Export))
 	slow.POST("/backup/inspect", httpx.H(h.Inspect))
+	// 恢复要读 200MB 上传并解包，同样走放宽超时的分组。
+	slow.POST("/backup/restore", httpx.H(h.Restore))
 }
 
 type manifest struct {

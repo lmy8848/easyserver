@@ -271,7 +271,7 @@ func Setup(store *config.Store, sig *infra.Signal) (http.Handler, func()) {
 	terminalhttp.RegisterRoutes(g.WS, terminalManager, cfg.Auth.JWTSecret, auditSvc, cfg.Server.AllowedOrigins, cfg.Server.DevMode)
 	filemanagerhttp.RegisterRoutes(g.Protected, g.File, fileManager, g.maxUploadSize)
 	audithttp.RegisterRoutes(g.Protected, db, auditRepo, auditSvc)
-	backuphttp.RegisterRoutes(g.Protected, store, db)
+	backuphttp.RegisterRoutes(g.Protected, store, db, sig)
 
 	settingshttp.RegisterRoutes(g.Protected, store, alertService, monitorSvc, sig, mdManager)
 	runtimeenvhttp.RegisterRoutes(g.Protected.Group("", middleware.WriteTimeout(10*time.Minute)), runtimeService, packageManagerService, mirrorService)

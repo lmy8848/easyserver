@@ -1,5 +1,17 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Descriptions, Modal, Space, Typography, Upload, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Divider,
+  Modal,
+  Popconfirm,
+  Space,
+  Typography,
+  Upload,
+  message,
+} from 'antd';
 import { CloudDownloadOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import api from '../../services/client';
 
@@ -15,6 +27,29 @@ export default function BackupCard() {
   const [inspecting, setInspecting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [info, setInfo] = useState<InspectInfo | null>(null);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoring, setRestoring] = useState(false);
+
+  const handleRestore = async () => {
+    if (!restoreFile) return;
+    setRestoring(true);
+    try {
+      const form = new FormData();
+      form.append('file', restoreFile);
+      form.append('confirm', 'RESTORE');
+      const res = await api.post('/backup/restore', form);
+      const data = res.data?.data as { pre_snapshot?: string; skipped?: string[] } | undefined;
+      message.success('恢复已应用，面板将在数秒后重启');
+      if (data?.pre_snapshot) {
+        message.info(`恢复前快照：${data.pre_snapshot}`);
+      }
+      setRestoreFile(null);
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : '恢复失败');
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   const handleInspect = async (file: File) => {
     setInspecting(true);
@@ -129,8 +164,46 @@ export default function BackupCard() {
           </Space>
         )}
       </Modal>
+      <Divider />
+      <Typography.Text strong style={{ color: '#f87171' }}>
+        恢复备份（危险操作）
+      </Typography.Text>
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 4 }}>
+        用备份包覆盖当前配置与数据库。执行前会自动生成「恢复前快照」并保留旧文件为 .bak-时间戳，
+        完成后面板会热重启。站点/插件目录本次不覆盖。
+      </Typography.Paragraph>
+      <Space wrap>
+        <Upload
+          accept=".gz,.tar.gz"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            setRestoreFile(file as File);
+            return false;
+          }}
+        >
+          <Button icon={<UploadOutlined />}>{restoreFile ? '重新选择备份包' : '选择恢复包'}</Button>
+        </Upload>
+        {restoreFile && <Typography.Text>{restoreFile.name}</Typography.Text>}
+        <Popconfirm
+          title="确认用该备份覆盖当前面板数据？"
+          description="将替换配置与数据库并重启面板，建议先预检备份包。"
+          okText="确认恢复"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
+          onConfirm={() => void handleRestore()}
+        >
+          <Button
+            danger
+            icon={<CloudDownloadOutlined />}
+            loading={restoring}
+            disabled={!restoreFile}
+          >
+            恢复备份
+          </Button>
+        </Popconfirm>
+      </Space>
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
-        <CloudDownloadOutlined /> 导入/恢复功能将先做预检与二次确认，再替换数据并自动回滚。
+        <CloudDownloadOutlined /> 恢复只支持本面板导出的备份包（manifest 校验通过）；站点/插件需人工迁移。
       </Typography.Paragraph>
     </Card>
   );
