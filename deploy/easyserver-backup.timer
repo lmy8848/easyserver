@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily EasyServer panel backup
+
+[Timer]
+# 每天 03:30 本地时间；Persistent 保证关机错过的备份在开机后补跑。
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=600
+Unit=easyserver-backup.service
+
+[Install]
+WantedBy=timers.target

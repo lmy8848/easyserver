@@ -117,6 +117,11 @@ func (h *Handler) Export(c *gin.Context) (any, error) {
 
 // buildArchive 把内容写入 out（tar.gz），返回非致命告警。
 func (h *Handler) buildArchive(ctx context.Context, out io.Writer, tmpDir string, includes map[string]bool) ([]string, error) {
+	return BuildArchive(ctx, h.store, h.db, out, tmpDir, includes)
+}
+
+// BuildArchive 是 buildArchive 的包级入口：CLI（定时备份）与 HTTP 导出共用同一套打包逻辑。
+func BuildArchive(ctx context.Context, store *config.Store, db *sql.DB, out io.Writer, tmpDir string, includes map[string]bool) ([]string, error) {
 	gz := gzip.NewWriter(out)
 	tw := tar.NewWriter(gz)
 	warnings := []string{}
@@ -127,7 +132,7 @@ func (h *Handler) buildArchive(ctx context.Context, out io.Writer, tmpDir string
 	}
 
 	if includes["config"] {
-		path := h.store.Get().Path
+		path := store.Get().Path
 		if path == "" {
 			warnings = append(warnings, "配置路径未知，已跳过 config.toml")
 		} else if err := addFile(tw, "config.toml", path); err != nil {
@@ -135,7 +140,7 @@ func (h *Handler) buildArchive(ctx context.Context, out io.Writer, tmpDir string
 		}
 	}
 	if includes["db"] {
-		if err := h.addDatabase(ctx, tw, tmpDir); err != nil {
+		if err := addDatabaseSnapshot(ctx, tw, tmpDir, db); err != nil {
 			return nil, fmt.Errorf("备份数据库: %w", err)
 		}
 	}
@@ -168,11 +173,11 @@ func (h *Handler) buildArchive(ctx context.Context, out io.Writer, tmpDir string
 	return warnings, nil
 }
 
-// addDatabase 用 VACUUM INTO 生成一致快照后写入归档。
+// addDatabaseSnapshot 用 VACUUM INTO 生成一致快照后写入归档。
 // 复用面板现有连接池（带 busy_timeout），避免新连接立刻撞 "database is locked"。
-func (h *Handler) addDatabase(ctx context.Context, tw *tar.Writer, tmpDir string) error {
+func addDatabaseSnapshot(ctx context.Context, tw *tar.Writer, tmpDir string, db *sql.DB) error {
 	snapshot := filepath.Join(tmpDir, "snapshot.db")
-	if _, err := h.db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
+	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
 		return err
 	}
 	return addFile(tw, "data/easyserver.db", snapshot)
