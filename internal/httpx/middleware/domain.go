@@ -22,8 +22,9 @@ func DomainRedirectMiddleware(domain string, forceDomain bool) gin.HandlerFunc {
 			return
 		}
 
-		// Skip health check
-		if c.Request.URL.Path == "/health" {
+		// Skip health check 与 /metrics（后者自带 loopback/token 鉴权，
+		// 本机 Prometheus 抓取时不应被强制跳转到域名）
+		if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/metrics" {
 			c.Next()
 			return
 		}

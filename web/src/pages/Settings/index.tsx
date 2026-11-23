@@ -19,6 +19,7 @@ import FeatureSettings from './FeatureSettings';
 import AlertRulesForm from './AlertRulesForm';
 import LogSettings from './LogSettings';
 import MobileDirectSettings from './MobileDirectSettings';
+import BackupCard from './BackupCard';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useTab('server');
@@ -68,11 +69,14 @@ export default function SettingsPage() {
             key: 'server',
             label: <span><SettingOutlined /> 服务器</span>,
             children: (
-              <ServerSettings
-                settings={settings}
-                systemInfo={systemInfo}
-                onRefresh={fetchSettings}
-              />
+              <>
+                <ServerSettings
+                  settings={settings}
+                  systemInfo={systemInfo}
+                  onRefresh={fetchSettings}
+                />
+                <BackupCard />
+              </>
             ),
           },
           {

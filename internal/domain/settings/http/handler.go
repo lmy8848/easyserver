@@ -136,6 +136,14 @@ func (h *SettingsHandler) GetSettings(c *gin.Context) (any, error) {
 		"notify": gin.H{
 			"enabled":     cfg.Notify.Enabled,
 			"webhook_url": webhookURL,
+			// 邮件渠道：密码永不回显，只回传"是否已配置"，避免泄漏
+			"email_enabled":     cfg.Notify.EmailEnabled,
+			"smtp_host":         cfg.Notify.SMTPHost,
+			"smtp_port":         cfg.Notify.SMTPPort,
+			"smtp_username":     cfg.Notify.SMTPUsername,
+			"smtp_from":         cfg.Notify.SMTPFrom,
+			"smtp_to":           cfg.Notify.SMTPTo,
+			"smtp_has_password": cfg.Notify.SMTPPassword != "",
 		},
 		"features": gin.H{
 			"fim":                cfg.Features.FIM,
@@ -693,11 +701,34 @@ func validateWebhookURL(rawURL string) error {
 // UpdateNotifyConfig updates notification configuration
 func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) (any, error) {
 	req, err := httpx.BindJSON[struct {
-		Enabled    *bool   `json:"enabled"`
-		WebhookURL *string `json:"webhook_url"`
+		Enabled           *bool     `json:"enabled"`
+		WebhookURL        *string   `json:"webhook_url"`
+		EmailEnabled      *bool     `json:"email_enabled"`
+		SMTPHost          *string   `json:"smtp_host"`
+		SMTPPort          *int      `json:"smtp_port"`
+		SMTPUsername      *string   `json:"smtp_username"`
+		SMTPPassword      *string   `json:"smtp_password"`
+		SMTPFrom          *string   `json:"smtp_from"`
+		SMTPTo            *[]string `json:"smtp_to"`
+		ClearSMTPPassword bool      `json:"clear_smtp_password"`
 	}](c)
 	if err != nil {
 		return nil, err
+	}
+
+	// 校验：端口范围、收件人非空、Webhook 掩码值不允许写回
+	if req.SMTPPort != nil && (*req.SMTPPort < 0 || *req.SMTPPort > 65535) {
+		return nil, errx.BadRequest("SMTP 端口必须在 1 到 65535 之间")
+	}
+	if req.SMTPTo != nil {
+		for _, rcpt := range *req.SMTPTo {
+			if strings.TrimSpace(rcpt) == "" {
+				return nil, errx.BadRequest("收件人不能为空项")
+			}
+		}
+	}
+	if req.WebhookURL != nil && strings.Contains(*req.WebhookURL, "/***") {
+		return nil, errx.BadRequest("Webhook 地址是掩码回显值，请填写完整地址")
 	}
 
 	middleware.AuditSummary(c, "更新通知配置")
@@ -715,6 +746,36 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) (any, error) {
 		if req.WebhookURL != nil {
 			cfg.Notify.WebhookURL = strings.TrimSpace(*req.WebhookURL)
 		}
+		if req.EmailEnabled != nil {
+			cfg.Notify.EmailEnabled = *req.EmailEnabled
+		}
+		if req.SMTPHost != nil {
+			cfg.Notify.SMTPHost = strings.TrimSpace(*req.SMTPHost)
+		}
+		if req.SMTPPort != nil {
+			cfg.Notify.SMTPPort = *req.SMTPPort
+		}
+		if req.SMTPUsername != nil {
+			cfg.Notify.SMTPUsername = strings.TrimSpace(*req.SMTPUsername)
+		}
+		// 密码留空表示"保持不变"（前端不回显密码）；显式清除用 clear 标记
+		if req.ClearSMTPPassword {
+			cfg.Notify.SMTPPassword = ""
+		} else if req.SMTPPassword != nil && *req.SMTPPassword != "" {
+			cfg.Notify.SMTPPassword = *req.SMTPPassword
+		}
+		if req.SMTPFrom != nil {
+			cfg.Notify.SMTPFrom = strings.TrimSpace(*req.SMTPFrom)
+		}
+		if req.SMTPTo != nil {
+			to := make([]string, 0, len(*req.SMTPTo))
+			for _, a := range *req.SMTPTo {
+				if s := strings.TrimSpace(a); s != "" {
+					to = append(to, s)
+				}
+			}
+			cfg.Notify.SMTPTo = to
+		}
 	})
 
 	// Save to config file
@@ -723,6 +784,19 @@ func (h *SettingsHandler) UpdateNotifyConfig(c *gin.Context) (any, error) {
 	}
 
 	return gin.H{"message": "通知配置已更新"}, nil
+}
+
+// TestEmail 发送测试邮件（设置页按钮）。错误原样返回，便于定位 SMTP 问题。
+func (h *SettingsHandler) TestEmail(c *gin.Context) (any, error) {
+	middleware.AuditSummary(c, "测试邮件通知")
+	cfg := h.store.Get()
+	if cfg.Notify.SMTPHost == "" || len(cfg.Notify.SMTPTo) == 0 {
+		return nil, errx.BadRequest("请先配置 SMTP 主机与收件人")
+	}
+	if err := notify.NewService(h.store).TestEmail(); err != nil {
+		return nil, errx.Internal("测试邮件发送失败: %w", err)
+	}
+	return gin.H{"message": "测试邮件已发送"}, nil
 }
 
 // TestWebhook sends a test notification to the configured webhook
@@ -1077,6 +1151,7 @@ func RegisterRoutes(protected *gin.RouterGroup, store *config.Store, alertServic
 	protected.PUT("/settings/features", httpx.H(handler.UpdateFeaturesConfig))
 	protected.PUT("/settings/logs", httpx.H(handler.UpdateLogsConfig))
 	protected.POST("/settings/notify/test", httpx.H(handler.TestWebhook))
+	protected.POST("/settings/notify/test-email", httpx.H(handler.TestEmail))
 	protected.POST("/settings/notify/send", httpx.H(handler.SendCustomNotification))
 	protected.GET("/alerts/rules", httpx.H(handler.GetAlertRules))
 	protected.PUT("/alerts/rules", httpx.H(handler.UpdateAlertRules))

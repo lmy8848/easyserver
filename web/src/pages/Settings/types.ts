@@ -46,6 +46,13 @@ export interface Settings {
   notify: {
     enabled: boolean;
     webhook_url: string;
+    email_enabled?: boolean;
+    smtp_host?: string;
+    smtp_port?: number;
+    smtp_username?: string;
+    smtp_from?: string;
+    smtp_to?: string[];
+    smtp_has_password?: boolean;
   };
   features: {
     fim: boolean;

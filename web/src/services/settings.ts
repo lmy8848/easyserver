@@ -64,8 +64,19 @@ export const settingsApi = {
   restart: (force?: boolean) =>
     api.post<ApiResponse>('/settings/restart', force ? { force: true } : undefined),
 
-  updateNotify: (data: { enabled?: boolean; webhook_url?: string }) =>
-    api.put<ApiResponse>('/settings/notify', data),
+  updateNotify: (data: {
+    enabled?: boolean;
+    webhook_url?: string;
+    email_enabled?: boolean;
+    smtp_host?: string;
+    smtp_port?: number;
+    smtp_username?: string;
+    smtp_password?: string;
+    smtp_from?: string;
+    smtp_to?: string[];
+  }) => api.put<ApiResponse>('/settings/notify', data),
+
+  testEmail: () => api.post<ApiResponse>('/settings/notify/test-email'),
 
   updateFeatures: (data: { fim?: boolean; show_plugin_manual?: boolean }) =>
     api.put<ApiResponse>('/settings/features', data),
